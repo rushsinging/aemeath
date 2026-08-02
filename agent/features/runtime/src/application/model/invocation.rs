@@ -37,10 +37,21 @@ use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::ports::{InvocationOptions, InvocationRequest};
 
+use share::config::TaskListConfig;
+use share::message::Message;
+
 /// One initial invocation plus at most ten retries.
 const DEFAULT_MAX_ATTEMPTS: u32 = 11;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
 const MAX_BACKOFF: Duration = Duration::from_secs(120);
+
+/// #1492：从 Runtime 持有的 Task 端口渲染 run 首步注入文本（invocation-only）。
+fn build_task_reminder_for_invocation(runtime_context: &RuntimeContext) -> Option<String> {
+    crate::application::loop_engine::chat::task_snapshot::build_task_reminder(
+        runtime_context.task().as_ref(),
+        TaskListConfig::default().max_lines,
+    )
+}
 
 struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
 
@@ -201,7 +212,18 @@ async fn invoke_model_impl(
         .cloned()
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
     observer.on_window(execution).await;
-    let invocation_context = extract_invocation_context(&window);
+    let mut invocation_context = extract_invocation_context(&window);
+    // #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）。
+    // 只修改请求侧局部 messages，canonical message / SDK/TUI 事件 / 持久化 JSON 不受影响
+    // （spec 3.4.5 显式例外）；注入标志保证同 run 后续请求（tool 往返 / retry）不重复。
+    if !execution.task_reminder_injected() {
+        if let Some(reminder) = build_task_reminder_for_invocation(observer.runtime_context()) {
+            invocation_context
+                .messages_for_api
+                .push(Message::user(reminder));
+        }
+        execution.mark_task_reminder_injected();
+    }
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),

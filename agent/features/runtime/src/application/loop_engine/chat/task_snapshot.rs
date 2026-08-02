@@ -19,22 +19,45 @@ use task::{Task, TaskAccess, TaskId, TaskStatus};
 /// #889：改为同步 low-privilege 读取并按 current batch 过滤 Task PL。
 /// 任务标题隐藏持久化 ID；任务自身和依赖均通过当前 batch 的稳定 `seq()` 显示。
 pub(crate) fn build_task_snapshot(access: &dyn TaskAccess) -> TaskStatusView {
-    let Some(current_batch) = access.current_batch() else {
+    let Some(active) = current_batch_tasks(access) else {
         return TaskStatusView::default();
     };
-    // `list()` 只返回 live（非 Deleted）Task；再按 current batch 收敛。
+
+    let max_lines = TaskListConfig::default().max_lines;
+    let lines = task_status_lines(&active, max_lines);
+    TaskStatusView { lines }
+}
+
+/// 当前 batch 的 live（非 Deleted）Task 列表；无 batch 或无任务时返回 `None`。
+fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
+    let current_batch = access.current_batch()?;
     let active: Vec<Task> = access
         .list()
         .into_iter()
         .filter(|task| task.batch() == current_batch)
         .collect();
     if active.is_empty() {
-        return TaskStatusView::default();
+        None
+    } else {
+        Some(active)
     }
+}
 
-    let max_lines = TaskListConfig::default().max_lines;
+/// #1492：run 首步注入用——渲染 Task 进度为 `<system-reminder>` 文本，
+/// 复用 `task_status_lines`（计数 + 分组排序 + max_lines 截断）。
+///
+/// 只出现在 invocation-only 的请求侧 messages；**NEVER** 写入 canonical
+/// message、SDK/TUI 事件或持久化 JSON（spec 3.4.5 的显式例外）。
+pub(crate) fn build_task_reminder(access: &dyn TaskAccess, max_lines: usize) -> Option<String> {
+    let active = current_batch_tasks(access)?;
     let lines = task_status_lines(&active, max_lines);
-    TaskStatusView { lines }
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "<system-reminder>当前任务进度：\n{}\n</system-reminder>",
+        lines.join("\n")
+    ))
 }
 
 fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {

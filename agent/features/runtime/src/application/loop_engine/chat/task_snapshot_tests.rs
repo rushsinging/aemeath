@@ -108,3 +108,36 @@ fn task_status_lines_returns_empty_when_line_limit_is_zero() {
 
     assert!(task_status_lines(&access.list(), 0).is_empty());
 }
+
+#[test]
+fn task_reminder_renders_count_and_active_list() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    let completed = access.create_task(task_spec("done"), 2).unwrap().value;
+    let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
+    access
+        .transition(completed.id(), TaskStatus::Completed, 4)
+        .unwrap();
+
+    let reminder = build_task_reminder(access, 7).expect("reminder rendered");
+
+    assert!(reminder.starts_with("<system-reminder>"));
+    assert!(reminder.contains("━━ Tasks: 1/2 ━━"));
+    assert!(reminder.contains("✓ #1 done"));
+    assert!(reminder.contains("□ #2 todo"));
+    assert!(reminder.ends_with("</system-reminder>"));
+}
+
+#[test]
+fn task_reminder_none_without_tasks() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_reminder(access, 7).is_none());
+}
+
+#[test]
+fn task_reminder_none_without_active_batch() {
+    let store = task::TaskStore::new();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_reminder(access, 7).is_none());
+}
