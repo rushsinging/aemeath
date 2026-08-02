@@ -91,30 +91,73 @@ esac
 
 fast_pids=()
 fast_names=()
+fast_outputs=()
+fast_status=0
+
+# 防挂保护：任何 guard 都不得无限运行（Stop Hook 被无限 guard 阻断的根因修复）。
+# macOS 无 GNU timeout，兼容 gtimeout；两者都没有时退回无超时（打印警告）。
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN=gtimeout
+else
+  TIMEOUT_BIN=""
+fi
 
 run_guard() {
   local profile="$1"
   shift
+  local cmd="$1"
+
+  # 函数（如 run_tui_single_source_structure_guard）不能直接交给外部 timeout——
+  # 经子 shell 导出后由 timeout 驱动 bash -c 调用；外部命令直接包裹。
+  guarded() {
+    if [ -z "$TIMEOUT_BIN" ]; then
+      "$@"
+    elif [ "$(type -t "$1")" = "function" ]; then
+      local fn_name="$1"
+      shift
+      (
+        export -f "$fn_name"
+        "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" bash -c "$fn_name"
+      )
+    else
+      "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" "$@"
+    fi
+  }
 
   if [ "$mode" = "--fast" ]; then
     if [ "$profile" = "fast" ]; then
-      "$@" &
-      fast_pids+=("$!")
-      fast_names+=("$1")
+      # 串行执行（稳定优先）：实测 40 个 guard 并发 fork 时 bash 5.3 的
+      # here-doc / 函数导出路径间歇性卡死（fork 子进程不 exec、管道写端
+      # 泄漏）；单独或少量并发不触发。Stop 串行约 25s，远优于 600s 阻断
+      # + 孤儿 guard。
+      if ! guarded "$@"; then
+        echo "[architecture] fast guard failed: $cmd" >&2
+        fast_status=1
+      fi
     fi
     return
   fi
 
-  "$@"
+  guarded "$@"
 }
 
 wait_for_fast_guards() {
   local index status=0
   for index in "${!fast_pids[@]}"; do
-    if ! wait "${fast_pids[$index]}"; then
-      echo "[architecture] fast guard failed: ${fast_names[$index]}" >&2
+    local wait_status=0
+    wait "${fast_pids[$index]}" || wait_status=$?
+    if [ "$wait_status" -ne 0 ]; then
+      echo "[architecture] fast guard failed (exit=$wait_status): ${fast_names[$index]}" >&2
+      if [ -s "${fast_outputs[$index]}" ]; then
+        echo "--- ${fast_names[$index]} output ---" >&2
+        cat "${fast_outputs[$index]}" >&2
+        echo "--- end ${fast_names[$index]} ---" >&2
+      fi
       status=1
     fi
+    rm -f "${fast_outputs[$index]}"
   done
   return "$status"
 }
@@ -182,7 +225,12 @@ run_guard full "$HOOKS_DIR/check-production-reachability.sh"
 run_guard fast "$HOOKS_DIR/check-no-inline-tests.sh"
 
 if [ "$mode" = "--fast" ]; then
-  wait_for_fast_guards
+  # 串行模式无后台批；fast_status 已在 run_guard 中累积。
+  :
 fi
 
+if [ "$fast_status" -ne 0 ]; then
+  echo "[architecture] fast guards failed (see above)" >&2
+  exit "$fast_status"
+fi
 echo "All ${mode#--} architecture guards passed."
