@@ -210,6 +210,38 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
 }
 
 #[test]
+fn manual_compaction_uses_run_root_without_a_step() {
+    let coordinator = coordinator();
+
+    let compact_id = coordinator
+        .start_manual_compaction(CompactStageView::Preparing)
+        .expect("start manual compact");
+
+    let snapshot = coordinator.snapshot();
+    let root_id = snapshot
+        .activities
+        .iter()
+        .find(|activity| activity.kind == ActivityKindView::Run)
+        .map(|activity| activity.id.clone())
+        .expect("run root");
+    let compact = snapshot.find(&compact_id).expect("manual compact activity");
+    assert_eq!(compact.parent_activity_id.as_ref(), Some(&root_id));
+    assert!(compact.run_step_id.is_none());
+    assert!(matches!(
+        compact.source,
+        sdk::ActivitySourceView::Compaction(_)
+    ));
+    assert_eq!(
+        compact.detail,
+        ActivityDetailView::Compact {
+            stage: CompactStageView::Preparing,
+            current: None,
+            total: None,
+        }
+    );
+}
+
+#[test]
 fn parallel_tools_keep_independent_identity_and_parallel_count() {
     let coordinator = coordinator();
     let step_id = RunStepId::new("tool-step");

@@ -111,8 +111,12 @@ where
             macro_rules! handle_pending_command {
         ($cmd:expr) => {
             match $cmd {
-                PendingCommand::Compact => {
-                    let bound = match wiring.bind_main_run().await {
+                    PendingCommand::Compact => {
+                        log::debug!(
+                            target: crate::LOG_TARGET,
+                            "[compact] idle command accepted; starting manual compaction"
+                        );
+                        let bound = match wiring.bind_main_run().await {
                         Ok(bound) => bound,
                         Err(error) => {
                             sink.send_event(RuntimeStreamEvent::CommandResultText {
@@ -129,19 +133,103 @@ where
                         system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
                         context_size,
                     };
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[compact] manual request prepared session_id={} context_size={}",
+                        request.session_id,
+                        request.context_size
+                    );
+                    let activity_coordinator = crate::application::activity::ActivityCoordinator::production(
+                        request.run_id.clone(),
+                        Arc::new(sink_handle.clone()),
+                    );
+                    let compact_activity_id = match activity_coordinator
+                        .start_manual_compaction(sdk::CompactStageView::Preparing)
+                    {
+                        Ok(activity_id) => Some(activity_id),
+                        Err(error) => {
+                            log::warn!(
+                                target: crate::LOG_TARGET,
+                                "[compact] 无法发布手动 Compact Activity，继续执行压缩: {error}"
+                            );
+                            None
+                        }
+                    };
+                    if let Some(activity_id) = compact_activity_id.as_ref() {
+                        if let Err(error) = activity_coordinator.update_compaction(
+                            activity_id.clone(),
+                            sdk::CompactStageView::Summarizing,
+                            None,
+                            None,
+                        ) {
+                            log::warn!(
+                                target: crate::LOG_TARGET,
+                                "[compact] 无法更新手动 Compact Activity，继续执行压缩: {error}"
+                            );
+                        }
+                    }
                     match coordinator.manual_compact(&request).await {
                         Ok(crate::ports::CompactOutcome::Committed(result)) => {
+                            log::debug!(
+                                target: crate::LOG_TARGET,
+                                "[compact] manual compaction committed recent_messages={}",
+                                result.recent_messages.len()
+                            );
+                            if let Some(activity_id) = compact_activity_id.as_ref() {
+                                if let Err(error) = activity_coordinator.update_compaction(
+                                    activity_id.clone(),
+                                    sdk::CompactStageView::Finalizing,
+                                    None,
+                                    None,
+                                ) {
+                                    log::warn!(
+                                        target: crate::LOG_TARGET,
+                                        "[compact] 无法更新手动 Compact Activity，继续发布结果: {error}"
+                                    );
+                                }
+                                if let Err(error) = activity_coordinator.finish(
+                                    activity_id.clone(),
+                                    crate::application::activity::ActivityTerminal::Succeeded,
+                                ) {
+                                    log::warn!(
+                                        target: crate::LOG_TARGET,
+                                        "[compact] 无法结束手动 Compact Activity，继续发布结果: {error}"
+                                    );
+                                }
+                            }
                             messages = result.recent_messages.clone();
                             sink.send_event(RuntimeStreamEvent::CompactFinished {
                                 messages: result.recent_messages,
                             }).await;
                         }
                         Ok(crate::ports::CompactOutcome::Skipped(_)) => {
+                            if let Some(activity_id) = compact_activity_id {
+                                if let Err(error) = activity_coordinator.finish(
+                                    activity_id,
+                                    crate::application::activity::ActivityTerminal::Succeeded,
+                                ) {
+                                    log::warn!(
+                                        target: crate::LOG_TARGET,
+                                        "[compact] 无法结束跳过的手动 Compact Activity: {error}"
+                                    );
+                                }
+                            }
                             sink.send_event(RuntimeStreamEvent::SystemMessage(
                                 "Not enough messages to compact.".to_string(),
                             )).await;
                         }
                         Err(error) => {
+                            if let Some(activity_id) = compact_activity_id {
+                                if let Err(activity_error) = activity_coordinator.finish(
+                                    activity_id,
+                                    crate::application::activity::ActivityTerminal::Failed,
+                                ) {
+                                    log::warn!(
+                                        target: crate::LOG_TARGET,
+                                        "[compact] 无法结束失败的手动 Compact Activity: {activity_error}"
+                                    );
+                                }
+                            }
                             sink.send_event(RuntimeStreamEvent::CommandResultText {
                                 text: format!("Session compact 失败：{error}"),
                                 is_error: true,

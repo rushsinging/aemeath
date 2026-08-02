@@ -4021,6 +4021,53 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     );
 }
 
+/// 手动 Compact 必须从 idle gate 进入真实 session loop，并返回可见结果。
+/// 仅测试 `apply_gate` 无法覆盖 `PendingCommand` 的执行分支；此场景会
+/// 发现命令被接收但没有执行或没有结果事件的断链。
+#[tokio::test]
+async fn idle_compact_command_reaches_context_and_emits_result() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::Compact).unwrap();
+
+    let shell = test_shell();
+    shell.set_test_session_id("test-idle-compact-command");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(process_chat_loop(ctx));
+    wait_for_retry_test_condition("manual compact result", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "SystemMessage:Not enough messages to compact.")
+    })
+    .await;
+
+    drop(input_tx);
+    run.await.unwrap();
+    assert!(
+        sink.events()
+            .iter()
+            .any(|event| event.starts_with("ActivityChanged:Started:")),
+        "manual compact must publish a Runtime-owned Activity"
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| event.starts_with("ActivityChanged:Finished:"))
+            .count(),
+        1,
+        "manual compact Activity must publish exactly one terminal event"
+    );
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| event.as_str() == "SystemMessage:Not enough messages to compact.")
+            .count(),
+        1,
+        "manual compact must emit exactly one visible result"
+    );
+}
+
 // ─── #1492 task reminder injection ─────────────────────────────────────
 
 /// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
