@@ -322,6 +322,13 @@ pub struct RunStepCompleted {
     pub step_id: super::interaction::UiRunStepId,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunStepCancelled {
+    pub run_id: UiRunId,
+    pub step_id: super::interaction::UiRunStepId,
+    pub confirmed: bool,
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  Runtime intent structs（原 RuntimeIntent enum 的 14 个 variant，
 //  排除 SetSpinnerPhase / StopSpinner —— 它们的功能已被其他 intent 附带维护）
@@ -467,6 +474,7 @@ pub enum ConversationIntent {
     RunFailed(RunFailed),
     RunStepStarted(RunStepStarted),
     RunStepCompleted(RunStepCompleted),
+    RunStepCancelled(RunStepCancelled),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),

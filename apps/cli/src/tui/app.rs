@@ -28,7 +28,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Terminal,
 };
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -149,6 +151,7 @@ pub(crate) fn display_working_dir(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |name| name.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn display_status_path(path: &Path) -> String {
     let raw = path.display().to_string();
     let Some(home) = dirs::home_dir() else {

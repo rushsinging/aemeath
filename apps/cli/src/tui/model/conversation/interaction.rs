@@ -351,6 +351,8 @@ impl UiRunStepId {
 pub(crate) enum AgentRunStepPhase {
     Running,
     Completed,
+    Cancelled,
+    CancellationUnconfirmed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -386,6 +388,18 @@ impl AgentRunStepState {
             return false;
         }
         self.phase = AgentRunStepPhase::Completed;
+        true
+    }
+
+    fn cancel(&mut self, confirmed: bool) -> bool {
+        if self.phase != AgentRunStepPhase::Running {
+            return false;
+        }
+        self.phase = if confirmed {
+            AgentRunStepPhase::Cancelled
+        } else {
+            AgentRunStepPhase::CancellationUnconfirmed
+        };
         true
     }
 }
@@ -446,6 +460,13 @@ impl AgentRunState {
             .iter_mut()
             .find(|step| &step.step_id == step_id)
             .is_some_and(AgentRunStepState::complete)
+    }
+
+    pub(super) fn cancel_step(&mut self, step_id: &UiRunStepId, confirmed: bool) -> bool {
+        self.steps
+            .iter_mut()
+            .find(|step| &step.step_id == step_id)
+            .is_some_and(|step| step.cancel(confirmed))
     }
 
     pub(super) fn transition_to(&mut self, phase: AgentRunPhase) -> bool {

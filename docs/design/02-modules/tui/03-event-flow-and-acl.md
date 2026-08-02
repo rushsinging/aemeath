@@ -9,7 +9,7 @@
 > - **R7**：领域事件与 TUI Model **NEVER** 跨界直用，**MUST** 经防腐层转换
 > - **§5**：Server 化时传输层 NEVER 进核心，`AgentClient` 保持传输透明
 >
-> UiEvent **NEVER** 持有 `sdk::*` 类型，SDK 类型在第一层 `sdk_event_to_ui_event` 中**彻底**转换为 TUI 自有类型。
+> Runtime 事件 **MUST** 在 `sdk_event_to_tui_event` 中转换为 `TuiRuntimeEvent`；旧 `sdk_event_to_ui_event → UiEvent` 兼容路径已退役。
 
 ## 1. 定位
 
@@ -17,10 +17,10 @@
 
 ```
 Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
-  → sdk_event_to_ui_event（adapter/event_mapping.rs，第一层转换）
-  → UiEvent → mpsc channel (cap 256)
-  → ui_rx → tokio::select! → TuiMsg::Ui(ui_event)
-  → map_agent_event（adapter/agent_event.rs，第二层 ACL）
+  → sdk_event_to_tui_event（adapter/event_mapping.rs，唯一结构转换）
+  → TuiRuntimeEvent → runtime channel
+  → TuiMsg::Runtime(runtime_event)
+  → map_runtime_event（adapter/agent_event.rs，语义 ACL）
   → AgentEventMapping { intents }
   → root_reducer → Model Change
   → Coordinator::effects_for(Change) → async Effect runner → result Intent
@@ -31,10 +31,10 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 
 | 层 | 位置 | 职责 | 输入 → 输出 |
 |---|---|---|---|
-| 第一层 | `event_mapping.rs` | **结构转换**——SDK 类型 → TUI 类型，消除 SDK 类型依赖 | `sdk::ChatEvent` → `UiEvent` |
-| 第二层 | `agent_event.rs` | **语义翻译**——事件 → Intent 拆分，防腐层核心 | `UiEvent` → `AgentEventMapping` |
+| 第一层 | `adapter/event_mapping.rs` | **结构转换**——SDK 类型 → TUI-owned DTO，消除 SDK 类型依赖 | `sdk::ChatEvent` → `TuiRuntimeEvent` |
+| 第二层 | `adapter/agent_event.rs` | **语义翻译**——Runtime event → Intent 拆分，防腐层核心 | `TuiRuntimeEvent` → `AgentEventMapping` |
 
-> **设计原则**：两层分离是因为结构转换（类型映射）和语义翻译（Intent 拆分）是不同关注点。第一层是机械式 1:1 映射，第二层涉及业务逻辑（sanitize、progress 格式化、hook notice 派生等）。
+> **单路径原则**：Runtime 事件只允许走上述链路；`UiEvent` 仅保留本地 Effect 回灌与终端/App 事件，**NEVER** 再承载 Runtime ChatStream 镜像。
 
 ## 2. 事件流完整链路
 
@@ -71,19 +71,56 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 | 文件 | 职责 |
 |---|---|
 | Runtime-owned SDK contract | `AgentClient` / `ChatEvent` Published Language 的单一来源 |
-| `apps/cli/.../effect/session/processing.rs` | `spawn_processing`：持 `AgentClient` → `ChatStream`；把纯值 SDK event 转换并转发 UiEvent |
-| `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_ui_event`：第一层结构转换；只产 TUI-owned DTO |
-| `apps/cli/.../app/event.rs` | `UiEvent`（`AppEvent`）定义 |
-| `apps/cli/.../adapter/agent_event.rs` | `map_agent_event`：第二层 ACL；只产 Intent |
+| `apps/cli/.../effect/session/processing.rs` | `spawn_processing`：持 `AgentClient` → `ChatStream`；调用唯一 adapter 并转发 `TuiRuntimeEvent` |
+| `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_tui_event`：唯一结构转换；只产 TUI-owned DTO |
+| `apps/cli/.../adapter/tui_runtime_event.rs` | `TuiRuntimeEvent` 与 Run/RunStep 等 TUI-owned DTO 定义 |
+| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event`：第二层 ACL；只产 Intent |
 | `apps/cli/.../adapter/agent_event/progress.rs` | sub-agent progress 格式化 |
 | `apps/cli/.../adapter/agent_event/sanitize.rs` | tool 输出/参数截断 |
 | `apps/cli/.../adapter/hook_notice.rs` | Hook 事件 → TUI notice |
 
+```text
+sdk::ChatEvent
+  → adapter/event_mapping.rs::sdk_event_to_tui_event
+  → TuiRuntimeEvent
+  → TuiMsg::Runtime
+  → App::update_runtime_event
+  → adapter/agent_event.rs::map_runtime_event
+  → ConversationIntent / SessionIntent / WorkspaceIntent
+  → root_reducer
+  → ConversationChange
+  → ViewAssembler → Render
+```
+
 ## 3. AgentEventMapper ACL 设计
 
-### 3.1 ACL 职责
+### 3.1 Run / RunStep 事件映射表
 
-`map_agent_event` 是防腐层核心，职责：
+| SDK Published Language | TUI-owned event | 消费策略 |
+|---|---|---|
+| `RunStarted` | `Run::Started` | `RunStarted` Intent，登记 Run |
+| `RunAwaitingUser` | `Run::AwaitingUser` | `RunAwaitingUser` Intent |
+| `RunResumed` | `Run::Resumed` | `RunResumed` Intent |
+| `RunCancelling` | `Run::Cancelling` | `RunCancelling` Intent；非终态 |
+| `RunCancelled` | `Run::Cancelled` | `RunCancelled` Intent；仅整个 Run 取消时进入终态 |
+| `RunCompleted` | `Run::Completed` | `RunCompleted` Intent |
+| `RunFailed` | `Run::Failed` | `RunFailed` Intent |
+| `RunStuckDetected` | `Run::Stuck` | 追加错误诊断 |
+| `RunDrainingInput` | `Run::DrainingInput` | no-visual lifecycle observation；不得完成 chat 或清除 Step 取消回显 |
+| `RunTerminationRequested` | `Run::TerminationRequested` | no-visual lifecycle observation；保留与 Step 取消的语义分离 |
+| `RunTerminated` | `Run::Terminated` | Run 终止的权威 observation；不得伪装成 Step 取消 |
+| `RunTransitioned` | `Run::Transitioned` | 诊断 observation，不反向推断业务终态 |
+| `RunStepStarted` | `RunStep::Started` | `RunStepStarted` Intent |
+| `RunStepCompleted` | `RunStep::Completed` | `RunStepCompleted` Intent |
+| `RunStepCancellationRequested` | `RunStep::CancellationRequested` | no-visual lifecycle observation；等待权威完成事件 |
+| `RunStepFinalizationStarted` | `RunStep::FinalizationStarted` | no-visual lifecycle observation；不得提前关闭工具 |
+| `RunStepCancelled { confirmed }` | `RunStep::Cancelled { confirmed }` | `RunStepCancelled` Intent：更新 Step phase；将当前未终态普通 Tool 与 Agent Tool 统一置为 `Cancelled`；逐个产生 `ToolCallCompleted` 使 running tool count 归零；追加 `Cancelled` 终态回显；Run 继续处于 drain/可继续状态 |
+
+`RunStepCancelled` 是 Step 取消 UI 收口的唯一权威事件。TUI **NEVER** 等待 `RunCancelled` 来关闭当前工具，也 **NEVER** 从 Ctrl+C 本地按键或取消 command outcome 猜测工具终态。普通 Tool 与 Agent Tool 共享同一 `ToolCallStatus` 转移机制，禁止按工具名建立取消旁路。
+
+### 3.2 ACL 职责
+
+`map_runtime_event` 是 Runtime 事件防腐层核心，职责：
 
 1. **Intent 拆分**：一个 UiEvent 可能产生多个 Intent（跨 Context），如 `Error` 同时产生 ConversationIntent + DiagnosticIntent；ACL **NEVER** 直接产生 Effect
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）

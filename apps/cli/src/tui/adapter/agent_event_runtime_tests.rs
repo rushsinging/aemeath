@@ -4,7 +4,7 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
 };
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, RunCancelling, RunStepStarted, ShowInteraction,
+    ConversationIntent, RunCancelling, RunStepCancelled, RunStepStarted, ShowInteraction,
 };
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
@@ -34,6 +34,27 @@ fn runtime_run_and_step_lifecycle_maps_to_existing_conversation_intents() {
         mapping.conversation.as_slice(),
         [ConversationIntent::RunStepStarted(RunStepStarted { run_id: actual, step_id, .. })]
             if actual == &run_id && step_id.as_str() == "step-1"
+    ));
+}
+
+#[test]
+fn runtime_cancelled_step_maps_to_explicit_conversation_intent() {
+    let run_id = UiRunId::from("run-1");
+    let step_id = UiRunStepId::from("step-1");
+    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id: run_id.clone(),
+        parent_run_id: None,
+        step_id: step_id.clone(),
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::RunStepCancelled(RunStepCancelled {
+            run_id: actual_run_id,
+            step_id: actual_step_id,
+            confirmed: true,
+        })] if actual_run_id == &run_id && actual_step_id == &step_id
     ));
 }
 

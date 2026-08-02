@@ -6,6 +6,62 @@ use super::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 impl ConversationModel {
+    pub(super) fn cancel_active_turn_tools(&mut self) -> Vec<ConversationChange> {
+        let Some(active_chat) = self.chats.iter_mut().rev().find(|chat| {
+            chat.turns.iter().rev().any(|turn| {
+                turn.tool_calls.iter().any(|call| {
+                    matches!(
+                        call.status,
+                        ToolCallStatus::PendingArgs
+                            | ToolCallStatus::Ready
+                            | ToolCallStatus::Running
+                    )
+                })
+            })
+        }) else {
+            return Vec::new();
+        };
+        let Some(active_turn) = active_chat.turns.iter_mut().rev().find(|turn| {
+            turn.tool_calls.iter().any(|call| {
+                matches!(
+                    call.status,
+                    ToolCallStatus::PendingArgs | ToolCallStatus::Ready | ToolCallStatus::Running
+                )
+            })
+        }) else {
+            return Vec::new();
+        };
+        let mut cancelled_tools = Vec::new();
+        for call in &mut active_turn.tool_calls {
+            if call.cancel() {
+                let Some(id) = call.id.as_ref() else {
+                    continue;
+                };
+                cancelled_tools.push((
+                    active_chat.id.to_string(),
+                    active_turn.id.to_string(),
+                    id.to_string(),
+                ));
+            }
+        }
+        let mut changes = cancelled_tools
+            .into_iter()
+            .map(
+                |(chat_id, turn_id, id)| ConversationChange::ToolCallCompleted {
+                    chat_id,
+                    turn_id,
+                    id,
+                    status: ToolCallStatus::Cancelled,
+                },
+            )
+            .collect::<Vec<_>>();
+        if !changes.is_empty() {
+            changes.push(ConversationChange::StyleBoundaryResetRequired);
+            changes.push(ConversationChange::OutputDirty);
+        }
+        changes
+    }
+
     pub(super) fn promote_orphan_tool_result(
         &mut self,
         chat_id: &ChatId,

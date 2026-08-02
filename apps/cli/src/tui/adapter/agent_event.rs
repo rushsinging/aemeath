@@ -820,9 +820,16 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     step_id: step_id.clone(),
                 }))
             }
-            TuiRunStepEvent::CancellationRequested
-            | TuiRunStepEvent::FinalizationStarted
-            | TuiRunStepEvent::Cancelled { .. } => AgentEventMapping::default(),
+            TuiRunStepEvent::Cancelled { confirmed } => {
+                conversation(ConversationIntent::RunStepCancelled(RunStepCancelled {
+                    run_id: run_id.clone(),
+                    step_id: step_id.clone(),
+                    confirmed: *confirmed,
+                }))
+            }
+            TuiRunStepEvent::CancellationRequested | TuiRunStepEvent::FinalizationStarted => {
+                AgentEventMapping::default()
+            }
         },
         TuiRuntimeEvent::InteractionRequested(request) => {
             let body = match &request.body {

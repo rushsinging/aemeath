@@ -296,8 +296,8 @@ fn test_phase_four_workspace_provider_owns_workspace_fields() {
 fn test_phase_four_workspace_metadata_git_is_executor_only() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let app = fs::read_to_string(root.join("app.rs")).expect("read app");
-    let mapping = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read event mapping");
+    let mapping =
+        fs::read_to_string(root.join("adapter/event_mapping.rs")).expect("read event mapping");
     let event = fs::read_to_string(root.join("app/event.rs")).expect("read app event");
     let provider = fs::read_to_string(root.join("model/workspace_provider.rs"))
         .expect("read workspace provider");
@@ -331,7 +331,7 @@ fn test_phase_four_workspace_metadata_git_is_executor_only() {
 }
 
 #[test]
-fn test_phase_five_agent_run_state_is_tui_owned_and_mapper_is_not_wired() {
+fn test_phase_five_agent_run_state_is_tui_owned_and_runtime_mapper_is_single_path() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))
         .expect("read interaction model");
@@ -339,8 +339,10 @@ fn test_phase_five_agent_run_state_is_tui_owned_and_mapper_is_not_wired() {
         .expect("read conversation intent");
     let change = fs::read_to_string(root.join("model/conversation/change.rs"))
         .expect("read conversation change");
-    let mapper = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read processing mapper");
+    let mapper = fs::read_to_string(root.join("adapter/event_mapping.rs"))
+        .expect("read runtime event mapper");
+    let processing =
+        fs::read_to_string(root.join("effect/session/processing.rs")).expect("read processing");
 
     let run_intents = intent
         .split("pub struct RunStarted")
@@ -367,9 +369,14 @@ fn test_phase_five_agent_run_state_is_tui_owned_and_mapper_is_not_wired() {
         }
     }
     assert!(
-        mapper.contains("sdk::ChatEvent::RunStarted { .. }")
-            && mapper.contains("UiEvent::SystemMessage(String::new())"),
-        "#943 must wire Runtime lifecycle DTOs; #944 5A must not modify the SDK mapper"
+        mapper.contains("ChatEvent::RunStarted")
+            && mapper.contains("TuiRunEvent::Started")
+            && processing.contains("sdk_event_to_tui_event"),
+        "Runtime lifecycle events must use the single SDK-to-TuiRuntimeEvent adapter path"
+    );
+    assert!(
+        !processing.contains("mod event_mapping;"),
+        "legacy processing-local SDK-to-UiEvent mapper must remain retired"
     );
 }
 

@@ -300,6 +300,18 @@ impl ConversationModel {
             .is_some_and(|run| run.complete_step(step_id))
     }
 
+    pub(super) fn cancel_agent_run_step(
+        &mut self,
+        run_id: &UiRunId,
+        step_id: &super::interaction::UiRunStepId,
+        confirmed: bool,
+    ) -> bool {
+        self.agent_runs
+            .iter_mut()
+            .find(|run| run.run_id() == run_id)
+            .is_some_and(|run| run.cancel_step(step_id, confirmed))
+    }
+
     pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {
         if let Some(placeholder) = self.model_stream_placeholder.take() {
             crate::tui::log_debug!(

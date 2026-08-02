@@ -94,6 +94,20 @@ impl ToolCall {
     pub fn orphan(&mut self) {
         self.status = ToolCallStatus::Orphaned;
     }
+
+    pub fn cancel(&mut self) -> bool {
+        if matches!(
+            self.status,
+            ToolCallStatus::Success
+                | ToolCallStatus::Error
+                | ToolCallStatus::Cancelled
+                | ToolCallStatus::Orphaned
+        ) {
+            return false;
+        }
+        self.status = ToolCallStatus::Cancelled;
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

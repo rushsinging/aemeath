@@ -694,6 +694,30 @@ impl ConversationUpdate for RunStepCompleted {
     }
 }
 
+impl ConversationUpdate for RunStepCancelled {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        let phase = if self.confirmed {
+            super::interaction::AgentRunStepPhase::Cancelled
+        } else {
+            super::interaction::AgentRunStepPhase::CancellationUnconfirmed
+        };
+        let mut changes = Vec::new();
+        if model.cancel_agent_run_step(&self.run_id, &self.step_id, self.confirmed) {
+            changes.push(ConversationChange::AgentRunStepChanged {
+                run_id: self.run_id,
+                step_id: self.step_id,
+                phase,
+            });
+        }
+        changes.extend(model.cancel_active_turn_tools());
+        changes.extend(
+            super::terminal::terminal_notice(super::terminal::TerminalCause::UserCancelled, None)
+                .map_or_else(Vec::new, |text| model.append_system_message(text)),
+        );
+        changes
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  ConversationIntent enum 的 ConversationUpdate 转发
 // ════════════════════════════════════════════════════════════════════
@@ -751,6 +775,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::RunFailed(s) => s.update(model),
             Self::RunStepStarted(s) => s.update(model),
             Self::RunStepCompleted(s) => s.update(model),
+            Self::RunStepCancelled(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
             Self::UpdateLastInputTokens(s) => s.update(model),
