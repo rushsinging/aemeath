@@ -156,7 +156,7 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
             id: "compact",
             revision: 6,
             parent_activity_id: Some("root"),
-            source: TuiActivitySource::Run,
+            source: TuiActivitySource::Compaction(UiActivityId::from("compact-source")),
             kind: TuiActivityKind::Compaction,
             state: TuiActivityState::Running,
             detail: TuiActivityDetail::Compact {

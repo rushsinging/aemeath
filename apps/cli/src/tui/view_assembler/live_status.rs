@@ -140,7 +140,12 @@ mod tests {
             run_step_id: None,
             parent_activity_id: (!matches!(kind, TuiActivityKind::Run))
                 .then(|| UiActivityId::from("root")),
-            source: TuiActivitySource::Run,
+            source: match kind {
+                TuiActivityKind::Compaction => TuiActivitySource::Compaction(UiActivityId::from(
+                    format!("{id}-source").as_str(),
+                )),
+                _ => TuiActivitySource::Run,
+            },
             kind,
             state: TuiActivityState::Running,
             detail,

@@ -41,6 +41,7 @@ pub(crate) enum TuiActivitySource {
     ModelInvocation(String),
     ToolCall(String),
     HookDispatch(UiActivityId),
+    Compaction(UiActivityId),
     Interaction(String),
     ChildRun(UiRunId),
 }

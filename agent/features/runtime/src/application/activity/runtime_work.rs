@@ -53,7 +53,7 @@ impl ActivityCoordinator {
         self.start(StartActivity {
             run_step_id: Some(run_step_id.clone()),
             parent_activity_id: Some(parent_activity_id),
-            source: ActivitySource::HookDispatch(ActivityId::new_v7()),
+            source: ActivitySource::Compaction(ActivityId::new_v7()),
             kind: ActivityKind::Compaction,
             detail: ActivityDetail::Compact {
                 stage,

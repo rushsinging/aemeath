@@ -1,6 +1,7 @@
 use super::super::intent::{AppendUserMessage, AssistantText};
 use super::{ConversationModel, OutputViewChange, OutputViewChanges, OUTPUT_VIEW_JOURNAL_CAPACITY};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::intent::{RecordAgentProgress, ToolCallStart};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
@@ -81,6 +82,41 @@ fn append_and_streaming_update_publish_payload_free_output_view_changes() {
     let debug = format!("{changes:?}");
     assert!(!debug.contains("first-secret-chunk"));
     assert!(!debug.contains("second-secret-chunk"));
+}
+
+#[test]
+fn tool_progress_invalidates_the_existing_tool_root() {
+    let mut model = ConversationModel::default();
+    let chat_id = ChatId::new("chat-tool");
+    let turn_id = ChatTurnId::new("turn-tool");
+    let tool_id = ToolCallId::new("tool-progress");
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    let cursor = model.output_view_cursor();
+
+    model.apply(RecordAgentProgress {
+        chat_id,
+        turn_id,
+        tool_id,
+        message: "reviewing".to_string(),
+    });
+
+    let changes = match model.output_view_changes_since(cursor) {
+        OutputViewChanges::Delta { changes, .. } => changes,
+        OutputViewChanges::RebuildRequired { .. } => panic!("fresh cursor must receive delta"),
+    };
+    assert_eq!(
+        changes,
+        vec![OutputViewChange::Update {
+            item_id: "tool-call-chat-tool/turn-tool/tool-progress".to_string(),
+        }]
+    );
 }
 
 #[test]

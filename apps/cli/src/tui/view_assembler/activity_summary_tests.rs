@@ -26,6 +26,7 @@ fn activity(
             TuiActivityKind::HookDispatch => {
                 TuiActivitySource::HookDispatch(UiActivityId::from(id))
             }
+            TuiActivityKind::Compaction => TuiActivitySource::Compaction(UiActivityId::from(id)),
             _ => TuiActivitySource::Interaction(id.to_string()),
         },
         kind,

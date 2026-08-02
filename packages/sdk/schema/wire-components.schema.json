@@ -418,6 +418,22 @@
         {
           "properties": {
             "kind": {
+              "const": "compaction",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ActivityId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
               "const": "interaction",
               "type": "string"
             },

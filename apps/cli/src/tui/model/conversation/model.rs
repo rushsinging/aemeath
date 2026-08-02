@@ -531,7 +531,11 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         }
         | ConversationChange::AskUserShown { id: block_id }
         | ConversationChange::AskUserUpdated { id: block_id }
-        | ConversationChange::OrphanToolResultObserved { id: block_id } => Some(block_id.clone()),
+        | ConversationChange::OrphanToolResultObserved { id: block_id }
+        | ConversationChange::AgentProgressRecorded {
+            block_id,
+            tool_id: _,
+        } => Some(block_id.clone()),
         ConversationChange::AskUserDismissed { .. } => None,
         ConversationChange::ToolCallObserved { .. } => None,
         ConversationChange::OutputDirty => None,
@@ -552,7 +556,6 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
             turn_id,
             tool_id: id,
         } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
-        ConversationChange::AgentProgressRecorded { .. } => None,
         _ => None,
     }
 }

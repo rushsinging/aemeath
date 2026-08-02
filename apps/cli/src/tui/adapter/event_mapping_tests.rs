@@ -94,6 +94,8 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
     let expected_phase_step_id = phase_step_id.as_str().to_string();
     let hook_dispatch_id = sdk::ActivityId::new("hook-dispatch");
     let expected_hook_dispatch_id = hook_dispatch_id.as_str().to_string();
+    let compaction_id = sdk::ActivityId::new("compaction");
+    let expected_compaction_id = compaction_id.as_str().to_string();
     let child_run_id = sdk::RunId::new("child-run");
     let expected_child_run_id = child_run_id.as_str().to_string();
     let activities = vec![
@@ -164,7 +166,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
         ),
         fixture(
             6,
-            sdk::ActivitySourceView::Run,
+            sdk::ActivitySourceView::Compaction(compaction_id),
             sdk::ActivityKindView::Compaction,
             sdk::ActivityStateView::Running,
             sdk::ActivityDetailView::Compact {
@@ -203,6 +205,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
                 && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
                 && matches!(snapshot.activities[5].detail, TuiActivityDetail::ChildRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
+                && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
                 && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, current: Some(2), total: Some(3) })
     ));
 }

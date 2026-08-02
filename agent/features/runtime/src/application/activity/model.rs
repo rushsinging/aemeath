@@ -10,6 +10,7 @@ pub(crate) enum ActivitySource {
     ModelInvocation(sdk::ModelInvocationId),
     ToolCall(sdk::ToolCallId),
     HookDispatch(ActivityId),
+    Compaction(ActivityId),
     Interaction(sdk::InteractionRequestId),
     ChildRun(RunId),
 }
@@ -22,6 +23,7 @@ impl ActivitySource {
             Self::ModelInvocation(id) => ActivitySourceView::ModelInvocation(id.clone()),
             Self::ToolCall(id) => ActivitySourceView::ToolCall(id.clone()),
             Self::HookDispatch(id) => ActivitySourceView::HookDispatch(id.clone()),
+            Self::Compaction(id) => ActivitySourceView::Compaction(id.clone()),
             Self::Interaction(id) => ActivitySourceView::Interaction(id.clone()),
             Self::ChildRun(id) => ActivitySourceView::ChildRun(id.clone()),
         }

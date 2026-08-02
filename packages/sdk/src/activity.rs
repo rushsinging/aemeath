@@ -121,6 +121,7 @@ pub enum ActivitySourceView {
     ModelInvocation(ModelInvocationId),
     ToolCall(ToolCallId),
     HookDispatch(ActivityId),
+    Compaction(ActivityId),
     Interaction(InteractionRequestId),
     ChildRun(RunId),
 }

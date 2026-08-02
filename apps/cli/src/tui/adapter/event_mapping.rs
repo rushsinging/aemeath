@@ -523,6 +523,9 @@ fn activity_source(value: sdk::ActivitySourceView) -> TuiActivitySource {
         sdk::ActivitySourceView::HookDispatch(id) => {
             TuiActivitySource::HookDispatch(UiActivityId::from(id.as_str()))
         }
+        sdk::ActivitySourceView::Compaction(id) => {
+            TuiActivitySource::Compaction(UiActivityId::from(id.as_str()))
+        }
         sdk::ActivitySourceView::Interaction(id) => {
             TuiActivitySource::Interaction(id.as_str().to_string())
         }

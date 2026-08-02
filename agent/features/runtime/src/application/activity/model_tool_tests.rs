@@ -180,6 +180,10 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
     );
 
     let compact = snapshot.find(&compact_id).expect("compact activity");
+    assert!(matches!(
+        compact.source,
+        sdk::ActivitySourceView::Compaction(_)
+    ));
     assert_eq!(compact.kind, ActivityKindView::Compaction);
     assert_eq!(compact.state, ActivityStateView::Succeeded);
     assert_eq!(
