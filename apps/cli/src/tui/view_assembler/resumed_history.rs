@@ -54,6 +54,7 @@ pub(crate) fn assemble_resumed_history_item(
         ResumedHistoryItemKind::ToolCall { .. } | ResumedHistoryItemKind::ToolResult { .. } => {
             materialize_tool_item(step, item)
         }
+        ResumedHistoryItemKind::StepPlaceholder => None,
         ResumedHistoryItemKind::TerminalNotice => {
             let text = terminal_text(step.finalize_cause?, step.duration_ms);
             text_leaf(

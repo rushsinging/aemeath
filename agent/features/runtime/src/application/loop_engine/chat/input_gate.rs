@@ -26,6 +26,7 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ManageSession { .. } => "ManageSession",
         ChatInputEvent::ManageMemory { .. } => "ManageMemory",
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
+        ChatInputEvent::LoadDisplayHistoryWindow(_) => "LoadDisplayHistoryWindow",
         ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
         ChatInputEvent::ListReminders => "ListReminders",
@@ -96,6 +97,7 @@ pub enum PendingCommand {
     ResumeSession {
         id: String,
     },
+    LoadDisplayHistoryWindow(sdk::DisplayHistoryWindowRequest),
     /// 查询 reflection 历史；不触发执行或 apply。
     QueryReflectionHistory {
         limit: usize,
@@ -418,6 +420,16 @@ where
                     break;
                 } else {
                     buffer.push(ChatInputEvent::ResumeSession { id });
+                }
+            }
+            ChatInputEvent::LoadDisplayHistoryWindow(request) => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::LoadDisplayHistoryWindow(request));
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::LoadDisplayHistoryWindow(request));
                 }
             }
             ChatInputEvent::QueryReflectionHistory { limit } => {

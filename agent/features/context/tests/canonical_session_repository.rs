@@ -478,7 +478,8 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
                 ),
                 tool_receipts: Vec::new(),
             }],
-        )],
+        )]
+        .into(),
         committed_steps: vec![context::domain::session::CommittedStep {
             run_id: "run".to_string(),
             step_id: "step".to_string(),

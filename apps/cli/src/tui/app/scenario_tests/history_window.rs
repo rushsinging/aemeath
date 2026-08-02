@@ -142,6 +142,7 @@ fn resumed_history_initial_window_keeps_newest_complete_groups() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-tail".into(),
         created_at: 0,
@@ -204,6 +205,7 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
     ];
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "019f9952-601d-7139-a936-fa5d1f366eb9".into(),
         created_at: 0,
@@ -280,6 +282,7 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-oldest".into(),
         created_at: 0,
@@ -321,6 +324,7 @@ fn resumed_history_scrolls_from_oldest_window_back_to_latest() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-round-trip".into(),
         created_at: 0,
@@ -393,6 +397,7 @@ fn resumed_large_history_loads_after_first_render_and_continues_in_batches() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-large".into(),
         created_at: 0,
@@ -426,6 +431,7 @@ fn resumed_history_window_can_continue_loading_older_blocks_after_cap() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-sliding".into(),
         created_at: 0,
@@ -456,6 +462,7 @@ fn resumed_history_window_stops_at_three_thousand_lines() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-capped".into(),
         created_at: 0,
@@ -486,6 +493,7 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-early".into(),
         created_at: 0,
@@ -514,6 +522,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-adopted".into(),
         created_at: 0,
@@ -578,6 +587,7 @@ fn sliding_window_rebuild_keeps_visible_history_rows_fixed_in_same_frame() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-anchor".into(),
         created_at: 0,

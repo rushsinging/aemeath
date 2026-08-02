@@ -29,6 +29,7 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
         )
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-sdk-session".into(),
         created_at: 0,

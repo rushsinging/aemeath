@@ -18,13 +18,14 @@ pub use envelope::{
     SkillLoadRecord, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use generation::{
+    DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
     SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionMemberBytes, SessionMetadataMember, SessionStateMember,
     SessionStepMember,
 };
 pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
-    SessionMetadataUpdate, SessionResumeView,
+    SessionMetadataUpdate, SessionResumeLoad, SessionResumeView,
 };
 pub use restore::{SessionRestore, SessionRestoreStep};
 pub use types::{

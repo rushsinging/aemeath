@@ -39,6 +39,7 @@ impl App {
         &mut self,
         session_id: &str,
         steps: Vec<TuiResumedSessionStep>,
+        display_history: Option<crate::tui::adapter::runtime_view::TuiDisplayHistoryIndex>,
         created_at: String,
     ) {
         let messages = steps
@@ -69,12 +70,20 @@ impl App {
             id: session_id.to_string(),
         }));
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-        // 走 ResumeConversation intent，不触发 spinner 副作用
-        self.apply_agent_intent(AgentIntent::Conversation(
-            crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
-                crate::tui::model::conversation::intent::ResumeConversation { steps },
-            ),
-        ));
+        if let Some(index) = display_history {
+            self.model.conversation.replace_resumed_history(
+                crate::tui::model::conversation::resumed_history::ResumedHistoryBacking::from_tui_index(
+                    index,
+                ),
+            );
+        } else {
+            // 走 ResumeConversation intent，不触发 spinner 副作用
+            self.apply_agent_intent(AgentIntent::Conversation(
+                crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                    crate::tui::model::conversation::intent::ResumeConversation { steps },
+                ),
+            ));
+        }
         apply_resume_input_history(self, &messages);
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
@@ -147,6 +156,7 @@ mod tests {
                 finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
                 duration_ms: Some(10),
             }],
+            display_history: None,
             session_id: "session-resumed".to_string(),
             created_at: 42,
         });
@@ -257,6 +267,7 @@ mod tests {
                 finalize_cause: None,
                 duration_ms: None,
             }],
+            None,
             "2026-01-01T00:00:00Z".to_string(),
         );
 

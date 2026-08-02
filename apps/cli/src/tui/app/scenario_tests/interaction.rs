@@ -44,6 +44,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
     let mut harness = TuiScenarioHarness::new(100, 30);
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![
             TuiResumedSessionStep {
                 run_id: "run-1".into(),
@@ -87,6 +88,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
     assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![TuiResumedSessionStep {
             run_id: "run-2".into(),
             step_id: "step-1".into(),
@@ -117,6 +119,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
 fn resume_renders_bash_tool_with_typed_header_and_output() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![TuiResumedSessionStep {
             run_id: "run-bash".into(),
             step_id: "step-bash".into(),

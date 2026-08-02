@@ -303,8 +303,8 @@ where
                                         duration_ms: step.duration_ms,
                                     })
                                         .collect(),
-                                    session_id: resume_view.session_id,
-                                    created_at: chrono::DateTime::parse_from_rfc3339(
+                                    display_history: resume_view.display_history,
+                                    session_id: resume_view.session_id,                                    created_at: chrono::DateTime::parse_from_rfc3339(
                                         &resume_view.created_at,
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
@@ -335,6 +335,33 @@ where
                                     message: error.to_string(),
                                 })
                                 .await;
+                        }
+                    }
+                    continue;
+                }
+                PendingCommand::LoadDisplayHistoryWindow(request) => {
+                    let project = shell.workspace.read().project_identity();
+                    match shell
+                        .session_management
+                        .load_display_history_steps(
+                            &request.session_id,
+                            &project,
+                            request.generation_revision,
+                            &request.member_names,
+                        )
+                        .await
+                    {
+                        Ok(window) => {
+                            sink.send_event(RuntimeStreamEvent::DisplayHistoryWindowLoaded {
+                                window,
+                            })
+                            .await;
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                target: crate::LOG_TARGET,
+                                "display history window loading failed: {error}"
+                            );
                         }
                     }
                     continue;

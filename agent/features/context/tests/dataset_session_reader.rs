@@ -187,6 +187,132 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
     ));
 }
 
+#[tokio::test]
+async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("compacted", 7, "hidden before compact");
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            "run-1",
+            vec![CommittedRunStep::accepted_only(
+                "step-1",
+                AcceptedInputProjection::new(
+                    vec![Message::user("hidden before compact")],
+                    "fp-1",
+                    1,
+                ),
+            )],
+        ),
+        CommittedRunSlice::new(
+            "run-2",
+            vec![CommittedRunStep::accepted_only(
+                "step-2",
+                AcceptedInputProjection::new(
+                    vec![Message::user("visible after compact")],
+                    "fp-2",
+                    7,
+                ),
+            )],
+        ),
+    ]
+    .into();
+    session.compact = Some(context::domain::session::ActiveCompactMarker {
+        summary: "compacted summary".to_string(),
+        start_at: Some(context::domain::session::RunStepCursor {
+            run_id: "run-2".to_string(),
+            step_id: "step-2".to_string(),
+        }),
+        source_revision: 6,
+    });
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume("compacted")
+        .await
+        .expect("load compacted generation");
+    let loaded = prepared.active_session;
+
+    assert_eq!(loaded.run_slices.len(), 1);
+    assert_eq!(loaded.run_slices[0].steps.len(), 1);
+    assert_eq!(loaded.run_slices[0].steps[0].step_id, "step-2");
+    assert_eq!(
+        loaded.structured_messages()[0].text_content(),
+        "visible after compact"
+    );
+    assert_eq!(prepared.display_history.steps().len(), 2);
+    assert_eq!(prepared.display_history.steps()[0].run_id(), "run-1");
+    assert_eq!(prepared.display_history.steps()[0].step_id(), "step-1");
+    assert_eq!(prepared.display_history.steps()[1].run_id(), "run-2");
+    assert_eq!(prepared.display_history.steps()[1].step_id(), "step-2");
+}
+
+#[tokio::test]
+async fn dataset_reader_loads_requested_display_history_steps_from_same_generation() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("windowed", 9, "first");
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            "run-1",
+            vec![CommittedRunStep::accepted_only(
+                "step-1",
+                AcceptedInputProjection::new(vec![Message::user("first body")], "fp-1", 1),
+            )],
+        ),
+        CommittedRunSlice::new(
+            "run-2",
+            vec![CommittedRunStep::accepted_only(
+                "step-2",
+                AcceptedInputProjection::new(vec![Message::user("second body")], "fp-2", 9),
+            )],
+        ),
+    ]
+    .into();
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume("windowed")
+        .await
+        .expect("prepare resume");
+    let window = reader
+        .load_display_history_steps(
+            "windowed",
+            prepared.display_history.generation_revision(),
+            &[prepared.display_history.steps()[0]
+                .member_name()
+                .to_string()],
+        )
+        .await
+        .expect("load requested history window");
+
+    assert_eq!(window.session_id(), "windowed");
+    assert_eq!(window.generation_revision(), 9);
+    assert_eq!(window.steps().len(), 1);
+    assert_eq!(window.steps()[0].cursor().run_id, "run-1");
+    assert_eq!(window.steps()[0].cursor().step_id, "step-1");
+    assert_eq!(
+        window.steps()[0]
+            .step()
+            .accepted_input
+            .as_ref()
+            .expect("accepted input")
+            .messages[0]
+            .text_content(),
+        "first body"
+    );
+}
+
 #[test]
 fn manifest_codec_fixture_remains_current_for_reader_contract() {
     let manifest = SessionGenerationManifest::new("fixture", 0, vec![]).expect("manifest");

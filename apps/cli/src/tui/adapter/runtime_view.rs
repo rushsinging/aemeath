@@ -73,6 +73,30 @@ pub(crate) struct TuiResumedSessionStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryStepReference {
+    pub(crate) run_id: String,
+    pub(crate) step_id: String,
+    pub(crate) member_name: String,
+    pub(crate) estimated_lines: usize,
+    pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
+    pub(crate) duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryIndex {
+    pub(crate) session_id: String,
+    pub(crate) generation_revision: u64,
+    pub(crate) steps: Vec<TuiDisplayHistoryStepReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryWindow {
+    pub(crate) session_id: String,
+    pub(crate) generation_revision: u64,
+    pub(crate) steps: Vec<TuiResumedSessionStep>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiChatMessage {
     pub(crate) role: String,
     pub(crate) content: Vec<TuiContentBlock>,

@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
 use share::session_types::ProjectIdentity;
 
-use super::{CanonicalSession, SessionMetadata, SessionRestoreStep, SnapshotState};
+use super::{
+    CanonicalSession, DisplayHistoryStepIndex, SessionMetadata, SessionRestoreStep, SnapshotState,
+};
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,12 +104,19 @@ impl SessionMetadataUpdate {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionResumeLoad {
+    pub active_session: CanonicalSession,
+    pub display_history: Option<DisplayHistoryStepIndex>,
+}
+
 /// Runtime-safe resume view. Session internals never cross the crate boundary.
 #[derive(Debug, Clone)]
 pub struct SessionResumeView {
     pub session_id: String,
     pub active_messages: Vec<Message>,
     pub display_steps: Vec<SessionRestoreStep>,
+    pub display_history: Option<DisplayHistoryStepIndex>,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,

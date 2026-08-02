@@ -40,6 +40,7 @@ fn terminal_text_after_thinking_matches_resume_projection() {
 
     let mut resumed = TuiScenarioHarness::new(100, 30);
     resumed.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![TuiResumedSessionStep {
             run_id: "chat-p0".into(),
             step_id: "turn-p0".into(),

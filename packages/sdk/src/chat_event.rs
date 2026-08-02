@@ -162,6 +162,7 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
 #[derive(Debug, Clone)]
 pub struct LocalSessionResumeBacking {
     pub steps: Vec<LocalResumedSessionStep>,
+    pub display_history: Option<DisplayHistoryIndex>,
     pub session_id: String,
     pub created_at: u64,
 }
@@ -174,6 +175,7 @@ impl LocalSessionResumeBacking {
                 .into_iter()
                 .map(LocalResumedSessionStep::from_wire)
                 .collect(),
+            display_history: None,
             session_id: view.session_id,
             created_at: view.created_at,
         }
@@ -190,6 +192,39 @@ impl LocalSessionResumeBacking {
             created_at: self.created_at,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryWindowRequest {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub member_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryWindow {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub steps: Vec<ResumedSessionStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryStepReference {
+    pub run_id: String,
+    pub step_id: String,
+    pub member_name: String,
+    pub estimated_lines: usize,
+    #[serde(default)]
+    pub finalize_cause: Option<ResumedStepFinalizeCause>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryIndex {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub steps: Vec<DisplayHistoryStepReference>,
 }
 
 /// 会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。
@@ -581,8 +616,12 @@ pub enum ChatEvent {
     /// 会话恢复完成通知（#497）。TUI 据此更新 messages 和状态。
     SessionResumed {
         steps: Vec<ResumedSessionStep>,
+        display_history: Option<DisplayHistoryIndex>,
         session_id: String,
         created_at: u64,
+    },
+    DisplayHistoryWindowLoaded {
+        window: DisplayHistoryWindow,
     },
     /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，
     /// TUI 据此显示对应错误并恢复到空 session。

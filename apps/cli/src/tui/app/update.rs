@@ -100,6 +100,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
         UiEvent::CommandResultText { .. } => "CommandResultText",
         UiEvent::SessionResumed { .. } => "SessionResumed",
+        UiEvent::DisplayHistoryWindowLoaded { .. } => "DisplayHistoryWindowLoaded",
         UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
     }
 }
@@ -413,6 +414,7 @@ impl App {
             }
             TuiRuntimeEvent::SessionResumed {
                 steps,
+                display_history,
                 session_id,
                 created_at,
             } => {
@@ -422,7 +424,12 @@ impl App {
                     steps.len(),
                     steps.iter().map(|step| step.messages.len()).sum::<usize>()
                 );
-                self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                self.resume_session_messages(
+                    session_id,
+                    steps.clone(),
+                    display_history.clone(),
+                    created_at.to_string(),
+                );
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
                     session_id,
@@ -435,6 +442,16 @@ impl App {
                     spawn_effect: None,
                     pending_slash: None,
                 };
+            }
+            TuiRuntimeEvent::DisplayHistoryWindowLoaded { window } => {
+                if self
+                    .model
+                    .conversation
+                    .apply_display_history_window(window.clone())
+                {
+                    self.mark_output_dirty();
+                }
+                return UpdateResult::none();
             }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
                 // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
@@ -593,6 +610,19 @@ impl App {
             requested_window,
         );
         let indexed_items = materialized.indexed_items;
+        if let Some(request) = materialized.missing_history_request {
+            let request_key = (
+                request.session_id.clone(),
+                request.generation_revision,
+                request.member_names.clone(),
+            );
+            if cache.loading_history_window.as_ref() != Some(&request_key) {
+                cache.loading_history_window = Some(request_key);
+                self.send_chat_input_event(sdk::ChatInputEvent::LoadDisplayHistoryWindow(request));
+            }
+        } else {
+            cache.loading_history_window = None;
+        }
         let sync_stats = materialized.stats;
         #[cfg(test)]
         crate::tui::render::performance::record_retained_view_sync(

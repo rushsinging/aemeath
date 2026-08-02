@@ -1,5 +1,5 @@
 use super::{
-    SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
+    DisplayHistoryStepIndex, SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionStepMember,
 };
 use crate::domain::session::{
@@ -267,6 +267,56 @@ fn session_incremental_change_set_release_workload() {
         changed_bytes,
         elapsed.as_secs_f64() * 1_000.0
     );
+}
+
+#[test]
+fn generation_manifest_builds_body_free_display_history_index() {
+    let manifest = SessionGenerationManifest::new(
+        "session",
+        7,
+        vec![
+            RunStepCursor {
+                run_id: "run-before".to_string(),
+                step_id: "step-before".to_string(),
+            },
+            RunStepCursor {
+                run_id: "run-active".to_string(),
+                step_id: "step-active".to_string(),
+            },
+        ],
+    )
+    .expect("manifest");
+
+    let session = session_with_steps(
+        "session",
+        7,
+        &[
+            ("run-before", "step-before", "before body"),
+            ("run-active", "step-active", "active body"),
+        ],
+    );
+    let index = DisplayHistoryStepIndex::from_session_and_manifest(&session, &manifest);
+
+    assert_eq!(index.session_id(), "session");
+    assert_eq!(index.generation_revision(), 7);
+    assert_eq!(index.steps().len(), 2);
+    assert_eq!(index.steps()[0].run_id(), "run-before");
+    assert_eq!(index.steps()[0].step_id(), "step-before");
+    assert_eq!(
+        index.steps()[0].member_name(),
+        "step-72756e2d6265666f7265-737465702d6265666f7265.json"
+    );
+    assert_eq!(index.steps()[1].run_id(), "run-active");
+    assert_eq!(index.steps()[1].step_id(), "step-active");
+    assert_eq!(index.steps()[0].estimated_lines(), 1);
+    assert_eq!(index.steps()[0].finalize_cause(), None);
+    assert_eq!(index.steps()[0].duration_ms(), None);
+
+    let encoded = serde_json::to_value(&index).expect("history index json");
+    assert!(encoded.get("messages").is_none());
+    assert!(encoded.get("message_segments").is_none());
+    assert!(encoded.get("tool_receipts").is_none());
+    assert!(encoded.get("accepted_input").is_none());
 }
 
 #[test]

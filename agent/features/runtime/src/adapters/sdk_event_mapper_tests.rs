@@ -50,6 +50,35 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
+fn session_resume_mapping_preserves_body_free_history_index() {
+    let event = RuntimeStreamEvent::SessionResumed {
+        steps: Vec::new(),
+        display_history: Some(context::api::DisplayHistoryStepIndex::fixture(
+            "session-index",
+            17,
+            vec![("run-1", "step-1", "step-run-step.json", 23)],
+        )),
+        session_id: "session-index".into(),
+        created_at: 42,
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::SessionResumed {
+            steps,
+            display_history: Some(index),
+            ..
+        } => {
+            assert!(steps.is_empty());
+            assert_eq!(index.session_id, "session-index");
+            assert_eq!(index.generation_revision, 17);
+            assert_eq!(index.steps[0].member_name, "step-run-step.json");
+            assert_eq!(index.steps[0].estimated_lines, 23);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {
@@ -59,6 +88,7 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
             finalize_cause: None,
             duration_ms: None,
         }],
+        display_history: None,
         session_id: "session-1".into(),
         created_at: 0,
     };

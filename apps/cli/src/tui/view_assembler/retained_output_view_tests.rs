@@ -7,6 +7,7 @@ use crate::tui::model::conversation::intent::{
     UpsertModelStreamPlaceholder,
 };
 use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::resumed_history::ResumedHistoryBacking;
 use crate::tui::view_model::OutputRenderWindow;
 use std::sync::Arc;
 
@@ -30,6 +31,45 @@ fn root_ids(view: &RetainedOutputView) -> Vec<&str> {
         .iter()
         .map(|root| root.block_id.as_str())
         .collect()
+}
+
+#[test]
+fn indexed_resume_requests_only_selected_window_members() {
+    let mut model = ConversationModel::default();
+    model.replace_resumed_history(ResumedHistoryBacking::from_index(
+        sdk::DisplayHistoryIndex {
+            session_id: "session-window".to_string(),
+            generation_revision: 13,
+            steps: (0..100)
+                .map(|step_index| sdk::DisplayHistoryStepReference {
+                    run_id: format!("run-{step_index}"),
+                    step_id: format!("step-{step_index}"),
+                    member_name: format!("step-{step_index}.json"),
+                    estimated_lines: 10,
+                    finalize_cause: None,
+                    duration_ms: None,
+                })
+                .collect(),
+        },
+    ));
+    let mut view = RetainedOutputView::default();
+
+    let window = view.materialize_window(
+        &model,
+        None,
+        OutputRenderWindow {
+            line_limit: 20,
+            tail_offset: 0,
+        },
+    );
+
+    let request = window
+        .missing_history_request
+        .expect("selected members must be requested");
+    assert_eq!(request.session_id, "session-window");
+    assert_eq!(request.generation_revision, 13);
+    assert_eq!(request.member_names, ["step-98.json", "step-99.json"]);
+    assert!(window.view_model.roots.is_empty());
 }
 
 #[test]

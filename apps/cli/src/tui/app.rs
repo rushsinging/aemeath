@@ -44,6 +44,7 @@ pub use event::UiEvent;
 #[derive(Default)]
 pub(crate) struct OutputViewState {
     pub(crate) retained: crate::tui::view_assembler::retained_output_view::RetainedOutputView,
+    pub(crate) loading_history_window: Option<(String, u64, Vec<String>)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

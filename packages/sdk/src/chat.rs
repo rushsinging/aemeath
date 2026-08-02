@@ -133,6 +133,7 @@ pub enum ChatInputEvent {
     ResumeSession {
         id: String,
     },
+    LoadDisplayHistoryWindow(crate::DisplayHistoryWindowRequest),
     /// 查询最近的 reflection 历史。由 `/reflect [limit]` 触发；不运行或应用 reflection。
     QueryReflectionHistory {
         limit: usize,

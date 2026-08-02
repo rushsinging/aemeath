@@ -323,10 +323,14 @@ pub async fn from_args_with_workspace(
                 log::info!(target: crate::LOG_TARGET, "startup resume: {}", resume_view.session_id);
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "resume_lifecycle boundary=startup_view stage=view_created session_id={} steps={} messages={}",
+                    "resume_lifecycle boundary=startup_view stage=view_created session_id={} display_index_steps={} legacy_steps={} active_messages={}",
                     resume_view.session_id,
+                    resume_view
+                        .display_history
+                        .as_ref()
+                        .map_or(0, |index| index.steps().len()),
                     resume_view.display_steps.len(),
-                    resume_view.display_steps.iter().map(|step| step.messages().count()).sum::<usize>(),
+                    resume_view.active_messages.len(),
                 );
                 let session_id = resume_view.session_id.clone();
                 let startup_resume = sdk::LocalSessionResumeBacking {
@@ -343,6 +347,26 @@ pub async fn from_args_with_workspace(
                             duration_ms: step.duration_ms,
                         })
                         .collect(),
+                    display_history: resume_view.display_history.map(|index| {
+                        sdk::DisplayHistoryIndex {
+                            session_id: index.session_id().to_string(),
+                            generation_revision: index.generation_revision(),
+                            steps: index
+                                .steps()
+                                .iter()
+                                .map(|step| sdk::DisplayHistoryStepReference {
+                                    run_id: step.run_id().to_string(),
+                                    step_id: step.step_id().to_string(),
+                                    member_name: step.member_name().to_string(),
+                                    estimated_lines: step.estimated_lines(),
+                                    finalize_cause: step
+                                        .finalize_cause()
+                                        .map(super::mapping::map_finalize_cause_to_sdk),
+                                    duration_ms: step.duration_ms(),
+                                })
+                                .collect(),
+                        }
+                    }),
                     session_id: resume_view.session_id,
                     created_at: chrono::DateTime::parse_from_rfc3339(&resume_view.created_at)
                         .map(|dt| dt.timestamp_millis() as u64)

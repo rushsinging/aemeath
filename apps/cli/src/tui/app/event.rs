@@ -232,9 +232,13 @@ pub enum AppEvent {
     /// 会话恢复完成（#497）。TUI 据此更新 messages。
     SessionResumed {
         steps: Vec<crate::tui::adapter::runtime_view::TuiResumedSessionStep>,
+        display_history: Option<sdk::DisplayHistoryIndex>,
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,
+    },
+    DisplayHistoryWindowLoaded {
+        window: sdk::DisplayHistoryWindow,
     },
     /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
     SessionResumeFailed {

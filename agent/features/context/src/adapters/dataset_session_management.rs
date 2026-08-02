@@ -61,6 +61,39 @@ impl SessionManagementPort for DatasetSessionManagement {
         }
     }
 
+    async fn load_for_resume(
+        &self,
+        id: &str,
+        project: &share::session_types::ProjectIdentity,
+    ) -> Result<crate::domain::session::SessionResumeLoad, SessionManagementError> {
+        let prepared = self
+            .reader
+            .load_for_resume(id)
+            .await
+            .map_err(map_reader_error)?;
+        if !session_matches_project(&prepared.active_session, project) {
+            return Err(SessionManagementError::ProjectMismatch(id.to_string()));
+        }
+        Ok(crate::domain::session::SessionResumeLoad {
+            active_session: prepared.active_session,
+            display_history: Some(prepared.display_history),
+        })
+    }
+
+    async fn load_display_history_steps(
+        &self,
+        id: &str,
+        project: &share::session_types::ProjectIdentity,
+        generation_revision: u64,
+        member_names: &[String],
+    ) -> Result<crate::domain::session::DisplayHistoryStepWindow, SessionManagementError> {
+        self.load_for_project(id, project).await?;
+        self.reader
+            .load_display_history_steps(id, generation_revision, member_names)
+            .await
+            .map_err(map_reader_error)
+    }
+
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentity,
@@ -75,8 +108,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             let Some(session_id) = dataset_key
                 .segments()
                 .first()
-                .map(|segment| segment.as_str().strip_suffix(".dataset"))
-                .flatten()
+                .and_then(|segment| segment.as_str().strip_suffix(".dataset"))
             else {
                 continue;
             };

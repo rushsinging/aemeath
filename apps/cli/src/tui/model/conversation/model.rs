@@ -92,7 +92,7 @@ impl ConversationModel {
         &self,
         index: usize,
     ) -> Option<&super::resumed_history::ResumedHistoryStep> {
-        self.resumed_history.steps().get(index)
+        self.resumed_history.step(index)
     }
 
     pub(crate) fn resumed_history_items(&self) -> &[super::resumed_history::ResumedHistoryItem] {
@@ -106,6 +106,13 @@ impl ConversationModel {
         self.resumed_history.item(id)
     }
 
+    pub(crate) fn display_history_window_request(
+        &self,
+        item_ids: &[String],
+    ) -> Option<sdk::DisplayHistoryWindowRequest> {
+        self.resumed_history.history_window_request(item_ids)
+    }
+
     pub(crate) fn replace_resumed_history(
         &mut self,
         backing: super::resumed_history::ResumedHistoryBacking,
@@ -113,6 +120,18 @@ impl ConversationModel {
         self.reset();
         self.resumed_history = backing;
         self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn apply_display_history_window(
+        &mut self,
+        window: crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow,
+    ) -> bool {
+        if !self.resumed_history.apply_window(window) {
+            return false;
+        }
+        self.revision = self.revision.wrapping_add(1);
+        self.output_view_journal.publish(OutputViewChange::Reset);
+        true
     }
 
     /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。

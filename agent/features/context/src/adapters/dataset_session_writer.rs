@@ -100,23 +100,31 @@ fn verify_expected_generation(
             "Session 当前数据集代缺少领域 manifest",
         ));
     };
+    let expected_steps = expected
+        .run_slices
+        .iter()
+        .flat_map(|run_slice| {
+            run_slice.steps.iter().cloned().map(|step| {
+                crate::domain::session::SessionStepMember::new(
+                    crate::domain::session::RunStepCursor {
+                        run_id: run_slice.run_id.clone(),
+                        step_id: step.step_id.clone(),
+                    },
+                    step,
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.to_string()))?;
     let expected_manifest = SessionGenerationManifest::new(
         expected.id.clone(),
         expected.revision,
-        expected
-            .run_slices
+        expected_steps
             .iter()
-            .flat_map(|run_slice| {
-                run_slice
-                    .steps
-                    .iter()
-                    .map(|step| crate::domain::session::RunStepCursor {
-                        run_id: run_slice.run_id.clone(),
-                        step_id: step.step_id.clone(),
-                    })
-            })
+            .map(|step| step.cursor().clone())
             .collect(),
     )
+    .and_then(|manifest| manifest.with_step_metadata(&expected_steps))
     .and_then(|manifest| SessionGenerationCodec::encode_manifest(&manifest))
     .map_err(|error| StorageError::new(StorageErrorKind::InvalidKey, error.to_string()))?;
     if manifest_member.byte_len() != expected_manifest.len() as u64

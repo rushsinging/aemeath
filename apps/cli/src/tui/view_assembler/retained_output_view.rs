@@ -25,6 +25,7 @@ pub(crate) struct MaterializedOutputWindow {
     pub(crate) view_model: crate::tui::view_model::OutputViewModel,
     pub(crate) stats: RetainedOutputViewStats,
     pub(crate) indexed_items: usize,
+    pub(crate) missing_history_request: Option<sdk::DisplayHistoryWindowRequest>,
 }
 
 #[derive(Debug, Default)]
@@ -66,12 +67,15 @@ impl RetainedOutputView {
         }
 
         let selection = self.window_index.select_window(request);
-        let visible_item_ids = selection
+        let requested_item_ids = selection
             .item_range
             .clone()
             .filter_map(|position| self.window_index.entry_id(position))
             .map(str::to_string)
-            .collect::<HashSet<_>>();
+            .collect::<Vec<_>>();
+        let visible_item_ids = requested_item_ids.iter().cloned().collect::<HashSet<_>>();
+        let missing_history_request =
+            conversation.display_history_window_request(&requested_item_ids);
         self.root_cache
             .retain(|item_id, _| visible_item_ids.contains(item_id));
         let lookup = ConversationToolLookup::new(conversation);
@@ -117,6 +121,7 @@ impl RetainedOutputView {
             view_model,
             stats,
             indexed_items: self.window_index.len(),
+            missing_history_request,
         }
     }
 

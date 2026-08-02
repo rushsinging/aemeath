@@ -378,6 +378,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         }
         ChatEvent::SessionResumed {
             steps,
+            display_history,
             session_id,
             created_at,
         } => TuiRuntimeEvent::SessionResumed {
@@ -401,9 +402,15 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                     duration_ms: step.duration_ms,
                 })
                 .collect(),
+            display_history: display_history.map(tui_display_history_index),
             session_id,
             created_at,
         },
+        ChatEvent::DisplayHistoryWindowLoaded { window } => {
+            TuiRuntimeEvent::DisplayHistoryWindowLoaded {
+                window: tui_display_history_window(window),
+            }
+        }
         ChatEvent::SessionResumeFailed { kind, id, message } => {
             TuiRuntimeEvent::SessionResumeFailed {
                 kind: session_failure(kind),
@@ -720,6 +727,67 @@ fn config_view(value: sdk::ConfigView) -> TuiConfigView {
         logging_level: value.logging_level,
     }
 }
+pub(crate) fn tui_display_history_window(
+    window: sdk::DisplayHistoryWindow,
+) -> super::runtime_view::TuiDisplayHistoryWindow {
+    super::runtime_view::TuiDisplayHistoryWindow {
+        session_id: window.session_id,
+        generation_revision: window.generation_revision,
+        steps: window
+            .steps
+            .into_iter()
+            .map(|step| super::runtime_view::TuiResumedSessionStep {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                messages: step.messages.into_iter().map(chat_message).collect(),
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                    }
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                    }
+                    sdk::ResumedStepFinalizeCause::RunTerminated => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                    }
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn tui_display_history_index(
+    index: sdk::DisplayHistoryIndex,
+) -> super::runtime_view::TuiDisplayHistoryIndex {
+    super::runtime_view::TuiDisplayHistoryIndex {
+        session_id: index.session_id,
+        generation_revision: index.generation_revision,
+        steps: index
+            .steps
+            .into_iter()
+            .map(|step| super::runtime_view::TuiDisplayHistoryStepReference {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                member_name: step.member_name,
+                estimated_lines: step.estimated_lines,
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                    }
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                    }
+                    sdk::ResumedStepFinalizeCause::RunTerminated => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                    }
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect(),
+    }
+}
+
 fn session_failure(value: sdk::SessionResumeFailureKind) -> TuiSessionResumeFailureKind {
     match value {
         sdk::SessionResumeFailureKind::NotFound => TuiSessionResumeFailureKind::NotFound,

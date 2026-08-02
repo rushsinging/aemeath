@@ -25,7 +25,7 @@ pub use canonical_session::{
     NoOpCanonicalSessionWriter, ProductionMainContextFactory,
 };
 pub use dataset_session_management::DatasetSessionManagement;
-pub use dataset_session_reader::DatasetSessionReader;
+pub use dataset_session_reader::{DatasetSessionReader, PreparedDatasetResume};
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub use in_memory_session::InMemorySessionRepository;
 pub use memory_injection::{

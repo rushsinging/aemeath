@@ -2,6 +2,59 @@ use sdk::{ChatMessage, ResumedSessionStep};
 use std::sync::Arc;
 
 #[test]
+fn display_history_window_round_trip_preserves_requested_steps() {
+    let window = sdk::DisplayHistoryWindow {
+        session_id: "session-window".to_string(),
+        generation_revision: 21,
+        steps: vec![ResumedSessionStep {
+            run_id: "run-window".to_string(),
+            step_id: "step-window".to_string(),
+            messages: vec![ChatMessage::user_text("window body")],
+            finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
+            duration_ms: Some(77),
+        }],
+    };
+
+    let encoded = serde_json::to_value(&window).expect("serialize display history window");
+    let decoded: sdk::DisplayHistoryWindow =
+        serde_json::from_value(encoded).expect("deserialize display history window");
+
+    assert_eq!(decoded.session_id, "session-window");
+    assert_eq!(decoded.generation_revision, 21);
+    assert_eq!(decoded.steps[0].messages[0].text_content(), "window body");
+    assert_eq!(decoded.steps[0].duration_ms, Some(77));
+}
+
+#[test]
+fn display_history_index_round_trip_contains_no_message_bodies() {
+    let index = sdk::DisplayHistoryIndex {
+        session_id: "session-index".to_string(),
+        generation_revision: 17,
+        steps: vec![sdk::DisplayHistoryStepReference {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            member_name: "step-run-step.json".to_string(),
+            estimated_lines: 23,
+            finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
+            duration_ms: Some(42),
+        }],
+    };
+
+    let encoded = serde_json::to_value(&index).expect("serialize history index");
+    let decoded: sdk::DisplayHistoryIndex =
+        serde_json::from_value(encoded.clone()).expect("deserialize history index");
+
+    assert_eq!(decoded.session_id, "session-index");
+    assert_eq!(decoded.generation_revision, 17);
+    assert_eq!(decoded.steps[0].estimated_lines, 23);
+    assert_eq!(decoded.steps[0].duration_ms, Some(42));
+    let json = encoded.to_string();
+    assert!(!json.contains("messages"));
+    assert!(!json.contains("message_segments"));
+    assert!(!json.contains("tool_receipts"));
+}
+
+#[test]
 fn local_resume_backing_clone_reuses_shared_step_messages() {
     let shared_messages: Arc<[share::message::Message]> =
         vec![share::message::Message::user("large history")].into();
@@ -14,6 +67,7 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
     };
     let backing = sdk::LocalSessionResumeBacking {
         steps: vec![step],
+        display_history: None,
         session_id: "session-shared".to_string(),
         created_at: 42,
     };

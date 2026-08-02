@@ -270,8 +270,12 @@ pub enum RuntimeStreamEvent {
     /// 会话恢复完成通知（#497）。
     SessionResumed {
         steps: Vec<RuntimeResumedSessionStep>,
+        display_history: Option<context::api::DisplayHistoryStepIndex>,
         session_id: String,
         created_at: u64,
+    },
+    DisplayHistoryWindowLoaded {
+        window: context::api::DisplayHistoryStepWindow,
     },
     /// 会话恢复失败（#636 D2）。区分 not_found / corrupt / io，前端展示对应错误。
     SessionResumeFailed {

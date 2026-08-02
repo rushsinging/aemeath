@@ -331,7 +331,7 @@ impl App {
         }
     }
 
-    fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
+    pub(crate) fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
         if self.chat.input_event_tx.is_none() {
             crate::tui::log_debug!(
                 "send_chat_input_event DROPPED tx=None event={:?}",

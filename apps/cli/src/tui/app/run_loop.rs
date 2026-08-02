@@ -259,7 +259,6 @@ impl App {
             for effect in result.effects {
                 self.execute_effect(effect, &ui_tx).await;
             }
-
             self.input.just_pasted = false;
             if self.layout.should_exit {
                 break;

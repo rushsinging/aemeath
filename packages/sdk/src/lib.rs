@@ -22,7 +22,9 @@ pub mod session_lock;
 
 /// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
 pub use chat_event::{
-    LocalResumedSessionStep, LocalSessionResumeBacking, SessionResumeFailureKind, SessionResumeView,
+    DisplayHistoryIndex, DisplayHistoryStepReference, DisplayHistoryWindow,
+    DisplayHistoryWindowRequest, LocalResumedSessionStep, LocalSessionResumeBacking,
+    SessionResumeFailureKind, SessionResumeView,
 };
 pub mod tool_input;
 pub mod tool_result;

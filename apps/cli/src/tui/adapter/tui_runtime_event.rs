@@ -494,8 +494,12 @@ pub(crate) enum TuiRuntimeEvent {
     },
     SessionResumed {
         steps: Vec<super::runtime_view::TuiResumedSessionStep>,
+        display_history: Option<super::runtime_view::TuiDisplayHistoryIndex>,
         session_id: String,
         created_at: u64,
+    },
+    DisplayHistoryWindowLoaded {
+        window: super::runtime_view::TuiDisplayHistoryWindow,
     },
     SessionResumeFailed {
         kind: TuiSessionResumeFailureKind,

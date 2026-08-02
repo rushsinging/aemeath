@@ -20,10 +20,212 @@ const SESSION_WORKSPACE_MEMBER_NAME: &str = "workspace-state.json";
 const SESSION_RECEIPT_MEMBER_NAME: &str = "receipt-ledger.json";
 const SESSION_SKILL_MEMBER_NAME: &str = "skill-loads.json";
 
+#[derive(Debug, Clone)]
+pub struct DisplayHistoryStepWindow {
+    session_id: String,
+    generation_revision: u64,
+    steps: Vec<SessionStepMember>,
+}
+
+impl DisplayHistoryStepWindow {
+    pub fn new(
+        session_id: impl Into<String>,
+        generation_revision: u64,
+        steps: Vec<SessionStepMember>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            generation_revision,
+            steps,
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn generation_revision(&self) -> u64 {
+        self.generation_revision
+    }
+
+    pub fn steps(&self) -> &[SessionStepMember] {
+        &self.steps
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayHistoryStepReference {
+    run_id: String,
+    step_id: String,
+    member_name: String,
+    estimated_lines: usize,
+    finalize_cause: Option<crate::domain::FinalizeCause>,
+    duration_ms: Option<u64>,
+}
+
+impl DisplayHistoryStepReference {
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub fn step_id(&self) -> &str {
+        &self.step_id
+    }
+
+    pub fn member_name(&self) -> &str {
+        &self.member_name
+    }
+
+    pub fn estimated_lines(&self) -> usize {
+        self.estimated_lines
+    }
+
+    pub fn finalize_cause(&self) -> Option<crate::domain::FinalizeCause> {
+        self.finalize_cause
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayHistoryStepIndex {
+    session_id: String,
+    generation_revision: u64,
+    steps: Vec<DisplayHistoryStepReference>,
+}
+
+impl DisplayHistoryStepIndex {
+    #[cfg(any(test, feature = "dev"))]
+    pub fn fixture(
+        session_id: impl Into<String>,
+        generation_revision: u64,
+        steps: Vec<(&str, &str, &str, usize)>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            generation_revision,
+            steps: steps
+                .into_iter()
+                .map(|(run_id, step_id, member_name, estimated_lines)| {
+                    DisplayHistoryStepReference {
+                        run_id: run_id.to_string(),
+                        step_id: step_id.to_string(),
+                        member_name: member_name.to_string(),
+                        estimated_lines,
+                        finalize_cause: None,
+                        duration_ms: None,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    pub fn from_session_and_manifest(
+        session: &CanonicalSession,
+        manifest: &SessionGenerationManifest,
+    ) -> Self {
+        let steps_by_identity = session
+            .run_slices
+            .iter()
+            .flat_map(|slice| {
+                slice
+                    .steps
+                    .iter()
+                    .map(|step| ((slice.run_id.as_str(), step.step_id.as_str()), step))
+            })
+            .collect::<HashMap<_, _>>();
+        Self {
+            session_id: manifest.session_id.clone(),
+            generation_revision: manifest.revision,
+            steps: manifest
+                .steps
+                .iter()
+                .map(|reference| {
+                    let step = steps_by_identity
+                        .get(&(
+                            reference.cursor.run_id.as_str(),
+                            reference.cursor.step_id.as_str(),
+                        ))
+                        .copied();
+                    DisplayHistoryStepReference {
+                        run_id: reference.cursor.run_id.clone(),
+                        step_id: reference.cursor.step_id.clone(),
+                        member_name: reference.member_name.clone(),
+                        estimated_lines: step.map(estimated_step_lines).unwrap_or(1),
+                        finalize_cause: step
+                            .and_then(|step| step.outcome.as_ref())
+                            .map(|outcome| outcome.finalize_cause),
+                        duration_ms: step
+                            .and_then(|step| step.outcome.as_ref())
+                            .and_then(|outcome| outcome.duration_ms),
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    pub fn from_manifest(manifest: &SessionGenerationManifest) -> Self {
+        Self {
+            session_id: manifest.session_id.clone(),
+            generation_revision: manifest.revision,
+            steps: manifest
+                .steps
+                .iter()
+                .map(|reference| DisplayHistoryStepReference {
+                    run_id: reference.cursor.run_id.clone(),
+                    step_id: reference.cursor.step_id.clone(),
+                    member_name: reference.member_name.clone(),
+                    estimated_lines: reference.estimated_lines,
+                    finalize_cause: reference.finalize_cause,
+                    duration_ms: reference.duration_ms,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn generation_revision(&self) -> u64 {
+        self.generation_revision
+    }
+
+    pub fn steps(&self) -> &[DisplayHistoryStepReference] {
+        &self.steps
+    }
+}
+
+fn default_estimated_lines() -> usize {
+    1
+}
+
+fn estimated_step_lines(step: &CommittedRunStep) -> usize {
+    step.accepted_input
+        .iter()
+        .flat_map(|input| input.messages.iter())
+        .chain(
+            step.outcome
+                .iter()
+                .flat_map(|outcome| outcome.messages.iter()),
+        )
+        .map(|message| message.text_content().lines().count().max(1))
+        .fold(0usize, |total, lines| total.saturating_add(lines))
+        .max(1)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionStepReference {
     cursor: RunStepCursor,
     member_name: String,
+    #[serde(default = "default_estimated_lines")]
+    estimated_lines: usize,
+    #[serde(default)]
+    finalize_cause: Option<crate::domain::FinalizeCause>,
+    #[serde(default)]
+    duration_ms: Option<u64>,
 }
 
 impl SessionStepReference {
@@ -33,6 +235,18 @@ impl SessionStepReference {
 
     pub fn member_name(&self) -> &str {
         &self.member_name
+    }
+
+    pub fn estimated_lines(&self) -> usize {
+        self.estimated_lines
+    }
+
+    pub fn finalize_cause(&self) -> Option<crate::domain::FinalizeCause> {
+        self.finalize_cause
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
     }
 }
 
@@ -65,6 +279,9 @@ impl SessionGenerationManifest {
             steps.push(SessionStepReference {
                 member_name: Self::step_member_name(&cursor),
                 cursor,
+                estimated_lines: default_estimated_lines(),
+                finalize_cause: None,
+                duration_ms: None,
             });
         }
         Ok(Self {
@@ -76,6 +293,44 @@ impl SessionGenerationManifest {
             metadata_member_name: SESSION_METADATA_MEMBER_NAME.to_string(),
             steps,
         })
+    }
+
+    pub fn with_step_metadata(
+        mut self,
+        steps: &[SessionStepMember],
+    ) -> Result<Self, SessionGenerationWireError> {
+        let steps_by_identity = steps
+            .iter()
+            .map(|member| {
+                (
+                    (
+                        member.cursor.run_id.as_str(),
+                        member.cursor.step_id.as_str(),
+                    ),
+                    &member.step,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        for reference in &mut self.steps {
+            let step = steps_by_identity
+                .get(&(
+                    reference.cursor.run_id.as_str(),
+                    reference.cursor.step_id.as_str(),
+                ))
+                .copied()
+                .ok_or_else(|| {
+                    SessionGenerationWireError::InvalidManifest(
+                        "Session generation 缺少 Step metadata 来源".to_string(),
+                    )
+                })?;
+            reference.estimated_lines = estimated_step_lines(step);
+            reference.finalize_cause = step.outcome.as_ref().map(|outcome| outcome.finalize_cause);
+            reference.duration_ms = step
+                .outcome
+                .as_ref()
+                .and_then(|outcome| outcome.duration_ms);
+        }
+        Ok(self)
     }
 
     pub fn generation_schema_version(&self) -> u32 {
@@ -147,7 +402,14 @@ impl SessionGenerationManifest {
             || self.session_schema_version != CURRENT_SESSION_SCHEMA_VERSION
             || self.state_member_name != SESSION_STATE_MEMBER_NAME
             || self.metadata_member_name != SESSION_METADATA_MEMBER_NAME
-            || self.steps != expected.steps
+            || self.steps.len() != expected.steps.len()
+            || self
+                .steps
+                .iter()
+                .zip(&expected.steps)
+                .any(|(actual, expected)| {
+                    actual.cursor != expected.cursor || actual.member_name != expected.member_name
+                })
         {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session generation manifest 引用不一致".to_string(),
@@ -217,6 +479,12 @@ impl SessionStateMember {
 
     pub fn session_id(&self) -> &str {
         &self.id
+    }
+
+    pub fn compact_start_at(&self) -> Option<&RunStepCursor> {
+        self.compact
+            .as_ref()
+            .and_then(|marker| marker.start_at.as_ref())
     }
 
     pub fn into_session(
@@ -336,7 +604,8 @@ impl SessionChangeSet {
                 .iter()
                 .map(|step| step.cursor().clone())
                 .collect(),
-        )?;
+        )?
+        .with_step_metadata(&after_steps)?;
         let before_metadata = SessionMetadataMember::from_session(before);
         let after_metadata = SessionMetadataMember::from_session(after);
         let before_state = SessionStateMember::from_session(before);
@@ -487,6 +756,11 @@ pub enum SessionGenerationWireError {
     },
     #[error("Session identity 不一致: before={before}, after={after}")]
     SessionIdentityMismatch { before: String, after: String },
+    #[error("Session generation 已变更: expected={expected_revision}, actual={actual_revision}")]
+    StaleDisplayHistory {
+        expected_revision: u64,
+        actual_revision: u64,
+    },
     #[error("Session generation manifest 无效: {0}")]
     InvalidManifest(String),
     #[error("Session generation JSON 解码失败: {0}")]

@@ -30,6 +30,9 @@ pub mod queued_submission;
 mod resume_performance_tests;
 pub(crate) mod resumed_history;
 #[cfg(test)]
+#[path = "conversation/resumed_history_tests.rs"]
+mod resumed_history_tests;
+#[cfg(test)]
 #[path = "conversation/retained_state_tests.rs"]
 mod retained_state_tests;
 pub mod runtime_state;

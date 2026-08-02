@@ -14,10 +14,14 @@ impl crate::application::MainSessionWiring {
             "resume_lifecycle boundary=context_session_resume stage=session_load_started session_id={}",
             session_id
         );
-        let session = self
+        // Project scope remains mandatory; `load_for_resume` extends the same
+        // `load_for_project` contract with a body-free display-history index.
+        let loaded = self
             .session_management()
-            .load_for_project(session_id, &project)
+            .load_for_resume(session_id, &project)
             .await?;
+        let display_history = loaded.display_history;
+        let session = loaded.active_session;
         log::debug!(
             target: crate::LOG_TARGET,
             "resume_lifecycle boundary=context_session_resume stage=session_load_completed session_id={} committed_steps={} elapsed_ms={}",
@@ -40,11 +44,16 @@ impl crate::application::MainSessionWiring {
         );
         let restore_started = Instant::now();
         let committed = self.committed_session();
-        let restore = SessionRestore::from_canonical(&committed);
+        let restore = if display_history.is_some() {
+            SessionRestore::active_from_canonical(&committed)
+        } else {
+            SessionRestore::from_canonical(&committed)
+        };
         log::debug!(
             target: crate::LOG_TARGET,
-            "resume_lifecycle boundary=context_session_resume stage=restore_completed session_id={} display_steps={} active_messages={} elapsed_ms={} restore_ms={}",
+            "resume_lifecycle boundary=context_session_resume stage=restore_completed session_id={} display_index_steps={} legacy_steps={} active_messages={} elapsed_ms={} restore_ms={}",
             committed.id,
+            display_history.as_ref().map_or(0, |index| index.steps().len()),
             restore.display_steps.len(),
             restore.active_messages.len(),
             started.elapsed().as_secs_f64() * 1000.0,
@@ -54,6 +63,7 @@ impl crate::application::MainSessionWiring {
             session_id: committed.id.clone(),
             active_messages: restore.active_messages,
             display_steps: restore.display_steps,
+            display_history,
             created_at: restore.created_at,
             trimmed: restore.trimmed,
             repaired: restore.repaired,

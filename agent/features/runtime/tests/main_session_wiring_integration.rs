@@ -170,8 +170,18 @@ async fn runtime_resume_is_equivalent_to_startup_resume() {
         projection2.active_messages.len()
     );
     assert_eq!(
-        projection1.display_steps.len(),
-        projection2.display_steps.len()
+        projection1
+            .display_history
+            .as_ref()
+            .map(|index| index.steps().len()),
+        projection2
+            .display_history
+            .as_ref()
+            .map(|index| index.steps().len())
+    );
+    assert!(
+        projection1.display_history.is_none() || projection1.display_steps.is_empty(),
+        "Dataset resume must not materialize a duplicate full display history"
     );
 }
 
