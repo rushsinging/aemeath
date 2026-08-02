@@ -278,6 +278,14 @@ fn test_shell() -> crate::application::client::SessionRuntime {
 fn test_shell_with_hooks(
     hooks: Arc<dyn hook::HookPort>,
 ) -> crate::application::client::SessionRuntime {
+    test_shell_with_task_store(hooks, Arc::new(task::TaskStore::new()))
+}
+
+/// #1492：预置 Task 状态的行为测试用——允许注入外部 `TaskStore`。
+fn test_shell_with_task_store(
+    hooks: Arc<dyn hook::HookPort>,
+    task_store: Arc<task::TaskStore>,
+) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
@@ -360,7 +368,7 @@ fn test_shell_with_hooks(
                 factory.execution(),
                 Arc::new(policy::AllowAllPolicy),
                 test_reflection_history_store(),
-                Arc::new(task::TaskStore::new()),
+                task_store,
                 hooks,
             ),
         ),
@@ -4010,5 +4018,196 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     assert!(
         sink.events().iter().any(|e| e == "DoneWithDuration"),
         "Run must terminate with DoneWithDuration"
+    );
+}
+
+// ─── #1492 task reminder injection ─────────────────────────────────────
+
+/// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
+///  - 首请求 messages 含 `<system-reminder>`（计数 + 任务列表）
+///  - 同 run 第二次请求（tool 往返后）不再注入
+///  - TUI 同步快照（TurnStarted / PostToolExecutionSync）不含注入内容
+#[tokio::test]
+async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
+    let after_first = Arc::new(tokio::sync::Notify::new());
+    let after_second = Arc::new(tokio::sync::Notify::new());
+
+    let provider = Arc::new(ToolThenTextProvider::new(
+        after_first.clone(),
+        after_second.clone(),
+    ));
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let _catalog_port = wired.catalog_port();
+    let _execution = wired.execution();
+
+    // 预置一个 active batch + 一个 in_progress 任务。
+    use task::TaskAccess as _;
+    let task_store = Arc::new(task::TaskStore::new());
+    task_store
+        .create_batch(
+            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            1,
+        )
+        .unwrap();
+    let task = task_store
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "修复 compact 收敛".to_string(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap()
+        .value;
+    task_store
+        .transition(task.id(), task::TaskStatus::InProgress, 3)
+        .unwrap();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "run with tasks",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-task-reminder-injection");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let driver_sink = sink.clone();
+    let driver_after_first = after_first.clone();
+    let driver_after_second = after_second.clone();
+    let driver = tokio::spawn(async move {
+        driver_after_first.notified().await;
+        driver_after_second.notified().await;
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop completes after tool round + final text");
+    driver.await.expect("driver joins cleanly");
+
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(
+        recorded.len(),
+        2,
+        "expected exactly two model invocations (tool call + final text)"
+    );
+
+    let reminder_text = "<system-reminder>当前任务进度：";
+    // 首请求注入；同 run 第二次请求不重复。
+    assert!(
+        recorded[0]
+            .iter()
+            .any(|m| m.text_content().contains(reminder_text)),
+        "first invocation must carry the task reminder, got: {:?}",
+        recorded[0]
+            .iter()
+            .map(Message::text_content)
+            .collect::<Vec<_>>()
+    );
+    let first_reminder = recorded[0]
+        .iter()
+        .find(|m| m.text_content().contains(reminder_text))
+        .unwrap();
+    // 任务处于 in_progress，completed 计数为 0。
+    assert!(first_reminder.text_content().contains("━━ Tasks: 0/1 ━━"));
+    assert!(first_reminder
+        .text_content()
+        .contains("■ #1 修复 compact 收敛"));
+    assert!(
+        !recorded[1]
+            .iter()
+            .any(|m| m.text_content().contains(reminder_text)),
+        "second invocation (tool round continuation) must NOT re-inject the reminder"
+    );
+
+    // TUI 同步快照不含注入内容。
+    let synced = sink.synced_messages();
+    assert!(
+        synced
+            .iter()
+            .flatten()
+            .all(|m| !m.text_content().contains(reminder_text)),
+        "TUI JSON (synced messages) must not contain the injected reminder"
+    );
+}
+
+/// #1492：/clear（ChatInputEvent::Reset）在 idle 时清理权威 Task 状态。
+#[tokio::test]
+async fn clear_resets_authoritative_task_state() {
+    let provider = Arc::new(TextOnlyProvider::new(Arc::new(tokio::sync::Notify::new())));
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    use task::TaskAccess as _;
+    let task_store = Arc::new(task::TaskStore::new());
+    task_store
+        .create_batch(
+            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            1,
+        )
+        .unwrap();
+    task_store
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "遗留任务".to_string(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+    input_tx.send(sdk::ChatInputEvent::Reset).unwrap();
+
+    let shell = test_shell_with_task_store(test_hook_port(), task_store.clone());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-clear-resets-tasks");
+    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(process_chat_loop(ctx));
+    wait_for_retry_test_condition("SessionReset observed", || {
+        sink.events().iter().any(|event| event == "SessionReset")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    assert!(
+        task_store.list().is_empty(),
+        "/clear must clear the authoritative task aggregate"
     );
 }

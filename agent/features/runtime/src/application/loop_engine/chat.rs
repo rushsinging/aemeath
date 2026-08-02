@@ -31,7 +31,7 @@ pub(crate) mod stall;
 mod stream_handler;
 #[cfg(test)]
 mod stream_handler_tests;
-mod task_snapshot;
+pub(crate) mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{

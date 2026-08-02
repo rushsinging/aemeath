@@ -33,6 +33,9 @@ pub struct RunExecutionState {
     pending_interaction_work: Option<PendingInteractionWork>,
     adopted_input: Vec<(sdk::InputId, Message)>,
     active_interaction: Option<ActiveInteractionReceiver>,
+    /// #1492：本 run 是否已注入 Task 进度 reminder（invocation-only，只给 LLM）。
+    /// 每个新 run 首个 LLM 请求注入一次；run 内 tool 往返 / retry 的后续请求不重复。
+    task_reminder_injected: bool,
 }
 
 impl RunExecutionState {
@@ -147,6 +150,14 @@ impl RunExecutionState {
 
     pub(crate) fn messages_len(&self) -> usize {
         self.messages.len()
+    }
+
+    pub(crate) fn task_reminder_injected(&self) -> bool {
+        self.task_reminder_injected
+    }
+
+    pub(crate) fn mark_task_reminder_injected(&mut self) {
+        self.task_reminder_injected = true;
     }
 
     pub(crate) fn message_tokens(&self) -> usize {
