@@ -769,16 +769,25 @@ async fn run_model_invocation_phase<P>(
 where
     P: ModelInvocationPort + ?Sized,
 {
-    match await_interruptible(run, cancel, model.invoke_model(execution, step_id, cancel)).await {
-        Interrupt::Completed(Ok((step, usage))) => ModelInvocationOutcome::Invoked(step, usage),
-        Interrupt::Completed(Err(LoopEngineError::NeedsCompaction(error))) => {
+    let invocation = model.invoke_model(execution, step_id, cancel);
+    let result = if let Some(remaining) = run.remaining_time(Instant::now()) {
+        if remaining.is_zero() {
+            return ModelInvocationOutcome::TimedOut;
+        }
+        match tokio::time::timeout(remaining, invocation).await {
+            Ok(result) => result,
+            Err(_) => return ModelInvocationOutcome::TimedOut,
+        }
+    } else {
+        invocation.await
+    };
+    match result {
+        Ok((step, usage)) => ModelInvocationOutcome::Invoked(step, usage),
+        Err(LoopEngineError::NeedsCompaction(error)) => {
             ModelInvocationOutcome::NeedsCompaction(error)
         }
-        Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-            ModelInvocationOutcome::Cancelled
-        }
-        Interrupt::Completed(Err(error)) => ModelInvocationOutcome::Failed(error),
-        Interrupt::TimedOut => ModelInvocationOutcome::TimedOut,
+        Err(LoopEngineError::Cancelled) => ModelInvocationOutcome::Cancelled,
+        Err(error) => ModelInvocationOutcome::Failed(error),
     }
 }
 
