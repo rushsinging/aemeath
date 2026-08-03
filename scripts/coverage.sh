@@ -35,6 +35,7 @@ cargo llvm-cov \
     -j 2 \
     --workspace \
     --exclude xtask \
+    --exclude hook \
     --quiet \
     --json \
     --summary-only \
