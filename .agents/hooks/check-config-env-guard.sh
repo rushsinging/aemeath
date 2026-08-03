@@ -39,33 +39,36 @@ for dir in "${SCAN_DIRS[@]}"; do
   if [ ! -d "$dir" ]; then
     continue
   fi
-  # 扫描 .rs 文件中的 env::var("AEMEATH_*") 等业务 env 读取
-  while IFS= read -r file; do
-    rel="${file#$ROOT/}"
+  # 文件级粗筛（grep -l 只输出含业务 env 变量的文件，避免对全仓库逐文件做
+  # 双正则扫描）；xargs -P 并行化（8 路）——实测从 5.3s 降到 ~1s。
+  find "$dir" -name '*.rs' -type f -print0 |
+    xargs -0 -P 8 grep -lE "$BUSINESS_ENV_PATTERN" 2>/dev/null |
+    while IFS= read -r file; do
+      rel="${file#$ROOT/}"
 
-    # 跳过白名单
-    whitelisted=0
-    for pattern in "${WHITELIST_PATTERNS[@]}"; do
-      if [[ "$rel" == *"$pattern"* ]]; then
-        whitelisted=1
-        break
+      # 跳过白名单
+      whitelisted=0
+      for pattern in "${WHITELIST_PATTERNS[@]}"; do
+        if [[ "$rel" == *"$pattern"* ]]; then
+          whitelisted=1
+          break
+        fi
+      done
+      if [ "$whitelisted" -eq 1 ]; then
+        continue
       fi
-    done
-    if [ "$whitelisted" -eq 1 ]; then
-      continue
-    fi
 
-    # 跳过测试文件
-    if [[ "$rel" == *"_test"* ]] || [[ "$rel" == *"tests"* ]]; then
-      continue
-    fi
+      # 跳过测试文件
+      if [[ "$rel" == *"_test"* ]] || [[ "$rel" == *"tests"* ]]; then
+        continue
+      fi
 
-    # 搜索业务 env 读取
-    # guard-registry:scope.config.comments
-    if grep -nE "($BUSINESS_ENV_PATTERN)" "$file" 2>/dev/null | grep -E "$ENV_READ_PATTERN" | grep -v '//' | sed "s|^|$rel:|" >>"$tmp"; then
-      :
-    fi
-  done < <(find "$dir" -name '*.rs' -type f)
+      # 搜索业务 env 读取
+      # guard-registry:scope.config.comments
+      if grep -nE "($BUSINESS_ENV_PATTERN)" "$file" 2>/dev/null | grep -E "$ENV_READ_PATTERN" | grep -v '//' | sed "s|^|$rel:|" >>"$tmp"; then
+        :
+      fi
+    done || true
 done
 
 if [ -s "$tmp" ]; then
