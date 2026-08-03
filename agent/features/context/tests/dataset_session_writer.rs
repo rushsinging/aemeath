@@ -3,7 +3,8 @@ use std::sync::Arc;
 use context::adapters::DatasetCanonicalSessionWriter;
 use context::domain::session::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionGenerationCodec,
+    CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionCommitPlan,
+    SessionGenerationCodec,
 };
 use share::message::Message;
 use storage::api::{
@@ -89,7 +90,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
         .save_incremental(
             &before,
             &after,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("incremental generation must commit");
@@ -139,6 +140,45 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 }
 
 #[tokio::test]
+async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let persisted = session_with_steps("overlay-session", 1, &[("run-a", "step-a", "a")]);
+    writer
+        .save_initial(&persisted)
+        .await
+        .expect("initial generation must commit");
+
+    let mut before = persisted.clone();
+    before.run_slices = before.run_slices.append_accepted_input(
+        "run-overlay",
+        "step-overlay",
+        AcceptedInputProjection::new(vec![Message::user("overlay")], "overlay", 2),
+    );
+    let mut after = before.clone();
+    after.revision = 2;
+    after.metadata.title = Some("persist overlay".to_string());
+
+    writer
+        .save_incremental(
+            &before,
+            &after,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
+        )
+        .await
+        .expect("overlay member must be written without reuse evidence failure");
+
+    let manifest = dataset
+        .read_manifest(&dataset_key("overlay-session"))
+        .await
+        .expect("read committed generation");
+    assert!(manifest.members().iter().any(|member| {
+        member.as_str() == "step-72756e2d6f7665726c6179-737465702d6f7665726c6179.json"
+    }));
+}
+
+#[tokio::test]
 async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() {
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
@@ -184,7 +224,7 @@ async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() 
         .save_incremental(
             &before,
             &after,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("accepted input mutation");
@@ -259,7 +299,7 @@ async fn active_resume_append_reuses_compact_history_members() {
         .save_incremental(
             &active,
             &appended,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("active Resume append must commit against complete generation");
@@ -337,7 +377,7 @@ async fn active_resume_finalize_reuses_compact_history_members() {
         .save_incremental(
             &active,
             &finalized,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("active Resume finalize must preserve complete generation");
@@ -358,6 +398,48 @@ async fn active_resume_finalize_reuses_compact_history_members() {
     assert_eq!(manifest.steps().len(), 2);
     assert_eq!(manifest.steps()[0].cursor().step_id, "step-old");
     assert_eq!(manifest.steps()[1].cursor().step_id, "step-active");
+}
+
+#[tokio::test]
+async fn partial_history_commit_intent_cannot_remove_persisted_step_members() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps(
+        "partial-history",
+        1,
+        &[
+            ("run-old", "step-old", "old"),
+            ("run-live", "step-live", "live"),
+        ],
+    );
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation must commit");
+    let mut after = before.clone();
+    after.revision = 2;
+    after.run_slices = after.run_slices.cleared();
+
+    writer
+        .save_incremental(
+            &before,
+            &after,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
+        )
+        .await
+        .expect("partial history commit must preserve persisted steps");
+
+    let manifest = dataset
+        .read_manifest(&dataset_key("partial-history"))
+        .await
+        .expect("read committed manifest");
+    let step_count = manifest
+        .members()
+        .iter()
+        .filter(|member| member.as_str().starts_with("step-"))
+        .count();
+    assert_eq!(step_count, 2);
 }
 
 #[tokio::test]
@@ -382,7 +464,7 @@ async fn complete_history_replacement_removes_every_step_member() {
         .save_incremental(
             &before,
             &after,
-            context::adapters::SessionWriteScope::ReplaceCompleteHistory,
+            context::adapters::SessionSaveIntent::ReplaceCompleteHistory,
         )
         .await
         .expect("complete history replacement must commit");
@@ -399,6 +481,122 @@ async fn complete_history_replacement_removes_every_step_member() {
             .collect::<Vec<_>>(),
         ["manifest.json", "metadata.json", "session-state.json"]
     );
+}
+
+#[tokio::test]
+async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps("new-session", 0, &[]);
+    let mut after = before.clone();
+    after.revision = 1;
+    after.run_slices = after.run_slices.append_accepted_input(
+        "run",
+        "step",
+        AcceptedInputProjection::new(vec![Message::user("first")], "first", 1),
+    );
+    let plan = SessionCommitPlan::between(&before, &after).expect("first commit plan");
+
+    writer
+        .commit_plan("new-session", 0, plan)
+        .await
+        .expect("first typed commit must publish an initial Dataset generation");
+
+    let manifest_name = "manifest.json"
+        .parse::<SafePathSegment>()
+        .expect("manifest member name");
+    let DatasetReadOutcome::Found(read) = dataset
+        .read_consistent(&dataset_key("new-session"), &[manifest_name])
+        .await
+        .expect("read first generation manifest")
+    else {
+        panic!("first Dataset generation must exist");
+    };
+    let manifest = SessionGenerationCodec::decode_manifest(read.members()[0].bytes())
+        .expect("domain manifest");
+    assert_eq!(manifest.session_id(), "new-session");
+    assert_eq!(manifest.revision(), 1);
+    assert_eq!(manifest.steps().len(), 1);
+}
+
+#[tokio::test]
+async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps("session", 1, &[("run", "step", "before")]);
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation must commit");
+
+    let mut after = before.clone();
+    after.id = "foreign-session".to_string();
+    after.revision = 2;
+    let plan = SessionCommitPlan::between(&after, &after).expect("foreign plan");
+
+    let error = writer
+        .commit_plan("session", 1, plan)
+        .await
+        .expect_err("plan identity must match the committed dataset");
+
+    assert!(error.contains("identity"), "unexpected error: {error}");
+    let manifest = dataset
+        .read_manifest(&dataset_key("session"))
+        .await
+        .expect("read unchanged manifest");
+    let requested = manifest.members().to_vec();
+    let DatasetReadOutcome::Found(read) = dataset
+        .read_consistent(&dataset_key("session"), &requested)
+        .await
+        .expect("current generation remains readable")
+    else {
+        panic!("current generation must remain committed");
+    };
+    let metadata = read
+        .members()
+        .iter()
+        .find(|member| member.name().as_str() == "metadata.json")
+        .expect("metadata member");
+    let value: serde_json::Value = serde_json::from_slice(metadata.bytes()).expect("metadata JSON");
+    assert_eq!(value["id"], "session");
+    assert_eq!(value["revision"], 1);
+}
+
+#[tokio::test]
+async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revision() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps("session", 1, &[("run", "step", "before")]);
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation must commit");
+    let mut invalid_after = before.clone();
+    invalid_after.metadata.title = Some("must not publish".to_string());
+    let plan = SessionCommitPlan::between(&before, &invalid_after).expect("non-advancing plan");
+
+    let error = writer
+        .commit_plan("session", 1, plan)
+        .await
+        .expect_err("target revision must advance the expected revision");
+
+    assert!(error.contains("revision"), "unexpected error: {error}");
+    let manifest_name = "manifest.json"
+        .parse::<SafePathSegment>()
+        .expect("manifest member name");
+    let DatasetReadOutcome::Found(read) = dataset
+        .read_consistent(&dataset_key("session"), &[manifest_name])
+        .await
+        .expect("read unchanged generation manifest")
+    else {
+        panic!("current generation must remain committed");
+    };
+    let manifest = SessionGenerationCodec::decode_manifest(read.members()[0].bytes())
+        .expect("domain manifest");
+    assert_eq!(manifest.revision(), 1);
 }
 
 #[tokio::test]
@@ -419,7 +617,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
         .save_incremental(
             &before,
             &committed,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("first incremental generation must commit");
@@ -431,7 +629,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
         .save_incremental(
             &before,
             &stale_candidate,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect_err("stale Session generation must be rejected");

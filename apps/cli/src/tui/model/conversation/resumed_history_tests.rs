@@ -1,4 +1,5 @@
-use super::resumed_history::ResumedHistoryBacking;
+use super::resumed_history::{ResumedHistoryBacking, ResumedHistoryItemKind};
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 
 fn index(session_id: &str, revision: u64, count: usize) -> sdk::DisplayHistoryIndex {
     sdk::DisplayHistoryIndex {
@@ -69,6 +70,43 @@ fn loaded_window_replaces_step_placeholder_with_renderable_items() {
     assert_eq!(backing.items().len(), 2);
     assert_eq!(backing.items()[0].id, "history-step-0");
     assert_eq!(backing.items()[1].id, "history-1-message-0");
+}
+
+#[test]
+fn loaded_window_excludes_llm_only_user_role_messages() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut stop_hook = TuiChatMessage::system_generated_user_text(
+        "<system-reminder>blocked by hook</system-reminder>",
+    );
+    stop_hook.source = TuiMessageSource::StopHook;
+    stop_hook.stop_hook = None;
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage::user_text("visible user input"),
+        stop_hook,
+        TuiChatMessage::system_generated_user_text(
+            "<system-reminder>Skill loaded</system-reminder>",
+        ),
+        TuiChatMessage {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::text("assistant reply")],
+            source: TuiMessageSource::User,
+            stop_hook: None,
+            input_id: None,
+        },
+    ];
+
+    assert!(backing.apply_window(loaded));
+
+    assert_eq!(
+        backing
+            .items()
+            .iter()
+            .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
+            .count(),
+        1
+    );
+    assert!(backing.user_input_history().is_empty());
 }
 
 #[test]

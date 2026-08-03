@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
-use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter, SessionWriteScope};
+use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
     AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
-    SnapshotState,
+    SessionCommitPlan, SnapshotState,
 };
 use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
@@ -24,24 +24,38 @@ use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidatio
 
 use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
 
+#[derive(Debug)]
+struct RecordedSessionCommit {
+    session_id: String,
+    expected_revision: u64,
+    plan: SessionCommitPlan,
+}
+
 #[derive(Default)]
 struct RecordingWriter {
-    saved: Mutex<Vec<CanonicalSession>>,
+    saved: Mutex<Vec<RecordedSessionCommit>>,
     fail: bool,
 }
 
 #[async_trait]
 impl CanonicalSessionWriter for RecordingWriter {
-    async fn save(
+    async fn commit(
         &self,
-        _before: &CanonicalSession,
-        session: &CanonicalSession,
-        _scope: SessionWriteScope,
+        session_id: &str,
+        expected_revision: u64,
+        plan: SessionCommitPlan,
     ) -> Result<(), String> {
         if self.fail {
             return Err("disk full".to_string());
         }
-        self.saved.lock().unwrap().push(session.clone());
+        if plan.changed_members().is_empty() {
+            return Err("missing changed member".to_string());
+        }
+        self.saved.lock().unwrap().push(RecordedSessionCommit {
+            session_id: session_id.to_string(),
+            expected_revision,
+            plan,
+        });
         Ok(())
     }
 }
@@ -1442,6 +1456,32 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
     ));
 }
 
+#[tokio::test]
+async fn finalized_append_commits_typed_plan_with_expected_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, _) = repository(writer.clone());
+
+    repository
+        .append_finalized(&append("typed-plan"))
+        .await
+        .expect("append should commit");
+
+    let commits = writer.saved.lock().unwrap();
+    let commit = commits.last().expect("typed commit should be recorded");
+    assert!(!commit.session_id.is_empty());
+    assert_eq!(commit.expected_revision, 0);
+    assert!(
+        commit
+            .plan
+            .changed_members()
+            .iter()
+            .any(|member| member.name() == "manifest.json"),
+        "commit plan must carry the canonical generation manifest"
+    );
+    assert!(commit.plan.preserves_unloaded_steps());
+    assert!(commit.plan.removed_members().is_empty());
+}
+
 /// #1486：注入 generator 后 commit_compaction 走 LLM 语义压缩，
 /// summary 来自生成器而非本地 fallback 模板。
 #[tokio::test]
@@ -1470,14 +1510,26 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
 
     compact(&repository_under_test, session_id.clone(), 0).await;
 
-    let saved = writer.saved.lock().unwrap().last().cloned().unwrap();
-    let summary = saved.compact.expect("compact marker 应已写入").summary;
+    let commits = writer.saved.lock().unwrap();
+    let saved = &commits.last().expect("compact commit must exist").plan;
+    let state_member = saved
+        .changed_members()
+        .iter()
+        .find(|member| member.name() == "session-state.json")
+        .expect("compact must replace state member");
+    let state =
+        context::domain::session::SessionGenerationCodec::decode_state(state_member.bytes())
+            .expect("decode committed state");
     assert!(
-        summary.contains("LLM 生成的语义摘要"),
-        "summary 应来自 LLM 生成器: {summary}"
+        state
+            .compact_summary()
+            .is_some_and(|summary| summary.contains("LLM 生成的语义摘要")),
+        "summary 应来自 LLM 生成器"
     );
     assert!(
-        !summary.contains("## User Requests"),
-        "不应使用本地 fallback 模板: {summary}"
+        state
+            .compact_summary()
+            .is_none_or(|summary| !summary.contains("## User Requests")),
+        "不应使用本地 fallback 模板"
     );
 }

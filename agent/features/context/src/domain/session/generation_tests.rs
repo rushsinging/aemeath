@@ -1,5 +1,5 @@
 use super::{
-    DisplayHistoryStepIndex, SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
+    DisplayHistoryStepIndex, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionStepMember,
 };
 use crate::domain::session::{
@@ -31,6 +31,41 @@ fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> 
 }
 
 #[test]
+fn preserving_unloaded_history_never_infers_removal_from_partial_after_state() {
+    let before = session_with_steps(
+        "session",
+        1,
+        &[
+            ("run-old", "step-old", "old"),
+            ("run-current", "step-current", "current"),
+        ],
+    );
+    let persisted_manifest = SessionGenerationManifest::new(
+        before.id.clone(),
+        before.revision,
+        vec![
+            RunStepCursor {
+                run_id: "run-old".to_string(),
+                step_id: "step-old".to_string(),
+            },
+            RunStepCursor {
+                run_id: "run-current".to_string(),
+                step_id: "step-current".to_string(),
+            },
+        ],
+    )
+    .expect("persisted manifest");
+    let mut after = before.clone();
+    after.revision = 2;
+    after.run_slices = after.run_slices.cleared();
+
+    let changes =
+        SessionCommitPlan::between_preserving_unloaded_steps(&before, &after, &persisted_manifest)
+            .expect("preserving change set");
+
+    assert!(changes.removed_members().is_empty());
+}
+#[test]
 fn finalized_append_changes_manifest_state_and_only_new_step_member() {
     let before = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
     let mut after = before.clone();
@@ -41,7 +76,7 @@ fn finalized_append_changes_manifest_state_and_only_new_step_member() {
         AcceptedInputProjection::new(vec![Message::user("b")], "run-b:step-b:b", 2),
     );
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
 
     assert_eq!(changes.changed_members().len(), 3);
     assert_eq!(
@@ -70,7 +105,7 @@ fn metadata_mutation_changes_only_metadata_state_member() {
     after.metadata.title = Some("updated title".to_string());
     after.revision += 1;
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
     let changed_names = changes
         .changed_members()
         .iter()
@@ -93,7 +128,7 @@ fn metadata_mutation_reuses_unchanged_step_member() {
     after.revision = 2;
     after.metadata.title = Some("renamed".to_string());
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
 
     assert_eq!(
         changes
@@ -125,7 +160,7 @@ fn receipt_update_replaces_only_affected_step_member() {
         AcceptedInputProjection::new(vec![Message::user("changed")], "changed", 2),
     );
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
 
     assert_eq!(
         changes
@@ -156,7 +191,7 @@ fn clear_removes_every_previous_step_member() {
     after.revision = 2;
     after.run_slices = after.run_slices.cleared();
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
 
     assert_eq!(changes.reused_members(), ["session-state.json"]);
     assert_eq!(
@@ -186,7 +221,7 @@ fn compact_mutation_changes_state_member_without_reencoding_steps() {
         source_revision: 3,
     });
 
-    let changes = SessionChangeSet::between(&before, &after).expect("change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("change set");
     let changed_names = changes
         .changed_members()
         .iter()
@@ -203,6 +238,87 @@ fn compact_mutation_changes_state_member_without_reencoding_steps() {
             "step-72756e2d62-737465702d62.json"
         ]
     );
+}
+
+#[test]
+fn overlay_step_missing_from_persisted_generation_is_written_instead_of_reused() {
+    let persisted = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
+    let persisted_manifest = SessionGenerationManifest::new(
+        persisted.id.clone(),
+        persisted.revision,
+        vec![RunStepCursor {
+            run_id: "run-a".to_string(),
+            step_id: "step-a".to_string(),
+        }],
+    )
+    .expect("persisted manifest");
+    let mut before = persisted.clone();
+    before.run_slices = before.run_slices.append_accepted_input(
+        "run-overlay",
+        "step-overlay",
+        AcceptedInputProjection::new(
+            vec![Message::user("overlay")],
+            "run-overlay:step-overlay:overlay",
+            2,
+        ),
+    );
+    let mut after = before.clone();
+    after.revision = 2;
+    after.metadata.title = Some("persist overlay".to_string());
+
+    let changes =
+        SessionCommitPlan::between_preserving_unloaded_steps(&before, &after, &persisted_manifest)
+            .expect("preserving change set");
+    let overlay_member_name = "step-72756e2d6f7665726c6179-737465702d6f7665726c6179.json";
+
+    assert!(changes
+        .changed_members()
+        .iter()
+        .any(|member| member.name() == overlay_member_name));
+    assert!(!changes
+        .reused_members()
+        .iter()
+        .any(|name| name == overlay_member_name));
+    assert!(changes
+        .reused_members()
+        .iter()
+        .any(|name| { name == "step-72756e2d61-737465702d61.json" }));
+}
+
+#[test]
+fn overlay_step_missing_from_persisted_generation_is_not_removed() {
+    let persisted = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
+    let persisted_manifest = SessionGenerationManifest::new(
+        persisted.id.clone(),
+        persisted.revision,
+        vec![RunStepCursor {
+            run_id: "run-a".to_string(),
+            step_id: "step-a".to_string(),
+        }],
+    )
+    .expect("persisted manifest");
+    let mut before = persisted.clone();
+    before.run_slices = before.run_slices.append_accepted_input(
+        "run-overlay",
+        "step-overlay",
+        AcceptedInputProjection::new(
+            vec![Message::user("overlay")],
+            "run-overlay:step-overlay:overlay",
+            2,
+        ),
+    );
+    let mut after = persisted.clone();
+    after.revision = 2;
+    after.metadata.title = Some("discard overlay".to_string());
+
+    let changes =
+        SessionCommitPlan::between_preserving_unloaded_steps(&before, &after, &persisted_manifest)
+            .expect("preserving change set");
+
+    assert!(!changes
+        .removed_members()
+        .iter()
+        .any(|name| { name == "step-72756e2d6f7665726c6179-737465702d6f7665726c6179.json" }));
 }
 
 #[test]
@@ -250,7 +366,7 @@ fn session_incremental_change_set_release_workload() {
     after.updated_at = "2026-01-02T00:00:00Z".to_string();
 
     let started = std::time::Instant::now();
-    let changes = SessionChangeSet::between(&before, &after).expect("large change set");
+    let changes = SessionCommitPlan::between(&before, &after).expect("large change set");
     let elapsed = started.elapsed();
     let changed_bytes = changes
         .changed_members()

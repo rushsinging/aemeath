@@ -118,7 +118,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
         .save_incremental(
             &previous,
             &current,
-            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+            context::adapters::SessionSaveIntent::CommitPartialHistory,
         )
         .await
         .expect("save current generation");

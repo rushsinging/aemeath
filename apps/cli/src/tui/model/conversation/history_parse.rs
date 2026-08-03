@@ -34,6 +34,7 @@ pub(crate) enum HistoryDisplayParseError {
     MissingToolResultId,
     MissingToolResultContent,
     EmptyAssistantMessage,
+    NonUserVisibleMessage,
 }
 
 impl std::fmt::Display for HistoryDisplayParseError {
@@ -44,6 +45,11 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     pub(crate) fn parse(msg: &TuiChatMessage) -> Result<Self, HistoryDisplayParseError> {
+        if msg.role == "user"
+            && msg.source != crate::tui::adapter::runtime_view::TuiMessageSource::User
+        {
+            return Err(HistoryDisplayParseError::NonUserVisibleMessage);
+        }
         let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
@@ -326,7 +332,7 @@ mod tests {
     // ── parse: user 分支 ──
 
     #[test]
-    fn test_parse_stop_hook_message_as_user_history() {
+    fn parse_stop_hook_message_is_not_user_visible_history() {
         let mut message = msg(
             "user",
             vec![text_block("<system-reminder>blocked</system-reminder>")],
@@ -335,22 +341,18 @@ mod tests {
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::User {
-                text: "<system-reminder>blocked</system-reminder>".to_string(),
-            })
+            Err(HistoryDisplayParseError::NonUserVisibleMessage)
         );
     }
 
     #[test]
-    fn test_parse_non_stop_system_generated_message_as_user() {
+    fn parse_system_generated_message_is_not_user_visible_history() {
         let mut message = msg("user", vec![text_block("guidance changed")]);
         message.source = TuiMessageSource::SystemGenerated;
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::User {
-                text: "guidance changed".to_string(),
-            })
+            Err(HistoryDisplayParseError::NonUserVisibleMessage)
         );
     }
 

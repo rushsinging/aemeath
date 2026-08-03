@@ -19,7 +19,7 @@ pub use envelope::{
 };
 pub use generation::{
     DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
-    SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
+    SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionMemberBytes, SessionMetadataMember, SessionStateMember,
     SessionStepMember,
 };

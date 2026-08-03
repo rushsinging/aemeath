@@ -8,7 +8,7 @@ use storage::api::{
 };
 
 use crate::domain::session::{
-    CanonicalSession, SessionChangeSet, SessionGenerationCodec, SessionGenerationManifest,
+    CanonicalSession, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
 };
 
 pub struct DatasetCanonicalSessionWriter {
@@ -17,13 +17,13 @@ pub struct DatasetCanonicalSessionWriter {
 
 #[async_trait::async_trait]
 impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
-    async fn save(
+    async fn commit(
         &self,
-        before: &CanonicalSession,
-        after: &CanonicalSession,
-        scope: crate::adapters::SessionWriteScope,
+        session_id: &str,
+        expected_revision: u64,
+        plan: SessionCommitPlan,
     ) -> Result<(), String> {
-        self.save_incremental(before, after, scope).await
+        self.commit_plan(session_id, expected_revision, plan).await
     }
 }
 
@@ -33,7 +33,7 @@ impl DatasetCanonicalSessionWriter {
     }
 
     pub async fn save_initial(&self, session: &CanonicalSession) -> Result<(), String> {
-        let changes = SessionChangeSet::initial(session).map_err(|error| error.to_string())?;
+        let changes = SessionCommitPlan::initial(session).map_err(|error| error.to_string())?;
         self.commit(session.id.as_str(), changes).await
     }
 
@@ -41,7 +41,7 @@ impl DatasetCanonicalSessionWriter {
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
-        scope: crate::adapters::SessionWriteScope,
+        intent: crate::adapters::SessionSaveIntent,
     ) -> Result<(), String> {
         let dataset_key =
             session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
@@ -72,24 +72,82 @@ impl DatasetCanonicalSessionWriter {
                 .bytes(),
         )
         .map_err(|error| error.to_string())?;
-        let changes = match scope {
-            crate::adapters::SessionWriteScope::PreserveUnloadedHistory => {
-                SessionChangeSet::between_preserving_unloaded_steps(
+        let mut changes = match intent {
+            crate::adapters::SessionSaveIntent::CommitPartialHistory => {
+                SessionCommitPlan::between_preserving_unloaded_steps(
                     before,
                     after,
                     &persisted_manifest,
                 )
             }
-            crate::adapters::SessionWriteScope::ReplaceCompleteHistory => {
-                SessionChangeSet::between(before, after)
+            crate::adapters::SessionSaveIntent::ReplaceCompleteHistory => {
+                SessionCommitPlan::between(before, after)
             }
         }
         .map_err(|error| error.to_string())?;
+        changes
+            .validate_commit_boundary(after.id.as_str(), before.revision, &persisted_manifest)
+            .map_err(|error| error.to_string())?;
+        promote_missing_reuse_evidence(&manifest, &mut changes)?;
         self.commit_with_manifest(&dataset_key, &manifest, changes)
             .await
     }
 
-    async fn commit(&self, session_id: &str, changes: SessionChangeSet) -> Result<(), String> {
+    pub async fn commit_plan(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        mut plan: SessionCommitPlan,
+    ) -> Result<(), String> {
+        let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
+        let manifest = self
+            .dataset
+            .read_manifest(&dataset_key)
+            .await
+            .map_err(|error| error.to_string())?;
+        if manifest.members().is_empty() {
+            plan.validate_initial_commit_boundary(session_id, expected_revision)
+                .map_err(|error| error.to_string())?;
+            promote_missing_reuse_evidence(&manifest, &mut plan)?;
+            return self
+                .commit_with_manifest(&dataset_key, &manifest, plan)
+                .await;
+        }
+        let manifest_member_name =
+            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
+                .map_err(|error| error.to_string())?;
+        let persisted_manifest = self
+            .dataset
+            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_member_name))
+            .await
+            .map_err(|error| error.to_string())?;
+        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
+            return Err("Session generation manifest 不存在".to_string());
+        };
+        let persisted_manifest = SessionGenerationCodec::decode_manifest(
+            persisted_manifest
+                .members()
+                .first()
+                .ok_or_else(|| "Session generation manifest 不存在".to_string())?
+                .bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+        let persisted_revision = persisted_manifest.revision();
+        if persisted_revision != expected_revision {
+            return Err(format!(
+                "Session 数据集修订号已变更: expected={expected_revision}, actual={persisted_revision}"
+            ));
+        }
+        plan.validate_commit_boundary(session_id, expected_revision, &persisted_manifest)
+            .map_err(|error| error.to_string())?;
+        plan.reconcile_persisted_steps(&persisted_manifest)
+            .map_err(|error| error.to_string())?;
+        promote_missing_reuse_evidence(&manifest, &mut plan)?;
+        self.commit_with_manifest(&dataset_key, &manifest, plan)
+            .await
+    }
+
+    async fn commit(&self, session_id: &str, changes: SessionCommitPlan) -> Result<(), String> {
         let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
@@ -104,7 +162,7 @@ impl DatasetCanonicalSessionWriter {
         &self,
         dataset_key: &DatasetKey,
         manifest: &storage::api::DatasetManifest,
-        changes: SessionChangeSet,
+        changes: SessionCommitPlan,
     ) -> Result<(), String> {
         let dataset_changes =
             map_session_changes(manifest, changes).map_err(|error| error.to_string())?;
@@ -127,9 +185,29 @@ pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKey, Storag
     )
 }
 
+fn promote_missing_reuse_evidence(
+    manifest: &storage::api::DatasetManifest,
+    plan: &mut SessionCommitPlan,
+) -> Result<(), String> {
+    plan.promote_reuse_fallbacks(|name| {
+        SafePathSegment::from_str(name)
+            .ok()
+            .is_some_and(|safe_name| manifest.member_evidence(&safe_name).is_some())
+    });
+    let missing_name = plan.reused_members().iter().find(|name| {
+        SafePathSegment::from_str(name)
+            .ok()
+            .is_none_or(|safe_name| manifest.member_evidence(&safe_name).is_none())
+    });
+    if let Some(name) = missing_name {
+        return Err(missing_reuse_evidence(name).to_string());
+    }
+    Ok(())
+}
+
 fn map_session_changes(
     manifest: &storage::api::DatasetManifest,
-    changes: SessionChangeSet,
+    changes: SessionCommitPlan,
 ) -> Result<DatasetChangeSet, StorageError> {
     let changed_members = changes
         .changed_members()

@@ -354,6 +354,31 @@ fn resumed_step_from_wire(step: sdk::ResumedSessionStep) -> ResumedHistoryStep {
 }
 
 fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMessage) -> Message {
+    let metadata = match message.source {
+        crate::tui::adapter::runtime_view::TuiMessageSource::User => None,
+        crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {
+            Some(sdk::ChatMessageMetadata {
+                source: sdk::ChatMessageSource::SystemGenerated,
+                stop_hook: None,
+            })
+        }
+        crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
+            Some(sdk::ChatMessageMetadata {
+                source: sdk::ChatMessageSource::StopHook,
+                stop_hook: message.stop_hook.map(|feedback| sdk::StopHookFeedbackView {
+                    summary: feedback.summary,
+                    command: feedback.command,
+                    exit_code: feedback.exit_code,
+                    reason: feedback.reason,
+                    stdout_preview: feedback.stdout_preview,
+                    stderr_preview: feedback.stderr_preview,
+                    stdout_truncated: feedback.stdout_truncated,
+                    stderr_truncated: feedback.stderr_truncated,
+                    output_file: feedback.output_file,
+                }),
+            })
+        }
+    };
     let wire = sdk::ChatMessage {
         role: message.role,
         content: message
@@ -397,7 +422,7 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
                 },
             })
             .collect(),
-        metadata: None,
+        metadata,
         input_id: message
             .input_id
             .and_then(|id| sdk::InputId::parse_uuid7(&id).ok()),
@@ -445,7 +470,9 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
     let mut items = Vec::new();
     for (message_index, message) in step.messages().enumerate() {
         match message.role {
-            Role::User if !message.has_tool_results() => {
+            Role::User
+                if message.source() == MessageSource::User && !message.has_tool_results() =>
+            {
                 let text = message.text_content();
                 items.push(ResumedHistoryItem {
                     id: format!("history-{step_index}-message-{message_index}"),
@@ -454,6 +481,8 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                     kind: ResumedHistoryItemKind::UserMessage { message_index },
                 });
             }
+            Role::User
+                if message.source() != MessageSource::User && !message.has_tool_results() => {}
             _ => {
                 for (block_index, block) in message.content.iter().enumerate() {
                     let (kind, estimated_lines) = match block {

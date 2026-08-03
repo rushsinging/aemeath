@@ -517,6 +517,10 @@ impl SessionStateMember {
             .and_then(|marker| marker.start_at.as_ref())
     }
 
+    pub fn compact_summary(&self) -> Option<&str> {
+        self.compact.as_ref().map(|marker| marker.summary.as_str())
+    }
+
     pub fn into_session(
         self,
         metadata: SessionMetadataMember,
@@ -563,13 +567,15 @@ impl SessionMemberBytes {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionChangeSet {
+pub struct SessionCommitPlan {
     changed_members: Vec<SessionMemberBytes>,
     reused_members: Vec<String>,
     removed_members: Vec<String>,
+    reuse_fallbacks: Vec<SessionMemberBytes>,
+    preserves_unloaded_steps: bool,
 }
 
-impl SessionChangeSet {
+impl SessionCommitPlan {
     pub fn initial(session: &CanonicalSession) -> Result<Self, SessionGenerationWireError> {
         let empty = CanonicalSession {
             id: session.id.clone(),
@@ -714,19 +720,15 @@ impl SessionChangeSet {
             })?;
         manifest_member.bytes = encoded_manifest;
 
+        changes.preserves_unloaded_steps = true;
+        changes.removed_members.clear();
         let changed_names = changes
             .changed_members
             .iter()
             .map(|member| member.name.as_str())
             .collect::<HashSet<_>>();
-        let removed_names = changes
-            .removed_members
-            .iter()
-            .map(String::as_str)
-            .collect::<HashSet<_>>();
         for reference in persisted_manifest.steps() {
             if !changed_names.contains(reference.member_name())
-                && !removed_names.contains(reference.member_name())
                 && !changes
                     .reused_members
                     .iter()
@@ -735,6 +737,56 @@ impl SessionChangeSet {
                 changes.reused_members.push(reference.member_name.clone());
             }
         }
+        let after_steps_by_name = after_steps
+            .iter()
+            .map(|step| {
+                (
+                    SessionGenerationManifest::step_member_name(step.cursor()),
+                    step,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        changes.reuse_fallbacks = changes
+            .reused_members
+            .iter()
+            .filter_map(|name| {
+                after_steps_by_name.get(name).map(|step| {
+                    SessionGenerationCodec::encode_step(step)
+                        .map(|bytes| SessionMemberBytes::new(name.clone(), bytes))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let persisted_step_names = persisted_manifest
+            .steps()
+            .iter()
+            .map(|reference| reference.member_name.as_str())
+            .collect::<HashSet<_>>();
+        let missing_reused_step_names = changes
+            .reused_members
+            .iter()
+            .filter(|name| {
+                after_steps_by_name.contains_key(name.as_str())
+                    && !persisted_step_names.contains(name.as_str())
+            })
+            .cloned()
+            .collect::<HashSet<_>>();
+        changes
+            .reused_members
+            .retain(|name| !missing_reused_step_names.contains(name));
+        for name in missing_reused_step_names {
+            let step = after_steps_by_name.get(&name).ok_or_else(|| {
+                SessionGenerationWireError::InvalidManifest(format!(
+                    "Session 待写入 Step member 不存在：{name}"
+                ))
+            })?;
+            changes.changed_members.push(SessionMemberBytes::new(
+                name,
+                SessionGenerationCodec::encode_step(step)?,
+            ));
+        }
+        changes
+            .changed_members
+            .sort_by(|left, right| left.name.cmp(&right.name));
         changes.reused_members.sort();
         changes.reused_members.dedup();
         Ok(changes)
@@ -839,6 +891,8 @@ impl SessionChangeSet {
             changed_members,
             reused_members,
             removed_members,
+            reuse_fallbacks: Vec::new(),
+            preserves_unloaded_steps: false,
         })
     }
 
@@ -852,6 +906,192 @@ impl SessionChangeSet {
 
     pub fn removed_members(&self) -> &[String] {
         &self.removed_members
+    }
+
+    pub fn validate_initial_commit_boundary(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), SessionGenerationWireError> {
+        if expected_revision != 0 {
+            return Err(SessionGenerationWireError::StaleSessionGeneration {
+                expected_revision,
+                actual_revision: 0,
+            });
+        }
+        self.validate_target_manifest(session_id, expected_revision)
+    }
+
+    pub fn validate_commit_boundary(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        persisted_manifest: &SessionGenerationManifest,
+    ) -> Result<(), SessionGenerationWireError> {
+        if persisted_manifest.session_id() != session_id {
+            return Err(SessionGenerationWireError::SessionIdentityMismatch {
+                before: session_id.to_string(),
+                after: persisted_manifest.session_id().to_string(),
+            });
+        }
+        if persisted_manifest.revision() != expected_revision {
+            return Err(SessionGenerationWireError::StaleSessionGeneration {
+                expected_revision,
+                actual_revision: persisted_manifest.revision(),
+            });
+        }
+        self.validate_target_manifest(session_id, expected_revision)
+    }
+
+    fn validate_target_manifest(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), SessionGenerationWireError> {
+        let manifest_member = self
+            .changed_members
+            .iter()
+            .find(|member| member.name() == MANIFEST_MEMBER_NAME)
+            .ok_or_else(|| {
+                SessionGenerationWireError::InvalidManifest(
+                    "Session commit plan 缺少 generation manifest".to_string(),
+                )
+            })?;
+        let target_manifest = SessionGenerationCodec::decode_manifest(manifest_member.bytes())?;
+        if target_manifest.session_id() != session_id {
+            return Err(SessionGenerationWireError::SessionIdentityMismatch {
+                before: session_id.to_string(),
+                after: target_manifest.session_id().to_string(),
+            });
+        }
+        let target_revision = expected_revision.checked_add(1).ok_or_else(|| {
+            SessionGenerationWireError::InvalidManifest(
+                "Session commit expected revision 已溢出".to_string(),
+            )
+        })?;
+        if target_manifest.revision() != target_revision {
+            return Err(SessionGenerationWireError::InvalidManifest(format!(
+                "Session commit target revision 必须递增一次: expected={target_revision}, actual={}",
+                target_manifest.revision()
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn reconcile_persisted_steps(
+        &mut self,
+        persisted_manifest: &SessionGenerationManifest,
+    ) -> Result<(), SessionGenerationWireError> {
+        if !self.preserves_unloaded_steps {
+            return Ok(());
+        }
+        let manifest_member = self
+            .changed_members
+            .iter_mut()
+            .find(|member| member.name() == MANIFEST_MEMBER_NAME)
+            .ok_or_else(|| {
+                SessionGenerationWireError::InvalidManifest(
+                    "Session commit plan 缺少 generation manifest".to_string(),
+                )
+            })?;
+        let target_manifest = SessionGenerationCodec::decode_manifest(manifest_member.bytes())?;
+        let target_by_identity = target_manifest
+            .steps
+            .iter()
+            .map(|reference| {
+                (
+                    (
+                        reference.cursor.run_id.as_str(),
+                        reference.cursor.step_id.as_str(),
+                    ),
+                    reference,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let mut merged_steps = persisted_manifest.steps.clone();
+        for reference in &mut merged_steps {
+            if let Some(target) = target_by_identity.get(&(
+                reference.cursor.run_id.as_str(),
+                reference.cursor.step_id.as_str(),
+            )) {
+                *reference = (*target).clone();
+            }
+        }
+        let persisted_identities = merged_steps
+            .iter()
+            .map(|reference| {
+                (
+                    reference.cursor.run_id.clone(),
+                    reference.cursor.step_id.clone(),
+                )
+            })
+            .collect::<HashSet<_>>();
+        for reference in &target_manifest.steps {
+            if !persisted_identities.contains(&(
+                reference.cursor.run_id.clone(),
+                reference.cursor.step_id.clone(),
+            )) {
+                merged_steps.push(reference.clone());
+            }
+        }
+        let merged_manifest = SessionGenerationManifest {
+            steps: merged_steps,
+            ..target_manifest
+        };
+        manifest_member.bytes = SessionGenerationCodec::encode_manifest(&merged_manifest)?;
+
+        let changed_names = self
+            .changed_members
+            .iter()
+            .map(|member| member.name())
+            .collect::<HashSet<_>>();
+        for reference in persisted_manifest.steps() {
+            if !changed_names.contains(reference.member_name())
+                && !self
+                    .reused_members
+                    .iter()
+                    .any(|name| name == reference.member_name())
+            {
+                self.reused_members.push(reference.member_name.clone());
+            }
+        }
+        self.reused_members.sort();
+        self.reused_members.dedup();
+        Ok(())
+    }
+
+    pub fn promote_reuse_fallbacks<F>(&mut self, mut has_evidence: F)
+    where
+        F: FnMut(&str) -> bool,
+    {
+        let missing_names = self
+            .reused_members
+            .iter()
+            .filter(|name| !has_evidence(name))
+            .cloned()
+            .collect::<HashSet<_>>();
+        self.reused_members
+            .retain(|name| !missing_names.contains(name));
+        for fallback in &self.reuse_fallbacks {
+            if missing_names.contains(fallback.name())
+                && !self
+                    .changed_members
+                    .iter()
+                    .any(|member| member.name() == fallback.name())
+            {
+                self.changed_members.push(fallback.clone());
+            }
+        }
+        self.changed_members
+            .sort_by(|left, right| left.name.cmp(&right.name));
+    }
+
+    pub fn reuse_fallbacks(&self) -> &[SessionMemberBytes] {
+        &self.reuse_fallbacks
+    }
+
+    pub fn preserves_unloaded_steps(&self) -> bool {
+        self.preserves_unloaded_steps
     }
 }
 

@@ -156,6 +156,7 @@ impl ConversationUpdate for ResumeConversation {
                                 .extend(model.restore_answered_ask_user_batch(restored_ask_slots));
                         }
                     }
+                    Err(super::history_parse::HistoryDisplayParseError::NonUserVisibleMessage) => {}
                     Err(error) => {
                         crate::tui::log_warn!(
                             "skip invalid history message during resume: {error}"
@@ -988,7 +989,7 @@ mod tests {
         );
     }
     #[test]
-    fn resume_interleaves_stop_hook_feedback_as_ordinary_user_history() {
+    fn resume_excludes_llm_only_messages_from_user_history() {
         let user = TuiChatMessage::user_text("user question");
         let stop_hook = TuiChatMessage {
             role: "user".to_string(),
@@ -999,6 +1000,9 @@ mod tests {
             source: TuiMessageSource::StopHook,
             stop_hook: None,
         };
+        let system_generated = TuiChatMessage::system_generated_user_text(
+            "<system-reminder>Skill loaded</system-reminder>",
+        );
         let assistant = TuiChatMessage::assistant_text("assistant reply");
         let mut model = ConversationModel::default();
 
@@ -1006,17 +1010,26 @@ mod tests {
             steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
-                messages: vec![user, stop_hook, assistant],
+                messages: vec![user, stop_hook, system_generated, assistant],
                 finalize_cause: None,
                 duration_ms: None,
             }],
         }
         .update(&mut model);
 
-        assert!(matches!(
-            model.timeline.items().get(1),
-            Some(OutputTimelineItem::UserMessage { text, .. })
-                if text.contains("blocked by hook")
-        ));
+        let user_messages = model
+            .timeline
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                OutputTimelineItem::UserMessage { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, ["user question"]);
+        assert!(!model.timeline.items().iter().any(|item| match item {
+            OutputTimelineItem::UserMessage { text, .. } => text.contains("system-reminder"),
+            _ => false,
+        }));
     }
 }

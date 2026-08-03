@@ -180,7 +180,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .save_incremental(
                 &before,
                 &after,
-                crate::adapters::SessionWriteScope::PreserveUnloadedHistory,
+                crate::adapters::SessionSaveIntent::CommitPartialHistory,
             )
             .await
             .map_err(SessionManagementError::Storage)?;
