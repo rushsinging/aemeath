@@ -493,9 +493,10 @@ mod tests {
                 }),
             ),
             (
-                RunDomainEvent::Cancelled {
+                RunDomainEvent::Terminated {
                     run_id,
                     parent_run_id,
+                    reason: sdk::RunTerminationReason::ParentStepCancelled,
                 },
                 Some(tools::AgentRunTerminal::Cancelled),
             ),

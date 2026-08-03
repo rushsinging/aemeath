@@ -3,9 +3,6 @@ pub mod activity_observation;
 #[path = "conversation/activity_observation_tests.rs"]
 mod activity_observation_tests;
 pub mod agent_progress;
-#[cfg(test)]
-#[path = "conversation/agent_run_state_tests.rs"]
-mod agent_run_state_tests;
 pub mod ask_user;
 pub mod block;
 pub mod change;

@@ -6,8 +6,8 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiRunStepEvent, TuiRuntimeEvent, TuiToolApprovalPrompt, TuiWorkspaceSnapshot, UiActivityId,
 };
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ObserveActivityChange, ReplaceActivitySnapshot, RunCancelling,
-    RunStepStarted, ShowInteraction,
+    ConversationIntent, ObserveActivityChange, PresentCancelledStep, ReplaceActivitySnapshot,
+    ShowInteraction,
 };
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
@@ -61,29 +61,54 @@ fn activity_events_map_to_dedicated_conversation_intents() {
 }
 
 #[test]
-fn runtime_run_and_step_lifecycle_maps_to_existing_conversation_intents() {
+fn runtime_run_and_step_lifecycle_are_observational_only() {
     let run_id = UiRunId::from("run-1");
-    let mapping = map_runtime_event(&TuiRuntimeEvent::Run {
+    let run_mapping = map_runtime_event(&TuiRuntimeEvent::Run {
         run_id: run_id.clone(),
         parent_run_id: None,
-        event: TuiRunEvent::Cancelling,
+        event: TuiRunEvent::TerminationRequested {
+            reason: crate::tui::adapter::tui_runtime_event::TuiRunTerminationReason::UserExit,
+            deadline_unix_millis: 42,
+        },
     });
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::RunCancelling(RunCancelling { run_id: actual })] if actual == &run_id
-    ));
+    assert!(run_mapping.conversation.is_empty());
 
-    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
-        run_id: run_id.clone(),
+    let step_mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id,
         parent_run_id: None,
         step_id: UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Started,
+        event: TuiRunStepEvent::CancellationRequested,
     });
+    assert!(step_mapping.conversation.is_empty());
+}
+
+#[test]
+fn runtime_cancelled_step_maps_to_presentation_only_intent() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id: UiRunId::from("run-1"),
+        parent_run_id: None,
+        step_id: UiRunStepId::from("step-1"),
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [ConversationIntent::RunStepStarted(RunStepStarted { run_id: actual, step_id, .. })]
-            if actual == &run_id && step_id.as_str() == "step-1"
+        [ConversationIntent::PresentCancelledStep(
+            PresentCancelledStep { confirmed: true }
+        )]
     ));
+}
+
+#[test]
+fn child_cancelled_step_remains_observational_only() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id: UiRunId::from("child-run"),
+        parent_run_id: Some(UiRunId::from("root-run")),
+        step_id: UiRunStepId::from("child-step"),
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+
+    assert!(mapping.conversation.is_empty());
 }
 
 #[test]

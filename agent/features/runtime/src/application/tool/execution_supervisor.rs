@@ -100,8 +100,18 @@ impl ToolExecutionSupervisor {
         );
         log::debug!(
             target: crate::LOG_TARGET,
-            "tool execution awaiting terminal: run_id={} step_id={} call_id={} tool={} caller_cancelled={} effective_deadline={:?}",
+            "tool execution cancellation identity: run_id={} step_id={} call_id={} tool={} caller_cancelled={} context_cancelled={} declared={:?}",
             call.identity.run_id,
+            call.identity.step_id,
+            call.identity.runtime_call_id,
+            call.identity.tool_name,
+            call.cancellation.is_cancelled(),
+            call.context.cancellation().is_cancelled(),
+            descriptor.cancellation,
+        );
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "tool execution awaiting terminal: run_id={} step_id={} call_id={} tool={} caller_cancelled={} effective_deadline={:?}",            call.identity.run_id,
             call.identity.step_id,
             call.identity.runtime_call_id,
             call.identity.tool_name,

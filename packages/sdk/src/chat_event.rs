@@ -582,15 +582,7 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
     },
-    /// 同步打断请求已接受，Run 已进入 Cancelling。
-    RunCancelling {
-        run_id: crate::RunId,
-    },
-    /// Run 取消收口完成 ACK。
-    RunCancelled {
-        run_id: crate::RunId,
-    },
-    /// Chat 被取消（兼容旧 TUI 投影）。
+    /// Chat 被取消；由 Runtime 的 typed Run termination 投影。
     Cancelled {
         context: ChatEventContext,
         /// 取消前该回合已经运行的耗时。

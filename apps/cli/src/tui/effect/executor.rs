@@ -316,18 +316,30 @@ impl App {
             processing_handle_present,
             outcome
         );
-        if matches!(
-            outcome,
+        match outcome {
             sdk::CancelCurrentRunOutcome::Accepted
-                | sdk::CancelCurrentRunOutcome::AlreadyCancelling
-                | sdk::CancelCurrentRunOutcome::RunTerminating
-        ) {
-            self.chat.start_cancelling();
-            self.apply_agent_intent(AgentIntent::Conversation(
-                ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
-                    "Cancelling current response… Press Ctrl+C again to exit",
-                ))),
-            ));
+            | sdk::CancelCurrentRunOutcome::AlreadyCancelling => {
+                self.chat.start_cancelling();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
+                        "Cancelling current response…",
+                    ))),
+                ));
+            }
+            sdk::CancelCurrentRunOutcome::RunTerminating => {
+                self.chat.start_cancelling();
+                self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
+            }
+            sdk::CancelCurrentRunOutcome::NoActiveStep => {
+                self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
+            }
+            sdk::CancelCurrentRunOutcome::NoActiveRun => {
+                self.set_transient_notice(StatusNotice::warning("No active run to cancel"));
+            }
+            sdk::CancelCurrentRunOutcome::RunTerminal => {
+                self.chat.stop_processing();
+                self.set_transient_notice(StatusNotice::warning("Current run already finished"));
+            }
         }
     }
 

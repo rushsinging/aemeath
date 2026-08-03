@@ -39,20 +39,15 @@ pub enum RunStatus {
     Compacting,
     CancellingStep,
     FinalizingStep,
-    Cancelling,
     Terminating,
     Completed,
     Failed,
-    Cancelled,
     Terminated,
 }
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Terminated
-        )
+        matches!(self, Self::Completed | Self::Failed | Self::Terminated)
     }
 }
 
@@ -138,7 +133,6 @@ pub enum RunTransition {
     ToolsCompleted,
     StepCancelled,
     TerminationFinished,
-    CancellationFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,8 +158,6 @@ pub enum RunTransitionReason {
     StepCancelled,
     TerminationRequested,
     TerminationFinished,
-    InterruptRequested,
-    CancellationFinished,
     Failed,
 }
 
@@ -190,7 +182,6 @@ impl From<RunTransition> for RunTransitionReason {
             RunTransition::ToolsCompleted => Self::ToolsCompleted,
             RunTransition::StepCancelled => Self::StepCancelled,
             RunTransition::TerminationFinished => Self::TerminationFinished,
-            RunTransition::CancellationFinished => Self::CancellationFinished,
         }
     }
 }
@@ -252,13 +243,6 @@ pub enum RunStepCancellationRequest {
 pub enum RunTerminationRequest {
     Accepted,
     AlreadyTerminating,
-    AlreadyTerminal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunCancellationRequest {
-    Accepted,
-    AlreadyCancelling,
     AlreadyTerminal,
 }
 

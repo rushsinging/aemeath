@@ -77,6 +77,17 @@ where
         .into_iter()
         .partition(|prepared| prepared.call.name == "Agent");
 
+    let step_tool_context = agent.ctx.with_cancellation(Arc::new(
+        crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
+    ));
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "tool round cancellation context bound: run_id={} step_id={} cancelled={}",
+        run_id,
+        step_id,
+        step_tool_context.cancellation().is_cancelled()
+    );
+
     // Execute AskUserQuestion calls through the tool execution port.
     // Suspensions are collected and returned to the caller — they are NOT
     // resolved inline. The caller routes them through the engine's
@@ -88,7 +99,7 @@ where
         .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
         let call = &prepared.call;
-        let tool_ctx = agent.ctx.with_authorization(prepared.authorization);
+        let tool_ctx = step_tool_context.with_authorization(prepared.authorization);
         match agent
             .execute_one_outcome_with_ctx(call, &tool_ctx, step_id)
             .await
@@ -128,13 +139,15 @@ where
         policy,
         run_id,
         step_id,
+        &step_tool_context,
+        cancel,
     )
     .await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
         agent,
-        &agent.ctx,
+        &step_tool_context,
         &agent.agent_semaphore,
         &agent.workspace_persist,
         sink,
@@ -463,6 +476,41 @@ mod tests {
 
     struct UnsafeLifecycleTool;
 
+    struct BlockingAgentTool {
+        started: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl TypedTool for BlockingAgentTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "Agent"
+        }
+
+        fn description(&self) -> &str {
+            "blocking Agent cancellation test"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type":"object"})
+        }
+
+        fn cancellation(&self) -> tools::CancellationDeclaration {
+            tools::CancellationDeclaration::Cooperative
+        }
+
+        async fn call(
+            &self,
+            _input: Value,
+            ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            self.started.notify_one();
+            ctx.cancellation().cancelled().await;
+            TypedToolResult::error("Agent cancelled by current Step")
+        }
+    }
+
     #[async_trait]
     impl TypedTool for UnsafeLifecycleTool {
         type Output = Value;
@@ -510,6 +558,71 @@ mod tests {
             index,
             input: serde_json::json!({"label": format!("call-{index}")}),
         }
+    }
+
+    #[tokio::test]
+    async fn tool_round_step_cancellation_reaches_running_agent_context() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        let started = Arc::new(tokio::sync::Notify::new());
+        registry.register(BlockingAgentTool {
+            started: started.clone(),
+        });
+        let ctx = test_tool_context();
+        let agent = Arc::new(Agent::for_test(registry.as_ref(), ctx, 10));
+        let sink = RecordingSink::default();
+        let hook_port = noop_hook_port();
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let workspace_root = std::env::current_dir().unwrap();
+        let call = ToolCall {
+            id: ToolCallId::from_legacy_or_new("agent-cancel"),
+            provider_id: "provider-agent-cancel".to_string(),
+            name: "Agent".to_string(),
+            index: 0,
+            input: serde_json::json!({}),
+        };
+        let step_cancel = tokio_util::sync::CancellationToken::new();
+        let execution_agent = agent.clone();
+        let execution_context = context.clone();
+        let execution_sink = sink.clone();
+        let execution_hook_port = hook_port.clone();
+        let execution_workspace_root = workspace_root.clone();
+        let execution_call = call.clone();
+        let execution_cancel = step_cancel.clone();
+        let execution_activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
+        let handle = tokio::spawn(async move {
+            execute_tool_round(
+                &execution_context,
+                std::slice::from_ref(&execution_call),
+                &execution_agent.catalog,
+                &policy::AllowAllPolicy,
+                &sdk::RunId::new_v7(),
+                &sdk::RunStepId::new_v7(),
+                execution_agent.as_ref(),
+                &execution_sink,
+                &execution_hook_port,
+                &execution_activities,
+                &execution_cancel,
+                "en",
+                &execution_workspace_root,
+                &[(execution_call.clone(), ToolGuardDecision::Allow)],
+            )
+            .await
+        });
+        started.notified().await;
+
+        step_cancel.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("当前 Step 取消必须到达运行中的 Agent execution context")
+            .unwrap();
+
+        assert_eq!(result.results.len(), 1);
+        assert!(result.results[0].outcome.is_error);
+        assert!(result.results[0].outcome.text.contains("cancel"));
     }
 
     #[tokio::test]

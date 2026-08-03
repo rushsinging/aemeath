@@ -6,7 +6,6 @@ use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
-    UiRunId,
 };
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
@@ -98,6 +97,11 @@ pub struct ToolResult {
 pub struct TerminalNotice {
     pub cause: super::terminal::TerminalCause,
     pub duration: Option<std::time::Duration>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresentCancelledStep {
+    pub confirmed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -261,31 +265,6 @@ pub struct CompleteChat {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStarted {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunAwaitingUser {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunResumed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelling {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelled {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObserveActivityChange {
     pub kind: crate::tui::adapter::tui_runtime_event::TuiActivityChangeKind,
     pub activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
@@ -294,29 +273,6 @@ pub struct ObserveActivityChange {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplaceActivitySnapshot {
     pub snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCompleted {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunFailed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepStarted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
-    pub tool_reference: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepCompleted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -414,6 +370,7 @@ pub enum ConversationIntent {
     ToolCallUpdate(ToolCallUpdate),
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
+    PresentCancelledStep(PresentCancelledStep),
     AppendSystemMessage(AppendSystemMessage),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),
@@ -443,17 +400,8 @@ pub enum ConversationIntent {
     InteractionCancelAccepted(InteractionCancelAccepted),
     InteractionReplyRejected(InteractionReplyRejected),
     InteractionCancelRejected(InteractionCancelRejected),
-    RunStarted(RunStarted),
-    RunAwaitingUser(RunAwaitingUser),
-    RunResumed(RunResumed),
-    RunCancelling(RunCancelling),
-    RunCancelled(RunCancelled),
-    RunCompleted(RunCompleted),
-    RunFailed(RunFailed),
     ObserveActivityChange(ObserveActivityChange),
     ReplaceActivitySnapshot(ReplaceActivitySnapshot),
-    RunStepStarted(RunStepStarted),
-    RunStepCompleted(RunStepCompleted),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),

@@ -37,6 +37,8 @@ use tokio_util::sync::CancellationToken;
 pub enum StopHookDecision {
     /// Stop hook 放行，Run 可以正常完成。
     Proceed,
+    /// Stop Hook 执行已被当前 Step 取消，不应向 LLM 注入取消反馈。
+    Cancelled,
     /// Stop hook 阻断。携带完整的 typed reason、block detail、feedback 材料。
     /// 第 1-15 次 Block 走 continue-with-feedback；第 16 次 Block 触发 Run Failed。
     Block(Box<StopHookBlock>),
@@ -226,6 +228,17 @@ pub async fn orchestrate_stop_hook(
     let hook_outcome = hook_port
         .dispatch_at(invocation, hook_dispatch_context, cancellation)
         .await;
+    if cancellation.is_cancelled()
+        || hook_outcome
+            .executions
+            .iter()
+            .any(|execution| matches!(execution.status, hook::HookExecutionStatus::Cancelled))
+    {
+        return StopHookOutcome {
+            decision: StopHookDecision::Cancelled,
+            feedback_message: None,
+        };
+    }
     let dispatch = map_hook_outcome(&hook_outcome);
 
     let (decision, feedback_message) = match &dispatch.directive {

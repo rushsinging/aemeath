@@ -50,7 +50,7 @@ where
             let hook_port = hook_port.clone();
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
-            let mut ag_ctx = agent_ctx.clone();
+            let mut agent_tool_context = agent_ctx.clone();
             let context = context.clone();
             let cancel = cancel.clone();
             let workspace_root = workspace_root.to_path_buf();
@@ -72,7 +72,7 @@ where
                     hook_port,
                     activities,
                     agent,
-                    &mut ag_ctx,
+                    &mut agent_tool_context,
                     &workspace_persist,
                     &workspace_root,
                     &cancel,
@@ -110,7 +110,7 @@ async fn execute_one_agent<S>(
     hook_port: Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     agent: &crate::application::tool::agent::Agent,
-    ag_ctx: &mut ToolExecutionContext,
+    agent_tool_context: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &std::path::Path,
     cancel: &CancellationToken,
@@ -288,9 +288,18 @@ where
         effective_call.provider_id,
     );
 
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "agent tool cancellation context bound: run_id={} step_id={} call_id={} tool={} cancelled={}",
+        run_id,
+        step_id,
+        effective_call.id,
+        effective_call.name,
+        agent_tool_context.cancellation().is_cancelled()
+    );
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
     let prog_adapter = crate::application::run::context::tool_progress_sink(prog_tx);
-    *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
+    *agent_tool_context = agent_tool_context.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
@@ -330,7 +339,7 @@ where
     });
 
     let execution = agent
-        .execute_one_with_ctx(&effective_call, ag_ctx, step_id)
+        .execute_one_with_ctx(&effective_call, agent_tool_context, step_id)
         .await;
     let workspace = workspace_persist.snapshot();
     let _ = sink
@@ -340,7 +349,7 @@ where
             workspace,
         })
         .await;
-    *ag_ctx = ag_ctx.with_progress(None);
+    *agent_tool_context = agent_tool_context.with_progress(None);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
     run_post_tool_hooks(
@@ -547,11 +556,14 @@ mod tests {
                     crate::application::tool::test_support::test_tool_result_materializer(),
                 runtime_cancellation: cancel.clone(),
             };
+            let step_tool_context = ctx.with_cancellation(Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
+            ));
             execute_agent_calls(
                 &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
                 &prepared,
                 &agent,
-                &ctx,
+                &step_tool_context,
                 &agent_semaphore,
                 &crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 &sink,
@@ -639,6 +651,35 @@ mod tests {
         first.await.unwrap();
         second.await.unwrap();
         assert_eq!(h.max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn running_agent_call_uses_current_step_cancellation() {
+        let mut harness = harness(&["running"], 1);
+        let step_cancel = CancellationToken::new();
+        let handle = spawn_calls(
+            harness.execution.clone(),
+            harness.ctx.clone(),
+            vec![call("running", 0)],
+            harness.agent_semaphore.clone(),
+            step_cancel.clone(),
+            harness.catalog.clone(),
+        );
+        assert_eq!(harness.started.recv().await.unwrap(), "running");
+
+        step_cancel.cancel();
+        let results = tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("当前 Step 取消必须终止运行中的 Agent tool call")
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].outcome.is_error);
+        assert!(
+            results[0].outcome.text.contains("cancel"),
+            "Agent tool terminal 必须保留取消语义: {}",
+            results[0].outcome.text
+        );
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiInteractionKind,
-    TuiModelStreamState, TuiRunEvent, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
 };
 
 #[test]
@@ -394,24 +394,6 @@ fn authoritative_cancelled_terminal_maps_without_run_or_step_correlation() {
             context,
             duration_ms: 6_000,
         }) if context.chat_id == chat_id.as_str() && context.turn_id == turn_id.as_str()
-    ));
-}
-
-#[test]
-fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
-    let run_id = sdk::RunId::new("run-1");
-
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RunCancelling {
-        run_id: run_id.clone(),
-    });
-
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::Run {
-            run_id: actual,
-            parent_run_id: None,
-            event: TuiRunEvent::Cancelling,
-        }) if actual.as_str() == run_id.as_str()
     ));
 }
 

@@ -210,9 +210,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::InteractionConflict { .. }
             | ConversationChange::ActivityObservationChanged { .. }
             | ConversationChange::ActivityObservationStale { .. }
-            | ConversationChange::ActivitySnapshotReplaced { .. }
-            | ConversationChange::AgentRunChanged { .. }
-            | ConversationChange::AgentRunStepChanged { .. } => {
+            | ConversationChange::ActivitySnapshotReplaced { .. } => {
                 ModelChange::output_and_status_dirty()
             }
             ConversationChange::CompactProgressChanged

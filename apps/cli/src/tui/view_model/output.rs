@@ -89,7 +89,16 @@ pub struct AskUserBatchBlockView {
     pub chat_input_text: String,
     pub chat_input_cursor: usize,
     pub confirm_cursor: usize,
-    pub confirmed: bool,
+    pub completion: AskUserCompletionView,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserCompletionView {
+    Active,
+    ReplyPending,
+    CancelPending,
+    Answered,
+    Cancelled,
 }
 
 /// AskUserBatch 单问槽位视图（投影自 model 层，不依赖 model internals）。

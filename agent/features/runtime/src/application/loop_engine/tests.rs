@@ -897,14 +897,6 @@ impl RunControlPort for RunControlFake {
 
 #[async_trait::async_trait]
 impl RunLifecyclePort for RunLifecycleFake {
-    fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-
-    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
-        true
-    }
-
     fn register_step_scope(
         &self,
         run_id: &sdk::RunId,
@@ -915,6 +907,8 @@ impl RunLifecyclePort for RunLifecycleFake {
         self.state.lock().unwrap().registered_step = Some(step_id);
         *self.step_cancel.lock().unwrap() = Some(cancel);
     }
+
+    fn clear_step_scope(&self, _run_id: &sdk::RunId, _step_id: &sdk::RunStepId) {}
 }
 
 #[async_trait::async_trait]
@@ -1641,14 +1635,14 @@ async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
 }
 #[tokio::test]
-async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
+async fn engine_terminates_in_flight_compaction_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     let mut port = ScriptedScenario {
@@ -1673,17 +1667,17 @@ async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
-    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::Terminated);
     assert!(port.calls().contains(&"compact"));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(!port.calls().contains(&"model"));
 }
 
 #[tokio::test]
-async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
+async fn engine_terminates_in_flight_model_and_emits_terminal_ack() {
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
     let mut port = ScriptedScenario {
@@ -1707,16 +1701,16 @@ async fn engine_cancels_in_flight_model_and_emits_terminal_ack() {
     canceller.await.unwrap();
 
     assert_eq!(directive, LoopDirective::Terminal);
-    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::Terminated);
     assert_eq!(port.cancelled_steps(), port.frozen_steps());
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::CancellationRequested { .. })));
+        .any(|event| matches!(event, RunDomainEvent::TerminationRequested { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
 }
 
 #[tokio::test]
@@ -2665,14 +2659,14 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
     assert_eq!(run.status(), RunStatus::Terminated);
     assert!(port.calls().contains(&"compact"));
     assert!(!port.calls().contains(&"model"));
-    assert!(!port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
-    assert!(port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+    assert_eq!(
+        port.events()
+            .iter()
+            .filter(|event| matches!(event, RunDomainEvent::Terminated { .. }))
+            .count(),
+        1,
+        "Run termination must emit exactly one terminal domain event"
+    );
 }
 
 #[tokio::test]
@@ -2702,7 +2696,7 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
@@ -2738,7 +2732,7 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
@@ -2798,10 +2792,6 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     .unwrap();
     assert_eq!(directive, LoopDirective::Terminal);
     assert_eq!(run.status(), RunStatus::Terminated);
-    assert!(!port
-        .events()
-        .iter()
-        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
     assert!(port
         .events()
         .iter()
@@ -3438,6 +3428,96 @@ mod interaction_routing {
         assert_eq!(step.tool_calls()[0].id(), &call_id);
     }
 
+    /// Cancelling the active UserQuestions interaction remains interaction-scoped,
+    /// completes the current Step exactly once, and never applies ToolsCompleted
+    /// while the Run is still AwaitingUser.
+    #[tokio::test]
+    async fn user_questions_cancel_completes_step_once_without_illegal_transition() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let mut port = ScriptedScenario {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            ..Default::default()
+        };
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
+        assert_eq!(
+            port.interaction_bridge
+                .cancel(&request_id, sdk::InteractionCancelReason::UserCancelled,),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        port.sync_inputs();
+
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .expect("interaction cancellation must leave AwaitingUser before ToolsCompleted");
+
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+        assert!(run.pending_interaction().is_none());
+        assert_eq!(run.steps().len(), 1);
+        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
+        assert_eq!(
+            run.steps()[0].tool_calls()[0].status(),
+            ToolCallStatus::Cancelled
+        );
+        assert_eq!(port.finalized_steps().len(), 1);
+        assert!(!port
+            .events()
+            .iter()
+            .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+        assert_eq!(
+            port.events()
+                .iter()
+                .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+                .count(),
+            1
+        );
+    }
+
     // ── UserQuestions: two questions serial roundtrip ──
 
     /// Two AskUserQuestion calls: first resolved → second becomes active,
@@ -3755,7 +3835,7 @@ async fn compact_progress_view_updates_activity_with_chunk_counts() {
                     stage,
                     current,
                     total,
-                } => Some((stage.clone(), *current, *total)),
+                } => Some((*stage, *current, *total)),
                 _ => None,
             })
             .expect("compaction activity must be observed")

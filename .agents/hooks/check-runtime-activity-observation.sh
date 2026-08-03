@@ -5,134 +5,176 @@ set -euo pipefail
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-python3 - <<'PY'
-from pathlib import Path
-import re
-import sys
+perl - "$ROOT" <<'PERL'
+use strict;
+use warnings;
+use File::Find;
+use File::Spec;
 
-root = Path.cwd()
-runtime = root / "agent/features/runtime/src"
-tui = root / "apps/cli/src/tui"
-coordinator = runtime / "application/activity/coordinator.rs"
-model = runtime / "application/activity/model.rs"
-root_reducer = tui / "update/root_reducer.rs"
-violations = []
+my $root = shift @ARGV;
+my $runtime = "$root/agent/features/runtime/src";
+my $tui = "$root/apps/cli/src/tui";
+my $coordinator = "$runtime/application/activity/coordinator.rs";
+my $model = "$runtime/application/activity/model.rs";
+my $root_reducer = "$tui/update/root_reducer.rs";
+my @violations;
 
-
-def production_text(path: Path) -> str:
-    source = path.read_text()
-    source = re.sub(r"(?ms)#\[cfg\(test\)\].*?\n}\n", "", source)
-    return "\n".join(
-        line for line in source.splitlines()
-        if not line.lstrip().startswith("//")
-    )
-
-
-def is_test(path: Path) -> bool:
-    return "tests" in path.parts or "test" in path.stem
-
-
-for path in runtime.rglob("*.rs"):
-    if is_test(path) or path in {coordinator, model}:
-        continue
-    if "ActivityObservation {" in production_text(path):
-        violations.append(
-            f"Runtime ActivityObservation construction must stay in ActivityCoordinator: {path}"
-        )
-
-for path in tui.rglob("*.rs"):
-    if is_test(path) or "scenario_tests" in path.parts or path == root_reducer:
-        continue
-    if "activity_observations_mut(" in production_text(path):
-        violations.append(
-            f"TUI ActivityObservation mutation must stay behind root reducer: {path}"
-        )
-
-live_status = production_text(tui / "view_assembler/live_status.rs")
-for symbol in ("RunStatusView", "TuiRunStatus", "RunTransitioned"):
-    if symbol in live_status:
-        violations.append(f"LiveStatus must not depend on legacy Run status: {symbol}")
-
-legacy_symbols = (
-    "RunStatusObserved",
-    "RunStateSnapshot",
-    "run_state_snapshots",
-    "active_main_run_snapshot",
-    "TuiRunTiming",
-    "SpinnerPhase",
-    "chat_active",
-    "running_tool_count",
-)
-for path in tui.rglob("*.rs"):
-    if is_test(path) or path.name == "architecture_tests.rs":
-        continue
-    source = production_text(path)
-    for symbol in legacy_symbols:
-        if symbol in source:
-            violations.append(f"legacy Activity display symbol {symbol}: {path}")
-
-hook_parallel_symbols = (
-    "RuntimeStreamEvent::HookEvent",
-    "RuntimeStreamEvent::HookMessage",
-    "RuntimeStreamEvent::StopHookBlocked",
-    "ChatEvent::HookEvent",
-    "ChatEvent::HookMessage",
-    "ChatEvent::StopHookBlocked",
-    "TuiRuntimeEvent::HookEvent",
-    "TuiRuntimeEvent::HookMessage",
-    "TuiRuntimeEvent::StopHookBlocked",
-    "UiEvent::HookEvent",
-    "UiEvent::HookMessage",
-    "UiEvent::StopHookBlocked",
-    "AppendHookNotice",
-    "HookNotice",
-)
-for path in (runtime, root / "packages/sdk/src", tui):
-    for source_path in path.rglob("*.rs"):
-        if is_test(source_path) or "scenario_tests" in source_path.parts:
-            continue
-        source = production_text(source_path)
-        for symbol in hook_parallel_symbols:
-            if symbol in source:
-                violations.append(
-                    f"Hook display must use the unique Activity observation path, found {symbol}: {source_path}"
-                )
-
-allowed_direct_hook_dispatches = {
-    runtime / "application/loop_engine/chat/hook_ui.rs",
-    runtime / "application/hook/stop_coordination.rs",
-    runtime / "application/hook/empty.rs",
-    runtime / "application/prompt/build/prompt_build.rs",
-    runtime / "application/prompt/instructions_hook.rs",
+sub rust_files {
+  my (@roots) = @_;
+  my @paths;
+  for my $search_root (@roots) {
+    find(
+      {
+        no_chdir => 1,
+        wanted => sub {
+          push @paths, $File::Find::name if -f $_ && $_ =~ /\.rs\z/;
+        },
+      },
+      $search_root,
+    );
+  }
+  return sort @paths;
 }
-for source_path in runtime.rglob("*.rs"):
-    if is_test(source_path) or source_path in allowed_direct_hook_dispatches:
-        continue
-    if ".dispatch_at(" in production_text(source_path):
-        violations.append(
-            f"Run Hook dispatch must publish an Activity lifecycle through the designated boundary: {source_path}"
-        )
 
-for path in (coordinator, tui / "effect/session/processing/logging.rs"):
-    source = production_text(path)
-    for field in (
-        "run_id={}",
-        "revision={}",
-        "total_elapsed_ms={}",
-        "active_elapsed_ms={}",
-        "state_elapsed_ms={}",
-    ):
-        if field not in source:
-            violations.append(f"Activity diagnostic missing {field}: {path}")
-    for sensitive in ("raw_args", "stdout", "response={}"):
-        if sensitive in source:
-            violations.append(f"Activity diagnostic exposes {sensitive}: {path}")
+sub production_text {
+  my ($path) = @_;
+  open my $source_file, '<', $path or die "cannot read $path: $!";
+  local $/;
+  my $source = <$source_file>;
+  close $source_file;
+  $source =~ s/#\[cfg\(test\)\].*?\n}\n//sg;
+  return join "\n", grep { $_ !~ /^\s*\/\// } split /\n/, $source;
+}
 
-if violations:
-    print("[architecture] Runtime Activity observation guard failed:", file=sys.stderr)
-    for violation in violations:
-        print(f"  - {violation}", file=sys.stderr)
-    sys.exit(2)
+sub relative_path {
+  my ($path) = @_;
+  return File::Spec->abs2rel($path, $root);
+}
 
-print("Runtime Activity observation guard passed.")
-PY
+sub is_test {
+  my ($path) = @_;
+  my @parts = File::Spec->splitdir($path);
+  return 1 if grep { $_ eq 'tests' } @parts;
+  my ($volume, $directories, $file) = File::Spec->splitpath($path);
+  $file =~ s/\.rs\z//;
+  return $file =~ /test/;
+}
+
+for my $path (rust_files($runtime)) {
+  next if is_test($path) || $path eq $coordinator || $path eq $model;
+  if (index(production_text($path), 'ActivityObservation {') >= 0) {
+    push @violations,
+      'Runtime ActivityObservation construction must stay in ActivityCoordinator: '
+      . relative_path($path);
+  }
+}
+
+for my $path (rust_files($tui)) {
+  next if is_test($path) || $path =~ m{/scenario_tests/} || $path eq $root_reducer;
+  if (index(production_text($path), 'activity_observations_mut(') >= 0) {
+    push @violations,
+      'TUI ActivityObservation mutation must stay behind root reducer: '
+      . relative_path($path);
+  }
+}
+
+my $live_status = production_text("$tui/view_assembler/live_status.rs");
+for my $symbol ('RunStatusView', 'TuiRunStatus', 'RunTransitioned') {
+  push @violations, "LiveStatus must not depend on legacy Run status: $symbol"
+    if index($live_status, $symbol) >= 0;
+}
+
+my @legacy_symbols = (
+  'RunStatusObserved',
+  'RunStateSnapshot',
+  'run_state_snapshots',
+  'active_main_run_snapshot',
+  'TuiRunTiming',
+  'SpinnerPhase',
+  'chat_active',
+  'running_tool_count',
+);
+for my $path (rust_files($tui)) {
+  next if is_test($path) || $path =~ m{/architecture_tests\.rs\z};
+  my $source = production_text($path);
+  for my $symbol (@legacy_symbols) {
+    push @violations,
+      "legacy Activity display symbol $symbol: " . relative_path($path)
+      if index($source, $symbol) >= 0;
+  }
+}
+
+my @hook_parallel_symbols = (
+  'RuntimeStreamEvent::HookEvent',
+  'RuntimeStreamEvent::HookMessage',
+  'RuntimeStreamEvent::StopHookBlocked',
+  'ChatEvent::HookEvent',
+  'ChatEvent::HookMessage',
+  'ChatEvent::StopHookBlocked',
+  'TuiRuntimeEvent::HookEvent',
+  'TuiRuntimeEvent::HookMessage',
+  'TuiRuntimeEvent::StopHookBlocked',
+  'UiEvent::HookEvent',
+  'UiEvent::HookMessage',
+  'UiEvent::StopHookBlocked',
+  'AppendHookNotice',
+  'HookNotice',
+);
+for my $path (rust_files($runtime, "$root/packages/sdk/src", $tui)) {
+  next if is_test($path) || $path =~ m{/scenario_tests/};
+  my $source = production_text($path);
+  for my $symbol (@hook_parallel_symbols) {
+    push @violations,
+      "Hook display must use the unique Activity observation path, found $symbol: "
+      . relative_path($path)
+      if index($source, $symbol) >= 0;
+  }
+}
+
+my %allowed_direct_hook_dispatches = map { $_ => 1 } (
+  "$runtime/application/loop_engine/chat/hook_ui.rs",
+  "$runtime/application/hook/stop_coordination.rs",
+  "$runtime/application/hook/empty.rs",
+  "$runtime/application/prompt/build/prompt_build.rs",
+  "$runtime/application/prompt/instructions_hook.rs",
+);
+for my $path (rust_files($runtime)) {
+  next if is_test($path) || $allowed_direct_hook_dispatches{$path};
+  if (index(production_text($path), '.dispatch_at(') >= 0) {
+    push @violations,
+      'Run Hook dispatch must publish an Activity lifecycle through the designated boundary: '
+      . relative_path($path);
+  }
+}
+
+for my $path (
+  $coordinator,
+  "$tui/effect/session/processing/logging.rs",
+) {
+  my $source = production_text($path);
+  for my $field (
+    'run_id={}',
+    'revision={}',
+    'total_elapsed_ms={}',
+    'active_elapsed_ms={}',
+    'state_elapsed_ms={}',
+  ) {
+    push @violations,
+      "Activity diagnostic missing $field: " . relative_path($path)
+      if index($source, $field) < 0;
+  }
+  for my $sensitive ('raw_args', 'stdout', 'response={}') {
+    push @violations,
+      "Activity diagnostic exposes $sensitive: " . relative_path($path)
+      if index($source, $sensitive) >= 0;
+  }
+}
+
+if (@violations) {
+  print STDERR "[architecture] Runtime Activity observation guard failed:\n";
+  print STDERR "  - $_\n" for @violations;
+  exit 2;
+}
+
+print "Runtime Activity observation guard passed.\n";
+PERL

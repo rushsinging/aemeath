@@ -109,13 +109,11 @@ fn validate_event_run(run_id: &RunId, event: &RunDomainEvent) -> Result<(), Acti
         | RunDomainEvent::DrainingInput { run_id, .. }
         | RunDomainEvent::TerminationRequested { run_id, .. }
         | RunDomainEvent::Terminated { run_id, .. }
-        | RunDomainEvent::CancellationRequested { run_id, .. }
         | RunDomainEvent::AwaitingUser { run_id, .. }
         | RunDomainEvent::Resumed { run_id, .. }
         | RunDomainEvent::StuckDetected { run_id, .. }
         | RunDomainEvent::Completed { run_id, .. }
-        | RunDomainEvent::Failed { run_id, .. }
-        | RunDomainEvent::Cancelled { run_id, .. } => run_id,
+        | RunDomainEvent::Failed { run_id, .. } => run_id,
     };
     if event_run_id != run_id {
         return Err(ActivityError::RunMismatch);
@@ -141,10 +139,8 @@ fn to_phase(status: RunStatus) -> Option<RunPhaseKind> {
         | RunStatus::InvokingModel
         | RunStatus::AwaitingUser
         | RunStatus::Compacting
-        | RunStatus::Cancelling
         | RunStatus::Completed
         | RunStatus::Failed
-        | RunStatus::Cancelled
         | RunStatus::Terminated => None,
     }
 }
@@ -153,7 +149,6 @@ fn terminal_for_status(status: RunStatus) -> Option<ActivityTerminal> {
     match status {
         RunStatus::Completed => Some(ActivityTerminal::Succeeded),
         RunStatus::Failed => Some(ActivityTerminal::Failed),
-        RunStatus::Cancelled => Some(ActivityTerminal::Cancelled),
         RunStatus::Terminated => Some(ActivityTerminal::Terminated),
         RunStatus::Created
         | RunStatus::DrainingInput
@@ -166,7 +161,6 @@ fn terminal_for_status(status: RunStatus) -> Option<ActivityTerminal> {
         | RunStatus::Compacting
         | RunStatus::CancellingStep
         | RunStatus::FinalizingStep
-        | RunStatus::Cancelling
         | RunStatus::Terminating => None,
     }
 }

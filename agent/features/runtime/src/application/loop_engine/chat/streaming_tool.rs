@@ -42,16 +42,85 @@ struct StreamingToolInner {
     run_id: sdk::RunId,
     language: String,
     workspace_root: PathBuf,
-    cancel: CancellationToken,
     semaphore: Arc<tokio::sync::Semaphore>,
     state: std::sync::Mutex<StreamingToolState>,
 }
 
+#[derive(Clone)]
+struct StreamingInvocation {
+    step_id: sdk::RunStepId,
+    generation: u64,
+    cancel: CancellationToken,
+}
+
+impl StreamingInvocation {
+    fn new(step_id: sdk::RunStepId, generation: u64, cancel: CancellationToken) -> Self {
+        Self {
+            step_id,
+            generation,
+            cancel,
+        }
+    }
+}
+
 #[derive(Default)]
 struct StreamingToolState {
-    step_id: Option<sdk::RunStepId>,
+    invocation: Option<StreamingInvocation>,
+    next_generation: u64,
     pending: Vec<tokio::task::JoinHandle<()>>,
     results: Vec<StreamingToolRoundResult>,
+}
+
+impl StreamingToolState {
+    fn begin_invocation(
+        &mut self,
+        step_id: &sdk::RunStepId,
+        step_cancel: CancellationToken,
+    ) -> StreamingInvocation {
+        self.next_generation = self.next_generation.wrapping_add(1);
+        let invocation = StreamingInvocation::new(
+            step_id.clone(),
+            self.next_generation,
+            step_cancel.child_token(),
+        );
+        self.invocation = Some(invocation.clone());
+        invocation
+    }
+
+    fn detach_invocation(&mut self) -> Vec<tokio::task::JoinHandle<()>> {
+        if let Some(invocation) = self.invocation.take() {
+            invocation.cancel.cancel();
+        }
+        std::mem::take(&mut self.pending)
+    }
+
+    fn accepts(&self, invocation: &StreamingInvocation) -> bool {
+        self.invocation.as_ref().is_some_and(|active| {
+            active.step_id == invocation.step_id && active.generation == invocation.generation
+        })
+    }
+
+    fn accept_result(
+        &mut self,
+        invocation: &StreamingInvocation,
+        round: StreamingToolRoundResult,
+    ) -> bool {
+        if !self.accepts(invocation) {
+            return false;
+        }
+        self.results.push(round);
+        true
+    }
+}
+
+#[cfg(test)]
+#[path = "streaming_tool_tests.rs"]
+mod tests;
+
+async fn await_pending_tasks(handles: Vec<tokio::task::JoinHandle<()>>) {
+    for handle in handles {
+        let _ = handle.await;
+    }
 }
 
 impl StreamingToolExecutor {
@@ -63,7 +132,6 @@ impl StreamingToolExecutor {
         run_id: sdk::RunId,
         language: String,
         workspace_root: PathBuf,
-        cancel: CancellationToken,
         max_tool_concurrency: usize,
     ) -> Self {
         Self {
@@ -74,50 +142,62 @@ impl StreamingToolExecutor {
                 run_id,
                 language,
                 workspace_root,
-                cancel,
                 semaphore: Arc::new(tokio::sync::Semaphore::new(max_tool_concurrency.max(1))),
                 state: std::sync::Mutex::new(StreamingToolState::default()),
             }),
         }
     }
 
-    /// 每次 invoke 开始时调用：绑定 step 并清空上次残留（retry / compact 丢弃）。
-    pub(crate) fn reset_for_invocation(&self, step_id: &sdk::RunStepId) {
+    /// 每次 invoke 开始时绑定当前 Step scope，并先收敛上一次 invocation 的任务。
+    pub(crate) async fn reset_for_invocation(
+        &self,
+        step_id: &sdk::RunStepId,
+        step_cancel: CancellationToken,
+    ) {
+        let (handles, dropped_results, dropped_pending) = {
+            let mut state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let pending_handles = state.detach_invocation();
+            let dropped_pending = pending_handles.len();
+            (pending_handles, state.results.len(), dropped_pending)
+        };
+        await_pending_tasks(handles).await;
         let mut state = self
             .inner
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        let dropped_results = state.results.len();
-        let dropped_pending = state.pending.len();
-        state.step_id = Some(step_id.clone());
-        state.pending.clear();
+        let invocation = state.begin_invocation(step_id, step_cancel);
         state.results.clear();
         log::debug!(
             target: crate::LOG_TARGET,
-            "[streaming_tool] reset_for_invocation dropped_results={} pending={}",
+            "[streaming_tool] reset_for_invocation step_id={} generation={} dropped_results={} pending={}",
+            invocation.step_id,
+            invocation.generation,
             dropped_results,
             dropped_pending
         );
     }
-
     /// 流中 `ToolCallCompleted` → 立即执行（spawn，semaphore 限并发）。
     fn submit(&self, call: ToolCall) {
         let inner = self.inner.clone();
-        let step_id = {
+        let (invocation, step_id) = {
             let state = inner
                 .state
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner());
-            state.step_id.clone()
-        };
-        let Some(step_id) = step_id else {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "streaming tool submit skipped: step_id not attached (call={})",
-                call.name
-            );
-            return;
+            let Some(invocation) = state.invocation.clone() else {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "streaming tool submit skipped: invocation not attached (call={})",
+                    call.name
+                );
+                return;
+            };
+            (invocation.clone(), invocation.step_id.clone())
         };
         log::debug!(
             target: crate::LOG_TARGET,
@@ -132,7 +212,7 @@ impl StreamingToolExecutor {
                 Ok(permit) => permit,
                 Err(_) => return,
             };
-            if spawn_inner.cancel.is_cancelled() {
+            if invocation.cancel.is_cancelled() {
                 return;
             }
             let guarded = vec![(call.clone(), ToolGuardDecision::Allow)];
@@ -147,7 +227,7 @@ impl StreamingToolExecutor {
                 &spawn_inner.runtime_context.event_sink(),
                 spawn_inner.runtime_context.hooks_ref(),
                 spawn_inner.runtime_context.activities().as_ref(),
-                &spawn_inner.cancel,
+                &invocation.cancel,
                 &spawn_inner.language,
                 &spawn_inner.workspace_root,
                 &guarded,
@@ -161,12 +241,20 @@ impl StreamingToolExecutor {
                 round.suspensions.len(),
                 round.approvals.len()
             );
-            spawn_inner
+            let accepted = spawn_inner
                 .state
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
-                .results
-                .push(round);
+                .accept_result(&invocation, round);
+            if !accepted {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[streaming_tool] discarded stale round tool={} step_id={} generation={}",
+                    call.name,
+                    invocation.step_id,
+                    invocation.generation
+                );
+            }
         });
         inner
             .state
@@ -186,9 +274,7 @@ impl StreamingToolExecutor {
                 .unwrap_or_else(|poison| poison.into_inner());
             std::mem::take(&mut state.pending)
         };
-        for handle in handles {
-            let _ = handle.await;
-        }
+        await_pending_tasks(handles).await;
         let mut state = self
             .inner
             .state

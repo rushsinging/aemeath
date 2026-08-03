@@ -7,15 +7,8 @@ pub enum CancelCurrentRunOutcome {
     AlreadyCancelling,
     RunTerminating,
     RunTerminal,
+    NoActiveStep,
     NoActiveRun,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum CancelRunOutcome {
-    Accepted,
-    AlreadyCancelling,
-    AlreadyTerminal,
-    NotFound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

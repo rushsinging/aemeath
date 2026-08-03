@@ -59,6 +59,29 @@ async fn continue_decision_preserves_typed_dispatch_for_mapping() {
 }
 
 #[tokio::test]
+async fn cancelled_stop_hook_does_not_materialize_llm_feedback() {
+    let port = always_blocking_hook_port();
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+
+    let outcome = orchestrate_stop_hook(
+        &port,
+        StopHookContext {
+            turns: 3,
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            session_id: "test-session".to_string(),
+            language: "en".to_string(),
+            subscription_execution_observer: None,
+        },
+        &cancellation,
+    )
+    .await;
+
+    assert!(matches!(outcome.decision, StopHookDecision::Cancelled));
+    assert!(outcome.feedback_message.is_none());
+}
+
+#[tokio::test]
 async fn block_outcome_materializes_feedback_message_once() {
     let port = always_blocking_hook_port();
     let outcome = orchestrate_stop_hook(
