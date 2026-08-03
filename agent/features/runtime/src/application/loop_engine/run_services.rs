@@ -21,9 +21,9 @@ use crate::application::loop_engine::step_persistence::{
     AcceptedInputObserver, StepPersistenceCoordinator,
 };
 use crate::application::loop_engine::{
-    CompactionPort, InteractionMailboxPort, LoopEngineError, ModelInvocationPort,
-    PendingInteractionWork, StepCommit, StepPersistencePort, ToolGuardDecision,
-    ToolOrchestrationPort,
+    CompactProgressView, CompactionPort, InteractionMailboxPort, LoopEngineError,
+    ModelInvocationPort, PendingInteractionWork, StepCommit, StepPersistencePort,
+    ToolGuardDecision, ToolOrchestrationPort,
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
@@ -158,9 +158,10 @@ where
         &mut self,
         execution: &mut RunExecutionState,
         _cancel: &CancellationToken,
+        progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError> {
         CompactionCoordinator::from_context(self.runtime_context)
-            .compact(execution, &mut self.observer)
+            .compact(execution, &mut self.observer, progress)
             .await
     }
 }

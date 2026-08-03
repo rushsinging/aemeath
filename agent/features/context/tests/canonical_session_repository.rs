@@ -357,6 +357,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
             source_revision: SessionRevision::new(revision),
             source: request,
             trigger: CompactTrigger::Automatic,
+            progress: None,
         })
         .await
         .unwrap();
@@ -499,6 +500,7 @@ async fn compaction_preserves_skill_load_records() {
             source_revision: SessionRevision::new(1),
             source: compact_request(SessionId::new(&session_id)),
             trigger: CompactTrigger::Automatic,
+            progress: None,
         })
         .await
         .unwrap();
@@ -713,6 +715,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: CompactTrigger::Automatic,
+            progress: None,
         }),
     )
     .await;
@@ -1319,6 +1322,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: CompactTrigger::Automatic,
+            progress: None,
         })
         .await
         .unwrap();
@@ -1341,6 +1345,7 @@ async fn manual_compaction_bypasses_automatic_threshold() {
             run_id: RunId::new("manual-run"),
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 1_000_000,
+            progress: None,
         })
         .await
         .unwrap();
@@ -1431,6 +1436,7 @@ async fn compaction_rejects_stale_source_revision() {
             source_revision: SessionRevision::new(1),
             source: request,
             trigger: CompactTrigger::Automatic,
+            progress: None,
         })
         .await;
 

@@ -153,6 +153,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             source_revision: SessionRevision::new(3),
             source: request.clone(),
             trigger: CompactTrigger::Automatic,
+            progress: None,
         })
         .await
         .unwrap(),
@@ -165,6 +166,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
+            progress: None,
         })
         .await
         .unwrap();

@@ -4649,6 +4649,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "quote",
+ "regex",
  "sdk",
  "serde",
  "serde_json",

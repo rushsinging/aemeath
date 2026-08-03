@@ -391,12 +391,16 @@ impl CanonicalSessionRepository {
     /// - 未注入时走本地文本压缩 `compact_messages`，并手动补齐
     ///   previous_summary（`build_summary_text` 已保证不全文累加）。
     ///
+    /// `progress` 为压缩进度回调（#1500）：Preparing/Summarizing chunk
+    /// 计数/Finalizing 阶段实时上报；`None` 表示调用方不关心进度。
+    ///
     /// 返回 `(summary, recent_messages)`；消息太少无法压缩时返回 `None`。
     async fn compact_visible_messages(
         &self,
         messages: &[share::message::Message],
         previous_summary: Option<&str>,
         context_size: usize,
+        progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
     ) -> Option<(String, Vec<share::message::Message>)> {
         match &self.generator {
             Some(generator) => {
@@ -405,7 +409,7 @@ impl CanonicalSessionRepository {
                     previous_summary,
                     context_size,
                     Some(generator.as_ref()),
-                    None,
+                    progress.as_deref(),
                     &tokio_util::sync::CancellationToken::new(),
                 )
                 .await;
@@ -826,7 +830,12 @@ impl SessionRepository for CanonicalSessionRepository {
             .as_ref()
             .map(|marker| marker.summary.as_str());
         let Some((summary, recent_messages)) = self
-            .compact_visible_messages(&messages, previous_summary, request.source.context_size)
+            .compact_visible_messages(
+                &messages,
+                previous_summary,
+                request.source.context_size,
+                request.progress.clone(),
+            )
             .await
         else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
@@ -893,7 +902,12 @@ impl SessionRepository for CanonicalSessionRepository {
             .as_ref()
             .map(|marker| marker.summary.as_str());
         let Some((summary, recent_messages)) = self
-            .compact_visible_messages(&messages, previous_summary, request.context_size)
+            .compact_visible_messages(
+                &messages,
+                previous_summary,
+                request.context_size,
+                request.progress.clone(),
+            )
             .await
         else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
