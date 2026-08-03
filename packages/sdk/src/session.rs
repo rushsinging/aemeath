@@ -24,6 +24,15 @@ pub struct ChatMessageMetadata {
     pub source: ChatMessageSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_hook: Option<StopHookFeedbackView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_request: Option<SkillRequestMetadataView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SkillRequestMetadataView {
+    pub skill: String,
+    pub arguments: String,
+    pub raw_input: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -47,6 +56,7 @@ pub enum ChatMessageSource {
     User,
     SystemGenerated,
     StopHook,
+    SkillRequest,
 }
 
 impl ChatMessage {
@@ -66,6 +76,7 @@ impl ChatMessage {
             metadata: Some(ChatMessageMetadata {
                 source: ChatMessageSource::SystemGenerated,
                 stop_hook: None,
+                skill_request: None,
             }),
             input_id: None,
         }

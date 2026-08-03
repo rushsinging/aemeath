@@ -92,6 +92,7 @@ fn loaded_window_excludes_llm_only_user_role_messages() {
             content: vec![TuiContentBlock::text("assistant reply")],
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
             input_id: None,
         },
     ];
@@ -107,6 +108,66 @@ fn loaded_window_excludes_llm_only_user_role_messages() {
         1
     );
     assert!(backing.user_input_history().is_empty());
+}
+
+#[test]
+fn loaded_window_projects_skill_and_stop_hook_as_typed_json_not_user_messages() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage::user_text("visible user input"),
+        TuiChatMessage::skill_request(
+            "LLM skill prompt",
+            crate::tui::adapter::runtime_view::TuiSkillRequestMetadata {
+                skill: "superpowers:brainstorming".to_string(),
+                arguments: "feature scope".to_string(),
+                raw_input: "/superpowers:brainstorming feature scope".to_string(),
+            },
+        ),
+        TuiChatMessage::stop_hook_feedback(
+            "LLM hook prompt",
+            crate::tui::adapter::runtime_view::TuiStopHookFeedback {
+                summary: "Stop hook prevented stopping.".to_string(),
+                command: ".agents/hooks/check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "guard failed".to_string(),
+                stdout_preview: "details".to_string(),
+                stderr_preview: "blocked".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                output_file: None,
+            },
+        ),
+    ];
+
+    assert!(backing.apply_window(loaded));
+
+    assert_eq!(
+        backing
+            .items()
+            .iter()
+            .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
+            .count(),
+        1
+    );
+    assert!(backing.items().iter().any(|item| {
+        matches!(
+            item.kind,
+            ResumedHistoryItemKind::TypedJson {
+                source: super::resumed_history::TypedJsonHistorySource::SkillRequest,
+                ..
+            }
+        )
+    }));
+    assert!(backing.items().iter().any(|item| {
+        matches!(
+            item.kind,
+            ResumedHistoryItemKind::TypedJson {
+                source: super::resumed_history::TypedJsonHistorySource::StopHook,
+                ..
+            }
+        )
+    }));
 }
 
 #[test]

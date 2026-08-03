@@ -162,6 +162,7 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                     sdk::ChatMessageSource::SystemGenerated
                 }
                 share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
+                share::message::MessageSource::SkillRequest => sdk::ChatMessageSource::SkillRequest,
             },
             stop_hook: metadata.stop_hook.map(|payload| sdk::StopHookFeedbackView {
                 summary: payload.summary,
@@ -174,6 +175,13 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 stderr_truncated: payload.stderr_truncated,
                 output_file: payload.output_file,
             }),
+            skill_request: metadata
+                .skill_request
+                .map(|payload| sdk::SkillRequestMetadataView {
+                    skill: payload.skill,
+                    arguments: payload.arguments,
+                    raw_input: payload.raw_input,
+                }),
         }),
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
         // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。

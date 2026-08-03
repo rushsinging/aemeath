@@ -365,7 +365,27 @@ impl App {
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);
                     }
-                    self.append_user_echo(item.text_content());
+                    match item.source {
+                        crate::tui::adapter::runtime_view::TuiMessageSource::User => {
+                            self.append_user_echo(item.text_content());
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
+                            if let Some(payload) = item.skill_request.as_ref() {
+                                if let Ok(text) = serde_json::to_string_pretty(payload) {
+                                    self.append_system_notice(text);
+                                }
+                            }
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
+                            let text = item
+                                .stop_hook
+                                .as_ref()
+                                .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                                .unwrap_or_else(|| item.text_content());
+                            self.append_system_notice(text);
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {}
+                    }
                 }
                 // 用户消息已经成为已提交的会话尾部内容。即使 resume 后用户先向上
                 // 浏览过历史，也必须把视图恢复到最新窗口，否则新消息只进入 model，

@@ -1,5 +1,6 @@
 use super::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback, TuiToolResultImage,
+    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata,
+    TuiStopHookFeedback, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
@@ -782,12 +783,13 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
 }
 
 pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
-    let (source, stop_hook) = match value.metadata {
+    let (source, stop_hook, skill_request) = match value.metadata {
         Some(metadata) => (
             match metadata.source {
                 sdk::ChatMessageSource::User => TuiMessageSource::User,
                 sdk::ChatMessageSource::SystemGenerated => TuiMessageSource::SystemGenerated,
                 sdk::ChatMessageSource::StopHook => TuiMessageSource::StopHook,
+                sdk::ChatMessageSource::SkillRequest => TuiMessageSource::SkillRequest,
             },
             metadata.stop_hook.map(|hook| TuiStopHookFeedback {
                 summary: hook.summary,
@@ -800,8 +802,15 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
                 stderr_truncated: hook.stderr_truncated,
                 output_file: hook.output_file,
             }),
+            metadata
+                .skill_request
+                .map(|request| TuiSkillRequestMetadata {
+                    skill: request.skill,
+                    arguments: request.arguments,
+                    raw_input: request.raw_input,
+                }),
         ),
-        None => (TuiMessageSource::User, None),
+        None => (TuiMessageSource::User, None, None),
     };
     TuiChatMessage {
         role: value.role,
@@ -809,6 +818,7 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
         input_id: value.input_id.map(|id| id.as_str().to_string()),
         source,
         stop_hook,
+        skill_request,
     }
 }
 fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {

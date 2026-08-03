@@ -28,6 +28,12 @@ pub(crate) struct ResumedHistoryStep {
     pub(crate) duration_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TypedJsonHistorySource {
+    SkillRequest,
+    StopHook,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ResumedHistoryItemKind {
     UserMessage {
@@ -48,6 +54,11 @@ pub(crate) enum ResumedHistoryItemKind {
     ToolResult {
         message_index: usize,
         block_index: usize,
+    },
+    TypedJson {
+        message_index: usize,
+        source: TypedJsonHistorySource,
+        text: String,
     },
     StepPlaceholder,
     TerminalNotice,
@@ -360,6 +371,7 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
             Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::SystemGenerated,
                 stop_hook: None,
+                skill_request: None,
             })
         }
         crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
@@ -376,6 +388,20 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
                     stderr_truncated: feedback.stderr_truncated,
                     output_file: feedback.output_file,
                 }),
+                skill_request: None,
+            })
+        }
+        crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
+            Some(sdk::ChatMessageMetadata {
+                source: sdk::ChatMessageSource::SkillRequest,
+                stop_hook: None,
+                skill_request: message
+                    .skill_request
+                    .map(|request| sdk::SkillRequestMetadataView {
+                        skill: request.skill,
+                        arguments: request.arguments,
+                        raw_input: request.raw_input,
+                    }),
             })
         }
     };
@@ -479,6 +505,48 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                     estimated_lines: text.lines().count().max(1).saturating_add(2),
                     step_index,
                     kind: ResumedHistoryItemKind::UserMessage { message_index },
+                });
+            }
+            Role::User
+                if message.source() == MessageSource::SkillRequest
+                    && !message.has_tool_results() =>
+            {
+                if let Some(payload) = message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())
+                {
+                    let text = serde_json::to_string_pretty(payload).unwrap_or_default();
+                    items.push(ResumedHistoryItem {
+                        id: format!("history-{step_index}-message-{message_index}-skill-request"),
+                        estimated_lines: text.lines().count().max(1).saturating_add(1),
+                        step_index,
+                        kind: ResumedHistoryItemKind::TypedJson {
+                            message_index,
+                            source: TypedJsonHistorySource::SkillRequest,
+                            text,
+                        },
+                    });
+                }
+            }
+            Role::User
+                if message.source() == MessageSource::StopHook && !message.has_tool_results() =>
+            {
+                let text = message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.stop_hook.as_ref())
+                    .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                    .unwrap_or_else(|| message.text_content());
+                items.push(ResumedHistoryItem {
+                    id: format!("history-{step_index}-message-{message_index}-stop-hook"),
+                    estimated_lines: text.lines().count().max(1).saturating_add(1),
+                    step_index,
+                    kind: ResumedHistoryItemKind::TypedJson {
+                        message_index,
+                        source: TypedJsonHistorySource::StopHook,
+                        text,
+                    },
                 });
             }
             Role::User

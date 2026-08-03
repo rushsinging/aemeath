@@ -31,6 +31,44 @@ fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
 }
 
 #[test]
+fn adopted_typed_skill_request_mapping_preserves_display_metadata_for_sdk() {
+    let input_id = sdk::InputId::new("skill-input");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![(
+            input_id.clone(),
+            share::message::Message::skill_request(
+                "LLM prompt",
+                share::message::SkillRequestMetadata {
+                    skill: "superpowers:brainstorming".to_string(),
+                    arguments: "feature scope".to_string(),
+                    raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                },
+            ),
+        )],
+        queued: Vec::new(),
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::UserMessagesAdopted { items, .. } => {
+            assert_eq!(items[0].input_id.as_ref(), Some(&input_id));
+            assert_eq!(
+                items[0].metadata.as_ref().map(|metadata| metadata.source),
+                Some(sdk::ChatMessageSource::SkillRequest)
+            );
+            assert_eq!(
+                items[0]
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())
+                    .map(|request| request.raw_input.as_str()),
+                Some("/superpowers:brainstorming feature scope")
+            );
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn activity_events_map_without_losing_change_or_snapshot_facts() {
     let activity = sdk::ActivityView {
         id: sdk::ActivityId::new("activity-map"),

@@ -290,10 +290,18 @@ where
             }
             ChatInputEvent::SkillRequest(request) => {
                 added_events.push(ChatInputEvent::SkillRequest(request.clone()));
-                added.push(build_user_message(
+                added.push((
                     request.input_id.clone(),
-                    crate::application::loop_engine::input::format_skill_request(&request, "en"),
-                    Vec::new(),
+                    Message::skill_request(
+                        crate::application::loop_engine::input::format_skill_request(
+                            &request, "en",
+                        ),
+                        share::message::SkillRequestMetadata {
+                            skill: request.skill.clone(),
+                            arguments: request.arguments.clone(),
+                            raw_input: request.raw_input.clone(),
+                        },
+                    ),
                 ));
                 appended_user_messages += 1;
             }

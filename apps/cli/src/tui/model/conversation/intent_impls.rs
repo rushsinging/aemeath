@@ -47,6 +47,9 @@ impl ConversationUpdate for ResumeConversation {
                     Ok(HistoryDisplayMessage::User { text }) => {
                         all_changes.extend(model.apply(AppendUserMessage { text }));
                     }
+                    Ok(HistoryDisplayMessage::TypedJson { text }) => {
+                        all_changes.extend(model.apply(AppendSystemMessage { text }));
+                    }
                     Ok(HistoryDisplayMessage::ToolResults) => {}
                     Ok(HistoryDisplayMessage::Assistant { blocks }) => {
                         let tool_results = collect_following_tool_results(subsequent);
@@ -700,6 +703,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }
     }
 
@@ -787,6 +791,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         };
         let result = TuiChatMessage {
             role: "user".to_string(),
@@ -799,6 +804,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::SystemGenerated,
             stop_hook: None,
+            skill_request: None,
         };
 
         ResumeConversation {
@@ -876,6 +882,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         };
         let assistant_two = TuiChatMessage {
             role: "assistant".to_string(),
@@ -883,6 +890,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         };
         let mut model = ConversationModel::default();
 
@@ -931,6 +939,7 @@ mod tests {
             input_id: None,
             source: TuiMessageSource::StopHook,
             stop_hook: None,
+            skill_request: None,
         };
         let system_generated = TuiChatMessage::system_generated_user_text(
             "<system-reminder>Skill loaded</system-reminder>",

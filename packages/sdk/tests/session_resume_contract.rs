@@ -85,6 +85,47 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
 }
 
 #[test]
+fn resumed_session_step_round_trip_preserves_typed_skill_request_display_metadata() {
+    let step = ResumedSessionStep {
+        run_id: "run-skill".to_string(),
+        step_id: "step-skill".to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::text("LLM skill prompt")],
+            metadata: Some(sdk::ChatMessageMetadata {
+                source: sdk::ChatMessageSource::SkillRequest,
+                stop_hook: None,
+                skill_request: Some(sdk::SkillRequestMetadataView {
+                    skill: "superpowers:brainstorming".to_string(),
+                    arguments: "feature scope".to_string(),
+                    raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                }),
+            }),
+            input_id: None,
+        }],
+        finalize_cause: None,
+        duration_ms: None,
+    };
+
+    let encoded = serde_json::to_value(&step).expect("serialize skill resume step");
+    let decoded: ResumedSessionStep =
+        serde_json::from_value(encoded).expect("deserialize skill resume step");
+    let metadata = decoded.messages[0]
+        .metadata
+        .as_ref()
+        .expect("typed skill metadata");
+
+    assert_eq!(metadata.source, sdk::ChatMessageSource::SkillRequest);
+    assert_eq!(
+        metadata
+            .skill_request
+            .as_ref()
+            .map(|request| request.raw_input.as_str()),
+        Some("/superpowers:brainstorming feature scope")
+    );
+}
+
+#[test]
 fn resumed_session_step_round_trip_preserves_run_step_boundaries() {
     let step = ResumedSessionStep {
         run_id: "run-1".to_string(),

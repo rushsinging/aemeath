@@ -54,6 +54,14 @@ pub(crate) fn assemble_resumed_history_item(
         ResumedHistoryItemKind::ToolCall { .. } | ResumedHistoryItemKind::ToolResult { .. } => {
             materialize_tool_item(step, item)
         }
+        ResumedHistoryItemKind::TypedJson { ref text, .. } => text_leaf(
+            item.id.clone(),
+            OutputBlockKind::SystemNotice(TextBlockView {
+                key: item.id.clone(),
+                text: text.clone(),
+                style: SemanticStyle::Muted,
+            }),
+        ),
         ResumedHistoryItemKind::StepPlaceholder => None,
         ResumedHistoryItemKind::TerminalNotice => {
             let text = terminal_text(step.finalize_cause?, step.duration_ms);

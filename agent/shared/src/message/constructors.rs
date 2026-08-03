@@ -19,6 +19,7 @@ impl Message {
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
                 stop_hook: None,
+                skill_request: None,
             }),
         }
     }
@@ -30,6 +31,19 @@ impl Message {
             metadata: Some(MessageMetadata {
                 source: MessageSource::StopHook,
                 stop_hook: Some(payload),
+                skill_request: None,
+            }),
+        }
+    }
+
+    pub fn skill_request(text: impl Into<String>, payload: SkillRequestMetadata) -> Self {
+        Self {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+            metadata: Some(MessageMetadata {
+                source: MessageSource::SkillRequest,
+                stop_hook: None,
+                skill_request: Some(payload),
             }),
         }
     }

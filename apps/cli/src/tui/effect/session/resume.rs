@@ -339,6 +339,7 @@ mod tests {
             ],
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
             input_id: None,
         }];
 

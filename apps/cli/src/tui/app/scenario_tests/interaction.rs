@@ -143,6 +143,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     input_id: None,
                     source: TuiMessageSource::User,
                     stop_hook: None,
+                    skill_request: None,
                 },
                 TuiChatMessage {
                     role: "user".into(),
@@ -161,6 +162,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     input_id: None,
                     source: TuiMessageSource::User,
                     stop_hook: None,
+                    skill_request: None,
                 },
             ],
             finalize_cause: None,
@@ -213,6 +215,7 @@ fn resume_restores_all_answered_ask_batches() {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }
     }
 
@@ -229,6 +232,7 @@ fn resume_restores_all_answered_ask_batches() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     ask_result("resume-ask-1", "恢复答案一"),
                     TuiChatMessage {
@@ -237,6 +241,7 @@ fn resume_restores_all_answered_ask_batches() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     ask_result("resume-ask-2", "恢复答案二"),
                 ],
@@ -484,6 +489,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     TuiChatMessage {
                         role: "user".to_string(),
@@ -496,6 +502,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                 ],
                 finalize_cause: None,

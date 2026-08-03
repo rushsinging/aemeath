@@ -50,6 +50,7 @@ fn invocation_context_preserves_non_user_message_sources() {
         metadata: Some(MessageMetadata {
             source: MessageSource::StopHook,
             stop_hook: None,
+            skill_request: None,
         }),
     };
 

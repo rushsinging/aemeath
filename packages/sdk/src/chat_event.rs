@@ -159,6 +159,9 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
                         share::message::MessageSource::SystemGenerated
                     }
                     crate::ChatMessageSource::StopHook => share::message::MessageSource::StopHook,
+                    crate::ChatMessageSource::SkillRequest => {
+                        share::message::MessageSource::SkillRequest
+                    }
                 },
                 stop_hook: metadata
                     .stop_hook
@@ -173,6 +176,13 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
                         stderr_truncated: payload.stderr_truncated,
                         output_file: payload.output_file,
                     }),
+                skill_request: metadata.skill_request.map(|payload| {
+                    share::message::SkillRequestMetadata {
+                        skill: payload.skill,
+                        arguments: payload.arguments,
+                        raw_input: payload.raw_input,
+                    }
+                }),
             }),
     }
 }
@@ -195,6 +205,9 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
                         crate::ChatMessageSource::SystemGenerated
                     }
                     share::message::MessageSource::StopHook => crate::ChatMessageSource::StopHook,
+                    share::message::MessageSource::SkillRequest => {
+                        crate::ChatMessageSource::SkillRequest
+                    }
                 },
                 stop_hook: metadata
                     .stop_hook
@@ -210,6 +223,13 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
                         stderr_truncated: payload.stderr_truncated,
                         output_file: payload.output_file.clone(),
                     }),
+                skill_request: metadata.skill_request.as_ref().map(|payload| {
+                    crate::SkillRequestMetadataView {
+                        skill: payload.skill.clone(),
+                        arguments: payload.arguments.clone(),
+                        raw_input: payload.raw_input.clone(),
+                    }
+                }),
             }),
         input_id: None,
     }

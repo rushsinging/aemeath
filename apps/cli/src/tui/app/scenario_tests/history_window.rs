@@ -601,6 +601,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
             input_id: Some("resume-adopted-input".into()),
             source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }],
         queued: vec![],
     });

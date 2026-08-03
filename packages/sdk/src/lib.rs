@@ -88,7 +88,7 @@ pub use run::{
 };
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
-    StopHookFeedbackView,
+    SkillRequestMetadataView, StopHookFeedbackView,
 };
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{
