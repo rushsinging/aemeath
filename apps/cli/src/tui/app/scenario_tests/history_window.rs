@@ -96,6 +96,8 @@ fn load_to_oldest_history(harness: &mut TuiScenarioHarness) {
         harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
         harness.render();
     }
+    harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+    harness.render();
 }
 
 fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
@@ -421,7 +423,16 @@ fn scrolling_to_top_loads_history_by_visible_height() {
     harness.render();
 
     assert_eq!(harness.app.view_state.output.render_line_limit(), 1_015);
-    assert!(harness.app.output_area.document().total_lines() <= 1_016);
+    assert!(
+        harness.app.output_area.document().total_lines()
+            <= harness
+                .app
+                .view_state
+                .output
+                .render_line_limit()
+                .saturating_add(3),
+        "完整 root group 允许跨过行预算边界，但只能保留一个小的 group 原子性余量"
+    );
 }
 
 #[test]
