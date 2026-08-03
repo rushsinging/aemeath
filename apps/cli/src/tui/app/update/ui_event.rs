@@ -168,11 +168,38 @@ impl App {
             }
             UiEvent::SessionResumed {
                 steps,
+                display_history,
                 session_id,
                 created_at,
                 compacted,
             } => {
-                self.resume_session_messages(&session_id, steps, created_at.to_string(), compacted);
+                self.resume_session_messages(
+                    &session_id,
+                    steps,
+                    display_history
+                        .map(crate::tui::adapter::event_mapping::tui_display_history_index),
+                    created_at.to_string(),
+                    compacted,
+                );
+            }
+            UiEvent::DisplayHistoryWindowLoaded { window } => {
+                let window = crate::tui::adapter::event_mapping::tui_display_history_window(window);
+                self.output_view.loading_history_window = None;
+                if self.model.display_history.apply_window(window) {
+                    self.output_view.retained.invalidate_display_history();
+                    self.mark_output_dirty();
+                }
+            }
+            UiEvent::DisplayHistoryWindowLoadFailed { request, message } => {
+                let request_key = (
+                    request.session_id,
+                    request.generation_revision,
+                    request.member_names,
+                );
+                if self.output_view.loading_history_window.as_ref() == Some(&request_key) {
+                    self.output_view.loading_history_window = None;
+                }
+                crate::tui::log_warn!("display history window loading failed: {message}");
             }
             UiEvent::SessionResumeFailed { kind, id, message } => {
                 use sdk::SessionResumeFailureKind;

@@ -45,6 +45,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
     let mut harness = TuiScenarioHarness::new(100, 30);
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![
             TuiResumedSessionStep {
                 run_id: "run-1".into(),
@@ -95,6 +96,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
         .is_empty());
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![TuiResumedSessionStep {
             run_id: "run-2".into(),
             step_id: "step-1".into(),
@@ -126,6 +128,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
 fn resume_renders_bash_tool_with_typed_header_and_output() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps: vec![TuiResumedSessionStep {
             run_id: "run-bash".into(),
             step_id: "step-bash".into(),
@@ -140,6 +143,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     input_id: None,
                     source: TuiMessageSource::User,
                     stop_hook: None,
+                    skill_request: None,
                 },
                 TuiChatMessage {
                     role: "user".into(),
@@ -158,6 +162,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     input_id: None,
                     source: TuiMessageSource::User,
                     stop_hook: None,
+                    skill_request: None,
                 },
             ],
             finalize_cause: None,
@@ -210,6 +215,7 @@ fn resume_restores_all_answered_ask_batches() {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }
     }
 
@@ -226,6 +232,7 @@ fn resume_restores_all_answered_ask_batches() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     ask_result("resume-ask-1", "恢复答案一"),
                     TuiChatMessage {
@@ -234,6 +241,7 @@ fn resume_restores_all_answered_ask_batches() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     ask_result("resume-ask-2", "恢复答案二"),
                 ],
@@ -481,6 +489,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                     TuiChatMessage {
                         role: "user".to_string(),
@@ -493,6 +502,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         input_id: None,
                         source: TuiMessageSource::User,
                         stop_hook: None,
+                        skill_request: None,
                     },
                 ],
                 finalize_cause: None,

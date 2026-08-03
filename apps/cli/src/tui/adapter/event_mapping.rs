@@ -1,5 +1,6 @@
 use super::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback, TuiToolResultImage,
+    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata,
+    TuiStopHookFeedback, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
@@ -366,6 +367,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         }
         ChatEvent::SessionResumed {
             steps,
+            display_history,
             session_id,
             created_at,
             compacted,
@@ -390,6 +392,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                     duration_ms: step.duration_ms,
                 })
                 .collect(),
+            display_history: display_history.map(tui_display_history_index),
             session_id,
             created_at,
             compacted,
@@ -780,12 +783,13 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
 }
 
 pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
-    let (source, stop_hook) = match value.metadata {
+    let (source, stop_hook, skill_request) = match value.metadata {
         Some(metadata) => (
             match metadata.source {
                 sdk::ChatMessageSource::User => TuiMessageSource::User,
                 sdk::ChatMessageSource::SystemGenerated => TuiMessageSource::SystemGenerated,
                 sdk::ChatMessageSource::StopHook => TuiMessageSource::StopHook,
+                sdk::ChatMessageSource::SkillRequest => TuiMessageSource::SkillRequest,
             },
             metadata.stop_hook.map(|hook| TuiStopHookFeedback {
                 summary: hook.summary,
@@ -798,8 +802,15 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
                 stderr_truncated: hook.stderr_truncated,
                 output_file: hook.output_file,
             }),
+            metadata
+                .skill_request
+                .map(|request| TuiSkillRequestMetadata {
+                    skill: request.skill,
+                    arguments: request.arguments,
+                    raw_input: request.raw_input,
+                }),
         ),
-        None => (TuiMessageSource::User, None),
+        None => (TuiMessageSource::User, None, None),
     };
     TuiChatMessage {
         role: value.role,
@@ -807,6 +818,7 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
         input_id: value.input_id.map(|id| id.as_str().to_string()),
         source,
         stop_hook,
+        skill_request,
     }
 }
 fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
@@ -899,6 +911,68 @@ fn config_view(value: sdk::ConfigView) -> TuiConfigView {
         logging_level: value.logging_level,
     }
 }
+pub(crate) fn tui_display_history_window(
+    window: sdk::DisplayHistoryWindow,
+) -> super::runtime_view::TuiDisplayHistoryWindow {
+    super::runtime_view::TuiDisplayHistoryWindow {
+        session_id: window.session_id,
+        generation_revision: window.generation_revision,
+        steps: window
+            .steps
+            .into_iter()
+            .map(|step| super::runtime_view::TuiResumedSessionStep {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                messages: step.messages.into_iter().map(chat_message).collect(),
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                    }
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                    }
+                    sdk::ResumedStepFinalizeCause::RunTerminated => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                    }
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn tui_display_history_index(
+    index: sdk::DisplayHistoryIndex,
+) -> super::runtime_view::TuiDisplayHistoryIndex {
+    super::runtime_view::TuiDisplayHistoryIndex {
+        session_id: index.session_id,
+        generation_revision: index.generation_revision,
+        steps: index
+            .steps
+            .into_iter()
+            .map(|step| super::runtime_view::TuiDisplayHistoryStepReference {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                member_name: step.member_name,
+                estimated_lines: step.estimated_lines,
+                user_input_history: step.user_input_history,
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::Completed
+                    }
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep
+                    }
+                    sdk::ResumedStepFinalizeCause::RunTerminated => {
+                        super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated
+                    }
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect(),
+    }
+}
+
 fn session_failure(value: sdk::SessionResumeFailureKind) -> TuiSessionResumeFailureKind {
     match value {
         sdk::SessionResumeFailureKind::NotFound => TuiSessionResumeFailureKind::NotFound,

@@ -480,7 +480,8 @@ struct ScriptedState {
     cancel_when_tools_starts: bool,
     terminate_when_compact_starts: bool,
     cancelled_during_model: bool,
-    block_model_forever: bool,
+    require_model_cancellation_cleanup: bool,
+    model_cancellation_cleanup_completed: bool,
     block_await_user_input_forever: bool,
     block_compact_until_cancelled: bool,
     fail_accept_input: bool,
@@ -503,7 +504,8 @@ impl Default for ScriptedState {
             cancel_when_tools_starts: false,
             terminate_when_compact_starts: false,
             cancelled_during_model: false,
-            block_model_forever: false,
+            require_model_cancellation_cleanup: false,
+            model_cancellation_cleanup_completed: false,
             block_await_user_input_forever: false,
             block_compact_until_cancelled: false,
             fail_accept_input: false,
@@ -619,7 +621,8 @@ struct ScriptedScenario {
     drain_outcomes: VecDeque<DrainOutcome>,
     drain_epoch: DrainEpoch,
     cancelled_during_model: bool,
-    block_model_forever: bool,
+    require_model_cancellation_cleanup: bool,
+    model_cancellation_cleanup_completed: bool,
     block_await_user_input_forever: bool,
     block_compact_until_cancelled: bool,
     fail_accept_input: bool,
@@ -660,7 +663,8 @@ impl Default for ScriptedScenario {
             drain_outcomes,
             drain_epoch: DrainEpoch(0),
             cancelled_during_model: false,
-            block_model_forever: false,
+            require_model_cancellation_cleanup: false,
+            model_cancellation_cleanup_completed: false,
             block_await_user_input_forever: false,
             block_compact_until_cancelled: false,
             fail_accept_input: false,
@@ -688,7 +692,8 @@ impl ScriptedScenario {
                 cancel_when_tools_starts: self.cancel_when_tools_starts,
                 terminate_when_compact_starts: self.terminate_when_compact_starts,
                 cancelled_during_model: self.cancelled_during_model,
-                block_model_forever: self.block_model_forever,
+                require_model_cancellation_cleanup: self.require_model_cancellation_cleanup,
+                model_cancellation_cleanup_completed: self.model_cancellation_cleanup_completed,
                 block_await_user_input_forever: self.block_await_user_input_forever,
                 block_compact_until_cancelled: self.block_compact_until_cancelled,
                 fail_accept_input: self.fail_accept_input,
@@ -1034,14 +1039,20 @@ impl ModelInvocationPort for ModelInvocationFake {
         _step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        let (registered_step, cancel_model, block_forever, cancelled_during_model, error) = {
+        let (
+            registered_step,
+            cancel_model,
+            cancelled_during_model,
+            require_cancellation_cleanup,
+            error,
+        ) = {
             let mut state = self.state.lock().unwrap();
             state.observations.calls.push("model");
             (
                 state.registered_step.clone(),
                 state.cancel_when_model_starts,
-                state.block_model_forever,
                 state.cancelled_during_model,
+                state.require_model_cancellation_cleanup,
                 state.model_errors.pop_front(),
             )
         };
@@ -1055,10 +1066,17 @@ impl ModelInvocationPort for ModelInvocationFake {
                     deadline: sdk::ControlDeadline::from_unix_millis(1_725_000_000_123),
                 });
             cancel.cancel();
-            return Err(LoopEngineError::Cancelled);
+            if !require_cancellation_cleanup {
+                return Err(LoopEngineError::Cancelled);
+            }
         }
-        if block_forever {
-            std::future::pending::<()>().await;
+        if require_cancellation_cleanup {
+            cancel.cancelled().await;
+            self.state
+                .lock()
+                .unwrap()
+                .model_cancellation_cleanup_completed = true;
+            return Err(LoopEngineError::Cancelled);
         }
         if cancelled_during_model {
             cancel.cancelled().await;
@@ -1800,7 +1818,7 @@ async fn engine_timeout_interrupts_a_blocked_model_call() {
     let mut run = new_run(Duration::from_millis(10));
     let cancel = CancellationToken::new();
     let mut port = ScriptedScenario {
-        block_model_forever: true,
+        require_model_cancellation_cleanup: true,
         ..Default::default()
     };
 
@@ -2701,6 +2719,35 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
         .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+}
+
+#[tokio::test]
+async fn cancel_step_during_model_waits_for_stream_cancellation_cleanup() {
+    let mut run = new_run(Duration::ZERO);
+    let root = CancellationToken::new();
+    let mut port = ScriptedScenario {
+        cancel_when_model_starts: true,
+        require_model_cancellation_cleanup: true,
+        ..Default::default()
+    };
+
+    run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &root,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        port.state
+            .lock()
+            .unwrap()
+            .model_cancellation_cleanup_completed,
+        "model stream cancellation must pass through its cleanup path before Step finalization"
+    );
+    assert_eq!(port.cancelled_steps(), port.frozen_steps());
 }
 
 #[tokio::test]

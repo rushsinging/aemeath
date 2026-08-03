@@ -98,11 +98,17 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
+    let session_dataset = Arc::new(
+        storage::FileSystemDatasetAdapter::new(agents_dir)
+            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+    );
     let session_blob = storage::api::file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
-    );
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        Arc::new(context::adapters::DatasetSessionManagement::new(
+            session_dataset.clone(),
+            session_blob.clone(),
+        ));
 
     let snapshot = config.reader().committed_snapshot();
     let runtime_model = snapshot
@@ -181,7 +187,13 @@ pub(crate) async fn from_args_with_gateways(
         session_management: session_management.clone(),
         context_factory: Arc::new(
             context::adapters::ProductionMainContextFactory::new(Arc::new(
-                context::adapters::AtomicBlobCanonicalSessionWriter::new(session_blob),
+                context::adapters::DatasetCanonicalSessionWriter::new(session_dataset),
+            ))
+            .with_accepted_input_writer(Arc::new(
+                context::adapters::AtomicBlobAcceptedInputWriter::new(session_blob.clone()),
+            ))
+            .with_tool_receipt_writer(Arc::new(
+                context::adapters::AtomicBlobToolReceiptWriter::new(session_blob),
             ))
             .with_skill_catalog(
                 skill_catalog.clone(),

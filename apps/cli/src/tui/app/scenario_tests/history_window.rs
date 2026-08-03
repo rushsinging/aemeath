@@ -1,5 +1,8 @@
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiDisplayHistoryIndex, TuiDisplayHistoryStepReference, TuiResumedSessionStep,
+};
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext};
+use crate::tui::effect::effect::Effect;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::super::testing::{input, TuiScenarioHarness};
@@ -93,6 +96,8 @@ fn load_to_oldest_history(harness: &mut TuiScenarioHarness) {
         harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
         harness.render();
     }
+    harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+    harness.render();
 }
 
 fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
@@ -127,6 +132,43 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
 }
 
 #[test]
+fn resumed_history_initial_window_loads_through_display_query_effect() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: Some(TuiDisplayHistoryIndex {
+            session_id: "resume-query".into(),
+            generation_revision: 42,
+            steps: vec![TuiDisplayHistoryStepReference {
+                run_id: "resume-query-run".into(),
+                step_id: "resume-query-step".into(),
+                member_name: "steps/0001.json".into(),
+                estimated_lines: 12,
+                user_input_history: Vec::new(),
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        }),
+        steps: Vec::new(),
+        session_id: "resume-query".into(),
+        created_at: 0,
+        compacted: false,
+    });
+    harness.render();
+
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        Effect::LoadDisplayHistoryWindow { request }
+            if request.session_id == "resume-query"
+                && request.generation_revision == 42
+                && request.member_names == ["steps/0001.json"]
+    )));
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, Effect::SendChatInputEvent { .. })));
+}
+
+#[test]
 fn resumed_history_initial_window_keeps_newest_complete_groups() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let steps = (0..1_200)
@@ -142,6 +184,7 @@ fn resumed_history_initial_window_keeps_newest_complete_groups() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-tail".into(),
         created_at: 0,
@@ -205,6 +248,7 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
     ];
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "019f9952-601d-7139-a936-fa5d1f366eb9".into(),
         created_at: 0,
@@ -282,6 +326,7 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-oldest".into(),
         created_at: 0,
@@ -324,6 +369,7 @@ fn resumed_history_scrolls_from_oldest_window_back_to_latest() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-round-trip".into(),
         created_at: 0,
@@ -377,7 +423,16 @@ fn scrolling_to_top_loads_history_by_visible_height() {
     harness.render();
 
     assert_eq!(harness.app.view_state.output.render_line_limit(), 1_015);
-    assert!(harness.app.output_area.document().total_lines() <= 1_016);
+    assert!(
+        harness.app.output_area.document().total_lines()
+            <= harness
+                .app
+                .view_state
+                .output
+                .render_line_limit()
+                .saturating_add(3),
+        "完整 root group 允许跨过行预算边界，但只能保留一个小的 group 原子性余量"
+    );
 }
 
 #[test]
@@ -397,6 +452,7 @@ fn resumed_large_history_loads_after_first_render_and_continues_in_batches() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-large".into(),
         created_at: 0,
@@ -431,6 +487,7 @@ fn resumed_history_window_can_continue_loading_older_blocks_after_cap() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-sliding".into(),
         created_at: 0,
@@ -462,6 +519,7 @@ fn resumed_history_window_stops_at_three_thousand_lines() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-capped".into(),
         created_at: 0,
@@ -493,6 +551,7 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-early".into(),
         created_at: 0,
@@ -522,6 +581,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-adopted".into(),
         created_at: 0,
@@ -541,6 +601,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
             input_id: Some("resume-adopted-input".into()),
             source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }],
         queued: vec![],
     });
@@ -587,6 +648,7 @@ fn sliding_window_rebuild_keeps_visible_history_rows_fixed_in_same_frame() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-anchor".into(),
         created_at: 0,

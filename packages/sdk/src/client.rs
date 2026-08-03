@@ -68,6 +68,14 @@ pub trait AgentClient: Send + Sync + 'static {
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, super::SdkError>;
 }
 
+#[async_trait]
+pub trait DisplayHistoryQuery: Send + Sync + 'static {
+    async fn load_display_history_window(
+        &self,
+        request: crate::DisplayHistoryWindowRequest,
+    ) -> Result<crate::DisplayHistoryWindow, super::SdkError>;
+}
+
 /// 面向 Server、Coordinator 等管理端的可寻址 Run 控制面。
 ///
 /// 普通交互客户端不应观察或缓存 Run/Step identity；只有确实管理多个 Run 的

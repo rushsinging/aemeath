@@ -319,7 +319,12 @@ fn assemble_output_window(
     window: crate::tui::view_model::OutputRenderWindow,
 ) -> OutputViewModel {
     super::retained_output_view::RetainedOutputView::default()
-        .materialize_window(conversation, workspace_root, window)
+        .materialize_window(
+            conversation,
+            &crate::tui::model::display_history::DisplayHistoryModel::default(),
+            workspace_root,
+            window,
+        )
         .view_model
 }
 

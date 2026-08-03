@@ -327,8 +327,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
          | sdk::ChatEvent::CostUpdate { .. }
-         | sdk::ChatEvent::SessionResumeFailed { .. } => {}
-    }
+         | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }
 }
 
 pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {

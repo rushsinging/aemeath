@@ -29,6 +29,7 @@ fn message_value_preserves_identity_content_and_stop_hook_metadata() {
             stderr_truncated: true,
             output_file: Some("/tmp/hook.log".to_string()),
         }),
+        skill_request: None,
     };
 
     assert_eq!(message.input_id.as_deref(), Some("input-1"));

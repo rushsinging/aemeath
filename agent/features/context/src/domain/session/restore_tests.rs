@@ -67,8 +67,9 @@ fn unfinished_tool_session_with_outcome(
                 }),
                 tool_receipts: vec![receipt],
             }],
-        )],
-        committed_steps: vec![],
+        )]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -96,8 +97,9 @@ fn two_step_session() -> CanonicalSession {
                     AcceptedInputProjection::new(vec![Message::user("second")], "fp-2", 0),
                 ),
             ],
-        )],
-        committed_steps: vec![],
+        )]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -369,8 +371,9 @@ fn restore_reads_only_steps_from_active_marker() {
                     AcceptedInputProjection::new(vec![Message::user("visible")], "fp-2", 0),
                 )],
             ),
-        ],
-        committed_steps: vec![],
+        ]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 

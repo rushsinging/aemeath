@@ -47,6 +47,48 @@ impl InputEventDrainPort for MockInputPort {
 }
 
 #[tokio::test]
+async fn skill_request_adoption_preserves_typed_display_payload() {
+    let buffer = PendingInputBuffer::default();
+    let input_id = sdk::InputId::new_v7();
+    let input = TestInputEventPort::new(vec![ChatInputEvent::SkillRequest(sdk::SkillRequest {
+        input_id: input_id.clone(),
+        skill: "superpowers:brainstorming".to_string(),
+        arguments: "feature scope".to_string(),
+        raw_input: "/superpowers:brainstorming feature scope".to_string(),
+    })]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert_eq!(outcome.adopted_messages.len(), 1);
+    assert_eq!(outcome.adopted_messages[0].0, input_id);
+    assert_eq!(
+        outcome.adopted_messages[0].1.source(),
+        share::message::MessageSource::SkillRequest
+    );
+    assert_eq!(
+        outcome.adopted_messages[0]
+            .1
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.skill_request.as_ref()),
+        Some(&share::message::SkillRequestMetadata {
+            skill: "superpowers:brainstorming".to_string(),
+            arguments: "feature scope".to_string(),
+            raw_input: "/superpowers:brainstorming feature scope".to_string(),
+        })
+    );
+}
+
+#[tokio::test]
 async fn test_recv_next_input_returns_event_then_none_on_close() {
     // MockInputPort: 用 tokio::sync::mpsc 支持 recv_next
     let (tx, port) = MockInputPort::new();

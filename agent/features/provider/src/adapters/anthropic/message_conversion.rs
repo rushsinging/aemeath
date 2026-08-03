@@ -246,6 +246,7 @@ mod tests {
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
                 stop_hook: None,
+                skill_request: None,
             }),
         };
         let result = convert_messages(&[msg]);

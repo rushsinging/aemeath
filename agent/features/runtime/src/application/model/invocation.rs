@@ -698,6 +698,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events =
+            futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Thinking {
+                thinking: "partial thought".to_string(),
+                signature: None,
+            })])
+            .chain(futures::stream::pending());
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+        let streaming_block_active = std::cell::Cell::new(false);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                match &event {
+                    InvocationEvent::Delta(InvocationDelta::Thinking { .. }) => {
+                        streaming_block_active.set(true);
+                        cancel.cancel();
+                    }
+                    InvocationEvent::Failed(error) if error.is_cancelled() => {
+                        streaming_block_active.set(false);
+                    }
+                    _ => {}
+                }
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(!streaming_block_active.get());
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Thinking { .. }),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[tokio::test]
     async fn reducer_value_from_delta_is_protocol_failure() {
         let coordinator = ModelInvocationCoordinator::new();
         let cancel = CancellationToken::new();

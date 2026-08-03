@@ -424,8 +424,8 @@ where
                                         duration_ms: step.duration_ms,
                                     })
                                         .collect(),
-                                    session_id: resume_view.session_id,
-                                    created_at: chrono::DateTime::parse_from_rfc3339(
+                                    display_history: resume_view.display_history,
+                                    session_id: resume_view.session_id,                                    created_at: chrono::DateTime::parse_from_rfc3339(
                                         &resume_view.created_at,
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
@@ -460,8 +460,7 @@ where
                     }
                     continue;
                 }
-                PendingCommand::QueryReflectionHistory { limit } => {
-                    match session_queries.list_reflection_history(limit).await {
+                PendingCommand::QueryReflectionHistory { limit } => {                    match session_queries.list_reflection_history(limit).await {
                         Ok(records) => {
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ReflectionHistory { records })

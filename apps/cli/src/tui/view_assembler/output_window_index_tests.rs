@@ -10,6 +10,25 @@ fn ids(index: &OutputWindowIndex) -> Vec<&str> {
 }
 
 #[test]
+fn tail_selection_does_not_scan_every_historical_entry() {
+    let mut index = OutputWindowIndex::default();
+    index.apply_change(OutputWindowIndexChange::Reset {
+        entries: (0..100_000)
+            .map(|position| (format!("item-{position}"), 3))
+            .collect(),
+    });
+    index.reset_selection_entry_reads();
+
+    let selection = index.select_window(OutputRenderWindow {
+        line_limit: 30,
+        tail_offset: 0,
+    });
+
+    assert_eq!(selection.item_range, 99_990..100_000);
+    assert!(index.selection_entry_reads() <= 40);
+}
+
+#[test]
 fn changes_update_only_lightweight_window_entries() {
     let mut index = OutputWindowIndex::default();
 

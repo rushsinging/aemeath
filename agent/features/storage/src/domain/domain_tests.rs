@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use crate::domain::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DatasetKey, DatasetManifest, DatasetMember, DeleteOptions, DigestObservation, Durability,
-    Generation, JournalPhase, PreviousPolicy, QuarantineDisposition, QuarantineOutcome,
-    QuarantineReason, RecoveryDecision, SafePathSegment, StorageErrorKind, StorageKey,
-    StorageNamespace, TransactionDigest, TransactionScope,
+    DatasetChangeSet, DatasetKey, DatasetManifest, DatasetMember, DatasetMemberChange,
+    DatasetMemberReference, DeleteOptions, DigestObservation, Durability, Generation, JournalPhase,
+    PreviousPolicy, QuarantineDisposition, QuarantineOutcome, QuarantineReason, RecoveryDecision,
+    SafePathSegment, StorageErrorKind, StorageKey, StorageNamespace, TransactionDigest,
+    TransactionScope,
 };
 
 #[test]
@@ -263,6 +264,138 @@ fn dataset_revision_changes_when_member_bytes_change() {
         .expect("distinct member names should be accepted");
 
     assert_ne!(base.revision(), mutated.revision());
+}
+
+#[test]
+fn manifest_member_evidence_matches_only_original_bytes() {
+    let manifest = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("current generation should be valid");
+    let evidence = manifest
+        .member_evidence(&SafePathSegment::from_str("active").expect("safe member name"))
+        .expect("manifest evidence");
+
+    assert!(evidence.matches_bytes(b"a"));
+    assert!(!evidence.matches_bytes(b"b"));
+    assert!(!evidence.matches_bytes(b"aa"));
+}
+
+#[test]
+fn incremental_dataset_members_distinguish_new_and_reused_bytes() {
+    let current = DatasetManifest::new(vec![
+        dataset_member("active", b"a"),
+        dataset_member("archive", b"z"),
+    ])
+    .expect("current generation should be valid");
+    let reused = DatasetMemberReference::from_manifest_member(
+        current.revision().clone(),
+        SafePathSegment::from_str("archive").expect("safe member name"),
+        1,
+        [0; 32],
+    );
+    let replacement = DatasetMember::new(
+        SafePathSegment::from_str("active").expect("safe member name"),
+        b"a2".to_vec(),
+    );
+    let change_set = DatasetChangeSet::new(
+        current.revision().clone(),
+        vec![DatasetMemberChange::Replace(replacement)],
+        vec![reused.clone()],
+    )
+    .expect("incremental member set should be valid");
+
+    assert_eq!(change_set.reused_members(), &[reused]);
+    assert_eq!(change_set.new_members().len(), 1);
+    assert!(change_set.removed_members().is_empty());
+}
+
+#[test]
+fn incremental_dataset_rejects_duplicate_new_and_reused_member_names() {
+    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("current generation should be valid")
+        .revision()
+        .clone();
+    let reused = DatasetMemberReference::from_manifest_member(
+        revision.clone(),
+        SafePathSegment::from_str("active").expect("safe member name"),
+        1,
+        [0; 32],
+    );
+    let error = DatasetChangeSet::new(
+        revision,
+        vec![DatasetMemberChange::Replace(dataset_member(
+            "active", b"a2",
+        ))],
+        vec![reused],
+    )
+    .expect_err("one member cannot be both replaced and reused");
+
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+}
+
+#[test]
+fn incremental_dataset_removal_names_are_canonical_and_unique() {
+    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("current generation should be valid")
+        .revision()
+        .clone();
+    let active = SafePathSegment::from_str("active").expect("safe member name");
+    let archive = SafePathSegment::from_str("archive").expect("safe member name");
+    let change_set = DatasetChangeSet::new(revision.clone(), Vec::new(), Vec::new())
+        .expect("empty change set should be valid")
+        .with_removed_members(vec![archive.clone(), active.clone()])
+        .expect("distinct removal names should be valid");
+
+    assert_eq!(change_set.removed_members(), &[active.clone(), archive]);
+
+    let duplicate_error = DatasetChangeSet::new(revision, Vec::new(), Vec::new())
+        .expect("empty change set should be valid")
+        .with_removed_members(vec![active.clone(), active])
+        .expect_err("duplicate removal names must be rejected");
+    assert_eq!(duplicate_error.kind(), &StorageErrorKind::InvalidKey);
+}
+
+#[test]
+fn incremental_dataset_rejects_reused_member_from_another_revision() {
+    let expected_revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("current generation should be valid")
+        .revision()
+        .clone();
+    let another_revision = DatasetManifest::new(vec![dataset_member("active", b"b")])
+        .expect("another generation should be valid")
+        .revision()
+        .clone();
+    let reused = DatasetMemberReference::from_manifest_member(
+        another_revision,
+        SafePathSegment::from_str("active").expect("safe member name"),
+        1,
+        [0; 32],
+    );
+
+    let error = DatasetChangeSet::new(expected_revision, Vec::new(), vec![reused])
+        .expect_err("a reused member must belong to the expected generation");
+
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+}
+
+#[test]
+fn incremental_dataset_rejects_member_named_as_removed() {
+    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("current generation should be valid")
+        .revision()
+        .clone();
+    let active = SafePathSegment::from_str("active").expect("safe member name");
+    let error = DatasetChangeSet::new(
+        revision,
+        vec![DatasetMemberChange::Replace(dataset_member(
+            "active", b"a2",
+        ))],
+        Vec::new(),
+    )
+    .expect("replacement should be valid")
+    .with_removed_members(vec![active])
+    .expect_err("a target member cannot also be removed");
+
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
 }
 
 #[test]

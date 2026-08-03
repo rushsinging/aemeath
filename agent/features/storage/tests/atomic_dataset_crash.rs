@@ -227,6 +227,39 @@ fn stage_dir(root: &Path) -> PathBuf {
         .expect("Prepared transaction must retain its stage")
 }
 
+fn content_path_for_member(root: &Path, generation: &str, member_name: &str) -> PathBuf {
+    let dataset = dataset_dir(root, "conversation-1");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dataset.join(generation).join("manifest.json"))
+            .expect("generation manifest must exist"),
+    )
+    .expect("generation manifest must decode");
+    let content_digest = manifest["成员证据"]
+        .as_array()
+        .expect("manifest evidence must be an array")
+        .iter()
+        .find(|member| member["名称"] == member_name)
+        .and_then(|member| member["内容摘要"].as_str())
+        .expect("member content digest must exist");
+    dataset.join("members").join(content_digest)
+}
+
+fn staged_content_path(root: &Path, member_name: &str) -> PathBuf {
+    let dataset = dataset_dir(root, "conversation-1");
+    let journal: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dataset.join("journal.json")).expect("Prepared journal must exist"),
+    )
+    .expect("Prepared journal must decode");
+    let content_digest = journal["成员集合"]
+        .as_array()
+        .expect("journal members must be an array")
+        .iter()
+        .find(|member| member["名称"] == member_name)
+        .and_then(|member| member["摘要"].as_str())
+        .expect("journal member digest must exist");
+    stage_dir(root).join("members").join(content_digest)
+}
+
 fn assert_corrupt_and_quarantined(error: StorageError, root: &Path) {
     let StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
         panic!("recovery contradiction must outrank ordinary I/O/CAS errors: {error:?}");
@@ -711,7 +744,7 @@ fn missing_staged_member_after_prepared_is_typed_corruption_and_quarantined() {
     let root = unique_root("missing-stage");
     seed(&root, &key(), &old_members());
     assert!(!spawn_fault_child(&root, "after_prepared", true).success());
-    std::fs::remove_file(stage_dir(&root).join("blobs/archive"))
+    std::fs::remove_file(staged_content_path(&root, "archive"))
         .expect("remove one fsynced staged member");
     let error = runtime()
         .block_on(adapter(&root).read_manifest(&key()))
@@ -725,7 +758,7 @@ fn staged_member_digest_mismatch_is_typed_corruption_and_quarantined() {
     let root = unique_root("stage-digest");
     seed(&root, &key(), &old_members());
     assert!(!spawn_fault_child(&root, "after_prepared", true).success());
-    std::fs::write(stage_dir(&root).join("blobs/archive"), b"tampered-stage")
+    std::fs::write(staged_content_path(&root, "archive"), b"tampered-stage")
         .expect("tamper staged member");
     let error = runtime()
         .block_on(adapter(&root).read_consistent(&key(), &[name("active"), name("archive")]))
@@ -739,11 +772,14 @@ fn published_member_digest_contradiction_is_typed_corruption_and_quarantined() {
     let root = unique_root("published-digest");
     seed(&root, &key(), &old_members());
     assert!(!spawn_fault_child(&root, "after_member_publish:active", true).success());
-    std::fs::write(
-        dataset_dir(&root, "conversation-1").join("primary/blobs/active"),
-        b"neither-old-nor-new",
-    )
-    .expect("tamper already-published member");
+    let published_active = staged_content_path(&root, "active");
+    let published_active = dataset_dir(&root, "conversation-1").join("members").join(
+        published_active
+            .file_name()
+            .expect("staged content path must carry digest"),
+    );
+    std::fs::write(published_active, b"neither-old-nor-new")
+        .expect("tamper already-published member");
     let error = runtime()
         .block_on(adapter(&root).read_manifest(&key()))
         .expect_err("published digest contradiction must fail closed");
@@ -782,8 +818,11 @@ fn quarantined_journal_without_marker_keeps_contradictory_primary_fail_closed() 
     seed(&root, &key(), &old_members());
     assert!(!spawn_fault_child(&root, "after_member_publish:active", true).success());
     let dataset = dataset_dir(&root, "conversation-1");
-    std::fs::write(dataset.join("primary/blobs/active"), b"neither-old-nor-new")
-        .expect("make the still-published primary contradict transaction evidence");
+    std::fs::write(
+        content_path_for_member(&root, "primary", "active"),
+        b"neither-old-nor-new",
+    )
+    .expect("make the still-published primary contradict transaction evidence");
 
     // Model a crash inside quarantine: journal isolation is durable, but primary isolation and
     // corruption.marker creation have not happened yet.
@@ -819,7 +858,13 @@ fn quarantine_partial_failure_keeps_the_journal_as_a_persistent_fail_closed_barr
     assert!(!spawn_fault_child(&root, "after_member_publish:active", true).success());
     let dataset = dataset_dir(&root, "conversation-1");
     let journal = dataset.join("journal.json");
-    std::fs::write(dataset.join("primary/blobs/active"), b"neither-old-nor-new")
+    let published_active = staged_content_path(&root, "active");
+    let published_active = dataset.join("members").join(
+        published_active
+            .file_name()
+            .expect("staged content path must carry digest"),
+    );
+    std::fs::write(published_active, b"neither-old-nor-new")
         .expect("create a published contradiction");
 
     // Force a *partial* quarantine rather than a blanket permission failure. Reinsert primary
@@ -990,8 +1035,11 @@ fn promote_recovery_rejects_tampered_prepared_previous_before_publishing_it() {
         .expect("pending Previous manifest must exist");
     let journal =
         std::fs::read(dataset.join("journal.json")).expect("Prepared promotion journal must exist");
-    std::fs::write(dataset.join("previous/blobs/archive"), b"tampered-previous")
-        .expect("tamper one member of the generation awaiting promotion");
+    std::fs::write(
+        content_path_for_member(&root, "previous", "archive"),
+        b"tampered-previous",
+    )
+    .expect("tamper one member of the generation awaiting promotion");
     assert_eq!(
         std::fs::read(dataset.join("previous/manifest.json")).expect("manifest remains readable"),
         manifest,
@@ -1014,7 +1062,7 @@ fn promote_recovery_rejects_tampered_prepared_previous_before_publishing_it() {
         storage::CorruptionReason::DatasetMemberDigestMismatch
     );
     assert_eq!(
-        std::fs::read(dataset.join("primary/blobs/archive"))
+        std::fs::read(content_path_for_member(&root, "primary", "archive"))
             .expect("the original Primary must remain published"),
         b"new-archive",
         "recovery must not publish the tampered Previous as Primary"
@@ -1059,7 +1107,7 @@ fn promote_rejects_missing_previous_member_before_prepared_without_journal() {
     let root = unique_root("promote-missing-member");
     seed(&root, &key(), &old_members());
     seed(&root, &key(), &new_members());
-    std::fs::remove_file(dataset_dir(&root, "conversation-1").join("previous/blobs/archive"))
+    std::fs::remove_file(content_path_for_member(&root, "previous", "archive"))
         .expect("remove previous member");
 
     let error = runtime()

@@ -52,6 +52,15 @@ pub struct MessageMetadata {
     pub source: MessageSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_hook: Option<StopHookFeedback>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_request: Option<SkillRequestMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SkillRequestMetadata {
+    pub skill: String,
+    pub arguments: String,
+    pub raw_input: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -75,6 +84,7 @@ pub enum MessageSource {
     User,
     SystemGenerated,
     StopHook,
+    SkillRequest,
 }
 
 impl Role {
