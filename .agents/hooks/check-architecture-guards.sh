@@ -119,6 +119,7 @@ guarded() {
     shift
     (
       export -f "$fn_name"
+      export ROOT
       "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" /bin/bash -c "$fn_name"
     )
   else
