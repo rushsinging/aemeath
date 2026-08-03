@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+export ROOT
 # 扫描整个 CLI app（不止 tui）：工具调用 header / 摘要等字符串处理也可能落在非 tui 路径。
 TARGET="$ROOT/apps/cli/src"
 if [[ ! -d "$TARGET" ]]; then
@@ -13,28 +14,7 @@ fi
 FAILED=0
 COUNT=0
 
-while IFS= read -r -d '' file; do
-    rel="${file#$ROOT/}"
-    # guard-registry:scope.tui.safe-text-owners
-    case "$rel" in
-      apps/cli/src/tui/render/display/safe_text.rs)
-          continue
-          ;;
-      apps/cli/src/tui/display/safe_text.rs)
-          continue
-          ;;
-      # split_at_ascii 是安全的 helper（只计数字节值 < 128 的 ASCII 字符）
-      apps/cli/src/tui/text.rs)
-          continue
-          ;;
-    esac
-
-    # 检测会因「字节偏移落在非 char 边界」而 panic 的文本操作：
-    #   chars-nth（字符索引误当字节）、&var[a..b] / var[a..b]（&str/String 字节切片）、
-    #   split_at（str::split_at 在非 char 边界 panic）。
-    # 刻意不检测 get-range（返回 Option 不 panic，是 safe_text 推荐用法，flag 会误伤）
-    # 与 truncate（本仓库内均为 Vec::truncate，flag 会产生误导性注解）。
-    while IFS=: read -r line_no line; do
+while IFS=: read -r rel line_no line; do
       # guard-registry:false-positive.tui.unsafe-text-inline-allow
       if [[ "$line" == *"allow unsafe_text_op"* ]]; then
         continue
@@ -42,19 +22,27 @@ while IFS= read -r -d '' file; do
       if [[ "$line" =~ ^[[:space:]]*#\!?\[ ]]; then
         continue
       fi
+      # guard-registry:scope.tui.safe-text-owners
+      case "$rel" in
+        apps/cli/src/tui/render/display/safe_text.rs|apps/cli/src/tui/display/safe_text.rs|apps/cli/src/tui/text.rs)
+            continue
+            ;;
+      esac
       printf 'unsafe text op: %s:%s:%s\n' "$rel" "$line_no" "$line"
       FAILED=1
       COUNT=$((COUNT + 1))
     done < <(
-      perl -ne '
-              print "$.:$_" if /\.chars\(\)\.nth\(/;
-              print "$.:$_" if /&\s*[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]*\.\.[^\]]*\]/;
-              print "$.:$_" if /[A-Za-z_][A-Za-z0-9_]*\s*\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\]/;
-              print "$.:$_" if /[A-Za-z_][A-Za-z0-9_]*\s*\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\]/ && /allow unsafe_text_op/;
-              print "$.:$_" if /\.split_at\(/;
-            ' "$file"
+      # perl 单进程批量处理全部文件（$ARGV 携带文件名），避免逐文件 fork perl——
+      # 实测从 4.4s 降到 ~0.3s。
+      find "$TARGET" -name '*.rs' -print0 | xargs -0 perl -ne '
+              my $rel = $ARGV;
+              $rel =~ s/^\Q$ENV{ROOT}\E\///;
+              if (/\.chars\(\)\.nth\(/ || /&\s*[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]*\.\.[^\]]*\]/ || /[A-Za-z_][A-Za-z0-9_]*\s*\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\]/ || (/[A-Za-z_][A-Za-z0-9_]*\s*\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\]/ && /allow unsafe_text_op/) || /\.split_at\(/) {
+                print "$rel:$.:$_";
+              }
+if (eof) { close ARGV; }
+                          '
     )
-done < <(find "$TARGET" -name '*.rs' -print0)
 
 if [[ "$COUNT" -eq 0 ]]; then
   echo "Unsafe CLI text/index operations found (0)."

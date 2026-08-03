@@ -38,6 +38,13 @@ expect_failure() {
 
 run_guard >/dev/null
 
+# --fast-only：Stop 场景只做主检查；15 个变异回归（每个重跑 guard ~1.3s）
+# 只在 full 门禁执行——fast 全量 wall 从 22s 降到 ~8s。
+if [ "${1:-}" = "--fast-only" ]; then
+  echo "Runtime Capability Assembly fast probe passed."
+  exit 0
+fi
+
 CONTEXT_FACTORY="$TMP/repo/agent/features/runtime/src/application/run/context_factory.rs"
 cat >>"$CONTEXT_FACTORY" <<'RUST'
 
