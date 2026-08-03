@@ -36,3 +36,21 @@ impl CompactStage {
         }
     }
 }
+
+/// Compact 进度回调（domain 单一真相，#1500 由 adapters 上移）。
+///
+/// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
+/// 调用此回调通知调用方。map-reduce 模式下，每个 chunk 处理前也会调用，
+/// 携带 `(current, total)` chunk 计数。闭包形式可自动实现（F: Fn）。
+pub trait CompactProgressFn: Send + Sync {
+    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>);
+}
+
+impl<F> CompactProgressFn for F
+where
+    F: Fn(CompactStage, Option<usize>, Option<usize>) + Send + Sync,
+{
+    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
+        self(stage, current, total)
+    }
+}

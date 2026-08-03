@@ -3,7 +3,7 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::domain::compact::{sanitize_tool_pairs, CompactStage};
+use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStage};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
@@ -34,24 +34,8 @@ fn placeholder_tool_results(messages: &mut [Message]) {
     }
 }
 
-/// Compact 进度回调 trait。
-///
-/// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
-/// 调用此回调通知调用方。map-reduce 模式下，每个 chunk 处理前也会调用，
-/// 携带 `(current, total)` chunk 计数。
-pub trait CompactProgressFn: Send + Sync {
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>);
-}
-
-impl<F> CompactProgressFn for F
-where
-    F: Fn(CompactStage, Option<usize>, Option<usize>) + Send + Sync,
-{
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
-        self(stage, current, total)
-    }
-}
-
+/// Compact 进度回调 trait 的域定义见 `crate::domain::compact::CompactProgressFn`
+/// （#1500 上移，adapter 层不再重复定义）。
 /// 发出进度回调的辅助函数（`progress` 为 `None` 时 no-op）。
 fn emit_progress(progress: Option<&dyn CompactProgressFn>, stage: CompactStage) {
     if let Some(p) = progress {

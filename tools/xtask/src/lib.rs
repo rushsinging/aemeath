@@ -1,4 +1,5 @@
 pub mod changed_lines;
+pub mod cola_layer_purity;
 pub mod coverage;
 pub mod flaky;
 pub mod guard_registry;

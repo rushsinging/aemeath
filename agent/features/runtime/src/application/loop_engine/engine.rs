@@ -470,6 +470,23 @@ pub trait StepPersistencePort: Send {
     }
 }
 
+/// Compact 进度视图回调（#1500）：`(stage, current, total)`——
+/// `current/total` 为 map-reduce chunk 计数，单次摘要时为 `None`。
+/// Loop Engine 提供实现（转发到 Activity 观测），Runtime 透传给 Context。
+/// 闭包形式可自动实现（F: Fn + Send + Sync）。
+pub trait CompactProgressView: Send + Sync {
+    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>);
+}
+
+impl<F> CompactProgressView for F
+where
+    F: Fn(sdk::CompactStageView, Option<u32>, Option<u32>) + Send + Sync,
+{
+    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>) {
+        self(stage, current, total)
+    }
+}
+
 #[async_trait]
 pub trait CompactionPort: Send {
     async fn needs_compaction(
@@ -480,6 +497,7 @@ pub trait CompactionPort: Send {
         &mut self,
         execution: &mut RunExecutionState,
         cancel: &CancellationToken,
+        progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError>;
 }
 
@@ -718,11 +736,12 @@ async fn run_context_compaction_phase<P>(
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
     compaction: &mut P,
+    progress: std::sync::Arc<dyn CompactProgressView>,
 ) -> Result<ContextCompactionOutcome, LoopEngineError>
 where
     P: CompactionPort + ?Sized,
 {
-    match await_interruptible(run, cancel, compaction.compact(execution, cancel)).await {
+    match await_interruptible(run, cancel, compaction.compact(execution, cancel, progress)).await {
         Interrupt::Completed(Ok(())) => Ok(ContextCompactionOutcome::Ready),
         Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
             Ok(ContextCompactionOutcome::Cancelled)
@@ -1235,12 +1254,17 @@ async fn execute_step_with_scope(
     if needs_compaction {
         transition_and_emit(run, execution, port, RunTransition::BeginCompaction).await?;
         let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
-        port.update_compaction_activity(
-            compact_activity_id.clone(),
-            sdk::CompactStageView::Summarizing,
-        )?;
-        match run_context_compaction_phase(run, execution, &step_cancel, port.compaction_mut())
-            .await?
+        // #1500：进度由 Context 的 compact 管线（Preparing/Summarizing
+        // chunk 计数/Finalizing）经 progress 回调驱动，不再硬编码 Summarizing。
+        let compact_progress = port.compact_progress_view(compact_activity_id.clone());
+        match run_context_compaction_phase(
+            run,
+            execution,
+            &step_cancel,
+            port.compaction_mut(),
+            compact_progress,
+        )
+        .await?
         {
             ContextCompactionOutcome::Ready => {
                 port.update_compaction_activity(
@@ -1311,15 +1335,14 @@ async fn execute_step_with_scope(
                 transition_and_emit(run, execution, port, RunTransition::ModelContextExceeded)
                     .await?;
                 let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
-                port.update_compaction_activity(
-                    compact_activity_id.clone(),
-                    sdk::CompactStageView::Summarizing,
-                )?;
+                // #1500：进度由 Context compact 管线经 progress 回调驱动。
+                let compact_progress = port.compact_progress_view(compact_activity_id.clone());
                 match run_context_compaction_phase(
                     run,
                     execution,
                     &step_cancel,
                     port.compaction_mut(),
+                    compact_progress,
                 )
                 .await?
                 {

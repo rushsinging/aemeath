@@ -3,9 +3,10 @@ use tokio_util::sync::CancellationToken;
 use crate::application::activity::{ActivityCoordinator, ActivityError, ActivityTerminal};
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
-    CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort, InternalContinuationKind,
-    LoopEngineError, ModelInvocationPort, PendingInteractionWork, PlanApprovalPort, RunControlPort,
-    RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
+    CompactProgressView, CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort,
+    InternalContinuationKind, LoopEngineError, ModelInvocationPort, PendingInteractionWork,
+    PlanApprovalPort, RunControlPort, RunLifecyclePort, StepPersistencePort, StuckDecision,
+    StuckHandlingPort, ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RunDomainEvent;
@@ -234,6 +235,21 @@ impl<'a> RunLoop<'a> {
     ) -> Result<(), ActivityError> {
         self.activities()?
             .update_compaction(activity_id, stage, None, None)
+    }
+
+    /// #1500：构造 compact 进度视图回调——把 Context 压缩管线进度
+    /// （Preparing/Summarizing chunk 计数/Finalizing）转发到 Activity 观测。
+    /// 闭包只捕获 `Arc<ActivityCoordinator>` 与 activity_id，不借用自身。
+    pub(super) fn compact_progress_view(
+        &self,
+        activity_id: sdk::ActivityId,
+    ) -> std::sync::Arc<dyn CompactProgressView> {
+        let activities = self.activities.clone();
+        std::sync::Arc::new(move |stage, current, total| {
+            if let Some(coordinator) = activities.as_ref() {
+                let _ = coordinator.update_compaction(activity_id.clone(), stage, current, total);
+            }
+        })
     }
 
     pub(super) fn start_interaction_activity(

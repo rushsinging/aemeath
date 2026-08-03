@@ -737,3 +737,143 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
         calls.load(Ordering::SeqCst)
     );
 }
+
+/// #1500：progress 回调必须收到完整阶段序列——Preparing →
+/// Summarizing（map-reduce 带 chunk 计数 1..N）→ Finalizing。
+#[tokio::test]
+async fn progress_callback_receives_stages_and_chunk_counts() {
+    use std::sync::{Arc, Mutex};
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+    let seen = Arc::new(Mutex::new(
+        Vec::<(String, Option<usize>, Option<usize>)>::new(),
+    ));
+
+    struct EchoGenerator;
+    #[async_trait::async_trait]
+    impl CompactGenerator for EchoGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            Ok("<summary>ok</summary>".to_string())
+        }
+    }
+
+    let progress = {
+        let seen = seen.clone();
+        move |stage: CompactStage, current: Option<usize>, total: Option<usize>| {
+            seen.lock()
+                .unwrap()
+                .push((stage.as_str().to_string(), current, total));
+        }
+    };
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&EchoGenerator),
+        Some(&progress),
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
+    assert!(result.summary.contains("ok"));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.first().map(|(stage, _, _)| stage.as_str()),
+        Some("preparing"),
+        "首个进度必须是 preparing，实际 {seen:?}"
+    );
+    assert_eq!(
+        seen.last().map(|(stage, _, _)| stage.as_str()),
+        Some("finalizing"),
+        "末个进度必须是 finalizing，实际 {seen:?}"
+    );
+    let summarizing: Vec<_> = seen
+        .iter()
+        .filter(|(stage, _, _)| stage == "summarizing")
+        .collect();
+    assert!(
+        summarizing.len() >= 3,
+        "map-reduce 应上报多个 chunk 进度，实际 {summarizing:?}"
+    );
+    let (_, first_current, first_total) = summarizing[0];
+    let (_, last_current, last_total) = summarizing.last().unwrap();
+    assert_eq!(first_current, &Some(1), "chunk 进度应从 1 开始");
+    assert_eq!(first_total, last_total, "total 必须全程一致");
+    let total = first_total.expect("chunk 进度必须携带 total");
+    assert_eq!(last_current, &Some(total), "最后 chunk 计数应等于 total");
+}
+
+/// #1500：单次摘要（非 map-reduce）progress 为阶段事件，chunk 计数为 None。
+#[tokio::test]
+async fn progress_callback_single_summary_reports_stages_without_chunk_counts() {
+    use std::sync::{Arc, Mutex};
+
+    let messages = (0..8)
+        .map(|index| Message::user(format!("短会话消息编号 {index}，不足以触发 map-reduce。")))
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+    let seen = Arc::new(Mutex::new(
+        Vec::<(String, Option<usize>, Option<usize>)>::new(),
+    ));
+
+    struct EchoGenerator;
+    #[async_trait::async_trait]
+    impl CompactGenerator for EchoGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, String> {
+            Ok("<summary>ok</summary>".to_string())
+        }
+    }
+
+    let progress = {
+        let seen = seen.clone();
+        move |stage: CompactStage, current: Option<usize>, total: Option<usize>| {
+            seen.lock()
+                .unwrap()
+                .push((stage.as_str().to_string(), current, total));
+        }
+    };
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&EchoGenerator),
+        Some(&progress),
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
+    assert!(result.summary.contains("ok"));
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.iter()
+            .map(|(stage, _, _)| stage.as_str())
+            .collect::<Vec<_>>(),
+        vec!["preparing", "summarizing", "finalizing"],
+        "单次摘要进度序列，实际 {seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .all(|(_, current, total)| current.is_none() && total.is_none()),
+        "单次摘要不应带 chunk 计数，实际 {seen:?}"
+    );
+}

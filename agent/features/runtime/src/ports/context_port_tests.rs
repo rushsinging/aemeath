@@ -103,6 +103,7 @@ async fn runtime_fake_compiles_against_context_owned_port() {
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
+            progress: None,
         })
         .await
         .unwrap();

@@ -11,7 +11,8 @@ use share::message::{ContentBlock, Message};
 // 已在 #1486 修复中删除；以下为仍在使用的纯函数。）
 
 /// Estimate token count for a string.
-/// Uses CJK-aware estimation: CJK characters average ~2 tokens each,
+/// Uses CJK-aware estimation: CJK characters average ~1 token each
+/// (mainstream tokenizers measure 0.7–1.0 tokens per CJK char),
 /// while ASCII/Latin text averages ~4 characters per token.
 pub fn estimate_tokens(text: &str) -> usize {
     estimate_tokens_with_ratio(text, 4.0)
@@ -30,13 +31,13 @@ pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
         }
     }
 
-    // CJK: ~2 tokens per character; Other: ~N bytes per token (varies by model)
-    // Apply conservative safety margin
-    let cjk_tokens = cjk_chars * 2;
+    // CJK: ~1 token per character; Other: ~N bytes per token (varies by model).
+    // 无额外 safety margin：compact threshold 已含 0.8 安全系数，
+    // 旧实现（CJK×2 + 1.33x margin）实测高估 1.8–3.2 倍（#1500）。
+    let cjk_tokens = cjk_chars;
     let ratio = bytes_per_token.clamp(2.0, 6.0);
     let other_tokens = (other_bytes as f64 / ratio).ceil() as usize;
-    let safety_margin = 4.0 / 3.0; // 1.33x safety margin
-    ((cjk_tokens + other_tokens) as f64 * safety_margin).ceil() as usize
+    cjk_tokens + other_tokens
 }
 
 /// Check if a character is in CJK Unicode ranges.
@@ -53,10 +54,11 @@ fn is_cjk_char(ch: char) -> bool {
     )
 }
 
-/// Estimate tokens for JSON content (more dense, ~2 chars per token)
+/// Estimate tokens for JSON content (~4 bytes per token, same as text;
+/// 旧实现按 2 bytes/token × 1.33 高估 ~2.7 倍，tool schemas 因 JSON 占比高
+/// 是 heuristic 判定系统性高估的主要来源之一，#1500)。
 pub fn estimate_json_tokens(text: &str) -> usize {
-    let base = text.len().div_ceil(2);
-    base * 4 / 3
+    text.len().div_ceil(4)
 }
 
 /// Estimate total tokens in a message list

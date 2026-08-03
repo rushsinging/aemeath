@@ -30,7 +30,6 @@ enum StreamingBlockKind {
 #[derive(Debug, Default)]
 pub struct StreamProgressState {
     first_visible_event_seen: bool,
-    visible_progress_version: u64,
     active_streaming_block: Option<StreamingBlockKind>,
 }
 
@@ -258,7 +257,6 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             let mut progress = self.progress.lock().unwrap();
             let first = !progress.first_visible_event_seen;
             progress.first_visible_event_seen = true;
-            progress.visible_progress_version = progress.visible_progress_version.wrapping_add(1);
             first
         };
         if first {
