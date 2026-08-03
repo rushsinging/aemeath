@@ -332,6 +332,7 @@ fn live_and_resumed_compact_render_one_persistent_notice_without_chat_message() 
     let mut resumed = TuiScenarioHarness::new(100, 30);
     resumed.runtime_event(TuiRuntimeEvent::SessionResumed {
         steps: vec![],
+        display_history: None,
         session_id: "session-compact".into(),
         created_at: 0,
         compacted: true,

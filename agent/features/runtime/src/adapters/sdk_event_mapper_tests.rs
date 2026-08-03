@@ -2,6 +2,33 @@ use super::sdk_event_mapper::map_stream_event;
 use crate::application::loop_engine::chat::{
     RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
 };
+#[test]
+fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
+    let first_id = sdk::InputId::new("input-a");
+    let second_id = sdk::InputId::new("input-b");
+    let queued_id = sdk::InputId::new("input-c");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![
+            (first_id.clone(), share::message::Message::user("first")),
+            (second_id.clone(), share::message::Message::user("second")),
+        ],
+        queued: vec![(queued_id.clone(), share::message::Message::user("queued"))],
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].input_id.as_ref(), Some(&first_id));
+            assert_eq!(items[0].text_content(), "first");
+            assert_eq!(items[1].input_id.as_ref(), Some(&second_id));
+            assert_eq!(items[1].text_content(), "second");
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].input_id.as_ref(), Some(&queued_id));
+            assert_eq!(queued[0].text_content(), "queued");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
 
 #[test]
 fn activity_events_map_without_losing_change_or_snapshot_facts() {

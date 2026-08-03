@@ -27,7 +27,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试与 production reachability，并并行等待其余无 Cargo 静态守卫；`--full` 按固定顺序串行执行全部独立脚本守卫及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
+`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、SDK wire schema、Runtime capability assembly 测试与 production reachability，并并行等待其余无 Cargo 静态守卫；`--full` 按固定顺序串行执行全部独立脚本守卫及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
 
 ## 守卫索引
 

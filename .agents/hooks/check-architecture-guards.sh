@@ -120,8 +120,7 @@ guarded() {
     (
       export -f "$fn_name"
       export ROOT
-      "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" /bin/bash -c "$fn_name"
-    )
+      "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" /bin/bash -c "$fn_name"    )
   else
     if [ "$1" = "bash" ]; then
       shift

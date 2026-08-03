@@ -149,6 +149,7 @@ fn resumed_history_initial_window_loads_through_display_query_effect() {
         steps: Vec::new(),
         session_id: "resume-query".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 

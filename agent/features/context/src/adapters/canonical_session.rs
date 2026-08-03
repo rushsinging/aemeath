@@ -31,6 +31,150 @@ pub trait CanonicalSessionWriter: Send + Sync {
     ) -> Result<(), String>;
 }
 
+#[async_trait]
+pub trait AcceptedInputWriter: Send + Sync {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        run_id: &str,
+        step_id: &str,
+        input: &AcceptedInputProjection,
+    ) -> Result<(), String>;
+
+    async fn acknowledge_finalized_input(
+        &self,
+        _session_id: &str,
+        _run_id: &str,
+        _step_id: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn delete_all(&self, _session_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+pub struct NoOpAcceptedInputWriter;
+
+#[async_trait]
+impl AcceptedInputWriter for NoOpAcceptedInputWriter {
+    async fn save(
+        &self,
+        _session_id: &str,
+        _revision: u64,
+        _run_id: &str,
+        _step_id: &str,
+        _input: &AcceptedInputProjection,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+pub trait ToolReceiptWriter: Send + Sync {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String>;
+}
+
+pub struct AtomicBlobAcceptedInputWriter {
+    blob: Arc<dyn storage::api::AtomicBlobPort>,
+}
+
+impl AtomicBlobAcceptedInputWriter {
+    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+        Self { blob }
+    }
+}
+
+#[async_trait]
+impl AcceptedInputWriter for AtomicBlobAcceptedInputWriter {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        run_id: &str,
+        step_id: &str,
+        input: &AcceptedInputProjection,
+    ) -> Result<(), String> {
+        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .save(revision, run_id, step_id, input)
+        .await
+    }
+
+    async fn acknowledge_finalized_input(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        step_id: &str,
+    ) -> Result<(), String> {
+        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .acknowledge_finalized_input(run_id, step_id)
+        .await
+    }
+
+    async fn delete_all(&self, session_id: &str) -> Result<(), String> {
+        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .delete()
+        .await
+    }
+}
+
+pub struct AtomicBlobToolReceiptWriter {
+    blob: Arc<dyn storage::api::AtomicBlobPort>,
+}
+
+impl AtomicBlobToolReceiptWriter {
+    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+        Self { blob }
+    }
+}
+
+#[async_trait]
+impl ToolReceiptWriter for AtomicBlobToolReceiptWriter {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+            Arc::clone(&self.blob),
+            session_id,
+        )?
+        .save(revision, receipt)
+        .await
+    }
+}
+
+pub struct NoOpToolReceiptWriter;
+
+#[async_trait]
+impl ToolReceiptWriter for NoOpToolReceiptWriter {
+    async fn save(
+        &self,
+        _session_id: &str,
+        _revision: u64,
+        _receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 pub struct AtomicBlobCanonicalSessionWriter {
     blob: Arc<dyn storage::api::AtomicBlobPort>,
 }
@@ -52,6 +196,19 @@ impl AtomicBlobCanonicalSessionWriter {
         )?
         .save(revision, receipt)
         .await
+    }
+}
+
+#[async_trait]
+impl ToolReceiptWriter for AtomicBlobCanonicalSessionWriter {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        receipt: &crate::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        AtomicBlobCanonicalSessionWriter::save_tool_receipt(self, session_id, revision, receipt)
+            .await
     }
 }
 
@@ -99,6 +256,8 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
 
 pub struct ProductionMainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
+    accepted_input_writer: Arc<dyn AcceptedInputWriter>,
+    tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
     skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
@@ -110,13 +269,24 @@ impl ProductionMainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
         Self {
             writer,
+            accepted_input_writer: Arc::new(NoOpAcceptedInputWriter),
+            tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             skill_catalog: None,
             query_factory: None,
             generator: None,
         }
     }
 
-    /// 注入 Skill metadata catalog 与 Context-owned query factory。
+    pub fn with_accepted_input_writer(mut self, writer: Arc<dyn AcceptedInputWriter>) -> Self {
+        self.accepted_input_writer = writer;
+        self
+    }
+
+    pub fn with_tool_receipt_writer(mut self, writer: Arc<dyn ToolReceiptWriter>) -> Self {
+        self.tool_receipt_writer = writer;
+        self
+    }
+
     pub fn with_skill_catalog(
         mut self,
         catalog: Arc<dyn tools::SkillCatalogPort>,
@@ -160,9 +330,11 @@ impl MainContextFactory for ProductionMainContextFactory {
             Arc::clone(&self.writer),
             mutation_gate,
         );
+        repository = repository.with_accepted_input_writer(Arc::clone(&self.accepted_input_writer));
         if let Some(generator) = &self.generator {
             repository = repository.with_generator(Arc::clone(generator));
         }
+        repository = repository.with_tool_receipt_writer(Arc::clone(&self.tool_receipt_writer));
         Arc::new(crate::application::ContextApplicationService::new(
             Arc::new(repository),
             prompt,
@@ -176,6 +348,8 @@ pub struct CanonicalSessionRepository {
     task_persist: Arc<dyn task::TaskPersist>,
     workspace_persist: Arc<dyn project::WorkspacePersist>,
     writer: Arc<dyn CanonicalSessionWriter>,
+    accepted_input_writer: Arc<dyn AcceptedInputWriter>,
+    tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
     /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
     /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
@@ -194,19 +368,52 @@ impl CanonicalSessionRepository {
             session,
             task_persist,
             workspace_persist,
+            accepted_input_writer: Arc::new(NoOpAcceptedInputWriter),
+            tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             writer,
             mutation_gate,
             generator: None,
         }
     }
 
-    /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
+    pub fn with_accepted_input_writer(mut self, writer: Arc<dyn AcceptedInputWriter>) -> Self {
+        self.accepted_input_writer = writer;
+        self
+    }
+
+    pub fn with_tool_receipt_writer(mut self, writer: Arc<dyn ToolReceiptWriter>) -> Self {
+        self.tool_receipt_writer = writer;
+        self
+    }
+
     pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
         self.generator = Some(generator);
         self
     }
 
-    /// 压缩可见消息（#1486）：
+    async fn acknowledge_finalized_input_ledger(
+        &self,
+        session_id: &str,
+        run_id: &str,
+        step_id: &str,
+    ) {
+        if let Err(error) = self
+            .accepted_input_writer
+            .acknowledge_finalized_input(session_id, run_id, step_id)
+            .await
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "accepted input ledger cleanup deferred session_id={} run_id={} step_id={} error={}",
+                session_id,
+                run_id,
+                step_id,
+                error
+            );
+        }
+    }
+
+    /// 压缩可见消息：
     /// - 注入 generator 时走 LLM 语义压缩（`compact_messages_with_llm`，
     ///   内部失败自动 fallback 本地，分块并发 + 汇总收敛）；
     /// - 未注入时走本地文本压缩 `compact_messages`，并手动补齐
@@ -344,7 +551,6 @@ impl SessionRepository for CanonicalSessionRepository {
             });
         }
         let mut candidate = (*current).clone();
-        candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
@@ -357,11 +563,17 @@ impl SessionRepository for CanonicalSessionRepository {
                 candidate.revision,
             ),
         );
-        self.writer
+        let input = candidate
+            .accepted_input(append.run_id.as_ref(), append.step_id.as_str())
+            .expect("accepted input must exist")
+            .clone();
+        self.accepted_input_writer
             .save(
-                &current,
-                &candidate,
-                SessionWriteScope::PreserveUnloadedHistory,
+                &current.id,
+                candidate.revision,
+                append.run_id.as_ref(),
+                append.step_id.as_str(),
+                &input,
             )
             .await
             .map_err(AcceptedInputError::Storage)?;
@@ -404,7 +616,6 @@ impl SessionRepository for CanonicalSessionRepository {
                 changed: false,
             });
         }
-        candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
@@ -412,20 +623,17 @@ impl SessionRepository for CanonicalSessionRepository {
             .tool_receipt(&mutation)
             .expect("advanced receipt must exist")
             .clone();
-        self.writer
-            .save(
-                &current,
-                &candidate,
-                SessionWriteScope::PreserveUnloadedHistory,
-            )
+        let revision = current.revision;
+        self.tool_receipt_writer
+            .save(&current.id, revision, &receipt)
             .await
             .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(ToolReceiptMutationError::Storage)?;
-        Ok(ToolReceiptMutationReceipt {
+        return Ok(ToolReceiptMutationReceipt {
             receipt,
             changed: true,
-        })
+        });
     }
 
     async fn compare_and_record_skill_load(
@@ -489,10 +697,14 @@ impl SessionRepository for CanonicalSessionRepository {
             .find(append.run_id.as_ref(), append.step_id.as_str())
         {
             if committed.fingerprint == append.fingerprint.as_str() {
-                return Ok(Self::receipt(
-                    append,
-                    SessionRevision::new(committed.committed_revision),
-                ));
+                let revision = SessionRevision::new(committed.committed_revision);
+                self.acknowledge_finalized_input_ledger(
+                    &current.id,
+                    append.run_id.as_ref(),
+                    append.step_id.as_str(),
+                )
+                .await;
+                return Ok(Self::receipt(append, revision));
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -561,6 +773,12 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
+        self.acknowledge_finalized_input_ledger(
+            &current.id,
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+        )
+        .await;
         Ok(Self::receipt(&append, revision))
     }
 
@@ -734,6 +952,10 @@ impl SessionRepository for CanonicalSessionRepository {
             .await
             .map_err(ContextPortError::SessionRepository)?;
         self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
+        self.accepted_input_writer
+            .delete_all(&current.id)
+            .await
             .map_err(ContextPortError::SessionRepository)?;
         Ok(())
     }

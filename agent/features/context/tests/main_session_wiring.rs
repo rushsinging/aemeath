@@ -361,7 +361,7 @@ async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
         })
         .await
         .expect("append accepted input");
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
 
     let committed = h.wiring.committed_session();
     let step = &committed.run_slices[0].steps[0];
@@ -410,7 +410,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
     context
         .append_and_persist(&ContextAppend {
             session_id: SessionId::new(source_id.clone()),
-            expected_revision: SessionRevision::new(1),
+            expected_revision: SessionRevision::new(0),
             run_id: RunId::new("run-finalized"),
             step_id: RunStepId::new("step-finalized"),
             source_request_id: ContextRequestId::new("request-finalized"),

@@ -139,6 +139,82 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 }
 
 #[tokio::test]
+async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let steps = (0..256)
+        .map(|index| {
+            (
+                format!("run-{index}"),
+                format!("step-{index}"),
+                format!("history-{index}"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let before_steps = steps
+        .iter()
+        .map(|(run_id, step_id, text)| (run_id.as_str(), step_id.as_str(), text.as_str()))
+        .collect::<Vec<_>>();
+    let before = session_with_steps("large-session", 1, &before_steps);
+
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation");
+    let member_dir = root
+        .path()
+        .join("session")
+        .join("large-session.dataset")
+        .join("members");
+    let initial_member_count = std::fs::read_dir(&member_dir)
+        .expect("member store")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .count();
+
+    let mut after = before.clone();
+    after.revision = 2;
+    after.run_slices = after.run_slices.append_accepted_input(
+        "run-new",
+        "step-new",
+        AcceptedInputProjection::new(vec![Message::user("new input")], "new-input", 2),
+    );
+    writer
+        .save_incremental(
+            &before,
+            &after,
+            context::adapters::SessionWriteScope::PreserveUnloadedHistory,
+        )
+        .await
+        .expect("accepted input mutation");
+
+    let final_member_count = std::fs::read_dir(&member_dir)
+        .expect("member store")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .count();
+    assert_eq!(
+        final_member_count - initial_member_count,
+        3,
+        "accepted input mutation may update metadata and state, but must not rewrite history members"
+    );
+    let manifest = dataset
+        .read_manifest(&dataset_key("large-session"))
+        .await
+        .expect("committed manifest");
+    let history_member_count = manifest
+        .members()
+        .iter()
+        .filter(|member| member.as_str().starts_with("step-"))
+        .count();
+    assert_eq!(
+        history_member_count, 257,
+        "large-history accepted input must add exactly one step member"
+    );
+}
+
+#[tokio::test]
 async fn active_resume_append_reuses_compact_history_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));

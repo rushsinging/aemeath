@@ -46,7 +46,80 @@ impl CanonicalSessionWriter for RecordingWriter {
     }
 }
 
+#[derive(Default)]
+struct RecordingToolReceiptWriter {
+    saved: Mutex<Vec<context::domain::ToolCallReceipt>>,
+    fail: bool,
+}
+
+#[async_trait]
+impl context::adapters::ToolReceiptWriter for RecordingToolReceiptWriter {
+    async fn save(
+        &self,
+        _session_id: &str,
+        _revision: u64,
+        receipt: &context::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        if self.fail {
+            return Err("receipt disk full".to_string());
+        }
+        self.saved.lock().unwrap().push(receipt.clone());
+        Ok(())
+    }
+}
+
+type AcceptedInputWrite = (String, u64, String, String, AcceptedInputProjection);
+
+#[derive(Default)]
+struct RecordingAcceptedInputWriter {
+    saved: Mutex<Vec<AcceptedInputWrite>>,
+    cleared: Mutex<Vec<(String, String)>>,
+    fail: bool,
+}
+
+#[async_trait]
+impl context::adapters::AcceptedInputWriter for RecordingAcceptedInputWriter {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        run_id: &str,
+        step_id: &str,
+        input: &AcceptedInputProjection,
+    ) -> Result<(), String> {
+        if self.fail {
+            return Err("input disk full".to_string());
+        }
+        self.saved.lock().unwrap().push((
+            session_id.to_string(),
+            revision,
+            run_id.to_string(),
+            step_id.to_string(),
+            input.clone(),
+        ));
+        Ok(())
+    }
+
+    async fn acknowledge_finalized_input(
+        &self,
+        _session_id: &str,
+        run_id: &str,
+        step_id: &str,
+    ) -> Result<(), String> {
+        self.cleared
+            .lock()
+            .unwrap()
+            .push((run_id.to_string(), step_id.to_string()));
+        Ok(())
+    }
+
+    async fn delete_all(&self, _session_id: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 struct EmptyTask;
+
 impl TaskPersist for EmptyTask {
     fn collect_snapshot(&self) -> TaskSnapshot {
         TaskSnapshot::empty()
@@ -172,6 +245,31 @@ fn repository_with_session(
             writer,
             Arc::new(tokio::sync::Mutex::new(())),
         ),
+        holder,
+    )
+}
+
+fn repository_with_receipt_writer(
+    writer: Arc<RecordingWriter>,
+    receipt_writer: Arc<RecordingToolReceiptWriter>,
+) -> (
+    CanonicalSessionRepository,
+    Arc<RwLock<Arc<CanonicalSession>>>,
+) {
+    let (repository, holder) = repository(writer);
+    (repository.with_tool_receipt_writer(receipt_writer), holder)
+}
+
+fn repository_with_accepted_input_writer(
+    writer: Arc<RecordingWriter>,
+    accepted_input_writer: Arc<RecordingAcceptedInputWriter>,
+) -> (
+    CanonicalSessionRepository,
+    Arc<RwLock<Arc<CanonicalSession>>>,
+) {
+    let (repository, holder) = repository(writer);
+    (
+        repository.with_accepted_input_writer(accepted_input_writer),
         holder,
     )
 }
@@ -673,15 +771,18 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
 #[tokio::test]
 async fn accepted_input_persists_before_publish() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer.clone());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
     let accepted = accepted_input("input-v1");
 
     let receipt = repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
     {
         let session = holder.read().unwrap();
+        assert_eq!(session.revision, 0);
         let step = &session.run_slices[0].steps[0];
         assert_eq!(
             step.accepted_input.as_ref().unwrap().messages[0].text_content(),
@@ -703,7 +804,8 @@ async fn accepted_input_persists_before_publish() {
 #[tokio::test]
 async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, _) = repository(writer);
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer);
     let accepted = accepted_input("input-v1");
 
     let first = repository.append_accepted_input(&accepted).await.unwrap();
@@ -718,6 +820,66 @@ async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     ));
 }
 
+#[tokio::test]
+async fn accepted_input_storage_failure_does_not_publish_or_advance_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter {
+        saved: Mutex::new(vec![]),
+        cleared: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
+    let accepted = accepted_input("input-failure");
+
+    let result = repository.append_accepted_input(&accepted).await;
+
+    assert!(matches!(
+        result,
+        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
+    assert!(writer.saved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn accepted_input_duplicate_after_persist_is_published_exactly_once() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
+    let accepted = accepted_input("input-retry");
+
+    repository.append_accepted_input(&accepted).await.unwrap();
+    repository.append_accepted_input(&accepted).await.unwrap();
+
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(holder.read().unwrap().run_slices[0].steps.len(), 1);
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn finalized_append_acknowledges_accepted_input_after_canonical_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer.clone());
+    let accepted = accepted_input("input-to-finalize");
+    repository.append_accepted_input(&accepted).await.unwrap();
+
+    repository
+        .append_finalized(&append("finalized"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        *accepted_writer.cleared.lock().unwrap(),
+        vec![(
+            accepted.run_id.to_string(),
+            accepted.step_id.as_str().to_string()
+        )]
+    );
+}
 #[tokio::test]
 async fn finalized_append_bridges_messages_into_structured_outcome() {
     let writer = Arc::new(RecordingWriter::default());
@@ -772,7 +934,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
         step.accepted_input.as_ref().unwrap().fingerprint,
         "input-v1"
     );
-    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 1);
+    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 0);
     let outcome = step.outcome.as_ref().unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
     assert_eq!(outcome.api_input_tokens, Some(42));
@@ -979,6 +1141,43 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
 }
 
 #[tokio::test]
+async fn accepted_input_uses_independent_writer_before_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer.clone());
+
+    let receipt = repository
+        .append_accepted_input(&accepted_input("input-ledger"))
+        .await
+        .unwrap();
+
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+    assert_eq!(accepted_input_writer.saved.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn accepted_input_writer_failure_does_not_publish_candidate() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter {
+        saved: Mutex::new(vec![]),
+        cleared: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer);
+
+    assert!(matches!(
+        repository.append_accepted_input(&accepted_input("input-ledger")).await,
+        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+}
+#[tokio::test]
 async fn append_persists_candidate_before_publishing_revision() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer.clone());
@@ -997,9 +1196,10 @@ async fn append_persists_candidate_before_publishing_revision() {
 #[tokio::test]
 async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer.clone());
-    let mutation =
-        ToolReceiptMutation::pending(tool_identity(), "{\"pattern\":\"**/archify.mjs\"}");
+    let receipt_writer = Arc::new(RecordingToolReceiptWriter::default());
+    let (repository, holder) =
+        repository_with_receipt_writer(writer.clone(), receipt_writer.clone());
+    let mutation = ToolReceiptMutation::pending(tool_identity(), "safe preview");
 
     let first = repository
         .advance_tool_receipt(mutation.clone())
@@ -1009,11 +1209,11 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
     assert!(first.changed);
     assert!(!second.changed);
-    assert_eq!(holder.read().unwrap().revision, 1);
+    assert_eq!(holder.read().unwrap().revision, 0);
     assert_eq!(
         writer.saved.lock().unwrap().len(),
-        1,
-        "Tool receipt 更新应通过增量 Session writer 提交 before/after generation"
+        0,
+        "Tool receipt mutation must not invoke the canonical Session writer"
     );
     assert_eq!(
         holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
@@ -1023,20 +1223,26 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
 #[tokio::test]
 async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
-    let writer = Arc::new(RecordingWriter {
+    let writer = Arc::new(RecordingWriter::default());
+    let receipt_writer = Arc::new(RecordingToolReceiptWriter {
         saved: Mutex::new(vec![]),
         fail: true,
     });
-    let (repository, holder) = repository(writer);
+    let (repository, holder) = repository_with_receipt_writer(writer.clone(), receipt_writer);
 
     assert!(matches!(
         repository
             .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
             .await,
-        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "disk full"
+        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
+    assert_eq!(
+        writer.saved.lock().unwrap().len(),
+        0,
+        "失败的 receipt 写入不得回退调用 canonical Session writer"
+    );
 }
 
 #[tokio::test]

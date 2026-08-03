@@ -356,7 +356,17 @@ impl DatasetSessionReader {
             active_names.len(),
             members.len()
         );
-        let active_session = assemble_session(&manifest, &members)?;
+        let mut active_session = assemble_session(&manifest, &members)?;
+        if let Some(blob) = &self.legacy_blob {
+            crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
+                Arc::clone(blob),
+                manifest.session_id(),
+            )
+            .map_err(SessionGenerationWireError::InvalidManifest)?
+            .overlay(&mut active_session)
+            .await
+            .map_err(SessionGenerationWireError::InvalidManifest)?;
+        }
         Ok(PreparedDatasetResume {
             active_session,
             display_history: DisplayHistoryStepIndex::from_manifest(&manifest),

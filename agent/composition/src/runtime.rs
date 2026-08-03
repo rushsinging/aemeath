@@ -189,6 +189,12 @@ pub(crate) async fn from_args_with_gateways(
             context::adapters::ProductionMainContextFactory::new(Arc::new(
                 context::adapters::DatasetCanonicalSessionWriter::new(session_dataset),
             ))
+            .with_accepted_input_writer(Arc::new(
+                context::adapters::AtomicBlobAcceptedInputWriter::new(session_blob.clone()),
+            ))
+            .with_tool_receipt_writer(Arc::new(
+                context::adapters::AtomicBlobToolReceiptWriter::new(session_blob),
+            ))
             .with_skill_catalog(
                 skill_catalog.clone(),
                 Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
