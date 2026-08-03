@@ -162,8 +162,8 @@
       },
       "classification": "migration_exception",
       "owner": "runtime",
-      "reason": "Runtime application still reaches adapter-owned client accessors during production cutover",
-      "tracking_issue": 879,
+      "reason": "Runtime application still reaches adapter-owned client accessors during production cutover; physical retirement tracked by #1399",
+      "tracking_issue": 1399,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when RuntimeResources and old MainRunPort production paths are cut",
       "status": "active"
