@@ -202,6 +202,61 @@ async fn cancellation_reaps_shell_and_descendant_processes() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn shell_exit_with_background_holder_returns_promptly_and_reaps_group() {
+    let temp = tempfile::tempdir().expect("创建测试目录");
+    let marker = temp.path().join("bg-pids");
+    // shell 立即退出（exit 0），但后台 job 残留并持有 stdout/stderr 管道写端：
+    // 修复前 read_bounded 等 EOF 会卡满 timeout（只能由 timeout 路径杀进程组）；
+    // 修复后 shell 退出即应探测并回收进程组残留，快速正常返回。
+    let command = format!(
+        "sleep 30 & child=$!; printf '%s\\n%s\\n' $$ $child > '{}'; exit 0",
+        marker.display()
+    );
+    let mut request = request(command);
+    request.timeout = Duration::from_secs(10);
+    let marker_reader = tokio::spawn({
+        let marker = marker.clone();
+        async move { wait_for_file(&marker).await }
+    });
+    let started = std::time::Instant::now();
+    let output = ProcessDriver
+        .execute(request, &CancellationToken::new())
+        .await
+        .expect("shell 已退出，残留后台 job 应被回收后正常返回");
+    let elapsed = started.elapsed();
+    let (shell, child) = parse_pids(&marker_reader.await.expect("读取 PID marker"));
+
+    assert_eq!(output.exit_code, Some(0));
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "修复前残留 job 持有管道写端会卡满 timeout；实际耗时 {elapsed:?}"
+    );
+    assert_process_gone(child).await;
+    assert_process_gone(shell).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn empty_stdin_is_dev_null_not_pipe() {
+    // 探针：fd 0 为字符设备（/dev/null）输出 char，为管道输出 fifo。
+    let probe = "[ -c /dev/stdin ] && echo char || echo fifo";
+    let output = ProcessDriver
+        .execute(request(probe), &CancellationToken::new())
+        .await
+        .expect("空 stdin 应使用 /dev/null");
+    assert_eq!(output.stdout, b"char\n");
+
+    let mut with_input = request(probe);
+    with_input.stdin = b"{}".to_vec();
+    let output = ProcessDriver
+        .execute(with_input, &CancellationToken::new())
+        .await
+        .expect("非空 stdin 应使用管道");
+    assert_eq!(output.stdout, b"fifo\n");
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn term_ignoring_process_is_escalated_to_kill_and_reaped() {
     let temp = tempfile::tempdir().expect("创建测试目录");
     let marker = temp.path().join("kill-pids");

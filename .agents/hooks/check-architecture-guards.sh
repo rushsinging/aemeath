@@ -111,6 +111,8 @@ fi
 #   小 here-doc 与串行场景也偶发；bash 3.2 用临时文件实现 here-doc，无此问题，
 #   实测 51 个 guard 全并发稳定通过）。
 # 注意：guard 脚本 shebang（#!/usr/bin/env bash 会解析到 5.x），此处显式 /bin/bash 忽略 shebang。
+# --kill-after=5：timeout 超时发 SIGTERM 后 5s 仍未退出则 SIGKILL（含进程组内子进程），
+# 避免卡死 guard 的子进程残留并持有管道写端（aemeath hook 执行器侧兜底见 issue 1507）。
 guarded() {
   if [ -z "$TIMEOUT_BIN" ]; then
     /bin/bash "$@"
@@ -120,13 +122,13 @@ guarded() {
     (
       export -f "$fn_name"
       export ROOT
-      "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" /bin/bash -c "$fn_name"
+      "$TIMEOUT_BIN" --kill-after=5 "${GUARD_TIMEOUT:-120}" /bin/bash -c "$fn_name"
     )
   else
     if [ "$1" = "bash" ]; then
       shift
     fi
-    "$TIMEOUT_BIN" "${GUARD_TIMEOUT:-120}" /bin/bash "$@"
+    "$TIMEOUT_BIN" --kill-after=5 "${GUARD_TIMEOUT:-120}" /bin/bash "$@"
   fi
 }
 
