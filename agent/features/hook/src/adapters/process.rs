@@ -83,7 +83,13 @@ impl ProcessDriver {
             .arg("-c")
             .arg(&request.command)
             .current_dir(&request.cwd)
-            .stdin(std::process::Stdio::piped())
+            // stdin 为空时不建管道：脚本内后台 job 继承的读端会阻塞其自身读 stdin
+            // 的路径（共享管道读端），且空管道对 hook 无任何输入价值。
+            .stdin(if request.stdin.is_empty() {
+                std::process::Stdio::null()
+            } else {
+                std::process::Stdio::piped()
+            })
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .env_clear()
@@ -101,13 +107,19 @@ impl ProcessDriver {
         let process_group = child
             .id()
             .ok_or_else(|| ProcessFailure::new(ProcessFailureKind::Spawn, "hook 子进程缺少 PID"))?;
-        let stdin = take_pipe_or_reap(
-            child.stdin.take(),
-            &mut child,
-            process_group,
-            "hook stdin 管道不可用",
-        )
-        .await?;
+        let stdin = if request.stdin.is_empty() {
+            None
+        } else {
+            Some(
+                take_pipe_or_reap(
+                    child.stdin.take(),
+                    &mut child,
+                    process_group,
+                    "hook stdin 管道不可用",
+                )
+                .await?,
+            )
+        };
         let stdout = take_pipe_or_reap(
             child.stdout.take(),
             &mut child,
@@ -168,7 +180,14 @@ impl ProcessDriver {
                 }
                 result = child.wait(), if status.is_none() => {
                     match result {
-                        Ok(exit_status) => status = Some(exit_status),
+                        Ok(exit_status) => {
+                            status = Some(exit_status);
+                            // `wait()` 返回只保证直接子进程（sh）退出；脚本内 `&` 启动的
+                            // 后台 job 若未退出，会持续持有 stdout/stderr 管道写端（阻塞 io
+                            // EOF，导致完成被无限推迟）并最终成为孤儿。探测并回收进程组
+                            // 残留，无残留时零开销返回。
+                            reap_process_group_leftovers(process_group).await;
+                        }
                         Err(error) => {
                             terminate_and_reap(&mut child, process_group, None).await;
                             let _ = io.await;
@@ -206,27 +225,29 @@ impl ProcessDriver {
 }
 
 async fn run_io(
-    mut stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     input: Vec<u8>,
     stdout: ChildStdout,
     stderr: ChildStderr,
     output_limit: usize,
 ) -> IoResult {
     let write = async move {
-        if let Err(error) = stdin.write_all(&input).await {
-            if error.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(ProcessFailure::new(
-                    ProcessFailureKind::Io,
-                    format!("写入 hook stdin 失败: {error}"),
-                ));
+        if let Some(mut stdin) = stdin {
+            if let Err(error) = stdin.write_all(&input).await {
+                if error.kind() != std::io::ErrorKind::BrokenPipe {
+                    return Err(ProcessFailure::new(
+                        ProcessFailureKind::Io,
+                        format!("写入 hook stdin 失败: {error}"),
+                    ));
+                }
             }
-        }
-        if let Err(error) = stdin.shutdown().await {
-            if error.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(ProcessFailure::new(
-                    ProcessFailureKind::Io,
-                    format!("关闭 hook stdin 失败: {error}"),
-                ));
+            if let Err(error) = stdin.shutdown().await {
+                if error.kind() != std::io::ErrorKind::BrokenPipe {
+                    return Err(ProcessFailure::new(
+                        ProcessFailureKind::Io,
+                        format!("关闭 hook stdin 失败: {error}"),
+                    ));
+                }
             }
         }
         Ok(())
@@ -299,6 +320,26 @@ fn signal_process_group(process_group: u32, signal: libc::c_int) {
     unsafe {
         libc::kill(-(process_group as libc::pid_t), signal);
     }
+}
+
+#[cfg(unix)]
+async fn reap_process_group_leftovers(process_group: u32) {
+    if process_group_exists(process_group) {
+        signal_process_group(process_group, libc::SIGTERM);
+        tokio::time::sleep(TERMINATION_GRACE).await;
+        signal_process_group(process_group, libc::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn process_group_exists(process_group: u32) -> bool {
+    // `kill(-pgid, 0)`：0 表示组内仍有进程；EPERM 表示进程存在（无权限发信号）；
+    // ESRCH 表示组已空。正常场景（无残留）只有一次 ESRCH 探测，零副作用。
+    let result = unsafe { libc::kill(-(process_group as libc::pid_t), 0) };
+    if result == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 #[cfg(test)]

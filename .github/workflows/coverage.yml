@@ -18,6 +18,10 @@ jobs:
   coverage:
     name: Workspace coverage summary
     runs-on: ubuntu-latest
+    # 显式覆盖默认 job 超时：GitHub 平台曾对 ~4 分钟的慢 job 强制回收
+    # （SIGTERM/exit 143，cache miss 冷启动时必踩），显式设置可在平台
+    # 默认超时存在时绕过该限制。
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +35,18 @@ jobs:
           workspaces: '. -> target/coverage'
 
       - name: Install cargo-llvm-cov 0.8.7
-        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+        run: |
+          # 下载官方预编译二进制替代 `cargo install`（后者每次冷启动编译 ~60s）。
+          # cache miss 时全量 instrumented 编译的总时长接近平台回收阈值，
+          # 省下的编译时间决定冷启动 run 能否成功建立缓存（详见 #1508 配套调查）。
+          curl -L --fail --silent --show-error \
+            https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.8.7/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz \
+            -o /tmp/cargo-llvm-cov.tar.gz
+          tar -xzf /tmp/cargo-llvm-cov.tar.gz -C /tmp
+          mkdir -p "$HOME/.cargo/bin"
+          mv /tmp/cargo-llvm-cov "$HOME/.cargo/bin/cargo-llvm-cov"
+          chmod +x "$HOME/.cargo/bin/cargo-llvm-cov"
+          cargo llvm-cov --version
 
       - name: Print workspace and per-crate coverage
         run: ./scripts/coverage.sh
