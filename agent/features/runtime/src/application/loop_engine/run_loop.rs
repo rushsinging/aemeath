@@ -96,7 +96,15 @@ impl<'a> RunLoop<'a> {
         &self,
         run_id: &sdk::RunId,
     ) -> Option<crate::domain::agent_run::RunControl> {
-        self.control.take_control(run_id)
+        let control = self.control.take_control(run_id);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "run loop control polled: run_id={} control_present={} control={:?}",
+            run_id,
+            control.is_some(),
+            control
+        );
+        control
     }
 
     pub(super) fn register_step_scope(
@@ -106,6 +114,10 @@ impl<'a> RunLoop<'a> {
         cancel: CancellationToken,
     ) {
         self.lifecycle.register_step_scope(run_id, step_id, cancel);
+    }
+
+    pub(super) fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        self.lifecycle.clear_step_scope(run_id, step_id);
     }
 
     pub(super) fn interaction_port(

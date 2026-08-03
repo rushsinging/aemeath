@@ -113,7 +113,7 @@ fn completing_interaction_requires_matching_id_and_clears_exactly_once() {
 }
 
 #[test]
-fn cancelling_interaction_clears_pending_without_emitting_resumed() {
+fn cancelling_interaction_restores_working_status_without_emitting_resumed() {
     let mut run = run_at_status(RunStatus::ExecutingTools);
     let request_id = InteractionRequestId::new_v7();
     let continuation = tool_continuation("call-cancel");
@@ -123,12 +123,16 @@ fn cancelling_interaction_clears_pending_without_emitting_resumed() {
 
     assert_eq!(run.cancel_interaction(&request_id).unwrap(), continuation);
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
     assert!(!run
         .events()
         .iter()
         .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+    assert_eq!(
+        run.cancel_interaction(&request_id),
+        Err(RunTransitionError::NoPendingInteraction)
+    );
 }
 
 #[test]

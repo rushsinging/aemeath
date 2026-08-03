@@ -413,12 +413,13 @@ async fn coordinator_begin_then_cancel() {
         ))
     );
     assert!(run.pending_interaction().is_none());
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
 }
 
 // ── Cleanup: disconnect handling ──
 
 #[test]
-fn coordinator_cleanup_run_clears_pending_interaction_without_changing_run_lifecycle() {
+fn coordinator_cleanup_run_clears_pending_interaction_and_restores_continuation_phase() {
     let mut run = run_in_executing_tools();
     let port = InteractionBridge::new();
     let (body, continuation) = question_body();
@@ -447,7 +448,7 @@ fn coordinator_cleanup_run_clears_pending_interaction_without_changing_run_lifec
         InteractionCancelReason::RunCancelled,
     );
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
     assert!(!port.contains(&request_id));
 }
@@ -512,7 +513,7 @@ fn cleanup_run_clears_execution_mailbox_and_queued_work() {
     assert!(execution.pending_interaction_work().is_none());
     assert!(!port.contains(&request_id));
     assert!(run.pending_interaction().is_none());
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
 }
 
 // ── Parent adapter / channel drop via coordinator ──
@@ -555,7 +556,7 @@ async fn parent_adapter_drop_via_coordinator_does_not_hang_run() {
         InteractionCancelReason::RunCancelled,
     );
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
 }
 
@@ -597,6 +598,6 @@ async fn parent_adapter_drop_does_not_hang_run_with_full_coordinator_api() {
         InteractionCancelReason::RunCancelled,
     );
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
 }

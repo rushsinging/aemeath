@@ -102,8 +102,15 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {
-                RunDomainEvent::Completed { .. } => {
-                    self.project_done(RunFinalizationStatus::Completed).await;
+                RunDomainEvent::Completed {
+                    user_cancelled_step,
+                    ..
+                } => {
+                    if user_cancelled_step {
+                        self.send_cancelled().await;
+                    } else {
+                        self.project_done(RunFinalizationStatus::Completed).await;
+                    }
                 }
                 RunDomainEvent::Failed { error, .. } => {
                     self.sink
@@ -183,3 +190,7 @@ impl RunEventObserver for ProgressTerminalObserver<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "event_strategy_tests.rs"]
+mod tests;

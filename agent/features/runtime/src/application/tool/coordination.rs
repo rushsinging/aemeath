@@ -92,6 +92,7 @@ pub(crate) trait ToolRoundObserver: Send {
         _results: &[ToolExecution],
     ) {
     }
+    async fn cancelled_results_completed(&mut self, _results: &[ToolExecution]) {}
     async fn results_materialized(
         &mut self,
         _execution: &crate::application::run::execution_state::RunExecutionState,
@@ -178,7 +179,9 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     };
     let cancelled = cancel.is_cancelled();
     let results = if cancelled && interaction_ids.is_empty() {
-        complete_cancelled_tool_round(&raw_calls, selected)
+        let completed = complete_cancelled_tool_round(&raw_calls, selected);
+        observer.cancelled_results_completed(&completed).await;
+        completed
     } else {
         selected
     };
@@ -371,10 +374,7 @@ pub(crate) fn complete_cancelled_tool_round(
         .iter()
         .map(|call| {
             by_id.remove(&call.id).unwrap_or_else(|| {
-                ToolExecution::new(
-                    call,
-                    tools::ToolOutcome::error("tool execution cancelled by user"),
-                )
+                ToolExecution::new(call, tools::ToolOutcome::error("Command cancelled by user"))
             })
         })
         .collect()

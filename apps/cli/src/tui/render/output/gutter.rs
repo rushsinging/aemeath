@@ -61,7 +61,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             ToolSemanticStatus::Pending => "○",
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
-            ToolSemanticStatus::Cancelled => "–",
+            ToolSemanticStatus::Cancelled => "✗",
             ToolSemanticStatus::Orphaned => "?",
             ToolSemanticStatus::Running => {
                 let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
@@ -94,7 +94,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
             ToolSemanticStatus::Success => theme::SUCCESS,
             ToolSemanticStatus::Error => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
-            ToolSemanticStatus::Cancelled => theme::TEXT_MUTED,
+            ToolSemanticStatus::Cancelled => theme::ERROR,
             ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
@@ -235,6 +235,7 @@ mod tests {
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Pending)), "○");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
+        assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Cancelled)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");
     }
 

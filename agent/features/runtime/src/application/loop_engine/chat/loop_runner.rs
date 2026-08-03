@@ -743,6 +743,9 @@ where
                         main_run_port::ChatToolRoundObserver {
                             runtime_context: runtime_context.clone(),
                             workspace_root: tool_workspace_root,
+                            turn_context: turn_context.clone(),
+                            session_id: session_id.clone(),
+                            materializer: tool_result_materializer.clone(),
                         },
                     );
                 let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(

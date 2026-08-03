@@ -3,7 +3,9 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStepEvent, TuiRuntimeEvent,
     TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
 };
-use crate::tui::model::conversation::intent::{ConversationIntent, ShowInteraction};
+use crate::tui::model::conversation::intent::{
+    ConversationIntent, PresentCancelledStep, ShowInteraction,
+};
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
 };
@@ -29,6 +31,37 @@ fn runtime_run_and_step_lifecycle_are_observational_only() {
         event: TuiRunStepEvent::CancellationRequested,
     });
     assert!(step_mapping.conversation.is_empty());
+}
+
+#[test]
+fn runtime_cancelled_step_maps_to_presentation_only_intent() {
+    let run_id = UiRunId::from("run-1");
+    let step_id = UiRunStepId::from("step-1");
+    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id,
+        parent_run_id: None,
+        step_id,
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::PresentCancelledStep(
+            PresentCancelledStep { confirmed: true }
+        )]
+    ));
+}
+
+#[test]
+fn child_cancelled_step_remains_observational_only() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
+        run_id: UiRunId::from("child-run"),
+        parent_run_id: Some(UiRunId::from("root-run")),
+        step_id: UiRunStepId::from("child-step"),
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+
+    assert!(mapping.conversation.is_empty());
 }
 
 #[test]

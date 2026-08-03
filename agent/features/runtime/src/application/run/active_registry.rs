@@ -102,6 +102,37 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
         }
     }
 
+    fn clear_main_active_step(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let cleared = guard.runs.get_mut(run_id).is_some_and(|active| {
+            if active.main_step.as_ref().map(|step| &step.id) != Some(step_id) {
+                return false;
+            }
+            active.main_step = None;
+            if matches!(
+                active.control,
+                Some(crate::domain::agent_run::RunControl::CancelStep {
+                    step_id: ref control_step_id,
+                    ..
+                }) if control_step_id == step_id
+            ) {
+                active.control = None;
+                active.control_delivered = false;
+            }
+            true
+        });
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "active run main step cleared: run_id={} step_id={} cleared={}",
+            run_id,
+            step_id,
+            cleared
+        );
+    }
+
     fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
         ActiveRunRegistry::take_control(self, run_id)
     }

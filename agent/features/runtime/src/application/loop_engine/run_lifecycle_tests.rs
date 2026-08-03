@@ -11,6 +11,8 @@ struct RecordingActiveRun {
 impl ActiveRunPort for RecordingActiveRun {
     fn activate(&self, _run_id: RunId, _cancel: CancellationToken) {}
 
+    fn activate_main(&self, _run_id: RunId, _cancel: CancellationToken) {}
+
     fn set_main_active_step(
         &self,
         run_id: &RunId,

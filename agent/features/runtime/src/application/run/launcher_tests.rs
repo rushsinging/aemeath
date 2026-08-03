@@ -20,3 +20,12 @@ fn launcher_consumes_run_instance_without_requiring_callers_to_unpack_runtime_st
     assert!(!derived_setup.contains("run_instance.into_parts()"));
     assert!(derived_loop.contains("instance: &mut RunInstance"));
 }
+
+#[test]
+fn launcher_registers_only_root_run_as_current_foreground_run() {
+    let launcher = include_str!("launcher.rs");
+
+    assert!(launcher.contains("instance.run().parent_id().is_none()"));
+    assert!(launcher.contains("active_run.activate_main(run_id.clone(), cancel.clone())"));
+    assert!(launcher.contains("active_run.activate(run_id.clone(), cancel.clone())"));
+}

@@ -269,6 +269,12 @@ impl ConversationUpdate for TerminalNotice {
     }
 }
 
+impl ConversationUpdate for PresentCancelledStep {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.present_cancelled_step(self.confirmed)
+    }
+}
+
 impl ConversationUpdate for AppendSystemMessage {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_system_message(self.text)
@@ -444,13 +450,13 @@ impl ConversationUpdate for CancelInteraction {
 
 impl ConversationUpdate for InteractionReplyAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_reply(&self.request_id)
     }
 }
 
 impl ConversationUpdate for InteractionCancelAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_cancel(&self.request_id)
     }
 }
 
@@ -642,6 +648,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolCallUpdate(s) => s.update(model),
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
+            Self::PresentCancelledStep(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::UpsertModelStreamPlaceholder(s) => s.update(model),
             Self::ClearModelStreamPlaceholder(s) => s.update(model),

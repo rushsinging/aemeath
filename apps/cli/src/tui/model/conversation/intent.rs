@@ -101,6 +101,11 @@ pub struct TerminalNotice {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresentCancelledStep {
+    pub confirmed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendSystemMessage {
     pub text: String,
 }
@@ -376,6 +381,7 @@ pub enum ConversationIntent {
     ToolCallUpdate(ToolCallUpdate),
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
+    PresentCancelledStep(PresentCancelledStep),
     AppendSystemMessage(AppendSystemMessage),
     UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
     ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),

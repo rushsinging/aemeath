@@ -12,7 +12,8 @@ use super::update::ConversationUpdate;
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AnswerCurrentAskUser, InteractionReplyAccepted, ShowAskUserBatch, ToolCallStart, ToolCallUpdate,
+    AnswerCurrentAskUser, InteractionCancelAccepted, InteractionReplyAccepted, ShowAskUserBatch,
+    ToolCallStart, ToolCallUpdate,
 };
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
@@ -193,7 +194,9 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
     let mut model = ConversationModel::default();
     let completed_request_id = UiInteractionRequestId::from("request-completed");
     let completed_tool_id = ToolCallId::new("ask-completed");
+    let unrelated_tool_id = ToolCallId::new("ask-unrelated");
     start_ask_user_tool(&mut model, &completed_tool_id);
+    start_ask_user_tool(&mut model, &unrelated_tool_id);
     model.apply(ShowAskUserBatch {
         request_id: completed_request_id.clone(),
         slots: vec![ask_user_slot(completed_tool_id.as_str(), "明天想吃什么？")],
@@ -233,6 +236,64 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
     assert_eq!(
         ask_user_tool_status(&model, &completed_tool_id),
         ToolCallStatus::Success
+    );
+    let completed_result = model
+        .chats
+        .iter()
+        .flat_map(|chat| &chat.turns)
+        .flat_map(|turn| &turn.tool_calls)
+        .find(|call| call.id.as_ref() == Some(&completed_tool_id))
+        .and_then(|call| call.result.as_ref())
+        .expect("matching AskUserQuestion should have a result");
+    assert_eq!(completed_result.output, "Q1: 日料");
+    assert_eq!(
+        completed_result.content,
+        serde_json::json!({"status": "ok", "answers": ["日料"]})
+    );
+    assert_eq!(
+        ask_user_tool_status(&model, &unrelated_tool_id),
+        ToolCallStatus::Running
+    );
+    assert!(model.active_interaction().is_none());
+}
+
+#[test]
+fn accepted_cancel_cancels_only_the_ask_tool_bound_to_the_matching_request() {
+    let mut model = ConversationModel::default();
+    let cancelled_request_id = UiInteractionRequestId::from("request-cancelled");
+    let cancelled_tool_id = ToolCallId::new("ask-cancelled");
+    let unrelated_tool_id = ToolCallId::new("ask-unrelated");
+    start_ask_user_tool(&mut model, &cancelled_tool_id);
+    start_ask_user_tool(&mut model, &unrelated_tool_id);
+    model.apply(ShowAskUserBatch {
+        request_id: cancelled_request_id.clone(),
+        slots: vec![ask_user_slot(cancelled_tool_id.as_str(), "明天想吃什么？")],
+    });
+    model.show_interaction(InteractionRequest {
+        request_id: cancelled_request_id.clone(),
+        run_id: UiRunId::from("run-1"),
+        tool_call_id: Some(cancelled_tool_id.as_str().to_string()),
+        body: InteractionBody::UserQuestions(vec![UiUserQuestion {
+            prompt: "明天想吃什么？".to_string(),
+            options: vec!["日料".to_string()],
+            allow_multi: false,
+        }]),
+    });
+    model.cancel_interaction(&cancelled_request_id);
+
+    model.apply(ConversationIntent::InteractionCancelAccepted(
+        InteractionCancelAccepted {
+            request_id: cancelled_request_id,
+        },
+    ));
+
+    assert_eq!(
+        ask_user_tool_status(&model, &cancelled_tool_id),
+        ToolCallStatus::Cancelled
+    );
+    assert_eq!(
+        ask_user_tool_status(&model, &unrelated_tool_id),
+        ToolCallStatus::Running
     );
     assert!(model.active_interaction().is_none());
 }

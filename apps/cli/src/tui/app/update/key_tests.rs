@@ -133,11 +133,14 @@ fn test_ctrlc_action_processing_first_press_requests_cancel() {
 }
 
 #[test]
-fn test_ctrlc_action_cancelling_second_press_force_quits() {
-    assert_eq!(ctrlc_action(true, None, true, true), CtrlCAction::ForceQuit);
+fn test_ctrlc_action_cancelling_second_press_requests_cancel_again() {
+    assert_eq!(
+        ctrlc_action(true, None, true, true),
+        CtrlCAction::RequestCancel
+    );
     assert_eq!(
         ctrlc_action(false, None, true, true),
-        CtrlCAction::ForceQuit
+        CtrlCAction::RequestCancel
     );
 }
 

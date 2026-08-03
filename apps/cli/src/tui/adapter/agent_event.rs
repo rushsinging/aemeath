@@ -1,6 +1,6 @@
 use crate::tui::adapter::runtime_view::TuiMessageSource;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiHookStatus, TuiRuntimeEvent, TuiToolCallStatus,
+    TuiAgentProgressKind, TuiHookStatus, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
 };
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::model::conversation::ids::ToolCallId;
@@ -759,9 +759,32 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Run { .. } | TuiRuntimeEvent::RunStep { .. } => {
-            AgentEventMapping::default()
-        }
+        TuiRuntimeEvent::Run { .. } => AgentEventMapping::default(),
+        TuiRuntimeEvent::RunStep {
+            run_id,
+            parent_run_id,
+            step_id,
+            event,
+        } => match event {
+            TuiRunStepEvent::Cancelled { confirmed } if parent_run_id.is_none() => {
+                crate::tui::log_debug!(
+                    "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
+                    run_id,
+                    step_id,
+                    confirmed
+                );
+                conversation(ConversationIntent::PresentCancelledStep(
+                    PresentCancelledStep {
+                        confirmed: *confirmed,
+                    },
+                ))
+            }
+            TuiRunStepEvent::Started
+            | TuiRunStepEvent::Completed
+            | TuiRunStepEvent::CancellationRequested
+            | TuiRunStepEvent::FinalizationStarted
+            | TuiRunStepEvent::Cancelled { .. } => AgentEventMapping::default(),
+        },
         TuiRuntimeEvent::InteractionRequested(request) => {
             let body = match &request.body {
                 TuiInteractionBody::UserQuestions(questions) => InteractionBody::UserQuestions(

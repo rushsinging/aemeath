@@ -171,11 +171,12 @@ impl Run {
                 received: request_id.clone(),
             });
         }
-        Ok(self
-            .pending_interaction
-            .take()
-            .expect("checked above")
-            .continuation)
+        let pending = self.pending_interaction.take().expect("checked above");
+        self.apply_state_transition(
+            pending.continuation.resume_status(),
+            RunTransitionReason::UserResumed,
+        );
+        Ok(pending.continuation)
     }
 
     #[cfg(test)]

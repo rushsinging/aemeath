@@ -26,6 +26,8 @@ pub(super) async fn execute_non_agent<S>(
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -40,7 +42,7 @@ where
     }
 
     if other_calls.len() == 1 {
-        if agent.ctx.cancellation().is_cancelled() {
+        if cancel.is_cancelled() {
             return vec![cancelled_result(other_calls[0], language)];
         }
         return execute_one_non_agent(
@@ -54,6 +56,8 @@ where
             policy,
             run_id,
             step_id,
+            tool_context,
+            cancel,
         )
         .await;
     }
@@ -69,6 +73,8 @@ where
         policy,
         run_id,
         step_id,
+        tool_context,
+        cancel,
     )
     .await
 }
@@ -85,6 +91,8 @@ async fn execute_multiple_non_agent<S>(
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -105,7 +113,7 @@ where
                 let context = context.clone();
                 let workspace_root = workspace_root.to_path_buf();
                 async move {
-                    if agent.ctx.cancellation().is_cancelled() {
+                    if cancel.is_cancelled() {
                         return (pos, Vec::new());
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
@@ -120,6 +128,8 @@ where
                         policy,
                         run_id,
                         step_id,
+                        tool_context,
+                        cancel,
                     )
                     .await;
                     (pos, result)
@@ -137,7 +147,7 @@ where
 
     for &pos in &sequential_positions {
         let call = other_calls[pos];
-        let result_vec = if agent.ctx.cancellation().is_cancelled() {
+        let result_vec = if cancel.is_cancelled() {
             Vec::new()
         } else {
             execute_one_non_agent(
@@ -151,6 +161,8 @@ where
                 policy,
                 run_id,
                 step_id,
+                tool_context,
+                cancel,
             )
             .await
         };
@@ -210,6 +222,8 @@ async fn execute_one_non_agent<S>(
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -225,7 +239,7 @@ where
                 permission_rule: "auto".to_string(),
             }),
             workspace_root,
-            &agent.runtime_cancellation,
+            cancel,
         )
         .await;
     }
@@ -253,7 +267,7 @@ where
                 tool_input: owned_call.input.clone(),
             }),
             workspace_root,
-            &agent.runtime_cancellation,
+            cancel,
         )
         .await
     } else {
@@ -405,7 +419,16 @@ where
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = effective_call.name == "Bash";
 
-    let tool_ctx = agent.ctx.with_authorization(effective_authorization);
+    let tool_ctx = tool_context.with_authorization(effective_authorization);
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "non-agent tool cancellation context bound: run_id={} step_id={} call_id={} tool={} cancelled={}",
+        run_id,
+        step_id,
+        effective_call.id,
+        effective_call.name,
+        tool_ctx.cancellation().is_cancelled()
+    );
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
         let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
@@ -481,7 +504,7 @@ where
             hook_port,
             &effective_call,
             &ex,
-            &agent.runtime_cancellation,
+            cancel,
             workspace_root,
         )
         .await;
@@ -492,7 +515,7 @@ where
             &ex.outcome.text,
             is_error,
             workspace_root,
-            &agent.runtime_cancellation,
+            cancel,
         )
         .await;
         // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），

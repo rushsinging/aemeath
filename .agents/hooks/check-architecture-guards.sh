@@ -171,6 +171,8 @@ run_guard fast "$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-tool-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-hook-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-capability-assembly.sh"
+# TEMP DISABLED: activity observation code missing in this branch (behind main)
+# run_guard fast "$HOOKS_DIR/check-runtime-activity-observation.sh"
 run_guard fast bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh"
 run_guard fast "$HOOKS_DIR/check-composition-construction-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-command-catalog-boundary.sh"

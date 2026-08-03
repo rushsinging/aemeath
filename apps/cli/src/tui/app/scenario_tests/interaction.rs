@@ -333,6 +333,16 @@ fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
         .find(|call| call.id.as_ref() == Some(&tool_call_id))
         .expect("AskUserQuestion tool call should exist");
     assert_eq!(ask_tool.status, ToolCallStatus::Success);
+    let result = ask_tool
+        .result
+        .as_ref()
+        .expect("accepted AskUserQuestion should have a result payload");
+    assert_eq!(result.output, "Q1: 日料");
+    assert_eq!(
+        result.content,
+        serde_json::json!({"status": "ok", "answers": ["日料"]})
+    );
+    assert!(!result.is_error);
     let screen = harness.screen();
     assert!(
         screen
@@ -549,10 +559,21 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
     // Ctrl+C cancels the interaction
     harness.key(input::press(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
-    assert!(harness.effects().iter().any(|effect| matches!(
-        effect,
-        crate::tui::effect::effect::Effect::CancelInteraction { .. }
-    )));
+    let cancel_effects = harness
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(
+                effect,
+                crate::tui::effect::effect::Effect::CancelInteraction { .. }
+            )
+        })
+        .count();
+    assert_eq!(cancel_effects, 1);
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
     harness.assert_idle();
 }
 

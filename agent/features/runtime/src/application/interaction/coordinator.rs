@@ -293,14 +293,11 @@ impl InteractionCoordinator {
             .map_err(CoordinationError::RunError)
     }
 
-    /// Cancel a pending interaction (does NOT change run status).
+    /// Cancel a pending interaction and restore its continuation phase.
     ///
     /// Removes the pending interaction from the domain [`Run`] and returns
-    /// the continuation.  The caller is responsible for deciding whether
-    /// to terminate the run.
-    ///
-    /// Prefer [`cancel_and_drain`] for complete disconnect/cancel handling
-    /// that also drains the port and transitions the Run to a terminal state.
+    /// the continuation without emitting a `Resumed` event. The caller keeps
+    /// ownership of Step completion and any subsequent Run lifecycle decision.
     pub fn cancel(
         run: &mut Run,
         request_id: &InteractionRequestId,

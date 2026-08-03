@@ -874,6 +874,8 @@ impl RunLifecyclePort for RunLifecycleFake {
         self.state.lock().unwrap().registered_step = Some(step_id);
         *self.step_cancel.lock().unwrap() = Some(cancel);
     }
+
+    fn clear_step_scope(&self, _run_id: &sdk::RunId, _step_id: &sdk::RunStepId) {}
 }
 
 #[async_trait::async_trait]
@@ -3330,6 +3332,96 @@ mod interaction_routing {
         assert_eq!(step.tool_calls().len(), 1);
         assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
         assert_eq!(step.tool_calls()[0].id(), &call_id);
+    }
+
+    /// Cancelling the active UserQuestions interaction remains interaction-scoped,
+    /// completes the current Step exactly once, and never applies ToolsCompleted
+    /// while the Run is still AwaitingUser.
+    #[tokio::test]
+    async fn user_questions_cancel_completes_step_once_without_illegal_transition() {
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec!["yes".to_string(), "no".to_string()],
+                allow_multi: false,
+            }],
+        };
+        let mut port = ScriptedScenario {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            ..Default::default()
+        };
+        let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
+        assert_eq!(
+            port.interaction_bridge
+                .cancel(&request_id, sdk::InteractionCancelReason::UserCancelled,),
+            sdk::InteractionCommandOutcome::Accepted
+        );
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        }]);
+        port.sync_inputs();
+
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .expect("interaction cancellation must leave AwaitingUser before ToolsCompleted");
+
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+        assert!(run.pending_interaction().is_none());
+        assert_eq!(run.steps().len(), 1);
+        assert_eq!(run.steps()[0].tool_calls()[0].id(), &call_id);
+        assert_eq!(
+            run.steps()[0].tool_calls()[0].status(),
+            ToolCallStatus::Cancelled
+        );
+        assert_eq!(port.finalized_steps().len(), 1);
+        assert!(!port
+            .events()
+            .iter()
+            .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+        assert_eq!(
+            port.events()
+                .iter()
+                .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+                .count(),
+            1
+        );
     }
 
     // ── UserQuestions: two questions serial roundtrip ──

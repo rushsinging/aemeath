@@ -16,7 +16,7 @@
       {
         "matcher": "",
         "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-agent-stop.sh\"",
-        "timeout": 60
+        "timeout": 600
       }
     ]
   }

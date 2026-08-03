@@ -320,6 +320,7 @@ pub trait RunLifecyclePort: Send + Sync {
         step_id: sdk::RunStepId,
         cancel: CancellationToken,
     );
+    fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId);
 }
 
 #[async_trait]
@@ -758,19 +759,20 @@ async fn run_tool_round_phase<P>(
 where
     P: ToolOrchestrationPort + ?Sized,
 {
-    match await_interruptible(
-        run,
-        cancel,
-        tools.execute_tools(execution, run_id, step_id, calls, cancel),
-    )
-    .await
-    {
-        Interrupt::Completed(Ok(outcome)) => ToolRoundPhaseOutcome::Completed(outcome),
-        Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-            ToolRoundPhaseOutcome::Cancelled
+    let tool_execution = tools.execute_tools(execution, run_id, step_id, calls, cancel);
+    if let Some(remaining) = run.remaining_time(Instant::now()) {
+        match tokio::time::timeout(remaining, tool_execution).await {
+            Ok(Ok(outcome)) => ToolRoundPhaseOutcome::Completed(outcome),
+            Ok(Err(LoopEngineError::Cancelled)) => ToolRoundPhaseOutcome::Cancelled,
+            Ok(Err(error)) => ToolRoundPhaseOutcome::Failed(error),
+            Err(_) => ToolRoundPhaseOutcome::TimedOut,
         }
-        Interrupt::Completed(Err(error)) => ToolRoundPhaseOutcome::Failed(error),
-        Interrupt::TimedOut => ToolRoundPhaseOutcome::TimedOut,
+    } else {
+        match tool_execution.await {
+            Ok(outcome) => ToolRoundPhaseOutcome::Completed(outcome),
+            Err(LoopEngineError::Cancelled) => ToolRoundPhaseOutcome::Cancelled,
+            Err(error) => ToolRoundPhaseOutcome::Failed(error),
+        }
     }
 }
 
@@ -1116,7 +1118,43 @@ async fn execute_step(
 ) -> Result<(), LoopEngineError> {
     let step_cancel = cancel.child_token();
     let step_id = sdk::RunStepId::new_v7();
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation scope created: run_id={} step_id={} root_cancelled={} step_cancelled={}",
+        run.id(),
+        step_id,
+        cancel.is_cancelled(),
+        step_cancel.is_cancelled()
+    );
     port.register_step_scope(run.id(), step_id.clone(), step_cancel.clone());
+    let result = execute_step_with_scope(
+        run,
+        execution,
+        cancel,
+        port,
+        guard,
+        inputs,
+        terminal_text,
+        step_id.clone(),
+        step_cancel,
+    )
+    .await;
+    port.clear_step_scope(run.id(), &step_id);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_step_with_scope(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+    port: &mut RunLoop<'_>,
+    guard: &mut StuckGuard,
+    inputs: &[LoopInput],
+    terminal_text: &mut Option<String>,
+    step_id: sdk::RunStepId,
+    step_cancel: CancellationToken,
+) -> Result<(), LoopEngineError> {
     let step_id = match run_step_input_phase(
         run,
         execution,
@@ -2355,8 +2393,20 @@ async fn handle_pending_control(
     port: &mut RunLoop<'_>,
 ) -> Result<Option<ControlDirective>, LoopEngineError> {
     let Some(control) = port.take_control(run.id()) else {
+        log::trace!(
+            target: crate::LOG_TARGET,
+            "run control boundary: run_id={} control=none active_step={:?}",
+            run.id(),
+            run.active_step_id()
+        );
         return Ok(None);
     };
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "run control boundary: run_id={} control_received={control:?} active_step={:?}",
+        run.id(),
+        run.active_step_id()
+    );
     let active_step = run.active_step_id();
     match control {
         crate::domain::agent_run::RunControl::CancelStep { step_id, .. } => {
@@ -2399,6 +2449,12 @@ async fn finish_cancelled_step(
     port: &mut RunLoop<'_>,
     step_id: &sdk::RunStepId,
 ) -> Result<(), LoopEngineError> {
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation finalization started: run_id={} step_id={}",
+        run.id(),
+        step_id
+    );
     match run.request_step_cancellation(step_id) {
         crate::domain::agent_run::RunStepCancellationRequest::Accepted => {}
         crate::domain::agent_run::RunStepCancellationRequest::AlreadyCancelling => return Ok(()),
@@ -2419,6 +2475,12 @@ async fn finish_cancelled_step(
     )
     .await?;
     run.finish_cancelled_step(step_id)?;
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation finalization completed: run_id={} step_id={}",
+        run.id(),
+        step_id
+    );
     emit_events(run, execution, port).await
 }
 

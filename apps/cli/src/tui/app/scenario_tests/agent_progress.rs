@@ -1,5 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgress, TuiAgentProgressKind, TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext,
+    TuiAgentProgress, TuiAgentProgressKind, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
+    TuiTurnContext,
 };
 
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -85,5 +86,122 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         "child progress must remain inline in the parent Agent block"
     );
     assert_eq!(harness.screen().matches(marker).count(), 1);
+    harness.assert_idle();
+}
+
+#[test]
+fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
+    let context = TuiTurnContext {
+        chat_id: "parent-chat".to_string(),
+        turn_id: "parent-turn".to_string(),
+    };
+    let mut harness = TuiScenarioHarness::new(100, 30);
+
+    for (index, name) in ["Bash", "Agent"].into_iter().enumerate() {
+        let tool_id = format!("tool-{index}");
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+            context: context.clone(),
+            id: tool_id.clone(),
+            provider_id: Some(format!("provider-{index}")),
+            name: name.to_string(),
+            index,
+        });
+        harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+            context: context.clone(),
+            id: tool_id,
+            provider_id: Some(format!("provider-{index}")),
+            name: name.to_string(),
+            index,
+            arguments_delta: None,
+            arguments: Some(serde_json::json!({"command":"sleep 60"})),
+            status: TuiToolCallStatus::Running,
+        });
+    }
+
+    harness.runtime_event(TuiRuntimeEvent::ToolResult {
+        context: context.clone(),
+        id: "tool-0".to_string(),
+        provider_id: "provider-0".to_string(),
+        tool_name: "Bash".to_string(),
+        output: "Command cancelled by user".to_string(),
+        content: serde_json::json!({"display": "Command cancelled by user"}),
+        is_error: true,
+        images: Vec::new(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::RunStep {
+        run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+        parent_run_id: None,
+        step_id: crate::tui::model::conversation::interaction::UiRunStepId::from("step-1"),
+        event: TuiRunStepEvent::Cancelled { confirmed: true },
+    });
+    harness.runtime_event(TuiRuntimeEvent::Cancelled {
+        context: context.clone(),
+        duration_ms: 0,
+    });
+    harness.render();
+
+    let calls = harness
+        .app
+        .model
+        .conversation
+        .chats
+        .iter()
+        .flat_map(|chat| &chat.turns)
+        .flat_map(|turn| &turn.tool_calls)
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        calls
+            .iter()
+            .find(|call| call.name == "Bash")
+            .map(|call| call.status),
+        Some(crate::tui::model::conversation::tool_call::ToolCallStatus::Error)
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .find(|call| call.name == "Agent")
+            .map(|call| call.status),
+        Some(crate::tui::model::conversation::tool_call::ToolCallStatus::Cancelled)
+    );
+    assert_eq!(
+        harness
+            .app
+            .model
+            .conversation
+            .runtime
+            .spinner
+            .running_tool_count,
+        0
+    );
+    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .runtime
+        .spinner
+        .phase
+        .is_none());
+    let screen = harness.screen();
+    assert_eq!(
+        screen.matches("✻ Cancelled").count(),
+        1,
+        "实际屏幕：\n{screen}"
+    );
+    assert!(
+        screen.contains("✗ Run sleep 60"),
+        "取消的 Bash gutter 必须显示 ✗，实际屏幕：\n{screen}"
+    );
+    assert!(
+        screen.contains("Command cancelled by user"),
+        "取消的 Bash 必须回显命令取消结果，实际屏幕：\n{screen}"
+    );
+    assert!(
+        screen.contains("✗ Agent"),
+        "取消的 Agent gutter 必须显示 ✗，实际屏幕：\n{screen}"
+    );
+    assert!(!screen.contains("Calling tools"), "实际屏幕：\n{screen}");
+    assert!(!screen.contains("Completed"), "实际屏幕：\n{screen}");
     harness.assert_idle();
 }

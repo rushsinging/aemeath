@@ -6,6 +6,58 @@ use super::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 impl ConversationModel {
+    pub(super) fn present_cancelled_step(&mut self, confirmed: bool) -> Vec<ConversationChange> {
+        let mut cancelled_tools = Vec::new();
+        if confirmed {
+            if let Some((chat_id, turn)) = self.chats.iter_mut().rev().find_map(|chat| {
+                chat.turns
+                    .iter_mut()
+                    .rev()
+                    .find(|turn| {
+                        turn.tool_calls.iter().any(|call| {
+                            call.status == ToolCallStatus::Running
+                                || call.status == ToolCallStatus::Ready
+                                || call.status == ToolCallStatus::PendingArgs
+                        })
+                    })
+                    .map(|turn| (chat.id.to_string(), turn))
+            }) {
+                for call in &mut turn.tool_calls {
+                    if call.cancel() {
+                        if let Some(id) = call.id.as_ref() {
+                            cancelled_tools.push((
+                                chat_id.clone(),
+                                turn.id.to_string(),
+                                id.to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut changes = cancelled_tools
+            .into_iter()
+            .map(
+                |(chat_id, turn_id, id)| ConversationChange::ToolCallCompleted {
+                    chat_id,
+                    turn_id,
+                    id,
+                    status: ToolCallStatus::Cancelled,
+                },
+            )
+            .collect::<Vec<_>>();
+        self.runtime.stop_spinner();
+        changes.extend(self.apply(super::intent::TerminalNotice {
+            cause: super::terminal::TerminalCause::UserCancelled,
+            duration: None,
+        }));
+        changes.push(ConversationChange::SpinnerStopped);
+        changes.push(ConversationChange::StyleBoundaryResetRequired);
+        changes.push(ConversationChange::OutputDirty);
+        changes
+    }
+
     pub(super) fn promote_orphan_tool_result(
         &mut self,
         chat_id: &ChatId,
