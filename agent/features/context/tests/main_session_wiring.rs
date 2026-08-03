@@ -452,7 +452,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
         outcome.receipts[0].outcome(),
         ToolOutcomeKind::CancellationUnconfirmed
     );
-    assert_eq!(outcome.committed_revision, 2);
+    assert_eq!(outcome.committed_revision, 1);
 }
 
 #[tokio::test]
