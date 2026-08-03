@@ -3835,7 +3835,7 @@ async fn compact_progress_view_updates_activity_with_chunk_counts() {
                     stage,
                     current,
                     total,
-                } => Some((stage.clone(), *current, *total)),
+                } => Some((*stage, *current, *total)),
                 _ => None,
             })
             .expect("compaction activity must be observed")

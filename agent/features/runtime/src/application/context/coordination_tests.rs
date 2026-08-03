@@ -590,8 +590,8 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
     let coordinator = ContextCoordinator::new(port.clone());
     let frozen = request();
 
-    let received: Arc<Mutex<Vec<(sdk::CompactStageView, Option<u32>, Option<u32>)>>> =
-        Arc::new(Mutex::new(Vec::new()));
+    type CompactProgressRecord = (sdk::CompactStageView, Option<u32>, Option<u32>);
+    let received: Arc<Mutex<Vec<CompactProgressRecord>>> = Arc::new(Mutex::new(Vec::new()));
     let view = {
         let received = received.clone();
         std::sync::Arc::new(
