@@ -506,10 +506,6 @@ fn test_preview_respects_utf8_char_boundary() {
 
 #[cfg(unix)]
 #[tokio::test]
-#[cfg_attr(
-    coverage,
-    ignore = "llvm-cov 并行测试下 spawn 真实 bash（process_group + kill -9）会触发对 coverage 进程树的 SIGTERM（见 #1508）"
-)]
 async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
