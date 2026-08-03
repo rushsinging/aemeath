@@ -103,8 +103,12 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("cola-layer-purity") => {
+            let root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
+            xtask::cola_layer_purity::check(&root)
+        }
         _ => anyhow::bail!(
-            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|source-guard [root] [public-surface-output]>"
+            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|source-guard [root] [public-surface-output]|cola-layer-purity [root]>"
         ),
     }
 }

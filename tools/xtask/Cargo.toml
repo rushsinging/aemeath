@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 sdk = { path = "../../packages/sdk" }
