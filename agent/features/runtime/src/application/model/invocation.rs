@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
-    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse, RuntimeTurnContext,
+    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse,
 };
 use crate::application::loop_engine::llm_strategy::{
     build_step_token_usage, extract_invocation_context,
@@ -127,9 +127,6 @@ pub(crate) trait ModelInvocationSource: Send {
     {
         None
     }
-    fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
-        None
-    }
     fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
 }
 
@@ -202,7 +199,7 @@ async fn invoke_model_impl(
     // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
     // 残留的旁路结果丢弃：异常时 step 作废，重试请求不带已执行工具结果。
     if let Some(executor) = observer.streaming_tool() {
-        executor.reset_for_invocation(step_id);
+        executor.reset_for_invocation(step_id, cancel.clone()).await;
     }
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {

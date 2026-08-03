@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::model::conversation::block::AskUserSlot;
+use crate::tui::model::conversation::block::{AskUserCompletion, AskUserSlot};
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::interaction::UiInteractionRequestId;
 
@@ -123,8 +123,8 @@ fn test_confirm_sets_confirmed_flag() {
         answer: "A".to_string(),
     });
     model.apply(ConfirmAskUserBatch);
-    if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
-        assert!(*confirmed);
+    if let OutputTimelineItem::AskUserBatch { completion, .. } = timeline_item(&model) {
+        assert_eq!(*completion, AskUserCompletion::ReplyPending);
     }
 }
 
@@ -136,11 +136,11 @@ fn test_single_question_batch_answer_confirmed_immediately() {
         answer: "A".to_string(),
     });
     if let OutputTimelineItem::AskUserBatch {
-        confirmed, phase, ..
+        completion, phase, ..
     } = timeline_item(&model)
     {
-        assert!(*confirmed);
-        assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 confirmed
+        assert_eq!(*completion, AskUserCompletion::ReplyPending);
+        assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 completion
     }
 }
 
@@ -151,8 +151,8 @@ fn test_single_question_batch_answer_no_options_confirmed_immediately() {
     model.apply(AnswerCurrentAskUser {
         answer: "自由输入".to_string(),
     });
-    if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
-        assert!(*confirmed);
+    if let OutputTimelineItem::AskUserBatch { completion, .. } = timeline_item(&model) {
+        assert_eq!(*completion, AskUserCompletion::ReplyPending);
     }
 }
 
@@ -198,16 +198,19 @@ fn test_set_cursor_without_batch_is_noop() {
 }
 
 #[test]
-fn test_dismiss_ask_user_batch_removes_block() {
+fn test_dismiss_ask_user_batch_marks_cancel_pending_and_preserves_block() {
     let mut model = ConversationModel::default();
     show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
     let changes = model.apply(DismissAskUserBatch);
     assert!(changes
         .iter()
-        .any(|c| matches!(c, ConversationChange::AskUserDismissed { .. })));
-    assert!(!model.timeline.items().iter().any(|b| matches!(
-        b,
-        crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch { .. }
+        .any(|change| matches!(change, ConversationChange::AskUserUpdated { .. })));
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::AskUserBatch {
+            completion: AskUserCompletion::CancelPending,
+            ..
+        }
     )));
 }
 
@@ -379,15 +382,15 @@ fn show_new_batch_preserves_confirmed_batches_and_replaces_only_active_batch() {
         .items()
         .iter()
         .filter_map(|item| match item {
-            OutputTimelineItem::AskUserBatch { id, confirmed, .. } => Some((id, confirmed)),
+            OutputTimelineItem::AskUserBatch { id, completion, .. } => Some((id, completion)),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(asks.len(), 2);
     assert_eq!(asks[0].0, "ask-user-done");
-    assert!(*asks[0].1);
+    assert_eq!(*asks[0].1, AskUserCompletion::Answered);
     assert_eq!(asks[1].0, "ask-user-active-2");
-    assert!(!*asks[1].1);
+    assert_eq!(*asks[1].1, AskUserCompletion::Active);
 }
 
 #[test]
@@ -396,11 +399,12 @@ fn ask_user_snapshot_targets_active_unconfirmed_batch() {
     model.restore_answered_ask_user_batch(vec![make_slot("done", "已完成", &[])]);
     show_batch(&mut model, vec![make_slot("active", "待答", &["A"])]);
 
-    assert!(
-        !model
+    assert_eq!(
+        model
             .ask_user_snapshot()
             .expect("active Ask batch")
-            .confirmed
+            .completion,
+        AskUserCompletion::Active
     );
 }
 
@@ -485,7 +489,11 @@ fn restore_answered_batch_appends_confirmed_history() {
         .items()
         .iter()
         .filter_map(|item| match item {
-            OutputTimelineItem::AskUserBatch { id, confirmed, .. } if *confirmed => Some(id),
+            OutputTimelineItem::AskUserBatch {
+                id,
+                completion: AskUserCompletion::Answered,
+                ..
+            } => Some(id),
             _ => None,
         })
         .collect::<Vec<_>>();

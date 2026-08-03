@@ -203,7 +203,7 @@ impl OutputViewAssembler {
                 chat_input_text,
                 chat_input_cursor,
                 confirm_cursor,
-                confirmed,
+                completion,
                 ..
             } => {
                 use crate::tui::model::conversation::block::AskUserPhase as MPhase;
@@ -236,7 +236,23 @@ impl OutputViewAssembler {
                         chat_input_text: chat_input_text.clone(),
                         chat_input_cursor: *chat_input_cursor,
                         confirm_cursor: *confirm_cursor,
-                        confirmed: *confirmed,
+                        completion: match completion {
+                            crate::tui::model::conversation::block::AskUserCompletion::Active => {
+                                crate::tui::view_model::output::AskUserCompletionView::Active
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::ReplyPending => {
+                                crate::tui::view_model::output::AskUserCompletionView::ReplyPending
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::CancelPending => {
+                                crate::tui::view_model::output::AskUserCompletionView::CancelPending
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::Answered => {
+                                crate::tui::view_model::output::AskUserCompletionView::Answered
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::Cancelled => {
+                                crate::tui::view_model::output::AskUserCompletionView::Cancelled
+                            }
+                        },
                     }),
                 ))
             }

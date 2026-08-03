@@ -907,8 +907,10 @@ mod tests {
             .iter()
             .filter_map(|item| match item {
                 OutputTimelineItem::AskUserBatch {
-                    slots, confirmed, ..
-                } if *confirmed => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
+                    slots,
+                    completion: crate::tui::model::conversation::block::AskUserCompletion::Answered,
+                    ..
+                } => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
                 _ => None,
             })
             .collect::<Vec<_>>();

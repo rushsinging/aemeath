@@ -149,6 +149,8 @@ pub enum HookExecutionStatus {
     Success,
     /// Hook 主动阻断（非零 exit 或 JSON 声明 block）。
     Blocked,
+    /// Hook 执行被调用方取消。
+    Cancelled,
     /// 执行失败（spawn/wait/IO/timeout/非法 JSON）。
     ExecutionFailed {
         /// 失败原因。

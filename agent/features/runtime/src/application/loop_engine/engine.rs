@@ -1441,6 +1441,9 @@ async fn execute_step_with_scope(
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.
                 }
+                StopHookDecision::Cancelled => {
+                    return handle_step_control(run, execution, port).await;
+                }
                 StopHookDecision::Block(ref block) => {
                     let block_result = run.record_stop_hook_block();
                     log::info!(

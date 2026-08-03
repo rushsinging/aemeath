@@ -396,10 +396,15 @@ impl ConversationModel {
         let Some(reply) = interaction.confirm() else {
             return Vec::new();
         };
-        vec![ConversationChange::InteractionReplyRequested {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::ReplyPending,
+        );
+        changes.push(ConversationChange::InteractionReplyRequested {
             request_id: request_id.clone(),
             reply,
-        }]
+        });
+        changes
     }
 
     pub(super) fn cancel_interaction(
@@ -412,9 +417,14 @@ impl ConversationModel {
         if interaction.request_id() != request_id || !interaction.cancel() {
             return Vec::new();
         }
-        vec![ConversationChange::InteractionCancelRequested {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::CancelPending,
+        );
+        changes.push(ConversationChange::InteractionCancelRequested {
             request_id: request_id.clone(),
-        }]
+        });
+        changes
     }
 
     pub(super) fn accept_interaction_reply(
@@ -433,10 +443,15 @@ impl ConversationModel {
             return Vec::new();
         }
         self.active_interaction = None;
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Answered,
+        );
         self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref());
-        vec![ConversationChange::InteractionCompleted {
+        changes.push(ConversationChange::InteractionCompleted {
             request_id: request_id.clone(),
-        }]
+        });
+        changes
     }
 
     pub(super) fn accept_interaction_cancel(
@@ -455,10 +470,15 @@ impl ConversationModel {
             return Vec::new();
         }
         self.active_interaction = None;
-        self.cancel_ask_user_tool_for_request(request_id, tool_call_id.as_deref());
-        vec![ConversationChange::InteractionCompleted {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Cancelled,
+        );
+        changes.extend(self.cancel_ask_user_tool_for_request(request_id, tool_call_id.as_deref()));
+        changes.push(ConversationChange::InteractionCompleted {
             request_id: request_id.clone(),
-        }]
+        });
+        changes
     }
 
     fn ask_user_tool_call_ids_for_request(
@@ -544,13 +564,13 @@ impl ConversationModel {
         &mut self,
         request_id: &UiInteractionRequestId,
         interaction_tool_call_id: Option<&str>,
-    ) -> bool {
+    ) -> Vec<ConversationChange> {
         let tool_call_ids =
             self.ask_user_tool_call_ids_for_request(request_id, interaction_tool_call_id);
         if tool_call_ids.is_empty() {
-            return false;
+            return Vec::new();
         }
-        let mut cancelled = false;
+        let mut changes = Vec::new();
         for chat in &mut self.chats {
             for turn in &mut chat.turns {
                 for call in &mut turn.tool_calls {
@@ -559,15 +579,24 @@ impl ConversationModel {
                             .id
                             .as_ref()
                             .is_some_and(|id| tool_call_ids.contains(&id.to_string()))
+                        && call.cancel()
                     {
-                        cancelled |= call.cancel();
+                        changes.push(ConversationChange::ToolCallCompleted {
+                            chat_id: chat.id.to_string(),
+                            turn_id: turn.id.to_string(),
+                            id: call
+                                .id
+                                .as_ref()
+                                .expect("cancelled tool call has id")
+                                .to_string(),
+                            status: ToolCallStatus::Cancelled,
+                        });
                     }
                 }
             }
         }
-        cancelled
+        changes
     }
-
     pub(super) fn reject_interaction_reply(
         &mut self,
         request_id: &UiInteractionRequestId,
@@ -580,10 +609,15 @@ impl ConversationModel {
             return Vec::new();
         }
         interaction.restore_collecting();
-        vec![ConversationChange::InteractionCommandRejected {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Active,
+        );
+        changes.push(ConversationChange::InteractionCommandRejected {
             request_id: request_id.clone(),
             failure,
-        }]
+        });
+        changes
     }
 
     pub(super) fn reject_interaction_cancel(

@@ -780,7 +780,6 @@ where
                         run_id.clone(),
                         language.clone(),
                         tool_workspace_root.clone(),
-                        cancel.clone(),
                         max_tool_concurrency,
                     ));
                 let model_observer = main_run_port::ChatModelObserver {

@@ -27,41 +27,11 @@ enum StreamingBlockKind {
     Thinking,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StreamProgressSnapshot {
-    pub first_visible_event_seen: bool,
-    pub visible_progress_version: u64,
-    pub phase: &'static str,
-}
-
 #[derive(Debug, Default)]
 pub struct StreamProgressState {
     first_visible_event_seen: bool,
     visible_progress_version: u64,
     active_streaming_block: Option<StreamingBlockKind>,
-}
-
-impl StreamProgressState {
-    pub fn snapshot(&self) -> StreamProgressSnapshot {
-        StreamProgressSnapshot {
-            first_visible_event_seen: self.first_visible_event_seen,
-            visible_progress_version: self.visible_progress_version,
-            phase: match self.active_streaming_block {
-                Some(StreamingBlockKind::Text) => "writing",
-                Some(StreamingBlockKind::Thinking) => "thinking",
-                None if self.first_visible_event_seen => "waiting_model_output",
-                None => "waiting_model_response",
-            },
-        }
-    }
-}
-
-pub fn should_emit_model_stream_waiting(
-    previous_visible_progress_version: Option<u64>,
-    snapshot: &StreamProgressSnapshot,
-) -> bool {
-    previous_visible_progress_version
-        .is_none_or(|previous| previous == snapshot.visible_progress_version)
 }
 
 pub struct InvocationEventReducer<S: ChatEventSink> {
@@ -112,10 +82,6 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     ) -> Self {
         self.handler.streaming_tool = Some(streaming_tool);
         self
-    }
-
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.handler.progress_handle()
     }
 
     pub fn apply(
@@ -268,10 +234,6 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
 
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
-    }
-
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.progress.clone()
     }
 
     fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {

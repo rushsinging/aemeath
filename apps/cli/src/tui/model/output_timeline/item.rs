@@ -89,7 +89,7 @@ pub enum OutputTimelineItem {
         /// Type something 输入框的光标位置（byte offset，0..=text.len()）。
         chat_input_cursor: usize,
         confirm_cursor: usize,
-        confirmed: bool,
+        completion: crate::tui::model::conversation::block::AskUserCompletion,
     },
 }
 

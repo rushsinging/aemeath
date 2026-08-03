@@ -1,6 +1,6 @@
 use super::intent::{
-    ConfirmInteraction, ConversationIntent, InteractionReplyRejected, ShowInteraction,
-    UpdateInteractionDraft,
+    ConfirmInteraction, ConversationIntent, InteractionCancelRejected, InteractionReplyRejected,
+    ShowInteraction, UpdateInteractionDraft,
 };
 use super::interaction::{
     InteractionBody, InteractionCommandFailure, InteractionDraftAction, InteractionPhase,
@@ -9,13 +9,14 @@ use super::interaction::{
 };
 use super::model::ConversationModel;
 use super::update::ConversationUpdate;
-use crate::tui::model::conversation::block::AskUserSlot;
+use crate::tui::model::conversation::block::{AskUserCompletion, AskUserSlot};
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::intent::{
     AnswerCurrentAskUser, InteractionCancelAccepted, InteractionReplyAccepted, ShowAskUserBatch,
     ToolCallStart, ToolCallUpdate,
 };
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 fn tool_approval_request(id: &str) -> InteractionRequest {
     InteractionRequest {
@@ -61,6 +62,25 @@ fn ask_user_tool_status(model: &ConversationModel, tool_call_id: &ToolCallId) ->
         .find(|call| call.id.as_ref() == Some(tool_call_id))
         .expect("AskUserQuestion tool call should exist")
         .status
+}
+
+fn ask_user_completion(
+    model: &ConversationModel,
+    request_id: &UiInteractionRequestId,
+) -> AskUserCompletion {
+    model
+        .timeline
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            OutputTimelineItem::AskUserBatch {
+                request_id: Some(batch_request_id),
+                completion,
+                ..
+            } if batch_request_id == request_id => Some(*completion),
+            _ => None,
+        })
+        .expect("AskUserBatch should exist")
 }
 
 fn start_ask_user_tool(model: &mut ConversationModel, tool_call_id: &ToolCallId) {
@@ -226,6 +246,10 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
         },
     );
     model.confirm_interaction(&completed_request_id);
+    assert_eq!(
+        ask_user_completion(&model, &completed_request_id),
+        AskUserCompletion::ReplyPending
+    );
 
     model.apply(ConversationIntent::InteractionReplyAccepted(
         InteractionReplyAccepted {
@@ -254,6 +278,10 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
         ask_user_tool_status(&model, &unrelated_tool_id),
         ToolCallStatus::Running
     );
+    assert_eq!(
+        ask_user_completion(&model, &completed_request_id),
+        AskUserCompletion::Answered
+    );
     assert!(model.active_interaction().is_none());
 }
 
@@ -280,6 +308,10 @@ fn accepted_cancel_cancels_only_the_ask_tool_bound_to_the_matching_request() {
         }]),
     });
     model.cancel_interaction(&cancelled_request_id);
+    assert_eq!(
+        ask_user_completion(&model, &cancelled_request_id),
+        AskUserCompletion::CancelPending
+    );
 
     model.apply(ConversationIntent::InteractionCancelAccepted(
         InteractionCancelAccepted {
@@ -294,6 +326,10 @@ fn accepted_cancel_cancels_only_the_ask_tool_bound_to_the_matching_request() {
     assert_eq!(
         ask_user_tool_status(&model, &unrelated_tool_id),
         ToolCallStatus::Running
+    );
+    assert_eq!(
+        ask_user_completion(&model, &UiInteractionRequestId::from("request-cancelled")),
+        AskUserCompletion::Cancelled
     );
     assert!(model.active_interaction().is_none());
 }
@@ -341,5 +377,56 @@ fn rejected_reply_keeps_the_ask_tool_running() {
     assert_eq!(
         model.active_interaction().expect("retryable").phase(),
         InteractionPhase::Collecting
+    );
+    assert_eq!(
+        ask_user_completion(&model, &request_id),
+        AskUserCompletion::Active
+    );
+}
+
+#[test]
+fn rejected_cancel_restores_the_ask_batch_for_retry() {
+    let mut model = ConversationModel::default();
+    let request_id = UiInteractionRequestId::from("request-cancel-rejected");
+    let tool_call_id = ToolCallId::new("ask-cancel-rejected");
+    start_ask_user_tool(&mut model, &tool_call_id);
+    model.apply(ShowAskUserBatch {
+        request_id: request_id.clone(),
+        slots: vec![ask_user_slot(tool_call_id.as_str(), "明天想吃什么？")],
+    });
+    model.show_interaction(InteractionRequest {
+        request_id: request_id.clone(),
+        run_id: UiRunId::from("run-1"),
+        tool_call_id: Some(tool_call_id.as_str().to_string()),
+        body: InteractionBody::UserQuestions(vec![UiUserQuestion {
+            prompt: "明天想吃什么？".to_string(),
+            options: vec!["日料".to_string()],
+            allow_multi: false,
+        }]),
+    });
+    model.cancel_interaction(&request_id);
+    assert_eq!(
+        ask_user_completion(&model, &request_id),
+        AskUserCompletion::CancelPending
+    );
+
+    model.apply(ConversationIntent::InteractionCancelRejected(
+        InteractionCancelRejected {
+            request_id: request_id.clone(),
+            failure: InteractionCommandFailure::NotFound,
+        },
+    ));
+
+    assert_eq!(
+        ask_user_tool_status(&model, &tool_call_id),
+        ToolCallStatus::Running
+    );
+    assert_eq!(
+        model.active_interaction().expect("retryable").phase(),
+        InteractionPhase::Collecting
+    );
+    assert_eq!(
+        ask_user_completion(&model, &request_id),
+        AskUserCompletion::Active
     );
 }

@@ -173,7 +173,7 @@ fn reset_rebuilds_from_the_new_conversation_window() {
 }
 
 #[test]
-fn dismiss_removes_only_the_active_ask_user_root() {
+fn dismiss_updates_only_the_active_ask_user_root_to_cancel_pending() {
     let mut model = ConversationModel::default();
     model.apply(AppendUserMessage {
         text: "stable".to_string(),
@@ -201,9 +201,9 @@ fn dismiss_removes_only_the_active_ask_user_root() {
     let update = materialize_all(&mut view, &model, None);
 
     assert!(!update.stats.did_rebuild);
-    assert_eq!(update.stats.touched_roots, 0);
+    assert_eq!(update.stats.touched_roots, 1);
     assert_eq!(update.stats.reused_roots, 1);
-    assert_eq!(view.roots().len(), 1);
+    assert_eq!(view.roots().len(), 2);
     assert!(Arc::ptr_eq(&stable, &view.roots()[0]));
 }
 
