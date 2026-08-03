@@ -46,6 +46,7 @@ for name in crates:
 PY
 while IFS= read -r crate; do
     echo "[coverage] running $crate ..." >&2
+    echo "[coverage] disk: $(df -h / | awk 'NR==2 {print $4" free / "$2}') mem: $(free -m | awk '/Mem:/ {print $7" MB avail"}') procs: $(ps -e | wc -l | tr -d ' ')" >&2
     cargo llvm-cov -p "$crate" --quiet --json --summary-only \
         --output-path "$crater_dir/$crate.json" || exit 1
 done < "$crater_dir/crates.txt"
