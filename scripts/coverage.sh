@@ -25,6 +25,7 @@ export CARGO_LLVM_COV_BUILD_DIR="${CARGO_LLVM_COV_BUILD_DIR:-$CARGO_TARGET_DIR/l
 # （= CPU 数）导致内存/资源峰值，runner 在 tools 测试启动时取消 job
 # （SIGTERM + "The operation was canceled"，实测并行必现）。
 export RUST_TEST_THREADS=1
+export CARGO_BUILD_JOBS=2
 
 report_json="$(mktemp "${TMPDIR:-/tmp}/aemeath-coverage.XXXXXX.json")"
 trap 'rm -f "$report_json"' EXIT
