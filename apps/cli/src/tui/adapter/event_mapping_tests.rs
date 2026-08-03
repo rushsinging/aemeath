@@ -1,5 +1,316 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
-use crate::tui::adapter::tui_runtime_event::{TuiHookStatus, TuiRuntimeEvent};
+use crate::tui::adapter::tui_runtime_event::{
+    TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
+    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiInteractionKind,
+    TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+};
+
+#[test]
+fn activity_increment_maps_complete_typed_fact_without_sdk_types() {
+    let run_id = sdk::RunId::new("run-activity");
+    let step_id = sdk::RunStepId::new("step-activity");
+    let activity_id = sdk::ActivityId::new("activity-model");
+    let parent_activity_id = sdk::ActivityId::new("activity-root");
+    let model_invocation_id = sdk::ModelInvocationId::new("model-invocation");
+    let expected_model_invocation_id = model_invocation_id.as_str().to_string();
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ActivityChanged {
+        kind: sdk::ActivityChangeKind::Updated,
+        activity: sdk::ActivityView {
+            id: activity_id.clone(),
+            run_id: run_id.clone(),
+            run_step_id: Some(step_id.clone()),
+            parent_activity_id: Some(parent_activity_id.clone()),
+            source: sdk::ActivitySourceView::ModelInvocation(model_invocation_id),
+            kind: sdk::ActivityKindView::ModelInvocation,
+            state: sdk::ActivityStateView::Waiting,
+            detail: sdk::ActivityDetailView::Model {
+                model: "claude-sonnet".to_string(),
+                attempt: 2,
+                stream: sdk::ModelStreamStateView::Retrying,
+            },
+            audience: sdk::ActivityAudienceView::Operational,
+            revision: 7,
+            timing: sdk::ActivityTimingView {
+                total_elapsed_ms: 1_500,
+                active_elapsed_ms: 1_000,
+                state_elapsed_ms: 500,
+                started_at_unix_ms: Some(100),
+                finished_at_unix_ms: None,
+            },
+        },
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ActivityChanged {
+            kind: TuiActivityChangeKind::Updated,
+            activity,
+        }) if activity.id.as_str() == activity_id.as_str()
+            && activity.run_id.as_str() == run_id.as_str()
+            && activity.run_step_id.as_ref().is_some_and(|id| id.as_str() == step_id.as_str())
+            && activity.parent_activity_id.as_ref().is_some_and(|id| id.as_str() == parent_activity_id.as_str())
+            && matches!(activity.source, TuiActivitySource::ModelInvocation(ref id) if id == &expected_model_invocation_id)
+            && activity.kind == TuiActivityKind::ModelInvocation
+            && activity.state == TuiActivityState::Waiting
+            && matches!(activity.detail, TuiActivityDetail::Model { ref model, attempt: 2, stream: TuiModelStreamState::Retrying } if model == "claude-sonnet")
+            && activity.audience == TuiActivityAudience::Operational
+            && activity.revision == 7
+            && activity.timing.total_elapsed_ms == 1_500
+            && activity.timing.active_elapsed_ms == 1_000
+            && activity.timing.state_elapsed_ms == 500
+            && activity.timing.started_at_unix_ms == Some(100)
+            && activity.timing.finished_at_unix_ms.is_none()
+    ));
+}
+
+#[test]
+fn activity_snapshot_maps_all_closed_enum_variants() {
+    let run_id = sdk::RunId::new("run-snapshot");
+    let fixture = |index: usize,
+                   source: sdk::ActivitySourceView,
+                   kind: sdk::ActivityKindView,
+                   state: sdk::ActivityStateView,
+                   detail: sdk::ActivityDetailView,
+                   audience: sdk::ActivityAudienceView| {
+        sdk::ActivityView {
+            id: sdk::ActivityId::new(format!("activity-{index}")),
+            run_id: run_id.clone(),
+            run_step_id: None,
+            parent_activity_id: None,
+            source,
+            kind,
+            state,
+            detail,
+            audience,
+            revision: index as u64 + 1,
+            timing: sdk::ActivityTimingView::default(),
+        }
+    };
+    let tool_call_id = sdk::ToolCallId::new("tool-call");
+    let expected_tool_call_id = tool_call_id.as_str().to_string();
+    let interaction_id = sdk::InteractionRequestId::new("interaction");
+    let expected_interaction_id = interaction_id.as_str().to_string();
+    let phase_step_id = sdk::RunStepId::new("phase-step");
+    let expected_phase_step_id = phase_step_id.as_str().to_string();
+    let hook_dispatch_id = sdk::ActivityId::new("hook-dispatch");
+    let expected_hook_dispatch_id = hook_dispatch_id.as_str().to_string();
+    let compaction_id = sdk::ActivityId::new("compaction");
+    let expected_compaction_id = compaction_id.as_str().to_string();
+    let child_run_id = sdk::RunId::new("child-run");
+    let expected_child_run_id = child_run_id.as_str().to_string();
+    let activities = vec![
+        fixture(
+            0,
+            sdk::ActivitySourceView::Run,
+            sdk::ActivityKindView::Run,
+            sdk::ActivityStateView::Running,
+            sdk::ActivityDetailView::Run {
+                purpose: sdk::RunPurposeView::Main,
+            },
+            sdk::ActivityAudienceView::User,
+        ),
+        fixture(
+            1,
+            sdk::ActivitySourceView::RunStep(phase_step_id),
+            sdk::ActivityKindView::RunPhase(sdk::RunPhaseKindView::Terminating),
+            sdk::ActivityStateView::Succeeded,
+            sdk::ActivityDetailView::Phase {
+                phase: sdk::RunPhaseKindView::CancellingStep,
+            },
+            sdk::ActivityAudienceView::Diagnostic,
+        ),
+        fixture(
+            2,
+            sdk::ActivitySourceView::ToolCall(tool_call_id),
+            sdk::ActivityKindView::ToolCall,
+            sdk::ActivityStateView::Failed,
+            sdk::ActivityDetailView::Tool {
+                name: "Bash".to_string(),
+                summary: Some("cargo test".to_string()),
+                parallel_count: 3,
+            },
+            sdk::ActivityAudienceView::User,
+        ),
+        fixture(
+            3,
+            sdk::ActivitySourceView::HookDispatch(hook_dispatch_id),
+            sdk::ActivityKindView::HookDispatch,
+            sdk::ActivityStateView::Cancelled,
+            sdk::ActivityDetailView::Hook {
+                point: sdk::HookPointView::StopFailure,
+                script: "check-stop-failure.sh".to_string(),
+                attempt: 4,
+            },
+            sdk::ActivityAudienceView::Diagnostic,
+        ),
+        fixture(
+            4,
+            sdk::ActivitySourceView::Interaction(interaction_id),
+            sdk::ActivityKindView::Interaction,
+            sdk::ActivityStateView::Terminated,
+            sdk::ActivityDetailView::Interaction {
+                kind: sdk::InteractionKindView::PlanApproval,
+            },
+            sdk::ActivityAudienceView::Operational,
+        ),
+        fixture(
+            5,
+            sdk::ActivitySourceView::ChildRun(child_run_id),
+            sdk::ActivityKindView::ChildRun,
+            sdk::ActivityStateView::Waiting,
+            sdk::ActivityDetailView::ChildRun {
+                role: "reviewer".to_string(),
+                model: "claude-opus".to_string(),
+            },
+            sdk::ActivityAudienceView::User,
+        ),
+        fixture(
+            6,
+            sdk::ActivitySourceView::Compaction(compaction_id),
+            sdk::ActivityKindView::Compaction,
+            sdk::ActivityStateView::Running,
+            sdk::ActivityDetailView::Compact {
+                stage: sdk::CompactStageView::Finalizing,
+                current: Some(2),
+                total: Some(3),
+            },
+            sdk::ActivityAudienceView::Operational,
+        ),
+    ];
+
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ActivitySnapshot(
+        sdk::ActivitySnapshotView {
+            run_id: run_id.clone(),
+            revision: 11,
+            activities,
+        },
+    ));
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ActivitySnapshot(snapshot))
+            if snapshot.run_id.as_str() == run_id.as_str()
+                && snapshot.revision == 11
+                && snapshot.activities.len() == 7
+                && snapshot.activities[0].source == TuiActivitySource::Run
+                && matches!(snapshot.activities[0].detail, TuiActivityDetail::Run { purpose: TuiRunPurpose::Main })
+                && matches!(snapshot.activities[1].source, TuiActivitySource::RunStep(ref id) if id.as_str() == expected_phase_step_id)
+                && snapshot.activities[1].kind == TuiActivityKind::RunPhase(TuiRunPhaseKind::Terminating)
+                && matches!(snapshot.activities[1].detail, TuiActivityDetail::Phase { phase: TuiRunPhaseKind::CancellingStep })
+                && matches!(snapshot.activities[2].source, TuiActivitySource::ToolCall(ref id) if id == &expected_tool_call_id)
+                && matches!(snapshot.activities[2].detail, TuiActivityDetail::Tool { ref name, parallel_count: 3, .. } if name == "Bash")
+                && matches!(snapshot.activities[3].source, TuiActivitySource::HookDispatch(ref id) if id.as_str() == expected_hook_dispatch_id)
+                && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, ref script, attempt: 4 } if script == "check-stop-failure.sh")
+                && matches!(snapshot.activities[4].source, TuiActivitySource::Interaction(ref id) if id == &expected_interaction_id)
+                && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
+                && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
+                && matches!(snapshot.activities[5].detail, TuiActivityDetail::ChildRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
+                && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
+                && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, current: Some(2), total: Some(3) })
+    ));
+}
+
+#[test]
+fn activity_closed_enum_helpers_map_every_variant() {
+    let phases = [
+        (
+            sdk::RunPhaseKindView::DrainingInput,
+            TuiRunPhaseKind::DrainingInput,
+        ),
+        (
+            sdk::RunPhaseKindView::PreparingContext,
+            TuiRunPhaseKind::PreparingContext,
+        ),
+        (
+            sdk::RunPhaseKindView::ApplyingResponse,
+            TuiRunPhaseKind::ApplyingResponse,
+        ),
+        (
+            sdk::RunPhaseKindView::AwaitingToolApproval,
+            TuiRunPhaseKind::AwaitingToolApproval,
+        ),
+        (
+            sdk::RunPhaseKindView::ExecutingTools,
+            TuiRunPhaseKind::ExecutingTools,
+        ),
+        (
+            sdk::RunPhaseKindView::FinalizingStep,
+            TuiRunPhaseKind::FinalizingStep,
+        ),
+        (
+            sdk::RunPhaseKindView::CancellingStep,
+            TuiRunPhaseKind::CancellingStep,
+        ),
+        (
+            sdk::RunPhaseKindView::Terminating,
+            TuiRunPhaseKind::Terminating,
+        ),
+    ];
+    for (sdk_phase, expected) in phases {
+        assert_eq!(super::run_phase(sdk_phase), expected);
+    }
+
+    let hook_points = [
+        sdk::HookPointView::PreToolUse,
+        sdk::HookPointView::UserPromptSubmit,
+        sdk::HookPointView::PreCompact,
+        sdk::HookPointView::PermissionRequest,
+        sdk::HookPointView::Elicitation,
+        sdk::HookPointView::UserPromptExpansion,
+        sdk::HookPointView::Stop,
+        sdk::HookPointView::PostToolUse,
+        sdk::HookPointView::PostToolUseFailure,
+        sdk::HookPointView::PostCompact,
+        sdk::HookPointView::PostToolBatch,
+        sdk::HookPointView::ElicitationResult,
+        sdk::HookPointView::SessionStart,
+        sdk::HookPointView::SessionEnd,
+        sdk::HookPointView::SubRunStart,
+        sdk::HookPointView::SubRunStop,
+        sdk::HookPointView::TaskCreated,
+        sdk::HookPointView::TaskCompleted,
+        sdk::HookPointView::Notification,
+        sdk::HookPointView::InstructionsLoaded,
+        sdk::HookPointView::StopFailure,
+        sdk::HookPointView::PermissionDenied,
+        sdk::HookPointView::ConfigChange,
+        sdk::HookPointView::CwdChanged,
+        sdk::HookPointView::FileChanged,
+        sdk::HookPointView::TeammateIdle,
+    ];
+    for sdk_point in hook_points {
+        let mapped = super::hook_point(sdk_point);
+        assert!(matches!(
+            mapped,
+            TuiHookPoint::PreToolUse
+                | TuiHookPoint::UserPromptSubmit
+                | TuiHookPoint::PreCompact
+                | TuiHookPoint::PermissionRequest
+                | TuiHookPoint::Elicitation
+                | TuiHookPoint::UserPromptExpansion
+                | TuiHookPoint::Stop
+                | TuiHookPoint::PostToolUse
+                | TuiHookPoint::PostToolUseFailure
+                | TuiHookPoint::PostCompact
+                | TuiHookPoint::PostToolBatch
+                | TuiHookPoint::ElicitationResult
+                | TuiHookPoint::SessionStart
+                | TuiHookPoint::SessionEnd
+                | TuiHookPoint::SubRunStart
+                | TuiHookPoint::SubRunStop
+                | TuiHookPoint::TaskCreated
+                | TuiHookPoint::TaskCompleted
+                | TuiHookPoint::Notification
+                | TuiHookPoint::InstructionsLoaded
+                | TuiHookPoint::StopFailure
+                | TuiHookPoint::PermissionDenied
+                | TuiHookPoint::ConfigChange
+                | TuiHookPoint::CwdChanged
+                | TuiHookPoint::FileChanged
+                | TuiHookPoint::TeammateIdle
+        ));
+    }
+}
 
 #[test]
 fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
@@ -53,8 +364,8 @@ fn session_resume_keeps_context_run_step_boundaries() {
         }],
         session_id: "session-1".into(),
         created_at: 0,
+        compacted: false,
     });
-
     assert!(matches!(
         mapped,
         SdkEventMapping::Runtime(TuiRuntimeEvent::SessionResumed { steps, .. })
@@ -83,38 +394,6 @@ fn authoritative_cancelled_terminal_maps_without_run_or_step_correlation() {
             context,
             duration_ms: 6_000,
         }) if context.chat_id == chat_id.as_str() && context.turn_id == turn_id.as_str()
-    ));
-}
-
-#[test]
-fn hook_event_preserves_authoritative_status_and_final_diagnostics() {
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookEvent(sdk::HookEventView {
-        hook_name: "Stop".to_string(),
-        status: sdk::HookEventStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(sdk::HookExecutionResultView {
-            exit_code: Some(0),
-            stdout: "ok".to_string(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    }));
-
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::HookEvent(event))
-            if event.status == TuiHookStatus::Succeeded
-                && event.matcher.as_deref() == Some("*")
-                && event.command.as_deref() == Some("check-agent-stop.sh")
-                && event.result.as_ref().is_some_and(|result|
-                    result.exit_code == Some(0)
-                        && result.stdout == "ok"
-                        && result.stderr.is_empty()
-                        && result.decision.as_deref() == Some("continue")
-                        && result.reason.is_none())
     ));
 }
 

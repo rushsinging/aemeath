@@ -105,6 +105,16 @@ pub enum ConversationChange {
         active_request_id: UiInteractionRequestId,
         received_request_id: UiInteractionRequestId,
     },
+    ActivityObservationChanged {
+        run_id: super::interaction::UiRunId,
+        activity_id: crate::tui::adapter::tui_runtime_event::UiActivityId,
+    },
+    ActivityObservationStale {
+        run_id: super::interaction::UiRunId,
+    },
+    ActivitySnapshotReplaced {
+        run_id: super::interaction::UiRunId,
+    },
     OutputDirty,
     StyleBoundaryResetRequired,
     // ── 原 runtime changes（RuntimeChange 合入）──
@@ -127,8 +137,6 @@ pub enum ConversationChange {
     /// Compact 进度条嵌入 spinner 行（output 区），与 phase 变化解耦——单独归类为 output_dirty，
     /// 避免依赖 SpinnerTick 每 90ms 兜底 mark_output_dirty 的不可靠时序（#540）。
     CompactProgressChanged,
-    SpinnerPhaseChanged,
-    SpinnerStopped,
     QueuedSubmissionsSynced {
         count: usize,
     },

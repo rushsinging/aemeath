@@ -649,6 +649,22 @@
       "status": "active"
     },
     {
+      "id": "policy.runtime.activity-observation",
+      "guard": "check-runtime-activity-observation.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src/application/activity"
+      },
+      "classification": "target_capability_policy",
+      "owner": "runtime",
+      "reason": "ActivityCoordinator exclusively constructs Runtime Activity observations; TUI mutates its fact mirror only through the root reducer; LiveStatus consumes Activity instead of legacy Run status; diagnostics remain structured and payload-free",
+      "tracking_issue": 742,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent unified Runtime Activity observation policy",
+      "status": "active"
+    },
+    {
       "id": "policy.runtime.capability-assembly",
       "guard": "check-runtime-capability-assembly.sh",
       "module": "runtime",

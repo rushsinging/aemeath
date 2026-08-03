@@ -1,3 +1,4 @@
+use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
 use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
@@ -10,7 +11,6 @@ use super::output_view_change::{
 use super::queued_submission::QueuedSubmission;
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
-use crate::tui::app::event::ModelStreamWaitingView;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
 use std::time::Instant;
 
@@ -47,8 +47,8 @@ pub struct ConversationModel {
     pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
-    pub model_stream_placeholder: Option<ModelStreamWaitingView>,
     pub(super) active_interaction: Option<InteractionState>,
+    activity_observations: ActivityObservationModel,
 
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -71,8 +71,8 @@ impl Default for ConversationModel {
             active_text_context: None,
             active_thinking_block_id: None,
             active_thinking_context: None,
-            model_stream_placeholder: None,
             active_interaction: None,
+            activity_observations: ActivityObservationModel::default(),
             runtime: RuntimeState::default(),
         }
     }
@@ -119,11 +119,10 @@ impl ConversationModel {
     }
 
     pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
-        let before_placeholder = self.model_stream_placeholder.clone();
         let changes = update.update(self);
         if !changes.is_empty() {
             self.revision = self.revision.wrapping_add(1);
-            self.publish_output_view_changes(before_placeholder.as_ref(), &changes);
+            self.publish_output_view_changes(&changes);
         } else {
             let _ = self.timeline.take_pending_view_changes();
         }
@@ -166,11 +165,7 @@ impl ConversationModel {
             .find(|call| call.id.as_ref() == Some(tool_call_id))
     }
 
-    fn publish_output_view_changes(
-        &mut self,
-        before_placeholder: Option<&ModelStreamWaitingView>,
-        changes: &[ConversationChange],
-    ) {
+    fn publish_output_view_changes(&mut self, changes: &[ConversationChange]) {
         let timeline_changes = self.timeline.take_pending_view_changes();
         let mut changed_item_ids = std::collections::HashSet::new();
         for change in &timeline_changes {
@@ -180,18 +175,9 @@ impl ConversationModel {
                 | OutputViewChange::Remove { item_id } => {
                     changed_item_ids.insert(item_id.clone());
                 }
-                OutputViewChange::Reset | OutputViewChange::Placeholder => {}
+                OutputViewChange::Reset => {}
             }
             self.output_view_journal.publish(change.clone());
-        }
-
-        if before_placeholder != self.model_stream_placeholder.as_ref()
-            && !timeline_changes
-                .iter()
-                .any(|change| matches!(change, OutputViewChange::Placeholder))
-        {
-            self.output_view_journal
-                .publish(OutputViewChange::Placeholder);
         }
 
         for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
@@ -232,35 +218,47 @@ impl ConversationModel {
         }
     }
 
-    pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {
-        if let Some(placeholder) = self.model_stream_placeholder.take() {
-            crate::tui::log_debug!(
-                "clear model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-                placeholder.context.chat_id,
-                placeholder.context.turn_id,
-                placeholder.elapsed_secs,
-                placeholder.phase,
-            );
-            vec![ConversationChange::OutputDirty]
+    pub(crate) fn activity_observations(&self) -> &ActivityObservationModel {
+        &self.activity_observations
+    }
+
+    #[cfg(test)]
+    pub(crate) fn activity_observations_mut(&mut self) -> &mut ActivityObservationModel {
+        &mut self.activity_observations
+    }
+
+    pub(super) fn observe_activity_change(
+        &mut self,
+        activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
+    ) -> Vec<ConversationChange> {
+        let run_id = activity.run_id.clone();
+        let activity_id = activity.id.clone();
+        match self.activity_observations.observe_increment(activity) {
+            ActivityIncrementOutcome::Applied => {
+                vec![ConversationChange::ActivityObservationChanged {
+                    run_id,
+                    activity_id,
+                }]
+            }
+            ActivityIncrementOutcome::GapDetected => {
+                vec![ConversationChange::ActivityObservationStale { run_id }]
+            }
+            ActivityIncrementOutcome::Ignored => Vec::new(),
+        }
+    }
+
+    pub(super) fn replace_activity_snapshot(
+        &mut self,
+        snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
+    ) -> Vec<ConversationChange> {
+        let run_id = snapshot.run_id.clone();
+        if self.activity_observations.replace_snapshot(snapshot) {
+            vec![ConversationChange::ActivitySnapshotReplaced { run_id }]
         } else {
             Vec::new()
         }
     }
 
-    pub(super) fn upsert_model_stream_placeholder(
-        &mut self,
-        placeholder: ModelStreamWaitingView,
-    ) -> Vec<ConversationChange> {
-        crate::tui::log_debug!(
-            "upsert model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-            placeholder.context.chat_id,
-            placeholder.context.turn_id,
-            placeholder.elapsed_secs,
-            placeholder.phase,
-        );
-        self.model_stream_placeholder = Some(placeholder);
-        vec![ConversationChange::OutputDirty]
-    }
     pub(super) fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
         let chat_id = ChatId::new_v7();
@@ -465,7 +463,11 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         }
         | ConversationChange::AskUserShown { id: block_id }
         | ConversationChange::AskUserUpdated { id: block_id }
-        | ConversationChange::OrphanToolResultObserved { id: block_id } => Some(block_id.clone()),
+        | ConversationChange::OrphanToolResultObserved { id: block_id }
+        | ConversationChange::AgentProgressRecorded {
+            block_id,
+            tool_id: _,
+        } => Some(block_id.clone()),
         ConversationChange::AskUserDismissed { .. } => None,
         ConversationChange::ToolCallObserved { .. } => None,
         ConversationChange::OutputDirty => None,
@@ -486,7 +488,6 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
             turn_id,
             tool_id: id,
         } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
-        ConversationChange::AgentProgressRecorded { .. } => None,
         _ => None,
     }
 }

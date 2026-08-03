@@ -1,11 +1,9 @@
-use crate::tui::adapter::runtime_view::TuiMessageSource;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiHookStatus, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
+    TuiAgentProgressKind, TuiRuntimeEvent, TuiToolCallStatus,
 };
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
@@ -88,14 +86,14 @@ where
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
@@ -123,7 +121,7 @@ where
                 name,
                 index,
             );
-            clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -155,7 +153,7 @@ where
                 index,
                 args.as_ref().map(|s| s.len()).unwrap_or(0),
             );
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -190,7 +188,7 @@ where
                 is_error,
                 images.len(),
             );
-            clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+            conversation(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: ToolCallId::new(id.as_str()),
@@ -304,50 +302,27 @@ where
                 AppendSystemMessage { text: text.clone() },
             ))
         }
-        UiEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: context.clone(),
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
         | UiEvent::PostToolExecutionSync { messages }
-        | UiEvent::CompactRollback { messages }
-        | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
+        | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
+        UiEvent::CompactFinished { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
                 message_count: messages.len(),
             });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
             mapping
         }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
 
-        // ── HookEvent → notice via conversation ──
-        UiEvent::HookEvent(_) => AgentEventMapping::default(),
-        UiEvent::HookMessage(_) => AgentEventMapping::default(),
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
         UiEvent::WorkspaceMetadataResolved(metadata) => AgentEventMapping {
             workspace: vec![WorkspaceIntent::ApplyMetadata {
@@ -363,23 +338,35 @@ where
 }
 
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
-    use crate::tui::adapter::tui_runtime_event::TuiInteractionBody;
+    use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
         InteractionBody, InteractionRequest, UiApprovalPrompt, UiPlanApprovalPrompt, UiRiskLevel,
         UiStuckDiagnostic, UiUserQuestion,
     };
 
     match event {
+        TuiRuntimeEvent::Noop => AgentEventMapping::default(),
+        TuiRuntimeEvent::ActivityChanged { kind, activity } => conversation(
+            ConversationIntent::ObserveActivityChange(ObserveActivityChange {
+                kind: *kind,
+                activity: activity.clone(),
+            }),
+        ),
+        TuiRuntimeEvent::ActivitySnapshot(snapshot) => conversation(
+            ConversationIntent::ReplaceActivitySnapshot(ReplaceActivitySnapshot {
+                snapshot: snapshot.clone(),
+            }),
+        ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 text: text.clone(),
             }))
         }
         TuiRuntimeEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 text: text.clone(),
@@ -397,7 +384,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             provider_id,
             name,
             index,
-        } => clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+        } => conversation(ConversationIntent::ToolCallStart(ToolCallStart {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
             id: ToolCallId::new(id),
@@ -418,7 +405,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             let args = arguments_delta
                 .clone()
                 .or_else(|| arguments.as_ref().map(ToString::to_string));
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
                 id: ToolCallId::new(id),
@@ -444,7 +431,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             content,
             is_error,
             images,
-        } => clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+        } => conversation(ConversationIntent::ToolResult(ToolResult {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
             id: ToolCallId::new(id),
@@ -502,48 +489,21 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
-        TuiRuntimeEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: crate::tui::app::event::UiTurnContext {
-                        chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                            &context.chat_id,
-                        ),
-                        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                            &context.turn_id,
-                        ),
-                    },
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
         | TuiRuntimeEvent::PostToolExecutionSync { messages }
-        | TuiRuntimeEvent::CompactRollback { messages }
-        | TuiRuntimeEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
+        | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        TuiRuntimeEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
+        TuiRuntimeEvent::CompactFinished { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
                 message_count: messages.len(),
             });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
             mapping
         }
         TuiRuntimeEvent::ApiError { messages, error } => {
@@ -604,15 +564,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 (node != "idle").then(|| node.clone()),
             )))
         }
-        TuiRuntimeEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => conversation(ConversationIntent::SetCompactProgress(SetCompactProgress {
-            stage: stage.clone(),
-            current: *current,
-            total: *total,
-        })),
+        TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::TasksSnapshot { lines } => conversation(
             ConversationIntent::UpdateTaskLines(UpdateTaskLines(lines.clone())),
         ),
@@ -631,42 +583,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             },
         )),
         TuiRuntimeEvent::TurnChanged(_) => AgentEventMapping::default(),
-        TuiRuntimeEvent::HookEvent(event) => {
-            if event.hook_name == "PostCompact" {
-                AgentEventMapping::default()
-            } else {
-                let mut mapping =
-                    conversation(ConversationIntent::SetSpinnerPhase(SetSpinnerPhase {
-                        phase: crate::tui::adapter::hook_notice::hook_spinner_phase(event),
-                    }));
-                let suppress_notice =
-                    event.hook_name == "Stop" && event.status == TuiHookStatus::Blocked;
-                if !suppress_notice {
-                    if let Some(notice) = crate::tui::adapter::hook_notice::hook_event_notice(event)
-                    {
-                        mapping
-                            .conversation
-                            .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                                content: notice,
-                            }));
-                    }
-                }
-                mapping
-            }
-        }
-        TuiRuntimeEvent::HookMessage(message) => {
-            if message.point == "Stop" {
-                AgentEventMapping::default()
-            } else if let Some(notice) =
-                crate::tui::adapter::hook_notice::hook_message_notice(message)
-            {
-                conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                    content: notice,
-                }))
-            } else {
-                AgentEventMapping::default()
-            }
-        }
         TuiRuntimeEvent::AgentProgress {
             attachment_context,
             tool_id,
@@ -892,16 +808,6 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
-
-fn clear_placeholder_then(intent: ConversationIntent) -> AgentEventMapping {
-    AgentEventMapping {
-        conversation: vec![
-            ConversationIntent::ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
-            intent,
-        ],
-        ..AgentEventMapping::default()
-    }
-}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {

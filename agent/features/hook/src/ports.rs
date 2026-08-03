@@ -7,20 +7,68 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::domain::{HookInvocation, HookOutcome};
+use crate::domain::{HookInvocation, HookOutcome, HookPoint};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookSubscriptionExecutionTerminal {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookSubscriptionExecutionEvent {
+    Started {
+        point: HookPoint,
+        script: String,
+        attempt: u8,
+    },
+    AttemptChanged {
+        point: HookPoint,
+        script: String,
+        attempt: u8,
+    },
+    Finished {
+        point: HookPoint,
+        script: String,
+        terminal: HookSubscriptionExecutionTerminal,
+    },
+}
+
+pub trait HookSubscriptionExecutionObserver: Send + Sync {
+    fn observe(&self, event: HookSubscriptionExecutionEvent);
+}
 
 /// Hook 一次 dispatch 的工作区上下文。
 ///
 /// Runtime 每次调用只提供当前 Workspace 的 cwd；Hook adapter 根据当前 invocation
-/// 生成兼容环境变量并执行环境隔离。
-#[derive(Debug, Clone)]
+/// 生成兼容环境变量并执行环境隔离。生命周期 observer 只报告 typed subscription 事实。
+#[derive(Clone)]
 pub struct HookDispatchContext {
     cwd: PathBuf,
+    subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl HookDispatchContext {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
-        Self { cwd: cwd.into() }
+        Self {
+            cwd: cwd.into(),
+            subscription_execution_observer: None,
+        }
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: std::sync::Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
+    }
+
+    pub fn subscription_execution_observer(
+        &self,
+    ) -> Option<&std::sync::Arc<dyn HookSubscriptionExecutionObserver>> {
+        self.subscription_execution_observer.as_ref()
     }
 
     pub fn cwd(&self) -> &Path {

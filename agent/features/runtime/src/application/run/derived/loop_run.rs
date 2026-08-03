@@ -442,6 +442,11 @@ impl SubRunFinalizer {
             self.model_name,
             super::finalize::SubRunFinalizationObserver {
                 hook_port: self.runtime_context.hooks(),
+                activities: self.runtime_context.activities(),
+                run_step_id: sdk::RunStepId::new(format!(
+                    "{}:sub-run-stop",
+                    self.runtime_context.activities().run_id().as_str()
+                )),
                 workspace_root: &self.workspace_root,
                 session_id: &self.session_id,
                 prompt: &self.prompt,

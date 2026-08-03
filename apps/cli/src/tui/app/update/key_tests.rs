@@ -3,9 +3,10 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::model::input::completion::SuggestionType;
 use crate::tui::model::input::completion_item::CompletionItem;
 
-/// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
+/// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
+/// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
 #[test]
-fn test_busy_slash_no_placeholder() {
+fn busy_slash_routes_through_pending_slash_without_placeholder() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -14,27 +15,20 @@ fn test_busy_slash_no_placeholder() {
     app.chat.start_processing();
     app.model
         .input
-        .apply(InputIntent::InsertPastedText("/foo bar".to_string()));
+        .apply(InputIntent::InsertPastedText("/compact".to_string()));
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
     let result = app.update_key(key, &spawn_refs);
 
-    // 应产出 ControlCommand 事件
+    assert_eq!(result.pending_slash.as_deref(), Some("/compact"));
     assert!(
-        matches!(
-            result.effects.as_slice(),
-            [Effect::SendChatInputEvent {
-                event: sdk::ChatInputEvent::ControlCommand { raw }
-            }] if raw == "/foo bar"
-        ),
-        "busy-slash 应产出 ControlCommand 事件，got: {:?}",
-        result.effects
+        result.effects.is_empty(),
+        "busy slash 不得降级为无法执行的 ControlCommand"
     );
-    // conversation 中不应有 QueuedUserMessage 块
     assert!(
         app.model.conversation.queued_submissions.is_empty(),
-        "busy-slash 后不应建占位 QueuedUserMessage"
+        "busy slash 后不应建占位 QueuedUserMessage"
     );
 }
 

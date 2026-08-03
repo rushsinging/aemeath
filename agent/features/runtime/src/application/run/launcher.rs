@@ -39,25 +39,29 @@ pub async fn launch(
         active_run.activate(run_id.clone(), cancel.clone());
     }
     let (run, execution, context) = instance.execution_parts_mut();
+    let activities = context.activities().clone();
 
-    let result = match execute_prepared_loop(run, execution, context, &cancel, loop_context).await {
-        Ok(LoopDirective::Terminal) | Ok(LoopDirective::AwaitUser) => RunLaunchResult::Terminal,
-        Err(error) => {
-            log::error!(
-                target: crate::LOG_TARGET,
-                "[run_launcher] shared run_loop failed: {error}"
-            );
-            if let Err(terminal_error) =
-                fail_run(run, execution, loop_context, error.to_string()).await
-            {
+    let result =
+        match execute_prepared_loop(run, execution, context, activities, &cancel, loop_context)
+            .await
+        {
+            Ok(LoopDirective::Terminal) | Ok(LoopDirective::AwaitUser) => RunLaunchResult::Terminal,
+            Err(error) => {
                 log::error!(
                     target: crate::LOG_TARGET,
-                    "[run_launcher] failed to publish RunFailed: {terminal_error}"
+                    "[run_launcher] shared run_loop failed: {error}"
                 );
+                if let Err(terminal_error) =
+                    fail_run(run, execution, loop_context, error.to_string()).await
+                {
+                    log::error!(
+                        target: crate::LOG_TARGET,
+                        "[run_launcher] failed to publish RunFailed: {terminal_error}"
+                    );
+                }
+                RunLaunchResult::Failed(error)
             }
-            RunLaunchResult::Failed(error)
-        }
-    };
+        };
 
     active_run.clear(&run_id);
     result

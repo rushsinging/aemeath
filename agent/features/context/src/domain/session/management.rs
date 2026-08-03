@@ -108,6 +108,7 @@ pub struct SessionResumeView {
     pub session_id: String,
     pub active_messages: Vec<Message>,
     pub display_steps: Vec<SessionRestoreStep>,
+    pub compacted: bool,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,

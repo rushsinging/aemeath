@@ -16,6 +16,7 @@
 //!
 //! 实现由 #875 负责。
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -25,8 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
-    should_emit_model_stream_waiting, ChatEventSink, ChatEventSinkHandle, InvocationEventReducer,
-    InvocationResponse, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse, RuntimeTurnContext,
 };
 use crate::application::loop_engine::llm_strategy::{
     build_step_token_usage, extract_invocation_context,
@@ -37,17 +37,20 @@ use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::ports::{InvocationOptions, InvocationRequest};
 
+use share::config::TaskListConfig;
+use share::message::Message;
+
 /// One initial invocation plus at most ten retries.
 const DEFAULT_MAX_ATTEMPTS: u32 = 11;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
 const MAX_BACKOFF: Duration = Duration::from_secs(120);
 
-struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
-
-impl Drop for AbortTaskOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
+/// #1492：从 Runtime 持有的 Task 端口渲染 run 首步注入文本（invocation-only）。
+fn build_task_reminder_for_invocation(runtime_context: &RuntimeContext) -> Option<String> {
+    crate::application::loop_engine::chat::task_snapshot::build_task_reminder(
+        runtime_context.task().as_ref(),
+        TaskListConfig::default().max_lines,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +120,13 @@ pub(crate) trait ModelInvocationSource: Send {
     fn context_size(&self, execution: &RunExecutionState) -> usize;
     fn committed_delta(&self) -> bool;
     fn build_reducer(&self) -> InvocationEventReducer<ChatEventSinkHandle>;
+    /// #1494：边流边执行句柄（默认无；Main observer 装配后提供）。
+    fn streaming_tool(
+        &self,
+    ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
+    {
+        None
+    }
     fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
         None
     }
@@ -138,9 +148,10 @@ where
     pub(crate) async fn invoke(
         self,
         execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        invoke_model_impl(self.observer, execution, cancel).await
+        invoke_model_impl(self.observer, execution, step_id, cancel).await
     }
 }
 
@@ -174,18 +185,25 @@ pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
 pub(crate) async fn orchestrate_model_invocation(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     ModelInvocationContext::new(observer)
-        .invoke(execution, cancel)
+        .invoke(execution, step_id, cancel)
         .await
 }
 
 async fn invoke_model_impl(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+    // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
+    // 残留的旁路结果丢弃：异常时 step 作废，重试请求不带已执行工具结果。
+    if let Some(executor) = observer.streaming_tool() {
+        executor.reset_for_invocation(step_id);
+    }
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
             let coordinator = ContextCoordinator::new(observer.runtime_context().context());
@@ -201,7 +219,18 @@ async fn invoke_model_impl(
         .cloned()
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
     observer.on_window(execution).await;
-    let invocation_context = extract_invocation_context(&window);
+    let mut invocation_context = extract_invocation_context(&window);
+    // #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）。
+    // 只修改请求侧局部 messages，canonical message / SDK/TUI 事件 / 持久化 JSON 不受影响
+    // （spec 3.4.5 显式例外）；注入标志保证同 run 后续请求（tool 往返 / retry）不重复。
+    if !execution.task_reminder_injected() {
+        if let Some(reminder) = build_task_reminder_for_invocation(observer.runtime_context()) {
+            invocation_context
+                .messages_for_api
+                .push(Message::user(reminder));
+        }
+        execution.mark_task_reminder_injected();
+    }
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),
@@ -229,7 +258,6 @@ async fn invoke_model_impl(
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
-        let progress_handle = reducer.progress_handle();
         let invocation = async {
             let mut request = InvocationRequest::new(
                 model,
@@ -249,36 +277,8 @@ async fn invoke_model_impl(
                 })
                 .await
         };
-        let waiting_event_context = observer.waiting_event_context();
-        let waiting_started_at = tokio::time::Instant::now();
-        let waiting_task = waiting_event_context.map(|(sink, context)| {
-            AbortTaskOnDrop(logging::spawn_instrumented(
-                request_context.clone(),
-                async move {
-                    let mut next = waiting_started_at + Duration::from_secs(10);
-                    let mut last_version = None;
-                    loop {
-                        tokio::time::sleep_until(next).await;
-                        let snapshot = progress_handle
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .snapshot();
-                        if should_emit_model_stream_waiting(last_version, &snapshot) {
-                            sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                                context: context.clone(),
-                                elapsed_secs: waiting_started_at.elapsed().as_secs(),
-                                phase: snapshot.phase.to_string(),
-                            });
-                        }
-                        last_version = Some(snapshot.visible_progress_version);
-                        next += Duration::from_secs(10);
-                    }
-                },
-            ))
-        });
         let result =
             logging::instrument(request_context, observer.pump_while_invoking(invocation)).await;
-        drop(waiting_task);
         match result {
             Ok((response, _)) => break response,
             Err((error, _)) if error.is_cancelled() || cancel.is_cancelled() => {

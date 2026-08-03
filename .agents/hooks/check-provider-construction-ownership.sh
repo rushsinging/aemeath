@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：锁定 #907 Provider 构造所有权——Provider 的具体构造符号

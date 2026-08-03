@@ -1,3 +1,4 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::tools::{
     run_post_tool_hooks, send_tool_call_status, send_tool_result,
@@ -28,6 +29,7 @@ pub(crate) async fn execute_agent_calls<S>(
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     workspace_root: &std::path::Path,
     catalog: &tools::ToolCatalogSnapshot,
@@ -68,6 +70,7 @@ where
                     call,
                     sink,
                     hook_port,
+                    activities,
                     agent,
                     &mut agent_tool_context,
                     &workspace_persist,
@@ -105,6 +108,7 @@ async fn execute_one_agent<S>(
     call: ToolCall,
     sink: S,
     hook_port: Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     agent: &crate::application::tool::agent::Agent,
     agent_tool_context: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
@@ -131,7 +135,8 @@ where
     let pre_dispatch = if authorization.enforce_permission_hooks {
         dispatch_hook(
             &hook_port,
-            &sink,
+            activities,
+            step_id,
             HookInvocation::PreToolUse(PreToolUseInput {
                 tool_name: call.name.clone(),
                 tool_input: call.input.clone(),
@@ -348,8 +353,9 @@ where
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
     run_post_tool_hooks(
-        &sink,
         &hook_port,
+        activities,
+        step_id,
         &effective_call,
         &execution,
         cancel,
@@ -522,6 +528,11 @@ mod tests {
         tokio::spawn(async move {
             let sink = NoopSink;
             let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+            let activities = crate::application::activity::ActivityCoordinator::new(
+                sdk::RunId::new_v7(),
+                Arc::new(crate::application::activity::SystemActivityClock),
+                Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+            );
             let prepared = calls
                 .into_iter()
                 .map(|call| PreparedToolCall {
@@ -557,6 +568,7 @@ mod tests {
                 &crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 &sink,
                 &hook_port,
+                &activities,
                 &cancel,
                 std::path::Path::new("."),
                 &catalog,

@@ -223,6 +223,7 @@ impl RuntimeContextFactory {
         let hook = self.select_hook_port(request.spec(), parent.as_deref())?;
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
+        let activity_publisher = Arc::new(event_route.sink.clone());
         let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
@@ -248,6 +249,11 @@ impl RuntimeContextFactory {
             skill_load_session_id: skill_load.session_id,
         };
         self.bind_runtime_context(
+            request
+                .run_id()
+                .cloned()
+                .unwrap_or_else(crate::domain::agent_run::RunId::new_v7),
+            activity_publisher,
             bindings,
             hook,
             skill_load.state,
@@ -257,6 +263,8 @@ impl RuntimeContextFactory {
 
     fn bind_runtime_context(
         &self,
+        run_id: crate::domain::agent_run::RunId,
+        activity_publisher: Arc<dyn crate::application::activity::ActivityChangePublisher>,
         bindings: RunCapabilityBindings,
         hook: HookSelection,
         skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
@@ -282,6 +290,12 @@ impl RuntimeContextFactory {
             services,
             bindings,
             skill_load_state,
+            Arc::new(
+                crate::application::activity::ActivityCoordinator::production(
+                    run_id,
+                    activity_publisher,
+                ),
+            ),
             RuntimeContextAssemblyToken::new(),
         );
         let context = match resources.session.lease {

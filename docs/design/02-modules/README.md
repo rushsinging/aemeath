@@ -89,3 +89,5 @@
 | 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 两层重试、Usage-only Audit MVP | #790 |
 | 2026-07-16 | 增加模块 Target 目录结构决策矩阵：按 Hexagonal 默认依赖方向选择最小必要层，`capabilities/` 只在有独立能力证据和配套 Guard 时启用 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
 | 2026-07-16 | 将 Storage 冻结为 `domain + ports + adapters`：以稳定层名和单向依赖降低 Guard 成本，机械防止物理 I/O 下沉、adapter 类型泄漏与 façade 漂移 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
+| 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |
+| 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |

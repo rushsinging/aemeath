@@ -185,16 +185,15 @@ impl App {
                         is_slash,
                         &submission.text[..submission.text.len().min(60)]
                     );
-                    // 忙时 slash/control command 保持现有 mid-turn 行为：作为
-                    // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
-                    // slash 命令是控制命令、无 UserMessagesAdopted 归宿，剥离 MessagesSync
-                    // 全清后建占位会残留——故不建占位、不入文本队列（A3 Task 5）。
+                    // slash 命令无论 idle/busy 都由统一 CommandRouter 解析，再由各 owner
+                    // 产生 typed ChatInputEvent。直接压成 ControlCommand 会丢失 `/compact`
+                    // 等应用命令的业务语义，导致 busy 后静默无动作。
                     if submission.text.starts_with('/') {
-                        let event = sdk::ChatInputEvent::ControlCommand {
-                            raw: submission.text.clone(),
+                        return UpdateResult {
+                            effects: Vec::new(),
+                            spawn_effect: None,
+                            pending_slash: Some(submission.text),
                         };
-                        self.set_transient_notice(StatusNotice::warning("message event queued"));
-                        return UpdateResult::one(Effect::SendChatInputEvent { event });
                     }
                     // 忙时普通消息：与首条提交统一经事件通道发 UserMessage。
                     self.set_transient_notice(StatusNotice::warning("message event queued"));

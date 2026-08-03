@@ -1,3 +1,4 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
@@ -20,6 +21,7 @@ pub(super) async fn execute_non_agent<S>(
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     non_agent_calls: &[PreparedToolCall],
     language: &str,
     workspace_root: &Path,
@@ -50,6 +52,7 @@ where
             agent,
             sink,
             hook_port,
+            activities,
             other_calls[0],
             language,
             workspace_root,
@@ -67,6 +70,7 @@ where
         agent,
         sink,
         hook_port,
+        activities,
         &other_calls,
         language,
         workspace_root,
@@ -85,6 +89,7 @@ async fn execute_multiple_non_agent<S>(
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     other_calls: &[&PreparedToolCall],
     language: &str,
     workspace_root: &Path,
@@ -122,6 +127,7 @@ where
                         agent,
                         &sink,
                         &hook_port,
+                        activities,
                         call,
                         language,
                         &workspace_root,
@@ -155,6 +161,7 @@ where
                 agent,
                 sink,
                 hook_port,
+                activities,
                 call,
                 language,
                 workspace_root,
@@ -216,6 +223,7 @@ async fn execute_one_non_agent<S>(
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     prepared: &PreparedToolCall,
     language: &str,
     workspace_root: &Path,
@@ -233,7 +241,8 @@ where
     if authorization.enforce_permission_hooks {
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PermissionRequest(PermissionInput {
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
@@ -261,7 +270,8 @@ where
     let pre_dispatch = if authorization.enforce_permission_hooks {
         dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PreToolUse(PreToolUseInput {
                 tool_name: owned_call.name.clone(),
                 tool_input: owned_call.input.clone(),
@@ -500,8 +510,9 @@ where
             &ex.outcome.text,
         );
         run_post_tool_hooks(
-            sink,
             hook_port,
+            activities,
+            step_id,
             &effective_call,
             &ex,
             cancel,
@@ -509,8 +520,9 @@ where
         )
         .await;
         run_task_hooks(
-            sink,
             hook_port,
+            activities,
+            step_id,
             &effective_call,
             &ex.outcome.text,
             is_error,
@@ -533,21 +545,21 @@ where
     out
 }
 
-async fn run_task_hooks<S>(
-    sink: &S,
+async fn run_task_hooks(
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
+    step_id: &sdk::RunStepId,
     call: &ToolCall,
     output: &str,
     is_error: bool,
     workspace_root: &Path,
     cancel: &tokio_util::sync::CancellationToken,
-) where
-    S: ChatEventSink,
-{
+) {
     if !is_error && call.name == "TaskCreate" {
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::TaskCreated(TaskInput {
                 tool_input: call.input.clone(),
                 tool_output: output.to_string(),
@@ -560,7 +572,8 @@ async fn run_task_hooks<S>(
     if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::TaskCompleted(TaskInput {
                 tool_input: call.input.clone(),
                 tool_output: output.to_string(),

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Regression tests for no_mod_rs.sh.
 
 set -euo pipefail

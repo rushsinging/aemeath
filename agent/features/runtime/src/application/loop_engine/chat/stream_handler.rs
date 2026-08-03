@@ -103,6 +103,17 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
         }
     }
 
+    /// #1494：挂载边流边执行句柄（流中 `ToolCallCompleted` → 立即执行）。
+    pub fn with_streaming_tool(
+        mut self,
+        streaming_tool: Arc<
+            dyn crate::application::loop_engine::chat::streaming_tool::StreamingToolSubmitPort,
+        >,
+    ) -> Self {
+        self.handler.streaming_tool = Some(streaming_tool);
+        self
+    }
+
     pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
         self.handler.progress_handle()
     }
@@ -147,8 +158,11 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             &partial_json,
                         )
                     }
-                    InvocationDelta::ToolCallCompleted { .. }
-                    | InvocationDelta::UsageSnapshot(_) => {}
+                    InvocationDelta::ToolCallCompleted { index, call } => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_tool_call_completed(index, &call);
+                    }
+                    InvocationDelta::UsageSnapshot(_) => {}
                 }
                 Ok(None)
             }
@@ -220,6 +234,10 @@ struct RuntimeEventProjector<S: ChatEventSink> {
     pub tool_identity: ToolIdentityRegistry,
     pub context: RuntimeTurnContext,
     progress: Arc<Mutex<StreamProgressState>>,
+    /// #1494：边流边执行句柄；`Some` 时流中 `ToolCallCompleted` 立即触发执行。
+    streaming_tool: Option<
+        Arc<dyn crate::application::loop_engine::chat::streaming_tool::StreamingToolSubmitPort>,
+    >,
 }
 
 impl<S: ChatEventSink> RuntimeEventProjector<S> {
@@ -244,15 +262,16 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             tool_identity,
             context,
             progress: Arc::new(Mutex::new(StreamProgressState::default())),
+            streaming_tool: None,
         }
-    }
-
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.progress.clone()
     }
 
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
         self.tool_identity.runtime_id_for_stream(index, provider_id)
+    }
+
+    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
+        self.progress.clone()
     }
 
     fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {
@@ -388,6 +407,21 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
                 status: RuntimeToolCallStatus::PendingArgs,
             });
     }
+
+    /// #1494：provider 已给出完整验证过的 tool call → 立即旁路执行（边流边执行）。
+    fn on_tool_call_completed(&mut self, index: usize, call: &provider::ProviderToolCall) {
+        let Some(executor) = &self.streaming_tool else {
+            return;
+        };
+        let id = self.runtime_tool_id(index, Some(&call.id.0));
+        executor.submit(crate::application::tool::agent::ToolCall {
+            id,
+            provider_id: call.id.0.clone(),
+            name: call.name.clone(),
+            index,
+            input: call.arguments.clone(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -398,6 +432,7 @@ mod invocation_reducer_tests {
         InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError,
         ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
     };
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct RecordingSink(Arc<Mutex<Vec<RuntimeStreamEvent>>>);

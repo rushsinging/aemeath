@@ -1,15 +1,64 @@
 use super::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunStepEvent, TuiRuntimeEvent,
-    TuiToolApprovalPrompt, TuiWorkspaceSnapshot,
+    TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
+    TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
+    TuiActivityTiming, TuiInteractionBody, TuiInteractionRequest, TuiRunEvent, TuiRunPurpose,
+    TuiRunStepEvent, TuiRuntimeEvent, TuiToolApprovalPrompt, TuiWorkspaceSnapshot, UiActivityId,
 };
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, PresentCancelledStep, ShowInteraction,
+    ConversationIntent, ObserveActivityChange, PresentCancelledStep, ReplaceActivitySnapshot,
+    ShowInteraction,
 };
 use crate::tui::model::conversation::interaction::{
     UiInteractionRequestId, UiRiskLevel, UiRunId, UiRunStepId,
 };
 use crate::tui::model::workspace_provider::WorkspaceIntent;
+
+fn activity(run_id: &str, activity_id: &str, revision: u64) -> TuiActivityObservation {
+    TuiActivityObservation {
+        id: UiActivityId::from(activity_id),
+        run_id: UiRunId::from(run_id),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: TuiActivitySource::Run,
+        kind: TuiActivityKind::Run,
+        state: TuiActivityState::Running,
+        detail: TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Main,
+        },
+        audience: TuiActivityAudience::User,
+        revision,
+        timing: TuiActivityTiming::default(),
+    }
+}
+
+#[test]
+fn activity_events_map_to_dedicated_conversation_intents() {
+    let changed = map_runtime_event(&TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: activity("run-1", "activity-1", 2),
+    });
+    assert!(matches!(
+        changed.conversation.as_slice(),
+        [ConversationIntent::ObserveActivityChange(ObserveActivityChange {
+            kind: TuiActivityChangeKind::Updated,
+            activity,
+        })] if activity.id.as_str() == "activity-1" && activity.revision == 2
+    ));
+
+    let snapshot = map_runtime_event(&TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
+        run_id: UiRunId::from("run-1"),
+        revision: 3,
+        activities: vec![activity("run-1", "activity-1", 3)],
+    }));
+    assert!(matches!(
+        snapshot.conversation.as_slice(),
+        [ConversationIntent::ReplaceActivitySnapshot(ReplaceActivitySnapshot { snapshot })]
+            if snapshot.run_id.as_str() == "run-1"
+                && snapshot.revision == 3
+                && snapshot.activities.len() == 1
+    ));
+}
 
 #[test]
 fn runtime_run_and_step_lifecycle_are_observational_only() {
@@ -35,12 +84,10 @@ fn runtime_run_and_step_lifecycle_are_observational_only() {
 
 #[test]
 fn runtime_cancelled_step_maps_to_presentation_only_intent() {
-    let run_id = UiRunId::from("run-1");
-    let step_id = UiRunStepId::from("step-1");
     let mapping = map_runtime_event(&TuiRuntimeEvent::RunStep {
-        run_id,
+        run_id: UiRunId::from("run-1"),
         parent_run_id: None,
-        step_id,
+        step_id: UiRunStepId::from("step-1"),
         event: TuiRunStepEvent::Cancelled { confirmed: true },
     });
 
@@ -86,6 +133,21 @@ fn runtime_interaction_maps_to_sender_free_show_interaction() {
                 && request.run_id.as_str() == "run-1"
                 && matches!(request.body, crate::tui::model::conversation::interaction::InteractionBody::ToolApproval(ref prompt) if prompt.risk == UiRiskLevel::High)
     ));
+}
+
+#[test]
+fn compact_finished_syncs_messages_and_appends_runtime_notice_once() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactFinished {
+        messages: Vec::new(),
+        notice: "✓ 上下文压缩完成".to_string(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendSystemMessage(message)]
+            if message.text == "✓ 上下文压缩完成"
+    ));
+    assert_eq!(mapping.session.len(), 1);
 }
 
 #[test]

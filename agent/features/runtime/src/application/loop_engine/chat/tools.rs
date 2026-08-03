@@ -1,3 +1,4 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::agent_calls::execute_agent_calls;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::non_agent::execute_non_agent;
@@ -38,6 +39,7 @@ pub(crate) async fn execute_tool_round<S>(
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &std::path::Path,
@@ -59,6 +61,8 @@ where
         sink,
         context,
         hook_port,
+        activities,
+        step_id,
         cancel,
         workspace_root,
         agent,
@@ -128,6 +132,7 @@ where
         agent,
         sink,
         hook_port,
+        activities,
         &non_agent_approved,
         language,
         workspace_root,
@@ -147,6 +152,7 @@ where
         &agent.workspace_persist,
         sink,
         hook_port,
+        activities,
         cancel,
         workspace_root,
         catalog,
@@ -210,11 +216,14 @@ where
     blocked
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn deny_tool_calls<S>(
     denied: &[crate::application::tool::coordination::DeniedToolCall],
     sink: &S,
     context: &RuntimeTurnContext,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
     workspace_root: &std::path::Path,
     agent: &Agent,
@@ -231,7 +240,8 @@ where
         );
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PermissionDenied(PermissionInput {
                 tool_name: call.call.name.clone(),
                 permission_rule: "deny".to_string(),
@@ -284,22 +294,22 @@ where
     denied_results
 }
 
-pub(crate) async fn run_post_tool_hooks<S>(
-    sink: &S,
+pub(crate) async fn run_post_tool_hooks(
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
+    step_id: &sdk::RunStepId,
     call: &ToolCall,
     execution: &ToolExecution,
     cancel: &CancellationToken,
     workspace_root: &std::path::Path,
-) where
-    S: ChatEventSink,
-{
+) {
     let output = &execution.outcome.text;
     let is_error = execution.outcome.is_error;
 
     let _ = dispatch_hook(
         hook_port,
-        sink,
+        activities,
+        step_id,
         HookInvocation::PostToolUse(PostToolUseInput {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
@@ -314,7 +324,8 @@ pub(crate) async fn run_post_tool_hooks<S>(
     if is_error {
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PostToolUseFailure(PostToolUseFailureInput {
                 tool_name: call.name.clone(),
                 tool_input: call.input.clone(),
@@ -577,6 +588,11 @@ mod tests {
         let execution_workspace_root = workspace_root.clone();
         let execution_call = call.clone();
         let execution_cancel = step_cancel.clone();
+        let execution_activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
         let handle = tokio::spawn(async move {
             execute_tool_round(
                 &execution_context,
@@ -588,6 +604,7 @@ mod tests {
                 execution_agent.as_ref(),
                 &execution_sink,
                 &execution_hook_port,
+                &execution_activities,
                 &execution_cancel,
                 "en",
                 &execution_workspace_root,
@@ -619,6 +636,11 @@ mod tests {
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
 
         let result = execute_tool_round(
             &context,
@@ -630,6 +652,7 @@ mod tests {
             &agent,
             &sink,
             &hook_port,
+            &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,
@@ -660,6 +683,11 @@ mod tests {
         let hook_port = noop_hook_port();
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
         let calls = vec![lifecycle_call(0), lifecycle_call(1)];
         let guarded_calls = calls
             .iter()
@@ -677,6 +705,7 @@ mod tests {
             &agent,
             &sink,
             &hook_port,
+            &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,

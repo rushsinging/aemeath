@@ -107,6 +107,14 @@ impl super::OutputArea {
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
 
+        if let Some(detail) = s.detail_text.as_deref().filter(|detail| !detail.is_empty()) {
+            spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
+            spans.push(Span::styled(
+                detail.to_string(),
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+        }
+
         if let Some(cp) = compact_progress {
             spans.extend(compact_progress_spans(cp));
         }

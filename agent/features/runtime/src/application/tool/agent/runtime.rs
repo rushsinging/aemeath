@@ -42,6 +42,7 @@ impl ToolExecution {
     }
 }
 
+#[derive(Clone)]
 pub struct Agent {
     pub catalog: ToolCatalogSnapshot,
     pub execution: Arc<dyn ToolExecutionPort>,

@@ -270,6 +270,7 @@ impl From<RunSpecError> for RunCreationError {
 /// 输入消息不属于装配契约；首次和后续输入都必须经 InputPort 激活 Run。
 #[derive(Clone)]
 pub struct RunCreationRequest {
+    run_id: Option<RunId>,
     spec: RunSpec,
     session: SessionSnapshot,
     parent: Option<ParentRunFacts>,
@@ -285,10 +286,20 @@ impl RunCreationRequest {
             spec.validate_against(parent.spec())?;
         }
         Ok(Self {
+            run_id: None,
             spec,
             session,
             parent,
         })
+    }
+
+    pub(crate) fn run_id(&self) -> Option<&RunId> {
+        self.run_id.as_ref()
+    }
+
+    pub(crate) fn with_run_id(mut self, run_id: RunId) -> Self {
+        self.run_id = Some(run_id);
+        self
     }
 
     pub fn spec(&self) -> &RunSpec {
@@ -323,6 +334,7 @@ pub struct RunInstance {
 
 impl RunInstance {
     pub(crate) fn new(
+        run_id: RunId,
         spec: RunSpec,
         parent_run_id: Option<RunId>,
         session: SessionSnapshot,
@@ -330,7 +342,7 @@ impl RunInstance {
         workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) -> Self {
         Self {
-            run: Run::new(spec, parent_run_id),
+            run: Run::with_id(run_id, spec, parent_run_id),
             execution: RunExecutionState::new(),
             session,
             context,

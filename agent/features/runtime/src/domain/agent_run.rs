@@ -36,6 +36,8 @@ pub trait ActiveRunPort: Send + Sync {
 }
 
 pub use domain::Run;
+#[cfg(test)]
+pub use event::RunTimingSnapshot;
 pub use event::{RunDomainEvent, RunId};
 #[cfg(test)]
 pub use spec::{

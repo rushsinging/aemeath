@@ -24,6 +24,39 @@ fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
 }
 
 #[test]
+fn domain_events_are_observed_by_activity_before_external_publish() {
+    let source = include_str!("run_loop.rs");
+
+    assert!(source.contains(".observe_run_events(&events)"));
+    assert!(source.contains("self.events.emit(execution, events).await"));
+    assert!(
+        source
+            .find(".observe_run_events(&events)")
+            .expect("activity observation")
+            < source
+                .find("self.events.emit(execution, events).await")
+                .expect("external event publish")
+    );
+    let engine_source = include_str!("engine.rs");
+    assert!(engine_source.contains("run.restore_events(events)"));
+}
+
+#[test]
+fn engine_state_transitions_use_the_immediate_publish_boundary() {
+    let source = include_str!("engine.rs");
+    let direct_transition_count = source.matches("run.transition(RunTransition::").count();
+
+    assert_eq!(
+        direct_transition_count, 0,
+        "Engine state changes must go through transition_and_emit; found {direct_transition_count} direct transitions",
+    );
+    assert!(source.contains("async fn transition_and_emit("));
+    assert!(source.contains(
+        "transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?"
+    ));
+}
+
+#[test]
 fn production_engine_owns_step_state_reset() {
     let source = include_str!("engine.rs");
     assert!(source.contains("execution.begin_step()"));
@@ -997,6 +1030,7 @@ impl ModelInvocationPort for ModelInvocationFake {
     async fn invoke_model(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _step_id: &sdk::RunStepId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         let (registered_step, cancel_model, block_forever, cancelled_during_model, error) = {
@@ -1047,6 +1081,52 @@ impl crate::application::hook::stop_coordination::StopHookObserver for StopHookF
 
 #[async_trait::async_trait]
 impl ToolOrchestrationPort for ToolOrchestrationFake {
+    async fn finalize_streaming_tool_results(
+        &mut self,
+        _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _step_id: &sdk::RunStepId,
+        rounds: Vec<
+            crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult,
+        >,
+        _cancel: &CancellationToken,
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
+        let mut results = Vec::new();
+        let mut suspensions = Vec::new();
+        let mut approvals = Vec::new();
+        let mut fuse_bypassed = Vec::new();
+        for round in rounds {
+            results.extend(round.results);
+            suspensions.extend(round.suspensions);
+            approvals.extend(round.approvals);
+            fuse_bypassed.extend(round.fuse_bypassed);
+        }
+        if !suspensions.is_empty() {
+            return Ok(crate::application::tool::coordination::ToolRoundOutcome {
+                step: ToolStep::InteractionSuspended {
+                    suspended: suspensions,
+                    completed_results: Vec::new(),
+                    fuse_bypassed,
+                },
+                continuation: crate::application::tool::coordination::ToolRoundContinuation::None,
+            });
+        }
+        if !approvals.is_empty() {
+            return Ok(crate::application::tool::coordination::ToolRoundOutcome {
+                step: ToolStep::AwaitingToolApproval {
+                    calls_needing_approval: approvals,
+                    completed_results: Vec::new(),
+                    fuse_bypassed,
+                },
+                continuation: crate::application::tool::coordination::ToolRoundContinuation::None,
+            });
+        }
+        Ok(crate::application::tool::coordination::ToolRoundOutcome {
+            step: ToolStep::Continue,
+            continuation:
+                crate::application::tool::coordination::ToolRoundContinuation::ToolResults,
+        })
+    }
+
     async fn execute_tools(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
@@ -1187,7 +1267,9 @@ impl InteractionMailboxPort for InteractionMailboxFake {
 }
 
 fn scripted_run_loop(scenario: &mut ScriptedScenario) -> RunLoop<'_> {
-    scenario.ports().run_loop()
+    let mut run_loop = scenario.ports().run_loop();
+    run_loop.bind_test_activity_context();
+    run_loop
 }
 
 fn new_run(timeout: Duration) -> Run {
@@ -1277,7 +1359,10 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",
@@ -1471,9 +1556,15 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
             "compact",
+            "emit",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",
@@ -2513,6 +2604,8 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         &mut ports.stuck,
         &ports.plan_approval,
     );
+
+    loop_context.bind_test_activity_context();
 
     let result = run_loop(
         &mut run,

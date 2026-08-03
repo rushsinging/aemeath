@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.runtime.capability-assembly
 set -euo pipefail
 
@@ -513,6 +513,7 @@ approved_root_exports = {
     "ProviderBuildSpec",
     "ProviderFactory",
     "ProviderPort",
+    "ProviderCompactGenerator",
     "ReflectionError",
     "ReflectionTaskAdapter",
     "ReflectionTaskCompletion",

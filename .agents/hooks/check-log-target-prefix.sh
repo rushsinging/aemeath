@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Owner-aware production log target guard. Rust tests contain the maintained parser.
 set -euo pipefail
 

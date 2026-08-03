@@ -2,7 +2,7 @@
 //!
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
-use super::block::{AskUserSlot, HookNoticeContent};
+use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
@@ -10,7 +10,6 @@ use super::interaction::{
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
-use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -108,19 +107,6 @@ pub struct PresentCancelledStep {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendSystemMessage {
     pub text: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UpsertModelStreamPlaceholder {
-    pub placeholder: ModelStreamWaitingView,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClearModelStreamPlaceholder;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppendHookNotice {
-    pub content: HookNoticeContent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -277,9 +263,20 @@ pub struct CompleteChat {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObserveActivityChange {
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiActivityChangeKind,
+    pub activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReplaceActivitySnapshot {
+    pub snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
+}
+
 // ════════════════════════════════════════════════════════════════════
-//  Runtime intent structs（原 RuntimeIntent enum 的 14 个 variant，
-//  排除 SetSpinnerPhase / StopSpinner —— 它们的功能已被其他 intent 附带维护）
+//  Runtime intent structs
 // ════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Debug, PartialEq)]
@@ -339,14 +336,6 @@ pub struct SetCompactProgress {
     pub total: Option<u32>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SetSpinnerPhase {
-    pub phase: super::spinner::SpinnerPhase,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StopSpinner;
-
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
     pub queued: Vec<TuiChatMessage>,
@@ -383,9 +372,6 @@ pub enum ConversationIntent {
     TerminalNotice(TerminalNotice),
     PresentCancelledStep(PresentCancelledStep),
     AppendSystemMessage(AppendSystemMessage),
-    UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
-    ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
-    AppendHookNotice(AppendHookNotice),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
@@ -414,6 +400,8 @@ pub enum ConversationIntent {
     InteractionCancelAccepted(InteractionCancelAccepted),
     InteractionReplyRejected(InteractionReplyRejected),
     InteractionCancelRejected(InteractionCancelRejected),
+    ObserveActivityChange(ObserveActivityChange),
+    ReplaceActivitySnapshot(ReplaceActivitySnapshot),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),
@@ -427,8 +415,6 @@ pub enum ConversationIntent {
     SetTransientStatusNotice(SetTransientStatusNotice),
     SetGraphPhase(SetGraphPhase),
     SetCompactProgress(SetCompactProgress),
-    SetSpinnerPhase(SetSpinnerPhase),
-    StopSpinner(StopSpinner),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

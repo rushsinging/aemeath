@@ -22,10 +22,9 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - 基于 The Elm Architecture（TEA）变体
 - `UiEvent` **NEVER** 直达 Model：所有 SDK 事件必须经两层 ACL、六 Context Intent、reducer Change、Coordinator Effect 与 result Intent 闭环
 - UserQuestions、ToolApproval、PlanApproval、HardPause 共用 Runtime 生成的 Interaction request id，并经 SDK / TUI ACL / AgentClient reply command 无损贯穿；TUI **NEVER** 持有 sender、pending waiter 或自生成协议 id
-- Interaction command result 只结束本地交互块；Runtime Run / RunStep lifecycle DTO 在 Conversation mapper 边界仅供观察，**NEVER** 建立或推进第二套 Run 状态机
+- Interaction command result 只结束本地交互块；Run 只由 SDK `RunResumed` / `RunCancelling` / `RunCancelled` 等 Runtime 权威事件推进
 - 六 Context 核心字段私有，root reducer 是唯一写入口；ViewAssembler 只读 accessor，ViewState 只持瞬时交互 / 渲染状态
-- Conversation 的结构化投影（chats / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补投影；Run lifecycle 不属于 ConversationModel，**NEVER** 假定可从展示投影重建 Runtime 状态
-
+- Activity 增量 / 快照经 SDK event → TUI-owned DTO → Intent → root reducer 事实镜像 → ActivitySummaryAssembler 单向消费；revision gap 隐藏不可信摘要并等待 Snapshot 修复，Operational / Diagnostic detail 不进入主状态行
 ### Reflection 展示边界（#899）
 
 - Runtime 的 Interval / PreCompact / Manual Reflection 全部后台异步执行；完成时 **NEVER** 主动向 TUI 发送完整 `ReflectionResult`、formatted content、正文或完成通知块，TUI 不维护 reflection job 结果通道。

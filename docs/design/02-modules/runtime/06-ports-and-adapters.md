@@ -271,7 +271,26 @@ trait EventSink: Send + Sync {                         // 纯投影出口；NEVE
 
 `UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；#931 由 Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
 
-### 2.4 Reflection 异步执行 adapter（#899）
+### 2.3.1 Activity 观测发布
+
+Activity 不新增 Runtime → TUI 的旁路 Port；它复用 Runtime 已有的出站事件出口。`ActivityCoordinator` 负责把完整 typed observation 转换为 SDK `ActivityView`，由 `EventSink` / SDK stream adapter 发布：
+
+```text
+ActivityCoordinator
+  ├─ ActivityChanged { kind, activity, revision }
+  └─ ActivitySnapshot { run_id, revision, activities }
+       ↓
+  EventSink / sdk_event_mapper
+       ↓
+  SDK ChatEvent
+       ↓
+  TUI ACL → root reducer → Activity fact mirror
+       ↓
+  ViewAssembler → low-noise Activity Summary
+```
+
+增量和快照共享同一 Run identity 与 revision 序列。消费者发现 revision gap 时不得从现有事实猜测缺失变化；应保留上一个可信镜像并等待快照。Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
+
 
 Runtime 拥有 Reflection 的执行编排；Memory 拥有 prompt/parse/apply 领域能力与 history append/query。Interval、PreCompact、Manual 三种 trigger **MUST** 全部提交到同一个 Runtime 单槽后台 adapter：
 

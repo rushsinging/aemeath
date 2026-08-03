@@ -58,6 +58,9 @@ pub(crate) async fn parse_openai_stream(
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
     let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
         std::collections::HashMap::new();
+    // #1494：已发出 ToolCallCompleted 的 index（index 切换先发，流结束兜底跳过）。
+    let mut completed_tool_indices: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
     let mut usage = crate::domain::invoke::Usage {
         input_tokens: 0,
         output_tokens: 0,
@@ -241,6 +244,35 @@ pub(crate) async fn parse_openai_stream(
                             let index =
                                 tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
 
+                            // #1494：新 index 的第一个 delta 出现 → 上一个（更小的、
+                            // 未发出的）index 的 arguments 已完整——立即尝试解析并发出
+                            // ToolCallCompleted，runtime 据此边流边执行。
+                            if !current_tool_calls.contains_key(&index) {
+                                let prior_indices: Vec<usize> = current_tool_calls
+                                    .keys()
+                                    .copied()
+                                    .filter(|prior| *prior < index)
+                                    .collect();
+                                for prior_index in prior_indices {
+                                    if completed_tool_indices.contains(&prior_index) {
+                                        continue;
+                                    }
+                                    if let Some((id, name, arguments, _)) =
+                                        current_tool_calls.get(&prior_index)
+                                    {
+                                        if try_emit_completed_tool_call(
+                                            handler,
+                                            prior_index,
+                                            id.clone(),
+                                            name.clone(),
+                                            arguments,
+                                        ) {
+                                            completed_tool_indices.insert(prior_index);
+                                        }
+                                    }
+                                }
+                            }
+
                             // 获取或创建 tool call 条目
                             let entry = current_tool_calls.entry(index).or_insert_with(|| {
                                 (String::new(), String::new(), String::new(), 0)
@@ -335,7 +367,7 @@ pub(crate) async fn parse_openai_stream(
     sorted_tool_calls.sort_by_key(|(i, _)| *i);
 
     let mut truncated_tool: Option<(String, String, String, String, usize, u32)> = None;
-    for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
+    for (tool_index, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if name.is_empty() {
             log::warn!(target: crate::LOG_TARGET,
                 "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
@@ -391,7 +423,16 @@ pub(crate) async fn parse_openai_stream(
                 }
             }
         };
-        content_blocks.push(ContentBlock::ToolUse { id, name, input });
+        content_blocks.push(ContentBlock::ToolUse {
+            id: id.clone(),
+            name: name.clone(),
+            input: input.clone(),
+        });
+        // #1494 兜底：index 切换时未发出（参数解析失败 / 单 tool call 无切换）的，
+        // 流结束解析成功后补发；已发出的跳过。
+        if !completed_tool_indices.contains(&tool_index) {
+            handler.emit_tool_call_completed(tool_index, id, name, input);
+        }
     }
 
     // 如果 args 因 EOF 截断（典型上游断流症状）且启发式补全也失败，向上抛结构化错误
@@ -418,6 +459,43 @@ pub(crate) async fn parse_openai_stream(
         },
         stop_reason,
     })
+}
+
+/// #1494：尝试把已完整的 arguments 解析为 JSON 并发出 `ToolCallCompleted`。
+/// 解析失败（含 recovery 失败）时不发出——留到流结束兜底（那里有完整 recovery 逻辑）。
+fn try_emit_completed_tool_call(
+    handler: &mut dyn InvocationSink,
+    index: usize,
+    id: String,
+    name: String,
+    arguments: &str,
+) -> bool {
+    if arguments.trim().is_empty() {
+        handler.emit_tool_call_completed(
+            index,
+            id,
+            name,
+            serde_json::Value::Object(serde_json::Map::new()),
+        );
+        return true;
+    }
+    let parsed = match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => value,
+        Err(error) => {
+            match crate::adapters::json_recovery::try_complete_truncated_json(arguments) {
+                Some(recovered) => recovered,
+                None => {
+                    log::debug!(target: crate::LOG_TARGET,
+                        "[openai-compat stream] tool_call index={} name={} args not complete yet ({}) — deferring ToolCallCompleted to stream end",
+                        index, name, error
+                    );
+                    return false;
+                }
+            }
+        }
+    };
+    handler.emit_tool_call_completed(index, id, name, parsed);
+    true
 }
 
 #[cfg(test)]

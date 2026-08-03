@@ -164,25 +164,6 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
             .map(|call| call.status),
         Some(crate::tui::model::conversation::tool_call::ToolCallStatus::Cancelled)
     );
-    assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .runtime
-            .spinner
-            .running_tool_count,
-        0
-    );
-    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
-    assert!(harness
-        .app
-        .model
-        .conversation
-        .runtime
-        .spinner
-        .phase
-        .is_none());
     let screen = harness.screen();
     assert_eq!(
         screen.matches("✻ Cancelled").count(),

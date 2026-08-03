@@ -40,6 +40,7 @@ impl crate::application::MainSessionWiring {
             session_id: committed.id.clone(),
             active_messages: restore.active_messages,
             display_steps: restore.display_steps,
+            compacted: restore.compacted,
             created_at: restore.created_at,
             trimmed: restore.trimmed,
             repaired: restore.repaired,

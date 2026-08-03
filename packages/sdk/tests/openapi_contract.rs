@@ -25,7 +25,6 @@ fn wire_components_document_exposes_only_pure_wire_contracts() {
     assert!(schemas.contains_key("SessionSnapshot"));
     assert!(schemas.contains_key("ChatMessage"));
     assert!(schemas.contains_key("WorkspaceContextView"));
-    assert!(schemas.contains_key("HookMessageView"));
     assert!(schemas.contains_key("SessionResumeFailureKind"));
     assert!(!schemas.contains_key("AgentClient"));
     assert!(!schemas.contains_key("ChatStream"));

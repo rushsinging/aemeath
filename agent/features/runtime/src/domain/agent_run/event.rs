@@ -2,6 +2,13 @@ use super::state::{RunStatus, RunStepId, RunTransitionReason};
 
 pub use sdk::RunId;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunTimingSnapshot {
+    pub observation_revision: u64,
+    pub total_elapsed_ms: u64,
+    pub phase_elapsed_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunDomainEvent {
     Transitioned {
@@ -10,6 +17,7 @@ pub enum RunDomainEvent {
         from: RunStatus,
         to: RunStatus,
         reason: RunTransitionReason,
+        timing: RunTimingSnapshot,
     },
     Started {
         run_id: RunId,

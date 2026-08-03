@@ -119,11 +119,15 @@ agent/features/runtime/src/
 - 触发 Run 状态机迁移到 `AwaitingUser`/`AwaitingToolApproval`，且只有匹配 reply 才能恢复原 continuation
 - **NEVER** 让 Tool adapter 直接等待 TUI channel，也不让 `InteractionPort` 自行发布 `RunResumed`
 
-### sdk_event_mapper（横切）
-- **职责**：领域事件 → SDK `ChatEvent` 的封闭纯转换；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）使用 SDK 发布的 `AgentId` / `RunId` / `RunStepId`
-- 消费：`EventSink`
-- mapper **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
+### activity_observation（横切应用观测）
 
+- **职责**：由 `ActivityCoordinator` 统一创建、变更并发布 Run 内 Activity 事实；把 Run、Run Step、Model Invocation、Tool Call、Hook、Compaction、Interaction 与 Child Run 的执行观测收口为稳定 identity、父子关系、类型、状态、detail、revision 与 timing。
+- **状态所有权**：Activity 是应用层观测实体集合，不拥有 Run 控制权、不改变 Run 状态机、不持久化 Session，也不承载 Audit Usage 所有权；Run 聚合仍是唯一生命周期状态机。
+- **发布**：Runtime 通过 SDK Published Language 发布 `ActivityChanged` 增量和 `ActivitySnapshot` 快照；增量按 Run 维度递增 revision，快照用于初始化、重连和 revision gap 修复。
+- **边界**：Activity 事实可被 TUI、父 Run 诊断 sink 或其他交付适配器消费；TUI 经 ACL 转为 TUI-owned Activity 镜像，再由 root reducer 写入 Model。Activity Summary 只由 TUI ViewAssembler 从事实镜像派生，**NEVER** 回流 Runtime 或成为第二业务状态源。
+- **约束**：Activity detail 必须是 typed 且受 audience 控制；发布日志只含 identity、类型、状态、revision 与 timing，**NEVER** 含 raw args、stdout、response payload。
+
+### sdk_event_mapper（横切）
 ### model_invocation 的 Usage 出口
 - Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；`RunStepId` 由 Loop Engine 直接从 Run 聚合取得，**NEVER** 经 adapter 伪造或旁路。
 - `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态。Runtime 只消费 Provider ACL 标准化结果，**NEVER** 解释 vendor wire 字段或重复定义 Usage DTO。

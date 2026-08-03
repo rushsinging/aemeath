@@ -1,4 +1,3 @@
-use super::block::HookNoticeContent;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
@@ -40,23 +39,6 @@ impl ConversationModel {
         self.timeline.push(OutputTimelineItem::System {
             id: block_id.clone(),
             text,
-        });
-        vec![
-            ConversationChange::SystemMessageAppended { block_id },
-            ConversationChange::StyleBoundaryResetRequired,
-            ConversationChange::OutputDirty,
-        ]
-    }
-
-    pub(super) fn append_hook_notice(
-        &mut self,
-        content: HookNoticeContent,
-    ) -> Vec<ConversationChange> {
-        self.clear_active_text_blocks();
-        let block_id = self.next_block_id("hook");
-        self.timeline.push(OutputTimelineItem::HookNotice {
-            id: block_id.clone(),
-            content,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },

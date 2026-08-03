@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.config.override-store.composition-ownership
 set -euo pipefail
 

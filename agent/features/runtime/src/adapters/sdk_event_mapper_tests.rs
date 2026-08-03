@@ -1,66 +1,50 @@
 use super::sdk_event_mapper::map_stream_event;
-use crate::application::loop_engine::chat::events::RuntimeHookExecutionResult;
 use crate::application::loop_engine::chat::{
-    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
     RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
 };
 
 #[test]
-fn published_event_chain_exposes_step_cancellation_and_run_termination_only() {
-    let run_event_source = include_str!("../domain/agent_run/event.rs");
-    let runtime_event_source = include_str!("../application/loop_engine/chat/events.rs");
-    let mapper_source = include_str!("sdk_event_mapper.rs");
-    let sdk_run_source = include_str!("../../../../../packages/sdk/src/run.rs");
-    let sdk_event_source = include_str!("../../../../../packages/sdk/src/chat_event.rs");
-    let sdk_wire_source = include_str!("../../../../../packages/sdk/src/wire.rs");
+fn activity_events_map_without_losing_change_or_snapshot_facts() {
+    let activity = sdk::ActivityView {
+        id: sdk::ActivityId::new("activity-map"),
+        run_id: sdk::RunId::new("run-map"),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: sdk::ActivitySourceView::Run,
+        kind: sdk::ActivityKindView::Run,
+        state: sdk::ActivityStateView::Running,
+        detail: sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Main,
+        },
+        audience: sdk::ActivityAudienceView::User,
+        revision: 3,
+        timing: sdk::ActivityTimingView::default(),
+    };
 
-    for (source_name, source, retired_symbols) in [
-        (
-            "RunDomainEvent",
-            run_event_source,
-            &["    Cancelled {\n", "Self::Cancelled { parent_run_id, .. }"][..],
-        ),
-        (
-            "RuntimeStreamEvent",
-            runtime_event_source,
-            &["    RunCancelling {\n", "    RunCancelled {\n"][..],
-        ),
-        (
-            "SDK ChatEvent",
-            sdk_event_source,
-            &["    RunCancelling {\n", "    RunCancelled {\n"][..],
-        ),
-        (
-            "SDK run control",
-            sdk_run_source,
-            &["pub enum CancelRunOutcome"][..],
-        ),
-        (
-            "SDK wire registry",
-            sdk_wire_source,
-            &["CancelRunOutcome"][..],
-        ),
-    ] {
-        for retired_symbol in retired_symbols {
-            assert!(
-                !source.contains(retired_symbol),
-                "{source_name} retains retired Run cancellation projection: {retired_symbol}"
-            );
-        }
-    }
+    let changed = map_stream_event(RuntimeStreamEvent::ActivityChanged {
+        kind: sdk::ActivityChangeKind::Updated,
+        activity: activity.clone(),
+    });
+    let snapshot = map_stream_event(RuntimeStreamEvent::ActivitySnapshot(
+        sdk::ActivitySnapshotView {
+            run_id: activity.run_id.clone(),
+            revision: 3,
+            activities: vec![activity.clone()],
+        },
+    ));
 
-    for retired_mapper_branch in [
-        "RunDomainEvent::Cancelled",
-        "RuntimeStreamEvent::RunCancelling",
-        "RuntimeStreamEvent::RunCancelled",
-        "ChatEvent::RunCancelling",
-        "ChatEvent::RunCancelled",
-    ] {
-        assert!(
-            !mapper_source.contains(retired_mapper_branch),
-            "SDK mapper retains retired Run cancellation projection: {retired_mapper_branch}"
-        );
-    }
+    assert!(matches!(
+        changed,
+        sdk::ChatEvent::ActivityChanged {
+            kind: sdk::ActivityChangeKind::Updated,
+            activity: mapped,
+        } if mapped == activity
+    ));
+    assert!(matches!(
+        snapshot,
+        sdk::ChatEvent::ActivitySnapshot(mapped)
+            if mapped.revision == 3 && mapped.activities == vec![activity]
+    ));
 }
 
 #[test]
@@ -108,6 +92,22 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
+fn compact_finished_preserves_runtime_owned_notice() {
+    let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
+        messages: vec![share::message::Message::user("recent")],
+        notice: "✓ 上下文压缩完成".to_string(),
+    });
+
+    assert!(matches!(
+        mapped,
+        sdk::ChatEvent::CompactFinished { messages, notice }
+            if messages.len() == 1
+                && messages[0].text_content() == "recent"
+                && notice == "✓ 上下文压缩完成"
+    ));
+}
+
+#[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: vec![RuntimeResumedSessionStep {
@@ -119,6 +119,7 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
         }],
         session_id: "session-1".into(),
         created_at: 0,
+        compacted: false,
     };
 
     match map_stream_event(event) {
@@ -192,85 +193,6 @@ fn tool_call_projection_preserves_canonical_name() {
 
     match map_stream_event(event) {
         sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_event_mapping_preserves_authoritative_status_and_final_diagnostics() {
-    let event = RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-        hook_name: "Stop".to_string(),
-        status: RuntimeHookEventStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(RuntimeHookExecutionResult {
-            exit_code: Some(0),
-            stdout: "ok".to_string(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookEvent(view) => {
-            assert_eq!(view.status, sdk::HookEventStatus::Succeeded);
-            assert_eq!(view.matcher.as_deref(), Some("*"));
-            assert_eq!(view.command.as_deref(), Some("check-agent-stop.sh"));
-            let result = view.result.expect("hook result");
-            assert_eq!(result.exit_code, Some(0));
-            assert_eq!(result.stdout, "ok");
-            assert!(result.stderr.is_empty());
-            assert_eq!(result.decision.as_deref(), Some("continue"));
-            assert!(result.reason.is_none());
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_additional_context_attribution() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PreToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 0,
-        attempt: 1,
-        kind: RuntimeHookMessageKind::AdditionalContext,
-        text: "extra context".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.point, "PreToolUse");
-            assert_eq!(view.source, "Bash");
-            assert_eq!(view.execution_ordinal, 0);
-            assert_eq!(view.attempt, 1);
-            assert_eq!(view.kind, sdk::HookMessageKindView::AdditionalContext);
-            assert_eq!(view.text, "extra context");
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_system_message_attempt() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PostToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 2,
-        attempt: 3,
-        kind: RuntimeHookMessageKind::SystemMessage,
-        text: "warning".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.kind, sdk::HookMessageKindView::SystemMessage);
-            assert_eq!(view.execution_ordinal, 2);
-            assert_eq!(view.attempt, 3);
-            assert_eq!(view.text, "warning");
-        }
         other => panic!("unexpected event: {other:?}"),
     }
 }

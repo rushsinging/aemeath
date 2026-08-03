@@ -47,12 +47,10 @@ impl ConversationModel {
                 },
             )
             .collect::<Vec<_>>();
-        self.runtime.stop_spinner();
         changes.extend(self.apply(super::intent::TerminalNotice {
             cause: super::terminal::TerminalCause::UserCancelled,
             duration: None,
         }));
-        changes.push(ConversationChange::SpinnerStopped);
         changes.push(ConversationChange::StyleBoundaryResetRequired);
         changes.push(ConversationChange::OutputDirty);
         changes

@@ -56,7 +56,7 @@
 | 10 | `check-tui-toplevel-layout.sh` | TUI 架构 | 顶层模块白名单 + feature #57 旧路径守卫 |
 | 11 | `check-tui-effect-boundary.sh` | TUI 架构 | model/update 不直接执行 Effect |
 | 12 | `check-tui-model-view-boundaries.sh` | TUI 架构 | model/render/view 边界 + 物理遗留 |
-| 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留与 lifecycle 单一权威 | TUI M2 后选区/工具状态旁路守卫；ConversationModel 禁止恢复 AgentRun/RunStep lifecycle 状态，Runtime lifecycle mapper 禁止产生 `ConversationIntent::Run*` mutation |
+| 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留 | TUI M2 后选区/工具状态旁路守卫 |
 | 13a | `check-tui-retained-output-view.sh` | TUI 性能架构 | 生产输出刷新只经统一窗口物化入口；保留视图不得拥有完整历史节点，渲染器不得扫描完整语义历史；变更日志保持有界 |
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
 | 15a | `check-render-pure.sh` | TUI 渲染 | render 禁止直读 conversation/runtime domain model，测试与登记 display bridge 除外 |
@@ -77,7 +77,8 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配与 lifecycle 守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；RunKind 不驱动控制流；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名；Run lifecycle 只允许 Step cancellation 与 typed Run termination，禁止旧 Run cancellation Domain/Event/SDK projection 和 ActiveRunRegistry lifecycle 副本复活 |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
+| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 展示只能走逐 subscription Activity 链；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -85,7 +86,7 @@
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
 
-`check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界与 Run lifecycle 退役边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名；RunStatus 不得恢复 Run 级 Cancelling/Cancelled，Domain/Event/Runtime stream/SDK/wire 不得恢复旧 Run cancellation symbols，`ActiveRunRegistry` 不得恢复 cancelling/terminal 副本或 lifecycle claim。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不机械禁止 RunStep、Tool 或 Interaction 的局部 `Cancelled` 语义。故意向 Run domain event 注入 Run-level `Cancelled` 探针时，单 Guard 与 fast 总编排均阻断；恢复后 clean pass。
+`check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
 ## 0. check-guard-registry.sh
 
@@ -442,14 +443,11 @@
 
 ## 13. check-tui-output-legacy-guards.sh
 
-- **功能**：TUI M2 之后的输出区旁路与 Run lifecycle 单一权威守卫。
+- **功能**：TUI M2 之后的输出区旁路守卫。
 - **检查项**：
   - 整个 `apps/cli/src/tui` 不得出现 `find_last_running` / `last running` / `最后一个 running`。
   - `apps/cli/src/tui/output_area` + `apps/cli/src/tui/render` 不得在非 `if matches!(line.style, LineStyle::ToolCallRunning)` 上下文中调 `cell.set_char('●')`（防覆盖已完成 tool 的状态图标）。
-  - `model/conversation` 不得定义或保存 `AgentRunPhase`、`AgentRunState`、`AgentRunStepState`、对应 Change 或 retained-state Run 计数。
-  - `adapter/agent_event.rs` 不得从 Runtime Run lifecycle 产生 `ConversationIntent::Run*` mutation；step cancellation DTO 可保留，但 Conversation mapping 必须 observational/no-op。
-- **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身；Run lifecycle 规则无生产白名单。
-- **故意违规证据**：临时向 Conversation interaction model 注入 `AgentRunState` 时单 Guard 阻断；恢复后单 Guard 与 fast 总编排 clean pass。
+- **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身。
 
 ### 13a. check-tui-retained-output-view.sh
 

@@ -1,5 +1,5 @@
 use super::events::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
-use super::stream_handler::{should_emit_model_stream_waiting, InvocationEventReducer};
+use super::stream_handler::InvocationEventReducer;
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
     InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
@@ -69,33 +69,6 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         .collect();
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
-}
-
-#[test]
-fn reducer_progress_tracks_visible_deltas_and_waiting_phase() {
-    let sink = RecordingSink::default();
-    let mut reducer = InvocationEventReducer::new(sink);
-    let progress = reducer.progress_handle();
-    let initial = progress.lock().unwrap().snapshot();
-    assert_eq!(initial.phase, "waiting_model_response");
-
-    reducer
-        .apply(InvocationEvent::Delta(InvocationDelta::Thinking {
-            thinking: "thinking".into(),
-            signature: None,
-        }))
-        .unwrap();
-    let thinking = progress.lock().unwrap().snapshot();
-    assert_eq!(thinking.phase, "thinking");
-    assert!(thinking.first_visible_event_seen);
-
-    reducer
-        .apply(completion(vec![ProviderContentBlock::Text(
-            "answer".into(),
-        )]))
-        .unwrap();
-    let waiting = progress.lock().unwrap().snapshot();
-    assert_eq!(waiting.phase, "waiting_model_output");
 }
 
 #[test]
@@ -209,28 +182,4 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
     assert!(events
         .iter()
         .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));
-}
-
-#[test]
-fn waiting_detection_requires_no_progress_since_previous_snapshot() {
-    let sink = RecordingSink::default();
-    let mut reducer = InvocationEventReducer::new(sink);
-    let progress = reducer.progress_handle();
-    let initial = progress.lock().unwrap().snapshot();
-    assert!(should_emit_model_stream_waiting(None, &initial));
-    reducer
-        .apply(InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
-            index: 0,
-            call: ProviderToolCall {
-                id: ProviderToolCallId("provider-tool".into()),
-                name: "Read".into(),
-                arguments: serde_json::json!({}),
-            },
-        }))
-        .unwrap();
-    let unchanged = progress.lock().unwrap().snapshot();
-    assert!(should_emit_model_stream_waiting(
-        Some(initial.visible_progress_version),
-        &unchanged
-    ));
 }

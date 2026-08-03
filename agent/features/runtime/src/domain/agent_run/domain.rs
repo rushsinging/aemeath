@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::agent_run::ToolCall;
 
-use super::event::{RunDomainEvent, RunId};
+use super::event::{RunDomainEvent, RunId, RunTimingSnapshot};
 use super::spec::RunSpec;
 use super::state::{
     DrainDecision, InteractionContinuation, PendingInteraction, RunStatus, RunStep,
@@ -10,6 +10,10 @@ use super::state::{
     RunTransitionError, RunTransitionReason, StopHookBlockResult,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
+
+fn duration_millis(now: Instant, started_at: Instant) -> u64 {
+    u64::try_from(now.saturating_duration_since(started_at).as_millis()).unwrap_or(u64::MAX)
+}
 
 #[derive(Debug)]
 pub struct Run {
@@ -36,10 +40,13 @@ pub struct Run {
     user_cancelled_step: bool,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
+    phase_started_at: Option<Instant>,
+    timing_observation_revision: u64,
     events: Vec<RunDomainEvent>,
 }
 
 impl Run {
+    #[allow(dead_code)]
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
         Self::with_id(RunId::new_v7(), spec, parent_id)
     }
@@ -58,6 +65,8 @@ impl Run {
             user_cancelled_step: false,
             steps: Vec::new(),
             started_at: None,
+            phase_started_at: None,
+            timing_observation_revision: 0,
             events: Vec::new(),
         }
     }
@@ -289,14 +298,25 @@ impl Run {
     }
 
     fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
+        let now = Instant::now();
         let from = self.status;
+        self.timing_observation_revision = self.timing_observation_revision.wrapping_add(1);
+        let timing = RunTimingSnapshot {
+            observation_revision: self.timing_observation_revision,
+            total_elapsed_ms: self
+                .started_at
+                .map_or(0, |started_at| duration_millis(now, started_at)),
+            phase_elapsed_ms: 0,
+        };
         self.status = to;
+        self.phase_started_at = Some(now);
         self.events.push(RunDomainEvent::Transitioned {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             from,
             to,
             reason,
+            timing,
         });
         log::debug!(
             target: crate::LOG_TARGET,
@@ -458,8 +478,10 @@ impl Run {
     }
 
     pub fn start_draining(&mut self) -> Result<(), RunTransitionError> {
+        let now = Instant::now();
+        self.started_at = Some(now);
+        self.phase_started_at = Some(now);
         self.transition(RunTransition::StartDraining)?;
-        self.started_at = Some(Instant::now());
         self.events.push(RunDomainEvent::Started {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),

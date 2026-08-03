@@ -1,4 +1,12 @@
 #[test]
+fn launcher_passes_per_run_activity_coordinator_to_engine() {
+    let source = include_str!("launcher.rs");
+
+    assert!(source.contains("let activities = context.activities().clone();"));
+    assert!(source.contains("execute_prepared_loop(run, execution, context, activities,"));
+}
+
+#[test]
 fn legacy_launcher_entries_are_retired_after_instance_migration() {
     let source = include_str!("launcher.rs");
     assert!(!source.contains("pub async fn launch<P>"));

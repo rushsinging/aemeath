@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # #700：Main/Sub 必须只通过唯一 shared Loop Engine 驱动 Run。

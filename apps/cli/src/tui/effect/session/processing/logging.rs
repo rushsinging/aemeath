@@ -87,18 +87,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::SystemMessage(message) => {
             crate::tui::log_trace!("{} system_message len={}", stage, message.len())
         }
-        sdk::ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => crate::tui::log_trace!(
-            "{} model_stream_waiting chat_id={} turn_id={} elapsed_secs={} phase={}",
-            stage,
-            context.chat_id,
-            context.turn_id,
-            elapsed_secs,
-            phase
-        ),
         sdk::ChatEvent::ModelInvocationRetrying {
             context,
             attempt,
@@ -126,10 +114,9 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         ),
         sdk::ChatEvent::TurnStarted { messages }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
-        | sdk::ChatEvent::StopHookBlocked { messages }
         | sdk::ChatEvent::PostToolExecutionSync { messages }
         | sdk::ChatEvent::CompactRollback { messages }
-        | sdk::ChatEvent::CompactFinished { messages } => {
+        | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
         }
         sdk::ChatEvent::ApiError { messages, error } => {
@@ -190,7 +177,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::RunCompleted { run_id, .. } => crate::tui::log_trace!("{} run_completed run_id={}", stage, run_id),
         sdk::ChatEvent::RunFailed { run_id, .. } => crate::tui::log_trace!("{} run_failed run_id={}", stage, run_id),
         sdk::ChatEvent::RunStuckDetected { run_id, .. } => crate::tui::log_trace!("{} run_stuck_detected run_id={}", stage, run_id),
-        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={}", stage, run_id, status),
+        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={:?}", stage, run_id, status),
         sdk::ChatEvent::RunAwaitingUser { run_id, .. } => crate::tui::log_trace!("{} run_awaiting_user run_id={}", stage, run_id),
         sdk::ChatEvent::RunResumed { run_id, .. } => crate::tui::log_trace!("{} run_resumed run_id={}", stage, run_id),
         sdk::ChatEvent::InteractionRequested { request } => crate::tui::log_trace!("{} interaction_requested request_id={} run_id={}", stage, request.id, request.run_id),
@@ -206,21 +193,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::CurrentTurnChanged(turn) => {
             crate::tui::log_trace!("{} current_turn_changed turn={}", stage, turn)
         }
-        sdk::ChatEvent::HookEvent(event) => crate::tui::log_trace!(
-            "{} hook_event name={} status={:?}",
-            stage,
-            event.hook_name,
-            event.status
-        ),
-        sdk::ChatEvent::HookMessage(message) => crate::tui::log_trace!(
-            "{} hook_message point={} source={} ordinal={} attempt={} kind={:?}",
-            stage,
-            message.point,
-            message.source,
-            message.execution_ordinal,
-            message.attempt,
-            message.kind
-        ),
         sdk::ChatEvent::AskUserBatch { items, .. } => {
             crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
         }
@@ -326,6 +298,27 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             "{} reflection_history count={}",
             stage,
             records.len()
+        ),
+        sdk::ChatEvent::ActivityChanged { kind, activity } => crate::tui::log_debug!(
+            "{} activity_changed run_id={} activity_id={} source={:?} kind={:?} state={:?} change={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+            stage,
+            activity.run_id,
+            activity.id,
+            activity.source,
+            activity.kind,
+            activity.state,
+            kind,
+            activity.revision,
+            activity.timing.total_elapsed_ms,
+            activity.timing.active_elapsed_ms,
+            activity.timing.state_elapsed_ms,
+        ),
+        sdk::ChatEvent::ActivitySnapshot(snapshot) => crate::tui::log_debug!(
+            "{} activity_snapshot run_id={} revision={} activity_count={}",
+            stage,
+            snapshot.run_id,
+            snapshot.revision,
+            snapshot.activities.len(),
         ),
         // These metadata/list events are intentionally omitted from trace logging.
         sdk::ChatEvent::SkillsUpdated { .. }

@@ -3,6 +3,9 @@ use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
     match event {
+        sdk::ChatEvent::ActivityChanged { .. } | sdk::ChatEvent::ActivitySnapshot(_) => {
+            UiEvent::SessionReset
+        }
         sdk::ChatEvent::SkillsUpdated { event } => UiEvent::SkillsUpdated(event),
         sdk::ChatEvent::Token { context, text } => UiEvent::Text {
             context: context.into(),
@@ -69,15 +72,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             images,
         },
         sdk::ChatEvent::SystemMessage(msg) => UiEvent::SystemMessage(msg),
-        sdk::ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => UiEvent::ModelStreamWaiting {
-            context: context.into(),
-            elapsed_secs,
-            phase,
-        },
         sdk::ChatEvent::ModelInvocationRetrying { attempt, delay, .. } => {
             UiEvent::SystemMessage(format!(
                 "Retrying model invocation (attempt {attempt}) in {:.1}s.",
@@ -105,9 +99,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        sdk::ChatEvent::StopHookBlocked { messages } => UiEvent::StopHookBlocked {
-            messages: messages.into_iter().map(chat_message).collect(),
-        },
         sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
@@ -118,8 +109,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished {
+        sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactFinished {
             messages: messages.into_iter().map(chat_message).collect(),
+            notice,
         },
         sdk::ChatEvent::UserMessagesAdopted { items, queued } => UiEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
@@ -166,8 +158,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
             UiEvent::CurrentTurnChanged(turn)
         }
-        sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
-        sdk::ChatEvent::HookMessage(message) => UiEvent::HookMessage(message),
         // #944 5B: AskUserBatch legacy bridge removed.
         sdk::ChatEvent::AskUserBatch { .. } => {
             UiEvent::SystemMessage("AskUserBatch retired".to_string())
@@ -243,8 +233,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             steps,
             session_id,
             created_at,
-        } => UiEvent::SessionResumed {
-            steps: steps
+            compacted,
+        } => UiEvent::SessionResumed {            steps: steps
                 .into_iter()
                 .map(
                     |step| crate::tui::adapter::runtime_view::TuiResumedSessionStep {
@@ -262,8 +252,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
                 .collect(),
             session_id,
             created_at,
-        },
-        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+            compacted,
+        },        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
             UiEvent::SessionResumeFailed { kind, id, message }
         }
         sdk::ChatEvent::ReflectionHistory { records } => UiEvent::ReflectionHistory { records },
