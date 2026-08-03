@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -12,7 +12,7 @@ expect_block() {
   local label="$1"
   local output status
   set +e
-  output="$(AEMEATH_PROJECT_DIR="$REPO" bash "$REPO/.agents/hooks/check-hook-target-facade.sh" 2>&1)"
+  output="$(AEMEATH_PROJECT_DIR="$REPO" /bin/bash "$REPO/.agents/hooks/check-hook-target-facade.sh" 2>&1)"
   status=$?
   set -e
   [ "$status" -eq 2 ] || { echo "$label: expected exit 2, got $status: $output" >&2; exit 1; }
@@ -30,5 +30,5 @@ printf '\nuse hook::api::HookRunner;\n' >> "$REPO/agent/features/runtime/src/app
 expect_block runtime-api-consumer
 cp "$ROOT/agent/features/runtime/src/application/resources.rs" "$REPO/agent/features/runtime/src/application/resources.rs"
 
-AEMEATH_PROJECT_DIR="$REPO" bash "$REPO/.agents/hooks/check-hook-target-facade.sh"
+AEMEATH_PROJECT_DIR="$REPO" /bin/bash "$REPO/.agents/hooks/check-hook-target-facade.sh"
 echo "Hook target facade guard regression tests passed"

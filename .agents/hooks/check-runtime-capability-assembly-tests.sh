@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,7 +20,7 @@ cp "$TMP/repo/agent/features/runtime/src/application/run/derived/setup.rs" "$BAS
 cp "$TMP/repo/agent/features/runtime/src/application/run/derived/loop_run.rs" "$BASELINE/derived_loop_run.rs"
 
 run_guard() {
-  AEMEATH_PROJECT_DIR="$TMP/repo" bash "$GUARD"
+  AEMEATH_PROJECT_DIR="$TMP/repo" /bin/bash "$GUARD"
 }
 
 expect_failure() {

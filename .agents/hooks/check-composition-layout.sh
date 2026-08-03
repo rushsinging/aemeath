@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：锁定 Composition Root 的 capability-first wiring modules 结构。

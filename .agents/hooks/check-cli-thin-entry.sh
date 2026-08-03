@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：检查 apps/cli 只直接依赖 composition + sdk + 纯技术库。

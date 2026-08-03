@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Regression tests for check-unit-tests.sh.
 
 set -euo pipefail

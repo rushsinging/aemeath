@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：守护 agent context 所有权重构（project 拥有 WorkspaceState）的架构不变量。

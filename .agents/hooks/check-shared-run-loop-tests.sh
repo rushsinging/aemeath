@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
@@ -7,7 +7,7 @@ cp -R "$ROOT/." "$TMP/repo"
 probe="$TMP/repo/agent/features/runtime/src/application/session_bypass.rs"
 printf '%s\n' 'fn bypass(_: context::session::ChatChain) {}' > "$probe"
 set +e
-output="$(AEMEATH_PROJECT_DIR="$TMP/repo" bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" 2>&1)"
+output="$(AEMEATH_PROJECT_DIR="$TMP/repo" /bin/bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" 2>&1)"
 status=$?
 set -e
 if [ "$status" -ne 2 ] || [[ "$output" != *"Runtime 生产代码必须只经 Context"* ]]; then
@@ -17,7 +17,7 @@ if [ "$status" -ne 2 ] || [[ "$output" != *"Runtime 生产代码必须只经 Con
 fi
 printf '%s\n' 'const projection_start_index: usize = 0;' > "$probe"
 set +e
-output="$(AEMEATH_PROJECT_DIR="$TMP/repo" bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" 2>&1)"
+output="$(AEMEATH_PROJECT_DIR="$TMP/repo" /bin/bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" 2>&1)"
 status=$?
 set -e
 if [ "$status" -ne 2 ]; then
@@ -26,5 +26,5 @@ if [ "$status" -ne 2 ]; then
   exit 1
 fi
 rm "$probe"
-AEMEATH_PROJECT_DIR="$TMP/repo" bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" >/dev/null
+AEMEATH_PROJECT_DIR="$TMP/repo" /bin/bash "$TMP/repo/.agents/hooks/check-shared-run-loop.sh" >/dev/null
 echo "Shared Run Loop boundary probe OK."

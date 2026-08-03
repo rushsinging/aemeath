@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # check-config-workflow-boundary.sh
 #
 # 守卫：禁止 Workflow graph policy 标识符回到 Config 域。

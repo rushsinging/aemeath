@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 # guard-registry:policy.hexagonal.current-layer-matrix
 # guard-registry:policy.task.target-layout
