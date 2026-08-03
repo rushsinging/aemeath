@@ -3,10 +3,34 @@ use async_trait::async_trait;
 use crate::application::context::coordination::{
     apply_automatic_compact_outcome, ContextCoordinator,
 };
-use crate::application::loop_engine::LoopEngineError;
+use crate::application::loop_engine::{CompactProgressView, LoopEngineError};
 use crate::application::run::context::{RunUsageTracker, RuntimeContext};
 use crate::application::run::execution_state::RunExecutionState;
 use crate::ports::CompactOutcome;
+
+/// 把 Runtime 的 [`CompactProgressView`]（SDK 视图 stage）适配为 Context 的
+/// `CompactProgressFn`（domain stage + usize chunk 计数），#1500 全链路接线。
+pub(crate) struct CompactProgressAdapter(pub(crate) std::sync::Arc<dyn CompactProgressView>);
+
+impl context::compact::CompactProgressFn for CompactProgressAdapter {
+    fn emit(
+        &self,
+        stage: context::compact::CompactStage,
+        current: Option<usize>,
+        total: Option<usize>,
+    ) {
+        let view_stage = match stage {
+            context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
+            context::compact::CompactStage::Summarizing => sdk::CompactStageView::Summarizing,
+            context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
+        };
+        self.0.emit(
+            view_stage,
+            current.and_then(|value| u32::try_from(value).ok()),
+            total.and_then(|value| u32::try_from(value).ok()),
+        );
+    }
+}
 
 #[async_trait]
 pub(crate) trait CompactionObserver: Send {
@@ -62,6 +86,7 @@ impl CompactionCoordinator {
         &self,
         execution: &mut RunExecutionState,
         observer: &mut O,
+        progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError>
     where
         O: CompactionObserver,
@@ -83,7 +108,7 @@ impl CompactionCoordinator {
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         let outcome = self
             .context
-            .compact(&request, source_revision)
+            .compact(&request, source_revision, progress)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
         apply_automatic_compact_outcome(&outcome, &self.usage, execution.context_window_mut());

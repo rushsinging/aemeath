@@ -79,13 +79,19 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequest,
         source_revision: SessionRevision,
+        progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
     ) -> Result<CompactOutcome, ContextPortError> {
+        let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
+            Some(std::sync::Arc::new(
+                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
+            ));
         self.port
             .compact(&CompactRequest {
                 run_id: request.run_id.clone(),
                 source_revision,
                 source: request.clone(),
                 trigger: CompactTrigger::Automatic,
+                progress,
             })
             .await
     }

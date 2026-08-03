@@ -11,7 +11,7 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::CompactStage;
+pub use compact::{CompactProgressFn, CompactStage};
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
@@ -276,20 +276,49 @@ pub enum CompactTrigger {
     Manual,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CompactRequest {
     pub run_id: RunId,
     pub source_revision: SessionRevision,
     pub source: ContextRequest,
     pub trigger: CompactTrigger,
+    /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
+    /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
+    pub progress: Option<Arc<dyn CompactProgressFn>>,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for CompactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactRequest")
+            .field("run_id", &self.run_id)
+            .field("source_revision", &self.source_revision)
+            .field("source", &self.source)
+            .field("trigger", &self.trigger)
+            .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct ManualCompactRequest {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub system_prompt: SystemPromptSpec,
     pub context_size: usize,
+    /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
+    pub progress: Option<Arc<dyn CompactProgressFn>>,
+}
+
+impl std::fmt::Debug for ManualCompactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManualCompactRequest")
+            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
+            .field("system_prompt", &self.system_prompt)
+            .field("context_size", &self.context_size)
+            .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -526,7 +526,9 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress =
+        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
         "compact should succeed on Committed: {result:?}"
@@ -565,7 +567,9 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress =
+        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
         "automatic compact skip must continue the current Run: {result:?}"
@@ -599,7 +603,9 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress =
+        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_err(),
         "compact must propagate context port errors"
