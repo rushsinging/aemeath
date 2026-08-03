@@ -2,15 +2,20 @@
 
 use crate::ChatInputEventPort;
 
+pub use crate::activity::{
+    ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
+    ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
+    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
+    RunPurposeView,
+};
 pub use crate::chat_event::{
     ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
     ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
-    ResumedSessionStep, ResumedStepFinalizeCause, ToolCallStatusView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, ToolCallStatusView,
 };
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
-    HookEventView, HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, OptionItem,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
 

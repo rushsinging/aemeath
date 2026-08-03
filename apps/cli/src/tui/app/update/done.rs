@@ -11,7 +11,6 @@ impl App {
         _ui_tx: &mpsc::Sender<UiEvent>,
         _elapsed: Option<std::time::Duration>,
     ) -> Vec<Effect> {
-        self.spinner_stop();
         self.chat.stop_processing();
         self.apply_agent_intent(AgentIntent::Conversation(
             ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::success("Ready"))),

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 tmp="${TMPDIR:-/tmp}/aemeath-render-domain-guard.txt"

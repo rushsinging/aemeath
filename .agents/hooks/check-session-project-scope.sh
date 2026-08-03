@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.context.session-project-scope
 set -euo pipefail
 

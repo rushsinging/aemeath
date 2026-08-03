@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.session-management.composition-ownership
 set -euo pipefail
 

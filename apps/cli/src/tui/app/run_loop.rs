@@ -2,7 +2,6 @@ use super::App;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -135,14 +134,13 @@ impl App {
             let loop_gap_ms = loop_now.duration_since(last_loop_iteration).as_millis();
             last_loop_iteration = loop_now;
             crate::tui::log_trace!(
-                "tui.loop.frame_begin gap_ms={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} spinner_active={} spinner_phase={:?} spinner_frame={} output_lines={}",
+                "tui.loop.frame_begin gap_ms={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={} output_lines={}",
                 loop_gap_ms,
                 self.view_state.dirty.output,
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.conversation.runtime.spinner.chat_active,
-                self.model.conversation.runtime.spinner.phase,
+                self.view_state.run_activity.is_active(),
                 self.view_state.animation.spinner_frame,
                 self.output_area.document().total_lines()
             );
@@ -209,18 +207,16 @@ impl App {
             };
 
             crate::tui::log_trace!(
-                "tui.loop.event msg={} spinner_active={} spinner_phase={:?} spinner_frame={}",
+                "tui.loop.event msg={} run_activity_active={} spinner_frame={}",
                 tui_msg_name(&msg),
-                self.model.conversation.runtime.spinner.chat_active,
-                self.model.conversation.runtime.spinner.phase,
+                self.view_state.run_activity.is_active(),
                 self.view_state.animation.spinner_frame
             );
-
             // --- TEA update: state transition ---
             let update_start = Instant::now();
             let result = self.drive_frame(msg, &ui_tx, &spawn_refs);
             crate::tui::log_trace!(
-                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} spinner_active={} spinner_phase={:?} spinner_frame={}",
+                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={}",
                 update_start.elapsed().as_millis(),
                 result.effects.len(),
                 result.spawn_effect.is_some(),
@@ -229,11 +225,9 @@ impl App {
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.conversation.runtime.spinner.chat_active,
-                self.model.conversation.runtime.spinner.phase,
+                self.view_state.run_activity.is_active(),
                 self.view_state.animation.spinner_frame
             );
-
             // --- Handle pending slash commands (async) ---
             if let Some(input) = result.pending_slash {
                 let review_prompt = self
@@ -245,7 +239,6 @@ impl App {
                     // MessagesSync 单一真相驱动（与普通提交一致）。
                     interrupted.store(false, Ordering::Relaxed);
                     self.chat.clear_tool_activity();
-                    self.spinner_phase(SpinnerPhase::Thinking);
                     self.chat.start_processing();
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::UserMessage {

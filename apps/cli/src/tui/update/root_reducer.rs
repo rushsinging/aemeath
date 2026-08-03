@@ -46,12 +46,11 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
                 .conversation
                 .apply(ConversationIntent::ResumeConversation(intent));
             apply_history_conversation_changes(&mut result, &changes);
-            model.conversation.runtime.force_idle();
             result.dirty.mark_status();
         }
         AgentIntent::Conversation(intent) => {
             let changes = model.conversation.apply(intent);
-            apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
+            apply_conversation_changes(&mut result, &changes);
         }
         AgentIntent::RuntimePresentation(intent) => {
             model.runtime_presentation.apply(intent);
@@ -120,7 +119,7 @@ pub(crate) fn reduce_agent_event(
     let mut result = TuiUpdateResult::default();
     for intent in mapping.conversation {
         let changes = model.conversation.apply(intent);
-        apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
+        apply_conversation_changes(&mut result, &changes);
     }
     for intent in mapping.diagnostic {
         model.diagnostic.apply(intent);
@@ -167,32 +166,11 @@ fn apply_history_conversation_changes(
     }
 }
 
-fn apply_conversation_changes(
-    result: &mut TuiUpdateResult,
-    changes: &[ConversationChange],
-    runtime: &mut crate::tui::model::conversation::runtime_state::RuntimeState,
-) {
+fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[ConversationChange]) {
     for change in changes {
         result
             .effects
             .extend(crate::tui::update::coordinator::effects_for_conversation_change(change));
-        match change {
-            ConversationChange::ChatStarted { .. } => runtime.start_chat(),
-            ConversationChange::ChatCompleted { .. }
-            | ConversationChange::ChatCompleting { .. } => runtime.complete_chat(),
-            ConversationChange::AssistantTextAppended { .. } => runtime.generate(),
-            ConversationChange::ThinkingTextAppended { .. } => runtime.think(),
-            ConversationChange::ToolCallBound { name, running, .. } if *running => {
-                runtime.start_tool_call(name)
-            }
-            ConversationChange::ToolCallCompleted { .. } => runtime.complete_tool_call(),
-            ConversationChange::ErrorAppended { .. } => runtime.abort_chat(),
-            ConversationChange::AgentProgressRecorded { .. } => runtime.report_agent_progress(),
-            ConversationChange::AskUserShown { .. } => runtime.pause_chat(),
-            ConversationChange::AskUserUpdated { .. }
-            | ConversationChange::AskUserDismissed { .. } => runtime.resume_chat(),
-            _ => {}
-        }
     }
     let model_changes: Vec<ModelChange> = changes.iter().map(ModelChange::from).collect();
     let dirty = dirty_from_model_changes(&model_changes);
@@ -230,6 +208,9 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
             | ConversationChange::InteractionConflict { .. }
+            | ConversationChange::ActivityObservationChanged { .. }
+            | ConversationChange::ActivityObservationStale { .. }
+            | ConversationChange::ActivitySnapshotReplaced { .. }
             | ConversationChange::AgentRunChanged { .. }
             | ConversationChange::AgentRunStepChanged { .. } => {
                 ModelChange::output_and_status_dirty()
@@ -246,8 +227,6 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::LiveTpsChanged { .. }
             | ConversationChange::TaskStatusChanged { .. }
             | ConversationChange::ProcessingJobChanged { .. }
-            | ConversationChange::SpinnerPhaseChanged
-            | ConversationChange::SpinnerStopped
             | ConversationChange::TaskLinesChanged
             | ConversationChange::StatusNoticeChanged
             | ConversationChange::GraphPhaseChanged => ModelChange::status_dirty(),

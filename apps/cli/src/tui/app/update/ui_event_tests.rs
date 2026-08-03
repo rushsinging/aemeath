@@ -380,22 +380,15 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
     );
 }
 
-/// Bug #540：MessagesSync 兜底清理必须同时清空 compact runtime 三态（chat_active、
-/// phase、running_tool_count、compact_progress），否则 compact 完成后 spinner 行会
-/// 残留 Compacting 文案 + 90% 进度条。
+/// Compact 完成只清理 compact detail；Run 生命周期继续由 typed status 所有。
 #[test]
 fn test_messages_sync_clears_compact_runtime_state() {
     use crate::tui::model::conversation::intent::SetCompactProgress;
-    use crate::tui::model::conversation::spinner::SpinnerPhase;
 
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
 
-    // 模拟 compact 进行中：直接写入 runtime 三态
-    app.model.conversation.runtime.spinner.chat_active = true;
-    app.model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Compacting);
-    app.model.conversation.runtime.spinner.running_tool_count = 2;
     app.model.conversation.apply(SetCompactProgress {
         stage: "finalizing".into(),
         current: Some(8),
@@ -407,21 +400,14 @@ fn test_messages_sync_clears_compact_runtime_state() {
     );
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished { messages: vec![] }),
+        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished {
+            messages: vec![],
+            notice: "✓ 上下文压缩完成".to_string(),
+        }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // CompactFinished 后：compact runtime 状态被清空，但 spinner 不停（turn 仍在进行）
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_none(),
-        "CompactFinished 后 compact_progress 必须清空"
-    );
-    // spinner 不应被 CompactFinished 停止
-    assert!(
-        app.model.conversation.runtime.spinner.chat_active,
-        "CompactFinished 后 chat_active 保持 true（turn 仍在进行）"
-    );
     assert!(
         app.model.conversation.runtime.compact_progress.is_none(),
         "MessagesSync 后 compact_progress 必须清空（进度条才会消失）"

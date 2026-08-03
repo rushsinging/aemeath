@@ -33,7 +33,38 @@ impl App {
     }
 
     pub(crate) fn restore_startup_session(&mut self, resume: sdk::SessionResumeView) {
-        self.restore_startup_backing(sdk::LocalSessionResumeBacking::from_wire(resume));
+        crate::tui::log_debug!(
+            "resume_lifecycle boundary=tui_startup stage=view_received session_id={} steps={} messages={}",
+            resume.session_id,
+            resume.steps.len(),
+            resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
+        );
+        let steps = resume
+            .steps
+            .into_iter()
+            .map(|step| TuiResumedSessionStep {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                messages: step
+                    .messages
+                    .into_iter()
+                    .map(crate::tui::adapter::event_mapping::chat_message)
+                    .collect(),
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                    sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect();
+        self.resume_session_messages(
+            &resume.session_id,
+            steps,
+            None,
+            resume.created_at.to_string(),
+            resume.compacted,
+        );
     }
 
     pub(crate) fn resume_session_messages(
@@ -42,6 +73,7 @@ impl App {
         steps: Vec<TuiResumedSessionStep>,
         display_history: Option<crate::tui::adapter::runtime_view::TuiDisplayHistoryIndex>,
         created_at: String,
+        compacted: bool,
     ) {
         let messages = steps
             .iter()
@@ -99,6 +131,9 @@ impl App {
                     crate::tui::model::conversation::intent::ResumeConversation { steps },
                 ),
             ));
+        }
+        if compacted {
+            self.append_system_notice("✓ 上下文压缩完成");
         }
         self.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(
             input_history,
@@ -177,6 +212,7 @@ mod tests {
             display_history: None,
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(app.model.conversation.chats.len(), 0);
@@ -208,11 +244,11 @@ mod tests {
             }],
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(app.session.session_id(), "session-resumed");
-        assert_eq!(app.model.conversation.timeline.items().len(), 1);
-        assert_eq!(app.model.display_history.steps().len(), 1);
+        assert_eq!(app.model.conversation.timeline.items().len(), 2);
         assert!(app.model.conversation.revision() > 0);
     }
 
@@ -251,6 +287,7 @@ mod tests {
             }),
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(
@@ -332,14 +369,14 @@ mod tests {
             }],
             None,
             "2026-01-01T00:00:00Z".to_string(),
+            false,
         );
-
-        assert!(
-            !app.model.conversation.runtime.spinner.chat_active,
-            "SessionResumed 仅恢复历史，不能表示 Runtime 正在执行"
-        );
-        assert_eq!(app.model.conversation.runtime.spinner.phase, None);
-        assert_eq!(app.model.conversation.runtime.spinner.running_tool_count, 0);
+        assert!(app
+            .model
+            .conversation
+            .activity_observations()
+            .activities()
+            .is_empty());
     }
     #[test]
     fn test_apply_resume_input_history_populates_app_history() {

@@ -67,6 +67,21 @@ fn apply_ui_event(app: &mut App, event: super::event::UiEvent) {
 }
 
 #[tokio::test]
+async fn compact_slash_command_enqueues_runtime_compact_request() {
+    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
+    let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
+    app.chat.input_event_tx = Some(input_tx);
+
+    let prompt = app.handle_slash_command_with_events("/compact", None).await;
+
+    assert!(prompt.is_none());
+    assert!(matches!(
+        input_rx.try_recv(),
+        Ok(sdk::ChatInputEvent::Compact)
+    ));
+}
+
+#[tokio::test]
 async fn startup_skill_snapshot_routes_archify_before_runtime_refresh() {
     let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
     let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();

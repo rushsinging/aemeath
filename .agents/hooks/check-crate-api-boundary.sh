@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.task.crate-root-facade
 set -euo pipefail
 
@@ -196,7 +196,9 @@ ROOT_ACCESS_ALLOW = {
         "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
         "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
         "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",
-        "HookSubscription", "InstructionsInput", "PermissionInput", "PostToolBatchInput",
+        "HookSubscription", "HookSubscriptionExecutionEvent",
+        "HookSubscriptionExecutionObserver", "HookSubscriptionExecutionTerminal",
+        "InstructionsInput", "PermissionInput", "PostToolBatchInput",
         "PostToolUseFailureInput", "PostToolUseInput", "PreToolUseInput", "ProtocolViolation",
         "SubRunInput", "SubRunStopInput", "SubscriptionError", "TaskInput", "StopInput",
         "build_dispatcher",

@@ -6,7 +6,6 @@ use crate::tui::model::conversation::intent::{
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 
 fn tool_update(
     status: crate::tui::model::conversation::tool_call::ToolCallStatus,
@@ -24,7 +23,7 @@ fn tool_update(
 }
 
 #[test]
-fn session_history_restore_does_not_activate_runtime_spinner() {
+fn session_history_restore_keeps_run_snapshot_inactive() {
     let mut model = TuiModel::default();
 
     reduce_intent(
@@ -43,12 +42,11 @@ fn session_history_restore_does_not_activate_runtime_spinner() {
         })),
     );
 
-    assert!(
-        !model.conversation.runtime.spinner.chat_active,
-        "SessionResumed 的历史投影不能表示 Runtime 正在执行"
-    );
-    assert_eq!(model.conversation.runtime.spinner.phase, None);
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
+    assert!(model
+        .conversation
+        .activity_observations()
+        .activities()
+        .is_empty());
 }
 #[test]
 fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
@@ -72,8 +70,9 @@ fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
 }
 
 #[test]
-fn test_running_tool_update_starts_runtime_tool_spinner() {
+fn running_tool_update_does_not_mutate_runtime_presentation_state() {
     let mut model = TuiModel::default();
+    let runtime_before = model.conversation.runtime.clone();
 
     reduce_agent_event(
         &mut model,
@@ -85,11 +84,7 @@ fn test_running_tool_update_starts_runtime_tool_spinner() {
         },
     );
 
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 1);
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::CallingTool("Bash".to_string()))
-    );
+    assert_eq!(model.conversation.runtime, runtime_before);
 }
 
 #[test]

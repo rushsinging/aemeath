@@ -3,14 +3,12 @@ use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMess
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
     ClearCompactRuntime, ConfirmInteraction, ConversationIntent, RunAwaitingUser, RunStarted,
-    SetSpinnerPhase, ShowInteraction, StartChat, StopSpinner, SyncQueuedSubmissions,
-    UpdateInteractionDraft,
+    ShowInteraction, StartChat, SyncQueuedSubmissions, UpdateInteractionDraft,
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionDraftAction, InteractionRequest, UiInteractionRequestId, UiRunId,
     UiStuckDiagnostic,
 };
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::input::intent::InputIntent;
@@ -275,43 +273,6 @@ fn diagnostic_intent_marks_status_and_dialog_dirty() {
 }
 
 #[test]
-fn spinner_phase_intent_activates_spinner_and_marks_status_dirty() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::SetSpinnerPhase(SetSpinnerPhase {
-            phase: SpinnerPhase::Compacting,
-        })),
-    );
-
-    assert!(model.conversation.runtime.spinner.chat_active);
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::Compacting)
-    );
-    assert!(result.dirty.status);
-}
-
-#[test]
-fn stop_spinner_intent_clears_spinner_state_and_marks_status_dirty() {
-    let mut model = TuiModel::default();
-    model.conversation.runtime.spinner.chat_active = true;
-    model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Compacting);
-    model.conversation.runtime.spinner.running_tool_count = 2;
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::StopSpinner(StopSpinner)),
-    );
-
-    assert!(!model.conversation.runtime.spinner.chat_active);
-    assert_eq!(model.conversation.runtime.spinner.phase, None);
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
-    assert!(result.dirty.status);
-}
-
-#[test]
 fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty() {
     let mut model = TuiModel::default();
     let before_revision = model.conversation.revision();
@@ -347,7 +308,6 @@ fn clear_compact_runtime_intent_clears_progress_and_marks_output_dirty() {
         .conversation
         .runtime
         .set_compact_progress("summarizing".to_string(), Some(1), Some(2));
-    model.conversation.runtime.spinner.running_tool_count = 2;
 
     let result = reduce_intent(
         &mut model,
@@ -355,7 +315,6 @@ fn clear_compact_runtime_intent_clears_progress_and_marks_output_dirty() {
     );
 
     assert!(model.conversation.runtime.compact_progress.is_none());
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
     assert!(result.dirty.output);
 }
 #[test]

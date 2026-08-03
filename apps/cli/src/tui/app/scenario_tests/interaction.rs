@@ -69,6 +69,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
         ],
         session_id: "session-resumed".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 
@@ -85,7 +86,13 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
             "resume framebuffer 缺少 {expected}\n{screen}"
         );
     }
-    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .activity_observations()
+        .activities()
+        .is_empty());
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
         display_history: None,
@@ -98,6 +105,7 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
         }],
         session_id: "session-resumed".into(),
         created_at: 0,
+        compacted: false,
     });
     assert_eq!(harness.app.model.conversation.chats.len(), 1);
     assert_eq!(harness.app.model.conversation.chats[0].id.as_str(), "run-2");
@@ -159,6 +167,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
         }],
         session_id: "session-bash".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 

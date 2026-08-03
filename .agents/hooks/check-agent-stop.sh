@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Agent Stop gate: keep feedback immediate without repeating Cargo-backed checks.
 set -euo pipefail
 

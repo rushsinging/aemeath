@@ -150,55 +150,6 @@ pub struct WorkspaceContextView {
     pub context_stack: Vec<WorkspaceStackEntryView>,
 }
 
-/// Hook 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookEventStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-/// Hook 执行结果视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookExecutionResultView {
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub decision: Option<String>,
-    pub reason: Option<String>,
-    pub additional_context: Option<String>,
-}
-
-/// Hook 事件视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookEventView {
-    pub hook_name: String,
-    pub status: HookEventStatus,
-    pub matcher: Option<String>,
-    pub command: Option<String>,
-    pub result: Option<HookExecutionResultView>,
-}
-
-/// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HookMessageKindView {
-    AdditionalContext,
-    SystemMessage,
-}
-
-/// Hook 面向展示层的结构化消息。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct HookMessageView {
-    pub point: String,
-    pub source: String,
-    pub execution_ordinal: u32,
-    pub attempt: u8,
-    pub kind: HookMessageKindView,
-    pub text: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,30 +259,6 @@ mod tests {
         assert_eq!(view.path_base.to_string_lossy(), "/repo/sub");
         assert_eq!(view.workspace_root.to_string_lossy(), "/repo");
         assert_eq!(view.context_stack.len(), 1);
-    }
-
-    #[test]
-    fn hook_message_view_round_trips_with_attribution() {
-        let view = HookMessageView {
-            point: "PreToolUse".to_string(),
-            source: "Bash".to_string(),
-            execution_ordinal: 0,
-            attempt: 2,
-            kind: HookMessageKindView::AdditionalContext,
-            text: "extra context".to_string(),
-        };
-
-        let json = serde_json::to_value(&view).unwrap();
-        let restored: HookMessageView = serde_json::from_value(json).unwrap();
-        assert_eq!(restored, view);
-    }
-
-    #[test]
-    fn hook_message_kinds_remain_distinct() {
-        assert_ne!(
-            HookMessageKindView::AdditionalContext,
-            HookMessageKindView::SystemMessage
-        );
     }
 
     #[test]

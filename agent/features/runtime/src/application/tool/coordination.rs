@@ -119,6 +119,7 @@ pub(crate) trait ToolRoundObserver: Send {
     }
     async fn round_finished(
         &mut self,
+        _step_id: &sdk::RunStepId,
         _call_count: usize,
         _turn: usize,
         _cancel: &CancellationToken,
@@ -170,6 +171,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         agent,
         &sink,
         context.runtime_context.hooks_ref(),
+        context.runtime_context.activities().as_ref(),
         cancel,
         context.language,
         &context.workspace_root,
@@ -218,6 +220,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         context,
         observer,
         execution,
+        step_id,
         results,
         round.suspensions,
         round.approvals,
@@ -274,11 +277,11 @@ pub(crate) async fn finalize_streaming_rounds<O: ToolRoundObserver>(
             )
         })
         .collect();
-    let _ = step_id;
     finalize_tool_round_results(
         &coordinator.context,
         &mut coordinator.observer,
         execution,
+        step_id,
         results,
         suspensions,
         approvals,
@@ -297,6 +300,7 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
     context: &ToolRoundContext<'_>,
     observer: &mut O,
     execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
     results: Vec<ToolExecution>,
     suspensions: Vec<SuspendedToolCall>,
     approvals: Vec<ApprovalRequiredCall>,
@@ -346,7 +350,7 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
         });
     }
     observer
-        .round_finished(result_count, execution.turn_count(), run_cancel)
+        .round_finished(step_id, result_count, execution.turn_count(), run_cancel)
         .await;
     Ok(ToolRoundOutcome {
         step: crate::application::loop_engine::tool_strategy::step_from_fuse_bypass(fuse_bypassed),

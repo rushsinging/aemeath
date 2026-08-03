@@ -42,8 +42,12 @@ mod tests {
 
         assert_eq!(effects, vec![Effect::QueryReflectionHistory { limit: 10 }]);
         assert!(!app.chat.is_processing);
-        assert!(!app.model.conversation.runtime.spinner.chat_active);
-        assert!(app.model.conversation.runtime.spinner.phase.is_none());
+        assert!(app
+            .model
+            .conversation
+            .activity_observations()
+            .activities()
+            .is_empty());
     }
 
     #[test]

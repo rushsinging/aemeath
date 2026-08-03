@@ -15,6 +15,13 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
     use sdk::ChatEvent;
 
     let runtime = match event {
+        ChatEvent::ActivityChanged { kind, activity } => TuiRuntimeEvent::ActivityChanged {
+            kind: activity_change_kind(kind),
+            activity: activity_observation(activity),
+        },
+        ChatEvent::ActivitySnapshot(snapshot) => {
+            TuiRuntimeEvent::ActivitySnapshot(activity_snapshot(snapshot))
+        }
         ChatEvent::SkillsUpdated { event } => TuiRuntimeEvent::SkillsUpdated {
             revision: event.revision,
             skills: event
@@ -108,15 +115,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             images: images.into_iter().map(tool_image).collect(),
         },
         ChatEvent::SystemMessage(message) => TuiRuntimeEvent::SystemMessage(message),
-        ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => TuiRuntimeEvent::ModelStreamWaiting {
-            context: turn_context(context),
-            elapsed_secs,
-            phase,
-        },
         ChatEvent::ModelInvocationRetrying {
             context,
             attempt,
@@ -147,9 +145,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        ChatEvent::StopHookBlocked { messages } => TuiRuntimeEvent::StopHookBlocked {
-            messages: messages.into_iter().map(chat_message).collect(),
-        },
         ChatEvent::PostToolExecutionSync { messages } => TuiRuntimeEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
@@ -160,8 +155,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactRollback {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::CompactFinished { messages } => TuiRuntimeEvent::CompactFinished {
+        ChatEvent::CompactFinished { messages, notice } => TuiRuntimeEvent::CompactFinished {
             messages: messages.into_iter().map(chat_message).collect(),
+            notice,
         },
         ChatEvent::UserMessagesAdopted { items, queued } => TuiRuntimeEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
@@ -214,11 +210,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             parent_run_id,
             reason,
         } => run_event(run_id, parent_run_id, TuiRunEvent::Stuck { reason }),
-        ChatEvent::RunTransitioned {
-            run_id,
-            parent_run_id,
-            status,
-        } => run_event(run_id, parent_run_id, TuiRunEvent::Transitioned { status }),
+        ChatEvent::RunTransitioned { .. } => TuiRuntimeEvent::Noop,
         ChatEvent::RunTerminationRequested {
             run_id,
             parent_run_id,
@@ -298,8 +290,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::TurnChanged(turn) | ChatEvent::CurrentTurnChanged(turn) => {
             TuiRuntimeEvent::TurnChanged(turn)
         }
-        ChatEvent::HookEvent(event) => TuiRuntimeEvent::HookEvent(hook_event(event)),
-        ChatEvent::HookMessage(message) => TuiRuntimeEvent::HookMessage(hook_message(message)),
         // #944 5B: AskUserBatch legacy bridge removed.
         ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
@@ -381,6 +371,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             display_history,
             session_id,
             created_at,
+            compacted,
         } => TuiRuntimeEvent::SessionResumed {
             steps: steps
                 .into_iter()
@@ -405,6 +396,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             display_history: display_history.map(tui_display_history_index),
             session_id,
             created_at,
+            compacted,
         },
         ChatEvent::SessionResumeFailed { kind, id, message } => {
             TuiRuntimeEvent::SessionResumeFailed {
@@ -471,6 +463,229 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         },
     };
     SdkEventMapping::Runtime(runtime)
+}
+
+fn activity_change_kind(value: sdk::ActivityChangeKind) -> TuiActivityChangeKind {
+    match value {
+        sdk::ActivityChangeKind::Started => TuiActivityChangeKind::Started,
+        sdk::ActivityChangeKind::Updated => TuiActivityChangeKind::Updated,
+        sdk::ActivityChangeKind::Finished => TuiActivityChangeKind::Finished,
+    }
+}
+
+fn activity_snapshot(value: sdk::ActivitySnapshotView) -> TuiActivitySnapshot {
+    TuiActivitySnapshot {
+        run_id: run_id(value.run_id),
+        revision: value.revision,
+        activities: value
+            .activities
+            .into_iter()
+            .map(activity_observation)
+            .collect(),
+    }
+}
+
+fn activity_observation(value: sdk::ActivityView) -> TuiActivityObservation {
+    TuiActivityObservation {
+        id: UiActivityId::from(value.id.as_str()),
+        run_id: run_id(value.run_id),
+        run_step_id: value
+            .run_step_id
+            .as_ref()
+            .map(|id| UiRunStepId::from(id.as_str())),
+        parent_activity_id: value
+            .parent_activity_id
+            .as_ref()
+            .map(|id| UiActivityId::from(id.as_str())),
+        source: activity_source(value.source),
+        kind: activity_kind(value.kind),
+        state: activity_state(value.state),
+        detail: activity_detail(value.detail),
+        audience: activity_audience(value.audience),
+        revision: value.revision,
+        timing: TuiActivityTiming {
+            total_elapsed_ms: value.timing.total_elapsed_ms,
+            active_elapsed_ms: value.timing.active_elapsed_ms,
+            state_elapsed_ms: value.timing.state_elapsed_ms,
+            started_at_unix_ms: value.timing.started_at_unix_ms,
+            finished_at_unix_ms: value.timing.finished_at_unix_ms,
+        },
+    }
+}
+
+fn activity_source(value: sdk::ActivitySourceView) -> TuiActivitySource {
+    match value {
+        sdk::ActivitySourceView::Run => TuiActivitySource::Run,
+        sdk::ActivitySourceView::RunStep(id) => {
+            TuiActivitySource::RunStep(UiRunStepId::from(id.as_str()))
+        }
+        sdk::ActivitySourceView::ModelInvocation(id) => {
+            TuiActivitySource::ModelInvocation(id.as_str().to_string())
+        }
+        sdk::ActivitySourceView::ToolCall(id) => {
+            TuiActivitySource::ToolCall(id.as_str().to_string())
+        }
+        sdk::ActivitySourceView::HookDispatch(id) => {
+            TuiActivitySource::HookDispatch(UiActivityId::from(id.as_str()))
+        }
+        sdk::ActivitySourceView::Compaction(id) => {
+            TuiActivitySource::Compaction(UiActivityId::from(id.as_str()))
+        }
+        sdk::ActivitySourceView::Interaction(id) => {
+            TuiActivitySource::Interaction(id.as_str().to_string())
+        }
+        sdk::ActivitySourceView::ChildRun(id) => {
+            TuiActivitySource::ChildRun(UiRunId::from(id.as_str()))
+        }
+    }
+}
+
+fn activity_kind(value: sdk::ActivityKindView) -> TuiActivityKind {
+    match value {
+        sdk::ActivityKindView::Run => TuiActivityKind::Run,
+        sdk::ActivityKindView::RunPhase(phase) => TuiActivityKind::RunPhase(run_phase(phase)),
+        sdk::ActivityKindView::ModelInvocation => TuiActivityKind::ModelInvocation,
+        sdk::ActivityKindView::ToolCall => TuiActivityKind::ToolCall,
+        sdk::ActivityKindView::HookDispatch => TuiActivityKind::HookDispatch,
+        sdk::ActivityKindView::Compaction => TuiActivityKind::Compaction,
+        sdk::ActivityKindView::Interaction => TuiActivityKind::Interaction,
+        sdk::ActivityKindView::ChildRun => TuiActivityKind::ChildRun,
+    }
+}
+
+fn activity_state(value: sdk::ActivityStateView) -> TuiActivityState {
+    match value {
+        sdk::ActivityStateView::Running => TuiActivityState::Running,
+        sdk::ActivityStateView::Waiting => TuiActivityState::Waiting,
+        sdk::ActivityStateView::Succeeded => TuiActivityState::Succeeded,
+        sdk::ActivityStateView::Failed => TuiActivityState::Failed,
+        sdk::ActivityStateView::Cancelled => TuiActivityState::Cancelled,
+        sdk::ActivityStateView::Terminated => TuiActivityState::Terminated,
+    }
+}
+
+fn activity_audience(value: sdk::ActivityAudienceView) -> TuiActivityAudience {
+    match value {
+        sdk::ActivityAudienceView::User => TuiActivityAudience::User,
+        sdk::ActivityAudienceView::Operational => TuiActivityAudience::Operational,
+        sdk::ActivityAudienceView::Diagnostic => TuiActivityAudience::Diagnostic,
+    }
+}
+
+fn run_phase(value: sdk::RunPhaseKindView) -> TuiRunPhaseKind {
+    match value {
+        sdk::RunPhaseKindView::DrainingInput => TuiRunPhaseKind::DrainingInput,
+        sdk::RunPhaseKindView::PreparingContext => TuiRunPhaseKind::PreparingContext,
+        sdk::RunPhaseKindView::ApplyingResponse => TuiRunPhaseKind::ApplyingResponse,
+        sdk::RunPhaseKindView::AwaitingToolApproval => TuiRunPhaseKind::AwaitingToolApproval,
+        sdk::RunPhaseKindView::ExecutingTools => TuiRunPhaseKind::ExecutingTools,
+        sdk::RunPhaseKindView::FinalizingStep => TuiRunPhaseKind::FinalizingStep,
+        sdk::RunPhaseKindView::CancellingStep => TuiRunPhaseKind::CancellingStep,
+        sdk::RunPhaseKindView::Terminating => TuiRunPhaseKind::Terminating,
+    }
+}
+
+fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
+    match value {
+        sdk::ActivityDetailView::Run { purpose } => TuiActivityDetail::Run {
+            purpose: match purpose {
+                sdk::RunPurposeView::Main => TuiRunPurpose::Main,
+                sdk::RunPurposeView::Derived => TuiRunPurpose::Derived,
+            },
+        },
+        sdk::ActivityDetailView::Phase { phase } => TuiActivityDetail::Phase {
+            phase: run_phase(phase),
+        },
+        sdk::ActivityDetailView::Model {
+            model,
+            attempt,
+            stream,
+        } => TuiActivityDetail::Model {
+            model,
+            attempt,
+            stream: match stream {
+                sdk::ModelStreamStateView::Invoking => TuiModelStreamState::Invoking,
+                sdk::ModelStreamStateView::WaitingForFirstToken => {
+                    TuiModelStreamState::WaitingForFirstToken
+                }
+                sdk::ModelStreamStateView::Streaming => TuiModelStreamState::Streaming,
+                sdk::ModelStreamStateView::Retrying => TuiModelStreamState::Retrying,
+            },
+        },
+        sdk::ActivityDetailView::Tool {
+            name,
+            summary,
+            parallel_count,
+        } => TuiActivityDetail::Tool {
+            name,
+            summary,
+            parallel_count,
+        },
+        sdk::ActivityDetailView::Hook {
+            point,
+            script,
+            attempt,
+        } => TuiActivityDetail::Hook {
+            point: hook_point(point),
+            script,
+            attempt,
+        },
+        sdk::ActivityDetailView::Compact {
+            stage,
+            current,
+            total,
+        } => TuiActivityDetail::Compact {
+            stage: match stage {
+                sdk::CompactStageView::Preparing => TuiCompactStage::Preparing,
+                sdk::CompactStageView::Summarizing => TuiCompactStage::Summarizing,
+                sdk::CompactStageView::Finalizing => TuiCompactStage::Finalizing,
+            },
+            current,
+            total,
+        },
+        sdk::ActivityDetailView::Interaction { kind } => TuiActivityDetail::Interaction {
+            kind: match kind {
+                sdk::InteractionKindView::ToolApproval => TuiInteractionKind::ToolApproval,
+                sdk::InteractionKindView::UserQuestion => TuiInteractionKind::UserQuestion,
+                sdk::InteractionKindView::PlanApproval => TuiInteractionKind::PlanApproval,
+                sdk::InteractionKindView::StuckDiagnostic => TuiInteractionKind::StuckDiagnostic,
+            },
+        },
+        sdk::ActivityDetailView::ChildRun { role, model } => {
+            TuiActivityDetail::ChildRun { role, model }
+        }
+    }
+}
+
+fn hook_point(value: sdk::HookPointView) -> TuiHookPoint {
+    match value {
+        sdk::HookPointView::PreToolUse => TuiHookPoint::PreToolUse,
+        sdk::HookPointView::UserPromptSubmit => TuiHookPoint::UserPromptSubmit,
+        sdk::HookPointView::PreCompact => TuiHookPoint::PreCompact,
+        sdk::HookPointView::PermissionRequest => TuiHookPoint::PermissionRequest,
+        sdk::HookPointView::Elicitation => TuiHookPoint::Elicitation,
+        sdk::HookPointView::UserPromptExpansion => TuiHookPoint::UserPromptExpansion,
+        sdk::HookPointView::Stop => TuiHookPoint::Stop,
+        sdk::HookPointView::PostToolUse => TuiHookPoint::PostToolUse,
+        sdk::HookPointView::PostToolUseFailure => TuiHookPoint::PostToolUseFailure,
+        sdk::HookPointView::PostCompact => TuiHookPoint::PostCompact,
+        sdk::HookPointView::PostToolBatch => TuiHookPoint::PostToolBatch,
+        sdk::HookPointView::ElicitationResult => TuiHookPoint::ElicitationResult,
+        sdk::HookPointView::SessionStart => TuiHookPoint::SessionStart,
+        sdk::HookPointView::SessionEnd => TuiHookPoint::SessionEnd,
+        sdk::HookPointView::SubRunStart => TuiHookPoint::SubRunStart,
+        sdk::HookPointView::SubRunStop => TuiHookPoint::SubRunStop,
+        sdk::HookPointView::TaskCreated => TuiHookPoint::TaskCreated,
+        sdk::HookPointView::TaskCompleted => TuiHookPoint::TaskCompleted,
+        sdk::HookPointView::Notification => TuiHookPoint::Notification,
+        sdk::HookPointView::InstructionsLoaded => TuiHookPoint::InstructionsLoaded,
+        sdk::HookPointView::StopFailure => TuiHookPoint::StopFailure,
+        sdk::HookPointView::PermissionDenied => TuiHookPoint::PermissionDenied,
+        sdk::HookPointView::ConfigChange => TuiHookPoint::ConfigChange,
+        sdk::HookPointView::CwdChanged => TuiHookPoint::CwdChanged,
+        sdk::HookPointView::FileChanged => TuiHookPoint::FileChanged,
+        sdk::HookPointView::TeammateIdle => TuiHookPoint::TeammateIdle,
+    }
 }
 
 fn turn_context(value: sdk::ChatEventContext) -> TuiTurnContext {
@@ -635,40 +850,6 @@ fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
     }
 }
 
-fn hook_event(value: sdk::HookEventView) -> TuiHookEvent {
-    TuiHookEvent {
-        hook_name: value.hook_name,
-        status: match value.status {
-            sdk::HookEventStatus::Running => TuiHookStatus::Running,
-            sdk::HookEventStatus::Succeeded => TuiHookStatus::Succeeded,
-            sdk::HookEventStatus::Blocked => TuiHookStatus::Blocked,
-            sdk::HookEventStatus::Failed => TuiHookStatus::Failed,
-        },
-        matcher: value.matcher,
-        command: value.command,
-        result: value.result.map(|result| TuiHookResult {
-            exit_code: result.exit_code,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            decision: result.decision,
-            reason: result.reason,
-            additional_context: result.additional_context,
-        }),
-    }
-}
-fn hook_message(value: sdk::HookMessageView) -> TuiHookMessage {
-    TuiHookMessage {
-        point: value.point,
-        source: value.source,
-        execution_ordinal: value.execution_ordinal,
-        attempt: value.attempt,
-        kind: match value.kind {
-            sdk::HookMessageKindView::AdditionalContext => TuiHookMessageKind::AdditionalContext,
-            sdk::HookMessageKindView::SystemMessage => TuiHookMessageKind::SystemMessage,
-        },
-        text: value.text,
-    }
-}
 fn agent_progress(value: sdk::AgentProgressEventView) -> TuiAgentProgress {
     TuiAgentProgress {
         sequence: value.sequence,

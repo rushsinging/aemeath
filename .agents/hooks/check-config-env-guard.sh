@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # check-config-env-guard.sh
 # 禁止 config 包外读取业务 env（AEMEATH_*, *_API_KEY, LLM_*）。
 # 业务 env 只允许在以下白名单路径读取：

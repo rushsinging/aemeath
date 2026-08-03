@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.runtime.capability-assembly
 set -euo pipefail
 

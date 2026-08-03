@@ -39,13 +39,6 @@ pub struct WorkspaceMetadataResolved {
     pub kind: WorktreeKind,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ModelStreamWaitingView {
-    pub context: UiTurnContext,
-    pub elapsed_secs: u64,
-    pub phase: String,
-}
-
 /// Events sent from background task to UI
 #[derive(Debug)]
 pub enum AppEvent {
@@ -110,11 +103,7 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止 turn 结束，TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<TuiChatMessage>,
-    },
-    /// Tool 执行完成后同步，TUI 只同步消息。
+    /// Tool 执行或 Runtime 内部反馈注入后同步，TUI 只同步消息。
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
@@ -127,9 +116,10 @@ pub enum AppEvent {
     CompactRollback {
         messages: Vec<TuiChatMessage>,
     },
-    /// Compact 成功完成，TUI 同步消息 + 清 compact 状态。
+    /// Compact 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
     CompactFinished {
         messages: Vec<TuiChatMessage>,
+        notice: String,
     },
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
@@ -155,11 +145,6 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: UiTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// /save 命令保存成功后回传（携带 session id），用于推送 `[session saved: id]` 反馈行。
     SessionSaved {
         id: String,
@@ -180,10 +165,6 @@ pub enum AppEvent {
         tool_id: sdk::ids::ToolCallId,
         event: sdk::AgentProgressEventView,
     },
-    /// Unified lifecycle hook event.
-    HookEvent(sdk::HookEventView),
-    /// Hook-produced context or system message for structured conversation display.
-    HookMessage(sdk::HookMessageView),
     /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.
@@ -236,6 +217,7 @@ pub enum AppEvent {
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,
+        compacted: bool,
     },
     DisplayHistoryWindowLoaded {
         window: sdk::DisplayHistoryWindow,

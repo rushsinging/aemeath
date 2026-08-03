@@ -407,6 +407,31 @@ fn cancellation_and_completion_use_the_same_transition_event() {
 }
 
 #[test]
+fn transition_event_reports_runtime_owned_total_and_phase_elapsed() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+
+    let transition = run
+        .events()
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            RunDomainEvent::Transitioned {
+                to: RunStatus::PreparingContext,
+                timing,
+                ..
+            } => Some(*timing),
+            _ => None,
+        })
+        .expect("preparing-context transition timing");
+
+    assert!(transition.total_elapsed_ms >= transition.phase_elapsed_ms);
+    assert_eq!(transition.phase_elapsed_ms, 0);
+}
+
+#[test]
 fn rejected_transition_does_not_emit_transitioned_event() {
     let mut run = run();
 

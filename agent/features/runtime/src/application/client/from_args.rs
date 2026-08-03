@@ -372,6 +372,7 @@ pub async fn from_args_with_workspace(
                     created_at: chrono::DateTime::parse_from_rfc3339(&resume_view.created_at)
                         .map(|dt| dt.timestamp_millis() as u64)
                         .unwrap_or(0),
+                    compacted: resume_view.compacted,
                 };
                 (session_id, Some(startup_resume))
             }

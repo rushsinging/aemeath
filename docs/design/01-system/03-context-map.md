@@ -83,6 +83,7 @@ Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 T
 
 `WorkspaceMode` 是 `RunSpec` 的装配策略，不形成 Runtime → Project 出站边。Composition 在 active-main-session-slot scope 中保留 Project wiring：Main agent 启动时只选择一次 production wiring，同一 Session 的全部 Main Run 复用；运行期 resume 在排他 gate 内替换完整 state。Sub 由 composition-provided AgentDispatch 对父 scope 执行 isolated derivation；Runtime **NEVER** 持有 Project 端口或 wiring。
 
+Activity 不构成独立 BC，也不成为 Runtime 之外的对等领域实体。Runtime 作为 Activity 事实的 Supplier，通过 SDK Published Language 发布 `ActivityChanged` 增量和 `ActivitySnapshot` 快照；TUI 是 Customer，经 ACL 转为 TUI-owned Activity 事实镜像，再由 root reducer 维护。Activity 只描述执行观测，不拥有 Run 控制权、Session 持久化权、Audit Usage 所有权或用户交互 reply 权限。TUI 的 Activity Summary 是展示层派生视图，**NEVER** 作为新的 Runtime 状态源回流。
 ### 4.1 支撑 BC 之间的直接能力边
 
 | 消费方 | 供应方 | 模式 | 端口 / 契约 | 说明 |

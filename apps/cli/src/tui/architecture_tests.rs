@@ -47,6 +47,141 @@ fn production_source(source: &str) -> String {
 }
 
 #[test]
+fn activity_observation_has_single_runtime_constructor_and_tui_mutation_path() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let runtime = repository.join("agent/features/runtime/src");
+    let tui = repository.join("apps/cli/src/tui");
+
+    for file in rust_files_under(&runtime) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == runtime.join("application/activity/coordinator.rs")
+            || file == runtime.join("application/activity/model.rs")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read runtime source"));
+        assert!(
+            !source.contains("ActivityObservation {"),
+            "{} must delegate ActivityObservation construction to ActivityCoordinator; model.rs only defines the type",
+            file.display()
+        );
+    }
+
+    let root_reducer = tui.join("update/root_reducer.rs");
+    for file in rust_files_under(&tui) {
+        if file == root_reducer
+            || file
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file
+                .components()
+                .any(|component| component.as_os_str() == "scenario_tests")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read TUI source"));
+        assert!(
+            !source.contains("activity_observations_mut("),
+            "{} must not mutate ActivityObservationModel outside root reducer",
+            file.display()
+        );
+    }
+
+    let live_status = fs::read_to_string(tui.join("view_assembler/live_status.rs"))
+        .expect("read live status assembler");
+    for forbidden in ["RunStatusView", "TuiRunStatus", "RunTransitioned"] {
+        assert!(
+            !production_source(&live_status).contains(forbidden),
+            "LiveStatus must not depend on legacy Run status {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn activity_diagnostics_are_structured_and_payload_free() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let runtime = fs::read_to_string(
+        repository.join("agent/features/runtime/src/application/activity/coordinator.rs"),
+    )
+    .expect("read ActivityCoordinator");
+    let tui = fs::read_to_string(
+        repository.join("apps/cli/src/tui/effect/session/processing/logging.rs"),
+    )
+    .expect("read TUI event logging");
+
+    for source in [&runtime, &tui] {
+        for field in [
+            "run_id={}",
+            "revision={}",
+            "total_elapsed_ms={}",
+            "active_elapsed_ms={}",
+            "state_elapsed_ms={}",
+        ] {
+            assert!(source.contains(field), "activity log missing field {field}");
+        }
+        for sensitive in ["raw_args", "stdout", "response={}"] {
+            assert!(
+                !source.contains(sensitive),
+                "activity logs must not expose {sensitive}"
+            );
+        }
+    }
+}
+
+#[test]
+fn run_activity_has_no_legacy_business_state_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let forbidden_symbols = [
+        "RunStatusObserved",
+        "RunStateSnapshot",
+        "run_state_snapshots",
+        "active_main_run_snapshot",
+        "active_main_run_id",
+        "TuiRunStatus",
+        "TuiRunTiming",
+        "ObserveRunStatus",
+        "SpinnerModel",
+        "SpinnerPhase",
+        "chat_active",
+        "running_tool_count",
+        "SetSpinnerPhase",
+        "StopSpinner",
+        "spinner_phase(",
+        "spinner_stop(",
+        "pause_chat(",
+        "resume_chat(",
+        "set_spinner_phase(",
+        "stop_spinner(",
+    ];
+
+    for file in rust_files_under(&root) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == root.join("architecture_tests.rs")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read rust source"));
+        for forbidden in forbidden_symbols {
+            assert!(
+                !source.contains(forbidden),
+                "{} must not retain legacy run activity state symbol {forbidden}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
 fn test_phase_one_root_reducer_intent_entrypoint_exists() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let intent = fs::read_to_string(root.join("update/intent.rs")).expect("read AgentIntent");

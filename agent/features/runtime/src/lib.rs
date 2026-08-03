@@ -51,6 +51,7 @@ mod boundary_tests {
     fn application_top_level_modules_have_stable_owners() {
         let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
         let allowed = [
+            "activity",
             "client",
             "compact_generator",
             "context",

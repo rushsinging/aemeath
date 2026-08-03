@@ -26,15 +26,71 @@ mod skills_updated_tests {
     }
 }
 
+use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
-use crate::chat_view::{
-    AgentProgressEventView, HookEventView, HookMessageView, WorkspaceContextView,
-};
+use crate::chat_view::{AgentProgressEventView, WorkspaceContextView};
 use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(test)]
+mod run_status_view_tests {
+    use super::{ChatEvent, RunStatusView};
+    use serde_json::json;
+
+    #[test]
+    fn run_status_view_serializes_all_variants() {
+        let statuses = [
+            (RunStatusView::Created, "created"),
+            (RunStatusView::DrainingInput, "draining_input"),
+            (RunStatusView::PreparingContext, "preparing_context"),
+            (RunStatusView::InvokingModel, "invoking_model"),
+            (RunStatusView::ApplyingResponse, "applying_response"),
+            (
+                RunStatusView::AwaitingToolApproval,
+                "awaiting_tool_approval",
+            ),
+            (RunStatusView::ExecutingTools, "executing_tools"),
+            (RunStatusView::AwaitingUser, "awaiting_user"),
+            (RunStatusView::Compacting, "compacting"),
+            (RunStatusView::CancellingStep, "cancelling_step"),
+            (RunStatusView::FinalizingStep, "finalizing_step"),
+            (RunStatusView::Cancelling, "cancelling"),
+            (RunStatusView::Terminating, "terminating"),
+            (RunStatusView::Completed, "completed"),
+            (RunStatusView::Failed, "failed"),
+            (RunStatusView::Cancelled, "cancelled"),
+            (RunStatusView::Terminated, "terminated"),
+        ];
+
+        for (status, expected) in statuses {
+            assert_eq!(serde_json::to_value(status).unwrap(), json!(expected));
+        }
+    }
+
+    #[test]
+    fn run_transitioned_uses_typed_status() {
+        let event = ChatEvent::RunTransitioned {
+            run_id: crate::RunId::new_v7(),
+            parent_run_id: None,
+            status: RunStatusView::InvokingModel,
+            timing: super::RunTimingView {
+                observation_revision: 1,
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
+        };
+
+        match event {
+            ChatEvent::RunTransitioned { status, .. } => {
+                assert_eq!(status, RunStatusView::InvokingModel);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ResumedStepFinalizeCause {
@@ -165,6 +221,7 @@ pub struct LocalSessionResumeBacking {
     pub display_history: Option<DisplayHistoryIndex>,
     pub session_id: String,
     pub created_at: u64,
+    pub compacted: bool,
 }
 
 impl LocalSessionResumeBacking {
@@ -178,6 +235,7 @@ impl LocalSessionResumeBacking {
             display_history: None,
             session_id: view.session_id,
             created_at: view.created_at,
+            compacted: view.compacted,
         }
     }
 
@@ -190,6 +248,7 @@ impl LocalSessionResumeBacking {
                 .collect(),
             session_id: self.session_id.clone(),
             created_at: self.created_at,
+            compacted: self.compacted,
         }
     }
 }
@@ -248,6 +307,8 @@ pub struct SessionResumeView {
     pub steps: Vec<ResumedSessionStep>,
     pub session_id: String,
     pub created_at: u64,
+    #[serde(default)]
+    pub compacted: bool,
 }
 
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
@@ -261,6 +322,35 @@ impl ChatEventContext {
     pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
         Self { chat_id, turn_id }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RunTimingView {
+    pub observation_revision: u64,
+    pub total_elapsed_ms: u64,
+    pub phase_elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatusView {
+    Created,
+    DrainingInput,
+    PreparingContext,
+    InvokingModel,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    AwaitingUser,
+    Compacting,
+    CancellingStep,
+    FinalizingStep,
+    Cancelling,
+    Terminating,
+    Completed,
+    Failed,
+    Cancelled,
+    Terminated,
 }
 
 /// 工具调用的中间状态。
@@ -334,6 +424,13 @@ pub struct ReflectionHistoryView {
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
+    /// Runtime Activity 的完整增量观测。
+    ActivityChanged {
+        kind: ActivityChangeKind,
+        activity: ActivityView,
+    },
+    /// 单个 Run 在同一 revision 下的完整 Activity 快照。
+    ActivitySnapshot(ActivitySnapshotView),
     SkillsUpdated {
         event: crate::tui::SkillsUpdatedEvent,
     },
@@ -384,12 +481,6 @@ pub enum ChatEvent {
     },
     /// 系统消息。
     SystemMessage(String),
-    /// Stream is alive but no user-visible model delta has arrived yet.
-    ModelStreamWaiting {
-        context: ChatEventContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// Runtime 将在延迟后发起新的模型调用 attempt。
     ModelInvocationRetrying {
         context: ChatEventContext,
@@ -412,11 +503,7 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止了 turn 结束，追加 system-reminder 后继续。TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<ChatMessage>,
-    },
-    /// Tool 执行完成后的消息同步（AwaitUser gate）。TUI 只同步消息。
+    /// Tool 执行完成或 Runtime 注入内部反馈后的消息同步。
     PostToolExecutionSync {
         messages: Vec<ChatMessage>,
     },
@@ -429,9 +516,10 @@ pub enum ChatEvent {
     CompactRollback {
         messages: Vec<ChatMessage>,
     },
-    /// Compact（LLM 摘要）成功完成，替换消息列表。TUI 同步消息 + 清 compact 状态。
+    /// Compact 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
     CompactFinished {
         messages: Vec<ChatMessage>,
+        notice: String,
     },
     /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
     /// items = 本批接纳的消息；queued = gate 处理后仍留在 buffer 中的排队消息快照（一般空）。
@@ -520,7 +608,8 @@ pub enum ChatEvent {
     RunTransitioned {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
-        status: String,
+        status: RunStatusView,
+        timing: RunTimingView,
     },
     RunAwaitingUser {
         run_id: crate::RunId,
@@ -550,10 +639,6 @@ pub enum ChatEvent {
     TurnChanged(usize),
     /// 记录当前 turn 变化的端口事件。
     CurrentTurnChanged(usize),
-    /// Hook 事件。
-    HookEvent(HookEventView),
-    /// 结构化 hook 执行消息（typed projection）。
-    HookMessage(HookMessageView),
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,
@@ -621,6 +706,7 @@ pub enum ChatEvent {
         display_history: Option<DisplayHistoryIndex>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，    /// TUI 据此显示对应错误并恢复到空 session。
     SessionResumeFailed {

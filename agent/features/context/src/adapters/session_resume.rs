@@ -64,6 +64,7 @@ impl crate::application::MainSessionWiring {
             active_messages: restore.active_messages,
             display_steps: restore.display_steps,
             display_history,
+            compacted: restore.compacted,
             created_at: restore.created_at,
             trimmed: restore.trimmed,
             repaired: restore.repaired,

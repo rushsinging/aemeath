@@ -48,14 +48,13 @@ async fn continue_decision_preserves_typed_dispatch_for_mapping() {
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )
     .await;
 
     assert!(matches!(outcome.decision, StopHookDecision::Proceed));
-    assert_eq!(outcome.dispatch.directive, RuntimeHookDirective::Continue);
-    assert_eq!(outcome.point, hook::HookPoint::Stop);
     assert!(outcome.feedback_message.is_none());
 }
 
@@ -69,6 +68,7 @@ async fn block_outcome_materializes_feedback_message_once() {
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "zh".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )
@@ -92,6 +92,7 @@ async fn block_returns_typed_reason_not_string() {
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )

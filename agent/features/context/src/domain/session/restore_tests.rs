@@ -381,6 +381,7 @@ fn restore_reads_only_steps_from_active_marker() {
 
     assert_eq!(restore.active_messages.len(), 1);
     assert_eq!(restore.active_messages[0].text_content(), "visible");
+    assert!(restore.compacted, "restore 必须暴露已持久化的 compact 事实");
     assert_eq!(restore.display_steps.len(), 2);
     assert_eq!(restore.display_steps[0].run_id, "run-1");
     assert_eq!(restore.display_steps[0].step_id, "step-1");

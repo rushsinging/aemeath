@@ -11,15 +11,14 @@ pub struct SpinnerLineView {
     pub frame: u64,
     /// 当前动词文本。
     pub verb: String,
-    /// spinner 已运行秒数（由 view_state frame 派生）。
+    /// Runtime 发布的当前 Run 总耗时。
     pub elapsed_secs: u64,
-    /// 当前 phase 已运行秒数。
-    ///
-    /// Phase 级计时真相需要独立记录 phase 切换时间；当前切片只去除 OutputArea
-    /// mirror，不扩展 RuntimeModel/view_state 语义，因此暂以总 elapsed 兼容显示。
+    /// Runtime 发布的当前状态阶段耗时。
     pub phase_elapsed_secs: u64,
     /// 细分阶段文案（已由 phase 语义转换；None 表示无括号阶段）。
     pub phase_text: Option<String>,
+    /// 最多一条通过稳定性门槛的用户可见 Activity 摘要。
+    pub detail_text: Option<String>,
 }
 
 /// Compact 进度视图（spinner 行内嵌渲染用）。
@@ -66,6 +65,7 @@ mod tests {
             elapsed_secs: 0,
             phase_elapsed_secs: 0,
             phase_text: Some("Thinking...".to_string()),
+            detail_text: None,
         };
         assert_eq!(view.frame, 9);
         assert_eq!(view.elapsed_secs, 0);
@@ -82,6 +82,7 @@ mod tests {
                 elapsed_secs: 0,
                 phase_elapsed_secs: 0,
                 phase_text: None,
+                detail_text: None,
             }),
             queued_lines: vec!["> hello".to_string()],
             task_lines: vec!["□ #1".to_string()],

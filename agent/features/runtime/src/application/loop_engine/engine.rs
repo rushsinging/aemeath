@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::{ActivityError, ActivityTerminal};
 use crate::application::hook::stop_coordination::StopHookDecision;
 use crate::application::loop_engine::RunLoop;
 use crate::application::run::context::RuntimeContext;
@@ -263,6 +264,8 @@ pub enum InternalContinuationKind {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoopEngineError {
+    #[error("activity coordination error: {0}")]
+    Activity(#[from] ActivityError),
     #[error("run state error: {0}")]
     Domain(#[from] RunTransitionError),
     #[error("loop adapter requested context compaction: {0}")]
@@ -832,9 +835,15 @@ pub async fn execute_prepared_loop(
     run: &mut Run,
     execution: &mut RunExecutionState,
     context: &RuntimeContext,
+    activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
     cancel: &CancellationToken,
     loop_context: &mut RunLoop<'_>,
 ) -> Result<LoopDirective, LoopEngineError> {
+    loop_context.bind_activity_context(
+        activities.clone(),
+        context.provider_ref().model.model.clone(),
+    );
+    activities.publish_snapshot();
     let result = run_loop(run, execution, cancel, loop_context).await;
 
     let _event_sink = context.event_sink();
@@ -842,6 +851,24 @@ pub async fn execute_prepared_loop(
 }
 
 pub async fn run_loop(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+    port: &mut RunLoop<'_>,
+) -> Result<LoopDirective, LoopEngineError> {
+    #[cfg(test)]
+    let uses_ephemeral_test_activities = port.activities_are_unbound();
+    #[cfg(test)]
+    port.ensure_test_activities(run.id());
+    let directive = run_loop_body(run, execution, cancel, port).await;
+    #[cfg(test)]
+    if uses_ephemeral_test_activities {
+        port.clear_test_activities();
+    }
+    directive
+}
+
+async fn run_loop_body(
     run: &mut Run,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
@@ -1044,7 +1071,7 @@ pub async fn run_loop(
 
                 // User input: resume if awaiting, then drain into work.
                 if run.status() == RunStatus::AwaitingUser {
-                    run.transition(RunTransition::UserResumed)?;
+                    transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }
                 // batch is non-empty per DrainOutcome::Ready contract
                 run.apply_drain_decision(DrainDecision::Inputs, None)?;
@@ -1078,7 +1105,7 @@ pub async fn run_loop(
                     if batch.is_empty() {
                         return Ok(LoopDirective::AwaitUser);
                     }
-                    run.transition(RunTransition::UserResumed)?;
+                    transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }
                 run.apply_drain_decision(DrainDecision::InternalContinuation, None)?;
                 execute_step(
@@ -1176,37 +1203,71 @@ async fn execute_step(
             }
         };
     if needs_compaction {
-        run.transition(RunTransition::BeginCompaction)?;
+        transition_and_emit(run, execution, port, RunTransition::BeginCompaction).await?;
+        let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
+        port.update_compaction_activity(
+            compact_activity_id.clone(),
+            sdk::CompactStageView::Summarizing,
+        )?;
         match run_context_compaction_phase(run, execution, &step_cancel, port.compaction_mut())
             .await?
         {
-            ContextCompactionOutcome::Ready => {}
+            ContextCompactionOutcome::Ready => {
+                port.update_compaction_activity(
+                    compact_activity_id.clone(),
+                    sdk::CompactStageView::Finalizing,
+                )?;
+                port.finish_activity(compact_activity_id, ActivityTerminal::Succeeded)?;
+            }
             ContextCompactionOutcome::Cancelled => {
+                port.finish_activity(compact_activity_id, ActivityTerminal::Cancelled)?;
                 return handle_step_control(run, execution, port).await;
             }
             ContextCompactionOutcome::TimedOut => {
+                port.finish_activity(compact_activity_id, ActivityTerminal::Terminated)?;
                 timeout_run(run, execution, port).await?;
                 return Ok(());
             }
         }
-        run.transition(RunTransition::CompactionCompleted)?;
+        transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
     }
 
     if handle_interrupt(run, execution, cancel, port).await? {
         return Ok(());
     }
-    run.transition(RunTransition::ContextPrepared)?;
+    transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
+    let model_parent_activity_id = port.activity_parent_id()?;
+    let model_name = port.model_name()?.to_string();
+    let mut model_attempt = 1_u32;
+    let mut model_activity_id = port.start_model_activity(
+        step_id.clone(),
+        model_parent_activity_id,
+        sdk::ModelInvocationId::new_v7(),
+        model_name.clone(),
+        model_attempt,
+    )?;
     let mut compacted_after_context_too_long = false;
     let (model_step, token_usage) = loop {
         match run_model_invocation_phase(run, execution, &step_id, &step_cancel, port.model_mut())
             .await
         {
-            ModelInvocationOutcome::Invoked(step, usage) => break (step, usage),
+            ModelInvocationOutcome::Invoked(step, usage) => {
+                port.update_model_activity(
+                    model_activity_id.clone(),
+                    model_name.clone(),
+                    model_attempt,
+                    sdk::ModelStreamStateView::Streaming,
+                )?;
+                port.finish_activity(model_activity_id, ActivityTerminal::Succeeded)?;
+                break (step, usage);
+            }
             ModelInvocationOutcome::Cancelled => {
+                port.finish_activity(model_activity_id, ActivityTerminal::Cancelled)?;
                 handle_step_control(run, execution, port).await?;
                 return Ok(());
             }
             ModelInvocationOutcome::NeedsCompaction(error) => {
+                port.finish_activity(model_activity_id, ActivityTerminal::Failed)?;
                 if compacted_after_context_too_long {
                     fail_run(
                         run,
@@ -1217,7 +1278,13 @@ async fn execute_step(
                     .await?;
                     return Ok(());
                 }
-                run.transition(RunTransition::ModelContextExceeded)?;
+                transition_and_emit(run, execution, port, RunTransition::ModelContextExceeded)
+                    .await?;
+                let compact_activity_id = port.start_compaction_activity(step_id.clone())?;
+                port.update_compaction_activity(
+                    compact_activity_id.clone(),
+                    sdk::CompactStageView::Summarizing,
+                )?;
                 match run_context_compaction_phase(
                     run,
                     execution,
@@ -1226,25 +1293,50 @@ async fn execute_step(
                 )
                 .await?
                 {
-                    ContextCompactionOutcome::Ready => {}
+                    ContextCompactionOutcome::Ready => {
+                        port.update_compaction_activity(
+                            compact_activity_id.clone(),
+                            sdk::CompactStageView::Finalizing,
+                        )?;
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Succeeded)?;
+                    }
                     ContextCompactionOutcome::Cancelled => {
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Cancelled)?;
                         handle_step_control(run, execution, port).await?;
                         return Ok(());
                     }
                     ContextCompactionOutcome::TimedOut => {
+                        port.finish_activity(compact_activity_id, ActivityTerminal::Terminated)?;
                         timeout_run(run, execution, port).await?;
                         return Ok(());
                     }
                 }
-                run.transition(RunTransition::CompactionCompleted)?;
-                run.transition(RunTransition::ContextPrepared)?;
+                transition_and_emit(run, execution, port, RunTransition::CompactionCompleted)
+                    .await?;
+                transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
+                model_attempt += 1;
+                model_activity_id = port.start_model_activity(
+                    step_id.clone(),
+                    port.activity_parent_id()?,
+                    sdk::ModelInvocationId::new_v7(),
+                    model_name.clone(),
+                    model_attempt,
+                )?;
+                port.update_model_activity(
+                    model_activity_id.clone(),
+                    model_name.clone(),
+                    model_attempt,
+                    sdk::ModelStreamStateView::Retrying,
+                )?;
                 compacted_after_context_too_long = true;
             }
             ModelInvocationOutcome::Failed(error) => {
+                port.finish_activity(model_activity_id, ActivityTerminal::Failed)?;
                 fail_run(run, execution, port, error.to_string()).await?;
                 return Ok(());
             }
             ModelInvocationOutcome::TimedOut => {
+                port.finish_activity(model_activity_id, ActivityTerminal::Terminated)?;
                 timeout_run(run, execution, port).await?;
                 return Ok(());
             }
@@ -1282,7 +1374,7 @@ async fn execute_step(
         return Ok(());
     }
     run.record_model_invocation(&step_id, model_invocation(&model_step))?;
-    run.transition(RunTransition::ModelInvoked)?;
+    transition_and_emit(run, execution, port, RunTransition::ModelInvoked).await?;
     log::debug!(
         target: crate::LOG_TARGET,
         "[run_loop] model_step={} run_id={}",
@@ -1308,9 +1400,13 @@ async fn execute_step(
             // A blocking stop hook with repeated output should continue
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
-            let stop_outcome = port
-                .coordinate_stop_hook(execution, run.steps().len(), &step_cancel)
-                .await?;
+            let stop_outcome = match port
+                .coordinate_stop_hook(execution, &step_id, run.steps().len(), &step_cancel)
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => return Err(error),
+            };
             match stop_outcome.decision {
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.
@@ -1326,7 +1422,13 @@ async fn execute_step(
                     match block_result {
                         StopHookBlockResult::Blocked { .. } => {
                             // #1272: Block → ContinueAfterResponse for another attempt.
-                            run.transition(RunTransition::ContinueAfterResponse)?;
+                            transition_and_emit(
+                                run,
+                                execution,
+                                port,
+                                RunTransition::ContinueAfterResponse,
+                            )
+                            .await?;
                             run.complete_step(&step_id)?;
                             run_step_finalization_phase(
                                 execution,
@@ -1358,7 +1460,8 @@ async fn execute_step(
             match guard.inspect_text(terminal_text.as_deref().unwrap_or("")) {
                 decision @ StuckDecision::SoftBlock { .. } => {
                     record_stuck(run, execution, port, &decision).await?;
-                    run.transition(RunTransition::ContinueAfterResponse)?;
+                    transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse)
+                        .await?;
                     run.complete_step(&step_id)?;
                     run_step_finalization_phase(
                         execution,
@@ -1382,7 +1485,7 @@ async fn execute_step(
             }
 
             // #1272: Complete goes to DrainingInput (not Finishing→Finish)
-            run.transition(RunTransition::ContinueAfterResponse)?;
+            transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse).await?;
             run.complete_step(&step_id)?;
             run_step_finalization_phase(
                 execution,
@@ -1409,7 +1512,7 @@ async fn execute_step(
                 StuckDecision::Allow => {}
             }
             // #1272: Continue goes to DrainingInput
-            run.transition(RunTransition::ContinueAfterResponse)?;
+            transition_and_emit(run, execution, port, RunTransition::ContinueAfterResponse).await?;
             run.complete_step(&step_id)?;
             run_step_finalization_phase(
                 execution,
@@ -1425,7 +1528,7 @@ async fn execute_step(
             {
                 record_stuck(run, execution, port, &decision).await?;
             }
-            run.transition(RunTransition::ResponseWithTools)?;
+            transition_and_emit(run, execution, port, RunTransition::ResponseWithTools).await?;
             let mut guarded_calls = Vec::with_capacity(calls.len());
             for call in calls {
                 run.add_tool_call(&step_id, call.clone())?;
@@ -1460,10 +1563,24 @@ async fn execute_step(
                     }
                 }
             }
+            let parallel_count = u16::try_from(guarded_calls.len()).unwrap_or(u16::MAX);
+            let tool_parent_activity_id = port.activity_parent_id()?;
+            let tool_activity_ids = guarded_calls
+                .iter()
+                .map(|(call, _)| {
+                    port.start_tool_activity(
+                        step_id.clone(),
+                        tool_parent_activity_id.clone(),
+                        call,
+                        parallel_count,
+                    )
+                    .map(|activity_id| (call.id.clone(), activity_id))
+                })
+                .collect::<Result<std::collections::HashMap<_, _>, ActivityError>>()?;
             for (call, _) in &guarded_calls {
                 run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Ready)?;
             }
-            run.transition(RunTransition::ToolsApproved)?;
+            transition_and_emit(run, execution, port, RunTransition::ToolsApproved).await?;
             for (call, decision) in &guarded_calls {
                 if matches!(decision, ToolGuardDecision::Allow) {
                     run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Running)?;
@@ -1493,14 +1610,26 @@ async fn execute_step(
                 {
                     ToolRoundPhaseOutcome::Completed(outcome) => outcome,
                     ToolRoundPhaseOutcome::Cancelled => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Cancelled)?;
+                        }
                         handle_step_control(run, execution, port).await?;
                         return Ok(());
                     }
                     ToolRoundPhaseOutcome::Failed(error) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Failed)?;
+                        }
                         fail_run(run, execution, port, error.to_string()).await?;
                         return Ok(());
                     }
                     ToolRoundPhaseOutcome::TimedOut => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(
+                                activity_id.clone(),
+                                ActivityTerminal::Terminated,
+                            )?;
+                        }
                         timeout_run(run, execution, port).await?;
                         return Ok(());
                     }
@@ -1524,10 +1653,16 @@ async fn execute_step(
                 {
                     Ok(outcome) => outcome,
                     Err(LoopEngineError::Cancelled) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Cancelled)?;
+                        }
                         handle_step_control(run, execution, port).await?;
                         return Ok(());
                     }
                     Err(error) => {
+                        for activity_id in tool_activity_ids.values() {
+                            port.finish_activity(activity_id.clone(), ActivityTerminal::Failed)?;
+                        }
                         fail_run(run, execution, port, error.to_string()).await?;
                         return Ok(());
                     }
@@ -1568,6 +1703,17 @@ async fn execute_step(
             if !completed_non_interaction.is_empty() {
                 for (call_id, status) in completed_non_interaction {
                     run.advance_tool_call(&step_id, call_id, *status)?;
+                    if let Some(activity_id) = tool_activity_ids.get(call_id) {
+                        let terminal = match status {
+                            ToolCallStatus::Success => ActivityTerminal::Succeeded,
+                            ToolCallStatus::Error => ActivityTerminal::Failed,
+                            ToolCallStatus::Cancelled => ActivityTerminal::Cancelled,
+                            ToolCallStatus::Pending
+                            | ToolCallStatus::Ready
+                            | ToolCallStatus::Running => continue,
+                        };
+                        port.finish_activity(activity_id.clone(), terminal)?;
+                    }
                 }
             }
             // Only advance tool calls for non-interaction steps.
@@ -1585,6 +1731,17 @@ async fn execute_step(
                         ToolCallStatus::Cancelled
                     };
                     run.advance_tool_call(&step_id, &call.id, status)?;
+                    if let Some(activity_id) = tool_activity_ids.get(&call.id) {
+                        let terminal = match status {
+                            ToolCallStatus::Success => ActivityTerminal::Succeeded,
+                            ToolCallStatus::Error => ActivityTerminal::Failed,
+                            ToolCallStatus::Cancelled => ActivityTerminal::Cancelled,
+                            ToolCallStatus::Pending
+                            | ToolCallStatus::Ready
+                            | ToolCallStatus::Running => continue,
+                        };
+                        port.finish_activity(activity_id.clone(), terminal)?;
+                    }
                 }
             }
             match tool_step {
@@ -1598,7 +1755,8 @@ async fn execute_step(
                     )
                     .await?;
                     // #1272: ToolsCompleted → DrainingInput (not PreparingContext)
-                    run.transition(RunTransition::ToolsCompleted)?;
+                    transition_and_emit(run, execution, port, RunTransition::ToolsCompleted)
+                        .await?;
                 }
                 #[cfg(test)]
                 ToolStep::AwaitUser => {
@@ -1613,8 +1771,7 @@ async fn execute_step(
                         crate::ports::FinalizeCause::Completed,
                     )
                     .await?;
-                    run.transition(RunTransition::AwaitUser)?;
-                    emit_events(run, execution, port).await?;
+                    transition_and_emit(run, execution, port, RunTransition::AwaitUser).await?;
                     // Return to caller; the caller will call run_loop again
                     // with drain_input picking up the user response.
                     return Ok(());
@@ -1753,6 +1910,12 @@ async fn handle_suspensions(
             tool_call_id: Some(first.call.id.to_string()),
             body: body.clone(),
         };
+        let _interaction_activity_id = port.start_interaction_activity(
+            run.active_step_id()
+                .ok_or_else(|| LoopEngineError::Adapter("no active step".to_string()))?,
+            first_request_id.clone(),
+            sdk::InteractionKindView::UserQuestion,
+        )?;
         port.publish_interaction(execution, &request).await?;
 
         let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -1870,6 +2033,12 @@ async fn handle_tool_approvals(
             tool_call_id: None,
             body: body.clone(),
         };
+        let _interaction_activity_id = port.start_interaction_activity(
+            run.active_step_id()
+                .ok_or_else(|| LoopEngineError::Adapter("no active step".to_string()))?,
+            first_request_id.clone(),
+            sdk::InteractionKindView::ToolApproval,
+        )?;
         port.publish_interaction(execution, &request).await?;
         let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
             first_request_id.clone(),
@@ -1909,6 +2078,18 @@ async fn handle_interaction_completion(
     let metadata = resolution.metadata().clone();
     let request_id = metadata.request_id.clone();
     let run_id = metadata.run_id.clone();
+    let interaction_terminal = match &resolution {
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Replied(_),
+            ..
+        } => ActivityTerminal::Succeeded,
+        InteractionResolution::Resolved {
+            completion: InteractionCompletion::Cancelled(_),
+            ..
+        }
+        | InteractionResolution::Closed { .. } => ActivityTerminal::Cancelled,
+    };
+    port.finish_interaction_activity(&request_id, interaction_terminal)?;
 
     match &resolution {
         InteractionResolution::Resolved {
@@ -2113,6 +2294,17 @@ async fn handle_interaction_outcome(
                 .active_step_id()
                 .ok_or_else(|| LoopEngineError::Adapter("no active step".to_string()))?;
             run.advance_tool_call(&step_id, &call_id, status)?;
+            let terminal = match status {
+                ToolCallStatus::Success => ActivityTerminal::Succeeded,
+                ToolCallStatus::Error => ActivityTerminal::Failed,
+                ToolCallStatus::Cancelled => ActivityTerminal::Cancelled,
+                ToolCallStatus::Pending | ToolCallStatus::Ready | ToolCallStatus::Running => {
+                    return Err(LoopEngineError::Adapter(format!(
+                        "interaction tool returned non-terminal status: {status:?}"
+                    )));
+                }
+            };
+            port.finish_tool_activity_by_source(&call_id, terminal)?;
 
             if remaining_queue.is_empty() {
                 // All interactions resolved — complete the step
@@ -2124,7 +2316,7 @@ async fn handle_interaction_outcome(
                     crate::ports::FinalizeCause::Completed,
                 )
                 .await?;
-                run.transition(RunTransition::ToolsCompleted)?;
+                transition_and_emit(run, execution, port, RunTransition::ToolsCompleted).await?;
             } else {
                 // Start the next interaction from the queue
                 let next = remaining_queue[0].clone();
@@ -2165,6 +2357,11 @@ async fn handle_interaction_outcome(
                         tool_call_id: Some(suspended.call.id.to_string()),
                         body: body.clone(),
                     };
+                    let _interaction_activity_id = port.start_interaction_activity(
+                        step_id.clone(),
+                        next.request_id.clone(),
+                        sdk::InteractionKindView::UserQuestion,
+                    )?;
                     port.publish_interaction(execution, &request).await?;
                     let metadata =
                         crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -2214,6 +2411,11 @@ async fn handle_interaction_outcome(
                         tool_call_id: None,
                         body: body.clone(),
                     };
+                    let _interaction_activity_id = port.start_interaction_activity(
+                        step_id.clone(),
+                        next.request_id.clone(),
+                        sdk::InteractionKindView::ToolApproval,
+                    )?;
                     port.publish_interaction(execution, &request).await?;
                     let metadata =
                         crate::application::interaction::port::InteractionRequestMetadata::new(
@@ -2294,6 +2496,11 @@ async fn handle_hard_pause(
         tool_call_id: None,
         body: body.clone(),
     };
+    let _interaction_activity_id = port.start_interaction_activity(
+        step_id.clone(),
+        request_id.clone(),
+        sdk::InteractionKindView::StuckDiagnostic,
+    )?;
     port.publish_interaction(execution, &request).await?;
     let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
         request_id.clone(),
@@ -2364,6 +2571,11 @@ async fn handle_plan_approval(
         tool_call_id: None,
         body: body.clone(),
     };
+    let _interaction_activity_id = port.start_interaction_activity(
+        step_id.clone(),
+        request_id.clone(),
+        sdk::InteractionKindView::PlanApproval,
+    )?;
     port.publish_interaction(execution, &request).await?;
     let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
         request_id.clone(),
@@ -2595,6 +2807,16 @@ async fn cancel_run(
         .await?;
     }
     run.finish_cancellation()?;
+    emit_events(run, execution, port).await
+}
+
+async fn transition_and_emit(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    port: &mut RunLoop<'_>,
+    transition: RunTransition,
+) -> Result<(), LoopEngineError> {
+    run.transition(transition)?;
     emit_events(run, execution, port).await
 }
 

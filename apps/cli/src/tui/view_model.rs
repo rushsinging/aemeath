@@ -15,9 +15,8 @@ pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView,
-    ToolSemanticStatus,
+    OutputBlockKind, OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
@@ -58,7 +57,13 @@ mod tests {
             kind,
             children: Vec::new(),
         };
-        let model = OutputViewModel::from_roots(vec![node], 1, true);
+        let model = OutputViewModel {
+            roots: vec![node.into()],
+            version: 1,
+            follow_tail_hint: true,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
+        };
         assert_eq!(model.roots.len(), 1);
     }
 }

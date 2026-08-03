@@ -24,6 +24,39 @@ fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
 }
 
 #[test]
+fn domain_events_are_observed_by_activity_before_external_publish() {
+    let source = include_str!("run_loop.rs");
+
+    assert!(source.contains(".observe_run_events(&events)"));
+    assert!(source.contains("self.events.emit(execution, events).await"));
+    assert!(
+        source
+            .find(".observe_run_events(&events)")
+            .expect("activity observation")
+            < source
+                .find("self.events.emit(execution, events).await")
+                .expect("external event publish")
+    );
+    let engine_source = include_str!("engine.rs");
+    assert!(engine_source.contains("run.restore_events(events)"));
+}
+
+#[test]
+fn engine_state_transitions_use_the_immediate_publish_boundary() {
+    let source = include_str!("engine.rs");
+    let direct_transition_count = source.matches("run.transition(RunTransition::").count();
+
+    assert_eq!(
+        direct_transition_count, 0,
+        "Engine state changes must go through transition_and_emit; found {direct_transition_count} direct transitions",
+    );
+    assert!(source.contains("async fn transition_and_emit("));
+    assert!(source.contains(
+        "transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?"
+    ));
+}
+
+#[test]
 fn production_engine_owns_step_state_reset() {
     let source = include_str!("engine.rs");
     assert!(source.contains("execution.begin_step()"));
@@ -1240,7 +1273,9 @@ impl InteractionMailboxPort for InteractionMailboxFake {
 }
 
 fn scripted_run_loop(scenario: &mut ScriptedScenario) -> RunLoop<'_> {
-    scenario.ports().run_loop()
+    let mut run_loop = scenario.ports().run_loop();
+    run_loop.bind_test_activity_context();
+    run_loop
 }
 
 fn new_run(timeout: Duration) -> Run {
@@ -1330,7 +1365,10 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",
@@ -1524,9 +1562,15 @@ async fn provider_context_too_long_compacts_then_rebuilds_before_reinvoking() {
             "accept_step_input",
             "emit",
             "needs_compaction",
+            "emit",
             "model",
+            "emit",
             "compact",
+            "emit",
+            "emit",
             "model",
+            "emit",
+            "emit",
             "finalize_step",
             "input",
             "emit",
@@ -2566,6 +2610,8 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         &mut ports.stuck,
         &ports.plan_approval,
     );
+
+    loop_context.bind_test_activity_context();
 
     let result = run_loop(
         &mut run,

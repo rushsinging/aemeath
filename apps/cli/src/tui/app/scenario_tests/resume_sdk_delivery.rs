@@ -33,6 +33,7 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
         steps,
         session_id: "resume-sdk-session".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     while harness.app.view_state.output.render_line_limit() < 3_000 {

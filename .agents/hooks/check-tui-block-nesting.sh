@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # gutter-ownership 不变量守卫（Task 4.2 建立）：

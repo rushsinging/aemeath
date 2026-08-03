@@ -180,7 +180,13 @@ impl ConversationModel {
             tool_id.to_string(),
             message.clone(),
         ));
-        vec![ConversationChange::OutputDirty]
+        vec![
+            ConversationChange::AgentProgressRecorded {
+                block_id: format!("tool-call-{chat_id}/{turn_id}/{tool_id}"),
+                tool_id: tool_id.to_string(),
+            },
+            ConversationChange::OutputDirty,
+        ]
     }
 
     /// 写入 Agent 工具的 role/model 元数据（issue #499）。
