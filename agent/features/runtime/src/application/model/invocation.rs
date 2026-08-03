@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
-    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse, RuntimeTurnContext,
+    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse,
 };
 use crate::application::loop_engine::llm_strategy::{
     build_step_token_usage, extract_invocation_context,
@@ -125,9 +125,6 @@ pub(crate) trait ModelInvocationSource: Send {
         &self,
     ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
     {
-        None
-    }
-    fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
         None
     }
     fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
