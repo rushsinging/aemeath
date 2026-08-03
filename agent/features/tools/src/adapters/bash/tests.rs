@@ -287,6 +287,10 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    coverage,
+    ignore = "llvm-cov 下 spawn 真实 bash（sleep 60）+ 进程组清理与 coverage 进程管理交互，触发 CI runner 取消（见 #1508）"
+)]
 async fn bash_cancellation_returns_visible_command_cancelled_result() {
     struct Cancelled;
 
@@ -320,6 +324,10 @@ async fn bash_cancellation_returns_visible_command_cancelled_result() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    coverage,
+    ignore = "llvm-cov 下 spawn 真实 bash（sleep 60）+ 进程组清理与 coverage 进程管理交互，触发 CI runner 取消（见 #1508）"
+)]
 async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
     struct SharedCancellation {
         cancelled: std::sync::atomic::AtomicBool,
