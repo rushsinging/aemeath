@@ -1387,6 +1387,26 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
 }
 
 #[tokio::test]
+async fn claude_project_dir_placeholder_is_expanded_to_current_workspace() {
+    // 项目 hook 配置（.agents/aemeath.json）使用 {CLAUDE_PROJECT_DIR} 以同时兼容
+    // Claude Code（仅识别该内置变量）与 aemeath 运行时（两种占位符均替换）。
+    let subs = vec![sub(
+        HookPoint::PreToolUse,
+        "\"{CLAUDE_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+    )];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    dispatcher
+        .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
+        .await;
+
+    let cwd = std::env::current_dir().expect("current dir");
+    let expected = format!("\"{}/.agents/hooks/check-first.sh\" --fast", cwd.display());
+    assert_eq!(scripted.commands(), vec![expected]);
+}
+
+#[tokio::test]
 async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Spawn),
