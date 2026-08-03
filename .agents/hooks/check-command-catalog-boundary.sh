@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT="${AEMEATH_GUARD_ROOT:-$(git rev-parse --show-toplevel)}"

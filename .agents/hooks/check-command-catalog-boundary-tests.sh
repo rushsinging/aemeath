@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -9,7 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 cp -R "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" "$TMP/"
 
 run_guard() {
-  AEMEATH_GUARD_ROOT="$TMP" bash "$GUARD" >/dev/null 2>&1
+  AEMEATH_GUARD_ROOT="$TMP" /bin/bash "$GUARD" >/dev/null 2>&1
 }
 
 run_guard

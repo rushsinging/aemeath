@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：检查 share crate 不依赖任何业务 feature。
