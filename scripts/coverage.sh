@@ -9,7 +9,6 @@ cd "$ROOT"
 
 if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
     echo "error: cargo-llvm-cov $REQUIRED_LLVM_COV_VERSION is required" >&2
-    echo "install: cargo install cargo-llvm-cov --version $REQUIRED_LLVM_COV_VERSION --locked" >&2
     exit 1
 fi
 
@@ -22,23 +21,20 @@ fi
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/coverage}"
 export CARGO_LLVM_COV_TARGET_DIR="${CARGO_LLVM_COV_TARGET_DIR:-$CARGO_TARGET_DIR/llvm-cov-target}"
 export CARGO_LLVM_COV_BUILD_DIR="${CARGO_LLVM_COV_BUILD_DIR:-$CARGO_TARGET_DIR/llvm-cov-build}"
+# 限制每个测试进程的线程数为 1：llvm-cov 并行跑多 crate 时，默认线程数
+# （= CPU 数）导致内存/资源峰值，runner 在 tools 测试启动时取消 job
+# （SIGTERM + "The operation was canceled"，实测并行必现）。
+export RUST_TEST_THREADS=1
 
 report_json="$(mktemp "${TMPDIR:-/tmp}/aemeath-coverage.XXXXXX.json")"
 trap 'rm -f "$report_json"' EXIT
 
-# `--jobs 1`（透传给 cargo test）：cargo 默认并行跑各 crate 测试，
-# 与 cargo-llvm-cov 的进程管理交互时，tools 的 bash 进程组测试
-# （spawn 真实 bash + process_group）会触发对 coverage.sh 进程树的
-# SIGTERM（exit 143，实测并行必现、串行稳定通过）；串行测试为
-# 稳定修复，代价是 coverage 时长增加约 30s。
 cargo llvm-cov \
     --workspace \
     --exclude xtask \
     --quiet \
     --json \
     --summary-only \
-    --output-path "$report_json" \
-    -- \
-    --jobs 1
+    --output-path "$report_json"
 
 cargo run --quiet -p xtask -- coverage-summary "$report_json" "$ROOT"
