@@ -21,16 +21,18 @@ fi
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/coverage}"
 export CARGO_LLVM_COV_TARGET_DIR="${CARGO_LLVM_COV_TARGET_DIR:-$CARGO_TARGET_DIR/llvm-cov-target}"
 export CARGO_LLVM_COV_BUILD_DIR="${CARGO_LLVM_COV_BUILD_DIR:-$CARGO_TARGET_DIR/llvm-cov-build}"
-# 限制每个测试进程的线程数为 1：llvm-cov 并行跑多 crate 时，默认线程数
-# （= CPU 数）导致内存/资源峰值，runner 在 tools 测试启动时取消 job
-# （SIGTERM + "The operation was canceled"，实测并行必现）。
+# llvm-cov 默认并行度 = host CPU 数（16），并行编译 + 并行跑全部 crate 测试
+# 导致 runner 内存/资源峰值，在测试运行中段取消 job（SIGTERM +
+# "The operation was canceled"，实测 CI 必现、本地不现）。`-j 2` 是 llvm-cov
+# 自身的并行参数（CARGO_BUILD_JOBS 不影响其测试并行），将编译与测试并行度
+# 限制为 2；配合 RUST_TEST_THREADS=1 降低单进程内线程峰值。
 export RUST_TEST_THREADS=1
-export CARGO_BUILD_JOBS=2
 
 report_json="$(mktemp "${TMPDIR:-/tmp}/aemeath-coverage.XXXXXX.json")"
 trap 'rm -f "$report_json"' EXIT
 
 cargo llvm-cov \
+    -j 2 \
     --workspace \
     --exclude xtask \
     --quiet \
