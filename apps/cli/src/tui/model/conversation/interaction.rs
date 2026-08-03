@@ -447,7 +447,8 @@ impl ConversationModel {
             request_id,
             super::block::AskUserCompletion::Answered,
         );
-        self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref());
+        changes
+            .extend(self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref()));
         changes.push(ConversationChange::InteractionCompleted {
             request_id: request_id.clone(),
         });
@@ -527,14 +528,14 @@ impl ConversationModel {
         &mut self,
         request_id: &UiInteractionRequestId,
         interaction_tool_call_id: Option<&str>,
-    ) -> bool {
+    ) -> Vec<ConversationChange> {
         let tool_call_ids =
             self.ask_user_tool_call_ids_for_request(request_id, interaction_tool_call_id);
         if tool_call_ids.is_empty() {
-            return false;
+            return Vec::new();
         }
         let result = self.ask_user_reply_payload(request_id);
-        let mut completed = false;
+        let mut changes = Vec::new();
         for chat in &mut self.chats {
             for turn in &mut chat.turns {
                 for call in &mut turn.tool_calls {
@@ -552,12 +553,21 @@ impl ConversationModel {
                         )
                     {
                         call.complete(result.clone());
-                        completed = true;
+                        changes.push(ConversationChange::ToolCallCompleted {
+                            chat_id: chat.id.to_string(),
+                            turn_id: turn.id.to_string(),
+                            id: call
+                                .id
+                                .as_ref()
+                                .expect("completed tool call has id")
+                                .to_string(),
+                            status: ToolCallStatus::Success,
+                        });
                     }
                 }
             }
         }
-        completed
+        changes
     }
 
     fn cancel_ask_user_tool_for_request(

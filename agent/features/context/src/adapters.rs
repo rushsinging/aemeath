@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+mod accepted_input_ledger;
 mod atomic_blob_session;
 mod atomic_blob_session_management;
 mod canonical_session;
 pub(crate) mod compact_summary;
+mod dataset_session_management;
+mod dataset_session_reader;
+mod dataset_session_writer;
 mod in_memory_session;
 pub mod memory_injection;
 pub mod prompt;
@@ -18,9 +22,14 @@ mod tool_receipt_ledger;
 pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
 pub use canonical_session::{
-    AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository, CanonicalSessionWriter,
-    NoOpCanonicalSessionWriter, ProductionMainContextFactory,
+    AcceptedInputWriter, AtomicBlobAcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
+    AtomicBlobToolReceiptWriter, CanonicalSessionRepository, CanonicalSessionWriter,
+    NoOpAcceptedInputWriter, NoOpCanonicalSessionWriter, NoOpToolReceiptWriter,
+    ProductionMainContextFactory, SessionSaveIntent, ToolReceiptWriter,
 };
+pub use dataset_session_management::DatasetSessionManagement;
+pub use dataset_session_reader::{DatasetSessionReader, PreparedDatasetResume};
+pub use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub use in_memory_session::InMemorySessionRepository;
 pub use memory_injection::{
     CommittedMemoryRetrieveAdapter, MemoryRetrieveAdapter, NoOpContextMemorySource,

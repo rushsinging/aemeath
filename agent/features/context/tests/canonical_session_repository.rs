@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
     AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
-    SnapshotState,
+    SessionCommitPlan, SnapshotState,
 };
 use context::domain::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
@@ -24,42 +24,116 @@ use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidatio
 
 use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
 
+#[derive(Debug)]
+struct RecordedSessionCommit {
+    session_id: String,
+    expected_revision: u64,
+    plan: SessionCommitPlan,
+}
+
 #[derive(Default)]
 struct RecordingWriter {
-    saved: Mutex<Vec<CanonicalSession>>,
-    saved_tool_receipts: Mutex<Vec<(String, u64, context::domain::ToolCallReceipt)>>,
+    saved: Mutex<Vec<RecordedSessionCommit>>,
     fail: bool,
 }
 
 #[async_trait]
 impl CanonicalSessionWriter for RecordingWriter {
-    async fn save(&self, session: &CanonicalSession) -> Result<(), String> {
-        if self.fail {
-            return Err("disk full".to_string());
-        }
-        self.saved.lock().unwrap().push(session.clone());
-        Ok(())
-    }
-
-    async fn save_tool_receipt(
+    async fn commit(
         &self,
         session_id: &str,
-        revision: u64,
-        receipt: &context::domain::ToolCallReceipt,
+        expected_revision: u64,
+        plan: SessionCommitPlan,
     ) -> Result<(), String> {
         if self.fail {
             return Err("disk full".to_string());
         }
-        self.saved_tool_receipts.lock().unwrap().push((
+        if plan.changed_members().is_empty() {
+            return Err("missing changed member".to_string());
+        }
+        self.saved.lock().unwrap().push(RecordedSessionCommit {
+            session_id: session_id.to_string(),
+            expected_revision,
+            plan,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct RecordingToolReceiptWriter {
+    saved: Mutex<Vec<context::domain::ToolCallReceipt>>,
+    fail: bool,
+}
+
+#[async_trait]
+impl context::adapters::ToolReceiptWriter for RecordingToolReceiptWriter {
+    async fn save(
+        &self,
+        _session_id: &str,
+        _revision: u64,
+        receipt: &context::domain::ToolCallReceipt,
+    ) -> Result<(), String> {
+        if self.fail {
+            return Err("receipt disk full".to_string());
+        }
+        self.saved.lock().unwrap().push(receipt.clone());
+        Ok(())
+    }
+}
+
+type AcceptedInputWrite = (String, u64, String, String, AcceptedInputProjection);
+
+#[derive(Default)]
+struct RecordingAcceptedInputWriter {
+    saved: Mutex<Vec<AcceptedInputWrite>>,
+    cleared: Mutex<Vec<(String, String)>>,
+    fail: bool,
+}
+
+#[async_trait]
+impl context::adapters::AcceptedInputWriter for RecordingAcceptedInputWriter {
+    async fn save(
+        &self,
+        session_id: &str,
+        revision: u64,
+        run_id: &str,
+        step_id: &str,
+        input: &AcceptedInputProjection,
+    ) -> Result<(), String> {
+        if self.fail {
+            return Err("input disk full".to_string());
+        }
+        self.saved.lock().unwrap().push((
             session_id.to_string(),
             revision,
-            receipt.clone(),
+            run_id.to_string(),
+            step_id.to_string(),
+            input.clone(),
         ));
+        Ok(())
+    }
+
+    async fn acknowledge_finalized_input(
+        &self,
+        _session_id: &str,
+        run_id: &str,
+        step_id: &str,
+    ) -> Result<(), String> {
+        self.cleared
+            .lock()
+            .unwrap()
+            .push((run_id.to_string(), step_id.to_string()));
+        Ok(())
+    }
+
+    async fn delete_all(&self, _session_id: &str) -> Result<(), String> {
         Ok(())
     }
 }
 
 struct EmptyTask;
+
 impl TaskPersist for EmptyTask {
     fn collect_snapshot(&self) -> TaskSnapshot {
         TaskSnapshot::empty()
@@ -189,6 +263,31 @@ fn repository_with_session(
     )
 }
 
+fn repository_with_receipt_writer(
+    writer: Arc<RecordingWriter>,
+    receipt_writer: Arc<RecordingToolReceiptWriter>,
+) -> (
+    CanonicalSessionRepository,
+    Arc<RwLock<Arc<CanonicalSession>>>,
+) {
+    let (repository, holder) = repository(writer);
+    (repository.with_tool_receipt_writer(receipt_writer), holder)
+}
+
+fn repository_with_accepted_input_writer(
+    writer: Arc<RecordingWriter>,
+    accepted_input_writer: Arc<RecordingAcceptedInputWriter>,
+) -> (
+    CanonicalSessionRepository,
+    Arc<RwLock<Arc<CanonicalSession>>>,
+) {
+    let (repository, holder) = repository(writer);
+    (
+        repository.with_accepted_input_writer(accepted_input_writer),
+        holder,
+    )
+}
+
 fn repository(
     writer: Arc<RecordingWriter>,
 ) -> (
@@ -208,8 +307,8 @@ fn repository(
             workspace: SnapshotState::Captured(workspace()),
             revision: 0,
             compact: None,
-            run_slices: vec![],
-            committed_steps: vec![],
+            run_slices: vec![].into(),
+            committed_steps: Default::default(),
             skill_load_records: Vec::new(),
         },
     )
@@ -244,8 +343,8 @@ fn ten_step_session(
         workspace: SnapshotState::Captured(workspace()),
         revision,
         compact: None,
-        run_slices: ten_step_slices(),
-        committed_steps: vec![],
+        run_slices: ten_step_slices().into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -326,7 +425,6 @@ async fn skill_load_revision_is_atomic_idempotent_and_failure_safe() {
 
     let failing_writer = Arc::new(RecordingWriter {
         saved: Mutex::new(Vec::new()),
-        saved_tool_receipts: Mutex::new(Vec::new()),
         fail: true,
     });
     let (failing, failing_holder) = repository(failing_writer);
@@ -495,13 +593,15 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
                 ),
                 tool_receipts: Vec::new(),
             }],
-        )],
+        )]
+        .into(),
         committed_steps: vec![context::domain::session::CommittedStep {
             run_id: "run".to_string(),
             step_id: "step".to_string(),
             fingerprint: "outcome".to_string(),
             committed_revision: revision,
-        }],
+        }]
+        .into(),
         skill_load_records: Vec::new(),
     }
 }
@@ -659,7 +759,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             revision: step_count as u64,
             compact: None,
             run_slices,
-            committed_steps: vec![],
+            committed_steps: Default::default(),
             skill_load_records: Vec::new(),
         };
         let (repository, _) = repository_with_session(writer, session);
@@ -688,15 +788,18 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
 #[tokio::test]
 async fn accepted_input_persists_before_publish() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer.clone());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
     let accepted = accepted_input("input-v1");
 
     let receipt = repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
     {
         let session = holder.read().unwrap();
+        assert_eq!(session.revision, 0);
         let step = &session.run_slices[0].steps[0];
         assert_eq!(
             step.accepted_input.as_ref().unwrap().messages[0].text_content(),
@@ -718,7 +821,8 @@ async fn accepted_input_persists_before_publish() {
 #[tokio::test]
 async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, _) = repository(writer);
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer);
     let accepted = accepted_input("input-v1");
 
     let first = repository.append_accepted_input(&accepted).await.unwrap();
@@ -733,6 +837,66 @@ async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     ));
 }
 
+#[tokio::test]
+async fn accepted_input_storage_failure_does_not_publish_or_advance_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter {
+        saved: Mutex::new(vec![]),
+        cleared: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
+    let accepted = accepted_input("input-failure");
+
+    let result = repository.append_accepted_input(&accepted).await;
+
+    assert!(matches!(
+        result,
+        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
+    assert!(writer.saved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn accepted_input_duplicate_after_persist_is_published_exactly_once() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
+    let accepted = accepted_input("input-retry");
+
+    repository.append_accepted_input(&accepted).await.unwrap();
+    repository.append_accepted_input(&accepted).await.unwrap();
+
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(holder.read().unwrap().run_slices[0].steps.len(), 1);
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn finalized_append_acknowledges_accepted_input_after_canonical_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer.clone());
+    let accepted = accepted_input("input-to-finalize");
+    repository.append_accepted_input(&accepted).await.unwrap();
+
+    repository
+        .append_finalized(&append("finalized"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        *accepted_writer.cleared.lock().unwrap(),
+        vec![(
+            accepted.run_id.to_string(),
+            accepted.step_id.as_str().to_string()
+        )]
+    );
+}
 #[tokio::test]
 async fn finalized_append_bridges_messages_into_structured_outcome() {
     let writer = Arc::new(RecordingWriter::default());
@@ -787,7 +951,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
         step.accepted_input.as_ref().unwrap().fingerprint,
         "input-v1"
     );
-    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 1);
+    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 0);
     let outcome = step.outcome.as_ref().unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
     assert_eq!(outcome.api_input_tokens, Some(42));
@@ -900,8 +1064,9 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
                 "step",
                 AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
             )],
-        )],
-        committed_steps: vec![],
+        )]
+        .into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
     let (repository, _) = repository_with_session(writer, session);
@@ -912,6 +1077,123 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
     assert!(snapshot.active_summary.is_none());
 }
 
+#[tokio::test]
+async fn finalized_append_reuses_existing_committed_step_entry_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("shared-ledger");
+    let mut session = CanonicalSession::fixture(session_id.as_str());
+    session.revision = 1;
+    session.committed_steps = vec![context::domain::session::CommittedStep::fixture(
+        "run-existing",
+        "step-existing",
+        "existing",
+        1,
+    )]
+    .into();
+    let existing_entry = Arc::clone(&session.committed_steps.entries()[0]);
+    let (repository, holder) = repository_with_session(writer, session);
+    let mut mutation = append("new");
+    mutation.session_id = session_id;
+    mutation.expected_revision = SessionRevision::new(1);
+    mutation.run_id = RunId::new("run-new");
+    mutation.step_id = RunStepId::new("step-new");
+
+    repository
+        .append_finalized(&mutation)
+        .await
+        .expect("append finalized outcome");
+
+    let committed = holder.read().unwrap();
+    assert!(Arc::ptr_eq(
+        &existing_entry,
+        &committed.committed_steps.entries()[0]
+    ));
+    assert_eq!(committed.committed_steps.len(), 2);
+}
+
+#[tokio::test]
+async fn finalized_append_reuses_unchanged_run_slice_backing() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("shared-history");
+    let session = CanonicalSession {
+        id: session_id.to_string(),
+        chats: vec![],
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        updated_at: "2026-01-01T00:00:00Z".to_string(),
+        metadata: Default::default(),
+        tasks: SnapshotState::Missing,
+        workspace: SnapshotState::Captured(workspace()),
+        revision: 1,
+        compact: None,
+        run_slices: vec![CommittedRunSlice::new(
+            "run-existing",
+            vec![CommittedRunStep::accepted_only(
+                "step-existing",
+                AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+            )],
+        )]
+        .into(),
+        committed_steps: Default::default(),
+        skill_load_records: Vec::new(),
+    };
+    let existing_slice = Arc::clone(&session.run_slices.slices()[0]);
+    let (repository, holder) = repository_with_session(writer, session);
+    let mut mutation = append("new");
+    mutation.session_id = session_id;
+    mutation.expected_revision = SessionRevision::new(1);
+    mutation.run_id = RunId::new("run-new");
+    mutation.step_id = RunStepId::new("step-new");
+
+    repository
+        .append_finalized(&mutation)
+        .await
+        .expect("append finalized outcome");
+
+    let committed = holder.read().unwrap();
+    assert!(Arc::ptr_eq(
+        &existing_slice,
+        &committed.run_slices.slices()[0]
+    ));
+    assert_eq!(committed.run_slices.len(), 2);
+}
+
+#[tokio::test]
+async fn accepted_input_uses_independent_writer_before_publish() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer.clone());
+
+    let receipt = repository
+        .append_accepted_input(&accepted_input("input-ledger"))
+        .await
+        .unwrap();
+
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+    assert_eq!(accepted_input_writer.saved.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn accepted_input_writer_failure_does_not_publish_candidate() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter {
+        saved: Mutex::new(vec![]),
+        cleared: Mutex::new(vec![]),
+        fail: true,
+    });
+    let (repository, holder) =
+        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer);
+
+    assert!(matches!(
+        repository.append_accepted_input(&accepted_input("input-ledger")).await,
+        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+    ));
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(holder.read().unwrap().run_slices.is_empty());
+    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+}
 #[tokio::test]
 async fn append_persists_candidate_before_publishing_revision() {
     let writer = Arc::new(RecordingWriter::default());
@@ -931,9 +1213,10 @@ async fn append_persists_candidate_before_publishing_revision() {
 #[tokio::test]
 async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer.clone());
-    let mutation =
-        ToolReceiptMutation::pending(tool_identity(), "{\"pattern\":\"**/archify.mjs\"}");
+    let receipt_writer = Arc::new(RecordingToolReceiptWriter::default());
+    let (repository, holder) =
+        repository_with_receipt_writer(writer.clone(), receipt_writer.clone());
+    let mutation = ToolReceiptMutation::pending(tool_identity(), "safe preview");
 
     let first = repository
         .advance_tool_receipt(mutation.clone())
@@ -943,18 +1226,12 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
     assert!(first.changed);
     assert!(!second.changed);
-    assert_eq!(holder.read().unwrap().revision, 1);
-    assert!(
-        writer.saved.lock().unwrap().is_empty(),
-        "Tool receipt 更新不得重编码完整 CanonicalSession"
-    );
-    let saved_receipts = writer.saved_tool_receipts.lock().unwrap();
-    assert_eq!(saved_receipts.len(), 1);
+    assert_eq!(holder.read().unwrap().revision, 0);
     assert_eq!(
-        saved_receipts[0].0,
-        first.receipt.identity.session_id.as_str()
+        writer.saved.lock().unwrap().len(),
+        0,
+        "Tool receipt mutation must not invoke the canonical Session writer"
     );
-    assert_eq!(saved_receipts[0].1, 1);
     assert_eq!(
         holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
         ToolCallState::Pending
@@ -963,21 +1240,26 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
 #[tokio::test]
 async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
-    let writer = Arc::new(RecordingWriter {
+    let writer = Arc::new(RecordingWriter::default());
+    let receipt_writer = Arc::new(RecordingToolReceiptWriter {
         saved: Mutex::new(vec![]),
-        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
-    let (repository, holder) = repository(writer);
+    let (repository, holder) = repository_with_receipt_writer(writer.clone(), receipt_writer);
 
     assert!(matches!(
         repository
             .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
             .await,
-        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "disk full"
+        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
+    assert_eq!(
+        writer.saved.lock().unwrap().len(),
+        0,
+        "失败的 receipt 写入不得回退调用 canonical Session writer"
+    );
 }
 
 #[tokio::test]
@@ -1013,7 +1295,6 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
 async fn failed_durable_write_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
-        saved_tool_receipts: Mutex::new(vec![]),
         fail: true,
     });
     let (repository, holder) = repository(writer);
@@ -1181,6 +1462,32 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
     ));
 }
 
+#[tokio::test]
+async fn finalized_append_commits_typed_plan_with_expected_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, _) = repository(writer.clone());
+
+    repository
+        .append_finalized(&append("typed-plan"))
+        .await
+        .expect("append should commit");
+
+    let commits = writer.saved.lock().unwrap();
+    let commit = commits.last().expect("typed commit should be recorded");
+    assert!(!commit.session_id.is_empty());
+    assert_eq!(commit.expected_revision, 0);
+    assert!(
+        commit
+            .plan
+            .changed_members()
+            .iter()
+            .any(|member| member.name() == "manifest.json"),
+        "commit plan must carry the canonical generation manifest"
+    );
+    assert!(commit.plan.preserves_unloaded_steps());
+    assert!(commit.plan.removed_members().is_empty());
+}
+
 /// #1486：注入 generator 后 commit_compaction 走 LLM 语义压缩，
 /// summary 来自生成器而非本地 fallback 模板。
 #[tokio::test]
@@ -1209,14 +1516,26 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
 
     compact(&repository_under_test, session_id.clone(), 0).await;
 
-    let saved = writer.saved.lock().unwrap().last().cloned().unwrap();
-    let summary = saved.compact.expect("compact marker 应已写入").summary;
+    let commits = writer.saved.lock().unwrap();
+    let saved = &commits.last().expect("compact commit must exist").plan;
+    let state_member = saved
+        .changed_members()
+        .iter()
+        .find(|member| member.name() == "session-state.json")
+        .expect("compact must replace state member");
+    let state =
+        context::domain::session::SessionGenerationCodec::decode_state(state_member.bytes())
+            .expect("decode committed state");
     assert!(
-        summary.contains("LLM 生成的语义摘要"),
-        "summary 应来自 LLM 生成器: {summary}"
+        state
+            .compact_summary()
+            .is_some_and(|summary| summary.contains("LLM 生成的语义摘要")),
+        "summary 应来自 LLM 生成器"
     );
     assert!(
-        !summary.contains("## User Requests"),
-        "不应使用本地 fallback 模板: {summary}"
+        state
+            .compact_summary()
+            .is_none_or(|summary| !summary.contains("## User Requests")),
+        "不应使用本地 fallback 模板"
     );
 }

@@ -2,6 +2,71 @@ use super::sdk_event_mapper::map_stream_event;
 use crate::application::loop_engine::chat::{
     RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
 };
+#[test]
+fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
+    let first_id = sdk::InputId::new("input-a");
+    let second_id = sdk::InputId::new("input-b");
+    let queued_id = sdk::InputId::new("input-c");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![
+            (first_id.clone(), share::message::Message::user("first")),
+            (second_id.clone(), share::message::Message::user("second")),
+        ],
+        queued: vec![(queued_id.clone(), share::message::Message::user("queued"))],
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].input_id.as_ref(), Some(&first_id));
+            assert_eq!(items[0].text_content(), "first");
+            assert_eq!(items[1].input_id.as_ref(), Some(&second_id));
+            assert_eq!(items[1].text_content(), "second");
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].input_id.as_ref(), Some(&queued_id));
+            assert_eq!(queued[0].text_content(), "queued");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn adopted_typed_skill_request_mapping_preserves_display_metadata_for_sdk() {
+    let input_id = sdk::InputId::new("skill-input");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![(
+            input_id.clone(),
+            share::message::Message::skill_request(
+                "LLM prompt",
+                share::message::SkillRequestMetadata {
+                    skill: "superpowers:brainstorming".to_string(),
+                    arguments: "feature scope".to_string(),
+                    raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                },
+            ),
+        )],
+        queued: Vec::new(),
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::UserMessagesAdopted { items, .. } => {
+            assert_eq!(items[0].input_id.as_ref(), Some(&input_id));
+            assert_eq!(
+                items[0].metadata.as_ref().map(|metadata| metadata.source),
+                Some(sdk::ChatMessageSource::SkillRequest)
+            );
+            assert_eq!(
+                items[0]
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())
+                    .map(|request| request.raw_input.as_str()),
+                Some("/superpowers:brainstorming feature scope")
+            );
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
 
 #[test]
 fn activity_events_map_without_losing_change_or_snapshot_facts() {
@@ -92,6 +157,36 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
+fn session_resume_mapping_preserves_body_free_history_index() {
+    let event = RuntimeStreamEvent::SessionResumed {
+        steps: Vec::new(),
+        display_history: Some(context::api::DisplayHistoryStepIndex::fixture(
+            "session-index",
+            17,
+            vec![("run-1", "step-1", "step-run-step.json", 23)],
+        )),
+        session_id: "session-index".into(),
+        created_at: 42,
+        compacted: false,
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::SessionResumed {
+            steps,
+            display_history: Some(index),
+            ..
+        } => {
+            assert!(steps.is_empty());
+            assert_eq!(index.session_id, "session-index");
+            assert_eq!(index.generation_revision, 17);
+            assert_eq!(index.steps[0].member_name, "step-run-step.json");
+            assert_eq!(index.steps[0].estimated_lines, 23);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn compact_finished_preserves_runtime_owned_notice() {
     let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
         messages: vec![share::message::Message::user("recent")],
@@ -117,6 +212,7 @@ fn session_resume_mapping_preserves_context_run_step_boundaries() {
             finalize_cause: None,
             duration_ms: None,
         }],
+        display_history: None,
         session_id: "session-1".into(),
         created_at: 0,
         compacted: false,

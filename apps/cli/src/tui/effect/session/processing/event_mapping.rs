@@ -231,6 +231,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::SessionResumed {
             steps,
+            display_history,
             session_id,
             created_at,
             compacted,
@@ -250,10 +251,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
                     },
                 )
                 .collect(),
+            display_history,
             session_id,
             created_at,
             compacted,
-        },        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+        },
+        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
             UiEvent::SessionResumeFailed { kind, id, message }
         }
         sdk::ChatEvent::ReflectionHistory { records } => UiEvent::ReflectionHistory { records },

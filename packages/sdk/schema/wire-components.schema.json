@@ -701,6 +701,16 @@
     },
     "ChatMessageMetadata": {
       "properties": {
+        "skill_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkillRequestMetadataView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "source": {
           "$ref": "#/$defs/ChatMessageSource",
           "default": "user"
@@ -722,7 +732,8 @@
       "enum": [
         "user",
         "system_generated",
-        "stop_hook"
+        "stop_hook",
+        "skill_request"
       ],
       "type": "string"
     },
@@ -1884,6 +1895,25 @@
         "summary"
       ],
       "title": "SessionSummary",
+      "type": "object"
+    },
+    "SkillRequestMetadataView": {
+      "properties": {
+        "arguments": {
+          "type": "string"
+        },
+        "raw_input": {
+          "type": "string"
+        },
+        "skill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill",
+        "arguments",
+        "raw_input"
+      ],
       "type": "object"
     },
     "StopHookFeedbackView": {

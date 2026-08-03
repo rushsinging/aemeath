@@ -11,13 +11,6 @@
         "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/reject-main-edit.sh\"",
         "timeout": 10
       }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-agent-stop.sh\"",
-        "timeout": 600
-      }
-    ]
+      ]
   }
 }

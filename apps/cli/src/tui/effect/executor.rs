@@ -127,6 +127,9 @@ impl App {
             }
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
+            Effect::LoadDisplayHistoryWindow { request } => {
+                self.load_display_history_window_effect(request, ui_tx)
+            }
             Effect::CancelCurrentRun => self.cancel_current_run(),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
@@ -343,7 +346,50 @@ impl App {
         }
     }
 
-    fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
+    fn load_display_history_window_effect(
+        &self,
+        request: sdk::DisplayHistoryWindowRequest,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
+        let Some(display_history_query) = self.display_history_query.clone() else {
+            let ui_tx = ui_tx.clone();
+            crate::tui::effect::spawn_guard::spawn_guarded(
+                "display_history_unavailable",
+                async move {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoadFailed {
+                            request,
+                            message: "展示历史查询端口不可用".to_string(),
+                        })
+                        .await;
+                },
+            );
+            return;
+        };
+        let ui_tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("display_history_window", async move {
+            match display_history_query
+                .load_display_history_window(request.clone())
+                .await
+            {
+                Ok(window) => {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoaded { window })
+                        .await;
+                }
+                Err(error) => {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoadFailed {
+                            request,
+                            message: error.to_string(),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    pub(crate) fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
         if self.chat.input_event_tx.is_none() {
             crate::tui::log_debug!(
                 "send_chat_input_event DROPPED tx=None event={:?}",

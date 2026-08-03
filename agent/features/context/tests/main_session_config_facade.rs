@@ -217,8 +217,8 @@ async fn build_facade_harness(
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -292,8 +292,8 @@ fn session_with_workspace(
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }

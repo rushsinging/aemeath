@@ -95,7 +95,8 @@ fn tool_result_projection_round_trips_without_full_payload() {
             "step",
             vec![tool_result],
         )],
-    )];
+    )]
+    .into();
 
     let bytes = SessionCodec::encode(&session).unwrap();
     assert!(!String::from_utf8_lossy(&bytes).contains("FULL_PAYLOAD_SENTINEL"));
@@ -170,7 +171,8 @@ fn structured_projection_flattens_steps_once() {
                 vec![Message::user("outcome-b")],
             )],
         ),
-    ];
+    ]
+    .into();
 
     let messages = session.structured_messages();
     let texts: Vec<_> = messages
@@ -189,7 +191,8 @@ fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
             "step",
             AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
         )],
-    )];
+    )]
+    .into();
     session.revision = 1;
 
     let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
@@ -237,7 +240,8 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
             }),
             tool_receipts: Vec::new(),
         }],
-    )];
+    )]
+    .into();
     session.revision = 2;
 
     let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
@@ -439,9 +443,10 @@ fn future_version_is_rejected_without_losing_original_bytes() {
 #[test]
 fn committed_step_ledger_round_trips() {
     let mut session = CanonicalSession::fixture("ledger");
-    session
-        .committed_steps
-        .push(CommittedStep::fixture("run", "step", "fingerprint", 2));
+    session.committed_steps =
+        session
+            .committed_steps
+            .append(CommittedStep::fixture("run", "step", "fingerprint", 2));
     let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
     assert_eq!(decoded.session.revision, 2);
     assert_eq!(decoded.session.committed_steps, session.committed_steps);

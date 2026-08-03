@@ -41,9 +41,17 @@ pub(crate) enum TuiMessageSource {
     User,
     SystemGenerated,
     StopHook,
+    SkillRequest,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct TuiSkillRequestMetadata {
+    pub(crate) skill: String,
+    pub(crate) arguments: String,
+    pub(crate) raw_input: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub(crate) struct TuiStopHookFeedback {
     pub(crate) summary: String,
     pub(crate) command: String,
@@ -73,12 +81,38 @@ pub(crate) struct TuiResumedSessionStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryStepReference {
+    pub(crate) run_id: String,
+    pub(crate) step_id: String,
+    pub(crate) member_name: String,
+    pub(crate) estimated_lines: usize,
+    pub(crate) user_input_history: Vec<String>,
+    pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
+    pub(crate) duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryIndex {
+    pub(crate) session_id: String,
+    pub(crate) generation_revision: u64,
+    pub(crate) steps: Vec<TuiDisplayHistoryStepReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiDisplayHistoryWindow {
+    pub(crate) session_id: String,
+    pub(crate) generation_revision: u64,
+    pub(crate) steps: Vec<TuiResumedSessionStep>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiChatMessage {
     pub(crate) role: String,
     pub(crate) content: Vec<TuiContentBlock>,
     pub(crate) input_id: Option<String>,
     pub(crate) source: TuiMessageSource,
     pub(crate) stop_hook: Option<TuiStopHookFeedback>,
+    pub(crate) skill_request: Option<TuiSkillRequestMetadata>,
 }
 
 impl TuiContentBlock {
@@ -95,6 +129,7 @@ impl TuiChatMessage {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }
     }
 
@@ -105,6 +140,32 @@ impl TuiChatMessage {
             input_id: None,
             source: TuiMessageSource::SystemGenerated,
             stop_hook: None,
+            skill_request: None,
+        }
+    }
+
+    pub(crate) fn skill_request(text: impl Into<String>, payload: TuiSkillRequestMetadata) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(text)],
+            input_id: None,
+            source: TuiMessageSource::SkillRequest,
+            stop_hook: None,
+            skill_request: Some(payload),
+        }
+    }
+
+    pub(crate) fn stop_hook_feedback(
+        text: impl Into<String>,
+        payload: TuiStopHookFeedback,
+    ) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::text(text)],
+            input_id: None,
+            source: TuiMessageSource::StopHook,
+            stop_hook: Some(payload),
+            skill_request: None,
         }
     }
 
@@ -115,6 +176,7 @@ impl TuiChatMessage {
             input_id: None,
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         }
     }
 

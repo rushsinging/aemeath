@@ -195,6 +195,30 @@ fn tool_call_status_to_sdk(
     }
 }
 
+pub(crate) fn map_display_history_index(
+    index: context::api::DisplayHistoryStepIndex,
+) -> sdk::DisplayHistoryIndex {
+    sdk::DisplayHistoryIndex {
+        session_id: index.session_id().to_string(),
+        generation_revision: index.generation_revision(),
+        steps: index
+            .steps()
+            .iter()
+            .map(|step| sdk::DisplayHistoryStepReference {
+                run_id: step.run_id().to_string(),
+                step_id: step.step_id().to_string(),
+                member_name: step.member_name().to_string(),
+                estimated_lines: step.estimated_lines(),
+                user_input_history: step.user_input_history().to_vec(),
+                finalize_cause: step
+                    .finalize_cause()
+                    .map(crate::application::client::map_finalize_cause_to_sdk),
+                duration_ms: step.duration_ms(),
+            })
+            .collect(),
+    }
+}
+
 pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
@@ -512,6 +536,7 @@ pub(crate) fn map_stream_event(
         } => ChatEvent::CommandResultText { text, is_error },
         crate::application::loop_engine::chat::RuntimeStreamEvent::SessionResumed {
             steps,
+            display_history,
             session_id,
             created_at,
             compacted,
@@ -533,6 +558,7 @@ pub(crate) fn map_stream_event(
                     duration_ms: step.duration_ms,
                 })
                 .collect(),
+            display_history: display_history.map(map_display_history_index),
             session_id,
             created_at,
             compacted,

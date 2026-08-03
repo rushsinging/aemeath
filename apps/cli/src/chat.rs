@@ -11,11 +11,8 @@ pub(crate) async fn build_client_from_cli_args(
 
 fn initial_tui_resume_backing(
     bootstrap: &composition::app::AgentClientBootstrap,
-) -> Option<sdk::SessionResumeView> {
-    bootstrap
-        .startup_resume
-        .as_ref()
-        .map(|resume| resume.materialize())
+) -> Option<sdk::LocalSessionResumeBacking> {
+    bootstrap.startup_resume.clone()
 }
 
 fn should_emit_cli_frontend_started_log() -> bool {
@@ -77,8 +74,8 @@ pub(crate) async fn run_chat(args: Args) {
         let mut app =
             crate::tui::App::new(bootstrap.session_id, bootstrap.cwd, bootstrap.model_display);
         app.agent_client = Some(bootstrap.client.clone());
-        app.user_agent = bootstrap.user_agent;
-        app.config_view = bootstrap.config_view.clone();
+        app.display_history_query = Some(bootstrap.display_history_query.clone());
+        app.user_agent = bootstrap.user_agent;        app.config_view = bootstrap.config_view.clone();
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::UiPreferences(
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
@@ -111,9 +108,13 @@ pub(crate) async fn run_chat(args: Args) {
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_received session_id={} steps={} messages={}",
                 resume.session_id,
                 resume.steps.len(),
-                resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
+                resume
+                    .steps
+                    .iter()
+                    .map(|step| step.messages().count())
+                    .sum::<usize>()
             );
-            app.restore_startup_session(resume);
+            app.restore_startup_backing(resume);
         } else {
             crate::tui::log_debug!(
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_absent session_id={}",

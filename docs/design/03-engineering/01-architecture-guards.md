@@ -48,7 +48,7 @@
 | 6d | `check-provider-retry-ownership.sh` | Provider 策略所有权 | Provider 生产 stream adapter 禁止恢复 retry loop、backoff sleep、`FallbackPlanned` 或 stream→non-stream fallback；跨 attempt 策略只属于 Runtime |
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
 | 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
-| 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Session AtomicBlob backing 与 `SessionManagementPort`；Context / Runtime 只消费同一注入 Port，禁止 Context filesystem 构造、legacy free-function façade 或 Runtime 直连 façade |
+| 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Dataset Session backing、仅将 AtomicBlob 作为 legacy migration source 注入 Dataset-aware `SessionManagementPort`，并将同一 Port 交给 Context / Runtime；生产 writer 必须是 Dataset 增量 writer，禁止 Context filesystem 构造、legacy free-function façade、Runtime 直连 façade或 Composition 装配 legacy-only management |
 | 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |

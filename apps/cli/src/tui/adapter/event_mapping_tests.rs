@@ -362,6 +362,7 @@ fn session_resume_keeps_context_run_step_boundaries() {
             finalize_cause: Some(sdk::ResumedStepFinalizeCause::UserCancelledStep),
             duration_ms: Some(125_000),
         }],
+        display_history: None,
         session_id: "session-1".into(),
         created_at: 0,
         compacted: false,

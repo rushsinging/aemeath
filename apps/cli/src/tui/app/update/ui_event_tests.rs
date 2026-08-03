@@ -1,5 +1,7 @@
 use super::*;
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata, TuiStopHookFeedback,
+};
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
@@ -16,6 +18,33 @@ fn test_app() -> App {
         PathBuf::from("/tmp"),
         "test-model".to_string(),
     )
+}
+
+#[test]
+fn display_history_window_failure_clears_inflight_request_for_retry() {
+    let mut app = test_app();
+    let request = sdk::DisplayHistoryWindowRequest {
+        session_id: "retry-session".to_string(),
+        generation_revision: 9,
+        member_names: vec!["steps/0009.json".to_string()],
+    };
+    app.output_view.loading_history_window = Some((
+        request.session_id.clone(),
+        request.generation_revision,
+        request.member_names.clone(),
+    ));
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+
+    app.update_ui(
+        UiEvent::DisplayHistoryWindowLoadFailed {
+            request,
+            message: "读取失败".to_string(),
+        },
+        &ui_tx,
+        &make_spawn_refs(),
+    );
+
+    assert!(app.output_view.loading_history_window.is_none());
 }
 
 #[test]
@@ -212,6 +241,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             input_id: Some(id_a.clone()),
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         },
         TuiChatMessage {
             role: "user".to_string(),
@@ -219,6 +249,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             input_id: Some(id_b.clone()),
             source: TuiMessageSource::User,
             stop_hook: None,
+            skill_request: None,
         },
     ];
     app.update(
@@ -310,6 +341,7 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
         stop_hook: None,
+        skill_request: None,
     }];
 
     app.update(
@@ -351,6 +383,74 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         vec!["看图[Image #1]"],
         "回显应经 message.text_content() 还原含占位符（#507 修复目标）"
     );
+}
+
+#[test]
+fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+    let skill_id = "skill-input".to_string();
+    let hook_id = "hook-input".to_string();
+    app.enqueue_submission_echo(skill_id.clone(), "/superpowers:brainstorming feature scope");
+    app.enqueue_submission_echo(hook_id.clone(), "hook feedback");
+
+    app.update(
+        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+            items: vec![
+                TuiChatMessage {
+                    role: "user".to_string(),
+                    content: vec![TuiContentBlock::text("LLM skill prompt")],
+                    input_id: Some(skill_id),
+                    source: TuiMessageSource::SkillRequest,
+                    stop_hook: None,
+                    skill_request: Some(TuiSkillRequestMetadata {
+                        skill: "superpowers:brainstorming".to_string(),
+                        arguments: "feature scope".to_string(),
+                        raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                    }),
+                },
+                TuiChatMessage {
+                    role: "user".to_string(),
+                    content: vec![TuiContentBlock::text("LLM hook prompt")],
+                    input_id: Some(hook_id),
+                    source: TuiMessageSource::StopHook,
+                    stop_hook: Some(TuiStopHookFeedback {
+                        summary: "blocked".to_string(),
+                        command: "check.sh".to_string(),
+                        exit_code: Some(2),
+                        reason: "guard failed".to_string(),
+                        stdout_preview: "details".to_string(),
+                        stderr_preview: "blocked".to_string(),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                        output_file: None,
+                    }),
+                    skill_request: None,
+                },
+            ],
+            queued: Vec::new(),
+        }),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert!(app.model.conversation.queued_submissions.is_empty());
+    assert!(!app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(
+            item,
+            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { .. }
+        )));
+    let notices = system_notice_texts(&app);
+    assert!(notices.iter().any(|text| text.contains("raw_input")));
+    assert!(notices.iter().any(|text| text.contains("guard failed")));
+    assert!(!notices.iter().any(|text| text.contains("LLM skill prompt")));
+    assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
 
 /// Compact 完成只清理 compact detail；Run 生命周期继续由 typed status 所有。
@@ -509,6 +609,7 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
         stop_hook: None,
+        skill_request: None,
     }];
     app.update(
         TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {

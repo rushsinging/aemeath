@@ -134,7 +134,15 @@ impl TuiScenarioHarness {
 
     pub fn render(&mut self) {
         self.app.view_state.spinner.verb = "Brewing".to_owned();
-        self.app.prepare_frame();
+        let effects = self.app.prepare_frame();
+        self.messages.extend(
+            self.effects
+                .record(crate::tui::app::frame_driver::FrameOutcome {
+                    effects,
+                    spawn_effect: None,
+                    pending_slash: None,
+                }),
+        );
         self.app.draw(&mut self.terminal).expect("TestBackend draw");
     }
     pub fn screen(&self) -> String {

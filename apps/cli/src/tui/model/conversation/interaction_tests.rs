@@ -251,12 +251,20 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
         AskUserCompletion::ReplyPending
     );
 
-    model.apply(ConversationIntent::InteractionReplyAccepted(
+    let changes = model.apply(ConversationIntent::InteractionReplyAccepted(
         InteractionReplyAccepted {
             request_id: completed_request_id.clone(),
         },
     ));
 
+    assert!(changes.iter().any(|change| matches!(
+        change,
+        super::change::ConversationChange::ToolCallCompleted {
+            id,
+            status: ToolCallStatus::Success,
+            ..
+        } if id == completed_tool_id.as_str()
+    )));
     assert_eq!(
         ask_user_tool_status(&model, &completed_tool_id),
         ToolCallStatus::Success

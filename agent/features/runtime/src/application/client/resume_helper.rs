@@ -28,10 +28,14 @@ pub async fn resume_session_to_backing(
     };
     log::debug!(
         target: LOG_TARGET,
-        "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_completed requested_session_id={} loaded_session_id={} active_messages={} display_steps={} trimmed={} repaired={}",
+        "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_completed requested_session_id={} loaded_session_id={} active_messages={} display_index_steps={} legacy_steps={} trimmed={} repaired={}",
         session_id,
         resume_view.session_id,
         resume_view.active_messages.len(),
+        resume_view
+            .display_history
+            .as_ref()
+            .map_or(0, |index| index.steps().len()),
         resume_view.display_steps.len(),
         resume_view.trimmed,
         resume_view.repaired

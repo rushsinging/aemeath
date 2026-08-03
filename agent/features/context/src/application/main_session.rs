@@ -224,8 +224,8 @@ pub async fn wire_main_session(
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
         compact: None,
-        run_slices: Vec::new(),
-        committed_steps: Vec::new(),
+        run_slices: Default::default(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 

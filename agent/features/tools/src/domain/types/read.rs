@@ -12,7 +12,8 @@ pub struct ReadResult {
     pub file_path: String,
     pub line_count: u64,
     pub start_line: u64,
-    pub total_lines: u64,
+    /// Exact source line count when EOF was reached; unavailable for bounded windows.
+    pub total_lines: Option<u64>,
 }
 
 /// Typed input for the `read` tool.

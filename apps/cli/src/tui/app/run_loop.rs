@@ -119,7 +119,9 @@ impl App {
         // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
         self.update_project_context().await;
         self.draw(terminal)?;
-        self.refresh_output_document_from_model();
+        if let Some(effect) = self.refresh_output_document_from_model() {
+            self.execute_effect(effect, &ui_tx).await;
+        }
 
         // #390 A1：常驻 chat() 模型——启动时调一次 chat()，常驻 loop 顶部 idle-wait
         // 直到首条 UserMessage 经 input_events 通道到达；此后每次提交（首条 / 插话）
@@ -143,8 +145,11 @@ impl App {
                 self.output_area.document().total_lines()
             );
 
-            self.prepare_frame();
+            let frame_effects = self.prepare_frame();
             self.draw(terminal)?;
+            for effect in frame_effects {
+                self.execute_effect(effect, &ui_tx).await;
+            }
 
             let spawn_refs = processing::SpawnContextRefs {
                 agent_client: self.agent_client.clone(),
@@ -252,7 +257,6 @@ impl App {
             for effect in result.effects {
                 self.execute_effect(effect, &ui_tx).await;
             }
-
             self.input.just_pasted = false;
             if self.layout.should_exit {
                 break;

@@ -141,9 +141,8 @@ fn production_runtime_has_no_direct_active_memory_construction() {
         .collect::<Vec<_>>();
     assert_eq!(
         reflection_adapter_new.len(),
-        2,
-        "production runtime must construct exactly 2 dataset adapters: \
-         one for reflection (agents_dir), one for MemoryOpener (agents_dir)"
+        3,
+        "production runtime must construct exactly 3 dataset adapters: one for reflection, one for Session, and one for MemoryOpener"
     );
     // Verify neither uses `join("memory")` for FileSystemDatasetAdapter.
     // Legacy memory uses `agents_dir.join("memory")` via
@@ -267,11 +266,17 @@ async fn production_context_append_reopens_from_atomic_blob() {
         )),
     ));
     let session_blob = storage::api::file_system_blob(&agents_dir).expect("create session blob");
-    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
+    let session_dataset = Arc::new(
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone())
+            .expect("create session dataset adapter"),
     );
-    let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
-        session_blob,
+    let session_management: Arc<dyn SessionManagementPort> =
+        Arc::new(context::adapters::DatasetSessionManagement::new(
+            session_dataset.clone(),
+            session_blob.clone(),
+        ));
+    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
+        session_dataset,
     ));
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
@@ -600,4 +605,26 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
 
     // config_writer() returns a gate-aware façade (just verify it exists).
     let _writer = wiring.config_writer();
+}
+
+#[test]
+fn production_session_wiring_uses_dataset_writer_instead_of_blob_writer() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/runtime.rs"))
+        .expect("read composition runtime wiring");
+    assert!(
+        source.contains("DatasetSessionManagement::new"),
+        "production Session wiring must construct Dataset-aware management"
+    );
+    assert!(
+        !source.contains("AtomicBlobSessionManagement::new"),
+        "production Session wiring must not construct legacy-only management"
+    );
+    assert!(
+        source.contains("DatasetCanonicalSessionWriter::new"),
+        "production Session wiring must construct the incremental Dataset writer"
+    );
+    assert!(
+        !source.contains("AtomicBlobCanonicalSessionWriter::new"),
+        "production Session wiring must not construct the retired full-blob writer"
+    );
 }

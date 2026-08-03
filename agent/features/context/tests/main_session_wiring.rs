@@ -207,8 +207,8 @@ fn build_harness() -> Harness {
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -260,8 +260,8 @@ fn session_with_workspace(
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     }
 }
@@ -361,7 +361,7 @@ async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
         })
         .await
         .expect("append accepted input");
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
 
     let committed = h.wiring.committed_session();
     let step = &committed.run_slices[0].steps[0];
@@ -410,7 +410,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
     context
         .append_and_persist(&ContextAppend {
             session_id: SessionId::new(source_id.clone()),
-            expected_revision: SessionRevision::new(1),
+            expected_revision: SessionRevision::new(0),
             run_id: RunId::new("run-finalized"),
             step_id: RunStepId::new("step-finalized"),
             source_request_id: ContextRequestId::new("request-finalized"),
@@ -452,7 +452,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
         outcome.receipts[0].outcome(),
         ToolOutcomeKind::CancellationUnconfirmed
     );
-    assert_eq!(outcome.committed_revision, 2);
+    assert_eq!(outcome.committed_revision, 1);
 }
 
 #[tokio::test]
@@ -772,8 +772,8 @@ async fn workspace_missing_returns_typed_error() {
         workspace: SnapshotState::Missing,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -806,8 +806,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 

@@ -20,6 +20,9 @@ pub enum Effect {
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },
+    LoadDisplayHistoryWindow {
+        request: sdk::DisplayHistoryWindowRequest,
+    },
     CancelCurrentRun,
     ReplyInteraction {
         request_id: UiInteractionRequestId,

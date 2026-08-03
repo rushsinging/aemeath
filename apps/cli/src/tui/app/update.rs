@@ -93,6 +93,8 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
         UiEvent::CommandResultText { .. } => "CommandResultText",
         UiEvent::SessionResumed { .. } => "SessionResumed",
+        UiEvent::DisplayHistoryWindowLoaded { .. } => "DisplayHistoryWindowLoaded",
+        UiEvent::DisplayHistoryWindowLoadFailed { .. } => "DisplayHistoryWindowLoadFailed",
         UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
     }
 }
@@ -363,7 +365,27 @@ impl App {
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);
                     }
-                    self.append_user_echo(item.text_content());
+                    match item.source {
+                        crate::tui::adapter::runtime_view::TuiMessageSource::User => {
+                            self.append_user_echo(item.text_content());
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
+                            if let Some(payload) = item.skill_request.as_ref() {
+                                if let Ok(text) = serde_json::to_string_pretty(payload) {
+                                    self.append_system_notice(text);
+                                }
+                            }
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
+                            let text = item
+                                .stop_hook
+                                .as_ref()
+                                .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                                .unwrap_or_else(|| item.text_content());
+                            self.append_system_notice(text);
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {}
+                    }
                 }
                 // 用户消息已经成为已提交的会话尾部内容。即使 resume 后用户先向上
                 // 浏览过历史，也必须把视图恢复到最新窗口，否则新消息只进入 model，
@@ -414,6 +436,7 @@ impl App {
             }
             TuiRuntimeEvent::SessionResumed {
                 steps,
+                display_history,
                 session_id,
                 created_at,
                 compacted,
@@ -427,6 +450,7 @@ impl App {
                 self.resume_session_messages(
                     session_id,
                     steps.clone(),
+                    display_history.clone(),
                     created_at.to_string(),
                     *compacted,
                 );
@@ -614,7 +638,7 @@ impl App {
             .max(1)
     }
 
-    pub(crate) fn refresh_output_document_from_model(&mut self) {
+    pub(crate) fn refresh_output_document_from_model(&mut self) -> Option<Effect> {
         let before_lines = self.output_area.document().total_lines();
         let revision = self.model.conversation.revision();
         let current_workspace_root: Option<String> = self
@@ -636,10 +660,24 @@ impl App {
         };
         let materialized = cache.retained.materialize_window(
             &self.model.conversation,
+            &self.model.display_history,
             workspace_root,
             requested_window,
         );
         let indexed_items = materialized.indexed_items;
+        if let Some(request) = materialized.missing_history_request {
+            let request_key = (
+                request.session_id.clone(),
+                request.generation_revision,
+                request.member_names.clone(),
+            );
+            if cache.loading_history_window.as_ref() != Some(&request_key) {
+                cache.loading_history_window = Some(request_key);
+                return Some(Effect::LoadDisplayHistoryWindow { request });
+            }
+        } else {
+            cache.loading_history_window = None;
+        }
         let sync_stats = materialized.stats;
         #[cfg(test)]
         crate::tui::render::performance::record_retained_view_sync(
@@ -750,7 +788,7 @@ impl App {
                         "渲染失败，已记录 panic.log",
                     ))),
                 ));
-                return;
+                return None;
             }
         };
         crate::tui::log_trace!(
@@ -778,16 +816,21 @@ impl App {
             need_rebuild
         );
         self.output_area.replace_document(document);
+        None
     }
 
-    pub(crate) fn flush_dirty_view_models(&mut self) {
+    pub(crate) fn flush_dirty_view_models(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if self.view_state.dirty.output {
-            self.refresh_output_document_from_model();
+            if let Some(effect) = self.refresh_output_document_from_model() {
+                effects.push(effect);
+            }
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
             self.view_state.dirty.clear_status();
         }
+        effects
     }
     pub(crate) fn apply_agent_intent(
         &mut self,

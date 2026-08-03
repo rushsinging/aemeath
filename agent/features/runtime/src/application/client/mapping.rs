@@ -162,6 +162,7 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                     sdk::ChatMessageSource::SystemGenerated
                 }
                 share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
+                share::message::MessageSource::SkillRequest => sdk::ChatMessageSource::SkillRequest,
             },
             stop_hook: metadata.stop_hook.map(|payload| sdk::StopHookFeedbackView {
                 summary: payload.summary,
@@ -174,10 +175,57 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 stderr_truncated: payload.stderr_truncated,
                 output_file: payload.output_file,
             }),
+            skill_request: metadata
+                .skill_request
+                .map(|payload| sdk::SkillRequestMetadataView {
+                    skill: payload.skill,
+                    arguments: payload.arguments,
+                    raw_input: payload.raw_input,
+                }),
         }),
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
         // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
         input_id: None,
+    }
+}
+
+pub(crate) fn display_history_window_to_sdk(
+    window: context::api::DisplayHistoryStepWindow,
+) -> sdk::DisplayHistoryWindow {
+    sdk::DisplayHistoryWindow {
+        session_id: window.session_id().to_string(),
+        generation_revision: window.generation_revision(),
+        steps: window
+            .steps()
+            .iter()
+            .map(|member| {
+                let step = member.step();
+                sdk::ResumedSessionStep {
+                    run_id: member.cursor().run_id.clone(),
+                    step_id: member.cursor().step_id.clone(),
+                    messages: step
+                        .accepted_input
+                        .iter()
+                        .flat_map(|input| input.messages.iter())
+                        .chain(
+                            step.outcome
+                                .iter()
+                                .flat_map(|outcome| outcome.messages.iter()),
+                        )
+                        .cloned()
+                        .map(message_to_sdk)
+                        .collect(),
+                    finalize_cause: step
+                        .outcome
+                        .as_ref()
+                        .map(|outcome| map_finalize_cause_to_sdk(outcome.finalize_cause)),
+                    duration_ms: step
+                        .outcome
+                        .as_ref()
+                        .and_then(|outcome| outcome.duration_ms),
+                }
+            })
+            .collect(),
     }
 }
 

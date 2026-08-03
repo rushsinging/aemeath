@@ -26,7 +26,9 @@ pub mod session_lock;
 
 /// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
 pub use chat_event::{
-    LocalResumedSessionStep, LocalSessionResumeBacking, SessionResumeFailureKind, SessionResumeView,
+    DisplayHistoryIndex, DisplayHistoryStepReference, DisplayHistoryWindow,
+    DisplayHistoryWindowRequest, LocalResumedSessionStep, LocalSessionResumeBacking,
+    SessionResumeFailureKind, SessionResumeView,
 };
 pub mod tool_input;
 pub mod tool_result;
@@ -55,7 +57,7 @@ pub use chat::{
     RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::{AgentClient, RunControlClient};
+pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
@@ -86,7 +88,7 @@ pub use run::{
 };
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
-    StopHookFeedbackView,
+    SkillRequestMetadataView, StopHookFeedbackView,
 };
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{
