@@ -3,6 +3,7 @@ set -euo pipefail
 # guard-registry:migration.tui.tea-slash-dispatch
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+export ROOT
 FAILED=0
 COUNT=0
 
@@ -64,15 +65,12 @@ for dir in "${TUI_PURE_DIRS[@]}"; do
     continue
   fi
 
-  while IFS= read -r -d '' file; do
-    rel="${file#$ROOT/}"
+  while IFS=: read -r rel line_no line; do
+      # Skip files in the exemption list (runtime / command-execution layer)
+      if is_exempt "$rel"; then
+        continue
+      fi
 
-    # Skip files in the exemption list (runtime / command-execution layer)
-    if is_exempt "$rel"; then
-      continue
-    fi
-
-    while IFS=: read -r line_no line; do
       # guard-registry:false-positive.tui.tea-inline-allow
       if [[ "$line" == *"allow tea_side_effect"* ]]; then
         continue
@@ -81,21 +79,16 @@ for dir in "${TUI_PURE_DIRS[@]}"; do
       FAILED=1
       COUNT=$((COUNT + 1))
     done < <(
-      perl -ne '
-        print "$.:$_" if /tokio::spawn\s*\(/;
-        print "$.:$_" if /std::thread::spawn\s*\(/;
-        print "$.:$_" if /Command::new\s*\(/;
-        print "$.:$_" if /HookRunner::run|\.run_hook\s*\(/;
-        print "$.:$_" if /clipboard::|arboard::|copypasta::/;
-        print "$.:$_" if /read_clipboard_image\s*\(/;
-        print "$.:$_" if /process_image_file\s*\(/;
-        # ── New patterns ──────────────────────────────────────────────
-        print "$.:$_" if /\bHandle::block_on\s*\(|\bRuntime::block_on\s*\(/;
-        print "$.:$_" if /block_in_place\b/;
-        print "$.:$_" if /\.await\b/;
-      ' "$file"
+      # perl 单进程批量处理全部文件（$ARGV 携带文件名），避免逐文件 fork perl
+      find "$TARGET" -name '*.rs' -print0 | xargs -0 perl -ne '
+        my $rel = $ARGV;
+        $rel =~ s/^\Q$ENV{ROOT}\E\///;
+        if (/tokio::spawn\s*\(/ || /std::thread::spawn\s*\(/ || /Command::new\s*\(/ || /HookRunner::run|\.run_hook\s*\(/ || /clipboard::|arboard::|copypasta::/ || /read_clipboard_image\s*\(/ || /process_image_file\s*\(/ || /\bHandle::block_on\s*\(|\bRuntime::block_on\s*\(/ || /block_in_place\b/ || /\.await\b/) {
+          print "$rel:$.:$_";
+        }
+if (eof) { close ARGV; }
+                    '
     )
-  done < <(find "$TARGET" -name '*.rs' -print0)
 done
 
 if [[ "$FAILED" -ne 0 ]]; then

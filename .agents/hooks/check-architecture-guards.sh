@@ -221,7 +221,7 @@ run_guard fast "$HOOKS_DIR/check-runtime-tool-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-hook-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-capability-assembly.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-activity-observation.sh"
-run_guard fast bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh"
+run_guard fast bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh" --fast-only
 run_guard fast "$HOOKS_DIR/check-composition-construction-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-command-catalog-boundary.sh"
 run_guard fast "$HOOKS_DIR/check-unified-authorization.sh"
