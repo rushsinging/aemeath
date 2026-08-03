@@ -26,12 +26,19 @@ export CARGO_LLVM_COV_BUILD_DIR="${CARGO_LLVM_COV_BUILD_DIR:-$CARGO_TARGET_DIR/l
 report_json="$(mktemp "${TMPDIR:-/tmp}/aemeath-coverage.XXXXXX.json")"
 trap 'rm -f "$report_json"' EXIT
 
+# `--jobs 1`（透传给 cargo test）：cargo 默认并行跑各 crate 测试，
+# 与 cargo-llvm-cov 的进程管理交互时，tools 的 bash 进程组测试
+# （spawn 真实 bash + process_group）会触发对 coverage.sh 进程树的
+# SIGTERM（exit 143，实测并行必现、串行稳定通过）；串行测试为
+# 稳定修复，代价是 coverage 时长增加约 30s。
 cargo llvm-cov \
     --workspace \
     --exclude xtask \
     --quiet \
     --json \
     --summary-only \
-    --output-path "$report_json"
+    --output-path "$report_json" \
+    -- \
+    --jobs 1
 
 cargo run --quiet -p xtask -- coverage-summary "$report_json" "$ROOT"
