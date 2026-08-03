@@ -18,6 +18,16 @@ fn fault_env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|error| error.into_inner())
 }
 
+fn without_fault_env() -> FaultEnvGuard {
+    let lock = fault_env_lock();
+    let previous = std::env::var_os("AEMEATH_STORAGE_DATASET_FAULT_POINT");
+    std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT");
+    FaultEnvGuard {
+        previous,
+        _lock: lock,
+    }
+}
+
 struct FaultEnvGuard {
     previous: Option<OsString>,
     _lock: MutexGuard<'static, ()>,
@@ -199,8 +209,13 @@ fn dataset_member_content_file_count(dataset_path: &std::path::Path) -> usize {
         .unwrap_or_default()
 }
 
-#[tokio::test]
+#[allow(
+    clippy::await_holding_lock,
+    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
+)]
+#[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_incremental_commit() {
+    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
@@ -268,8 +283,13 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[tokio::test]
+#[allow(
+    clippy::await_holding_lock,
+    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
+)]
+#[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_with_revision_evidence_but_without_content_digests_reads_and_migrates() {
+    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
