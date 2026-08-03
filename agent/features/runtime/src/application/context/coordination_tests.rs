@@ -160,7 +160,11 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
     coordinator.build_window(&frozen).await.unwrap();
     coordinator.needs_compaction(&frozen).await.unwrap();
     coordinator
-        .compact(&frozen, SessionRevision::new(1))
+        .compact(
+            &frozen,
+            SessionRevision::new(1),
+            std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+        )
         .await
         .unwrap();
 
@@ -208,6 +212,7 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
             run_id: frozen.run_id.clone(),
             system_prompt: frozen.system_prompt.clone(),
             context_size: frozen.context_size,
+            progress: None,
         })
         .await
         .unwrap();
@@ -528,7 +533,11 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
     let coordinator = ContextCoordinator::new(Arc::new(SkippingPort));
     assert!(matches!(
         coordinator
-            .compact(&request(), SessionRevision::new(0))
+            .compact(
+                &request(),
+                SessionRevision::new(0),
+                std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+            )
             .await
             .unwrap(),
         CompactOutcome::Skipped(CompactSkipReason::ResumeProtection)
@@ -570,4 +579,56 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 
     assert_eq!(usage.get(), Some(42));
     assert_eq!(window, Some("window"));
+}
+
+/// #1500：ContextCoordinator 必须把 Runtime 的进度视图透传到 CompactRequest，
+/// 且 domain stage/chunk 计数正确映射为 SDK 视图（Preparing/Summarizing
+/// 带 chunk 计数/Finalizing）。
+#[tokio::test]
+async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(port.clone());
+    let frozen = request();
+
+    let received: Arc<Mutex<Vec<(sdk::CompactStageView, Option<u32>, Option<u32>)>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let view = {
+        let received = received.clone();
+        std::sync::Arc::new(
+            move |stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>| {
+                received.lock().unwrap().push((stage, current, total));
+            },
+        )
+    };
+
+    coordinator
+        .compact(&frozen, SessionRevision::new(1), view)
+        .await
+        .unwrap();
+
+    let requests = port.compact_requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let progress = requests[0]
+        .progress
+        .as_ref()
+        .expect("compact progress 必须接线到 CompactRequest");
+
+    // 触发 context 侧进度 → 视图收到映射后的 stage/chunk 计数
+    progress.emit(context::compact::CompactStage::Preparing, None, None);
+    progress.emit(
+        context::compact::CompactStage::Summarizing,
+        Some(2),
+        Some(5),
+    );
+    progress.emit(context::compact::CompactStage::Finalizing, None, None);
+
+    assert_eq!(
+        *received.lock().unwrap(),
+        vec![
+            (sdk::CompactStageView::Preparing, None, None),
+            (sdk::CompactStageView::Summarizing, Some(2), Some(5)),
+            (sdk::CompactStageView::Finalizing, None, None),
+        ],
+        "domain 进度必须原样映射到 SDK 视图（#1500）"
+    );
 }

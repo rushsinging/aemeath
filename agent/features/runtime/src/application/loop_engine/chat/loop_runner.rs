@@ -132,6 +132,7 @@ where
                         run_id: sdk::RunId::new(uuid::Uuid::now_v7().to_string()),
                         system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
                         context_size,
+                        progress: None,
                     };
                     log::debug!(
                         target: crate::LOG_TARGET,
@@ -139,9 +140,11 @@ where
                         request.session_id,
                         request.context_size
                     );
-                    let activity_coordinator = crate::application::activity::ActivityCoordinator::production(
-                        request.run_id.clone(),
-                        Arc::new(sink_handle.clone()),
+                    let activity_coordinator = std::sync::Arc::new(
+                        crate::application::activity::ActivityCoordinator::production(
+                            request.run_id.clone(),
+                            Arc::new(sink_handle.clone()),
+                        ),
                     );
                     let compact_activity_id = match activity_coordinator
                         .start_manual_compaction(sdk::CompactStageView::Preparing)
@@ -155,19 +158,48 @@ where
                             None
                         }
                     };
-                    if let Some(activity_id) = compact_activity_id.as_ref() {
-                        if let Err(error) = activity_coordinator.update_compaction(
-                            activity_id.clone(),
-                            sdk::CompactStageView::Summarizing,
-                            None,
-                            None,
-                        ) {
-                            log::warn!(
-                                target: crate::LOG_TARGET,
-                                "[compact] 无法更新手动 Compact Activity，继续执行压缩: {error}"
+                    // #1500：进度由 Context compact 管线经 progress 回调驱动，
+                    // 转发到手动 Compact Activity（chunk 计数实时更新）。
+                    let request = crate::ports::ManualCompactRequest {
+                        progress: compact_activity_id.as_ref().map(|activity_id| {
+                            let coordinator = activity_coordinator.clone();
+                            let activity_id = activity_id.clone();
+                            let progress: std::sync::Arc<
+                                dyn context::compact::CompactProgressFn,
+                            > = std::sync::Arc::new(
+                                move |stage: context::compact::CompactStage,
+                                      current: Option<usize>,
+                                      total: Option<usize>| {
+                                    let view_stage = match stage {
+                                        context::compact::CompactStage::Preparing => {
+                                            sdk::CompactStageView::Preparing
+                                        }
+                                        context::compact::CompactStage::Summarizing => {
+                                            sdk::CompactStageView::Summarizing
+                                        }
+                                        context::compact::CompactStage::Finalizing => {
+                                            sdk::CompactStageView::Finalizing
+                                        }
+                                    };
+                                    let _ = coordinator.update_compaction(
+                                        activity_id.clone(),
+                                        view_stage,
+                                        current.and_then(|value| u32::try_from(value).ok()),
+                                        total.and_then(|value| u32::try_from(value).ok()),
+                                    );
+                                },
                             );
-                        }
-                    }
+                            progress
+                        }),
+                        ..request
+                    };
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[compact] manual request prepared session_id={} context_size={} progress={}",
+                        request.session_id,
+                        request.context_size,
+                        request.progress.is_some(),
+                    );
                     match coordinator.manual_compact(&request).await {
                         Ok(crate::ports::CompactOutcome::Committed(result)) => {
                             log::debug!(
