@@ -306,7 +306,7 @@ fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_ca
     assert_eq!(results[0].outcome.text, "finished");
     assert_eq!(results[1].provider_id, "provider-1");
     assert!(results[1].outcome.is_error);
-    assert!(results[1].outcome.text.contains("cancelled"));
+    assert_eq!(results[1].outcome.text, "Command cancelled by user");
 }
 
 #[test]

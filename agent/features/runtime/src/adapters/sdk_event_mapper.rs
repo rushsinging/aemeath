@@ -118,8 +118,6 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             reason,
         },
-        RunDomainEvent::CancellationRequested { run_id, .. } => ChatEvent::RunCancelling { run_id },
-        RunDomainEvent::Cancelled { run_id, .. } => ChatEvent::RunCancelled { run_id },
         RunDomainEvent::Transitioned {
             run_id,
             parent_run_id,
@@ -170,11 +168,9 @@ fn run_status_to_sdk(status: crate::domain::agent_run::RunStatus) -> RunStatusVi
         RunStatus::Compacting => RunStatusView::Compacting,
         RunStatus::CancellingStep => RunStatusView::CancellingStep,
         RunStatus::FinalizingStep => RunStatusView::FinalizingStep,
-        RunStatus::Cancelling => RunStatusView::Cancelling,
         RunStatus::Terminating => RunStatusView::Terminating,
         RunStatus::Completed => RunStatusView::Completed,
         RunStatus::Failed => RunStatusView::Failed,
-        RunStatus::Cancelled => RunStatusView::Cancelled,
         RunStatus::Terminated => RunStatusView::Terminated,
     }
 }
@@ -438,12 +434,6 @@ pub(crate) fn map_stream_event(
             run_id,
             parent_run_id,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::RunCancelling { run_id } => {
-            ChatEvent::RunCancelling { run_id }
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::RunCancelled { run_id } => {
-            ChatEvent::RunCancelled { run_id }
-        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::Cancelled {
             context,
             duration,
@@ -653,11 +643,9 @@ mod run_status_mapping_tests {
             (RunStatus::Compacting, RunStatusView::Compacting),
             (RunStatus::CancellingStep, RunStatusView::CancellingStep),
             (RunStatus::FinalizingStep, RunStatusView::FinalizingStep),
-            (RunStatus::Cancelling, RunStatusView::Cancelling),
             (RunStatus::Terminating, RunStatusView::Terminating),
             (RunStatus::Completed, RunStatusView::Completed),
             (RunStatus::Failed, RunStatusView::Failed),
-            (RunStatus::Cancelled, RunStatusView::Cancelled),
             (RunStatus::Terminated, RunStatusView::Terminated),
         ];
 

@@ -27,7 +27,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、SDK wire schema、Runtime capability assembly 测试与 production reachability，并并行等待其余无 Cargo 静态守卫；`--full` 按固定顺序串行执行全部独立脚本守卫及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
+`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试、production reachability，以及会复制仓库或执行正反例测试的 `check-shared-run-loop-tests.sh`、`check-sdk-wire-schema.sh`、`check-runtime-capability-assembly-tests.sh`；其余无 Cargo 即时静态守卫并行执行。`--full` 按固定顺序串行执行全部独立脚本守卫、正反例测试及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
 
 ## 守卫索引
 
@@ -594,7 +594,7 @@
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
 - **#872 Context 边界 / #1397 公共 owner**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。独立 Run 与派生 Run 均委托 `application/loop_engine/step_persistence.rs` 的无角色 owner 接入唯一 `append_finalized`，Main/Sub adapter 禁止各自保留 finalized append 算法。Interaction completion 必须由 `application/interaction/coordinator.rs` 的 `InteractionCompletionContext` 与 `complete_tool_interaction` 统一拥有；禁止恢复 `InteractionCompletionPort` 或 Main/Sub 五组角色 completion 方法。消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。
-- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。总编排同时执行该正反例脚本。白名单预算保持不变，不新增 migration exception。
+- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。该正反例脚本只进入 `--full`，不进入 Stop `--fast`。白名单预算保持不变，不新增 migration exception。
 
 ## 23. check-run-control-boundary.sh
 
@@ -627,6 +627,8 @@
 - **白名单**：无；仅排除测试路径。
 - **故意违规证据**：在临时副本分别加入 SDK `builtin_commands()`、no-TUI 独立 parser 与 Runtime `CommandRoute`，单 Guard 和总编排均须 exit 2；恢复后 clean pass。
 - **失败模式**：输出命中路径后以 exit 2 阻断。
+
+`check-runtime-capability-assembly-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。
 
 ## 24. check-config-reader-injection.sh
 

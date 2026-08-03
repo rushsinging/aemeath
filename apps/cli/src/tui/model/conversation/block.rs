@@ -18,6 +18,26 @@ pub struct AskUserSlot {
     pub answer: Option<String>,
 }
 
+/// AskUser 批量交互的完成状态。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserCompletion {
+    Active,
+    ReplyPending,
+    CancelPending,
+    Answered,
+    Cancelled,
+}
+
+impl AskUserCompletion {
+    pub fn is_interactive(self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Answered | Self::Cancelled)
+    }
+}
+
 /// AskUser 批量交互的阶段。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum AskUserPhase {
@@ -107,8 +127,8 @@ pub enum ConversationBlock {
         chat_input_cursor: usize,
         /// 确认页导航光标。
         confirm_cursor: usize,
-        /// 用户已确认提交（block 进入终态）。
-        confirmed: bool,
+        /// Runtime 确认的完成状态。
+        completion: AskUserCompletion,
     },
 }
 

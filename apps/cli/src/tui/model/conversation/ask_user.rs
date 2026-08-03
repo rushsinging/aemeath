@@ -3,7 +3,7 @@
 //! AskUserBatch 同一时刻至多一个未完成的交互块；已完成块以首个 slot id
 //! 派生稳定身份保留在 timeline 中，管理多问 + 确认页状态机。
 
-use super::block::{AskUserPhase, AskUserSlot};
+use super::block::{AskUserCompletion, AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
 use super::interaction::UiInteractionRequestId;
 use super::model::ConversationModel;
@@ -40,8 +40,8 @@ pub struct AskUserSnapshot {
     pub options_count: usize,
     /// 当前激活问题的 multi_select 标志。
     pub multi_select: bool,
-    /// 用户已确认提交（block 进入终态）。
-    pub confirmed: bool,
+    /// Runtime 确认的完成状态。
+    pub completion: AskUserCompletion,
 }
 
 impl ConversationModel {
@@ -50,7 +50,7 @@ impl ConversationModel {
         self.timeline.items().iter().find_map(|item| {
             if let OutputTimelineItem::AskUserBatch {
                 slots,
-                confirmed: false,
+                completion: AskUserCompletion::Active,
                 ..
             } = item
             {
@@ -97,7 +97,7 @@ impl ConversationModel {
             if let OutputTimelineItem::AskUserBatch {
                 slots,
                 active_index,
-                confirmed: false,
+                completion: AskUserCompletion::Active,
                 ..
             } = item
             {
@@ -116,7 +116,7 @@ impl ConversationModel {
             if let OutputTimelineItem::AskUserBatch {
                 slots,
                 active_index,
-                confirmed: false,
+                completion: AskUserCompletion::Active,
                 ..
             } = item
             {
@@ -141,7 +141,7 @@ impl ConversationModel {
                 chat_input_active,
                 chat_input_cursor,
                 confirm_cursor,
-                confirmed: false,
+                completion: AskUserCompletion::Active,
                 ..
             } = item
             {
@@ -157,7 +157,7 @@ impl ConversationModel {
                     llm_option_count: slot.map(|s| s.llm_option_count).unwrap_or(0),
                     options_count: slot.map(|s| s.options.len()).unwrap_or(0),
                     multi_select: slot.map(|s| s.multi_select).unwrap_or(false),
-                    confirmed: false,
+                    completion: AskUserCompletion::Active,
                 })
             } else {
                 None
@@ -189,7 +189,7 @@ impl ConversationModel {
             chat_input_text: String::new(),
             chat_input_cursor: 0,
             confirm_cursor: n,
-            confirmed: false,
+            completion: AskUserCompletion::Active,
         });
         vec![
             ConversationChange::AskUserShown { id },
@@ -208,7 +208,7 @@ impl ConversationModel {
             chat_input_active,
             chat_input_text,
             confirm_cursor,
-            confirmed,
+            completion,
             ..
         }) = self.ask_user_timeline_item_mut()
         {
@@ -229,7 +229,7 @@ impl ConversationModel {
                 chat_input_text.clear();
             } else if slots.len() == 1 {
                 // 单问题：直接确认，跳过确认页
-                *confirmed = true;
+                *completion = AskUserCompletion::ReplyPending;
             } else {
                 *phase = AskUserPhase::Confirming;
                 *confirm_cursor = slots.len(); // 默认停在「全部确认提交」
@@ -507,36 +507,70 @@ impl ConversationModel {
         Vec::new()
     }
 
-    /// 确认提交所有答案（block 进入终态）。
+    /// 标记 Ask 回答正在等待 Runtime 接受。
     pub(super) fn confirm_ask_user_batch(&mut self) -> Vec<ConversationChange> {
-        if let Some(OutputTimelineItem::AskUserBatch { confirmed, .. }) =
-            self.ask_user_timeline_item_mut()
-        {
-            *confirmed = true;
-            return self.ask_user_updated();
-        }
-        Vec::new()
+        self.set_ask_user_completion_for_active(AskUserCompletion::ReplyPending)
     }
 
-    /// 移除 AskUserBatch 交互块。
-    pub(super) fn dismiss_ask_user_batch(&mut self) -> Vec<ConversationChange> {
-        let id = self.timeline.items().iter().find_map(|item| match item {
-            OutputTimelineItem::AskUserBatch {
-                id,
-                confirmed: false,
-                ..
-            } => Some(id.clone()),
-            _ => None,
-        });
-        if self.remove_active_ask_user_block() {
-            return vec![
-                ConversationChange::AskUserDismissed {
-                    id: id.expect("removed active AskUserBatch must have identity"),
-                },
+    pub(super) fn set_ask_user_completion_for_request(
+        &mut self,
+        request_id: &UiInteractionRequestId,
+        completion: AskUserCompletion,
+    ) -> Vec<ConversationChange> {
+        let id = self
+            .timeline
+            .items_mut()
+            .iter_mut()
+            .find_map(|item| match item {
+                OutputTimelineItem::AskUserBatch {
+                    id,
+                    request_id: Some(batch_request_id),
+                    completion: current,
+                    ..
+                } if batch_request_id == request_id => {
+                    *current = completion;
+                    Some(id.clone())
+                }
+                _ => None,
+            });
+        id.map_or_else(Vec::new, |id| {
+            vec![
+                ConversationChange::AskUserUpdated { id },
                 ConversationChange::OutputDirty,
-            ];
-        }
-        Vec::new()
+            ]
+        })
+    }
+
+    pub(super) fn set_ask_user_completion_for_active(
+        &mut self,
+        completion: AskUserCompletion,
+    ) -> Vec<ConversationChange> {
+        let id = self
+            .timeline
+            .items_mut()
+            .iter_mut()
+            .find_map(|item| match item {
+                OutputTimelineItem::AskUserBatch {
+                    id,
+                    completion: current,
+                    ..
+                } if current.is_interactive() => {
+                    *current = completion;
+                    Some(id.clone())
+                }
+                _ => None,
+            });
+        id.map_or_else(Vec::new, |id| {
+            vec![
+                ConversationChange::AskUserUpdated { id },
+                ConversationChange::OutputDirty,
+            ]
+        })
+    }
+
+    /// 标记 Ask 取消正在等待 Runtime 接受。
+    pub(super) fn dismiss_ask_user_batch(&mut self) -> Vec<ConversationChange> {
+        self.set_ask_user_completion_for_active(AskUserCompletion::CancelPending)
     }
 
     /// 追加一个仅用于历史展示的已完成 AskUserBatch。
@@ -562,7 +596,7 @@ impl ConversationModel {
             chat_input_text: String::new(),
             chat_input_cursor: 0,
             confirm_cursor: n,
-            confirmed: true,
+            completion: AskUserCompletion::Answered,
         });
         vec![
             ConversationChange::AskUserShown { id },
@@ -589,7 +623,7 @@ impl ConversationModel {
             matches!(
                 item,
                 OutputTimelineItem::AskUserBatch {
-                    confirmed: false,
+                    completion: AskUserCompletion::Active,
                     ..
                 }
             )
@@ -603,7 +637,7 @@ impl ConversationModel {
             !matches!(
                 item,
                 OutputTimelineItem::AskUserBatch {
-                    confirmed: false,
+                    completion: AskUserCompletion::Active,
                     ..
                 }
             )

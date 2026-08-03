@@ -298,10 +298,30 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
 pub(crate) struct ChatToolRoundObserver {
     pub runtime_context: RuntimeContext,
     pub workspace_root: std::path::PathBuf,
+    pub turn_context: RuntimeTurnContext,
+    pub session_id: String,
+    pub materializer:
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
 }
 
 #[async_trait]
 impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRoundObserver {
+    async fn cancelled_results_completed(
+        &mut self,
+        results: &[crate::application::tool::agent::ToolExecution],
+    ) {
+        for result in results {
+            crate::application::loop_engine::chat::tools::send_tool_result(
+                &self.runtime_context.event_sink(),
+                &self.turn_context,
+                result,
+                self.materializer.as_ref(),
+                &self.session_id,
+            )
+            .await;
+        }
+    }
+
     async fn results_materialized(
         &mut self,
         execution: &RunExecutionState,

@@ -3,7 +3,7 @@ use crate::tui::app::App;
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
     CancelInteraction, ConversationIntent, InteractionCancelRejected, ShowInteraction,
-    UpdateInteractionDraft,
+    ToolCallStart, ToolCallUpdate, UpdateInteractionDraft,
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionCommandFailure, InteractionDraftAction, InteractionRequest,
@@ -203,6 +203,61 @@ async fn plan_approval_confirmation_preserves_reply_variant() {
     ));
 }
 
+fn start_ask_user_tool(
+    app: &mut App,
+    tool_call_id: crate::tui::model::conversation::ids::ToolCallId,
+    chat_id: &str,
+    turn_id: &str,
+) {
+    let chat_id = crate::tui::model::conversation::ids::ChatId::new(chat_id);
+    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new(turn_id);
+    ConversationIntent::ToolCallStart(ToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_call_id.clone(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+    })
+    .update(&mut app.model.conversation);
+    ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+        chat_id,
+        turn_id,
+        id: tool_call_id.clone(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+        arguments: Some(serde_json::json!({ "question": "确认取消？" }).to_string()),
+        status: crate::tui::model::conversation::tool_call::ToolCallStatus::Running,
+    })
+    .update(&mut app.model.conversation);
+}
+
+fn install_ask_user_interaction(
+    app: &mut App,
+    request_id: UiInteractionRequestId,
+    tool_call_id: crate::tui::model::conversation::ids::ToolCallId,
+    chat_id: &str,
+    turn_id: &str,
+) {
+    start_ask_user_tool(app, tool_call_id.clone(), chat_id, turn_id);
+    ConversationIntent::ShowInteraction(ShowInteraction {
+        request: InteractionRequest {
+            request_id,
+            run_id: UiRunId::from("run-1"),
+            tool_call_id: Some(tool_call_id.as_str().to_string()),
+            body: InteractionBody::UserQuestions(vec![
+                crate::tui::model::conversation::interaction::UiUserQuestion {
+                    prompt: "确认取消？".to_string(),
+                    options: vec!["继续".to_string()],
+                    allow_multi: false,
+                },
+            ]),
+        },
+    })
+    .update(&mut app.model.conversation);
+}
+
 #[tokio::test]
 async fn cancel_effect_calls_typed_cancel_and_completes_interaction() {
     let client = Arc::new(RecordingInteractionClient::default());
@@ -233,6 +288,65 @@ async fn cancel_effect_calls_typed_cancel_and_completes_interaction() {
         sdk::InteractionCancelReason::UserCancelled
     );
     assert!(app.model.conversation.active_interaction().is_none());
+}
+
+#[tokio::test]
+async fn accepted_ask_user_cancel_marks_only_matching_tool_cancelled_through_executor() {
+    let client = Arc::new(RecordingInteractionClient::default());
+    let mut app = App::new("session".to_string(), "/tmp".into(), "model".to_string());
+    app.agent_client = Some(client);
+    let (tx, _rx) = mpsc::channel(1);
+    let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000009");
+    let matching_tool_id =
+        crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-matching");
+    let unrelated_tool_id =
+        crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-unrelated");
+    install_ask_user_interaction(
+        &mut app,
+        request_id.clone(),
+        matching_tool_id.clone(),
+        "chat-matching",
+        "turn-matching",
+    );
+    start_ask_user_tool(
+        &mut app,
+        unrelated_tool_id.clone(),
+        "chat-unrelated",
+        "turn-unrelated",
+    );
+    ConversationIntent::CancelInteraction(CancelInteraction {
+        request_id: request_id.clone(),
+    })
+    .update(&mut app.model.conversation);
+
+    app.execute_effect(
+        Effect::CancelInteraction {
+            request_id,
+            reason: UiInteractionCancelReason::UserCancelled,
+        },
+        &tx,
+    )
+    .await;
+
+    let tool_status = |tool_call_id: &crate::tui::model::conversation::ids::ToolCallId| {
+        app.model
+            .conversation
+            .chats
+            .iter()
+            .flat_map(|chat| &chat.turns)
+            .flat_map(|turn| &turn.tool_calls)
+            .find(|call| call.id.as_ref() == Some(tool_call_id))
+            .expect("AskUserQuestion tool call should exist")
+            .status
+    };
+    assert_eq!(
+        tool_status(&matching_tool_id),
+        crate::tui::model::conversation::tool_call::ToolCallStatus::Cancelled
+    );
+    assert_eq!(
+        tool_status(&unrelated_tool_id),
+        crate::tui::model::conversation::tool_call::ToolCallStatus::Running
+    );
 }
 
 #[tokio::test]

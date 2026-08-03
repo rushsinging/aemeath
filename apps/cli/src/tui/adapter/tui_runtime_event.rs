@@ -248,8 +248,6 @@ pub(crate) enum TuiRunEvent {
     Started,
     AwaitingUser,
     Resumed,
-    Cancelling,
-    Cancelled,
     Completed {
         result: String,
     },

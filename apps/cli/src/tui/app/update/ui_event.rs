@@ -55,9 +55,6 @@ impl App {
                     name: "error".to_string(),
                 });
             }
-            UiEvent::RunCancelled => {
-                self.chat.stop_processing();
-            }
             UiEvent::Cancelled { .. } => {
                 self.chat.stop_processing();
                 // 不清 processing_handle：cancel_to_idle 只把 loop FSM 带回 Idle，

@@ -183,7 +183,6 @@ fn completed_run_finishes_root_and_leaves_no_live_activity() {
 fn terminal_cause_is_not_projected_as_success() {
     for (status, expected) in [
         (RunStatus::Failed, ActivityStateView::Failed),
-        (RunStatus::Cancelled, ActivityStateView::Cancelled),
         (RunStatus::Terminated, ActivityStateView::Terminated),
     ] {
         let run_id = RunId::new(format!("terminal-{status:?}"));

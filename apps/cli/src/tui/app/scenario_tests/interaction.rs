@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::tui::adapter::runtime_view::{
@@ -18,9 +21,7 @@ use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
     busy.app.chat.start_processing();
-    busy.expect_effect(ExpectedEffect::CancelCurrentRun {
-        replies: vec![TuiMsg::Ui(UiEvent::RunCancelled)],
-    });
+    busy.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
     busy.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
     assert!(busy
         .effects()
@@ -255,7 +256,7 @@ fn resume_restores_all_answered_ask_batches() {
             matches!(
                 item,
                 crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch {
-                    confirmed: true,
+                    completion: crate::tui::model::conversation::block::AskUserCompletion::Answered,
                     ..
                 }
             )
@@ -270,11 +271,12 @@ fn resume_restores_all_answered_ask_batches() {
     assert_eq!(restored_count, 2);
 }
 
-#[test]
-fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
+#[tokio::test]
+async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.chat.start_processing();
-    let request_id = UiInteractionRequestId::from("test-ask-completed-gutter");
+    let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000012");
+    harness.app.agent_client = Some(Arc::new(AcceptingInteractionClient));
     let context = TuiTurnContext {
         chat_id: "ask-chat".to_string(),
         turn_id: "ask-turn".to_string(),
@@ -320,16 +322,8 @@ fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
     });
 
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
-    harness.app.model.conversation.apply(
-        crate::tui::model::conversation::intent::ConversationIntent::InteractionReplyAccepted(
-            crate::tui::model::conversation::intent::InteractionReplyAccepted {
-                request_id: request_id.clone(),
-            },
-        ),
-    );
-    harness.app.mark_output_dirty();
+    harness.execute_last_effect().await; // allow tea_side_effect: scenario drives the production effect executor
     harness.render();
-
     assert!(harness
         .app
         .model
@@ -347,6 +341,16 @@ fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end() {
         .find(|call| call.id.as_ref() == Some(&tool_call_id))
         .expect("AskUserQuestion tool call should exist");
     assert_eq!(ask_tool.status, ToolCallStatus::Success);
+    let result = ask_tool
+        .result
+        .as_ref()
+        .expect("accepted AskUserQuestion should have a result payload");
+    assert_eq!(result.output, "Q1: 日料");
+    assert_eq!(
+        result.content,
+        serde_json::json!({"status": "ok", "answers": ["日料"]})
+    );
+    assert!(!result.is_error);
     let screen = harness.screen();
     assert!(
         screen
@@ -534,6 +538,98 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
     harness.assert_idle();
 }
 
+struct AcceptingInteractionClient;
+
+#[async_trait]
+impl sdk::AgentClient for AcceptingInteractionClient {
+    fn reply_interaction(
+        &self,
+        _request_id: &sdk::InteractionRequestId,
+        _reply: sdk::InteractionReply,
+    ) -> sdk::InteractionCommandOutcome {
+        sdk::InteractionCommandOutcome::Accepted
+    }
+
+    fn cancel_interaction(
+        &self,
+        _request_id: &sdk::InteractionRequestId,
+        _reason: sdk::InteractionCancelReason,
+    ) -> sdk::InteractionCommandOutcome {
+        sdk::InteractionCommandOutcome::Accepted
+    }
+
+    async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+        unreachable!("AskUser scenario does not start chat")
+    }
+}
+
+#[tokio::test]
+async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+    let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000011");
+    harness.app.agent_client = Some(Arc::new(AcceptingInteractionClient));
+    let context = TuiTurnContext {
+        chat_id: "ask-chat-cancelled".to_string(),
+        turn_id: "ask-turn-cancelled".to_string(),
+    };
+    let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-cancelled");
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        context: context.clone(),
+        id: tool_call_id.as_str().to_string(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+    });
+    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+        context,
+        id: tool_call_id.as_str().to_string(),
+        provider_id: Some(tool_call_id.as_str().to_string()),
+        name: "AskUserQuestion".to_string(),
+        index: 0,
+        arguments_delta: None,
+        arguments: Some(serde_json::json!({ "question": "确认取消？", "options": ["继续"] })),
+        status: TuiToolCallStatus::Running,
+    });
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: Some(tool_call_id.as_str().to_string()),
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "确认取消？".to_string(),
+                options: vec!["继续".to_string()],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.expect_effect(ExpectedEffect::CancelInteraction {
+        replies: Vec::new(),
+    });
+    harness.key(input::press(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    harness.execute_last_effect().await; // allow tea_side_effect: scenario drives the production effect executor
+    harness.render();
+
+    let ask_tool = harness
+        .app
+        .model
+        .conversation
+        .chats
+        .iter()
+        .flat_map(|chat| &chat.turns)
+        .flat_map(|turn| &turn.tool_calls)
+        .find(|call| call.id.as_ref() == Some(&tool_call_id))
+        .expect("AskUserQuestion tool call should exist");
+    assert_eq!(ask_tool.status, ToolCallStatus::Cancelled);
+    let screen = harness.screen();
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains('✗') && line.contains("Ask")),
+        "accepted cancel 后应显示 cancelled gutter\n{screen}"
+    );
+}
+
 #[test]
 fn ask_user_cancel_emits_cancel_interaction_effect() {
     let mut harness = TuiScenarioHarness::new(100, 30);
@@ -560,13 +656,23 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
         replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("cancelled".into()))],
     });
 
-    // Ctrl+C cancels the interaction
     harness.key(input::press(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
-    assert!(harness.effects().iter().any(|effect| matches!(
-        effect,
-        crate::tui::effect::effect::Effect::CancelInteraction { .. }
-    )));
+    let cancel_effects = harness
+        .effects()
+        .iter()
+        .filter(|effect| {
+            matches!(
+                effect,
+                crate::tui::effect::effect::Effect::CancelInteraction { .. }
+            )
+        })
+        .count();
+    assert_eq!(cancel_effects, 1);
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
     harness.assert_idle();
 }
 

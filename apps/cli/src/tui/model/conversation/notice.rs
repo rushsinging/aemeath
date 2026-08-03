@@ -22,9 +22,20 @@ impl ConversationModel {
     }
 
     pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
+        let text = strip_system_reminder_envelope_owned(text);
+        if let Some(OutputTimelineItem::System { text: existing, .. }) =
+            self.timeline.items_mut().last_mut()
+        {
+            if existing == "✻ Cancelled" && text.starts_with("✻ Cancelled, ran ") {
+                *existing = text;
+                return vec![ConversationChange::OutputDirty];
+            }
+            if existing == &text {
+                return Vec::new();
+            }
+        }
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("system");
-        let text = strip_system_reminder_envelope_owned(text);
         self.timeline.push(OutputTimelineItem::System {
             id: block_id.clone(),
             text,

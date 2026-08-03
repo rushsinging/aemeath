@@ -124,6 +124,14 @@ impl TypedTool for BashTool {
 
         // Race: cancel signal vs timeout vs command completion
         let cancellation = ctx.cancellation();
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "bash cancellation boundary: command={:?} child_pid={:?} initial_cancelled={} timeout_ms={}",
+            command,
+            child_pid,
+            cancellation.is_cancelled(),
+            timeout_ms,
+        );
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
             _ = cancellation.cancelled() => {
@@ -146,7 +154,7 @@ impl TypedTool for BashTool {
                 );
                 stdout_handle.abort();
                 stderr_handle.abort();
-                return TypedToolResult::error("[interrupted by user]");
+                return TypedToolResult::error("Command cancelled by user");
             }
             result = tokio::time::timeout(
                 Duration::from_millis(timeout_ms),

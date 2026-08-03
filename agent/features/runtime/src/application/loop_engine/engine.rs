@@ -11,9 +11,8 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::domain::agent_run::{
-    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunCancellationRequest,
-    RunDomainEvent, RunStatus, RunTransition, RunTransitionError, StopHookBlockResult,
-    ToolCallStatus,
+    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunDomainEvent, RunStatus,
+    RunTransition, RunTransitionError, StopHookBlockResult, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};
@@ -318,14 +317,13 @@ pub trait RunControlPort: Send + Sync {
 
 #[async_trait]
 pub trait RunLifecyclePort: Send + Sync {
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool;
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool;
     fn register_step_scope(
         &self,
         run_id: &sdk::RunId,
         step_id: sdk::RunStepId,
         cancel: CancellationToken,
     );
+    fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId);
 }
 
 #[async_trait]
@@ -804,19 +802,20 @@ async fn run_tool_round_phase<P>(
 where
     P: ToolOrchestrationPort + ?Sized,
 {
-    match await_interruptible(
-        run,
-        cancel,
-        tools.execute_tools(execution, run_id, step_id, calls, cancel),
-    )
-    .await
-    {
-        Interrupt::Completed(Ok(outcome)) => ToolRoundPhaseOutcome::Completed(outcome),
-        Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-            ToolRoundPhaseOutcome::Cancelled
+    let tool_execution = tools.execute_tools(execution, run_id, step_id, calls, cancel);
+    if let Some(remaining) = run.remaining_time(Instant::now()) {
+        match tokio::time::timeout(remaining, tool_execution).await {
+            Ok(Ok(outcome)) => ToolRoundPhaseOutcome::Completed(outcome),
+            Ok(Err(LoopEngineError::Cancelled)) => ToolRoundPhaseOutcome::Cancelled,
+            Ok(Err(error)) => ToolRoundPhaseOutcome::Failed(error),
+            Err(_) => ToolRoundPhaseOutcome::TimedOut,
         }
-        Interrupt::Completed(Err(error)) => ToolRoundPhaseOutcome::Failed(error),
-        Interrupt::TimedOut => ToolRoundPhaseOutcome::TimedOut,
+    } else {
+        match tool_execution.await {
+            Ok(outcome) => ToolRoundPhaseOutcome::Completed(outcome),
+            Err(LoopEngineError::Cancelled) => ToolRoundPhaseOutcome::Cancelled,
+            Err(error) => ToolRoundPhaseOutcome::Failed(error),
+        }
     }
 }
 
@@ -982,7 +981,7 @@ async fn run_loop_body(
                                 ControlDirective::Terminal => LoopDirective::Terminal,
                             });
                         }
-                        cancel_run(run, execution, port).await?;
+                        terminate_interrupted_run(run, execution, port).await?;
                         return Ok(LoopDirective::Terminal);
                     }
                     InputDrainOutcome::TimedOut => {
@@ -1035,7 +1034,7 @@ async fn run_loop_body(
                             ControlDirective::Terminal => LoopDirective::Terminal,
                         });
                     }
-                    cancel_run(run, execution, port).await?;
+                    terminate_interrupted_run(run, execution, port).await?;
                     return Ok(LoopDirective::Terminal);
                 }
                 InputDrainOutcome::TimedOut => {
@@ -1164,11 +1163,6 @@ async fn run_loop_body(
                     expected_epoch = expected_epoch.next();
                 }
 
-                // #1272: terminal claim exactly once per run, at the seal point.
-                if !port.claim_terminal(run.id()) {
-                    cancel_run(run, execution, port).await?;
-                    return Ok(LoopDirective::Terminal);
-                }
                 let text = terminal_text.as_deref();
                 run.apply_drain_decision(DrainDecision::EmptyAndSealed, text)?;
                 emit_events(run, execution, port).await?;
@@ -1191,7 +1185,43 @@ async fn execute_step(
 ) -> Result<(), LoopEngineError> {
     let step_cancel = cancel.child_token();
     let step_id = sdk::RunStepId::new_v7();
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation scope created: run_id={} step_id={} root_cancelled={} step_cancelled={}",
+        run.id(),
+        step_id,
+        cancel.is_cancelled(),
+        step_cancel.is_cancelled()
+    );
     port.register_step_scope(run.id(), step_id.clone(), step_cancel.clone());
+    let result = execute_step_with_scope(
+        run,
+        execution,
+        cancel,
+        port,
+        guard,
+        inputs,
+        terminal_text,
+        step_id.clone(),
+        step_cancel,
+    )
+    .await;
+    port.clear_step_scope(run.id(), &step_id);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_step_with_scope(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    cancel: &CancellationToken,
+    port: &mut RunLoop<'_>,
+    guard: &mut StuckGuard,
+    inputs: &[LoopInput],
+    terminal_text: &mut Option<String>,
+    step_id: sdk::RunStepId,
+    step_cancel: CancellationToken,
+) -> Result<(), LoopEngineError> {
     let step_id = match run_step_input_phase(
         run,
         execution,
@@ -1433,6 +1463,9 @@ async fn execute_step(
             match stop_outcome.decision {
                 StopHookDecision::Proceed => {
                     // Normal completion — fall through to text stall check.
+                }
+                StopHookDecision::Cancelled => {
+                    return handle_step_control(run, execution, port).await;
                 }
                 StopHookDecision::Block(ref block) => {
                     let block_result = run.record_stop_hook_block();
@@ -2170,7 +2203,7 @@ async fn handle_interaction_completion(
                 target: crate::LOG_TARGET,
                 "[handle_interaction_completion] closed request={request_id}",
             );
-            let _ = InteractionCoordinator::cancel_and_drain(
+            InteractionCoordinator::cleanup_run(
                 run,
                 execution,
                 port.interaction_port(),
@@ -2237,7 +2270,7 @@ async fn dispatch_continuation(
                 reply,
                 sdk::InteractionReply::PlanApproval(sdk::ApprovalDecision::Deny { .. })
             ) {
-                let _ = InteractionCoordinator::cancel_and_drain(
+                InteractionCoordinator::cleanup_run(
                     run,
                     execution,
                     port.interaction_port(),
@@ -2654,8 +2687,20 @@ async fn handle_pending_control(
     port: &mut RunLoop<'_>,
 ) -> Result<Option<ControlDirective>, LoopEngineError> {
     let Some(control) = port.take_control(run.id()) else {
+        log::trace!(
+            target: crate::LOG_TARGET,
+            "run control boundary: run_id={} control=none active_step={:?}",
+            run.id(),
+            run.active_step_id()
+        );
         return Ok(None);
     };
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "run control boundary: run_id={} control_received={control:?} active_step={:?}",
+        run.id(),
+        run.active_step_id()
+    );
     let active_step = run.active_step_id();
     match control {
         crate::domain::agent_run::RunControl::CancelStep { step_id, .. } => {
@@ -2698,6 +2743,12 @@ async fn finish_cancelled_step(
     port: &mut RunLoop<'_>,
     step_id: &sdk::RunStepId,
 ) -> Result<(), LoopEngineError> {
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation finalization started: run_id={} step_id={}",
+        run.id(),
+        step_id
+    );
     match run.request_step_cancellation(step_id) {
         crate::domain::agent_run::RunStepCancellationRequest::Accepted => {}
         crate::domain::agent_run::RunStepCancellationRequest::AlreadyCancelling => return Ok(()),
@@ -2718,6 +2769,12 @@ async fn finish_cancelled_step(
     )
     .await?;
     run.finish_cancelled_step(step_id)?;
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "step cancellation finalization completed: run_id={} step_id={}",
+        run.id(),
+        step_id
+    );
     emit_events(run, execution, port).await
 }
 
@@ -2730,7 +2787,7 @@ async fn handle_step_control(
         Some(ControlDirective::Continue) => Ok(()),
         Some(ControlDirective::Terminal) => Ok(()),
         None => {
-            cancel_run(run, execution, port).await?;
+            terminate_interrupted_run(run, execution, port).await?;
             Ok(())
         }
     }
@@ -2742,13 +2799,10 @@ async fn handle_interrupt(
     cancel: &CancellationToken,
     port: &mut RunLoop<'_>,
 ) -> Result<bool, LoopEngineError> {
-    if cancel.is_cancelled() || run.status() == RunStatus::Cancelling {
-        cancel_run(run, execution, port).await?;
+    if cancel.is_cancelled() {
+        terminate_interrupted_run(run, execution, port).await?;
         return Ok(true);
     }
-    // #1272: if the run is already terminal (e.g. Failed after a
-    // timeout inside execute_step), return immediately without
-    // attempting another timeout transition.
     if run.status().is_terminal() {
         return Ok(true);
     }
@@ -2782,54 +2836,42 @@ pub(crate) async fn fail_run(
     port: &mut RunLoop<'_>,
     error: String,
 ) -> Result<(), LoopEngineError> {
-    if !port.claim_terminal(run.id()) {
-        return cancel_run(run, execution, port).await;
+    if run.status().is_terminal() {
+        return Ok(());
     }
     run.fail(error)?;
     emit_events(run, execution, port).await
 }
 
-async fn cancel_run(
+async fn terminate_interrupted_run(
     run: &mut Run,
     execution: &mut RunExecutionState,
     port: &mut RunLoop<'_>,
 ) -> Result<(), LoopEngineError> {
-    let active_step = run.active_step_id();
-    if run.status() != RunStatus::Cancelling {
-        if !port.claim_cancellation(run.id()) {
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "[cancel_run] cancellation not claimed (owned by another port) run_id={}",
-                short(run.id()),
-            );
-            return Ok(());
-        }
-        match run.request_cancellation() {
-            RunCancellationRequest::Accepted | RunCancellationRequest::AlreadyCancelling => {}
-            RunCancellationRequest::AlreadyTerminal => return Ok(()),
-        }
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "[cancel_run] phase1 CancellationRequested run_id={}",
-            short(run.id()),
-        );
-        emit_events(run, execution, port).await?;
+    if run.status().is_terminal() {
+        return Ok(());
     }
-    log::debug!(
-        target: crate::LOG_TARGET,
-        "[cancel_run] phase2 finish_cancellation run_id={}",
-        short(run.id()),
-    );
-    if let Some(step_id) = &active_step {
+    let active_step = run.active_step_id();
+    match run.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    ) {
+        crate::domain::agent_run::RunTerminationRequest::Accepted => {
+            emit_events(run, execution, port).await?;
+        }
+        crate::domain::agent_run::RunTerminationRequest::AlreadyTerminating => {}
+        crate::domain::agent_run::RunTerminationRequest::AlreadyTerminal => return Ok(()),
+    }
+    if let Some(step_id) = active_step {
         run_step_finalization_phase(
             execution,
             port.persistence_mut(),
-            step_id,
-            crate::ports::FinalizeCause::UserCancelledStep,
+            &step_id,
+            crate::ports::FinalizeCause::RunTerminated,
         )
         .await?;
     }
-    run.finish_cancellation()?;
+    run.finish_termination()?;
     emit_events(run, execution, port).await
 }
 

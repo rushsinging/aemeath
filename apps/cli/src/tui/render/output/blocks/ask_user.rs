@@ -8,7 +8,9 @@
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView};
+use crate::tui::view_model::output::{
+    AskUserBatchBlockView, AskUserCompletionView, AskUserPhaseView, AskUserSlotView,
+};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use sdk::OptionItem;
@@ -139,9 +141,20 @@ pub fn render_ask_user_batch(
 
     let question_max_width = (ctx.text_width as usize * 6 / 10).clamp(40, 80);
 
-    // Confirmed 终态
-    if view.confirmed {
-        return render_confirmed(block_id, view, header_style, question_max_width);
+    match view.completion {
+        AskUserCompletionView::Answered => {
+            return render_terminal(block_id, view, "━━ 已回答 ━━", question_max_width, true);
+        }
+        AskUserCompletionView::Cancelled => {
+            return render_terminal(block_id, view, "━━ 已取消 ━━", question_max_width, false);
+        }
+        AskUserCompletionView::ReplyPending => {
+            return render_pending(block_id, view, "━━ 正在提交回答… ━━", question_max_width);
+        }
+        AskUserCompletionView::CancelPending => {
+            return render_pending(block_id, view, "━━ 正在取消… ━━", question_max_width);
+        }
+        AskUserCompletionView::Active => {}
     }
 
     match view.phase {
@@ -374,29 +387,46 @@ fn render_confirming(
     }
 }
 
-/// Confirmed 终态渲染。
-fn render_confirmed(
+fn render_pending(
     block_id: &str,
     view: &AskUserBatchBlockView,
-    header_style: Style,
+    title: &str,
     question_max_width: usize,
 ) -> RenderedBlock {
-    let dim_style = Style::default().fg(theme::TEXT_DIM);
-    let mut lines = Vec::new();
-    lines.push(RenderedLine::new(vec![Span::styled(
-        "━━ 已回答 ━━".to_string(),
-        dim_style,
-    )]));
+    render_terminal(block_id, view, title, question_max_width, true)
+}
 
-    for (i, slot) in view.slots.iter().enumerate() {
+fn render_terminal(
+    block_id: &str,
+    view: &AskUserBatchBlockView,
+    title: &str,
+    question_max_width: usize,
+    show_answers: bool,
+) -> RenderedBlock {
+    let dim_style = Style::default().fg(theme::TEXT_DIM);
+    let mut lines = vec![RenderedLine::new(vec![Span::styled(
+        title.to_string(),
+        dim_style,
+    )])];
+
+    for (index, slot) in view.slots.iter().enumerate() {
         lines.push(RenderedLine::new(vec![Span::raw("")]));
-        for line in qa_summary_lines(i, slot, false, question_max_width) {
-            lines.push(line);
+        if show_answers {
+            lines.extend(qa_summary_lines(index, slot, false, question_max_width));
+        } else {
+            lines.extend(wrap_spans_with_prefix(
+                vec![Span::styled(
+                    format!("Q{}. {}", index + 1, slot.question),
+                    dim_style,
+                )],
+                question_max_width,
+                None,
+                WrapMode::Word,
+            ));
         }
     }
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
-    let _ = header_style;
     RenderedBlock {
         block_id: block_id.to_string(),
         lines: Rc::new(lines),
@@ -448,7 +478,7 @@ mod tests {
             chat_input_text: String::new(),
             chat_input_cursor: 0,
             confirm_cursor: 0,
-            confirmed: false,
+            completion: AskUserCompletionView::Active,
         }
     }
 
@@ -519,10 +549,42 @@ mod tests {
         let mut s1 = make_slot("问题1", &["A"]);
         s1.answer = Some("A".to_string());
         let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
-        view.confirmed = true;
+        view.completion = AskUserCompletionView::Answered;
         let block = render_ask_user_batch("ask", &view, &RenderCtx::for_width(80));
         assert!(block.lines.iter().any(|l| l.plain.contains("已回答")));
         assert!(!block.lines.iter().any(|l| l.plain.contains("[↑↓]")));
+    }
+
+    #[test]
+    fn test_cancelled_shows_question_without_answer_or_controls() {
+        let mut slot = make_slot("问题1", &["A"]);
+        slot.answer = Some("A".to_string());
+        let mut view = batch_view(vec![slot], 0, AskUserPhaseView::Answering);
+        view.completion = AskUserCompletionView::Cancelled;
+
+        let block = render_ask_user_batch("ask", &view, &RenderCtx::for_width(80));
+
+        assert!(block.lines.iter().any(|line| line.plain.contains("已取消")));
+        assert!(block.lines.iter().any(|line| line.plain.contains("问题1")));
+        assert!(!block.lines.iter().any(|line| line.plain.contains("→ A")));
+        assert!(!block.lines.iter().any(|line| line.plain.contains("[↑↓]")));
+    }
+
+    #[test]
+    fn test_reply_pending_shows_answers_without_claiming_acceptance() {
+        let mut slot = make_slot("问题1", &["A"]);
+        slot.answer = Some("A".to_string());
+        let mut view = batch_view(vec![slot], 0, AskUserPhaseView::Answering);
+        view.completion = AskUserCompletionView::ReplyPending;
+
+        let block = render_ask_user_batch("ask", &view, &RenderCtx::for_width(80));
+
+        assert!(block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("正在提交回答")));
+        assert!(block.lines.iter().any(|line| line.plain.contains("A")));
+        assert!(!block.lines.iter().any(|line| line.plain.contains("已回答")));
     }
 
     #[test]

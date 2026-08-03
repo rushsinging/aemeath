@@ -1139,13 +1139,13 @@ async fn block_policy_exhausted_short_circuits_remaining_subscriptions() {
 }
 
 // ════════════════════════════════════════════════════════════
-// 14. Cancelled 也是一次 attempt：保留 ExecutionFailed / 取消明细
+// 14. Cancelled 也是一次 attempt：保留 typed 取消明细
 // ════════════════════════════════════════════════════════════
 
-/// 执行返回 Cancelled 视作一次 attempt，必须在 executions 中保留一条
-/// ExecutionFailed 明细（错误文本为中文），而非静默丢弃。
+/// 执行返回 Cancelled 视作一次 attempt，必须在 executions 中保留 typed
+/// Cancelled 明细，而非压入 ExecutionFailed 文本或静默丢弃。
 #[tokio::test]
-async fn cancelled_records_execution_failed_with_chinese_detail() {
+async fn cancelled_records_typed_execution_status() {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::fault(ExecutionFault::Cancelled)]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -1165,15 +1165,10 @@ async fn cancelled_records_execution_failed_with_chinese_detail() {
         "Cancelled 这一次 attempt 的明细必须保留，实际 = {:?}",
         outcome.executions
     );
-    match &outcome.executions[0].status {
-        HookExecutionStatus::ExecutionFailed { error } => {
-            assert!(
-                error.contains('取') && error.contains('消'),
-                "Cancelled 的 ExecutionFailed 错误文本应为非空中文（含「取消」），实际 = {error:?}"
-            );
-        }
-        other => panic!("Cancelled 这一次 attempt 应记为 ExecutionFailed，实际 status = {other:?}"),
-    }
+    assert!(matches!(
+        outcome.executions[0].status,
+        HookExecutionStatus::Cancelled
+    ));
 }
 
 // ════════════════════════════════════════════════════════════

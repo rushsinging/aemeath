@@ -338,9 +338,7 @@ where
 }
 
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
-    use crate::tui::adapter::tui_runtime_event::{
-        TuiInteractionBody, TuiRunEvent, TuiRunStepEvent,
-    };
+    use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
         InteractionBody, InteractionRequest, UiApprovalPrompt, UiPlanApprovalPrompt, UiRiskLevel,
         UiStuckDiagnostic, UiUserQuestion,
@@ -677,65 +675,29 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Run { run_id, event, .. } => match event {
-            TuiRunEvent::Started => conversation(ConversationIntent::RunStarted(RunStarted {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::AwaitingUser => {
-                conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Resumed => conversation(ConversationIntent::RunResumed(RunResumed {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::Cancelling => {
-                conversation(ConversationIntent::RunCancelling(RunCancelling {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Cancelled => {
-                conversation(ConversationIntent::RunCancelled(RunCancelled {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Completed { .. } => {
-                conversation(ConversationIntent::RunCompleted(RunCompleted {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Failed { .. } => conversation(ConversationIntent::RunFailed(RunFailed {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::Stuck { reason } => {
-                conversation(ConversationIntent::AppendError(AppendError {
-                    text: reason.clone(),
-                }))
-            }
-            TuiRunEvent::DrainingInput
-            | TuiRunEvent::TerminationRequested { .. }
-            | TuiRunEvent::Terminated { .. } => AgentEventMapping::default(),
-        },
+        TuiRuntimeEvent::Run { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::RunStep {
             run_id,
+            parent_run_id,
             step_id,
             event,
-            ..
         } => match event {
-            TuiRunStepEvent::Started => {
-                conversation(ConversationIntent::RunStepStarted(RunStepStarted {
-                    run_id: run_id.clone(),
-                    step_id: step_id.clone(),
-                    tool_reference: None,
-                }))
+            TuiRunStepEvent::Cancelled { confirmed } if parent_run_id.is_none() => {
+                crate::tui::log_debug!(
+                    "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
+                    run_id,
+                    step_id,
+                    confirmed
+                );
+                conversation(ConversationIntent::PresentCancelledStep(
+                    PresentCancelledStep {
+                        confirmed: *confirmed,
+                    },
+                ))
             }
-            TuiRunStepEvent::Completed => {
-                conversation(ConversationIntent::RunStepCompleted(RunStepCompleted {
-                    run_id: run_id.clone(),
-                    step_id: step_id.clone(),
-                }))
-            }
-            TuiRunStepEvent::CancellationRequested
+            TuiRunStepEvent::Started
+            | TuiRunStepEvent::Completed
+            | TuiRunStepEvent::CancellationRequested
             | TuiRunStepEvent::FinalizationStarted
             | TuiRunStepEvent::Cancelled { .. } => AgentEventMapping::default(),
         },

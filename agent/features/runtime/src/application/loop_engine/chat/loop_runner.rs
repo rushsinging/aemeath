@@ -811,7 +811,6 @@ where
                         run_id.clone(),
                         language.clone(),
                         tool_workspace_root.clone(),
-                        cancel.clone(),
                         max_tool_concurrency,
                     ));
                 let model_observer = main_run_port::ChatModelObserver {
@@ -879,6 +878,9 @@ where
                         main_run_port::ChatToolRoundObserver {
                             runtime_context: runtime_context.clone(),
                             workspace_root: tool_workspace_root,
+                            turn_context: turn_context.clone(),
+                            session_id: session_id.clone(),
+                            materializer: tool_result_materializer.clone(),
                         },
                     );                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
                     active_run.as_ref(),

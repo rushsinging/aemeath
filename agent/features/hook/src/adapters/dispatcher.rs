@@ -517,6 +517,7 @@ impl Dispatcher {
                                     HookSubscriptionExecutionTerminal::Succeeded
                                 }
                                 HookExecutionStatus::Blocked
+                                | HookExecutionStatus::Cancelled
                                 | HookExecutionStatus::ExecutionFailed { .. } => {
                                     HookSubscriptionExecutionTerminal::Failed
                                 }
@@ -575,9 +576,7 @@ impl Dispatcher {
                 }
                 Err(ExecutionFault::Cancelled) => {
                     let execution = HookExecution {
-                        status: HookExecutionStatus::ExecutionFailed {
-                            error: ExecutionFault::Cancelled.message().to_string(),
-                        },
+                        status: HookExecutionStatus::Cancelled,
                         attempts,
                         exit_code: None,
                         stdout: String::new(),

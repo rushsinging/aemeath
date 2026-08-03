@@ -196,7 +196,7 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
         ToolCallStatus::Running => ("●", ToolSemanticStatus::Running, SemanticStyle::Running),
         ToolCallStatus::Success => ("✓", ToolSemanticStatus::Success, SemanticStyle::Success),
         ToolCallStatus::Error => ("✗", ToolSemanticStatus::Error, SemanticStyle::Error),
-        ToolCallStatus::Cancelled => ("–", ToolSemanticStatus::Cancelled, SemanticStyle::Muted),
+        ToolCallStatus::Cancelled => ("✗", ToolSemanticStatus::Cancelled, SemanticStyle::Error),
         ToolCallStatus::Orphaned => ("?", ToolSemanticStatus::Orphaned, SemanticStyle::Warning),
     }
 }

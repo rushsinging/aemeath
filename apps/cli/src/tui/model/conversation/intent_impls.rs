@@ -264,6 +264,12 @@ impl ConversationUpdate for TerminalNotice {
     }
 }
 
+impl ConversationUpdate for PresentCancelledStep {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.present_cancelled_step(self.confirmed)
+    }
+}
+
 impl ConversationUpdate for AppendSystemMessage {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_system_message(self.text)
@@ -421,13 +427,13 @@ impl ConversationUpdate for CancelInteraction {
 
 impl ConversationUpdate for InteractionReplyAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_reply(&self.request_id)
     }
 }
 
 impl ConversationUpdate for InteractionCancelAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_cancel(&self.request_id)
     }
 }
 
@@ -589,46 +595,6 @@ impl ConversationUpdate for ClearCompactRuntime {
     }
 }
 
-impl ConversationUpdate for RunStarted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run(self.run_id.clone()) {
-            vec![ConversationChange::AgentRunChanged {
-                run_id: self.run_id,
-                phase: super::interaction::AgentRunPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-macro_rules! impl_run_transition {
-    ($intent:ident, $phase:expr) => {
-        impl ConversationUpdate for $intent {
-            fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-                if model.transition_agent_run(&self.run_id, $phase) {
-                    vec![ConversationChange::AgentRunChanged {
-                        run_id: self.run_id,
-                        phase: $phase,
-                    }]
-                } else {
-                    Vec::new()
-                }
-            }
-        }
-    };
-}
-
-impl_run_transition!(
-    RunAwaitingUser,
-    super::interaction::AgentRunPhase::AwaitingUser
-);
-impl_run_transition!(RunResumed, super::interaction::AgentRunPhase::Running);
-impl_run_transition!(RunCancelling, super::interaction::AgentRunPhase::Cancelling);
-impl_run_transition!(RunCancelled, super::interaction::AgentRunPhase::Cancelled);
-impl_run_transition!(RunCompleted, super::interaction::AgentRunPhase::Completed);
-impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
-
 impl ConversationUpdate for ObserveActivityChange {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.observe_activity_change(self.activity)
@@ -638,34 +604,6 @@ impl ConversationUpdate for ObserveActivityChange {
 impl ConversationUpdate for ReplaceActivitySnapshot {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.replace_activity_snapshot(self.snapshot)
-    }
-}
-
-impl ConversationUpdate for RunStepStarted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-impl ConversationUpdate for RunStepCompleted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.complete_agent_run_step(&self.run_id, &self.step_id) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Completed,
-            }]
-        } else {
-            Vec::new()
-        }
     }
 }
 
@@ -685,6 +623,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolCallUpdate(s) => s.update(model),
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
+            Self::PresentCancelledStep(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),
@@ -714,17 +653,8 @@ impl ConversationUpdate for ConversationIntent {
             Self::InteractionCancelAccepted(s) => s.update(model),
             Self::InteractionReplyRejected(s) => s.update(model),
             Self::InteractionCancelRejected(s) => s.update(model),
-            Self::RunStarted(s) => s.update(model),
-            Self::RunAwaitingUser(s) => s.update(model),
-            Self::RunResumed(s) => s.update(model),
-            Self::RunCancelling(s) => s.update(model),
-            Self::RunCancelled(s) => s.update(model),
-            Self::RunCompleted(s) => s.update(model),
-            Self::RunFailed(s) => s.update(model),
             Self::ObserveActivityChange(s) => s.update(model),
             Self::ReplaceActivitySnapshot(s) => s.update(model),
-            Self::RunStepStarted(s) => s.update(model),
-            Self::RunStepCompleted(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
             Self::UpdateLastInputTokens(s) => s.update(model),
@@ -978,8 +908,10 @@ mod tests {
             .iter()
             .filter_map(|item| match item {
                 OutputTimelineItem::AskUserBatch {
-                    slots, confirmed, ..
-                } if *confirmed => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
+                    slots,
+                    completion: crate::tui::model::conversation::block::AskUserCompletion::Answered,
+                    ..
+                } => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
                 _ => None,
             })
             .collect::<Vec<_>>();

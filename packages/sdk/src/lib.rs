@@ -83,8 +83,8 @@ pub use interaction::{
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
-    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ControlDeadline,
-    RunTerminationReason, TerminateRunOutcome,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
+    TerminateRunOutcome,
 };
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,

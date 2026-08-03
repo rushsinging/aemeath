@@ -64,10 +64,6 @@ pub enum RunDomainEvent {
         parent_run_id: Option<RunId>,
         reason: sdk::RunTerminationReason,
     },
-    CancellationRequested {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
     AwaitingUser {
         run_id: RunId,
         parent_run_id: Option<RunId>,
@@ -96,10 +92,6 @@ pub enum RunDomainEvent {
         parent_run_id: Option<RunId>,
         error: String,
     },
-    Cancelled {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
 }
 
 impl RunDomainEvent {
@@ -115,13 +107,11 @@ impl RunDomainEvent {
             | Self::DrainingInput { parent_run_id, .. }
             | Self::TerminationRequested { parent_run_id, .. }
             | Self::Terminated { parent_run_id, .. }
-            | Self::CancellationRequested { parent_run_id, .. }
             | Self::AwaitingUser { parent_run_id, .. }
             | Self::Resumed { parent_run_id, .. }
             | Self::StuckDetected { parent_run_id, .. }
             | Self::Completed { parent_run_id, .. }
-            | Self::Failed { parent_run_id, .. }
-            | Self::Cancelled { parent_run_id, .. } => parent_run_id.as_ref(),
+            | Self::Failed { parent_run_id, .. } => parent_run_id.as_ref(),
         }
     }
 }

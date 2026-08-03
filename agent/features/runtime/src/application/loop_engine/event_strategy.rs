@@ -20,7 +20,7 @@ use tools::AgentRunTerminal;
 /// Extract terminal state from a domain event. Shared between Main and Sub.
 ///
 /// Returns `Some(AgentRunTerminal)` for terminal events (Completed, Failed,
-/// Cancelled, Terminated) and `None` for all other events.
+/// Terminated) and `None` for all other events.
 pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
     match event {
         RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
@@ -29,9 +29,7 @@ pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<Agent
         RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
             error: error.clone(),
         }),
-        RunDomainEvent::Cancelled { .. } | RunDomainEvent::Terminated { .. } => {
-            Some(AgentRunTerminal::Cancelled)
-        }
+        RunDomainEvent::Terminated { .. } => Some(AgentRunTerminal::Cancelled),
         RunDomainEvent::Transitioned { .. }
         | RunDomainEvent::Started { .. }
         | RunDomainEvent::StepStarted { .. }
@@ -41,7 +39,6 @@ pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<Agent
         | RunDomainEvent::StepCancelled { .. }
         | RunDomainEvent::DrainingInput { .. }
         | RunDomainEvent::TerminationRequested { .. }
-        | RunDomainEvent::CancellationRequested { .. }
         | RunDomainEvent::AwaitingUser { .. }
         | RunDomainEvent::Resumed { .. }
         | RunDomainEvent::StuckDetected { .. } => None,
@@ -105,8 +102,15 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {
-                RunDomainEvent::Completed { .. } => {
-                    self.project_done(RunFinalizationStatus::Completed).await;
+                RunDomainEvent::Completed {
+                    user_cancelled_step,
+                    ..
+                } => {
+                    if user_cancelled_step {
+                        self.send_cancelled().await;
+                    } else {
+                        self.project_done(RunFinalizationStatus::Completed).await;
+                    }
                 }
                 RunDomainEvent::Failed { error, .. } => {
                     self.sink
@@ -118,22 +122,8 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
                     self.project_done(RunFinalizationStatus::ApiError(error))
                         .await;
                 }
-                RunDomainEvent::Cancelled { run_id, .. } => {
+                RunDomainEvent::Terminated { .. } => {
                     self.send_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::Terminated { run_id, .. } => {
-                    self.send_cancelled().await;
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
-                        .await;
-                }
-                RunDomainEvent::CancellationRequested { run_id, .. } => {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::RunCancelling { run_id })
-                        .await;
                 }
                 RunDomainEvent::Started {
                     run_id,
@@ -200,3 +190,7 @@ impl RunEventObserver for ProgressTerminalObserver<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "event_strategy_tests.rs"]
+mod tests;

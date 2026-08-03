@@ -8,13 +8,12 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, CancelCurrentRunOutcome,
-    CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent,
-    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline,
-    ElementSpacingView, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
-    InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
-    MarkdownSpacingOverridesView, ModelSummary, ProjectContext, ReflectionHistoryView,
-    RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
-    TerminateRunOutcome, WorkspaceContextView,
+    CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent, ConfigReloadedEvent,
+    ConfigUpdate, ConfigUpdateResult, ConfigView, ControlDeadline, ElementSpacingView,
+    InteractionCancelReason, InteractionCommandOutcome, InteractionReply, InteractionRequest,
+    InteractionRequestBody, MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary,
+    ProjectContext, ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind,
+    SessionSnapshot, SessionSummary, TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -32,7 +31,6 @@ pub fn components_document() -> Value {
     register::<InteractionCommandOutcome>(&mut definitions);
     register::<InteractionCancelReason>(&mut definitions);
     register::<CancelCurrentRunOutcome>(&mut definitions);
-    register::<CancelRunOutcome>(&mut definitions);
     register::<CancelRunStepOutcome>(&mut definitions);
     register::<TerminateRunOutcome>(&mut definitions);
     register::<RunTerminationReason>(&mut definitions);

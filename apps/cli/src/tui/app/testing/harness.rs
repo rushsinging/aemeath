@@ -171,6 +171,15 @@ impl TuiScenarioHarness {
     pub fn effects(&self) -> &[crate::tui::effect::effect::Effect] {
         &self.effects.effects
     }
+    pub async fn execute_last_effect(&mut self) {
+        let effect = self
+            .effects
+            .effects
+            .last()
+            .cloned()
+            .expect("scenario must record an effect before execution");
+        self.app.execute_effect(effect, &self.ui_tx).await; // allow tea_side_effect: scenario drives the production effect executor
+    }
     pub fn assert_idle(&self) {
         assert!(self.messages.is_empty(), "pending messages remain");
         assert!(

@@ -22,8 +22,6 @@ pub(super) enum CtrlCAction {
     Quit,
     /// 请求取消当前处理
     RequestCancel,
-    /// 取消中再次按下时强制退出
-    ForceQuit,
 }
 
 /// Ctrl+C 两段式退出超时（秒）
@@ -34,11 +32,9 @@ fn ctrlc_action(
     input_empty: bool,
     last_ctrlc: Option<std::time::Instant>,
     is_processing: bool,
-    is_cancelling: bool,
+    _is_cancelling: bool,
 ) -> CtrlCAction {
-    if is_processing && is_cancelling {
-        CtrlCAction::ForceQuit
-    } else if is_processing {
+    if is_processing {
         CtrlCAction::RequestCancel
     } else if !input_empty {
         CtrlCAction::ClearInput
@@ -117,9 +113,6 @@ impl App {
                         );
                         self.layout.mark_ctrlc_now();
                         return UpdateResult::one(Effect::CancelCurrentRun);
-                    }
-                    CtrlCAction::ForceQuit => {
-                        return UpdateResult::one(Effect::QuitApplication);
                     }
                     CtrlCAction::ClearInput => {
                         self.handle_input_intent(InputIntent::Clear);

@@ -203,8 +203,6 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::RunAwaitingUser { .. }
         | sdk::ChatEvent::RunResumed { .. }
         | sdk::ChatEvent::InteractionRequested { .. }
-        | sdk::ChatEvent::RunCancelling { .. }
-        | sdk::ChatEvent::RunCancelled { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)

@@ -287,6 +287,97 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 }
 
 #[tokio::test]
+async fn bash_cancellation_returns_visible_command_cancelled_result() {
+    struct Cancelled;
+
+    #[async_trait::async_trait]
+    impl crate::domain::CancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+
+        async fn cancelled(&self) {}
+
+        fn child_signal(&self) -> std::sync::Arc<dyn crate::domain::CancellationSignal> {
+            std::sync::Arc::new(Self)
+        }
+    }
+
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_cancellation(std::sync::Arc::new(Cancelled));
+
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "sleep 60" }), &ctx)
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(result.text, "Command cancelled by user");
+}
+
+#[tokio::test]
+async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
+    struct SharedCancellation {
+        cancelled: std::sync::atomic::AtomicBool,
+        notify: tokio::sync::Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::domain::CancellationSignal for SharedCancellation {
+        fn is_cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        async fn cancelled(&self) {
+            if self.is_cancelled() {
+                return;
+            }
+            self.notify.notified().await;
+        }
+
+        fn child_signal(&self) -> std::sync::Arc<dyn crate::domain::CancellationSignal> {
+            std::sync::Arc::new(Self {
+                cancelled: std::sync::atomic::AtomicBool::new(self.is_cancelled()),
+                notify: tokio::sync::Notify::new(),
+            })
+        }
+    }
+
+    let workspace = tempdir().unwrap();
+    let cancellation = std::sync::Arc::new(SharedCancellation {
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+        notify: tokio::sync::Notify::new(),
+    });
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_cancellation(cancellation.clone());
+    let tool = bash_tool(&ctx);
+
+    let execution = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
+        let call = tool.call(json!({ "command": "sleep 60", "timeout": 600_000 }), &ctx);
+        tokio::pin!(call);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancellation
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        cancellation.notify.notify_waiters();
+        call.await
+    })
+    .await
+    .expect("running Bash must observe the Step cancellation before its command timeout");
+
+    assert!(execution.is_error);
+    assert_eq!(execution.text, "Command cancelled by user");
+}
+
+#[tokio::test]
 async fn test_bash_no_progress_tx_still_works() {
     let workspace = tempdir().unwrap();
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
