@@ -64,7 +64,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
-        UiEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
+        UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
         UiEvent::StopHookFeedback(_) => "StopHookFeedback",
         UiEvent::ApiError { .. } => "ApiError",
         UiEvent::CompactRollback { .. } => "CompactRollback",

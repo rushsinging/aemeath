@@ -347,13 +347,12 @@ pub(crate) fn map_stream_event(
                 .collect(),
             cleared_count,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::PostToolExecutionSync {
-            messages,
-        } => ChatEvent::PostToolExecutionSync {
-            messages: messages
-                .into_iter()
-                .map(crate::application::client::message_to_sdk)
-                .collect(),
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
         },
         crate::application::loop_engine::chat::RuntimeStreamEvent::StopHookFeedback(feedback) => {
             ChatEvent::StopHookFeedback {

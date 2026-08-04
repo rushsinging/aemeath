@@ -616,6 +616,7 @@ where
                 // returns Ready with user input.
 
                 let config_reader = wiring.config_reader();
+                let message_count_before_config_reload = messages.len();
                 let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
@@ -627,6 +628,9 @@ where
                     &segment_id,
                 )
                 .await;
+                if messages.len() != message_count_before_config_reload {
+                    sink_handle.send_message_state_changed(messages.len()).await;
+                }
                 let run_config = crate::application::run::config::RunConfigSnapshot::capture(
                     wiring.committed_config(),
                 );

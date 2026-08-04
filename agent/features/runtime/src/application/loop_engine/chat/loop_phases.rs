@@ -96,10 +96,6 @@ where
                         "[guidance 已更新] guidance 文件已被外部修改，请关注后续 system prompt 中的最新指引。".to_string(),
                     );
                     messages.push(reminder);
-                    sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                        messages: messages.clone(),
-                    })
-                    .await;
                     log::info!(target: crate::LOG_TARGET, "[config_reload] guidance inject mode: injected reminder into messages");
                 }
                 GuidanceReloadPolicy::Remind => {

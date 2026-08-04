@@ -99,8 +99,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
-            messages: messages.into_iter().map(chat_message).collect(),
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => UiEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
         },
         sdk::ChatEvent::StopHookFeedback { feedback } => {
             UiEvent::StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback {

@@ -100,8 +100,9 @@ pub enum RuntimeStreamEvent {
         messages: Vec<Message>,
         cleared_count: usize,
     },
-    PostToolExecutionSync {
-        messages: Vec<Message>,
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
     /// Stop Hook 阻断后的用户可见 typed feedback；与消息快照同步职责分离。
     StopHookFeedback(share::message::StopHookFeedback),
@@ -314,6 +315,7 @@ where
 #[derive(Clone)]
 pub struct ChatEventSinkHandle {
     inner: std::sync::Arc<dyn DynChatEventSink>,
+    message_state_revision: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ChatEventSinkHandle {
@@ -323,7 +325,23 @@ impl ChatEventSinkHandle {
     {
         Self {
             inner: std::sync::Arc::new(sink),
+            message_state_revision: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
+    }
+
+    pub async fn send_message_state_changed(&self, message_count: usize) {
+        let revision = self
+            .message_state_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .saturating_add(1);
+        ChatEventSink::send_event(
+            self,
+            RuntimeStreamEvent::SessionMessageStateChanged {
+                message_count,
+                revision,
+            },
+        )
+        .await;
     }
 }
 

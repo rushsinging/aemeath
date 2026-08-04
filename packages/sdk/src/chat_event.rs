@@ -523,9 +523,10 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
     },
-    /// Tool 执行完成或 Runtime 注入内部反馈后的消息同步。
-    PostToolExecutionSync {
-        messages: Vec<ChatMessage>,
+    /// Runtime 已提交消息状态的轻量有序投影。
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
     /// Stop Hook 阻断后的用户可见 typed feedback。
     StopHookFeedback {

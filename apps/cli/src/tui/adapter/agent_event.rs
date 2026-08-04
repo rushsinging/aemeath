@@ -304,9 +304,15 @@ where
         }
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::PostToolExecutionSync { messages }
         | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
+        }),
+        UiEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => session(SessionIntent::MessageStateChanged {
+            message_count: *message_count,
+            revision: *revision,
         }),
         UiEvent::CompactFinished { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
@@ -496,9 +502,15 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         ),
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
-        | TuiRuntimeEvent::PostToolExecutionSync { messages }
         | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
+        }),
+        TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => session(SessionIntent::MessageStateChanged {
+            message_count: *message_count,
+            revision: *revision,
         }),
         TuiRuntimeEvent::CompactFinished { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(

@@ -292,9 +292,7 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
                 .send_event(RuntimeStreamEvent::StopHookFeedback(feedback))
                 .await;
             self.sink
-                .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                    messages: execution.messages_snapshot(),
-                })
+                .send_message_state_changed(execution.messages_len())
                 .await;
         }
         Ok(())
@@ -335,9 +333,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
     ) {
         self.runtime_context
             .event_sink()
-            .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: execution.messages_snapshot(),
-            })
+            .send_message_state_changed(execution.messages_len())
             .await;
         if has_task_mutation {
             let snapshot =

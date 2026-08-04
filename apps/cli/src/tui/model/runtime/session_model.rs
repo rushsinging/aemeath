@@ -7,6 +7,7 @@ pub struct SessionModel {
     pub current_session_id: Option<String>,
     pub dirty: bool,
     pub message_count: usize,
+    pub message_state_revision: u64,
     pub resume_candidates: Vec<SessionResumeCandidate>,
     pub save_status: SessionSaveStatus,
 }
@@ -27,6 +28,30 @@ impl SessionModel {
                 self.dirty = false;
                 vec![
                     SessionChange::MessagesSynced { message_count },
+                    SessionChange::DirtyChanged { dirty: false },
+                ]
+            }
+            SessionIntent::MessageStateChanged {
+                message_count,
+                revision,
+            } => {
+                if revision <= self.message_state_revision {
+                    return Vec::new();
+                }
+                let revision_gap = self
+                    .message_state_revision
+                    .checked_add(1)
+                    .filter(|expected| revision > *expected)
+                    .map(|expected| revision - expected);
+                self.message_count = message_count;
+                self.message_state_revision = revision;
+                self.dirty = false;
+                vec![
+                    SessionChange::MessageStateObserved {
+                        message_count,
+                        revision,
+                        revision_gap,
+                    },
                     SessionChange::DirtyChanged { dirty: false },
                 ]
             }
@@ -69,6 +94,47 @@ mod tests {
         let mut model = SessionModel::default();
         model.apply(SessionIntent::SetCurrentSession { id: "s1".into() });
         assert_eq!(model.current_session_id.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn ignores_stale_or_duplicate_message_state_revision() {
+        let mut model = SessionModel::default();
+        model.apply(SessionIntent::MessageStateChanged {
+            message_count: 4,
+            revision: 2,
+        });
+        model.apply(SessionIntent::MessageStateChanged {
+            message_count: 1,
+            revision: 1,
+        });
+        model.apply(SessionIntent::MessageStateChanged {
+            message_count: 9,
+            revision: 2,
+        });
+
+        assert_eq!(model.message_count, 4);
+        assert_eq!(model.message_state_revision, 2);
+    }
+
+    #[test]
+    fn reports_revision_gap_while_accepting_newer_projection() {
+        let mut model = SessionModel::default();
+        let changes = model.apply(SessionIntent::MessageStateChanged {
+            message_count: 4,
+            revision: 3,
+        });
+
+        assert!(matches!(
+            changes.as_slice(),
+            [
+                SessionChange::MessageStateObserved {
+                    message_count: 4,
+                    revision: 3,
+                    revision_gap: Some(2),
+                },
+                SessionChange::DirtyChanged { dirty: false },
+            ]
+        ));
     }
 
     #[test]

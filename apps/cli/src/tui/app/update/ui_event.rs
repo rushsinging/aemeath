@@ -34,7 +34,7 @@ impl App {
             | UiEvent::UserMessagesQueued { .. }
             | UiEvent::TurnStarted { .. }
             | UiEvent::MicrocompactDone { .. }
-            | UiEvent::PostToolExecutionSync { .. }
+            | UiEvent::SessionMessageStateChanged { .. }
             | UiEvent::StopHookFeedback(_)
             | UiEvent::CompactRollback { .. }
             | UiEvent::CompactFinished { .. }

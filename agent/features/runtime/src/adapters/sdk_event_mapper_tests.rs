@@ -187,6 +187,23 @@ fn session_resume_mapping_preserves_body_free_history_index() {
 }
 
 #[test]
+fn message_state_mapping_preserves_count_and_revision_without_snapshot() {
+    match map_stream_event(RuntimeStreamEvent::SessionMessageStateChanged {
+        message_count: 7,
+        revision: 3,
+    }) {
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => {
+            assert_eq!(message_count, 7);
+            assert_eq!(revision, 3);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn stop_hook_feedback_mapping_preserves_all_fields_for_sdk() {
     let feedback = share::message::StopHookFeedback {
         summary: "Stop hook 阻止了停止。".to_string(),

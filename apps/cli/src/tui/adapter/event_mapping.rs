@@ -146,8 +146,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        ChatEvent::PostToolExecutionSync { messages } => TuiRuntimeEvent::PostToolExecutionSync {
-            messages: messages.into_iter().map(chat_message).collect(),
+        ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
         },
         ChatEvent::StopHookFeedback { feedback } => {
             TuiRuntimeEvent::StopHookFeedback(stop_hook_feedback(feedback))

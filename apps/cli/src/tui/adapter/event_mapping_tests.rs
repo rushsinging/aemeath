@@ -6,6 +6,22 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn session_message_state_maps_count_and_revision_without_messages() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
+        message_count: 7,
+        revision: 3,
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 7,
+            revision: 3,
+        })
+    ));
+}
+
+#[test]
 fn stop_hook_feedback_maps_complete_payload_without_message_snapshot() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::StopHookFeedback {
         feedback: sdk::StopHookFeedbackView {
