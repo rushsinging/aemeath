@@ -138,7 +138,10 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     content: vec![TuiContentBlock::ToolUse {
                         id: "bash-1".into(),
                         name: "Bash".into(),
-                        input: serde_json::json!({ "command": "git status --short --branch" }),
+                        input: serde_json::json!({
+                            "goal": "查看分支状态",
+                            "command": "git status --short --branch"
+                        }),
                     }],
                     input_id: None,
                     source: TuiMessageSource::User,
@@ -176,13 +179,12 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
 
     let screen = harness.screen();
     assert!(
-        screen.contains("Run git status --short --branch"),
-        "resume 后 Bash 应走 typed ToolDisplay header\n{screen}"
+        screen.contains("查 看 分 支 状 态"),
+        "resume 后 Bash header 应显示 goal\n{screen}"
     );
-    assert_eq!(
-        screen.matches("git status --short --branch").count(),
-        1,
-        "Bash 命令在 header 已显示，不能再重复为 details\n{screen}"
+    assert!(
+        screen.contains("git status --short --branch"),
+        "Bash 命令全文应在 details 中显示\n{screen}"
     );
     assert!(
         screen.contains("## feature/resume...origin/main"),
