@@ -15,6 +15,15 @@ fn completed_notice_uses_canonical_done_verb_and_duration() {
 }
 
 #[test]
+fn completed_notice_without_duration_still_uses_canonical_done_verb() {
+    let notice = terminal_notice(TerminalCause::Completed, None)
+        .expect("completed terminal notice without duration");
+
+    assert!(DONE_VERBS.iter().any(|verb| notice == format!("✻ {verb}")));
+    assert!(!notice.contains("Completed"));
+}
+
+#[test]
 fn cancelled_notice_preserves_canonical_text_with_and_without_duration() {
     assert_eq!(
         terminal_notice(TerminalCause::UserCancelled, Some(Duration::from_secs(125))),

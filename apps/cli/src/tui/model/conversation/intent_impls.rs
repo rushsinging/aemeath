@@ -755,7 +755,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_legacy_completed_step_without_duration_has_no_terminal_notice() {
+    fn resume_legacy_completed_step_without_duration_still_has_terminal_notice() {
         let mut model = ConversationModel::default();
 
         ResumeConversation {
@@ -771,10 +771,21 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(!model.timeline.items().iter().any(|item| matches!(
-            item,
-            OutputTimelineItem::System { text, .. } if text.starts_with('✻')
-        )));
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with("✻ ")
+                            && !text.contains(" for ")
+                            && !text.contains("Completed")
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
