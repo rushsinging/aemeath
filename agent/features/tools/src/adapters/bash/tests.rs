@@ -577,3 +577,35 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
         result.text
     );
 }
+
+#[test]
+fn bash_tool_timeout_secs_allows_up_to_one_hour() {
+    use crate::domain::Tool;
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    // Outer override must cover the full 3600s schema max so the outer
+    // guard does not kill a command before its internal timeout fires.
+    assert_eq!(tool.timeout_secs(), 3600);
+}
+
+#[test]
+fn bash_tool_description_advertises_60_minute_max() {
+    use crate::domain::Tool;
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    assert!(
+        tool.description().contains("max 3600s"),
+        "description should advertise 60-minute max, got: {}",
+        tool.description()
+    );
+}
