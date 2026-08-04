@@ -472,13 +472,10 @@ impl Dispatcher {
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
         let mut executions: Vec<HookExecution> = Vec::new();
-        let cwd_text = cwd.display().to_string();
-        let command = HookCommand::new(
-            sub.command
-                .command
-                .replace("{AEMEATH_PROJECT_DIR}", &cwd_text)
-                .replace("{CLAUDE_PROJECT_DIR}", &cwd_text),
-        );
+        // 命令原样透传：项目目录只经 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`
+        // 环境变量注入（`invocation_environment`），shell 内用 `${AEMEATH_PROJECT_DIR}`
+        // 展开；`{AEMEATH_PROJECT_DIR}` 占位符写法已移除，不再替换。
+        let command = HookCommand::new(sub.command.command.clone());
         let script = hook_script_file_name(&command.command);
         Self::observe_subscription_execution(
             subscription_execution_observer,

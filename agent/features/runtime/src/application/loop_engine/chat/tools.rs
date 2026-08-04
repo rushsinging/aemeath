@@ -415,7 +415,9 @@ mod tests {
     use hook::{HookInvocation, HookOutcome, HookPort};
     use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
+    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use share::message::ContentBlock;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
@@ -670,6 +672,69 @@ mod tests {
         assert!(
             !result.results[0].outcome.is_error,
             "AllowAll must execute the tool"
+        );
+    }
+
+    /// #1515: PreToolUse 事件 hook 必须无条件执行——AllowAll 只放行授权性
+    /// 限制，不得跳过事件 hook。修复前 PreToolUse 被错误门控跳过、工具正常
+    /// 执行；修复后 hook exit 2 阻断工具。
+    #[tokio::test]
+    async fn allow_all_still_runs_blocking_pre_tool_hook() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
+        let ctx = test_tool_context();
+        let agent = Agent::for_test(registry.as_ref(), ctx, 10);
+        let sink = RecordingSink::default();
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::PreToolUse,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "exit 2".to_string(),
+                timeout: 5,
+            }],
+        );
+        let hook_port: Arc<dyn HookPort> =
+            Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap());
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let workspace_root = std::env::current_dir().unwrap();
+        let call = lifecycle_call(0);
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
+
+        let result = execute_tool_round(
+            &context,
+            std::slice::from_ref(&call),
+            &agent.catalog,
+            &policy::AllowAllPolicy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            &agent,
+            &sink,
+            &hook_port,
+            &activities,
+            &tokio_util::sync::CancellationToken::new(),
+            "en",
+            &workspace_root,
+            &[(call.clone(), ToolGuardDecision::Allow)],
+        )
+        .await;
+
+        assert_eq!(result.results.len(), 1);
+        assert!(
+            result.results[0].outcome.is_error,
+            "AllowAll 不得跳过 PreToolUse 事件 hook：exit 2 应阻断工具"
+        );
+        assert!(
+            result.results[0]
+                .outcome
+                .text
+                .contains("Blocked by PreToolUse hook"),
+            "阻断消息应来自 PreToolUse hook，实际 = {:?}",
+            result.results[0].outcome.text
         );
     }
 
