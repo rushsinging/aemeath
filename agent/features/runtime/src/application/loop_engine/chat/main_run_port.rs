@@ -153,7 +153,7 @@ pub(crate) fn make_agent(
             )
             .build(),
             tools::ToolExecutionPorts::new(
-                crate::adapters::tool_runtime::cancellation(cancel.clone()),
+                Arc::new(runtime_context.cancel().clone()),
                 crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone())
                     .read_access(),
                 Arc::new(tools::MutexReadSet(read_files)),

@@ -1,9 +1,9 @@
 {
   "version": 1,
   "budgets": {
-    "repository_migration_debt": 4,
+    "repository_migration_debt": 1,
     "modules": {
-      "runtime": 3,
+      "runtime": 0,
       "tui": 1
     }
   },
@@ -150,22 +150,6 @@
       "tracking_issue": 1022,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
-      "status": "active"
-    },
-    {
-      "id": "migration.runtime.application-accessors-to-adapters",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/runtime/src/application/client/accessors.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "runtime",
-      "reason": "Runtime application still reaches adapter-owned client accessors during production cutover; physical retirement tracked by #1399",
-      "tracking_issue": 1399,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when RuntimeResources and old MainRunPort production paths are cut",
       "status": "active"
     },
     {

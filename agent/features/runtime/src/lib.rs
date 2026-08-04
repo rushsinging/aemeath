@@ -3,6 +3,7 @@ pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
 pub(crate) mod adapters;
 pub(crate) mod application;
+pub mod composition;
 pub(crate) mod domain;
 pub(crate) mod ports;
 
@@ -18,7 +19,8 @@ pub use application::client::{
     resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
     AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
     PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
-    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
+    RuntimeIngressAssembly, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
+    SkillBootstrapAssembly,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction

@@ -116,18 +116,9 @@ fn forbidden_layer_deps(current_layer: &str) -> &'static [&'static str] {
     }
 }
 
-/// Narrow migration exceptions for already-existing layer inversions. These are
-/// path + target-layer limited so new COLA violations still fail.
-const RUNTIME_LAYER_MIGRATION_EXCEPTIONS: [(&str, &str); 2] = [
-    (
-        "agent/features/runtime/src/application/client/accessors.rs",
-        "adapters",
-    ),
-    (
-        "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs",
-        "adapters",
-    ),
-];
+/// Runtime production code has completed the Hexagonal cutover. Layer
+/// inversions are rejected directly; no Runtime migration exceptions remain.
+const RUNTIME_LAYER_MIGRATION_EXCEPTIONS: [(&str, &str); 0] = [];
 
 const TOOL_PROFILE_PUBLIC_API: [&str; 3] =
     ["baseline", "derive_restricted", "allowed_capabilities"];
@@ -513,6 +504,11 @@ fn run_sanity() {
 pub fn check(root: &Path) -> Result<()> {
     run_sanity();
     let mut violations: Vec<String> = Vec::new();
+    let tool_profile_definition_pattern =
+        Regex::new(r"\bpub\s+struct\s+ToolProfile\b").expect("tool profile definition regex");
+    let storage_domain_adapter_pattern =
+        Regex::new(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b")
+            .expect("storage domain adapter regex");
     let mut seen_runtime_exceptions: BTreeSet<(String, String)> = BTreeSet::new();
 
     let policy_production_adapter = root.join("agent/features/policy/src/adapters.rs");
@@ -759,26 +755,19 @@ pub fn check(root: &Path) -> Result<()> {
             for violation in tools_boundary_violations(&rel_s, &source) {
                 violations.push(format!("{rel_s}: {violation}"));
             }
-            if Regex::new(r"\bpub\s+struct\s+ToolProfile\b")
-                .unwrap()
-                .is_match(&strip_rust_comments(&source))
-            {
+            if tool_profile_definition_pattern.is_match(&strip_rust_comments(&source)) {
                 for violation in tool_profile_violations(&source) {
                     violations.push(format!("{rel_s}: {violation}"));
                 }
             }
         }
-        if rel_s.starts_with("agent/features/storage/src/domain/")
-            || rel_s == "agent/features/storage/src/domain.rs"
+        if (rel_s.starts_with("agent/features/storage/src/domain/")
+            || rel_s == "agent/features/storage/src/domain.rs")
+            && storage_domain_adapter_pattern.is_match(&source)
         {
-            if Regex::new(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b")
-                .unwrap()
-                .is_match(&source)
-            {
-                violations.push(format!(
-                    "{rel_s}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"
-                ));
-            }
+            violations.push(format!(
+                "{rel_s}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"
+            ));
         }
         let Some((_feature, layer)) = feature_layer_for(root, &path) else {
             continue;

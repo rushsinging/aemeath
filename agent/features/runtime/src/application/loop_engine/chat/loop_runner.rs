@@ -14,20 +14,18 @@ use crate::application::loop_engine::chat::{
 };
 use crate::domain::agent_run::RunSpec;
 
-use super::loop_context::ChatLoopContext;
+use super::loop_context::SessionCommandDriverInput;
 
 #[path = "main_run_port.rs"]
 pub(crate) mod main_run_port;
 
-/// Session actor for Main chat. The session itself only idles, accepts one real user input,
-/// creates one fresh `Run`, drives it to a terminal state through the shared engine, then idles
-/// again. `Run` is the only production state machine inside an active turn.
-pub async fn process_chat_loop<S, I>(ctx: ChatLoopContext<S, I>)
+/// Drives one Main session across idle commands and sequential Runs.
+pub async fn run_session_command_driver<S, I>(input: SessionCommandDriverInput<S, I>)
 where
     S: ChatEventSink,
     I: crate::application::loop_engine::input_strategy::SessionInputPort,
 {
-    let session_id_for_scope = ctx.shell.session_snapshot().session_id().to_string();
+    let session_id_for_scope = input.session.session_snapshot().session_id().to_string();
     let chat_id = ChatId::new_v7();
     logging::within(
         logging::LogContextPatch {
@@ -36,13 +34,14 @@ where
             ..logging::LogContextPatch::default()
         },
         async move {
-            let ChatLoopContext {
+            let SessionCommandDriverInput {
                 sink,
                 input_events,
-                shell,
-                read_files,                session_reminders,
+                session: shell,
+                read_files,
+                session_reminders,
                 session_queries,
-            } = ctx;
+            } = input;
 
             // #1385 Task 12: Construct real ChatEventSinkHandle from session sink.
             // The handle is Clone and can be used in place of S everywhere.
@@ -90,8 +89,7 @@ where
             let mut config_snapshot =
                 crate::application::loop_engine::chat::config_reload::init_snapshot_registry(&cwd);
 
-            // #1385: build_switched_client is now computed from shell fields in loop_runner
-            // (was previously in trait_chat.rs ChatLoopContext construction)
+            // Model switching is assembled from session-owned config and provider factories.
             let build_switched_client: crate::application::loop_engine::chat::loop_context::SwitchClientFn = {
                 let config_query = config_query_for_switch.clone();
                 std::sync::Arc::new(move |selection: &str| {

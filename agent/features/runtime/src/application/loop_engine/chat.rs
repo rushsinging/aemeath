@@ -44,6 +44,6 @@ pub use input_gate::{
     PendingCommand, PendingInputBuffer,
 };
 pub use input_log::logged_input_messages;
-pub use loop_context::ChatLoopContext;
-pub use loop_runner::process_chat_loop;
+pub use loop_context::SessionCommandDriverInput;
+pub use loop_runner::run_session_command_driver;
 pub(crate) use stream_handler::{InvocationEventReducer, InvocationResponse};
