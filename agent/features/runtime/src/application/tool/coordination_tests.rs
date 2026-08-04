@@ -12,7 +12,7 @@ use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 fn p6_4_production_uses_explicit_tool_round_boundaries() {
     let coordinator = include_str!("coordination.rs");
     let services = include_str!("../loop_engine/run_services.rs");
-    let main = include_str!("../loop_engine/chat/loop_runner.rs");
+    let main = include_str!("../loop_engine/chat/session_driver/run_launch.rs");
     let sub = include_str!("../run/derived/setup.rs");
 
     assert!(coordinator.contains("pub(crate) struct ToolRoundContext"));

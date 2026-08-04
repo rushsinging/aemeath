@@ -15,7 +15,8 @@ cp "$TMP/repo/agent/features/runtime/src/application/run/creation.rs" "$BASELINE
 cp "$TMP/repo/agent/features/runtime/src/application/run/launcher.rs" "$BASELINE/launcher.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/engine.rs" "$BASELINE/engine.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/tests.rs" "$BASELINE/loop_engine_tests.rs"
-cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs" "$BASELINE/loop_runner.rs"
+cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs" "$BASELINE/loop_runner.rs"
+cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs" "$BASELINE/run_preparation.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/run/derived/setup.rs" "$BASELINE/derived_setup.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/run/derived/loop_run.rs" "$BASELINE/derived_loop_run.rs"
 
@@ -72,18 +73,19 @@ printf '%s\n' 'fn unapproved_run_instance_creator() { let _ = RunInstance::new(u
 expect_failure unapproved-run-instance-creator "RunInstance::new has an unapproved caller"
 
 cp "$BASELINE/launcher.rs" "$LAUNCHER"
-MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs"
 python3 - "$MAIN_CALLER" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 source = path.read_text()
-source = source.replace("run_factory.create(request)", "bypass_main_run_factory(request)", 1)
+source = source.replace("run_factory.create(preparation.request)", "bypass_main_run_factory(preparation.request)", 1)
 path.write_text(source)
 PY
 expect_failure main-factory-bypass "Main Run must use RunFactory::create and RunLauncher::launch"
 
-cp "$BASELINE/loop_runner.rs" "$MAIN_CALLER"
+cp "$BASELINE/run_preparation.rs" "$MAIN_CALLER"
+MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs"
 python3 - "$MAIN_CALLER" <<'PY'
 from pathlib import Path
 import sys

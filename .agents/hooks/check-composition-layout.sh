@@ -86,21 +86,26 @@ else:
                 "agent/composition/src/runtime.rs: FeatureGateways must not be ignored"
             )
 
-    runtime_bootstrap = root / "agent" / "features" / "runtime" / "src" / "application" / "client" / "from_args.rs"
-    if runtime_bootstrap.is_file():
-        text = runtime_bootstrap.read_text()
+    runtime_bootstrap_paths = [
+        root / "agent" / "features" / "runtime" / "src" / "application" / "client" / "from_args.rs",
+        root / "agent" / "features" / "runtime" / "src" / "application" / "client" / "trait_model.rs",
+    ]
+    runtime_bootstrap_sources = [path.read_text() for path in runtime_bootstrap_paths if path.is_file()]
+    if runtime_bootstrap_sources:
+        text = "\n".join(runtime_bootstrap_sources)
         # #907: Runtime consumes ProviderFactory/ProviderBuildSpec injection and
         # factory.build(spec); the old provider gateway / build_llm_client_with_gateway
         # forward construction is forbidden.
         required_patterns = {
             "injected ProviderFactory parameter": r"provider_factory\s*:\s*Arc<dyn\s+ProviderFactory>",
             "ProviderBuildSpec construction": r"\bProviderBuildSpec\s*\{",
-            "factory.build consumption": r"provider_factory\s*\.build\s*\(",
+            "factory.build consumption": r"\b(?:provider_factory|factory)\s*\.build\s*\(",
         }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text, re.DOTALL):
                 violations.append(
-                    f"{runtime_bootstrap.relative_to(root)}: missing {label}"
+                    "agent/features/runtime/src/application/client: "
+                    f"missing {label} across bootstrap responsibilities"
                 )
         forbidden_patterns = {
             "legacy provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn\s+provider::LlmProviderGateway>",
@@ -109,7 +114,8 @@ else:
         for label, pattern in forbidden_patterns.items():
             if re.search(pattern, text, re.DOTALL):
                 violations.append(
-                    f"{runtime_bootstrap.relative_to(root)}: {label} is forbidden after #907 cutover"
+                    "agent/features/runtime/src/application/client: "
+                    f"{label} is forbidden after #907 cutover"
                 )
 
 if violations:
