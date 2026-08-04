@@ -224,7 +224,7 @@ impl RuntimeContextFactory {
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
         let activity_publisher = Arc::new(event_route.sink.clone());
-        let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
+        let lifecycle = self.select_lifecycle(request, bindings, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
             model: crate::application::run::context::ModelBindings {
@@ -564,13 +564,20 @@ impl RuntimeContextFactory {
     fn select_lifecycle(
         &self,
         _request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
         parent: Option<&RuntimeContext>,
     ) -> Result<LifecycleSelection, RunCreationError> {
         Ok(LifecycleSelection {
             cancel: parent
                 .map(|context| context.cancel().child_scope())
                 .unwrap_or_default(),
-            usage: crate::application::run::context::RunUsageTracker::new(),
+            // Session Runs share a per-Session usage tracker so that a new Run
+            // inherits the last known API total tokens from the previous Run.
+            // Sub-Runs (Parent variant) get an isolated tracker.
+            usage: match bindings.session() {
+                Some(session) => session.usage().clone(),
+                None => crate::application::run::context::RunUsageTracker::new(),
+            },
         })
     }
 
