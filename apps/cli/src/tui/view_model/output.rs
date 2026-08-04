@@ -72,6 +72,7 @@ pub enum OutputBlockKind {
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
     DiagnosticNotice(TextBlockView),
+    StopHookFeedback(StopHookFeedbackBlockView),
     SystemNotice(TextBlockView),
     AskUserBatch(AskUserBatchBlockView),
 }
@@ -119,6 +120,13 @@ pub enum AskUserPhaseView {
     Answering,
     Confirming,
 }
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct StopHookFeedbackBlockView {
+    pub key: String,
+    pub title: String,
+    pub body: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TextBlockView {
     pub key: String,

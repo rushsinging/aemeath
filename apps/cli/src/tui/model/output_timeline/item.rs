@@ -51,6 +51,10 @@ pub enum OutputTimelineItem {
     ToolResult {
         reference: TimelineToolCallRef,
     },
+    StopHookFeedback {
+        id: String,
+        text: String,
+    },
     System {
         id: String,
         text: String,
@@ -99,6 +103,7 @@ impl OutputTimelineItem {
             OutputTimelineItem::UserMessage { id, .. }
             | OutputTimelineItem::AssistantText { id, .. }
             | OutputTimelineItem::Thinking { id, .. }
+            | OutputTimelineItem::StopHookFeedback { id, .. }
             | OutputTimelineItem::System { id, .. }
             | OutputTimelineItem::Error { id, .. }
             | OutputTimelineItem::QueuedUserMessage { id, .. }

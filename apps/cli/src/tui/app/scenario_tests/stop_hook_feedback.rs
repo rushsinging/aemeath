@@ -31,7 +31,8 @@ fn live_stop_hook_feedback_renders_once_with_complete_user_visible_detail() {
     harness.render();
 
     let screen = harness.screen();
-    assert_eq!(screen.matches("Stop hook").count(), 1, "{screen}");
+    assert_eq!(screen.matches("Stop hook blocked").count(), 1, "{screen}");
+    assert!(screen.contains("⊘ Stop hook"), "{screen}");
     assert!(screen.contains("check-agent-stop.sh"), "{screen}");
     assert!(screen.contains("exit code 2"), "{screen}");
     assert!(screen.contains("stderr preview"), "{screen}");

@@ -47,6 +47,9 @@ impl ConversationUpdate for ResumeConversation {
                     Ok(HistoryDisplayMessage::User { text }) => {
                         all_changes.extend(model.apply(AppendUserMessage { text }));
                     }
+                    Ok(HistoryDisplayMessage::StopHookFeedback { text }) => {
+                        all_changes.extend(model.apply(AppendStopHookFeedback { text }));
+                    }
                     Ok(HistoryDisplayMessage::TypedJson { text }) => {
                         all_changes.extend(model.apply(AppendSystemMessage { text }));
                     }
@@ -270,6 +273,12 @@ impl ConversationUpdate for TerminalNotice {
 impl ConversationUpdate for PresentCancelledStep {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.present_cancelled_step(self.confirmed)
+    }
+}
+
+impl ConversationUpdate for AppendStopHookFeedback {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.append_stop_hook_feedback(self.text)
     }
 }
 
@@ -627,6 +636,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
             Self::PresentCancelledStep(s) => s.update(model),
+            Self::AppendStopHookFeedback(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),

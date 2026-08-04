@@ -21,6 +21,20 @@ impl ConversationModel {
         changes
     }
 
+    pub(super) fn append_stop_hook_feedback(&mut self, text: String) -> Vec<ConversationChange> {
+        self.clear_active_text_blocks();
+        let block_id = self.next_block_id("stop-hook-feedback");
+        self.timeline.push(OutputTimelineItem::StopHookFeedback {
+            id: block_id.clone(),
+            text,
+        });
+        vec![
+            ConversationChange::SystemMessageAppended { block_id },
+            ConversationChange::StyleBoundaryResetRequired,
+            ConversationChange::OutputDirty,
+        ]
+    }
+
     pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
         let text = strip_system_reminder_envelope_owned(text);
         if let Some(OutputTimelineItem::System { text: existing, .. }) =

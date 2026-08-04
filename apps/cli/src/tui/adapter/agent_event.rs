@@ -496,7 +496,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }
         }
         TuiRuntimeEvent::StopHookFeedback(feedback) => conversation(
-            ConversationIntent::AppendSystemMessage(AppendSystemMessage {
+            ConversationIntent::AppendStopHookFeedback(AppendStopHookFeedback {
                 text: feedback.display_text(),
             }),
         ),

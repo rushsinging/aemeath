@@ -4,6 +4,7 @@ use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock};
 pub(crate) enum HistoryDisplayMessage {
     User { text: String },
     TypedJson { text: String },
+    StopHookFeedback { text: String },
     ToolResults,
     Assistant { blocks: Vec<HistoryAssistantBlock> },
 }
@@ -62,7 +63,7 @@ impl HistoryDisplayMessage {
                         .as_ref()
                         .map(crate::tui::adapter::runtime_view::TuiStopHookFeedback::display_text)
                         .unwrap_or_else(|| msg.text_content());
-                    return Ok(Self::TypedJson { text });
+                    return Ok(Self::StopHookFeedback { text });
                 }
                 crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {
                     return Err(HistoryDisplayParseError::NonUserVisibleMessage);
@@ -359,7 +360,7 @@ mod tests {
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::TypedJson {
+            Ok(HistoryDisplayMessage::StopHookFeedback {
                 text: "hook feedback".to_string()
             })
         );

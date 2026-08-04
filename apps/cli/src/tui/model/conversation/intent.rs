@@ -105,6 +105,11 @@ pub struct PresentCancelledStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppendStopHookFeedback {
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendSystemMessage {
     pub text: String,
 }
@@ -371,6 +376,7 @@ pub enum ConversationIntent {
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
     PresentCancelledStep(PresentCancelledStep),
+    AppendStopHookFeedback(AppendStopHookFeedback),
     AppendSystemMessage(AppendSystemMessage),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),
