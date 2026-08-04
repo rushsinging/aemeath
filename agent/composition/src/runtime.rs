@@ -324,6 +324,7 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         ),
+        runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         session_bootstrap,
         prompt,

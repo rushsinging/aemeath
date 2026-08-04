@@ -1,4 +1,4 @@
-//! 从 `process_chat_loop` 中提取的独立阶段处理函数。
+//! 从 Main session command driver 中提取的独立阶段处理函数。
 //!
 //! 这些函数不包含 `continue`/`break` 等跨循环控制流，
 //! 可以安全地从 async 循环体中提取为独立函数。

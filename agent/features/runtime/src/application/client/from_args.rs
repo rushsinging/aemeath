@@ -154,6 +154,23 @@ impl InitialProviderAssembly {
     }
 }
 
+pub struct RuntimeIngressAssembly {
+    pub(crate) event_sink_factory: Arc<super::accessors::EventSinkFactory>,
+    pub(crate) input_port_factory: Arc<super::accessors::InputPortFactory>,
+}
+
+impl RuntimeIngressAssembly {
+    pub(crate) fn new(
+        event_sink_factory: Arc<super::accessors::EventSinkFactory>,
+        input_port_factory: Arc<super::accessors::InputPortFactory>,
+    ) -> Self {
+        Self {
+            event_sink_factory,
+            input_port_factory,
+        }
+    }
+}
+
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 ///
 /// `runtime_context_factory` 随 Agent Runner assembly 进入 bootstrap，保证
@@ -168,6 +185,7 @@ pub struct RuntimeBootstrapDependencies {
     tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
+    ingress: RuntimeIngressAssembly,
     initial_provider: InitialProviderAssembly,
     session_bootstrap: SessionBootstrapAssembly,
     prompt: PromptAssembly,
@@ -184,6 +202,7 @@ impl RuntimeBootstrapDependencies {
     pub fn new(
         core: RuntimeCoreDependencies,
         tool_assembly: RuntimeToolAssemblyDependencies,
+        ingress: RuntimeIngressAssembly,
         initial_provider: InitialProviderAssembly,
         session_bootstrap: SessionBootstrapAssembly,
         prompt: PromptAssembly,
@@ -220,6 +239,7 @@ impl RuntimeBootstrapDependencies {
             skill_catalog,
             tool_result_materializer,
             active_run,
+            ingress,
             initial_provider,
             session_bootstrap,
             prompt,
@@ -285,6 +305,7 @@ pub async fn from_args_with_workspace(
         skill_catalog,
         tool_result_materializer,
         active_run,
+        ingress,
         initial_provider,
         session_bootstrap,
         prompt,
@@ -482,6 +503,8 @@ pub async fn from_args_with_workspace(
         parent_context_source,
         tool_result_materializer,
         active_run.clone(),
+        ingress.event_sink_factory,
+        ingress.input_port_factory,
         runtime_context_factory,
     );
 
@@ -854,6 +877,8 @@ mod tests {
             parent_context_source,
             tool_result_materializer,
             active_run,
+            crate::composition::wire_sdk_chat_ingress().event_sink_factory,
+            crate::composition::wire_sdk_chat_ingress().input_port_factory,
             runtime_context_factory,
         )
     }
@@ -1145,6 +1170,7 @@ mod tests {
                 tool_result_materializer,
                 active_run,
             ),
+            crate::composition::wire_sdk_chat_ingress(),
             initial_provider,
             SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
             PromptAssembly::new(Vec::new(), String::new(), String::new()),
@@ -1185,16 +1211,16 @@ mod tests {
         );
     } // ── Task 4 GREEN: single-source verification tests ──
 
-    /// #1385 Task 7: `tui_launch_context()` reads binding from
-    /// `shell.model_state` — the single model binding state.
+    /// The SDK startup snapshot reads the current model state without exposing
+    /// Runtime services or adapter-owned launch containers.
     #[tokio::test(flavor = "current_thread")]
-    async fn tui_launch_context_binding_comes_from_shell_lock() {
+    async fn startup_snapshot_reads_current_model_state() {
         let shell =
             make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
 
         // Write a distinct binding into SessionModelState.
         let switched = crate::application::model::test_support::test_binding(vec!["tui sees this"]);
-        shell.model_state.update_binding(switched.clone());
+        shell.model_state.update_binding(switched);
 
         let handle = RuntimeHandle {
             shell: shell.clone(),
@@ -1203,11 +1229,13 @@ mod tests {
             inner: Arc::new(handle),
         };
 
-        let launch = client.tui_launch_context();
-        assert!(
-            Arc::ptr_eq(&launch.binding, &switched),
-            "tui_launch_context must read binding from SessionModelState"
+        let expected_display = crate::application::client::mapping::model_display(
+            &shell.model_state.resolved().source_key,
+            &shell.model_state.resolved().model.name,
+            &shell.model_state.resolved().model.id,
         );
+        let launch = client.startup_snapshot();
+        assert_eq!(launch.model_display, expected_display);
     }
 
     /// #1385 Task 7: accessors return values from `shell`, the single source.
@@ -1251,7 +1279,7 @@ mod tests {
             &client.shell().session_state,
             &shell.session_state,
         ));
-        // #1385 Task 7: verbose migrated from ChatRuntimeContext to shell.
+        // verbose is owned by the session shell.
         assert_eq!(client.shell().verbose, shell.verbose);
     }
 
