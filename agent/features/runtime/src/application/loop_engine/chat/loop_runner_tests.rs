@@ -356,7 +356,9 @@ fn test_shell_with_catalog(
             )
         }),
         input_port_factory: Arc::new(|ingress| {
-            crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
+            crate::application::client::SessionInputHandle::new(
+                crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress),
+            )
         }),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::default(),
@@ -450,7 +452,9 @@ fn test_shell_with_task_store(
             )
         }),
         input_port_factory: Arc::new(|ingress| {
-            crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
+            crate::application::client::SessionInputHandle::new(
+                crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress),
+            )
         }),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::default(),
@@ -494,20 +498,20 @@ fn test_session_query_port() -> Arc<dyn crate::ports::SessionQueryPort> {
     Arc::new(FakeSessionQuery)
 }
 
-/// #1385: Shorthand for constructing a [`ChatLoopContext`] from a test shell.
-fn test_chat_loop_ctx<S, I>(
+/// Construct a [`SessionCommandDriverInput`] from a test session.
+fn test_session_driver_input<S, I>(
     sink: S,
     input_events: I,
-    shell: crate::application::client::SessionRuntime,
-) -> ChatLoopContext<S, I>
+    session: crate::application::client::SessionRuntime,
+) -> SessionCommandDriverInput<S, I>
 where
     S: ChatEventSink,
     I: crate::application::loop_engine::input_strategy::SessionInputPort,
 {
-    ChatLoopContext {
+    SessionCommandDriverInput {
         sink,
         input_events,
-        shell,
+        session,
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         session_queries: test_session_query_port(),
@@ -863,7 +867,7 @@ fn retry_main_context(
     provider: Arc<ScriptedInvocationProvider>,
     sink: RecordingSink,
     input_events: ChannelInputEvents,
-) -> ChatLoopContext<RecordingSink, ChannelInputEvents> {
+) -> SessionCommandDriverInput<RecordingSink, ChannelInputEvents> {
     retry_main_context_with_wiring(provider, sink, input_events).0
 }
 
@@ -872,7 +876,7 @@ fn retry_main_context_with_wiring(
     sink: RecordingSink,
     input_events: ChannelInputEvents,
 ) -> (
-    ChatLoopContext<RecordingSink, ChannelInputEvents>,
+    SessionCommandDriverInput<RecordingSink, ChannelInputEvents>,
     Arc<context::MainSessionWiring>,
 ) {
     let shell = test_shell();
@@ -881,7 +885,7 @@ fn retry_main_context_with_wiring(
         crate::application::model::test_support::binding_from_llm_provider(provider),
     );
     shell.set_test_session_id("test-main-terminal-retry");
-    (test_chat_loop_ctx(sink, input_events, shell), wiring)
+    (test_session_driver_input(sink, input_events, shell), wiring)
 }
 
 async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -> bool) {
@@ -913,7 +917,7 @@ async fn main_partial_stream_failure_retries_without_rollback() {
         .unwrap();
 
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     advance_until_retry_condition(
         "successful retry",
         std::time::Duration::from_secs(11),
@@ -967,7 +971,7 @@ async fn main_empty_completion_retries_and_succeeds() {
 
     let (ctx, wiring) =
         retry_main_context_with_wiring(provider.clone(), sink.clone(), input_events);
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     advance_until_retry_condition(
         "successful empty-completion retry",
         std::time::Duration::from_secs(11),
@@ -1027,7 +1031,7 @@ async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
         .unwrap();
 
     let ctx = retry_main_context(provider.clone(), sink.clone(), input_events);
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     for expected_calls in 2..=11 {
         advance_until_retry_condition(
             "next empty completion retry",
@@ -1140,7 +1144,7 @@ fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<d
 }
 
 #[tokio::test]
-async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
+async fn test_run_session_command_driver_stop_hook_blocked_continues_until_success() {
     // 每次测试生成独立 flag 路径，避免 cargo test 并行 race。
     let flag_path = std::env::temp_dir().join(format!(
         "aemeath_stop_hook_once_{}.flag",
@@ -1186,10 +1190,13 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-stop-hook-blocked");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
@@ -1303,10 +1310,13 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-stop-hook-follow-up");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
@@ -1401,10 +1411,13 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         )),
     );
     shell.set_test_session_id("test-stop-hook-metadata");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
@@ -1424,7 +1437,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
 }
 
 #[tokio::test]
-async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env() {
+async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_hook_env() {
     let sink = RecordingSink::default();
     // #894: stop hook 的 cwd / `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` 必须取自
     // restore 后的 `workspace_root`。要让 `workspace_root` 合法地不同于 wire 时的路径，
@@ -1561,10 +1574,13 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         )),
     );
     shell.set_test_session_id("test-worktree-stop-hook-env");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
 
     assert!(sink
@@ -1581,7 +1597,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
 }
 
 #[tokio::test]
-async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
+async fn test_run_session_command_driver_drains_input_after_stop_hook_before_done() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
@@ -1632,10 +1648,13 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         )),
     );
     shell.set_test_session_id("test-session");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -1776,10 +1795,13 @@ async fn test_continue_false_json_treated_as_block() {
         )),
     );
     shell.set_test_session_id("test-continue-false");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
@@ -1877,10 +1899,13 @@ async fn test_stall_triggers_stop_hook_check() {
         )),
     );
     shell.set_test_session_id("test-stall-hook");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
     let _ = std::fs::remove_file(&counter_path);
 
@@ -2023,12 +2048,15 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         )),
     );
     shell.set_test_session_id("test-persistent-loop");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -2154,11 +2182,14 @@ async fn test_stall_detector_resets_across_user_turns() {
         )),
     );
     shell.set_test_session_id("test-stall-reset-across-turns");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -2319,11 +2350,14 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         )),
     );
     shell.set_test_session_id("test-idle-control-command");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     // 关键断言（确定性）：LLM 调用序列恰为 ["first", "second"]。
@@ -2409,11 +2443,14 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         )),
     );
     shell.set_test_session_id("test-idle-pending-save");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     assert_eq!(
@@ -2479,11 +2516,14 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         )),
     );
     shell.set_test_session_id("test-idle-pending-list-reminders");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     assert_eq!(
@@ -2528,10 +2568,13 @@ async fn test_stop_hook_block_limit_stops_loop() {
         )),
     );
     shell.set_test_session_id("test-block-limit");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
-    tokio::time::timeout(std::time::Duration::from_secs(30), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop should complete after shutdown");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -2687,11 +2730,14 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         )),
     );
     shell.set_test_session_id("test-cancel-then-idle");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 cancel→idle→新回合→shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 cancel→idle→新回合→shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -2875,12 +2921,15 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         )),
     );
     shell.set_test_session_id("test-cancel-preserves-prior-turns");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 回合1→回合2取消→回合3→shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 回合1→回合2取消→回合3→shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -2920,7 +2969,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
 /// 随后投递一条 UserMessage，等 DoneWithDuration 出现，断言恰好一次 LLM 调用。
 /// 最后 drop 发送端，loop shutdown 退出（无 hang）。
 ///
-/// RED 阶段：当前 loop 在 `process_chat_loop` 顶部直接进入 BeforeLlm gate，
+/// RED 阶段：当前 loop 在 `run_session_command_driver` 顶部直接进入 BeforeLlm gate，
 /// 即使 messages 为空也不会 idle-wait，调用 LLM 时 messages_for_api 为空
 /// 导致 LLM provider 被调用（或回合逻辑异常）。实现 `has_pending_user_turn` +
 /// 顶部 idle 门后，测试应变绿。
@@ -3026,11 +3075,14 @@ async fn test_chat_impl_idle_until_first_input_event() {
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-idle-until-first-input");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -3118,11 +3170,14 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         )),
     );
     shell.set_test_session_id("test-no-turn-signal-before-first-input");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -3181,11 +3236,14 @@ async fn test_resume_skip_pending_user_run_idles_until_new_input() {
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-resume-skip-pending");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
     driver.await.unwrap();
 
     // 验证：收到新输入后产生回合（DoneWithDuration），证明 loop idle 等待了
@@ -3224,11 +3282,14 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-user-tail-idle");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -3337,11 +3398,14 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
     );
     shell.set_test_session_id("test-api-error-finalize");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop 应在 shutdown 后返回");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回");
     driver.await.unwrap();
 
     let events = sink.events();
@@ -3574,7 +3638,7 @@ fn stale_pending_replays_initial_input_on_empty_continuation_step() {
 // ─── #1272 per-turn drain seal fixtures ────────────────────────────────
 //
 // These verify the production drain→freeze→adopt pipeline through
-// `process_chat_loop`. The invariants are:
+// `run_session_command_driver`. The invariants are:
 //   1. `Context::append_accepted_input` is called exactly once for the
 //      initial user message (observable as exactly one user occurrence per
 //      LLM payload).
@@ -3858,7 +3922,7 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -3876,9 +3940,12 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
         drop(input_tx);
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop completes after ToolResults continuation + final text");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver completes after ToolResults continuation + final text");
 
     driver.await.expect("driver joins cleanly");
 
@@ -3982,7 +4049,7 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal-2");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -4000,9 +4067,12 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
         drop(input_tx);
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop completes");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver completes");
     driver.await.unwrap();
 
     // Only one adopted emit even though there are two LLM invocations.
@@ -4072,7 +4142,7 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-per-turn-drain-seal-single");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after = after_response.clone();
@@ -4088,9 +4158,12 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
         drop(input_tx);
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop completes after single text response");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver completes after single text response");
 
     driver.await.expect("driver joins cleanly");
 
@@ -4141,9 +4214,9 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
 
     let shell = test_shell();
     shell.set_test_session_id("test-idle-compact-command");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     wait_for_retry_test_condition("manual compact result", || {
         sink.events()
             .iter()
@@ -4252,7 +4325,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-task-reminder-injection");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_first = after_first.clone();
@@ -4269,9 +4342,12 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
         drop(input_tx);
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop completes after tool round + final text");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver completes after tool round + final text");
     driver.await.expect("driver joins cleanly");
 
     let recorded = recorded.lock().unwrap().clone();
@@ -4359,9 +4435,9 @@ async fn clear_resets_authoritative_task_state() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-clear-resets-tasks");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     wait_for_retry_test_condition("SessionReset observed", || {
         sink.events().iter().any(|event| event == "SessionReset")
     })
@@ -4628,7 +4704,7 @@ async fn assert_streaming_named_tool_observes_step_cancel(tool_name: &'static st
         crate::application::model::test_support::binding_from_llm_provider(provider),
     );
     let active_run = shell.active_run.clone();
-    let context = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let context = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver = tokio::spawn(async move {
@@ -4660,7 +4736,7 @@ async fn assert_streaming_named_tool_observes_step_cancel(tool_name: &'static st
 
     tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        process_chat_loop(context),
+        run_session_command_driver(context),
     )
     .await
     .expect("streaming tool Step cancellation must converge");
@@ -4717,7 +4793,7 @@ async fn streaming_tool_call_executes_before_stream_completes() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-streaming-tool-execution");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     let driver_sink = sink.clone();
     let driver_after_tool = after_tool_completed.clone();
@@ -4739,9 +4815,12 @@ async fn streaming_tool_call_executes_before_stream_completes() {
         drop(input_tx);
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(15), process_chat_loop(ctx))
-        .await
-        .expect("process_chat_loop completes after streaming tool + continuation");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver completes after streaming tool + continuation");
     driver.await.expect("driver joins cleanly");
 
     let events = sink.events();
@@ -4901,9 +4980,9 @@ async fn streaming_tool_results_dropped_on_retry() {
         crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
     );
     shell.set_test_session_id("test-streaming-tool-retry-drop");
-    let ctx = test_chat_loop_ctx(sink.clone(), input_events, shell);
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
-    let run = tokio::spawn(process_chat_loop(ctx));
+    let run = tokio::spawn(run_session_command_driver(ctx));
     advance_until_retry_condition(
         "retry succeeded",
         std::time::Duration::from_secs(15),

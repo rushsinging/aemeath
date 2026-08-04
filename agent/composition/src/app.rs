@@ -297,23 +297,26 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    let launch = runtime_client.tui_launch_context();
+    let launch = runtime_client.startup_snapshot();
+    let startup_resume = runtime_client.startup_resume();
+    let allow_all = runtime_client.allow_all();
+    let context_size = runtime_client.context_size();
+    let thinking = runtime_client.requested_reasoning() != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let thinking = launch.binding.requested_reasoning != provider::ReasoningLevel::Off;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.clone());
     let client = agent_client_from_runtime(runtime_client);
-    let cwd = launch.workspace_root.clone();
+    let cwd = launch.cwd.clone();
 
     Ok(AgentClientBootstrap {
         client,
         display_history_query,
         session_id: launch.session_id,
-        startup_resume: launch.startup_resume,
+        startup_resume,
         cwd,
         model_display: launch.model_display,
-        allow_all: launch.allow_all,
-        context_size: launch.context_size,
+        allow_all,
+        context_size,
         thinking,
         config_view,
         memory_config: launch.memory_config,
