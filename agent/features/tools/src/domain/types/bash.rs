@@ -26,6 +26,6 @@ pub struct BashInput {
     pub goal: String,
     /// The bash command to execute
     pub command: String,
-    /// Timeout in milliseconds (default 120000)
+    /// Timeout in milliseconds (default 120000, max 3600000)
     pub timeout: Option<u64>,
 }

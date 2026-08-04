@@ -33,7 +33,7 @@ impl TypedTool for BashTool {
         "Bash"
     }
     fn description(&self) -> &str {
-        "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s)."
+        "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 3600s)."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::bash(lang))
@@ -53,7 +53,7 @@ impl TypedTool for BashTool {
         false
     }
 
-    /// Override: Bash commands may run up to 600s (schema max).
+    /// Override: Bash commands may run up to 3600s (schema max).
     /// The default 120s outer timeout in agent.rs would kill long-running
     /// commands before the internal per-command timeout fires.
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -61,7 +61,7 @@ impl TypedTool for BashTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        600
+        3600
     }
 
     fn is_input_safe(&self, input: &Value) -> bool {
@@ -86,7 +86,7 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_ms = args.timeout.unwrap_or(120_000);
+        let timeout_ms = args.timeout.unwrap_or(120_000).min(3_600_000);
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(
