@@ -1,7 +1,7 @@
 use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
@@ -17,7 +17,7 @@ use super::tools::{log_tool_result, run_post_tool_hooks, send_tool_call_status, 
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
@@ -85,7 +85,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_multiple_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
@@ -219,7 +219,7 @@ fn cancelled_result(prepared: &PreparedToolCall, language: &str) -> ToolExecutio
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,

@@ -6,12 +6,12 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
     });
     model.apply(ThinkingText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "plan".to_string(),
     });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "answer".to_string(),
     });
 
@@ -33,16 +33,16 @@ fn test_conversation_starts_new_thinking_block_after_block_complete() {
     });
     model.apply(ThinkingText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "first thought".to_string(),
     });
     model.apply(CompleteBlock {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
     });
     model.apply(ThinkingText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "second thought".to_string(),
     });
 
@@ -67,12 +67,12 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "结论先到".to_string(),
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -80,7 +80,7 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -127,16 +127,16 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
     });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "已经完成的文字".to_string(),
     });
     model.apply(CompleteBlock {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -144,7 +144,7 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -188,7 +188,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
     });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("tool-1"),
         tool_name: "Read".to_string(),
@@ -199,7 +199,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -207,7 +207,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -248,7 +248,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -256,7 +256,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -266,7 +266,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("tool-1"),
         tool_name: "Read".to_string(),

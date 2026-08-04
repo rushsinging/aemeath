@@ -59,8 +59,8 @@ pub enum Effect {
         name: String,
         message: String,
     },
-    SetCurrentTurn {
-        turn: usize,
+    SetCurrentRun {
+        run_step: usize,
     },
     StartTimer {
         id: String,

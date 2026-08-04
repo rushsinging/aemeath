@@ -203,7 +203,7 @@ mod tests {
         OutputBlockKind::ToolCall(ToolCallBlockView {
             key: "t".into(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             tool_call_id: None,
             title: "Grep".into(),
             icon: "●".into(),

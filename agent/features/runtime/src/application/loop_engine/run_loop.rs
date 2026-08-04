@@ -383,7 +383,7 @@ impl<'a> RunLoop<'a> {
         &mut self,
         execution: &mut RunExecutionState,
         run_step_id: &sdk::RunStepId,
-        turns: usize,
+        run_steps: usize,
         cancel: &CancellationToken,
     ) -> Result<StopHookOutcome, LoopEngineError> {
         let activities = self.activities()?.clone();
@@ -394,7 +394,7 @@ impl<'a> RunLoop<'a> {
                 run_step_id,
             },
             execution,
-            turns,
+            run_steps,
             cancel,
         )
         .await

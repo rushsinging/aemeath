@@ -95,7 +95,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "tool".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("tool".into()),
         title: "Bash".into(),
         icon: "✓".into(),
@@ -406,7 +406,7 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "tool".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("tool".into()),
         title: "Bash".into(),
         icon: "✓".into(),
@@ -550,7 +550,7 @@ fn static_edit_root(id: &str, lines: usize) -> BlockNode {
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: id.into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some(id.into()),
         title: "Edit".into(),
         icon: "✓".into(),
@@ -643,7 +643,7 @@ fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "edit".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("edit".into()),
         title: "Edit".into(),
         icon: "✓".into(),

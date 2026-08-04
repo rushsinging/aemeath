@@ -6,15 +6,15 @@
 fn test_a43_insert_tool_call_dedup_reads_timeline() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-a43-dedup");
-    let turn_id = super::ids::ChatTurnId::new("turn-a43-dedup");
+    let run_id = super::ids::ChatRunId::new("turn-a43-dedup");
     let tool_id = super::ids::ToolCallId::new("tool-a43-dedup");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
 
     // ToolCallStart → 第 1 次插入
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Read".to_string(),
@@ -24,7 +24,7 @@ fn test_a43_insert_tool_call_dedup_reads_timeline() {
     // ToolCallUpdate with same id → 不应重复插入 ToolCall
     model.apply(ToolCallUpdate {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Read".to_string(),
@@ -42,7 +42,7 @@ fn test_a43_insert_tool_call_dedup_reads_timeline() {
                 item,
                 OutputTimelineItem::ToolCall { reference }
                     if reference.context.chat_id == chat_id
-                        && reference.context.turn_id == turn_id
+                        && reference.context.run_id == run_id
                         && reference.tool_call_id == tool_id
             )
         })
@@ -60,15 +60,15 @@ fn test_a43_insert_tool_call_dedup_reads_timeline() {
 fn test_a43_promote_orphan_timeline_ordering() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-a43-orphan");
-    let turn_id = super::ids::ChatTurnId::new("turn-a43-orphan");
+    let run_id = super::ids::ChatRunId::new("turn-a43-orphan");
     let tool_id = super::ids::ToolCallId::new("tool-a43-orphan");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
 
     // 先到达 ToolResult（孤儿）
     let changes = model.apply(ToolResult {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         provider_id: "prov-a43".to_string(),
         id: tool_id.clone(),
         tool_name: "Bash".to_string(),
@@ -93,7 +93,7 @@ fn test_a43_promote_orphan_timeline_ordering() {
     // ToolCallStart → 触发 promote_orphan_tool_result
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Bash".to_string(),
@@ -103,7 +103,7 @@ fn test_a43_promote_orphan_timeline_ordering() {
     // ToolCallUpdate → 触发 promote_orphan_tool_result（confirm binding）
     model.apply(ToolCallUpdate {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: Some("prov-a43".to_string()),
         name: "Bash".to_string(),
@@ -148,15 +148,15 @@ fn test_a43_promote_orphan_timeline_ordering() {
 fn test_a43_update_tool_call_no_duplicate_timeline_entry() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-a43-dup");
-    let turn_id = super::ids::ChatTurnId::new("turn-a43-dup");
+    let run_id = super::ids::ChatRunId::new("turn-a43-dup");
     let tool_id = super::ids::ToolCallId::new("tool-a43-dup");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
 
     // First: ToolCallStart inserts the tool
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Write".to_string(),
@@ -167,7 +167,7 @@ fn test_a43_update_tool_call_no_duplicate_timeline_entry() {
     for _ in 0..3 {
         model.apply(ToolCallUpdate {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id: tool_id.clone(),
             provider_id: Some("prov-a43-dup".to_string()),
             name: "Write".to_string(),
@@ -186,7 +186,7 @@ fn test_a43_update_tool_call_no_duplicate_timeline_entry() {
                 item,
                 OutputTimelineItem::ToolCall { reference }
                     if reference.context.chat_id == chat_id
-                       && reference.context.turn_id == turn_id
+                       && reference.context.run_id == run_id
                        && reference.tool_call_id == tool_id
             )
         })

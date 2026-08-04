@@ -207,13 +207,13 @@ fn start_ask_user_tool(
     app: &mut App,
     tool_call_id: crate::tui::model::conversation::ids::ToolCallId,
     chat_id: &str,
-    turn_id: &str,
+    run_id: &str,
 ) {
     let chat_id = crate::tui::model::conversation::ids::ChatId::new(chat_id);
-    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new(turn_id);
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new(run_id);
     ConversationIntent::ToolCallStart(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_call_id.clone(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
@@ -222,7 +222,7 @@ fn start_ask_user_tool(
     .update(&mut app.model.conversation);
     ConversationIntent::ToolCallUpdate(ToolCallUpdate {
         chat_id,
-        turn_id,
+        run_id,
         id: tool_call_id.clone(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
@@ -238,9 +238,9 @@ fn install_ask_user_interaction(
     request_id: UiInteractionRequestId,
     tool_call_id: crate::tui::model::conversation::ids::ToolCallId,
     chat_id: &str,
-    turn_id: &str,
+    run_id: &str,
 ) {
-    start_ask_user_tool(app, tool_call_id.clone(), chat_id, turn_id);
+    start_ask_user_tool(app, tool_call_id.clone(), chat_id, run_id);
     ConversationIntent::ShowInteraction(ShowInteraction {
         request: InteractionRequest {
             request_id,
@@ -333,7 +333,7 @@ async fn accepted_ask_user_cancel_marks_only_matching_tool_cancelled_through_exe
             .conversation
             .chats
             .iter()
-            .flat_map(|chat| &chat.turns)
+            .flat_map(|chat| &chat.runs)
             .flat_map(|turn| &turn.tool_calls)
             .find(|call| call.id.as_ref() == Some(tool_call_id))
             .expect("AskUserQuestion tool call should exist")

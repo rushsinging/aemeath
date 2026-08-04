@@ -36,8 +36,8 @@ pub(crate) mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{
-    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeResumedSessionStep, RuntimeStreamEvent,
-    RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeResumedSessionStep, RuntimeRunContext,
+    RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 pub use input_gate::{
     apply_gate, GateKind, InputEventDrainPort, InputEventFuture, InputEventOptFuture,

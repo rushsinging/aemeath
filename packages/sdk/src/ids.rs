@@ -1,4 +1,4 @@
-//! UUIDv7 newtypes for internal chat, turn, and tool call IDs.
+//! UUIDv7 newtypes for internal chat, run, and tool call IDs.
 //!
 //! Each newtype stores a UUIDv7 plus a pre-formatted string cache. The cache
 //! enables zero-allocation `AsRef<str>` and borrowed `as_str()` access,
@@ -213,27 +213,27 @@ impl ChatId {
 impl_id_type!(ChatId);
 
 // ---------------------------------------------------------------------------
-// ChatTurnId
+// ChatRunId
 // ---------------------------------------------------------------------------
 
-/// Internal turn ID (UUIDv7).
+/// Internal run ID (UUIDv7).
 #[derive(Debug, Clone)]
-pub struct ChatTurnId(Uuid, String);
+pub struct ChatRunId(Uuid, String);
 
-impl ChatTurnId {
-    /// Generate a new UUIDv7 turn ID.
+impl ChatRunId {
+    /// Generate a new UUIDv7 run ID.
     pub fn new_v7() -> Self {
         let uuid = Uuid::now_v7();
         Self(uuid, cache(uuid))
     }
 
-    /// Create a ChatTurnId from a legacy string or generate new UUIDv7.
+    /// Create a ChatRunId from a legacy string or generate new UUIDv7.
     /// Alias for `from_legacy_or_new` — use `new_v7()` for fresh IDs.
     pub fn new(s: impl AsRef<str>) -> Self {
         Self::from_legacy_or_new(s.as_ref())
     }
 
-    /// Parse a UUIDv7 string as a ChatTurnId.
+    /// Parse a UUIDv7 string as a ChatRunId.
     pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
         let uuid = Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
         if uuid.get_version_num() != 7 {
@@ -263,7 +263,7 @@ impl ChatTurnId {
     }
 }
 
-impl_id_type!(ChatTurnId);
+impl_id_type!(ChatRunId);
 
 // ---------------------------------------------------------------------------
 // RunId
@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn test_run_id_new_v7_is_version_7() {
+    fn test_chat_run_id_new_v7_is_version_7() {
         let id = RunId::new_v7();
         assert_eq!(id.as_uuid().get_version_num(), 7);
         assert_eq!(RunId::parse_uuid7(id.as_str()).unwrap(), id);
@@ -510,8 +510,8 @@ mod tests {
     }
 
     #[test]
-    fn test_turn_id_new_v7_is_version_7() {
-        let id = ChatTurnId::new_v7();
+    fn test_run_id_new_v7_is_version_7() {
+        let id = ChatRunId::new_v7();
         assert_eq!(id.as_uuid().get_version_num(), 7);
     }
 
@@ -599,12 +599,12 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_turn_id_serde_roundtrip_preserves_uuid() {
-        let original = ChatTurnId::new_v7();
+    fn test_chat_run_id_serde_roundtrip_preserves_uuid() {
+        let original = ChatRunId::new_v7();
         let json = serde_json::to_string(&original).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_string(), "expected string, got: {parsed}");
-        let restored: ChatTurnId = serde_json::from_str(&json).unwrap();
+        let restored: ChatRunId = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, original);
     }
 

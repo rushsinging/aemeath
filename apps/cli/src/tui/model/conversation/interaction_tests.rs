@@ -10,7 +10,7 @@ use super::interaction::{
 use super::model::ConversationModel;
 use super::update::ConversationUpdate;
 use crate::tui::model::conversation::block::{AskUserCompletion, AskUserSlot};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
     AnswerCurrentAskUser, InteractionCancelAccepted, InteractionReplyAccepted, ShowAskUserBatch,
     ToolCallStart, ToolCallUpdate,
@@ -57,7 +57,7 @@ fn ask_user_tool_status(model: &ConversationModel, tool_call_id: &ToolCallId) ->
     model
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .find(|call| call.id.as_ref() == Some(tool_call_id))
         .expect("AskUserQuestion tool call should exist")
@@ -85,10 +85,10 @@ fn ask_user_completion(
 
 fn start_ask_user_tool(model: &mut ConversationModel, tool_call_id: &ToolCallId) {
     let chat_id = ChatId::new("chat-1");
-    let turn_id = ChatTurnId::new("turn-1");
+    let run_id = ChatRunId::new("turn-1");
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_call_id.clone(),
         provider_id: None,
         name: "AskUserQuestion".to_string(),
@@ -96,7 +96,7 @@ fn start_ask_user_tool(model: &mut ConversationModel, tool_call_id: &ToolCallId)
     });
     model.apply(ToolCallUpdate {
         chat_id,
-        turn_id,
+        run_id,
         id: tool_call_id.clone(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
@@ -272,7 +272,7 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
     let completed_result = model
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .find(|call| call.id.as_ref() == Some(&completed_tool_id))
         .and_then(|call| call.result.as_ref())

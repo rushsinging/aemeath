@@ -1,4 +1,4 @@
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::intent::{ConversationIntent, RecordAgentProgress, ToolCallStart};
 use super::model::ConversationModel;
 
@@ -6,13 +6,13 @@ use super::model::ConversationModel;
 fn retained_state_snapshot_separates_history_from_transient_state() {
     let mut model = ConversationModel::default();
     let chat_id = ChatId::new("chat-retained");
-    let turn_id = ChatTurnId::new("turn-retained");
+    let run_id = ChatRunId::new("turn-retained");
     let tool_id = ToolCallId::new("tool-retained");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
     model.apply(ConversationIntent::ToolCallStart(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Agent".to_string(),
@@ -22,7 +22,7 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
         model.apply(ConversationIntent::RecordAgentProgress(
             RecordAgentProgress {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 tool_id: tool_id.clone(),
                 message: format!("progress-{index}"),
             },
@@ -30,7 +30,7 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
     }
     let retained = model.retained_state_snapshot();
     assert_eq!(retained.chats, 1);
-    assert_eq!(retained.turns, 1);
+    assert_eq!(retained.runs, 1);
     assert_eq!(retained.tool_calls, 1);
     assert_eq!(retained.timeline_items, 1);
     assert_eq!(retained.agent_progress_entries, 3);
@@ -52,7 +52,7 @@ fn retained_state_snapshot_returns_to_zero_after_reset() {
 
     let retained = model.retained_state_snapshot();
     assert_eq!(retained.chats, 0);
-    assert_eq!(retained.turns, 0);
+    assert_eq!(retained.runs, 0);
     assert_eq!(retained.tool_calls, 0);
     assert_eq!(retained.timeline_items, 0);
     assert_eq!(retained.agent_progress_entries, 0);

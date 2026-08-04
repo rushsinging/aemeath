@@ -200,7 +200,7 @@ fn test_assistant_after_system_notice_uses_assistant_color() {
     // 模拟后续 LLM 回复（Assistant block）
     app.model.conversation.apply(AssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         text: "后续回复".to_string(),
     });
     app.refresh_output_document_from_model();
@@ -244,7 +244,7 @@ fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
     // 模拟 LLM streaming
     app.model.conversation.apply(AssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         text: "你好".to_string(),
     });
     app.refresh_output_document_from_model();
@@ -254,7 +254,7 @@ fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
     // 模拟 LLM streaming 继续
     app.model.conversation.apply(AssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         text: "世界".to_string(),
     });
     app.refresh_output_document_from_model();

@@ -73,7 +73,7 @@ pub struct SkillRequest {
 /// Chat 运行期间追加到 runtime 的输入事件。
 #[derive(Debug, Clone)]
 pub enum ChatInputEvent {
-    /// 普通用户消息，延展当前 Chat 为新的 Turn。
+    /// 普通用户消息，延展当前 Chat 为新的 Run。
     ///
     /// `id` 是唯一标识本次输入的 UUIDv7（#390 A2）。
     /// `images` 携带图片数据（`ChatInputImage` 含 `id` 占位符），使内联/粘贴/文件
@@ -91,18 +91,18 @@ pub enum ChatInputEvent {
     },
     /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
     ///
-    /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
-    /// **不打断当前回合**（NEVER 调 CancellationToken）。
+    /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前run自然结束回 idle gate 后执行），
+    /// **不打断当前run**（NEVER 调 CancellationToken）。
     Reset,
     /// 批量撤回所有 pending 输入：清空 PendingInputBuffer + 回传 texts 还原输入框。
     ///
     /// 由 busy 态 Up 键触发（#391 S3）。
     WithdrawAll,
-    /// 用户请求手动 compact：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求手动 compact：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/compact` 触发，走 runtime 事件流（#497），不再调 `compact_messages()` trait。
     Compact,
-    /// 用户请求切换模型：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求切换模型：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/model` 触发，走 runtime 事件流（#567）。`selection` 是用户输入的
     /// `Provider/Model` 字符串，由 runtime 侧 `resolve_model_selection` 解析。
@@ -110,7 +110,7 @@ pub enum ChatInputEvent {
     SwitchModel {
         selection: String,
     },
-    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
     /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScope 读取；

@@ -1,7 +1,7 @@
 //! ConversationModel 辅助功能测试（reset、append_user_message）。
 
 use super::change::ConversationChange;
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use super::tool_result_payload::ToolResultPayload;
@@ -97,14 +97,14 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let mut model = ConversationModel::default();
 
     let runtime_chat_id = ChatId::new("runtime-chat-1");
-    let runtime_turn_id = ChatTurnId::new("runtime-turn-1");
+    let runtime_run_id = ChatRunId::new("runtime-turn-1");
     let expected_chat_id = runtime_chat_id.clone();
-    let expected_turn_id = runtime_turn_id.clone();
+    let expected_run_id = runtime_run_id.clone();
     let expected_tool_id = ToolCallId::new("tool-1");
-    model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
+    model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_run_id.clone());
     let changes = model.apply(ToolCallStart {
         chat_id: runtime_chat_id.clone(),
-        turn_id: runtime_turn_id.clone(),
+        run_id: runtime_run_id.clone(),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Bash".to_string(),
@@ -112,7 +112,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     });
     model.apply(ToolCallUpdate {
         chat_id: runtime_chat_id,
-        turn_id: runtime_turn_id,
+        run_id: runtime_run_id,
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Bash".to_string(),
@@ -129,7 +129,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         .chats
         .iter()
         .find(|chat| chat.id == expected_chat_id)
-        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == expected_turn_id))
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == expected_run_id))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()
@@ -142,26 +142,26 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         item,
         OutputTimelineItem::ToolCall { reference }
             if reference.context.chat_id == expected_chat_id
-                && reference.context.turn_id == expected_turn_id
+                && reference.context.run_id == expected_run_id
                 && reference.tool_call_id == expected_tool_id
     )));
 }
 
-/// A4.1 TDD：complete_tool_call 后对应 ChatTurn.tool_calls[i].result 应为 Some(ToolResultPayload)
+/// A4.1 TDD：complete_tool_call 后对应 ChatRun.tool_calls[i].result 应为 Some(ToolResultPayload)
 /// 且字段值正确（output / content / is_error / image_count 全部匹配）。
 #[test]
 fn test_tool_result_payload_stored_in_turn() {
     let mut model = ConversationModel::default();
     let chat_id = ChatId::new("chat-a41");
-    let turn_id = ChatTurnId::new("turn-a41");
+    let run_id = ChatRunId::new("turn-a41");
     let tool_id = ToolCallId::new("tool-a41");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
 
     // 登记 ToolCallStart
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Read".to_string(),
@@ -176,7 +176,7 @@ fn test_tool_result_payload_stored_in_turn() {
     // 登记 ToolResult
     model.apply(ToolResult {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         provider_id: "prov-a41".to_string(),
         id: tool_id.clone(),
         tool_name: "Read".to_string(),
@@ -191,7 +191,7 @@ fn test_tool_result_payload_stored_in_turn() {
         .chats
         .iter()
         .find(|chat| chat.id == chat_id)
-        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == run_id))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()
@@ -213,36 +213,36 @@ fn test_tool_result_payload_stored_in_turn() {
 }
 
 // issue #646：update_agent_meta 测试
-fn setup_turn_with_agent_tool() -> (ConversationModel, ChatId, ChatTurnId, ToolCallId) {
+fn setup_turn_with_agent_tool() -> (ConversationModel, ChatId, ChatRunId, ToolCallId) {
     let mut model = ConversationModel::default();
     let chat_id = ChatId::new("chat-meta");
-    let turn_id = ChatTurnId::new("turn-meta");
+    let run_id = ChatRunId::new("turn-meta");
     let tool_id = ToolCallId::new("tool-meta");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
     });
-    (model, chat_id, turn_id, tool_id)
+    (model, chat_id, run_id, tool_id)
 }
 
 fn find_tool_call<'a>(
     model: &'a ConversationModel,
     chat_id: &ChatId,
-    turn_id: &ChatTurnId,
+    run_id: &ChatRunId,
     tool_id: &ToolCallId,
 ) -> Option<&'a super::tool_call::ToolCall> {
     model
         .chats
         .iter()
         .filter(|ch| ch.id == *chat_id)
-        .flat_map(|ch| ch.turns.iter())
-        .filter(|t| t.id == *turn_id)
+        .flat_map(|ch| ch.runs.iter())
+        .filter(|t| t.id == *run_id)
         .flat_map(|t| t.tool_calls.iter())
         .find(|c| {
             c.id.as_ref()
@@ -252,26 +252,26 @@ fn find_tool_call<'a>(
 
 #[test]
 fn tool_call_lookup_matches_full_runtime_identity() {
-    let (model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+    let (model, chat_id, run_id, tool_id) = setup_turn_with_agent_tool();
 
-    let found = model.tool_call(&chat_id, &turn_id, &tool_id);
+    let found = model.tool_call(&chat_id, &run_id, &tool_id);
 
     assert_eq!(found.and_then(|call| call.id.as_ref()), Some(&tool_id));
     assert!(model
-        .tool_call(&chat_id, &ChatTurnId::new("other-turn"), &tool_id)
+        .tool_call(&chat_id, &ChatRunId::new("other-turn"), &tool_id)
         .is_none());
     assert!(model
-        .tool_call(&ChatId::new("other-chat"), &turn_id, &tool_id)
+        .tool_call(&ChatId::new("other-chat"), &run_id, &tool_id)
         .is_none());
 }
 
 #[test]
 fn test_update_agent_meta_writes_role_and_model() {
-    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+    let (mut model, chat_id, run_id, tool_id) = setup_turn_with_agent_tool();
 
     let changes = model.apply(UpdateAgentMeta {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         role: Some("coder".to_string()),
         model: "Zhipu/glm-5.2".to_string(),
@@ -286,8 +286,7 @@ fn test_update_agent_meta_writes_role_and_model() {
     );
 
     // 验证写入
-    let call =
-        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let call = find_tool_call(&model, &chat_id, &run_id, &tool_id).expect("tool call should exist");
     let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
     assert_eq!(meta.role.as_deref(), Some("coder"));
     assert_eq!(meta.model, "Zhipu/glm-5.2");
@@ -295,18 +294,17 @@ fn test_update_agent_meta_writes_role_and_model() {
 
 #[test]
 fn test_update_agent_meta_without_role() {
-    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+    let (mut model, chat_id, run_id, tool_id) = setup_turn_with_agent_tool();
 
     model.apply(UpdateAgentMeta {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         role: None,
         model: "fallback-model".to_string(),
     });
 
-    let call =
-        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let call = find_tool_call(&model, &chat_id, &run_id, &tool_id).expect("tool call should exist");
     let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
     assert!(meta.role.is_none());
     assert_eq!(meta.model, "fallback-model");
@@ -314,12 +312,12 @@ fn test_update_agent_meta_without_role() {
 
 #[test]
 fn test_update_agent_meta_does_not_overwrite_existing() {
-    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+    let (mut model, chat_id, run_id, tool_id) = setup_turn_with_agent_tool();
 
     // 第一次写入
     model.apply(UpdateAgentMeta {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         role: Some("coder".to_string()),
         model: "Zhipu/glm-5.2".to_string(),
@@ -328,7 +326,7 @@ fn test_update_agent_meta_does_not_overwrite_existing() {
     // 第二次写入（不同值）——应该被忽略
     let changes = model.apply(UpdateAgentMeta {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         role: Some("reviewer".to_string()),
         model: "Other/model".to_string(),
@@ -343,8 +341,7 @@ fn test_update_agent_meta_does_not_overwrite_existing() {
     );
 
     // 值应保持第一次的
-    let call =
-        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let call = find_tool_call(&model, &chat_id, &run_id, &tool_id).expect("tool call should exist");
     let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
     assert_eq!(meta.role.as_deref(), Some("coder"));
     assert_eq!(meta.model, "Zhipu/glm-5.2");
@@ -352,12 +349,12 @@ fn test_update_agent_meta_does_not_overwrite_existing() {
 
 #[test]
 fn test_update_agent_meta_unknown_tool_id_is_noop() {
-    let (mut model, chat_id, turn_id, _tool_id) = setup_turn_with_agent_tool();
+    let (mut model, chat_id, run_id, _tool_id) = setup_turn_with_agent_tool();
     let unknown_tool_id = ToolCallId::new("nonexistent");
 
     let changes = model.apply(UpdateAgentMeta {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: unknown_tool_id,
         role: Some("coder".to_string()),
         model: "X".to_string(),

@@ -16,12 +16,12 @@ pub fn capture() -> LogContext {
 /// Create a frontend session context from an explicit parent snapshot.
 ///
 /// Only the session identifier crosses the delivery boundary. Runtime fields
-/// (`chat`, `turn`, request, model, provider, and role) are deliberately reset.
+/// (`chat`, `run_step`, request, model, provider, and role) are deliberately reset.
 pub fn create_session_scope(parent: LogContext, session_id: impl Into<String>) -> LogContext {
     parent.patched(logging::LogContextPatch {
         session_id: logging::FieldPatch::Set(session_id.into()),
         chat_id: logging::FieldPatch::Clear,
-        turn: logging::FieldPatch::Clear,
+        run_step: logging::FieldPatch::Clear,
         request_id: logging::FieldPatch::Clear,
         model: logging::FieldPatch::Clear,
         provider: logging::FieldPatch::Clear,
@@ -53,7 +53,7 @@ mod tests {
         LogContext {
             session_id: Some(session_id.to_string()),
             chat_id: Some("runtime-chat".to_string()),
-            turn: Some(7),
+            run_step: Some(7),
             request_id: Some("request-42".to_string()),
             model: Some("model-1".to_string()),
             provider: Some("provider-1".to_string()),

@@ -16,7 +16,7 @@ impl App {
 
     /// 将一条用户输入回显写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
-    /// 用于 ask_user 应答、队列输入冲刷等「在已激活回合内回显用户输入」的场景：
+    /// 用于 ask_user 应答、队列输入冲刷等「在已激活run内回显用户输入」的场景：
     /// 走 `AppendUserMessage` 而非 `StartChat`，不新开 chat、不破坏在途工具绑定。
     /// 回显经 `ConversationBlock::UserMessage -> UserMessage view -> "> ..."` 渲染。
     pub(crate) fn append_user_echo(&mut self, text: impl Into<String>) {

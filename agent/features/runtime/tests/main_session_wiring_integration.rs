@@ -325,7 +325,7 @@ fn make_target_project(temp: &tempfile::TempDir) -> std::path::PathBuf {
         serde_json::json!({
             "memory": {
                 "enabled": false,
-                "reflection": { "enabled": true, "interval_turns": 7 }
+                "reflection": { "enabled": true, "interval_run_steps": 7 }
             },
             "models": {
                 "default": "local/target-model",
@@ -467,8 +467,8 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
         "memory inject_count must remain on project A"
     );
     assert_eq!(
-        after.memory().reflection.interval_turns,
-        before.memory().reflection.interval_turns,
+        after.memory().reflection.interval_run_steps,
+        before.memory().reflection.interval_run_steps,
         "memory reflection interval must remain on project A"
     );
 }

@@ -302,7 +302,7 @@ impl AgentRunner for CliAgentRunner {
 
             let source_context = AgentProgressSourceContext::new(
                 derived.session_id.clone(),
-                sdk::ChatTurnId::new_v7().to_string(),
+                sdk::ChatRunId::new_v7().to_string(),
             );
             // Call SubagentStart hook — workspace root from derived workspace.
             let workspace_root = derived
@@ -345,13 +345,13 @@ impl AgentRunner for CliAgentRunner {
             // Helper to emit progress
             let progress_role = role_name_for_log.clone();
             let progress_model = model_display.clone();
-            let progress = move |turn: Option<usize>, msg: &str| {
-                let turn_str = turn
+            let progress = move |run_step: Option<usize>, msg: &str| {
+                let turn_str = run_step
                     .map(|t| t.to_string())
                     .unwrap_or_else(|| "-".to_string());
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "[role:{} model:{} turn:{}] {}",
+                    "[role:{} model:{} step:{}] {}",
                     progress_role,
                     progress_model,
                     turn_str,
@@ -483,9 +483,9 @@ impl AgentRunner for CliAgentRunner {
             let runtime_context = derived.instance.context().clone();
             let tool_execution_context = agent.ctx.clone();
             let tool_workspace_root = agent.ctx.workspace_read().current_workspace_root();
-            let turn_context = crate::application::loop_engine::chat::RuntimeTurnContext::new(
+            let turn_context = crate::application::loop_engine::chat::RuntimeRunContext::new(
                 sdk::ChatId::from_legacy_or_new(&session_id),
-                sdk::ChatTurnId::new_v7(),
+                sdk::ChatRunId::new_v7(),
             );
             let input =
                 crate::application::loop_engine::input_strategy::FixedInputAdapter::new(prompt);

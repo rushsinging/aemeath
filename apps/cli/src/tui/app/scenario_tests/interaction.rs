@@ -7,7 +7,7 @@ use crate::tui::adapter::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiResumedSessionStep,
 };
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext,
+    TuiInteractionBody, TuiInteractionRequest, TuiRunContext, TuiRuntimeEvent, TuiToolCallStatus,
     TuiUserQuestion,
 };
 use crate::tui::app::event::UiEvent;
@@ -77,9 +77,9 @@ fn resume_renders_context_run_steps_without_inventing_chats_from_user_messages()
     assert_eq!(harness.app.model.conversation.chats.len(), 1);
     let chat = &harness.app.model.conversation.chats[0];
     assert_eq!(chat.id.as_str(), "run-1");
-    assert_eq!(chat.turns.len(), 2);
-    assert_eq!(chat.turns[0].id.as_str(), "step-1");
-    assert_eq!(chat.turns[1].id.as_str(), "step-2");
+    assert_eq!(chat.runs.len(), 2);
+    assert_eq!(chat.runs[0].id.as_str(), "step-1");
+    assert_eq!(chat.runs[1].id.as_str(), "step-2");
     let screen = harness.screen();
     for expected in ["QUESTION_ONE", "ANSWER_ONE", "QUESTION_TWO", "ANSWER_TWO"] {
         assert!(
@@ -282,9 +282,9 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
     harness.app.chat.start_processing();
     let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000012");
     harness.app.agent_client = Some(Arc::new(AcceptingInteractionClient));
-    let context = TuiTurnContext {
+    let context = TuiRunContext {
         chat_id: "ask-chat".to_string(),
-        turn_id: "ask-turn".to_string(),
+        run_id: "ask-turn".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-call");
     harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
@@ -341,7 +341,7 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
         .conversation
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .find(|call| call.id.as_ref() == Some(&tool_call_id))
         .expect("AskUserQuestion tool call should exist");
@@ -576,9 +576,9 @@ async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end
     harness.app.chat.start_processing();
     let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000011");
     harness.app.agent_client = Some(Arc::new(AcceptingInteractionClient));
-    let context = TuiTurnContext {
+    let context = TuiRunContext {
         chat_id: "ask-chat-cancelled".to_string(),
-        turn_id: "ask-turn-cancelled".to_string(),
+        run_id: "ask-turn-cancelled".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-cancelled");
     harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
@@ -623,7 +623,7 @@ async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end
         .conversation
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .find(|call| call.id.as_ref() == Some(&tool_call_id))
         .expect("AskUserQuestion tool call should exist");

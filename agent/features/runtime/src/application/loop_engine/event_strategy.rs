@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use crate::application::loop_engine::chat::finalize::MainRunFinalizationObserver;
 use crate::application::loop_engine::chat::{
-    ChatEventSink as _, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink as _, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::application::loop_engine::run_finalization::{
     RunFinalizationCoordinator, RunFinalizationStatus,
@@ -55,11 +55,11 @@ pub(crate) trait RunEventObserver {
 pub(crate) struct ChatStreamEventObserver<'a> {
     pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub session_id: &'a str,
-    pub turn_context: &'a RuntimeTurnContext,
+    pub turn_context: &'a RuntimeRunContext,
     pub task_access: &'a std::sync::Arc<dyn task::TaskAccess>,
     pub model: &'a str,
     pub started_at: std::time::Instant,
-    pub turn_count: usize,
+    pub step_count: usize,
     /// Snapshot of messages at emit time (cloned by the caller).
     pub messages_snapshot: Vec<share::message::Message>,
 }
@@ -78,7 +78,7 @@ impl ChatStreamEventObserver<'_> {
         )
         .finalize_terminal(
             status,
-            self.turn_count,
+            self.step_count,
             self.started_at.elapsed(),
             &AgentRunTerminal::Completed {
                 result: String::new(),
@@ -165,7 +165,7 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
 pub(crate) struct ProgressTerminalObserver<'a> {
     pub progress: &'a (dyn Fn(Option<usize>, &str) + Send + Sync),
     pub terminal: &'a mut Option<AgentRunTerminal>,
-    pub turn_count: usize,
+    pub step_count: usize,
 }
 
 #[async_trait]
@@ -175,13 +175,13 @@ impl RunEventObserver for ProgressTerminalObserver<'_> {
             if let Some(terminal) = terminal_from_domain_event(&event) {
                 match &terminal {
                     AgentRunTerminal::Completed { .. } => {
-                        (self.progress)(Some(self.turn_count), "Agent completed");
+                        (self.progress)(Some(self.step_count), "Agent completed");
                     }
                     AgentRunTerminal::Failed { error } => {
-                        (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
+                        (self.progress)(Some(self.step_count), &format!("Agent error: {error}"));
                     }
                     AgentRunTerminal::Cancelled => {
-                        (self.progress)(Some(self.turn_count), "Agent cancelled by user");
+                        (self.progress)(Some(self.step_count), "Agent cancelled by user");
                     }
                 }
                 *self.terminal = Some(terminal);

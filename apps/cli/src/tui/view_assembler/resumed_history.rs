@@ -1,4 +1,4 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId, ToolStreamKey};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 use crate::tui::model::conversation::resumed_history::{
     ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep,
 };
@@ -107,7 +107,7 @@ fn materialize_tool_item(
         tool_id.clone(),
         ToolStreamKey::new(
             ChatId::from_legacy_or_new(&step.run_id),
-            ChatTurnId::from_legacy_or_new(&step.step_id),
+            ChatRunId::from_legacy_or_new(&step.step_id),
             tool_name,
             block_index,
         ),
@@ -138,7 +138,7 @@ fn materialize_tool_item(
     };
     let lookup = ResumedToolLookup {
         chat_id: &call.stream_key.chat_id,
-        turn_id: &call.stream_key.turn_id,
+        run_id: &call.stream_key.run_id,
         tool_id: &tool_id,
         call: &call,
     };
@@ -146,7 +146,7 @@ fn materialize_tool_item(
         crate::tui::model::output_timeline::OutputTimelineItem::ToolResult {
             reference: crate::tui::model::output_timeline::TimelineToolCallRef::new(
                 call.stream_key.chat_id.clone(),
-                call.stream_key.turn_id.clone(),
+                call.stream_key.run_id.clone(),
                 tool_id.clone(),
             ),
         }
@@ -154,7 +154,7 @@ fn materialize_tool_item(
         crate::tui::model::output_timeline::OutputTimelineItem::ToolCall {
             reference: crate::tui::model::output_timeline::TimelineToolCallRef::new(
                 call.stream_key.chat_id.clone(),
-                call.stream_key.turn_id.clone(),
+                call.stream_key.run_id.clone(),
                 tool_id.clone(),
             ),
         }
@@ -195,7 +195,7 @@ fn find_tool_result<'a>(
 
 struct ResumedToolLookup<'a> {
     chat_id: &'a ChatId,
-    turn_id: &'a ChatTurnId,
+    run_id: &'a ChatRunId,
     tool_id: &'a ToolCallId,
     call: &'a ToolCall,
 }
@@ -204,10 +204,10 @@ impl ToolCallLookup for ResumedToolLookup<'_> {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        (self.chat_id == chat_id && self.turn_id == turn_id && self.tool_id == tool_id)
+        (self.chat_id == chat_id && self.run_id == run_id && self.tool_id == tool_id)
             .then_some(self.call)
     }
 }
