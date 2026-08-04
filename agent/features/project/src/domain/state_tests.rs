@@ -644,6 +644,133 @@ fn switch_to_succeeds_same_repo() {
 }
 
 #[test]
+fn switch_to_from_linked_back_to_primary_clears_stale_stack() {
+    // 复现：ExitWorktree{path} 经 switch_to 从 linked worktree 切回 primary 时，
+    // 残留的 linked 时期栈帧违反「stack 非空 ⟺ Linked」不变量，导致 resume 时
+    // prepare_restore 返回 InvalidStackShape。switch_to MUST 清空 stack。
+    let root = unique_temp_dir("switch_linked_to_primary_root");
+    let common = root.join(".git");
+    let worktree_path = root.join(".worktrees").join("feat");
+    std::fs::create_dir_all(&worktree_path).unwrap();
+    let worktree_canonical = worktree_path.canonicalize().unwrap();
+
+    let mut git = FakeGit::default();
+    git.common_dir.insert(root.clone(), common.clone());
+    git.common_dir
+        .insert(worktree_canonical.clone(), common.clone());
+    git.toplevel.insert(root.clone(), root.clone());
+    git.toplevel
+        .insert(worktree_canonical.clone(), worktree_canonical.clone());
+    git.worktrees.insert(worktree_canonical.clone());
+
+    // 初始：primary，在 main worktree。
+    let mut state = WorkspaceState {
+        project_identity: ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        workspace_root: root.clone(),
+        path_base: root.clone(),
+        worktree_kind: WorktreeKind::Primary,
+        stack: Vec::new(),
+    };
+
+    // enter linked worktree → stack 含一个 Primary 栈帧，kind=Linked。
+    enter(
+        &mut state,
+        &git,
+        Some(worktree_canonical.clone()),
+        Some("feat".to_string()),
+        None,
+    )
+    .expect("enter linked worktree");
+    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
+    assert_eq!(state.stack.len(), 1);
+
+    // switch_to 切回 primary worktree 根。
+    switch_to(&mut state, &git, root.clone()).expect("switch to primary");
+
+    // 不变量：切回 Primary 后 stack MUST 为空。
+    assert_eq!(
+        state.worktree_kind,
+        WorktreeKind::Primary,
+        "kind should be Primary after switch back"
+    );
+    assert_eq!(state.workspace_root, root);
+    assert_eq!(state.path_base, root);
+    assert!(
+        state.stack.is_empty(),
+        "stack MUST be cleared when switching back to Primary"
+    );
+
+    // snapshot 后 prepare_restore MUST 成功（不变量满足）。
+    let snapshot_dto = snapshot(&state);
+    let live = st("/repo");
+    let _prepared = prepare_restore(&live, &snapshot_dto, &git)
+        .expect("snapshot with cleared stack must restore successfully");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn switch_to_from_linked_to_another_linked_clears_stale_stack() {
+    // switch_to 在 linked 之间切换也 MUST 清空残留栈帧（不留多余栈帧）。
+    let root = unique_temp_dir("switch_linked_to_linked_root");
+    let common = root.join(".git");
+    let wt_a = root.join(".worktrees").join("a");
+    let wt_b = root.join(".worktrees").join("b");
+    std::fs::create_dir_all(&wt_a).unwrap();
+    std::fs::create_dir_all(&wt_b).unwrap();
+    let canonical_a = wt_a.canonicalize().unwrap();
+    let canonical_b = wt_b.canonicalize().unwrap();
+
+    let mut git = FakeGit::default();
+    git.common_dir.insert(root.clone(), common.clone());
+    git.common_dir.insert(canonical_a.clone(), common.clone());
+    git.common_dir.insert(canonical_b.clone(), common.clone());
+    git.toplevel.insert(root.clone(), root.clone());
+    git.toplevel
+        .insert(canonical_a.clone(), canonical_a.clone());
+    git.toplevel
+        .insert(canonical_b.clone(), canonical_b.clone());
+    git.worktrees.insert(canonical_a.clone());
+    git.worktrees.insert(canonical_b.clone());
+
+    let mut state = WorkspaceState {
+        project_identity: ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.display().to_string()),
+        },
+        workspace_root: root.clone(),
+        path_base: root.clone(),
+        worktree_kind: WorktreeKind::Primary,
+        stack: Vec::new(),
+    };
+
+    enter(
+        &mut state,
+        &git,
+        Some(canonical_a.clone()),
+        Some("a".to_string()),
+        None,
+    )
+    .expect("enter linked worktree a");
+    assert_eq!(state.stack.len(), 1);
+
+    // switch_to 从 a 切到 b（仍为 linked）。
+    switch_to(&mut state, &git, canonical_b.clone()).expect("switch to linked b");
+
+    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
+    assert_eq!(state.path_base, canonical_b);
+    assert!(
+        state.stack.is_empty(),
+        "switch_to MUST not leave stale stack frames"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_target() {
     let target = unique_temp_dir("non_git_target");
     let mut git = FakeGit::default();
