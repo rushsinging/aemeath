@@ -102,10 +102,12 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    /// Tool 执行或 Runtime 内部反馈注入后同步，TUI 只同步消息。
-    PostToolExecutionSync {
-        messages: Vec<TuiChatMessage>,
+    /// Runtime 已提交消息状态的轻量有序投影。
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
+    HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice),
     /// Provider API 调用失败，TUI stop spinner + 显示错误。
     ApiError {
         messages: Vec<TuiChatMessage>,

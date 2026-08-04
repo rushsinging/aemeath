@@ -50,6 +50,9 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::AskUserBatch(ask) => {
                 blocks::ask_user::render_ask_user_batch(block_id, ask, ctx)
             }
+            OutputBlockKind::HookNotice(notice) => {
+                blocks::hook_notice::render_hook_notice(block_id, notice, ctx)
+            }
             OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
                 blocks::diagnostic::render_diagnostic(block_id, text, ctx)
             }

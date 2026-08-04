@@ -51,6 +51,12 @@ pub enum OutputTimelineItem {
     ToolResult {
         reference: TimelineToolCallRef,
     },
+    HookNotice {
+        id: String,
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+    },
     System {
         id: String,
         text: String,
@@ -99,6 +105,7 @@ impl OutputTimelineItem {
             OutputTimelineItem::UserMessage { id, .. }
             | OutputTimelineItem::AssistantText { id, .. }
             | OutputTimelineItem::Thinking { id, .. }
+            | OutputTimelineItem::HookNotice { id, .. }
             | OutputTimelineItem::System { id, .. }
             | OutputTimelineItem::Error { id, .. }
             | OutputTimelineItem::QueuedUserMessage { id, .. }

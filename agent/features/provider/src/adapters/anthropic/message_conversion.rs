@@ -245,7 +245,7 @@ mod tests {
             }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: None,
             }),
         };

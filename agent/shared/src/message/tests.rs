@@ -21,10 +21,12 @@ fn assistant_with_tools(ids: &[&str]) -> Message {
 // ── 1. Message constructors ────────────────────────────────────
 
 #[test]
-fn stop_hook_feedback_carries_distinct_message_source() {
-    let message = Message::stop_hook_feedback(
+fn hook_notice_carries_distinct_message_source() {
+    let message = Message::hook_notice(
         "blocked",
-        StopHookFeedback {
+        HookNotice {
+            point: "PreToolUse".to_string(),
+            kind: HookNoticeKind::Blocked,
             summary: "blocked".to_string(),
             command: "check-agent-stop.sh".to_string(),
             exit_code: Some(2),
@@ -39,7 +41,7 @@ fn stop_hook_feedback_carries_distinct_message_source() {
 
     assert_eq!(
         message.metadata.as_ref().map(|metadata| metadata.source),
-        Some(MessageSource::StopHook)
+        Some(MessageSource::Hook)
     );
 }
 

@@ -406,6 +406,7 @@ pub struct StepCommit {
     pub step_id: sdk::RunStepId,
     pub expected_revision: Option<crate::ports::SessionRevision>,
     pub cause: crate::ports::FinalizeCause,
+    pub duration_ms: Option<u64>,
     pub messages: Vec<share::message::Message>,
 }
 
@@ -425,6 +426,9 @@ fn prepare_step_commit(
             .context_window()
             .map(|window| window.backing_revision),
         cause,
+        duration_ms: execution
+            .step_elapsed()
+            .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX)),
         messages: execution.step_outcome(),
     }
 }

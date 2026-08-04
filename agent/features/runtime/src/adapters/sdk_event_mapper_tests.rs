@@ -187,6 +187,57 @@ fn session_resume_mapping_preserves_body_free_history_index() {
 }
 
 #[test]
+fn message_state_mapping_preserves_count_and_revision_without_snapshot() {
+    match map_stream_event(RuntimeStreamEvent::SessionMessageStateChanged {
+        message_count: 7,
+        revision: 3,
+    }) {
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => {
+            assert_eq!(message_count, 7);
+            assert_eq!(revision, 3);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn hook_notice_mapping_preserves_point_kind_and_all_fields_for_sdk() {
+    let notice = share::message::HookNotice {
+        point: "PreToolUse".to_string(),
+        kind: share::message::HookNoticeKind::Blocked,
+        summary: "Stop hook 阻止了停止。".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(2),
+        reason: "exit code 2".to_string(),
+        stdout_preview: "stdout preview".to_string(),
+        stderr_preview: "stderr preview".to_string(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        output_file: Some("/tmp/stop-hook.txt".to_string()),
+    };
+
+    match map_stream_event(RuntimeStreamEvent::HookNotice(notice)) {
+        sdk::ChatEvent::HookNotice { notice } => {
+            assert_eq!(notice.point, "PreToolUse");
+            assert_eq!(notice.kind, sdk::HookNoticeKindView::Blocked);
+            assert_eq!(notice.summary, "Stop hook 阻止了停止。");
+            assert_eq!(notice.command, "check-agent-stop.sh");
+            assert_eq!(notice.exit_code, Some(2));
+            assert_eq!(notice.reason, "exit code 2");
+            assert_eq!(notice.stdout_preview, "stdout preview");
+            assert_eq!(notice.stderr_preview, "stderr preview");
+            assert!(notice.stdout_truncated);
+            assert!(!notice.stderr_truncated);
+            assert_eq!(notice.output_file.as_deref(), Some("/tmp/stop-hook.txt"));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn compact_finished_preserves_runtime_owned_notice() {
     let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
         messages: vec![share::message::Message::user("recent")],
@@ -203,28 +254,37 @@ fn compact_finished_preserves_runtime_owned_notice() {
 }
 
 #[test]
-fn session_resume_mapping_preserves_context_run_step_boundaries() {
-    let event = RuntimeStreamEvent::SessionResumed {
-        steps: vec![RuntimeResumedSessionStep {
-            run_id: "run-1".into(),
-            step_id: "step-1".into(),
-            message_segments: vec![vec![share::message::Message::user("hello")].into()],
-            finalize_cause: None,
-            duration_ms: None,
-        }],
-        display_history: None,
-        session_id: "session-1".into(),
-        created_at: 0,
-        compacted: false,
-    };
+fn session_resume_mapping_preserves_context_run_step_boundaries_and_terminal_facts() {
+    for finalize_cause in [
+        context::domain::FinalizeCause::Completed,
+        context::domain::FinalizeCause::UserCancelledStep,
+        context::domain::FinalizeCause::RunTerminated,
+    ] {
+        let event = RuntimeStreamEvent::SessionResumed {
+            steps: vec![RuntimeResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                message_segments: vec![vec![share::message::Message::user("hello")].into()],
+                finalize_cause: Some(finalize_cause),
+                duration_ms: Some(125_000),
+            }],
+            display_history: None,
+            session_id: "session-1".into(),
+            created_at: 0,
+            compacted: false,
+        };
 
-    match map_stream_event(event) {
-        sdk::ChatEvent::SessionResumed { steps, .. } => {
-            assert_eq!(steps[0].run_id, "run-1");
-            assert_eq!(steps[0].step_id, "step-1");
-            assert_eq!(steps[0].messages[0].text_content(), "hello");
+        let expected_cause = crate::application::client::map_finalize_cause_to_sdk(finalize_cause);
+        match map_stream_event(event) {
+            sdk::ChatEvent::SessionResumed { steps, .. } => {
+                assert_eq!(steps[0].run_id, "run-1");
+                assert_eq!(steps[0].step_id, "step-1");
+                assert_eq!(steps[0].messages[0].text_content(), "hello");
+                assert_eq!(steps[0].finalize_cause, Some(expected_cause));
+                assert_eq!(steps[0].duration_ms, Some(125_000));
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
-        other => panic!("unexpected event: {other:?}"),
     }
 }
 

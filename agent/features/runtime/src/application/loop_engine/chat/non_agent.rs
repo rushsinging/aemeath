@@ -510,7 +510,7 @@ where
             cancel,
         )
         .await;
-        // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），
+        // TasksSnapshot 由 loop_runner 在 SessionMessageStateChanged 之后统一推送（#642），
         // 不再在此处发 TasksChanged 通知。
         send_tool_result(
             sink,

@@ -11,6 +11,11 @@ pub enum SessionChange {
     MessagesSynced {
         message_count: usize,
     },
+    MessageStateObserved {
+        message_count: usize,
+        revision: u64,
+        revision_gap: Option<u64>,
+    },
     SaveStatusChanged {
         status: SessionSaveStatus,
     },

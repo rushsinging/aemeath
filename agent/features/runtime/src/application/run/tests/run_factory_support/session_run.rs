@@ -57,6 +57,12 @@ impl SessionRunFixture {
         self.context_factory.clone()
     }
 
+    pub(crate) fn use_snapshot_hooks(&mut self) {
+        Arc::get_mut(&mut self.context_factory)
+            .expect("fixture owns its context factory")
+            .use_snapshot_hooks_for_test();
+    }
+
     pub(crate) fn session_revision(&self) -> u64 {
         self.session_state.snapshot_for_run().revision()
     }

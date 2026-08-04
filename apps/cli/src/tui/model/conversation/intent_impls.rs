@@ -47,6 +47,9 @@ impl ConversationUpdate for ResumeConversation {
                     Ok(HistoryDisplayMessage::User { text }) => {
                         all_changes.extend(model.apply(AppendUserMessage { text }));
                     }
+                    Ok(HistoryDisplayMessage::HookNotice { title, text, kind }) => {
+                        all_changes.extend(model.apply(AppendHookNotice { title, text, kind }));
+                    }
                     Ok(HistoryDisplayMessage::TypedJson { text }) => {
                         all_changes.extend(model.apply(AppendSystemMessage { text }));
                     }
@@ -270,6 +273,12 @@ impl ConversationUpdate for TerminalNotice {
 impl ConversationUpdate for PresentCancelledStep {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.present_cancelled_step(self.confirmed)
+    }
+}
+
+impl ConversationUpdate for AppendHookNotice {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.append_hook_notice(self.title, self.text, self.kind)
     }
 }
 
@@ -627,6 +636,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
             Self::PresentCancelledStep(s) => s.update(model),
+            Self::AppendHookNotice(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),
@@ -702,7 +712,7 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }
     }
@@ -724,15 +734,28 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains("终止")
         )));
     }
 
     #[test]
-    fn resume_legacy_completed_step_without_duration_has_no_terminal_notice() {
+    fn resume_legacy_completed_step_without_duration_still_has_terminal_notice() {
         let mut model = ConversationModel::default();
 
         ResumeConversation {
@@ -748,10 +771,21 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(!model.timeline.items().iter().any(|item| matches!(
-            item,
-            OutputTimelineItem::System { text, .. } if text.starts_with('✻')
-        )));
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with("✻ ")
+                            && !text.contains(" for ")
+                            && !text.contains("Completed")
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -771,10 +805,23 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text == "✻ Cancelled, ran 2m 5s"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text == "✻ Cancelled, ran 2m 5s"
+                if text.contains("Completed") || text.contains(" for ") || text.contains("终止")
         )));
     }
 
@@ -790,7 +837,7 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         };
         let result = TuiChatMessage {
@@ -803,7 +850,7 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::SystemGenerated,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         };
 
@@ -844,9 +891,22 @@ mod tests {
             .items()
             .iter()
             .any(|item| matches!(item, OutputTimelineItem::ToolResult { .. })));
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
-            OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+            OutputTimelineItem::System { text, .. }
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains(" for ")
         )));
     }
 
@@ -881,7 +941,7 @@ mod tests {
             content: vec![ask_tool_use("ask-1", "第一问")],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         };
         let assistant_two = TuiChatMessage {
@@ -889,7 +949,7 @@ mod tests {
             content: vec![ask_tool_use("ask-2", "第二问")],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         };
         let mut model = ConversationModel::default();
@@ -931,14 +991,14 @@ mod tests {
     #[test]
     fn resume_excludes_llm_only_messages_from_user_history() {
         let user = TuiChatMessage::user_text("user question");
-        let stop_hook = TuiChatMessage {
+        let hook_notice = TuiChatMessage {
             role: "user".to_string(),
             content: vec![TuiContentBlock::text(
                 "<system-reminder>blocked by hook</system-reminder>",
             )],
             input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: None,
+            source: TuiMessageSource::Hook,
+            hook_notice: None,
             skill_request: None,
         };
         let system_generated = TuiChatMessage::system_generated_user_text(
@@ -951,7 +1011,7 @@ mod tests {
             steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
-                messages: vec![user, stop_hook, system_generated, assistant],
+                messages: vec![user, hook_notice, system_generated, assistant],
                 finalize_cause: None,
                 duration_ms: None,
             }],

@@ -655,7 +655,6 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
-            | RuntimeStreamEvent::PostToolExecutionSync { messages }
             | RuntimeStreamEvent::CompactFinished { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
@@ -664,7 +663,6 @@ impl RecordingSink {
                         "TurnStarted"
                     }
                     RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
-                    RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
                     RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
                     _ => "Sync",
                 };
@@ -704,6 +702,9 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
+            RuntimeStreamEvent::HookNotice(notice) => {
+                format!("HookNotice:{}", notice.reason)
+            }
             RuntimeStreamEvent::Cancelled { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
                 "Cancelled".to_string()
@@ -732,6 +733,10 @@ impl RecordingSink {
                 "UserMessagesAdopted".to_string()
             }
             RuntimeStreamEvent::UserMessagesQueued { .. } => "UserMessagesQueued".to_string(),
+            RuntimeStreamEvent::SessionMessageStateChanged {
+                message_count,
+                revision,
+            } => format!("SessionMessageStateChanged:{message_count}:{revision}"),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
@@ -1198,11 +1203,8 @@ async fn test_run_session_command_driver_stop_hook_blocked_continues_until_succe
     let events = sink.events();
     let feedback_sync = events
         .iter()
-        .position(|event| {
-            event.starts_with("PostToolExecutionSync:")
-                && event.contains("Stop hook prevented stopping")
-        })
-        .expect("blocked Stop hook feedback should be synced through ordinary message flow");
+        .position(|event| event.starts_with("SessionMessageStateChanged:"))
+        .expect("blocked Stop hook feedback should publish message state");
     let hook_activity = events
         .iter()
         .position(|event| event.starts_with("HookActivityChanged:Finished:"))
@@ -1431,7 +1433,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::StopHook);
+    assert_eq!(feedback.source(), MessageSource::Hook);
 }
 
 #[tokio::test]
@@ -1804,12 +1806,21 @@ async fn test_continue_false_json_treated_as_block() {
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
-    // continue:false 应产生普通反馈同步并终结 Hook Activity。
+    // continue:false 应产生独立 typed feedback、消息同步并终结 Hook Activity。
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.starts_with("HookNotice:"))
+            .count(),
+        1,
+        "continue:false should publish one typed feedback event: {:?}",
+        events
+    );
     assert!(
-        events.iter().any(|event| {
-            event.starts_with("PostToolExecutionSync:") && event.contains("must keep working")
-        }),
-        "continue:false JSON should be recognized as block: {:?}",
+        events
+            .iter()
+            .any(|event| event.starts_with("SessionMessageStateChanged:")),
+        "continue:false should still synchronize the canonical message snapshot: {:?}",
         events
     );
     // 应有反馈注入（stopReason 内容）
@@ -1903,11 +1914,10 @@ async fn test_stall_triggers_stop_hook_check() {
     // soft text repetition but does not expose it as a domain/UI event; importantly, it still
     // preserves stop-hook feedback in this same Run and eventually reaches one terminal event.
     assert!(
-        events.iter().any(|event| {
-            event.starts_with("PostToolExecutionSync:")
-                && event.contains("Stop hook prevented stopping")
-        }),
-        "stop hook should be checked while the shared Run continues: {:?}",
+        events
+            .iter()
+            .any(|event| event.starts_with("SessionMessageStateChanged:")),
+        "stop hook should publish message state while the shared Run continues: {:?}",
         events
     );
     // stall 后 Stop hook 阻断，应有第 4 次 LLM 响应（说明 detector 重置并继续了）
@@ -4252,7 +4262,7 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
 /// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
 ///  - 首请求 messages 含 `<system-reminder>`（计数 + 任务列表）
 ///  - 同 run 第二次请求（tool 往返后）不再注入
-///  - TUI 同步快照（TurnStarted / PostToolExecutionSync）不含注入内容
+///  - TUI 同步快照（TurnStarted / SessionMessageStateChanged）不含注入内容
 #[tokio::test]
 async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
     let after_first = Arc::new(tokio::sync::Notify::new());

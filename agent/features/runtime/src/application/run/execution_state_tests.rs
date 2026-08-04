@@ -200,6 +200,16 @@ fn messages_and_accepted_input_are_run_owned_working_sets() {
 }
 
 #[test]
+fn begin_step_starts_step_elapsed_clock() {
+    let mut state = RunExecutionState::new();
+    assert_eq!(state.step_elapsed(), None);
+
+    state.begin_step();
+
+    assert!(state.step_elapsed().is_some());
+}
+
+#[test]
 fn begin_step_replaces_transient_step_data_without_discarding_messages() {
     let mut state = RunExecutionState::new();
     state.append_message(Message::user("history"));

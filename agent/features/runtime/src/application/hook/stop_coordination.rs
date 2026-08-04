@@ -24,7 +24,7 @@ use hook::{
     HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionObserver,
     StopInput,
 };
-use share::message::{Message, StopHookFeedback};
+use share::message::{HookNotice, HookNoticeKind, Message};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -54,17 +54,17 @@ pub struct StopHookBlock {
     /// BC 保留的展示消息（按源顺序 1:1 投影，用于 UI 展示）。
     pub messages: Vec<super::outcome_mapper::RuntimeHookDisplayMessage>,
     /// Feedback materialization 所需材料；adapter 在 seam 实现中完成构造。
-    pub feedback: StopHookFeedbackMaterial,
+    pub feedback: HookNoticeMaterial,
 }
 
 /// Feedback 材料：由 adapter 层的 `evaluate_stop_hook` 实现消费，
-/// 构造 `Message::stop_hook_feedback` 并注入消息流。
+/// 构造通用 `Message::hook_notice` 并注入消息流。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StopHookFeedbackMaterial {
+pub struct HookNoticeMaterial {
     /// LLM 可见的提示文本（含 command/exit_code/reason/stdout/stderr 摘要）。
     pub llm_text: String,
-    /// 结构化 feedback payload（TUI 展示用）。
-    pub payload: StopHookFeedback,
+    /// 结构化 Hook notice（TUI 展示与 Session 恢复共用）。
+    pub notice: HookNotice,
 }
 
 /// Block detail（与 RuntimeHookBlockDetail 语义一致，但作为 StopHookDecision 内嵌类型重新导出）。
@@ -254,12 +254,12 @@ pub async fn orchestrate_stop_hook(
                 &context.language,
             )
             .await;
-            let message = Message::stop_hook_feedback(
+            let message = Message::hook_notice(
                 format!(
                     "<system-reminder>\n{}\n</system-reminder>",
                     feedback.llm_text
                 ),
-                feedback.payload.clone(),
+                feedback.notice.clone(),
             );
             (
                 StopHookDecision::Block(Box::new(StopHookBlock {
@@ -294,7 +294,7 @@ pub(crate) async fn materialize_stop_hook_feedback(
     reason: &RuntimeHookReason,
     session_id: &str,
     language: &str,
-) -> StopHookFeedbackMaterial {
+) -> HookNoticeMaterial {
     let output = full_hook_output(detail, reason);
     let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
         write_long_hook_feedback(session_id, &detail.command, &output)
@@ -311,7 +311,7 @@ fn build_stop_hook_feedback(
     reason: &RuntimeHookReason,
     language: &str,
     output_file: Option<String>,
-) -> StopHookFeedbackMaterial {
+) -> HookNoticeMaterial {
     let summary = match language {
         "zh" => "Stop hook 阻止了停止。".to_string(),
         _ => "Stop hook prevented stopping.".to_string(),
@@ -322,7 +322,9 @@ fn build_stop_hook_feedback(
         truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
     let (stderr_preview, stderr_truncated) =
         truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
-    let payload = StopHookFeedback {
+    let notice = HookNotice {
+        point: "Stop".to_string(),
+        kind: HookNoticeKind::Blocked,
         summary,
         command,
         exit_code: detail.execution.exit_code,
@@ -334,11 +336,11 @@ fn build_stop_hook_feedback(
         output_file,
     };
 
-    let mut llm_text = stop_hook_llm_text_english(&payload);
+    let mut llm_text = stop_hook_llm_text_english(&notice);
     if language == "zh" {
         llm_text = llm_text.replace("Stop hook prevented stopping.", "Stop hook 阻止了停止。");
     }
-    StopHookFeedbackMaterial { llm_text, payload }
+    HookNoticeMaterial { llm_text, notice }
 }
 
 fn full_hook_output(detail: &RuntimeHookBlockDetail, reason: &RuntimeHookReason) -> String {
@@ -393,26 +395,26 @@ fn format_reason(reason: &RuntimeHookReason) -> String {
     }
 }
 
-fn stop_hook_llm_text_english(payload: &StopHookFeedback) -> String {
+fn stop_hook_llm_text_english(notice: &HookNotice) -> String {
     let mut text = format!(
         "{}\nCommand: {}\nExit code: {}\nReason: {}",
-        payload.summary,
-        payload.command,
-        payload
+        notice.summary,
+        notice.command,
+        notice
             .exit_code
             .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
-        payload.reason
+        notice.reason
     );
-    if let Some(path) = &payload.output_file {
+    if let Some(path) = &notice.output_file {
         text.push_str(&format!(
             "\nFull hook output is saved to {path}; use the Read tool to inspect it."
         ));
     } else {
-        if !payload.stderr_preview.trim().is_empty() {
-            text.push_str(&format!("\nstderr:\n{}", payload.stderr_preview));
+        if !notice.stderr_preview.trim().is_empty() {
+            text.push_str(&format!("\nstderr:\n{}", notice.stderr_preview));
         }
-        if !payload.stdout_preview.trim().is_empty() {
-            text.push_str(&format!("\nstdout:\n{}", payload.stdout_preview));
+        if !notice.stdout_preview.trim().is_empty() {
+            text.push_str(&format!("\nstdout:\n{}", notice.stdout_preview));
         }
     }
     text

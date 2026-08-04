@@ -158,23 +158,33 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
                     crate::ChatMessageSource::SystemGenerated => {
                         share::message::MessageSource::SystemGenerated
                     }
-                    crate::ChatMessageSource::StopHook => share::message::MessageSource::StopHook,
+                    crate::ChatMessageSource::Hook => share::message::MessageSource::Hook,
                     crate::ChatMessageSource::SkillRequest => {
                         share::message::MessageSource::SkillRequest
                     }
                 },
-                stop_hook: metadata
-                    .stop_hook
-                    .map(|payload| share::message::StopHookFeedback {
-                        summary: payload.summary,
-                        command: payload.command,
-                        exit_code: payload.exit_code,
-                        reason: payload.reason,
-                        stdout_preview: payload.stdout_preview,
-                        stderr_preview: payload.stderr_preview,
-                        stdout_truncated: payload.stdout_truncated,
-                        stderr_truncated: payload.stderr_truncated,
-                        output_file: payload.output_file,
+                hook_notice: metadata
+                    .hook_notice
+                    .map(|notice| share::message::HookNotice {
+                        point: notice.point,
+                        kind: match notice.kind {
+                            crate::HookNoticeKindView::Blocked => {
+                                share::message::HookNoticeKind::Blocked
+                            }
+                            crate::HookNoticeKindView::Failed => {
+                                share::message::HookNoticeKind::Failed
+                            }
+                            crate::HookNoticeKindView::Info => share::message::HookNoticeKind::Info,
+                        },
+                        summary: notice.summary,
+                        command: notice.command,
+                        exit_code: notice.exit_code,
+                        reason: notice.reason,
+                        stdout_preview: notice.stdout_preview,
+                        stderr_preview: notice.stderr_preview,
+                        stdout_truncated: notice.stdout_truncated,
+                        stderr_truncated: notice.stderr_truncated,
+                        output_file: notice.output_file,
                     }),
                 skill_request: metadata.skill_request.map(|payload| {
                     share::message::SkillRequestMetadata {
@@ -204,24 +214,34 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
                     share::message::MessageSource::SystemGenerated => {
                         crate::ChatMessageSource::SystemGenerated
                     }
-                    share::message::MessageSource::StopHook => crate::ChatMessageSource::StopHook,
+                    share::message::MessageSource::Hook => crate::ChatMessageSource::Hook,
                     share::message::MessageSource::SkillRequest => {
                         crate::ChatMessageSource::SkillRequest
                     }
                 },
-                stop_hook: metadata
-                    .stop_hook
+                hook_notice: metadata
+                    .hook_notice
                     .as_ref()
-                    .map(|payload| crate::StopHookFeedbackView {
-                        summary: payload.summary.clone(),
-                        command: payload.command.clone(),
-                        exit_code: payload.exit_code,
-                        reason: payload.reason.clone(),
-                        stdout_preview: payload.stdout_preview.clone(),
-                        stderr_preview: payload.stderr_preview.clone(),
-                        stdout_truncated: payload.stdout_truncated,
-                        stderr_truncated: payload.stderr_truncated,
-                        output_file: payload.output_file.clone(),
+                    .map(|notice| crate::HookNoticeView {
+                        point: notice.point.clone(),
+                        kind: match notice.kind {
+                            share::message::HookNoticeKind::Blocked => {
+                                crate::HookNoticeKindView::Blocked
+                            }
+                            share::message::HookNoticeKind::Failed => {
+                                crate::HookNoticeKindView::Failed
+                            }
+                            share::message::HookNoticeKind::Info => crate::HookNoticeKindView::Info,
+                        },
+                        summary: notice.summary.clone(),
+                        command: notice.command.clone(),
+                        exit_code: notice.exit_code,
+                        reason: notice.reason.clone(),
+                        stdout_preview: notice.stdout_preview.clone(),
+                        stderr_preview: notice.stderr_preview.clone(),
+                        stdout_truncated: notice.stdout_truncated,
+                        stderr_truncated: notice.stderr_truncated,
+                        output_file: notice.output_file.clone(),
                     }),
                 skill_request: metadata.skill_request.as_ref().map(|payload| {
                     crate::SkillRequestMetadataView {
@@ -523,9 +543,14 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
     },
-    /// Tool 执行完成或 Runtime 注入内部反馈后的消息同步。
-    PostToolExecutionSync {
-        messages: Vec<ChatMessage>,
+    /// Runtime 已提交消息状态的轻量有序投影。
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
+    },
+    /// Hook 用户可见 typed notice。
+    HookNotice {
+        notice: crate::HookNoticeView,
     },
     /// Provider API 调用失败。TUI 据此 stop spinner + 显示错误。
     ApiError {

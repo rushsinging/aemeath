@@ -1331,6 +1331,20 @@ async fn display_message_attempt_and_ordinal_after_retries() {
     assert!(flaky_msg.execution_ordinal < stable_msg.execution_ordinal);
 }
 
+#[test]
+fn script_file_name_reconstructs_adjacent_quoted_and_unquoted_command_segments() {
+    assert_eq!(
+        super::hook_script_file_name("\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-verify.sh --fast"),
+        "stop-verify.sh"
+    );
+    assert_eq!(
+        super::hook_script_file_name(
+            "'$AEMEATH_PROJECT_DIR'/.agents/hooks/check-architecture-guards.sh"
+        ),
+        "check-architecture-guards.sh"
+    );
+}
+
 #[tokio::test]
 async fn subscription_execution_events_follow_order_and_expose_only_script_file_name() {
     let subs = vec![

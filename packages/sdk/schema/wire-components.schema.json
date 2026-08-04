@@ -701,6 +701,16 @@
     },
     "ChatMessageMetadata": {
       "properties": {
+        "hook_notice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HookNoticeView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "skill_request": {
           "anyOf": [
             {
@@ -714,16 +724,6 @@
         "source": {
           "$ref": "#/$defs/ChatMessageSource",
           "default": "user"
-        },
-        "stop_hook": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/StopHookFeedbackView"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "type": "object"
@@ -732,7 +732,7 @@
       "enum": [
         "user",
         "system_generated",
-        "stop_hook",
+        "hook",
         "skill_request"
       ],
       "type": "string"
@@ -1111,6 +1111,70 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "HookNoticeKindView": {
+      "enum": [
+        "blocked",
+        "failed",
+        "info"
+      ],
+      "type": "string"
+    },
+    "HookNoticeView": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/HookNoticeKindView",
+          "default": "blocked"
+        },
+        "output_file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "point": {
+          "default": "Stop",
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "stderr_preview": {
+          "type": "string"
+        },
+        "stderr_truncated": {
+          "type": "boolean"
+        },
+        "stdout_preview": {
+          "type": "string"
+        },
+        "stdout_truncated": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary",
+        "command",
+        "reason",
+        "stdout_preview",
+        "stderr_preview",
+        "stdout_truncated",
+        "stderr_truncated"
+      ],
       "type": "object"
     },
     "HookPointView": {
@@ -1913,54 +1977,6 @@
         "skill",
         "arguments",
         "raw_input"
-      ],
-      "type": "object"
-    },
-    "StopHookFeedbackView": {
-      "properties": {
-        "command": {
-          "type": "string"
-        },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "output_file": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
-          "type": "string"
-        },
-        "stderr_preview": {
-          "type": "string"
-        },
-        "stderr_truncated": {
-          "type": "boolean"
-        },
-        "stdout_preview": {
-          "type": "string"
-        },
-        "stdout_truncated": {
-          "type": "boolean"
-        },
-        "summary": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "summary",
-        "command",
-        "reason",
-        "stdout_preview",
-        "stderr_preview",
-        "stdout_truncated",
-        "stderr_truncated"
       ],
       "type": "object"
     },

@@ -132,6 +132,129 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
 }
 
 #[test]
+fn lazy_resume_loaded_window_renders_each_terminal_cause_on_real_framebuffer() {
+    use crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause;
+
+    let cases = [
+        (
+            "completed-with-duration",
+            TuiResumedStepFinalizeCause::Completed,
+            Some(125_000),
+            " for 2m 5s",
+            ["Completed", "Cancelled", "终止"].as_slice(),
+        ),
+        (
+            "completed-without-duration",
+            TuiResumedStepFinalizeCause::Completed,
+            None,
+            "✻ ",
+            ["Completed", "Cancelled", "终止", " for "].as_slice(),
+        ),
+        (
+            "cancelled-with-duration",
+            TuiResumedStepFinalizeCause::UserCancelledStep,
+            Some(125_000),
+            "✻ Cancelled, ran 2m 5s",
+            ["Completed", " for ", "终止"].as_slice(),
+        ),
+        (
+            "cancelled-without-duration",
+            TuiResumedStepFinalizeCause::UserCancelledStep,
+            None,
+            "✻ Cancelled",
+            ["Completed", " for ", "终止"].as_slice(),
+        ),
+        (
+            "terminated",
+            TuiResumedStepFinalizeCause::RunTerminated,
+            None,
+            "此 Run 已终止",
+            ["Completed", "Cancelled", " for "].as_slice(),
+        ),
+    ];
+
+    for (case_name, finalize_cause, duration_ms, expected, forbidden) in cases {
+        let mut harness = TuiScenarioHarness::new(100, 30);
+        let session_id = format!("resume-terminal-{case_name}");
+        let run_id = format!("run-{case_name}");
+        let step_id = format!("step-{case_name}");
+        let member_name = format!("steps/{case_name}.json");
+        harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+            display_history: Some(TuiDisplayHistoryIndex {
+                session_id: session_id.clone(),
+                generation_revision: 42,
+                steps: vec![TuiDisplayHistoryStepReference {
+                    run_id: run_id.clone(),
+                    step_id: step_id.clone(),
+                    member_name,
+                    estimated_lines: 3,
+                    user_input_history: Vec::new(),
+                    finalize_cause: Some(finalize_cause),
+                    duration_ms,
+                }],
+            }),
+            steps: Vec::new(),
+            session_id: session_id.clone(),
+            created_at: 0,
+            compacted: false,
+        });
+        harness.render();
+        harness.ui(
+            crate::tui::app::event::UiEvent::DisplayHistoryWindowLoaded {
+                window: sdk::DisplayHistoryWindow {
+                    session_id,
+                    generation_revision: 42,
+                    steps: vec![sdk::ResumedSessionStep {
+                        run_id,
+                        step_id,
+                        messages: vec![sdk::ChatMessage::assistant_text(format!(
+                            "answer-{case_name}"
+                        ))],
+                        finalize_cause: Some(match finalize_cause {
+                            TuiResumedStepFinalizeCause::Completed => {
+                                sdk::ResumedStepFinalizeCause::Completed
+                            }
+                            TuiResumedStepFinalizeCause::UserCancelledStep => {
+                                sdk::ResumedStepFinalizeCause::UserCancelledStep
+                            }
+                            TuiResumedStepFinalizeCause::RunTerminated => {
+                                sdk::ResumedStepFinalizeCause::RunTerminated
+                            }
+                        }),
+                        duration_ms,
+                    }],
+                },
+            },
+        );
+        harness.render();
+
+        let screen = harness.screen();
+        let compact_screen = screen.split_whitespace().collect::<String>();
+        let compact_expected = expected.split_whitespace().collect::<String>();
+        assert!(
+            compact_screen.contains(&format!("answer-{case_name}")),
+            "case={case_name}\n{screen}"
+        );
+        assert!(
+            compact_screen.contains(&compact_expected),
+            "case={case_name}\n{screen}"
+        );
+        assert_eq!(
+            compact_screen.matches(&compact_expected).count(),
+            1,
+            "case={case_name}\n{screen}"
+        );
+        for forbidden_text in forbidden {
+            let compact_forbidden = forbidden_text.split_whitespace().collect::<String>();
+            assert!(
+                !compact_screen.contains(&compact_forbidden),
+                "case={case_name}, forbidden={forbidden_text}\n{screen}"
+            );
+        }
+    }
+}
+
+#[test]
 fn resumed_history_initial_window_loads_through_display_query_effect() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
@@ -600,7 +723,7 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
             )],
             input_id: Some("resume-adopted-input".into()),
             source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }],
         queued: vec![],

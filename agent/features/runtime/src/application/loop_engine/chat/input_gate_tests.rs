@@ -206,7 +206,7 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     assert_eq!(outcome.appended_user_messages, 1);
     assert_eq!(outcome.adopted_messages.len(), 1);
     assert_eq!(outcome.adopted_messages[0].1.text_content(), "继续");
-    // #1272: apply_gate no longer emits Adopted or PostToolExecutionSync.
+    // #1272: apply_gate no longer emits Adopted or SessionMessageStateChanged.
     // Adopted is deferred to accept_step_input after durable Context accept.
     assert_eq!(sink.events.lock().unwrap().len(), 0);
 }
@@ -566,7 +566,7 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
     }
 }
 
-/// #1272：apply_gate 不再 emit UserMessagesAdopted / PostToolExecutionSync。
+/// #1272：apply_gate 不再 emit UserMessagesAdopted / SessionMessageStateChanged。
 /// Gate 的 adopted data 仅供 RunPort 携带，UI 投影由 accept_step_input 后发出。
 #[tokio::test]
 async fn test_apply_gate_no_premature_adopted_emission() {
