@@ -512,6 +512,38 @@ fn test_preview_respects_utf8_char_boundary() {
     );
 }
 
+// ---- BashInput goal 字段：反序列化兼容 + schema required ----
+
+#[test]
+fn bash_input_goal_required_and_deserialization() {
+    use crate::domain::types::ToolSchema;
+
+    // 1. 老 session 缺 goal 字段时反序列化仍成功（serde default 兼容）
+    let old_json = json!({"command": "ls -la", "timeout": 5000});
+    let input: BashInput = serde_json::from_value(old_json).unwrap();
+    assert_eq!(input.command, "ls -la");
+    assert!(input.goal.is_empty(), "老 session 缺 goal 应反序列化为空串");
+
+    // 2. goal 字段正常解析
+    let new_json = json!({"goal": "列出文件", "command": "ls -la"});
+    let input: BashInput = serde_json::from_value(new_json).unwrap();
+    assert_eq!(input.goal, "列出文件");
+    assert_eq!(input.command, "ls -la");
+
+    // 3. schema 中 goal 和 command 均在 required 列表
+    let schema = BashInput::data_schema();
+    let required = schema.get("required").expect("schema 应有 required 字段");
+    let required_str = required.to_string();
+    assert!(
+        required_str.contains("\"goal\""),
+        "goal 应在 required 中，实际: {required_str}"
+    );
+    assert!(
+        required_str.contains("\"command\""),
+        "command 应在 required 中，实际: {required_str}"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 #[cfg_attr(
