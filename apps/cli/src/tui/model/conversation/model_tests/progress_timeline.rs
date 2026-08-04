@@ -1,3 +1,135 @@
+use crate::tui::adapter::tui_runtime_event::{
+    TuiChildRunActivityKind, TuiChildRunTerminalOutcome,
+};
+
+#[test]
+fn child_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let run_id = super::ids::ChatRunId::new("parent-run");
+    let first_tool_id = super::ids::ToolCallId::new("agent-first");
+    let second_tool_id = super::ids::ToolCallId::new("agent-second");
+
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    for (index, tool_id) in [first_tool_id.clone(), second_tool_id.clone()]
+        .into_iter()
+        .enumerate()
+    {
+        model.apply(ToolCallStart {
+            chat_id: chat_id.clone(),
+            run_id: run_id.clone(),
+            id: tool_id,
+            provider_id: None,
+            name: "Agent".to_string(),
+            index,
+        });
+    }
+
+    let first_text = RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child-first".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: first_tool_id.clone(),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::Text {
+            text: "first child text".to_string(),
+        },
+    };
+    model.apply(first_text.clone());
+    model.apply(first_text);
+    model.apply(RecordChildRunActivity {
+        agent_id: "reviewer".to_string(),
+        child_run_id: "child-second".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: second_tool_id.clone(),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::Thinking {
+            text: "second child thinking".to_string(),
+        },
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child-first".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: first_tool_id.clone(),
+        sequence: 2,
+        kind: TuiChildRunActivityKind::ToolOutput {
+            tool_name: "grep".to_string(),
+            text: "grep output".to_string(),
+        },
+    });
+
+    assert_eq!(
+        tool_call(&model, &chat_id, &run_id, &first_tool_id)
+            .expect("first parent Agent ToolCall")
+            .activities,
+        vec!["first child textgrep output"]
+    );
+    assert_eq!(
+        tool_call(&model, &chat_id, &run_id, &second_tool_id)
+            .expect("second parent Agent ToolCall")
+            .activities,
+        vec!["second child thinking"]
+    );
+    assert_eq!(model.child_run_activities.len(), 3);
+}
+
+#[test]
+fn child_run_activity_rejects_unknown_parent_and_out_of_order_sequence() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let run_id = super::ids::ChatRunId::new("parent-run");
+    let tool_id = super::ids::ToolCallId::new("agent-tool");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: tool_id.clone(),
+        sequence: 2,
+        kind: TuiChildRunActivityKind::Terminal {
+            outcome: TuiChildRunTerminalOutcome::Completed,
+        },
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: tool_id.clone(),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::Text {
+            text: "late text".to_string(),
+        },
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "unknown".to_string(),
+        child_run_id: "unknown-child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: super::ids::ToolCallId::new("missing-agent-tool"),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::Text {
+            text: "must not attach".to_string(),
+        },
+    });
+
+    assert_eq!(
+        tool_call(&model, &chat_id, &run_id, &tool_id)
+            .expect("parent Agent ToolCall")
+            .activities,
+        vec!["Sub-agent terminal: Completed"]
+    );
+    assert_eq!(model.child_run_activities.len(), 1);
+}
+
 #[test]
 fn concurrent_agent_progress_attaches_to_matching_parent_tool_blocks() {
     let mut model = ConversationModel::default();

@@ -1,5 +1,5 @@
 use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
-use super::agent_progress::AgentProgressEntry;
+use super::agent_progress::{AgentProgressEntry, ChildRunActivityEntry};
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatRun;
@@ -36,6 +36,7 @@ pub struct ConversationModel {
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
     pub agent_progress: Vec<AgentProgressEntry>,
+    pub child_run_activities: Vec<ChildRunActivityEntry>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
     /// 单调递增的内容版本号；每次产生 change 的 apply +1。
@@ -61,6 +62,7 @@ impl Default for ConversationModel {
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
             agent_progress: Vec::new(),
+            child_run_activities: Vec::new(),
             next_chat_sequence: 0,
             next_block_sequence: 0,
             revision: 0,

@@ -212,6 +212,15 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.sequence,
             event
         ),
+        sdk::ChatEvent::ChildRunActivity { event } => crate::tui::log_trace!(
+            "{} child_run_activity agent_id={} run_id={} parent_run_id={} tool_id={} seq={}",
+            stage,
+            event.identity.agent_id,
+            event.identity.run_id,
+            event.identity.parent_run_id,
+            event.identity.spawned_by_tool_call_id,
+            event.sequence
+        ),
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,

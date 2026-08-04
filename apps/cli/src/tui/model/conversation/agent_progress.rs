@@ -1,3 +1,13 @@
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChildRunActivityEntry {
+    pub agent_id: String,
+    pub run_id: String,
+    pub parent_run_id: String,
+    pub spawned_by_tool_call_id: String,
+    pub sequence: u64,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentProgressEntry {
     pub tool_id: String,

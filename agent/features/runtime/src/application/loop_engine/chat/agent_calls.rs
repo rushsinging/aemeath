@@ -303,8 +303,12 @@ where
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
+    let child_parent_context = progress_context.clone();
+    let child_parent_tool_id = call_id.clone();
     let progress_log_context = logging::capture();
     let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
+        let mut child_activity_publisher =
+            ChildRunActivityPublisher::new(child_parent_context, child_parent_tool_id);
         while let Some(event) = prog_rx.recv().await {
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -317,6 +321,11 @@ where
                 progress_context.chat_id,
                 progress_context.run_id,
             );
+            for activity in child_activity_publisher.publish(event.clone()) {
+                let _ = ui_sink
+                    .send_event(RuntimeStreamEvent::ChildRunActivity(activity))
+                    .await;
+            }
             let source_context = event
                 .source_context
                 .as_ref()
@@ -373,6 +382,88 @@ where
     vec![execution]
 }
 
+struct ChildRunActivityPublisher {
+    identity: Option<tools::ChildRunIdentity>,
+    parent_context: RuntimeRunContext,
+    parent_tool_call_id: sdk::ToolCallId,
+    sequence: u64,
+}
+
+impl ChildRunActivityPublisher {
+    fn new(parent_context: RuntimeRunContext, parent_tool_call_id: sdk::ToolCallId) -> Self {
+        Self {
+            identity: None,
+            parent_context,
+            parent_tool_call_id,
+            sequence: 0,
+        }
+    }
+
+    fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<tools::ChildRunActivityEvent> {
+        if self.identity.is_none() {
+            if let Some(source) = event.source_context.as_ref() {
+                self.identity = Some(tools::ChildRunIdentity {
+                    agent_id: source.chat_id.clone(),
+                    run_id: source.run_id.clone(),
+                    parent_run_id: self.parent_context.run_id.to_string(),
+                    spawned_by_tool_call_id: self.parent_tool_call_id.to_string(),
+                });
+            }
+        }
+        let Some(identity) = self.identity.clone() else {
+            return Vec::new();
+        };
+        child_run_activity_kinds(event.kind)
+            .into_iter()
+            .map(|kind| {
+                self.sequence = self.sequence.saturating_add(1);
+                tools::ChildRunActivityEvent {
+                    identity: identity.clone(),
+                    sequence: self.sequence,
+                    kind,
+                }
+            })
+            .collect()
+    }
+}
+
+fn child_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::ChildRunActivityKind> {
+    match kind {
+        tools::AgentProgressKind::Started { .. } => Vec::new(),
+        tools::AgentProgressKind::Message { text } => {
+            vec![tools::ChildRunActivityKind::Text { text }]
+        }
+        tools::AgentProgressKind::Thinking { text } => {
+            vec![tools::ChildRunActivityKind::Thinking { text }]
+        }
+        tools::AgentProgressKind::ToolCalls { calls } => calls
+            .into_iter()
+            .map(|call| tools::ChildRunActivityKind::ToolCall {
+                id: call.id,
+                name: call.name,
+                input: call.input,
+            })
+            .collect(),
+        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
+            vec![tools::ChildRunActivityKind::ToolOutput { tool_name, text }]
+        }
+        tools::AgentProgressKind::ToolResult {
+            tool_call_id,
+            output,
+            content,
+            is_error,
+        } => vec![tools::ChildRunActivityKind::ToolResult {
+            tool_call_id,
+            output,
+            content,
+            is_error,
+        }],
+        tools::AgentProgressKind::Terminal { outcome } => {
+            vec![tools::ChildRunActivityKind::Terminal { outcome }]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +476,82 @@ mod tests {
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Notify};
     use tools::{TypedTool, TypedToolResult};
+
+    #[test]
+    fn child_run_activity_projection_preserves_parent_tool_identity_and_kinds() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let event = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 7,
+            kind: tools::AgentProgressKind::Thinking {
+                text: "reasoning".to_string(),
+            },
+        };
+
+        let mut publisher =
+            ChildRunActivityPublisher::new(parent_context.clone(), parent_tool_id.clone());
+        let projected = publisher.publish(event);
+
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].identity.agent_id, "researcher");
+        assert_eq!(projected[0].identity.run_id, "child-run");
+        assert_eq!(
+            projected[0].identity.parent_run_id,
+            parent_context.run_id.to_string()
+        );
+        assert_eq!(
+            projected[0].identity.spawned_by_tool_call_id,
+            parent_tool_id.to_string()
+        );
+        assert_eq!(projected[0].sequence, 1);
+        assert!(matches!(
+            &projected[0].kind,
+            tools::ChildRunActivityKind::Thinking { text } if text == "reasoning"
+        ));
+    }
+
+    #[test]
+    fn child_run_activity_projection_sequences_tool_output_without_source_context() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let mut publisher = ChildRunActivityPublisher::new(parent_context, parent_tool_id);
+        let started = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 0,
+            kind: tools::AgentProgressKind::Started {
+                role: Some("researcher".to_string()),
+                model: "model".to_string(),
+            },
+        };
+        assert!(publisher.publish(started).is_empty());
+
+        let output = publisher.publish(tools::AgentProgressEvent {
+            source_context: None,
+            sequence: 1,
+            kind: tools::AgentProgressKind::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: "hello".to_string(),
+            },
+        });
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].identity.run_id, "child-run");
+        assert_eq!(output[0].sequence, 1);
+        assert!(matches!(
+            &output[0].kind,
+            tools::ChildRunActivityKind::ToolOutput { tool_name, text }
+                if tool_name == "Bash" && text == "hello"
+        ));
+    }
 
     #[derive(Clone)]
     struct NoopSink;

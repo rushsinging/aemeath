@@ -302,6 +302,12 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
     }
 }
 
+impl ConversationUpdate for RecordChildRunActivity {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_child_run_activity(self)
+    }
+}
+
 impl ConversationUpdate for RecordAgentProgress {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.record_agent_progress(self.chat_id, self.run_id, self.tool_id, self.message)
@@ -632,6 +638,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
+            Self::RecordChildRunActivity(s) => s.update(model),
             Self::RecordAgentProgress(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),

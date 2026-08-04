@@ -1,4 +1,5 @@
 use super::agent_progress::AgentProgressEntry;
+use super::agent_progress::ChildRunActivityEntry;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
@@ -32,6 +33,89 @@ pub(super) struct ToolCallUpdateObservation {
 }
 
 impl ConversationModel {
+    pub(super) fn record_child_run_activity(
+        &mut self,
+        activity: crate::tui::model::conversation::intent::RecordChildRunActivity,
+    ) -> Vec<ConversationChange> {
+        use crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind;
+
+        if self.child_run_activities.iter().any(|entry| {
+            entry.agent_id == activity.agent_id
+                && entry.run_id == activity.child_run_id
+                && entry.sequence == activity.sequence
+        }) {
+            return Vec::new();
+        }
+        if let Some(latest_sequence) = self
+            .child_run_activities
+            .iter()
+            .filter(|entry| {
+                entry.agent_id == activity.agent_id && entry.run_id == activity.child_run_id
+            })
+            .map(|entry| entry.sequence)
+            .max()
+        {
+            if activity.sequence <= latest_sequence {
+                crate::tui::log_debug!(
+                    "child_run_activity_out_of_order agent_id={} child_run_id={} sequence={} latest_sequence={}",
+                    activity.agent_id,
+                    activity.child_run_id,
+                    activity.sequence,
+                    latest_sequence,
+                );
+                return Vec::new();
+            }
+        }
+
+        let message = match &activity.kind {
+            TuiChildRunActivityKind::Text { text }
+            | TuiChildRunActivityKind::Thinking { text }
+            | TuiChildRunActivityKind::ToolOutput { text, .. } => text.clone(),
+            TuiChildRunActivityKind::ToolCall { name, input, .. } => {
+                format!("→ {} {}", name, input)
+            }
+            TuiChildRunActivityKind::ToolResult { output, .. } => output.clone(),
+            TuiChildRunActivityKind::Terminal { outcome } => {
+                format!("Sub-agent terminal: {outcome:?}")
+            }
+        };
+
+        let parent_tool_context = self.chats.iter().find_map(|chat| {
+            chat.runs.iter().find_map(|run| {
+                (run.id.to_string() == activity.parent_run_id)
+                    .then(|| {
+                        run.tool_calls
+                            .iter()
+                            .any(|call| call.id.as_ref() == Some(&activity.spawned_by_tool_call_id))
+                            .then(|| (chat.id.clone(), run.id.clone()))
+                    })
+                    .flatten()
+            })
+        });
+        let Some((chat_id, run_id)) = parent_tool_context else {
+            crate::tui::log_debug!(
+                "child_run_activity_unknown_parent agent_id={} child_run_id={} parent_run_id={} spawned_by_tool_call_id={} sequence={}",
+                activity.agent_id,
+                activity.child_run_id,
+                activity.parent_run_id,
+                activity.spawned_by_tool_call_id,
+                activity.sequence,
+            );
+            return Vec::new();
+        };
+
+        self.child_run_activities.push(ChildRunActivityEntry {
+            agent_id: activity.agent_id,
+            run_id: activity.child_run_id,
+            parent_run_id: activity.parent_run_id,
+            spawned_by_tool_call_id: activity.spawned_by_tool_call_id.to_string(),
+            sequence: activity.sequence,
+            kind: activity.kind,
+        });
+
+        self.record_agent_progress(chat_id, run_id, activity.spawned_by_tool_call_id, message)
+    }
+
     pub(super) fn start_tool_call(
         &mut self,
         chat_id: ChatId,
