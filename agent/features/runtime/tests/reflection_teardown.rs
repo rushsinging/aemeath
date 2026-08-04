@@ -24,7 +24,7 @@ async fn shutdown_before_deadline_preserves_completed_task() {
 
     assert_eq!(
         adapter.submit(ReflectionTaskRequest::new(
-            ReflectionTaskTrigger::Interval { turn_count: 1 },
+            ReflectionTaskTrigger::Interval { step_count: 1 },
             Vec::new(),
         )),
         ReflectionTaskSubmitOutcome::Accepted

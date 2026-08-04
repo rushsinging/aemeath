@@ -4,7 +4,7 @@ use crate::application::loop_engine::chat::tools::{
     run_post_tool_hooks, send_tool_call_status, send_tool_result,
 };
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
@@ -21,7 +21,7 @@ use tools::ToolOutcome;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent_approved: &[PreparedToolCall],
     agent: &crate::application::tool::agent::Agent,
     agent_ctx: &ToolExecutionContext,
@@ -104,7 +104,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     call: ToolCall,
     sink: S,
     hook_port: Arc<dyn HookPort>,
@@ -301,22 +301,22 @@ where
         while let Some(event) = prog_rx.recv().await {
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[agent_progress_forward] tool_id={} kind={} seq={} source_chat_id={} source_turn_id={} attachment_chat_id={} attachment_turn_id={}",
+                "[agent_progress_forward] tool_id={} kind={} seq={} source_chat_id={} source_run_id={} attachment_chat_id={} attachment_run_id={}",
                 call_id.as_str(),
                 format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
                 event.sequence,
                 event.source_context.as_ref().map(|source| source.chat_id.as_str()).unwrap_or("<attachment>"),
-                event.source_context.as_ref().map(|source| source.turn_id.as_str()).unwrap_or("<attachment>"),
+                event.source_context.as_ref().map(|source| source.run_id.as_str()).unwrap_or("<attachment>"),
                 progress_context.chat_id,
-                progress_context.turn_id,
+                progress_context.run_id,
             );
             let source_context = event
                 .source_context
                 .as_ref()
                 .map(|source| {
-                    RuntimeTurnContext::new(
+                    RuntimeRunContext::new(
                         sdk::ChatId::from_legacy_or_new(&source.chat_id),
-                        sdk::ChatTurnId::from_legacy_or_new(&source.turn_id),
+                        sdk::ChatRunId::from_legacy_or_new(&source.run_id),
                     )
                 })
                 .unwrap_or_else(|| progress_context.clone());
@@ -371,7 +371,7 @@ mod tests {
     use super::*;
     use crate::application::loop_engine::chat::{EventFuture, RuntimeStreamEvent};
     use async_trait::async_trait;
-    use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+    use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -553,7 +553,7 @@ mod tests {
                 crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
             ));
             execute_agent_calls(
-                &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
+                &RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn")),
                 &prepared,
                 &agent,
                 &step_tool_context,

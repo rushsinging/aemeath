@@ -340,7 +340,7 @@ fn patch_for_update(
                     inject_count: Some(config.inject_count),
                     reflection: Some(share::config::domain::merge::ReflectionConfigPatch {
                         enabled: Some(config.reflection.enabled),
-                        interval_turns: Some(config.reflection.interval_turns),
+                        interval_run_steps: Some(config.reflection.interval_run_steps),
                         auto_apply_suggestions: Some(config.reflection.auto_apply_suggestions),
                         clear_model: config.reflection.model.is_none(),
                         model: config.reflection.model,

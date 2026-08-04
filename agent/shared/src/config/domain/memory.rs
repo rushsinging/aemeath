@@ -10,7 +10,7 @@ pub(crate) fn default_similarity_threshold() -> f64 {
     0.8
 }
 
-pub(crate) fn default_interval_turns() -> usize {
+pub(crate) fn default_interval_run_steps() -> usize {
     10
 }
 
@@ -66,9 +66,9 @@ pub struct ReflectionConfig {
     #[serde(default = "super::ui::default_true")]
     pub enabled: bool,
 
-    /// Trigger reflection every N turns.
-    #[serde(default = "default_interval_turns")]
-    pub interval_turns: usize,
+    /// Trigger reflection every N runs.
+    #[serde(default = "default_interval_run_steps")]
+    pub interval_run_steps: usize,
 
     /// Apply suggested memory entries automatically.
     #[serde(default)]
@@ -83,7 +83,7 @@ impl Default for ReflectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_turns: default_interval_turns(),
+            interval_run_steps: default_interval_run_steps(),
             auto_apply_suggestions: false,
             model: None,
         }
@@ -109,7 +109,7 @@ mod tests {
         let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
         assert!(empty.enabled);
         assert_eq!(empty.max_entries, 100);
-        assert_eq!(empty.reflection.interval_turns, 10);
+        assert_eq!(empty.reflection.interval_run_steps, 10);
         assert!(!empty.reflection.auto_apply_suggestions);
 
         let json = r#"{
@@ -130,7 +130,7 @@ mod tests {
             "similarity_threshold": 0.6,
             "reflection": {
                 "enabled": false,
-                "interval_turns": 5,
+                "interval_run_steps": 5,
                 "auto_apply_suggestions": true,
                 "model": "test/model"
             }
@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(config.max_entries, 20);
         assert_eq!(config.similarity_threshold, 0.6);
         assert!(!config.reflection.enabled);
-        assert_eq!(config.reflection.interval_turns, 5);
+        assert_eq!(config.reflection.interval_run_steps, 5);
         assert!(config.reflection.auto_apply_suggestions);
         assert_eq!(config.reflection.model.as_deref(), Some("test/model"));
     }
@@ -151,7 +151,7 @@ mod tests {
         let config = ReflectionConfig::default();
 
         assert!(config.enabled);
-        assert_eq!(config.interval_turns, 10);
+        assert_eq!(config.interval_run_steps, 10);
         assert!(!config.auto_apply_suggestions);
         assert!(config.model.is_none());
     }

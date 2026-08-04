@@ -102,7 +102,7 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
     );
     conversation.apply(AssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         text: "我看到 active bug 列表，下面是分析。".to_string(),
     });
 
@@ -143,7 +143,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Edit".to_string(),
@@ -151,7 +151,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: ToolCallId::new("tool-1"),
         tool_name: "Edit".to_string(),
@@ -163,7 +163,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: ToolCallId::new("tool-1"),
         name: "Edit".to_string(),
@@ -281,7 +281,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -289,7 +289,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -335,7 +335,7 @@ fn test_output_assembler_write_arguments_delta_updates_realtime_bytes_header() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Write".to_string(),
@@ -343,7 +343,7 @@ fn test_output_assembler_write_arguments_delta_updates_realtime_bytes_header() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Write".to_string(),
@@ -390,7 +390,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -398,7 +398,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -430,7 +430,7 @@ fn test_output_assembler_hides_activity_lines_when_tool_completed() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Agent".to_string(),
@@ -438,7 +438,7 @@ fn test_output_assembler_hides_activity_lines_when_tool_completed() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: ToolCallId::new("tool-1"),
         name: "Agent".to_string(),
@@ -449,14 +449,14 @@ fn test_output_assembler_hides_activity_lines_when_tool_completed() {
     // 子代理运行中发送 progress（写入 activities）
     conversation.apply(RecordAgentProgress {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
         message: "子代理最终输出文本".to_string(),
     });
     // 工具完成
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: ToolCallId::new("tool-1"),
         tool_name: "Agent".to_string(),
@@ -497,7 +497,7 @@ fn test_output_assembler_shows_activity_lines_while_tool_running() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Agent".to_string(),
@@ -505,7 +505,7 @@ fn test_output_assembler_shows_activity_lines_while_tool_running() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: ToolCallId::new("tool-1"),
         name: "Agent".to_string(),
@@ -515,7 +515,7 @@ fn test_output_assembler_shows_activity_lines_while_tool_running() {
     });
     conversation.apply(RecordAgentProgress {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
         message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
     });

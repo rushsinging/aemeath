@@ -3,16 +3,16 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
     TuiActivityTiming, TuiCompactStage, TuiHookPoint, TuiInteractionKind, TuiModelStreamState,
-    TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent, TuiTurnContext, UiActivityId,
+    TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent, UiActivityId,
 };
 use crate::tui::model::conversation::interaction::UiRunId;
 
 use super::super::testing::TuiScenarioHarness;
 
-fn ctx() -> TuiTurnContext {
-    TuiTurnContext {
+fn ctx() -> TuiRunContext {
+    TuiRunContext {
         chat_id: "chat-p0".to_string(),
-        turn_id: "turn-p0".to_string(),
+        run_id: "turn-p0".to_string(),
     }
 }
 

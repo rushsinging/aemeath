@@ -147,7 +147,7 @@ mod tests {
         ToolCallBlockView {
             key: "t1".into(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             tool_call_id: Some("t1".into()),
             title: "Grep".into(),
             icon: "●".into(),

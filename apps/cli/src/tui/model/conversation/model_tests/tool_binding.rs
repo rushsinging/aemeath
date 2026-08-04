@@ -10,7 +10,7 @@ fn test_conversation_observes_tool_lifecycle() {
 
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -18,7 +18,7 @@ fn test_conversation_observes_tool_lifecycle() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -28,7 +28,7 @@ fn test_conversation_observes_tool_lifecycle() {
     });
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("tool-1"),
         tool_name: "Read".to_string(),
@@ -53,7 +53,7 @@ fn test_conversation_reports_orphan_tool_result() {
     let missing_id = super::ids::ToolCallId::new("missing");
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: missing_id.clone(),
         tool_name: "Read".to_string(),
@@ -76,7 +76,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Skill".to_string(),
@@ -84,7 +84,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Skill".to_string(),
@@ -94,7 +94,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("call-using".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Skill".to_string(),
@@ -104,7 +104,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(CompleteChat {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
     });
 
     model.apply(StartChat {
@@ -112,7 +112,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-3"),
         provider_id: None,
         name: "Skill".to_string(),
@@ -120,7 +120,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-3"),
         provider_id: None,
         name: "Skill".to_string(),
@@ -130,7 +130,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("call-brainstorm".to_string()),
         id: super::ids::ToolCallId::new("tool-3"),
         name: "Skill".to_string(),
@@ -140,9 +140,9 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
     });
 
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
-    let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
+    let turn = chat.runs.iter().find(|t| t.id == run_id).unwrap();
     let summaries: Vec<_> = turn
         .tool_calls
         .iter()
@@ -159,16 +159,16 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
 fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_active_turn_drifted() {
     let mut model = ConversationModel::default();
     let live_chat = super::ids::ChatId::new("session-live");
-    let live_turn = super::ids::ChatTurnId::new("turn-2");
+    let live_turn = super::ids::ChatRunId::new("turn-2");
     let stale_chat = super::ids::ChatId::new("session-stale");
-    let stale_turn = super::ids::ChatTurnId::new("turn-55");
+    let stale_turn = super::ids::ChatRunId::new("turn-55");
 
     model.ensure_runtime_turn(live_chat.clone(), live_turn.clone());
     model.ensure_runtime_turn(stale_chat, stale_turn);
 
     model.apply(ToolCallStart {
         chat_id: live_chat.clone(),
-        turn_id: live_turn.clone(),
+        run_id: live_turn.clone(),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: Some("call-read".to_string()),
         name: "Read".to_string(),
@@ -176,7 +176,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
     });
     model.apply(ToolCallUpdate {
         chat_id: live_chat.clone(),
-        turn_id: live_turn.clone(),
+        run_id: live_turn.clone(),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: Some("call-read".to_string()),
         name: "Read".to_string(),
@@ -186,7 +186,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
     });
     model.apply(ToolResult {
         chat_id: live_chat.clone(),
-        turn_id: live_turn.clone(),
+        run_id: live_turn.clone(),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: "call-read".to_string(),
         tool_name: "Read".to_string(),
@@ -200,7 +200,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         .chats
         .iter()
         .find(|chat| chat.id == live_chat)
-        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == live_turn))
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == live_turn))
         .expect("live runtime turn should exist");
     assert_eq!(live_turn_model.tool_calls.len(), 1);
     assert_eq!(
@@ -222,7 +222,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         item,
         OutputTimelineItem::ToolResult { reference, .. }
             if reference.context.chat_id == live_chat
-                && reference.context.turn_id == live_turn
+                && reference.context.run_id == live_turn
                 && reference.tool_call_id == tool_id
     )));
 }
@@ -235,7 +235,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
@@ -243,7 +243,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
@@ -253,7 +253,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("call-skill".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Skill".to_string(),
@@ -263,7 +263,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(CompleteChat {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
     });
 
     model.apply(StartChat {
@@ -271,7 +271,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-2"),
         provider_id: "call-read".to_string(),
         tool_name: "Read".to_string(),
@@ -282,7 +282,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("call-read".to_string()),
         id: super::ids::ToolCallId::new("tool-2"),
         name: "Read".to_string(),
@@ -292,9 +292,9 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     });
 
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
-    let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
+    let turn = chat.runs.iter().find(|t| t.id == run_id).unwrap();
     let skill_result = turn.tool_calls[0]
         .result
         .as_ref()
@@ -305,11 +305,11 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         "Read 结果不应写入上一轮 Skill"
     );
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let read_call = tool_call(
         &model,
         &chat_id,
-        &turn_id,
+        &run_id,
         &super::ids::ToolCallId::new("tool-2"),
     )
     .expect("Read tool call should exist");
@@ -317,7 +317,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     assert!(timeline_tool_call_ref_exists(
         &model,
         &chat_id,
-        &turn_id,
+        &run_id,
         &super::ids::ToolCallId::new("tool-2")
     ));
     assert!(read_call
@@ -334,7 +334,7 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("call-provider-skill"),
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
@@ -342,7 +342,7 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("call-provider-skill"),
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
@@ -352,7 +352,7 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("call-provider-skill".to_string()),
         id: super::ids::ToolCallId::new("tool-99"),
         name: "Skill".to_string(),
@@ -362,9 +362,9 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     });
 
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
-    let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
+    let turn = chat.runs.iter().find(|t| t.id == run_id).unwrap();
     let provider_skill_id = super::ids::ToolCallId::new("call-provider-skill");
     let tool_calls: Vec<_> = turn
         .tool_calls
@@ -389,7 +389,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -397,7 +397,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("tool-1"),
         tool_name: "Read".to_string(),
@@ -408,7 +408,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -432,9 +432,9 @@ fn test_conversation_late_tool_call_binds_existing_result() {
             .iter()
             .find(|c| c.id == super::ids::ChatId::new("chat-1"))
             .unwrap()
-            .turns
+            .runs
             .iter()
-            .find(|t| t.id == super::ids::ChatTurnId::new("turn-1"))
+            .find(|t| t.id == super::ids::ChatRunId::new("turn-1"))
             .unwrap()
             .tool_calls[0]
             .result
@@ -448,9 +448,9 @@ fn test_conversation_late_tool_call_binds_existing_result() {
             .iter()
             .find(|c| c.id == super::ids::ChatId::new("chat-1"))
             .unwrap()
-            .turns
+            .runs
             .iter()
-            .find(|t| t.id == super::ids::ChatTurnId::new("turn-1"))
+            .find(|t| t.id == super::ids::ChatRunId::new("turn-1"))
             .unwrap()
             .tool_calls[0]
             .status,

@@ -3,10 +3,10 @@ use crate::domain::{FieldPatch, LogContext, LogContextPatch};
 use std::future::pending;
 use tokio::sync::Barrier;
 
-fn patch(role: &str, turn: usize) -> LogContextPatch {
+fn patch(role: &str, run_step: usize) -> LogContextPatch {
     LogContextPatch {
         role: FieldPatch::Set(role.to_string()),
-        turn: FieldPatch::Set(turn),
+        run_step: FieldPatch::Set(run_step),
         ..LogContextPatch::default()
     }
 }
@@ -15,7 +15,7 @@ fn patch(role: &str, turn: usize) -> LogContextPatch {
 async fn nested_scope_restores_parent_after_normal_completion() {
     within(patch("parent", 0), async {
         assert_eq!(capture().role.as_deref(), Some("parent"));
-        assert_eq!(capture().turn, Some(0));
+        assert_eq!(capture().run_step, Some(0));
 
         within(patch("child", 1), async {
             assert_eq!(capture().role.as_deref(), Some("child"));
@@ -23,7 +23,7 @@ async fn nested_scope_restores_parent_after_normal_completion() {
         .await;
 
         assert_eq!(capture().role.as_deref(), Some("parent"));
-        assert_eq!(capture().turn, Some(0));
+        assert_eq!(capture().run_step, Some(0));
     })
     .await;
 
@@ -48,9 +48,9 @@ async fn concurrent_scopes_do_not_overwrite_each_other() {
     let first = first.await.expect("first task");
     let second = second.await.expect("second task");
     assert_eq!(first.role.as_deref(), Some("first"));
-    assert_eq!(first.turn, Some(1));
+    assert_eq!(first.run_step, Some(1));
     assert_eq!(second.role.as_deref(), Some("second"));
-    assert_eq!(second.turn, Some(2));
+    assert_eq!(second.run_step, Some(2));
 }
 
 #[tokio::test]
@@ -61,7 +61,7 @@ async fn cancelled_scope_does_not_change_parent() {
         child.abort();
         assert!(child.await.expect_err("cancelled").is_cancelled());
         assert_eq!(capture().role.as_deref(), Some("parent"));
-        assert_eq!(capture().turn, Some(3));
+        assert_eq!(capture().run_step, Some(3));
     })
     .await;
 }
@@ -74,7 +74,7 @@ async fn panicking_scope_does_not_change_parent() {
         }));
         assert!(child.await.expect_err("panic").is_panic());
         assert_eq!(capture().role.as_deref(), Some("parent"));
-        assert_eq!(capture().turn, Some(5));
+        assert_eq!(capture().run_step, Some(5));
     })
     .await;
 }

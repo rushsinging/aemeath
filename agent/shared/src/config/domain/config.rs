@@ -21,7 +21,7 @@ use crate::config::update::UpdateConfig;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuidanceReloadPolicy {
-    /// 每 turn 在 system prompt 前置 `[guidance 已更新] <diff head>`。
+    /// 每 run 在 system prompt 前置 `[guidance 已更新] <diff head>`。
     Inject,
     /// 发 `<system-reminder>` 让 LLM 自行决定是否用 Read 重新读取。
     #[default]

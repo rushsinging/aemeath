@@ -32,7 +32,7 @@ pub(super) fn sub_run_log_context(
     parent.patched(logging::LogContextPatch {
         session_id: logging::FieldPatch::Set(session_id.to_string()),
         chat_id: logging::FieldPatch::Set(sub_run_id.to_string()),
-        turn: logging::FieldPatch::Clear,
+        run_step: logging::FieldPatch::Clear,
         request_id: logging::FieldPatch::Clear,
         model: logging::FieldPatch::Set(model.to_string()),
         provider: logging::FieldPatch::Set(provider.to_string()),
@@ -152,11 +152,11 @@ impl EventSinkPort for DerivedEventPort {
         execution: &mut RunExecutionState,
         events: Vec<RunDomainEvent>,
     ) -> Result<(), LoopEngineError> {
-        let turn_count = execution.turn_count();
+        let step_count = execution.step_count();
         ProgressTerminalObserver {
             progress: self.progress.as_ref(),
             terminal: execution.terminal_mut(),
-            turn_count,
+            step_count,
         }
         .emit(events)
         .await
@@ -177,19 +177,19 @@ pub(super) struct DerivedModelObserver {
 impl DerivedModelObserver {
     fn progress_turn_start(&self, execution: &RunExecutionState) {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!(
-                "Agent turn {}, messages: {}, est_tokens: {}",
-                execution.turn_count(),
+                "Agent step {}, messages: {}, est_tokens: {}",
+                execution.step_count(),
                 execution.messages_len(),
                 execution.message_tokens(),
             ),
         );
     }
 
-    fn progress_api_ok(&self, turn: usize, response: &InvocationResponse) {
+    fn progress_api_ok(&self, run_step: usize, response: &InvocationResponse) {
         (self.progress)(
-            Some(turn),
+            Some(run_step),
             &format!(
                 "API ok: in={} out={} stop={:?}",
                 response.usage.input_tokens.unwrap_or(0),
@@ -199,7 +199,7 @@ impl DerivedModelObserver {
         );
     }
 
-    fn send_text_progress(&self, turn: usize, response: &InvocationResponse) {
+    fn send_text_progress(&self, run_step: usize, response: &InvocationResponse) {
         let Some(sink) = self.progress_sink.as_ref() else {
             return;
         };
@@ -215,7 +215,7 @@ impl DerivedModelObserver {
         };
         sink.emit(super::progress::build_progress_event(
             self.source_context.clone(),
-            turn,
+            run_step,
             AgentProgressKind::Message { text },
         ));
     }
@@ -290,8 +290,8 @@ impl ModelInvocationObserver for DerivedModelObserver {
         response: &InvocationResponse,
         _elapsed_secs: f64,
     ) {
-        self.progress_api_ok(execution.turn_count(), response);
-        self.send_text_progress(execution.turn_count(), response);
+        self.progress_api_ok(execution.step_count(), response);
+        self.send_text_progress(execution.step_count(), response);
     }
 
     async fn classify_terminal(
@@ -304,8 +304,8 @@ impl ModelInvocationObserver for DerivedModelObserver {
         if response.stop_reason == StopReason::MaxOutputTokens {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                execution.turn_count(),
+                "run step {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                execution.step_count(),
             );
             execution.append_message(Message::user(
                 "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
@@ -355,7 +355,7 @@ pub(super) struct ProgressToolRoundObserver {
 impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolRoundObserver {
     async fn execution_started(
         &mut self,
-        turn: usize,
+        run_step: usize,
         all_calls: &[crate::application::tool::agent::ToolCall],
         executable: &[crate::application::tool::agent::ToolCall],
     ) {
@@ -363,7 +363,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
         if let Some(sink) = self.progress_sink.as_ref() {
             sink.emit(build_tool_calls_progress_event(
                 self.source_context.clone(),
-                turn,
+                run_step,
                 executable,
             ));
         }
@@ -372,11 +372,11 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
     async fn execution_finished(
         &mut self,
         execution: &RunExecutionState,
-        turn: usize,
+        run_step: usize,
         results: &[crate::application::tool::agent::ToolExecution],
     ) {
         (self.progress)(
-            Some(turn),
+            Some(run_step),
             &format!(
                 "Tools done ({}s elapsed), {} results",
                 execution.elapsed().as_secs(),
@@ -392,7 +392,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
                 output.clone()
             };
             (self.progress)(
-                Some(turn),
+                Some(run_step),
                 &format!("  ← {}[{}]: {}", result.tool_name, label, output),
             );
         }
@@ -411,7 +411,7 @@ impl crate::application::loop_engine::StuckHandlingPort for DerivedStuckObserver
         decision: &crate::application::loop_engine::StuckDecision,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!("StuckGuard: {decision:?}"),
         );
         Ok(())

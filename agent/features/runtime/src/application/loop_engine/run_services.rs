@@ -307,7 +307,7 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
         request: &sdk::InteractionRequest,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!("Interaction: id={}", request.id),
         );
         Ok(())
@@ -316,17 +316,17 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
 
 pub(crate) struct RuntimeModelInvocation<O> {
     observer: O,
-    advance_turn: bool,
+    advance_step: bool,
 }
 
 impl<O> RuntimeModelInvocation<O>
 where
     O: crate::application::model::invocation::ModelInvocationObserver,
 {
-    pub(crate) fn new(observer: O, advance_turn: bool) -> Self {
+    pub(crate) fn new(observer: O, advance_step: bool) -> Self {
         Self {
             observer,
-            advance_turn,
+            advance_step,
         }
     }
 }
@@ -348,13 +348,13 @@ where
         ),
         LoopEngineError,
     > {
-        if self.advance_turn {
-            execution.advance_turn();
+        if self.advance_step {
+            execution.advance_step();
         }
-        let turn = execution.turn_count();
+        let run_step = execution.step_count();
         logging::within(
             logging::LogContextPatch {
-                turn: logging::FieldPatch::Set(turn),
+                run_step: logging::FieldPatch::Set(run_step),
                 request_id: logging::FieldPatch::Clear,
                 ..logging::LogContextPatch::default()
             },

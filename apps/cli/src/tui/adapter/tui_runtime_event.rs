@@ -215,9 +215,9 @@ pub(crate) struct TuiActivitySnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiTurnContext {
+pub(crate) struct TuiRunContext {
     pub(crate) chat_id: String,
-    pub(crate) turn_id: String,
+    pub(crate) run_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -502,26 +502,26 @@ pub(crate) enum TuiRuntimeEvent {
         slash_routes: Vec<TuiSkillSlashRoute>,
     },
     Text {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         text: String,
     },
     Thinking {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         text: String,
     },
     BlockComplete {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         text: String,
     },
     ToolCallStart {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolCallUpdate {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
@@ -531,7 +531,7 @@ pub(crate) enum TuiRuntimeEvent {
         status: TuiToolCallStatus,
     },
     ToolResult {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         id: String,
         provider_id: String,
         tool_name: String,
@@ -542,7 +542,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     SystemMessage(String),
     ModelInvocationRetrying {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         attempt: u32,
         delay_ms: u128,
     },
@@ -582,7 +582,7 @@ pub(crate) enum TuiRuntimeEvent {
         queued: Vec<TuiChatMessage>,
     },
     Done {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         duration_ms: Option<u64>,
     },
     Run {
@@ -598,17 +598,17 @@ pub(crate) enum TuiRuntimeEvent {
     },
     InteractionRequested(TuiInteractionRequest),
     AgentProgress {
-        source_context: TuiTurnContext,
-        attachment_context: TuiTurnContext,
+        source_context: TuiRunContext,
+        attachment_context: TuiRunContext,
         tool_id: String,
         event: TuiAgentProgress,
     },
     Cancelled {
-        context: TuiTurnContext,
+        context: TuiRunContext,
         duration_ms: u64,
     },
     LiveTps(f64),
-    TurnChanged(usize),
+    RunChanged(usize),
     WorkspaceSnapshot(TuiWorkspaceSnapshot),
     SessionReset,
     UserMessagesWithdrawn {

@@ -1,5 +1,5 @@
 use super::change::ConversationChange;
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use super::tool_result_payload::ToolResultPayload;
@@ -10,7 +10,7 @@ impl ConversationModel {
         let mut cancelled_tools = Vec::new();
         if confirmed {
             if let Some((chat_id, turn)) = self.chats.iter_mut().rev().find_map(|chat| {
-                chat.turns
+                chat.runs
                     .iter_mut()
                     .rev()
                     .find(|turn| {
@@ -39,9 +39,9 @@ impl ConversationModel {
         let mut changes = cancelled_tools
             .into_iter()
             .map(
-                |(chat_id, turn_id, id)| ConversationChange::ToolCallCompleted {
+                |(chat_id, run_id, id)| ConversationChange::ToolCallCompleted {
                     chat_id,
-                    turn_id,
+                    run_id,
                     id,
                     status: ToolCallStatus::Cancelled,
                 },
@@ -59,7 +59,7 @@ impl ConversationModel {
     pub(super) fn promote_orphan_tool_result(
         &mut self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         id: &str,
     ) {
         // 从 timeline 查找 OrphanToolResult 并克隆 payload。
@@ -89,7 +89,7 @@ impl ConversationModel {
         if self
             .complete_tool_in_context(
                 chat_id,
-                turn_id,
+                run_id,
                 id,
                 ToolResultPayload::new(output, content, is_error, 0),
             )
@@ -100,7 +100,7 @@ impl ConversationModel {
             });
             self.insert_tool_result_after_tool_call(
                 chat_id.clone(),
-                turn_id.clone(),
+                run_id.clone(),
                 ToolCallId::from_legacy_or_new(id),
             );
         }
@@ -110,7 +110,7 @@ impl ConversationModel {
     pub(super) fn complete_tool_call(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         id: ToolCallId,
         _provider_id: String,
         tool_name: String,
@@ -119,14 +119,14 @@ impl ConversationModel {
         is_error: bool,
         image_count: usize,
     ) -> Vec<ConversationChange> {
-        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        self.ensure_runtime_turn(chat_id.clone(), run_id.clone());
         if let Some(status) = self.complete_tool_in_context(
             &chat_id,
-            &turn_id,
+            &run_id,
             id.as_ref(),
             ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
         ) {
-            self.insert_tool_result_after_tool_call(chat_id.clone(), turn_id.clone(), id.clone());
+            self.insert_tool_result_after_tool_call(chat_id.clone(), run_id.clone(), id.clone());
             crate::tui::log_debug!(
                 "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} timeline_items_after={}",
                 id,
@@ -139,7 +139,7 @@ impl ConversationModel {
             return vec![
                 ConversationChange::ToolCallCompleted {
                     chat_id: chat_id.to_string(),
-                    turn_id: turn_id.to_string(),
+                    run_id: run_id.to_string(),
                     id: id.to_string(),
                     status,
                 },
@@ -170,14 +170,14 @@ impl ConversationModel {
     pub(super) fn complete_tool_in_context(
         &mut self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         id: &str,
         result: ToolResultPayload,
     ) -> Option<ToolCallStatus> {
         self.chats
             .iter_mut()
             .find(|chat| &chat.id == chat_id)
-            .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
+            .and_then(|chat| chat.runs.iter_mut().find(|turn| &turn.id == run_id))
             .and_then(|turn| turn.complete_tool(id, result))
     }
 }

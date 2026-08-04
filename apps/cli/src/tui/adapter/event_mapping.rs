@@ -286,8 +286,8 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             duration_ms,
         },
         ChatEvent::LiveTps(tps) => TuiRuntimeEvent::LiveTps(tps),
-        ChatEvent::TurnChanged(turn) | ChatEvent::CurrentTurnChanged(turn) => {
-            TuiRuntimeEvent::TurnChanged(turn)
+        ChatEvent::RunChanged(turn) | ChatEvent::CurrentRunChanged(turn) => {
+            TuiRuntimeEvent::RunChanged(turn)
         }
         // #944 5B: AskUserBatch legacy bridge removed.
         ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
@@ -687,10 +687,10 @@ fn hook_point(value: sdk::HookPointView) -> TuiHookPoint {
     }
 }
 
-fn turn_context(value: sdk::ChatEventContext) -> TuiTurnContext {
-    TuiTurnContext {
+fn turn_context(value: sdk::ChatEventContext) -> TuiRunContext {
+    TuiRunContext {
         chat_id: value.chat_id.as_str().to_string(),
-        turn_id: value.turn_id.as_str().to_string(),
+        run_id: value.run_id.as_str().to_string(),
     }
 }
 fn tool_status(value: sdk::ToolCallStatusView) -> TuiToolCallStatus {

@@ -3,21 +3,21 @@
 //! remaining Runtime variants in UiEvent are dead code pending #944 5B.
 #![allow(dead_code)]
 use crate::tui::adapter::runtime_view::TuiChatMessage;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use crate::tui::model::conversation::workspace::WorktreeKind;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UiTurnContext {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 impl From<sdk::ChatEventContext> for UiTurnContext {
     fn from(context: sdk::ChatEventContext) -> Self {
         Self {
             chat_id: ChatId::new(context.chat_id.as_str()),
-            turn_id: ChatTurnId::new(context.turn_id.as_str()),
+            run_id: ChatRunId::new(context.run_id.as_str()),
         }
     }
 }
@@ -93,7 +93,7 @@ pub enum AppEvent {
         context: UiTurnContext,
         duration: std::time::Duration,
     },
-    /// Turn 启动，TUI 据此启动 spinner(Thinking)。
+    /// Run 启动，TUI 据此启动 spinner(Thinking)。
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },
@@ -157,15 +157,15 @@ pub enum AppEvent {
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    /// Sub-agent progress update (streams per-turn output to TUI)
+    /// Sub-agent progress update (streams per-run output to TUI)
     AgentProgress {
         source_context: UiTurnContext,
         attachment_context: UiTurnContext,
         tool_id: sdk::ids::ToolCallId,
         event: sdk::AgentProgressEventView,
     },
-    /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
-    CurrentTurnChanged(usize),
+    /// 当前 run 变化，需要由 CLI 边界记录到 runtime bootstrap。
+    CurrentRunChanged(usize),
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
     WorkspaceMetadataResolved(WorkspaceMetadataResolved),

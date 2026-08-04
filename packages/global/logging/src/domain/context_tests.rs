@@ -4,7 +4,7 @@ fn parent_context() -> LogContext {
     LogContext {
         session_id: Some("session-parent".to_string()),
         chat_id: Some("chat-parent".to_string()),
-        turn: Some(7),
+        run_step: Some(7),
         request_id: Some("request-parent".to_string()),
         model: Some("model-parent".to_string()),
         provider: Some("provider-parent".to_string()),
@@ -18,7 +18,7 @@ fn patch_applies_inherit_set_and_clear_without_mutating_parent() {
     let patch = LogContextPatch {
         session_id: FieldPatch::Inherit,
         chat_id: FieldPatch::Set("chat-child".to_string()),
-        turn: FieldPatch::Set(0),
+        run_step: FieldPatch::Set(0),
         request_id: FieldPatch::Clear,
         model: FieldPatch::Inherit,
         provider: FieldPatch::Clear,
@@ -29,12 +29,12 @@ fn patch_applies_inherit_set_and_clear_without_mutating_parent() {
 
     assert_eq!(child.session_id.as_deref(), Some("session-parent"));
     assert_eq!(child.chat_id.as_deref(), Some("chat-child"));
-    assert_eq!(child.turn, Some(0));
+    assert_eq!(child.run_step, Some(0));
     assert_eq!(child.request_id, None);
     assert_eq!(child.model.as_deref(), Some("model-parent"));
     assert_eq!(child.provider, None);
     assert_eq!(child.role.as_deref(), Some("role-child"));
-    assert_eq!(parent.turn, Some(7));
+    assert_eq!(parent.run_step, Some(7));
     assert_eq!(parent.request_id.as_deref(), Some("request-parent"));
 }
 

@@ -37,8 +37,8 @@ fn pre_tool_use(tool_name: &str) -> HookInvocation {
     })
 }
 
-fn stop(turns: usize) -> HookInvocation {
-    HookInvocation::Stop(StopInput { turns })
+fn stop(run_steps: usize) -> HookInvocation {
+    HookInvocation::Stop(StopInput { run_steps })
 }
 
 fn sub(point: HookPoint, command: &str) -> HookSubscription {
@@ -94,7 +94,7 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
         "/tmp/aemeath-workspace-a"
     );
     assert_eq!(calls[0].env["AEMEATH_TOOL_NAME"], "Bash");
-    assert!(!calls[0].env.contains_key("AEMEATH_STOP_TURNS"));
+    assert!(!calls[0].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
 
     assert_eq!(calls[1].cwd, second_workspace);
     assert_eq!(calls[1].env["AEMEATH_HOOK_EVENT"], "\"Stop\"");
@@ -102,7 +102,7 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
         calls[1].env["AEMEATH_PROJECT_DIR"],
         "/tmp/aemeath-workspace-b"
     );
-    assert_eq!(calls[1].env["AEMEATH_STOP_TURNS"], "7");
+    assert_eq!(calls[1].env["AEMEATH_STOP_RUN_STEPS"], "7");
     assert!(!calls[1].env.contains_key("AEMEATH_TOOL_NAME"));
     assert!(!calls[1].env.contains_key("AEMEATH_TOOL_INPUT"));
 }
@@ -136,8 +136,8 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
         calls[3].env["AEMEATH_PROJECT_DIR"],
         "/tmp/aemeath-stop-workspace"
     );
-    assert!(!calls[3].env.contains_key("AEMEATH_STOP_TURNS"));
-    assert_eq!(calls[3].stdin["StopFailure"]["turns"], 9);
+    assert!(!calls[3].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
+    assert_eq!(calls[3].stdin["StopFailure"]["run_steps"], 9);
 }
 
 // 各测试直接内联构造 Dispatcher + Scripted，以保持调用顺序与步骤入队的可读性。

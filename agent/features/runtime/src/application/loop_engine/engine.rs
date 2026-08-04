@@ -19,7 +19,7 @@ use super::{StuckDecision, StuckGuard};
 
 /// Monotonic per-Run drain epoch. Each successful drain call increments
 /// the epoch. Callers pass their expected epoch for mismatch detection
-/// (#1272 per-turn drain-or-seal linearization).
+/// (#1272 per-run drain-or-seal linearization).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DrainEpoch(pub u64);
 
@@ -33,11 +33,11 @@ impl DrainEpoch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopInput {
     pub text: String,
-    /// Per-turn user message InputId (from `ChatInputEvent::UserMessage::id`).
+    /// Per-run user message InputId (from `ChatInputEvent::UserMessage::id`).
     /// `None` for engine-driven continuations (StopHookFeedback, ToolResults)
-    /// and fixed-sub-agent prompts (#1272 per-turn drain identity).
+    /// and fixed-sub-agent prompts (#1272 per-run drain identity).
     pub input_id: Option<sdk::InputId>,
-    /// Per-turn user message images (from `ChatInputEvent::UserMessage::images`).
+    /// Per-run user message images (from `ChatInputEvent::UserMessage::images`).
     /// Empty for engine-driven continuations.
     pub images: Vec<sdk::ChatInputImage>,
 }
@@ -199,14 +199,14 @@ pub enum LoopDirective {
 
 /// Returned by `drain_input` to tell the engine what to do next.
 ///
-/// #1272 Per-turn drain-or-seal contract:
+/// #1272 Per-run drain-or-seal contract:
 /// - `Ready` carries a **non-empty** batch of user input.
 /// - `InternalContinuation` is for engine-driven continuations: stop hook
 ///   feedback or recorded tool results. The batch can be empty (pure
 ///   continuation) or carry any user input that arrived alongside it.
 /// - `EmptyAndSealed` is the unique terminal gate.
 ///
-/// Each variant carries a [`DrainEpoch`] for per-turn linearization.
+/// Each variant carries a [`DrainEpoch`] for per-run linearization.
 #[derive(Debug, Clone)]
 pub enum DrainOutcome {
     /// User input is ready for the next step. The batch SHOULD be non-empty;
@@ -242,7 +242,7 @@ impl DrainOutcome {
     }
 
     /// The epoch carried by this outcome — used by the engine to validate
-    /// per-turn linearization (#1272).
+    /// per-run linearization (#1272).
     pub fn epoch(&self) -> DrainEpoch {
         match self {
             Self::Ready { epoch, .. }
@@ -915,7 +915,7 @@ async fn run_loop_body(
     );
 
     let mut guard = StuckGuard::new();
-    // #1272: engine-owned epoch for per-turn drain linearization.
+    // #1272: engine-owned epoch for per-run drain linearization.
     // Initialized from the Run's persisted epoch so that re-entering
     // run_loop (e.g. after AwaitUser) recovers the correct epoch
     // instead of resetting to 0.  Each successful drain increments

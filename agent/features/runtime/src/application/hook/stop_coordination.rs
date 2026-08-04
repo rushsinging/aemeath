@@ -131,7 +131,7 @@ impl StopHookObserver for NoopStopHookObserver {}
 pub async fn coordinate_stop_hook<O>(
     observer: &mut O,
     execution: &mut RunExecutionState,
-    turns: usize,
+    run_steps: usize,
     cancellation: &CancellationToken,
 ) -> Result<StopHookOutcome, LoopEngineError>
 where
@@ -146,7 +146,7 @@ where
     let outcome = orchestrate_stop_hook(
         &context.hook_port,
         StopHookContext {
-            turns,
+            run_steps,
             workspace_root: context.workspace_root,
             session_id: context.session_id,
             language: context.language,
@@ -168,7 +168,7 @@ where
 }
 
 pub struct StopHookContext {
-    pub turns: usize,
+    pub run_steps: usize,
     pub workspace_root: PathBuf,
     pub session_id: String,
     pub language: String,
@@ -218,7 +218,7 @@ pub async fn orchestrate_stop_hook(
     cancellation: &CancellationToken,
 ) -> StopHookOutcome {
     let invocation = HookInvocation::Stop(StopInput {
-        turns: context.turns,
+        run_steps: context.run_steps,
     });
     let mut hook_dispatch_context = HookDispatchContext::new(&context.workspace_root);
     if let Some(observer) = context.subscription_execution_observer {
