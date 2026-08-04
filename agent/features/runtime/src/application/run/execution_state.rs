@@ -17,7 +17,7 @@ pub(crate) struct ActiveInteractionReceiver {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ActiveInteractionAlreadyRegistered;
 
-/// 产生和替换的消息、Context 投影、turn 计数与 continuation 工作集。
+/// 产生和替换的消息、Context 投影、run step 计数与 continuation 工作集。
 #[derive(Default)]
 pub struct RunExecutionState {
     messages: Vec<Message>,
@@ -27,7 +27,7 @@ pub struct RunExecutionState {
     step_outcome: Vec<Message>,
     context_request: Option<ContextRequest>,
     context_window: Option<ContextWindow>,
-    turn_count: usize,
+    step_count: usize,
     started_at: Option<Instant>,
     terminal: Option<AgentRunTerminal>,
     pending_interaction_work: Option<PendingInteractionWork>,
@@ -43,7 +43,7 @@ impl RunExecutionState {
         Self::default()
     }
 
-    pub(crate) fn initialize_for_launch(&mut self, messages: Vec<Message>, turn_count: usize) {
+    pub(crate) fn initialize_for_launch(&mut self, messages: Vec<Message>, step_count: usize) {
         debug_assert!(
             self.started_at.is_none(),
             "execution state initialized twice"
@@ -53,7 +53,7 @@ impl RunExecutionState {
             "execution messages initialized twice"
         );
         self.messages = messages;
-        self.turn_count = turn_count;
+        self.step_count = step_count;
         self.started_at = Some(Instant::now());
     }
 
@@ -209,13 +209,13 @@ impl RunExecutionState {
             .unwrap_or_default()
     }
 
-    pub(crate) fn turn_count(&self) -> usize {
-        self.turn_count
+    pub(crate) fn step_count(&self) -> usize {
+        self.step_count
     }
 
-    pub(crate) fn advance_turn(&mut self) -> usize {
-        self.turn_count += 1;
-        self.turn_count
+    pub(crate) fn advance_step(&mut self) -> usize {
+        self.step_count += 1;
+        self.step_count
     }
 
     pub(crate) fn terminal_mut(&mut self) -> &mut Option<AgentRunTerminal> {
@@ -289,7 +289,7 @@ impl RunExecutionState {
     }
 
     /// 开始下一 Step 时清除只属于上一 Step 的临时工作集。
-    /// 已提交历史消息和 Run 级 turn 计数继续保留。
+    /// 已提交历史消息和 Run 级 run step 计数继续保留。
     pub(crate) fn begin_step(&mut self) {
         self.accepted_input.clear();
         self.context_request = None;

@@ -46,7 +46,7 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
                 system: self.system.to_string(),
                 model_spec: self.model_spec.map(str::to_string),
                 result: terminal.output(),
-                turns: outcome.turns,
+                run_steps: outcome.run_steps,
                 is_error,
             }),
             self.workspace_root,
@@ -58,7 +58,7 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
                 if let Some(sink) = self.progress_sink {
                     sink.emit(super::progress::build_progress_event(
                         self.source_context.clone(),
-                        outcome.turns,
+                        outcome.run_steps,
                         AgentProgressKind::Message {
                             text: format!("[hook] {}", msg.text),
                         },

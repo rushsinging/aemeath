@@ -3,13 +3,13 @@ use crate::tui::adapter::agent_event::sanitize::{
     TOOL_RESULT_PREVIEW_LIMIT, TOOL_STREAM_PREVIEW_LIMIT,
 };
 use crate::tui::app::event::UiTurnContext;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use serde_json::Value;
 
 fn ctx() -> UiTurnContext {
     UiTurnContext {
         chat_id: ChatId::new("chat-test"),
-        turn_id: ChatTurnId::new("turn-test"),
+        run_id: ChatRunId::new("turn-test"),
     }
 }
 
@@ -326,7 +326,7 @@ fn test_sanitize_partial_json_truncates() {
 mod started_tests {
     use super::*;
     use crate::tui::app::event::UiTurnContext;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId as TuiToolCallId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId as TuiToolCallId};
     use sdk::AgentProgressEventView;
     use sdk::AgentProgressKindView;
     use sdk::ToolCallId as SdkToolCallId;
@@ -334,7 +334,7 @@ mod started_tests {
     fn ctx() -> UiTurnContext {
         UiTurnContext {
             chat_id: ChatId::new("chat-test"),
-            turn_id: ChatTurnId::new("turn-test"),
+            run_id: ChatRunId::new("turn-test"),
         }
     }
 
@@ -357,11 +357,11 @@ mod started_tests {
     fn agent_progress_uses_parent_attachment_context() {
         let source_context = UiTurnContext {
             chat_id: ChatId::new("child-chat"),
-            turn_id: ChatTurnId::new("child-turn"),
+            run_id: ChatRunId::new("child-turn"),
         };
         let attachment_context = UiTurnContext {
             chat_id: ChatId::new("parent-chat"),
-            turn_id: ChatTurnId::new("parent-turn"),
+            run_id: ChatRunId::new("parent-turn"),
         };
         let sdk_tool_id = SdkToolCallId::new("agent-tool");
         let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
@@ -382,12 +382,12 @@ mod started_tests {
         match &mapping.conversation[0] {
             ConversationIntent::RecordAgentProgress(RecordAgentProgress {
                 chat_id,
-                turn_id,
+                run_id,
                 tool_id,
                 ..
             }) => {
                 assert_eq!(chat_id, &attachment_context.chat_id);
-                assert_eq!(turn_id, &attachment_context.turn_id);
+                assert_eq!(run_id, &attachment_context.run_id);
                 assert_eq!(tool_id, &expected_tool_id);
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),

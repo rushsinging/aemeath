@@ -6,7 +6,7 @@ use super::super::testing::{input, TuiScenarioHarness};
 fn sdk_context() -> sdk::ChatEventContext {
     sdk::ChatEventContext::new(
         sdk::ids::ChatId::new("resume-sdk-chat"),
-        sdk::ids::ChatTurnId::new("resume-sdk-turn"),
+        sdk::ids::ChatRunId::new("resume-sdk-turn"),
     )
 }
 

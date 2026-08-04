@@ -12,14 +12,14 @@ use share::message::Message;
 
 /// Turn 边界配置变更检测与 guidance 注入。
 ///
-/// 在每个 turn 开始时轮询配置/指令/guidance 文件是否有外部修改，
+/// 在每个 run 开始时轮询配置/指令/guidance 文件是否有外部修改，
 /// 检测到变更时通过 sink 发送 `ConfigReloaded` 事件，
 /// 并按 `GuidanceReloadPolicy` 注入对应的提醒消息。
 pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
     config_reader: &dyn ConfigReader,
     session_wiring: &context::MainSessionWiring,
-    turn_count: usize,
+    step_count: usize,
     sink: &S,
     messages: &mut Vec<Message>,
     language: &str,
@@ -69,8 +69,8 @@ where
     let config_diff = check_config_changes(config_snapshot);
     if config_diff.has_changes() {
         log::info!(target: crate::LOG_TARGET,
-            "[config_reload] turn {} detected changes: {:?}",
-            turn_count,
+            "[config_reload] run step {} detected changes: {:?}",
+            step_count,
             config_diff.changed_keys
         );
         // 通过 sink 发送 ConfigReloaded 事件通知客户端

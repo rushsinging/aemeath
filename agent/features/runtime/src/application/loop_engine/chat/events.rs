@@ -1,4 +1,4 @@
-use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+use sdk::ids::{ChatId, ChatRunId, ToolCallId};
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
@@ -6,14 +6,14 @@ use std::pin::Pin;
 use tools::{AgentProgressEvent, ImageData};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeTurnContext {
+pub struct RuntimeRunContext {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
-impl RuntimeTurnContext {
-    pub fn new(chat_id: ChatId, turn_id: ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+impl RuntimeRunContext {
+    pub fn new(chat_id: ChatId, run_id: ChatRunId) -> Self {
+        Self { chat_id, run_id }
     }
 }
 
@@ -46,26 +46,26 @@ pub enum RuntimeStreamEvent {
     },
     ActivitySnapshot(sdk::ActivitySnapshotView),
     Text {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         text: String,
     },
     Thinking {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         text: String,
     },
     BlockComplete {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         text: String,
     },
     ToolCallStart {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
     ToolCallUpdate {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
@@ -75,7 +75,7 @@ pub enum RuntimeStreamEvent {
         status: RuntimeToolCallStatus,
     },
     ToolResult {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: String,
         tool_name: String,
@@ -86,7 +86,7 @@ pub enum RuntimeStreamEvent {
     },
     SystemMessage(String),
     ModelInvocationRetrying {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         attempt: u32,
         delay: std::time::Duration,
     },
@@ -138,10 +138,10 @@ pub enum RuntimeStreamEvent {
         texts: Vec<String>,
     },
     Done {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     },
     DoneWithDuration {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         duration: std::time::Duration,
     },
     RunStarted {
@@ -149,11 +149,11 @@ pub enum RuntimeStreamEvent {
         parent_run_id: Option<sdk::RunId>,
     },
     Cancelled {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         duration: std::time::Duration,
     },
     LiveTps(f64),
-    TurnChanged(usize),
+    RunChanged(usize),
     AskUserBatch {
         items: Vec<sdk::AskUserQuestionItem>,
         reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
@@ -164,8 +164,8 @@ pub enum RuntimeStreamEvent {
         request: sdk::InteractionRequest,
     },
     AgentProgress {
-        source_context: RuntimeTurnContext,
-        attachment_context: RuntimeTurnContext,
+        source_context: RuntimeRunContext,
+        attachment_context: RuntimeRunContext,
         tool_id: ToolCallId,
         event: AgentProgressEvent,
     },

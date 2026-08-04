@@ -153,7 +153,7 @@ mod tests {
         composition::delivery_logging::LogContext {
             session_id: Some(session_id.to_string()),
             chat_id: Some("runtime-chat".to_string()),
-            turn: Some(7),
+            run_step: Some(7),
             request_id: Some("request-42".to_string()),
             model: Some("model-1".to_string()),
             provider: Some("provider-1".to_string()),

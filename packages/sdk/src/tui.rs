@@ -71,7 +71,7 @@ impl From<ClipboardImageView> for crate::ChatInputImage {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReflectionConfigView {
     pub enabled: bool,
-    pub interval_turns: usize,
+    pub interval_run_steps: usize,
     pub auto_apply_suggestions: bool,
 }
 

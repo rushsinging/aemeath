@@ -1,6 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgress, TuiAgentProgressKind, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
-    TuiTurnContext,
+    TuiAgentProgress, TuiAgentProgressKind, TuiRunContext, TuiRunStepEvent, TuiRuntimeEvent,
+    TuiToolCallStatus,
 };
 
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -9,13 +9,13 @@ use super::super::testing::TuiScenarioHarness;
 
 #[test]
 fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timeline() {
-    let parent_context = TuiTurnContext {
+    let parent_context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
-        turn_id: "parent-turn".to_string(),
+        run_id: "parent-turn".to_string(),
     };
-    let child_context = TuiTurnContext {
+    let child_context = TuiRunContext {
         chat_id: "child-chat".to_string(),
-        turn_id: "child-turn".to_string(),
+        run_id: "child-turn".to_string(),
     };
     let tool_id = "agent-tool".to_string();
     let marker = "child-private-progress";
@@ -69,7 +69,7 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         .conversation
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .find(|call| call.name == "Agent")
         .expect("parent Agent tool call should exist");
@@ -91,9 +91,9 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
 
 #[test]
 fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
-    let context = TuiTurnContext {
+    let context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
-        turn_id: "parent-turn".to_string(),
+        run_id: "parent-turn".to_string(),
     };
     let mut harness = TuiScenarioHarness::new(100, 30);
 
@@ -146,7 +146,7 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
         .conversation
         .chats
         .iter()
-        .flat_map(|chat| &chat.turns)
+        .flat_map(|chat| &chat.runs)
         .flat_map(|turn| &turn.tool_calls)
         .collect::<Vec<_>>();
     assert_eq!(calls.len(), 2);

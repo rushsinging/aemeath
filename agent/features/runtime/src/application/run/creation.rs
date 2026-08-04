@@ -366,8 +366,8 @@ impl RunInstance {
         self.workspace.as_ref()
     }
 
-    pub fn initialize(&mut self, messages: Vec<share::message::Message>, turn_count: usize) {
-        self.execution.initialize_for_launch(messages, turn_count);
+    pub fn initialize(&mut self, messages: Vec<share::message::Message>, step_count: usize) {
+        self.execution.initialize_for_launch(messages, step_count);
     }
 
     pub(crate) fn execution_parts_mut(

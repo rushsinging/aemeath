@@ -1,4 +1,4 @@
-use super::events::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use super::events::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use super::stream_handler::InvocationEventReducer;
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
@@ -34,9 +34,9 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
     let sink = RecordingSink::default();
     let registry = ToolIdentityRegistry::new();
     let first_context =
-        RuntimeTurnContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatTurnId::new_v7());
+        RuntimeRunContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatRunId::new_v7());
     let second_context =
-        RuntimeTurnContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatTurnId::new_v7());
+        RuntimeRunContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatRunId::new_v7());
     let mut first =
         InvocationEventReducer::with_tool_identity(sink.clone(), registry.clone(), first_context);
     let mut second =

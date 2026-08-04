@@ -28,7 +28,7 @@ impl ConversationUpdate for ResumeConversation {
             tool_result_display_text, tool_result_image_count, HistoryAssistantBlock,
             HistoryDisplayMessage,
         };
-        use super::ids::{ChatId, ChatTurnId, ToolCallId};
+        use super::ids::{ChatId, ChatRunId, ToolCallId};
         use super::terminal::TerminalCause;
         use super::tool_call::ToolCallStatus;
 
@@ -39,8 +39,8 @@ impl ConversationUpdate for ResumeConversation {
 
         for step in &self.steps {
             let chat_id = ChatId::from_legacy_or_new(&step.run_id);
-            let turn_id = ChatTurnId::from_legacy_or_new(&step.step_id);
-            model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+            let run_id = ChatRunId::from_legacy_or_new(&step.step_id);
+            model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
             for (index, msg) in step.messages.iter().enumerate() {
                 let subsequent = step.messages.get(index + 1);
                 match HistoryDisplayMessage::parse(msg) {
@@ -59,23 +59,23 @@ impl ConversationUpdate for ResumeConversation {
                                 HistoryAssistantBlock::Text(text) => {
                                     all_changes.extend(model.apply(AssistantText {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         text,
                                     }));
                                     all_changes.extend(model.apply(CompleteBlock {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                     }));
                                 }
                                 HistoryAssistantBlock::Thinking(text) => {
                                     all_changes.extend(model.apply(ThinkingText {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         text,
                                     }));
                                     all_changes.extend(model.apply(CompleteBlock {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                     }));
                                 }
                                 HistoryAssistantBlock::ToolUse { id, name, input } => {
@@ -94,7 +94,7 @@ impl ConversationUpdate for ResumeConversation {
                                     let tool_call_id = ToolCallId::from_legacy_or_new(&id);
                                     all_changes.extend(model.apply(ToolCallStart {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         id: tool_call_id.clone(),
                                         provider_id: None,
                                         name: name.clone(),
@@ -102,7 +102,7 @@ impl ConversationUpdate for ResumeConversation {
                                     }));
                                     all_changes.extend(model.apply(ToolCallUpdate {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         id: tool_call_id.clone(),
                                         provider_id: Some(id.clone()),
                                         name: name.clone(),
@@ -127,7 +127,7 @@ impl ConversationUpdate for ResumeConversation {
                                     if let Some(result) = tool_results.get(id.as_str()) {
                                         all_changes.extend(model.apply(ToolResult {
                                             chat_id: chat_id.clone(),
-                                            turn_id: turn_id.clone(),
+                                            run_id: run_id.clone(),
                                             id: tool_call_id.clone(),
                                             provider_id: id.clone(),
                                             tool_name: name,
@@ -142,7 +142,7 @@ impl ConversationUpdate for ResumeConversation {
                                         // Mark as Cancelled so it doesn't stay in Ready/Running.
                                         all_changes.extend(model.apply(ToolCallUpdate {
                                             chat_id: chat_id.clone(),
-                                            turn_id: turn_id.clone(),
+                                            run_id: run_id.clone(),
                                             id: tool_call_id.clone(),
                                             provider_id: Some(id.clone()),
                                             name: name.clone(),
@@ -200,19 +200,19 @@ impl ConversationUpdate for AppendUserMessage {
 
 impl ConversationUpdate for AssistantText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_assistant_text(self.chat_id, self.turn_id, self.text)
+        model.append_assistant_text(self.chat_id, self.run_id, self.text)
     }
 }
 
 impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_thinking_text(self.chat_id, self.turn_id, self.text)
+        model.append_thinking_text(self.chat_id, self.run_id, self.text)
     }
 }
 
 impl ConversationUpdate for CompleteBlock {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.complete_block(self.chat_id, self.turn_id)
+        model.complete_block(self.chat_id, self.run_id)
     }
 }
 
@@ -220,7 +220,7 @@ impl ConversationUpdate for ToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.start_tool_call(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.id,
             self.provider_id,
             self.name.clone(),
@@ -233,7 +233,7 @@ impl ConversationUpdate for ToolCallUpdate {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_tool_call(ToolCallUpdateObservation {
             chat_id: self.chat_id,
-            turn_id: self.turn_id,
+            run_id: self.run_id,
             id: self.id,
             provider_id: self.provider_id,
             name: self.name,
@@ -248,7 +248,7 @@ impl ConversationUpdate for ToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.complete_tool_call(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.id,
             self.provider_id,
             self.tool_name,
@@ -304,7 +304,7 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
 
 impl ConversationUpdate for RecordAgentProgress {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_progress(self.chat_id, self.turn_id, self.tool_id, self.message)
+        model.record_agent_progress(self.chat_id, self.run_id, self.tool_id, self.message)
     }
 }
 
@@ -312,7 +312,7 @@ impl ConversationUpdate for UpdateAgentMeta {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_agent_meta(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.tool_id,
             self.role,
             self.model,
@@ -454,7 +454,7 @@ impl ConversationUpdate for InteractionCancelRejected {
 
 impl ConversationUpdate for CompleteChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.complete_chat(self.chat_id, self.turn_id)
+        model.complete_chat(self.chat_id, self.run_id)
     }
 }
 
@@ -822,14 +822,14 @@ mod tests {
 
         let chat_id =
             crate::tui::model::conversation::ids::ChatId::from_legacy_or_new("terminated-run");
-        let turn_id = crate::tui::model::conversation::ids::ChatTurnId::from_legacy_or_new(
+        let run_id = crate::tui::model::conversation::ids::ChatRunId::from_legacy_or_new(
             "running-tool-step",
         );
         let turn = model
             .chats
             .iter()
             .find(|chat| chat.id == chat_id)
-            .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+            .and_then(|chat| chat.runs.iter().find(|turn| turn.id == run_id))
             .expect("恢复后应存在终止 Step");
         let call = turn.tool_calls.first().expect("恢复后应存在 Bash ToolCall");
         assert_eq!(call.name, "Bash");

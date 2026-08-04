@@ -326,7 +326,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Reset);
                 }
             }
@@ -362,7 +362,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Compact);
                 }
             }
@@ -373,7 +373,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::SwitchModel { selection });
                 }
             }
@@ -384,7 +384,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::SetThinking { desired });
                 }
             }

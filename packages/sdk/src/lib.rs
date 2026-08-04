@@ -72,7 +72,7 @@ pub use config_view::{
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{
-    AgentId, ChatId, ChatTurnId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
+    AgentId, ChatId, ChatRunId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
     RunId, RunStepId, SessionId, ToolCallId,
 };
 pub use interaction::{

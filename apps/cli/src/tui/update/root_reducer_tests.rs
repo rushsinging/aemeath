@@ -12,7 +12,7 @@ fn tool_update(
 ) -> ConversationIntent {
     ConversationIntent::ToolCallUpdate(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-lifecycle"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-lifecycle"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-lifecycle"),
         id: crate::tui::model::conversation::ids::ToolCallId::new("tool-lifecycle"),
         provider_id: Some("provider-lifecycle".to_string()),
         name: "Bash".to_string(),
@@ -94,16 +94,16 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
         submission: "read".to_string(),
     });
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
-    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-1");
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-1");
     model
         .conversation
-        .ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        .ensure_runtime_turn(chat_id.clone(), run_id.clone());
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
@@ -117,7 +117,7 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
@@ -140,14 +140,14 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
 fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_request() {
     let mut model = TuiModel::default();
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("chat-atomic");
-    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-atomic");
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-atomic");
 
     let result = reduce_agent_event(
         &mut model,
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
                 provider_id: Some("provider-atomic".to_string()),
                 name: "Read".to_string(),
@@ -178,7 +178,7 @@ fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_requ
             item,
             crate::tui::model::output_timeline::OutputTimelineItem::ToolCall { reference }
                 if reference.context.chat_id == chat_id
-                    && reference.context.turn_id == turn_id
+                    && reference.context.run_id == run_id
                     && reference.tool_call_id == expected_tool_id
         )));
 }

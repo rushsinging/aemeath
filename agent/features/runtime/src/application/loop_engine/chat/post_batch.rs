@@ -10,7 +10,7 @@ pub(crate) async fn run_post_tool_batch(
     step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
     tool_count: usize,
-    turn_count: usize,
+    step_count: usize,
     workspace_root: &std::path::Path,
 ) {
     let _ = dispatch_hook(
@@ -19,7 +19,7 @@ pub(crate) async fn run_post_tool_batch(
         step_id,
         HookInvocation::PostToolBatch(PostToolBatchInput {
             tool_count,
-            summary: format!("batch with {tool_count} tools after {turn_count} turns"),
+            summary: format!("batch with {tool_count} tools after {step_count} run steps"),
         }),
         workspace_root,
         cancel,

@@ -1,4 +1,4 @@
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 
 /// AskUserQuestion 批量交互中的单个问题槽位。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -55,24 +55,24 @@ pub enum ConversationBlock {
     AssistantText {
         id: String,
         chat_id: Option<ChatId>,
-        turn_id: Option<ChatTurnId>,
+        run_id: Option<ChatRunId>,
         text: String,
     },
     Thinking {
         id: String,
         chat_id: Option<ChatId>,
-        turn_id: Option<ChatTurnId>,
+        run_id: Option<ChatRunId>,
         text: String,
     },
     ToolCall {
         id: ToolCallId,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
     },
     ToolResult {
         id: ToolCallId,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         output: String,
         content: serde_json::Value,
         is_error: bool,
@@ -161,7 +161,7 @@ mod tests {
         let block = ConversationBlock::AssistantText {
             id: "assistant-1".to_string(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             text: "hello".to_string(),
         };
         assert_eq!(block.id(), "assistant-1");
@@ -172,7 +172,7 @@ mod tests {
         let block = ConversationBlock::ToolCall {
             id: ToolCallId::new("tool-1"),
             chat_id: ChatId::new("chat-1"),
-            turn_id: ChatTurnId::new("turn-1"),
+            run_id: ChatRunId::new("turn-1"),
         };
         let _ = block.id(); // just verify it returns
     }

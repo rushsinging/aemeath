@@ -130,7 +130,7 @@ pub struct TextBlockView {
 pub struct ToolCallBlockView {
     pub key: String,
     pub chat_id: Option<String>,
-    pub turn_id: Option<String>,
+    pub run_id: Option<String>,
     pub tool_call_id: Option<String>,
     pub title: String,
     pub icon: String,

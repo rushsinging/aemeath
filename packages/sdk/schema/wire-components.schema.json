@@ -637,18 +637,18 @@
       "type": "string"
     },
     "ChatEventContext": {
-      "description": "Runtime stream context used to bind UI events to the authoritative chat/turn.",
+      "description": "Runtime stream context used to bind UI events to the authoritative chat/run.",
       "properties": {
         "chat_id": {
           "$ref": "#/$defs/ChatId"
         },
-        "turn_id": {
-          "$ref": "#/$defs/ChatTurnId"
+        "run_id": {
+          "$ref": "#/$defs/ChatRunId"
         }
       },
       "required": [
         "chat_id",
-        "turn_id"
+        "run_id"
       ],
       "title": "ChatEventContext",
       "type": "object"
@@ -737,7 +737,7 @@
       ],
       "type": "string"
     },
-    "ChatTurnId": {
+    "ChatRunId": {
       "format": "uuid",
       "type": "string",
       "x-aemeath-uuid-version": 7

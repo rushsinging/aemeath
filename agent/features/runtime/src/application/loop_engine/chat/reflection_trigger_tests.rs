@@ -2,9 +2,9 @@ use provider::ProviderStopReason;
 
 use super::reflection::should_run_turn_reflection;
 
-fn enabled_config(interval_turns: usize) -> share::config::MemoryConfig {
+fn enabled_config(interval_run_steps: usize) -> share::config::MemoryConfig {
     let mut config = share::config::MemoryConfig::default();
-    config.reflection.interval_turns = interval_turns;
+    config.reflection.interval_run_steps = interval_run_steps;
     config
 }
 

@@ -16,7 +16,7 @@ pub enum RunFinalizationStatus {
 #[derive(Debug, Clone)]
 pub struct RunFinalizationOutcome {
     pub status: RunFinalizationStatus,
-    pub turns: usize,
+    pub run_steps: usize,
     pub duration: std::time::Duration,
     pub role: Option<String>,
     pub model: String,
@@ -24,10 +24,10 @@ pub struct RunFinalizationOutcome {
 
 pub fn log_run_finalization(outcome: &RunFinalizationOutcome, session_id: &str) {
     log::info!(target: crate::LOG_TARGET,
-        "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
+        "[agent_loop_finished] session={}, status={:?}, run_steps={}, duration_ms={}, role={}, model={}",
         session_id,
         outcome.status,
-        outcome.turns,
+        outcome.run_steps,
         outcome.duration.as_millis(),
         outcome.role.as_deref().unwrap_or("-"),
         outcome.model,
@@ -86,7 +86,7 @@ where
         };
         let outcome = RunFinalizationOutcome {
             status,
-            turns: execution.turn_count(),
+            run_steps: execution.step_count(),
             duration: execution.elapsed(),
             role: self.role.clone(),
             model: self.model.clone(),
@@ -98,13 +98,13 @@ where
     pub(crate) async fn finalize_terminal(
         mut self,
         status: RunFinalizationStatus,
-        turns: usize,
+        run_steps: usize,
         duration: std::time::Duration,
         terminal: &AgentRunTerminal,
     ) {
         let outcome = RunFinalizationOutcome {
             status,
-            turns,
+            run_steps,
             duration,
             role: self.role.clone(),
             model: self.model.clone(),

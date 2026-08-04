@@ -1,12 +1,12 @@
-use super::chat_turn::ChatTurn;
-use super::ids::{ChatId, ChatTurnId};
+use super::chat_turn::ChatRun;
+use super::ids::{ChatId, ChatRunId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Chat {
     pub id: ChatId,
     pub user_submission: String,
     pub status: ChatStatus,
-    pub turns: Vec<ChatTurn>,
+    pub runs: Vec<ChatRun>,
 }
 
 impl Chat {
@@ -15,16 +15,16 @@ impl Chat {
             id,
             user_submission,
             status: ChatStatus::Running,
-            turns: vec![ChatTurn::new(ChatTurnId::new_v7(), 0)],
+            runs: vec![ChatRun::new(ChatRunId::new_v7(), 0)],
         }
     }
 
-    pub fn active_turn_mut(&mut self) -> Option<&mut ChatTurn> {
-        self.turns.last_mut()
+    pub fn active_turn_mut(&mut self) -> Option<&mut ChatRun> {
+        self.runs.last_mut()
     }
 
-    pub fn active_turn(&self) -> Option<&ChatTurn> {
-        self.turns.last()
+    pub fn active_turn(&self) -> Option<&ChatRun> {
+        self.runs.last()
     }
 }
 

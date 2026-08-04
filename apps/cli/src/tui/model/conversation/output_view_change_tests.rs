@@ -1,6 +1,6 @@
 use super::super::intent::{AppendUserMessage, AssistantText};
 use super::{ConversationModel, OutputViewChange, OutputViewChanges, OUTPUT_VIEW_JOURNAL_CAPACITY};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{RecordAgentProgress, ToolCallStart};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
@@ -47,7 +47,7 @@ fn append_and_streaming_update_publish_payload_free_output_view_changes() {
 
     model.apply(AssistantText {
         chat_id: ChatId::new("chat-1"),
-        turn_id: ChatTurnId::new("turn-1"),
+        run_id: ChatRunId::new("turn-1"),
         text: "first-secret-chunk".to_string(),
     });
     let (stream_cursor, first_stream_changes) = match model.output_view_changes_since(next_cursor) {
@@ -66,7 +66,7 @@ fn append_and_streaming_update_publish_payload_free_output_view_changes() {
 
     model.apply(AssistantText {
         chat_id: ChatId::new("chat-1"),
-        turn_id: ChatTurnId::new("turn-1"),
+        run_id: ChatRunId::new("turn-1"),
         text: "second-secret-chunk".to_string(),
     });
     let changes = match model.output_view_changes_since(stream_cursor) {
@@ -88,11 +88,11 @@ fn append_and_streaming_update_publish_payload_free_output_view_changes() {
 fn tool_progress_invalidates_the_existing_tool_root() {
     let mut model = ConversationModel::default();
     let chat_id = ChatId::new("chat-tool");
-    let turn_id = ChatTurnId::new("turn-tool");
+    let run_id = ChatRunId::new("turn-tool");
     let tool_id = ToolCallId::new("tool-progress");
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Agent".to_string(),
@@ -102,7 +102,7 @@ fn tool_progress_invalidates_the_existing_tool_root() {
 
     model.apply(RecordAgentProgress {
         chat_id,
-        turn_id,
+        run_id,
         tool_id,
         message: "reviewing".to_string(),
     });

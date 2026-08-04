@@ -19,7 +19,7 @@ use share::message::Message;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SegmentKind {
-    /// 正常对话段（一条 user 消息 + 其触发的完整回合，含追问/多轮 tool）
+    /// 正常对话段（一条 user 消息 + 其触发的完整run，含追问/多轮 tool）
     #[default]
     Normal,
     /// compact 产生的新链起点（`parent_id` 为 None）
@@ -126,7 +126,7 @@ impl ChatChain {
     /// 追加消息到指定 segment。
     ///
     /// 若 segment 不存在则创建（parent_id 指向当前最后一个段）。
-    /// segment ID 由 loop 在 turn 开始时生成，整个 turn 内复用。
+    /// segment ID 由 loop 在 run 开始时生成，整个 run 内复用。
     pub fn push(&mut self, msg: Message, segment_id: &str) {
         // 找到对应 segment
         let idx = self.segments.iter().position(|s| s.id == segment_id);
@@ -155,7 +155,7 @@ impl ChatChain {
 
     /// 从扁平消息列表构造链（单段）。
     ///
-    /// **不猜测 turn 边界**——segment 边界只由 loop 在 turn 开始时生成 segment ID 控制。
+    /// **不猜测 run 边界**——segment 边界只由 loop 在 run 开始时生成 segment ID 控制。
     pub fn from_flat_messages(messages: Vec<Message>) -> Self {
         if messages.is_empty() {
             return Self::default();
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_from_flat_messages_single_segment() {
-        // from_flat_messages 不猜测 turn 边界，全部放入单段
+        // from_flat_messages 不猜测 run 边界，全部放入单段
         let msgs = vec![user_msg("a"), asst_msg("b"), user_msg("c"), asst_msg("d")];
         let chain = ChatChain::from_flat_messages(msgs);
         assert_eq!(chain.active_segments().len(), 1);

@@ -29,12 +29,12 @@ fn add_tool_after_thinking(
     });
     conversation.apply(ThinkingText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         text: "thinking".to_string(),
     });
     conversation.apply(CompleteBlock {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
     });
     add_completed_tool(
         conversation,
@@ -56,7 +56,7 @@ fn add_completed_tool(
 ) {
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new(id),
         provider_id: None,
         name: name.to_string(),
@@ -64,7 +64,7 @@ fn add_completed_tool(
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
         id: ToolCallId::new(id),
         name: name.to_string(),
@@ -74,7 +74,7 @@ fn add_completed_tool(
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: format!("provider-{id}"),
         id: ToolCallId::new(id),
         tool_name: name.to_string(),

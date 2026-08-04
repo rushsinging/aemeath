@@ -2,18 +2,18 @@
 fn concurrent_agent_progress_attaches_to_matching_parent_tool_blocks() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("parent-chat");
-    let turn_id = super::ids::ChatTurnId::new("parent-turn");
+    let run_id = super::ids::ChatRunId::new("parent-turn");
     let first_tool_id = super::ids::ToolCallId::new("agent-first");
     let second_tool_id = super::ids::ToolCallId::new("agent-second");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
     for (index, tool_id) in [first_tool_id.clone(), second_tool_id.clone()]
         .into_iter()
         .enumerate()
     {
         model.apply(ToolCallStart {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id: tool_id,
             provider_id: None,
             name: "Agent".to_string(),
@@ -23,25 +23,25 @@ fn concurrent_agent_progress_attaches_to_matching_parent_tool_blocks() {
 
     model.apply(RecordAgentProgress {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: first_tool_id.clone(),
         message: "first child activity".to_string(),
     });
     model.apply(RecordAgentProgress {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: second_tool_id.clone(),
         message: "second child activity".to_string(),
     });
 
     assert_eq!(
-        tool_call(&model, &chat_id, &turn_id, &first_tool_id)
+        tool_call(&model, &chat_id, &run_id, &first_tool_id)
             .expect("first parent Agent ToolCall")
             .activities,
         vec!["first child activity"]
     );
     assert_eq!(
-        tool_call(&model, &chat_id, &turn_id, &second_tool_id)
+        tool_call(&model, &chat_id, &run_id, &second_tool_id)
             .expect("second parent Agent ToolCall")
             .activities,
         vec!["second child activity"]
@@ -60,7 +60,7 @@ fn concurrent_agent_progress_attaches_to_matching_parent_tool_blocks() {
 fn test_timeline_mirrors_blocks_no_agent_progress() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-a42");
-    let turn_id = super::ids::ChatTurnId::new("turn-a42");
+    let run_id = super::ids::ChatRunId::new("turn-a42");
     let tool_id = super::ids::ToolCallId::new("tool-a42");
 
     // 1. 用户消息
@@ -71,18 +71,18 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
     // 2. Assistant text
     model.apply(AssistantText {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         text: "starting agent".to_string(),
     });
     model.apply(CompleteBlock {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
     });
 
     // 3. Tool call start
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Agent".to_string(),
@@ -92,7 +92,7 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
     // 4. Agent progress — 不进 timeline，只写入 tool_calls[].activities
     model.apply(RecordAgentProgress {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         message: "analysing codebase".to_string(),
     });
@@ -100,7 +100,7 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
     // 5. Tool result
     model.apply(ToolResult {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: "provider-a42".to_string(),
         tool_name: "Agent".to_string(),
@@ -132,8 +132,8 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
     let turn = model
         .chats
         .iter()
-        .flat_map(|ch| ch.turns.iter())
-        .find(|t| t.id == turn_id);
+        .flat_map(|ch| ch.runs.iter())
+        .find(|t| t.id == run_id);
     let activities = turn
         .and_then(|t| {
             t.tool_calls.iter().find(|c| {
@@ -167,13 +167,13 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
 fn test_bash_streaming_preview_tails_complete_lines() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-bash-stream");
-    let turn_id = super::ids::ChatTurnId::new("turn-bash-stream");
+    let run_id = super::ids::ChatRunId::new("turn-bash-stream");
     let tool_id = super::ids::ToolCallId::new("tool-bash-stream");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Bash".to_string(),
@@ -182,12 +182,12 @@ fn test_bash_streaming_preview_tails_complete_lines() {
 
     model.apply(RecordAgentProgress {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         message: "a\nb\nc\nd\ne\nf".to_string(),
     });
 
-    let activities = tool_call(&model, &chat_id, &turn_id, &tool_id)
+    let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
         .map(|call| call.activities.clone())
         .unwrap_or_default();
     assert_eq!(activities, vec!["b", "c", "d", "e", "f"]);
@@ -197,13 +197,13 @@ fn test_bash_streaming_preview_tails_complete_lines() {
 fn test_agent_progress_preview_limits_activity_lines() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-agent-stream");
-    let turn_id = super::ids::ChatTurnId::new("turn-agent-stream");
+    let run_id = super::ids::ChatRunId::new("turn-agent-stream");
     let tool_id = super::ids::ToolCallId::new("tool-agent-stream");
 
-    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
     model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         id: tool_id.clone(),
         provider_id: None,
         name: "Agent".to_string(),
@@ -212,12 +212,12 @@ fn test_agent_progress_preview_limits_activity_lines() {
 
     model.apply(RecordAgentProgress {
         chat_id: chat_id.clone(),
-        turn_id: turn_id.clone(),
+        run_id: run_id.clone(),
         tool_id: tool_id.clone(),
         message: "one\ntwo\nthree\nfour\nfive\nsix".to_string(),
     });
 
-    let activities = tool_call(&model, &chat_id, &turn_id, &tool_id)
+    let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
         .map(|call| call.activities.clone())
         .unwrap_or_default();
     assert_eq!(activities, vec!["two", "three", "four", "five", "six"]);

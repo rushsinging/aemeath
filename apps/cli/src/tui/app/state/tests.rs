@@ -367,7 +367,7 @@ mod tests {
     fn test_turn_context() -> crate::tui::app::event::UiTurnContext {
         crate::tui::app::event::UiTurnContext {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-test"),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-test"),
         }
     }
 

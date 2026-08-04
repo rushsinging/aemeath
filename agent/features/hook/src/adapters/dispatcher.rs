@@ -420,7 +420,10 @@ fn invocation_environment(
             env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), "true".to_string());
         }
         HookInvocation::Stop(input) => {
-            env.insert("AEMEATH_STOP_TURNS".to_string(), input.turns.to_string());
+            env.insert(
+                "AEMEATH_STOP_RUN_STEPS".to_string(),
+                input.run_steps.to_string(),
+            );
         }
         HookInvocation::PermissionRequest(input) | HookInvocation::PermissionDenied(input) => {
             env.insert(
@@ -648,11 +651,11 @@ impl Dispatcher {
         cwd: &std::path::Path,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
-        let turns = match stop_invocation {
-            HookInvocation::Stop(input) => input.turns,
+        let run_steps = match stop_invocation {
+            HookInvocation::Stop(input) => input.run_steps,
             _ => 0,
         };
-        let invocation = HookInvocation::StopFailure(StopFailureInput { turns, error });
+        let invocation = HookInvocation::StopFailure(StopFailureInput { run_steps, error });
 
         // 复用主 dispatch 的 enabled + matcher + order 稳定规则（不再触发新的 StopFailure）。
         let mut matching: Vec<&HookSubscription> = self

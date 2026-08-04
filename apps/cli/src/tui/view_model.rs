@@ -36,7 +36,7 @@ mod tests {
         let kind = OutputBlockKind::ToolCall(ToolCallBlockView {
             key: "chat-1/turn-1/tool-1".to_string(),
             chat_id: Some("chat-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
+            run_id: Some("turn-1".to_string()),
             tool_call_id: Some("tool-1".to_string()),
             title: "Read(src/main.rs)".to_string(),
             icon: "✓".to_string(),
