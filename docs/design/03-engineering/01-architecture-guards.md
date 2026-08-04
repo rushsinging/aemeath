@@ -77,7 +77,7 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；stop hook、Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
 | 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 展示只能走逐 subscription Activity 链；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
@@ -239,7 +239,7 @@
 |---|---|---|
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：当前精确 `path + target layer` 例外中已删除不存在的 `application/interaction/ask_user.rs → adapters` 与已退役的 `ports/legacy.rs → application`；其余路径必须通过 stale 自检，禁止扩张。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：空集合。Runtime application 不得依赖 `crate::adapters`；旧容器、角色 adapter 与兼容参数袋由 `check-runtime-capability-assembly.sh` 同时禁止复活。
 
 - **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
 
@@ -717,6 +717,7 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-04 | #1399 退役 Runtime 旧容器、`ChatLoopContext` 参数袋、Runtime-owned TUI launch adapter 与 Tokio cancellation adapter；具体 SDK ingress/egress 构造归 Runtime adapter façade并由 Composition 注入；`RUNTIME_LAYER_MIGRATION_EXCEPTIONS` 清零，registry migration debt 收敛为 repository 1 / Runtime 0 / TUI 1；Runtime capability Guard 新增旧符号与 application→adapters 反向依赖禁入 | [#1399](https://github.com/rushsinging/aemeath/issues/1399) |
 | 2026-07-17 | 登记 #983 的 AtomicDataset crate-root public façade；因跨 crate Memory 消费 deferred 至 #896，不提前修改 `ROOT_ACCESS_ALLOW.storage`，且 #983 无 Guard exception / allowlist 净增 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-17 | #903 收紧 `check-provider-pull-stream.sh`：Runtime/Context 的生产代码与测试替身统一禁止跨 crate 使用 legacy sink；同时为 Stop 单 crate 测试增加 180 秒默认超时、进程组回收与失败快速退出，避免单 crate 卡住整个 Hook | [#903](https://github.com/rushsinging/aemeath/issues/903) |
 | 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6c）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |

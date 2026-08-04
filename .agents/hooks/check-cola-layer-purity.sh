@@ -2,9 +2,6 @@
 set -euo pipefail
 # guard-registry:policy.hexagonal.current-layer-matrix
 # guard-registry:policy.task.target-layout
-# guard-registry:migration.runtime.application-accessors-to-adapters
-# guard-registry:migration.runtime.application-from-args-to-adapters
-# guard-registry:migration.runtime.legacy-port-to-application
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用

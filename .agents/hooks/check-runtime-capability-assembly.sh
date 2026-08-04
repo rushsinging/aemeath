@@ -252,6 +252,12 @@ for source_path in rust_source_paths():
 # ── 3. Retired symbols absent from production code ──
 RETIRED = {
     r'\bRuntimeContextParts\b': "RuntimeContextParts struct",
+    r'\bRuntimeResources\b': "RuntimeResources container",
+    r'\bChatRuntimeContext\b': "ChatRuntimeContext wrapper",
+    r'\bChatLoopContext\b': "ChatLoopContext compatibility parameter bag",
+    r'\bRunLoopPort\b': "fat RunLoopPort",
+    r'\bMainRunPort\b': "MainRunPort role adapter",
+    r'\bSubAgentRun\b': "SubAgentRun role adapter",
     r'\bassemble_main_runtime_context\b': "assemble_main_runtime_context function",
     r'\bModelStep::StopHookBlocked\b': "ModelStep::StopHookBlocked variant",
     r'\bInteractionBridge::disabled\b': "InteractionBridge::disabled() method",
@@ -266,6 +272,16 @@ for candidate in _glob.glob("agent/**/*.rs", recursive=True):
     for retired_pattern, retired_name in RETIRED.items():
         if re.search(retired_pattern, production_source):
             violations.append(f"3. Retired '{retired_name}' in production: {candidate_path}")
+
+# ── 3a. Runtime application must not construct concrete adapters ──
+for source_path in rust_source_paths():
+    if "/application/" not in source_path.as_posix() or is_test_source(source_path):
+        continue
+    production_source = production_text(source_path)
+    if re.search(r'\bcrate\s*::\s*adapters\s*::', production_source):
+        violations.append(
+            f"3a. Runtime application constructs or imports a concrete adapter: {source_path}"
+        )
 
 # ── 4. RunKind::Main/Sub not in factory, engine, or launcher ──
 for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/application/run/launcher.rs"]:
@@ -527,6 +543,7 @@ approved_root_exports = {
     "RuntimeBootstrapDependencies",
     "RuntimeContextFactory",
     "RuntimeCoreDependencies",
+    "RuntimeIngressAssembly",
     "RuntimeToolAssemblyDependencies",
     "SessionBootstrapAssembly",
     "SkillBootstrapAssembly",

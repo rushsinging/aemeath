@@ -275,6 +275,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
+        runtime::composition::wire_sdk_chat_ingress(),
         initial_provider_assembly(),
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),

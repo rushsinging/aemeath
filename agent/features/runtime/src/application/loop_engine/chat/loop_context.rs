@@ -1,12 +1,7 @@
-//! chat loop 的上下文类型定义。
+//! Main session command driver 的启动输入。
 //!
-//! `SwitchClientFn` 和 `ChatLoopContext` 从 `loop_runner.rs` 拆出，
-//! 降低主循环文件的体量。
-//!
-//! #1385: ChatLoopContext no longer duplicates service contracts (binding, tools,
-//! policy, hooks, memory, reflection, reasoning, etc.).  All service-level state
-//! lives in [`SessionRuntime`]; per-Run contracts come from [`RuntimeContext`]
-//! assembled via `RunFactory::create()`.
+//! 该输入只承载 session actor 启动所需的 I/O、会话状态和本地 bookkeeping；
+//! per-Run 活契约仍只由 `RunFactory::create()` 产生的 `RuntimeContext` 提供。
 
 use crate::application::loop_engine::chat::events::ChatEventSink;
 use crate::application::loop_engine::input_strategy::SessionInputPort;
@@ -30,42 +25,21 @@ pub type SwitchClientFn = Arc<
         + Sync,
 >;
 
-/// 单次 chat loop 的完整执行状态。
+/// Main session command driver 的一次启动输入。
 ///
-/// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
-/// 函数内解构消费。
-///
-/// #1385: Service contracts (policy, tools, hook, memory, task, reasoning, provider,
-/// interaction, reflection) are now assembled per-run via
-/// `RunFactory::create()`. ChatLoopContext no longer
-/// duplicates them.
-///
-/// Remaining fields are I/O channels, the session shell, initial user messages,
-/// and per-session mutable bookkeeping.
+/// Session actor 跨多个 Run 存活；每次真实用户输入都由它创建全新的
+/// `RunInstance`，并交给共享 Loop Engine。该类型不复制 Runtime service，
+/// 也不承担 per-Run capability 或执行状态所有权。
 #[allow(clippy::type_complexity)]
-pub struct ChatLoopContext<S, I>
+pub struct SessionCommandDriverInput<S, I>
 where
     S: ChatEventSink,
     I: SessionInputPort,
 {
-    /// I/O channels
     pub sink: S,
     pub input_events: I,
-
-    /// #1385: Session shell — single source for all session-level state.
-    /// Non-Option; tests must construct a real `SessionRuntime` via the
-    /// test helper or provide a minimal fixture.
-    pub shell: crate::application::client::SessionRuntime,
-
-    /// Per-session read file tracking.
+    pub session: crate::application::client::SessionRuntime,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-
-    /// Task 7 debt: ChatLoopContext uses tools::SessionReminders type;
-    /// shell holds share::memory::SessionReminders (different type).
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
-
-    /// Session-scoped query port for idle commands — replaces four `Arc<Fn>`
-    /// closures (#1385). Must stay in the Main Session shell; RuntimeContext
-    /// must NOT reference this port.
     pub session_queries: Arc<dyn crate::ports::SessionQueryPort>,
 }

@@ -116,18 +116,9 @@ fn forbidden_layer_deps(current_layer: &str) -> &'static [&'static str] {
     }
 }
 
-/// Narrow migration exceptions for already-existing layer inversions. These are
-/// path + target-layer limited so new COLA violations still fail.
-const RUNTIME_LAYER_MIGRATION_EXCEPTIONS: [(&str, &str); 2] = [
-    (
-        "agent/features/runtime/src/application/client/accessors.rs",
-        "adapters",
-    ),
-    (
-        "agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs",
-        "adapters",
-    ),
-];
+/// Runtime production code has completed the Hexagonal cutover. Layer
+/// inversions are rejected directly; no Runtime migration exceptions remain.
+const RUNTIME_LAYER_MIGRATION_EXCEPTIONS: [(&str, &str); 0] = [];
 
 const TOOL_PROFILE_PUBLIC_API: [&str; 3] =
     ["baseline", "derive_restricted", "allowed_capabilities"];

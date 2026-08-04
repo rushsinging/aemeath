@@ -438,8 +438,8 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
 }
 
 /// Wrap an existing `provider::test_harness::LlmProvider` scripted fake into a
-/// `ProviderBinding` so legacy loop/agent tests can plug their fakes directly
-/// into the `binding` field on `ChatLoopContext` without rewriting the fake bodies.
+/// `ProviderBinding` so session-driver and agent tests can reuse their scripted
+/// providers without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
