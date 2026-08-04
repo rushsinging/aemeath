@@ -484,6 +484,21 @@ fn resumed_step_from_tui(
     }
 }
 
+fn stop_hook_feedback_display_text(feedback: &sdk::LocalResumeStopHookFeedback) -> String {
+    let feedback = crate::tui::adapter::runtime_view::TuiStopHookFeedback {
+        summary: feedback.summary.clone(),
+        command: feedback.command.clone(),
+        exit_code: feedback.exit_code,
+        reason: feedback.reason.clone(),
+        stdout_preview: feedback.stdout_preview.clone(),
+        stderr_preview: feedback.stderr_preview.clone(),
+        stdout_truncated: feedback.stdout_truncated,
+        stderr_truncated: feedback.stderr_truncated,
+        output_file: feedback.output_file.clone(),
+    };
+    feedback.display_text()
+}
+
 fn build_items(steps: &[ResumedHistoryStep]) -> Vec<ResumedHistoryItem> {
     steps
         .iter()
@@ -536,7 +551,7 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                     .metadata
                     .as_ref()
                     .and_then(|metadata| metadata.stop_hook.as_ref())
-                    .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                    .map(stop_hook_feedback_display_text)
                     .unwrap_or_else(|| message.text_content());
                 items.push(ResumedHistoryItem {
                     id: format!("history-{step_index}-message-{message_index}-stop-hook"),

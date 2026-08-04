@@ -93,7 +93,7 @@ pub use session::{
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
-    Role as LocalResumeRole,
+    Role as LocalResumeRole, StopHookFeedback as LocalResumeStopHookFeedback,
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,

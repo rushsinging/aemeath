@@ -126,6 +126,7 @@ fn loaded_stop_hook_window_assembles_dedicated_feedback_block() {
         stderr_truncated: false,
         output_file: None,
     };
+    let expected_body = feedback.display_text();
     let mut loaded = window("session", 7, 0);
     loaded.steps[0].messages = vec![TuiChatMessage::stop_hook_feedback(
         "model feedback",
@@ -152,7 +153,10 @@ fn loaded_stop_hook_window_assembles_dedicated_feedback_block() {
     )
     .expect("Stop Hook block");
 
-    assert!(matches!(block.kind, OutputBlockKind::StopHookFeedback(_)));
+    let OutputBlockKind::StopHookFeedback(feedback_block) = block.kind else {
+        panic!("expected dedicated Stop Hook feedback block");
+    };
+    assert_eq!(feedback_block.body, expected_body);
 }
 
 #[test]
