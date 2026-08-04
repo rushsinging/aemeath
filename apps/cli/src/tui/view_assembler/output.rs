@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 #[cfg(test)]
 use crate::tui::model::conversation::model::ConversationModel;
 #[cfg(test)]
@@ -23,7 +23,7 @@ use super::output_tool_view::{
 #[cfg(test)]
 /// 测试参考装配使用的完整工具索引。
 pub(super) struct ToolIndex<'a> {
-    calls: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), &'a ToolCall>,
+    calls: HashMap<(&'a ChatId, &'a ChatRunId, &'a ToolCallId), &'a ToolCall>,
 }
 
 #[cfg(test)]
@@ -31,7 +31,7 @@ impl<'a> ToolIndex<'a> {
     pub(super) fn build(conversation: &'a ConversationModel) -> Self {
         let mut calls = HashMap::new();
         for chat in &conversation.chats {
-            for turn in &chat.turns {
+            for turn in &chat.runs {
                 for call in &turn.tool_calls {
                     if let Some(id) = call.id.as_ref() {
                         calls.insert((&chat.id, &turn.id, id), call);
@@ -46,10 +46,10 @@ impl<'a> ToolIndex<'a> {
     pub(super) fn call(
         &self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+        self.calls.get(&(chat_id, run_id, tool_id)).copied()
     }
 }
 
@@ -58,10 +58,10 @@ impl ToolCallLookup for ToolIndex<'_> {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+        self.calls.get(&(chat_id, run_id, tool_id)).copied()
     }
 }
 
@@ -102,7 +102,7 @@ impl OutputViewAssembler {
                 let tool = find_tool_view(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                     workspace_root,
                 )?;
@@ -131,7 +131,7 @@ impl OutputViewAssembler {
                 if tool_result_is_embedded(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                 ) {
                     return None;
@@ -139,7 +139,7 @@ impl OutputViewAssembler {
                 let call = find_tool_call(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                 )?;
                 let payload = call.result.as_ref()?;

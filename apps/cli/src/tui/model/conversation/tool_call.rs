@@ -130,10 +130,10 @@ pub enum ToolCallChange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId, ToolStreamKey};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 
     fn stream_key() -> ToolStreamKey {
-        ToolStreamKey::new(ChatId::new("chat-1"), ChatTurnId::new("turn-1"), "Read", 0)
+        ToolStreamKey::new(ChatId::new("chat-1"), ChatRunId::new("turn-1"), "Read", 0)
     }
 
     use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;

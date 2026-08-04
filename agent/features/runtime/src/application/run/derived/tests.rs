@@ -216,7 +216,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
     let parent = scoped_logging::LogContext {
         session_id: Some("parent-session".into()),
         chat_id: Some("parent-chat".into()),
-        turn: Some(99),
+        run_step: Some(99),
         request_id: Some("parent-request".into()),
         model: Some("parent-model".into()),
         provider: Some("parent-provider".into()),
@@ -268,7 +268,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
     assert_eq!(seen[1].role.as_deref(), Some("role-b"));
     assert_eq!(seen[1].model.as_deref(), Some("role-b/model-b"));
     for context in &seen {
-        assert_eq!(context.turn, Some(1));
+        assert_eq!(context.run_step, Some(1));
         assert_eq!(context.provider.as_deref(), Some("recording-provider"));
         assert!(context.request_id.is_some());
         assert_ne!(context.chat_id.as_deref(), Some("parent-chat"));
@@ -282,7 +282,7 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
     let parent = scoped_logging::LogContext {
         session_id: Some("parent-session".into()),
         chat_id: Some("parent-chat".into()),
-        turn: Some(9),
+        run_step: Some(9),
         request_id: Some("parent-request".into()),
         model: Some("parent-model".into()),
         provider: Some("parent-provider".into()),
@@ -311,7 +311,7 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
             scoped_logging::instrument(run_a, async {
                 scoped_logging::within(
                     scoped_logging::LogContextPatch {
-                        turn: scoped_logging::FieldPatch::Set(1),
+                        run_step: scoped_logging::FieldPatch::Set(1),
                         ..Default::default()
                     },
                     async { scoped_logging::capture() },
@@ -321,7 +321,7 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
             scoped_logging::instrument(run_b, async {
                 scoped_logging::within(
                     scoped_logging::LogContextPatch {
-                        turn: scoped_logging::FieldPatch::Set(1),
+                        run_step: scoped_logging::FieldPatch::Set(1),
                         ..Default::default()
                     },
                     async { scoped_logging::capture() },
@@ -335,13 +335,13 @@ async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() 
         assert_eq!(a.model.as_deref(), Some("model-a"));
         assert_eq!(a.provider.as_deref(), Some("provider-a"));
         assert_eq!(a.role.as_deref(), Some("role-a"));
-        assert_eq!(a.turn, Some(1));
+        assert_eq!(a.run_step, Some(1));
         assert_eq!(b.session_id.as_deref(), Some("sub-session-b"));
         assert_eq!(b.chat_id.as_deref(), Some("sub-run-b"));
         assert_eq!(b.model.as_deref(), Some("model-b"));
         assert_eq!(b.provider.as_deref(), Some("provider-b"));
         assert_eq!(b.role.as_deref(), Some("role-b"));
-        assert_eq!(b.turn, Some(1));
+        assert_eq!(b.run_step, Some(1));
         assert_eq!(scoped_logging::capture(), parent);
     })
     .await;
@@ -371,7 +371,7 @@ fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
     let services = include_str!("../../loop_engine/run_services.rs");
 
     assert!(setup.contains("logging::instrument(sub_run_context"));
-    assert!(services.contains("turn: logging::FieldPatch::Set(turn)"));
+    assert!(services.contains("run_step: logging::FieldPatch::Set(run_step)"));
     assert!(run.contains("sub_request_log_context("));
     for source in [setup, run] {
         assert!(!source.contains("logging::set_current_model"));
@@ -384,13 +384,13 @@ fn sub_request_retry_gets_a_fresh_request_id() {
     let turn = scoped_logging::LogContext {
         session_id: Some("session".into()),
         chat_id: Some("sub-run".into()),
-        turn: Some(1),
+        run_step: Some(1),
         ..Default::default()
     };
     let first = super::loop_run::sub_request_log_context(&turn, "model-a", "provider-a", "role-a");
     let retry = super::loop_run::sub_request_log_context(&turn, "model-a", "provider-a", "role-a");
 
-    assert_eq!(first.turn, Some(1));
+    assert_eq!(first.run_step, Some(1));
     assert_ne!(first.request_id, retry.request_id);
 }
 

@@ -331,16 +331,16 @@ pub struct SessionResumeView {
     pub compacted: bool,
 }
 
-/// Runtime stream context used to bind UI events to the authoritative chat/turn.
+/// Runtime stream context used to bind UI events to the authoritative chat/run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventContext {
     pub chat_id: crate::ids::ChatId,
-    pub turn_id: crate::ids::ChatTurnId,
+    pub run_id: crate::ids::ChatRunId,
 }
 
 impl ChatEventContext {
-    pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+    pub fn new(chat_id: crate::ids::ChatId, run_id: crate::ids::ChatRunId) -> Self {
+        Self { chat_id, run_id }
     }
 }
 
@@ -514,11 +514,11 @@ pub enum ChatEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    /// Turn 启动，首次同步全量消息。TUI 据此启动 spinner(Thinking)。
+    /// Run 启动，首次同步全量消息。TUI 据此启动 spinner(Thinking)。
     TurnStarted {
         messages: Vec<ChatMessage>,
     },
-    /// Microcompact 清理了陈旧 tool result，turn 仍在进行。TUI 只同步消息，不动 spinner。
+    /// Microcompact 清理了陈旧 tool result，run 仍在进行。TUI 只同步消息，不动 spinner。
     MicrocompactDone {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
@@ -646,15 +646,15 @@ pub enum ChatEvent {
     /// Chat 被取消；由 Runtime 的 typed Run termination 投影。
     Cancelled {
         context: ChatEventContext,
-        /// 取消前该回合已经运行的耗时。
+        /// 取消前该run已经运行的耗时。
         duration_ms: u64,
     },
     /// 实时 TPS。
     LiveTps(f64),
-    /// 当前 turn 变化。
-    TurnChanged(usize),
-    /// 记录当前 turn 变化的端口事件。
-    CurrentTurnChanged(usize),
+    /// 当前 run 变化。
+    RunChanged(usize),
+    /// 记录当前 run 变化的端口事件。
+    CurrentRunChanged(usize),
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,

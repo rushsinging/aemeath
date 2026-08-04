@@ -3,7 +3,7 @@
 //! 在 auto-compact（LLM 摘要）之前、budget reduction 之后运行。
 //! 纯规则判断，不调用 LLM，运行成本接近零。
 //!
-//! 两种入口都保护最近 N 个真实 user turn（= N 个 Run）：
+//! 两种入口都保护最近 N 个真实 user run（= N 个 Run）：
 //! - **主循环**：`microcompact_chain(&mut ChatChain)` — 保护最近 2 个 Run。
 //! - **sub-agent**：`microcompact_messages(&mut [Message])` — 保护最近 2 个 Run。
 
@@ -23,21 +23,21 @@ pub const EXPLORATORY_TOOLS: &[&str] = &[
     "ToolSearch",
 ];
 
-/// 保护最近 N 个真实 user turn（= N 个 Run）的 ToolResult 不被清理。
+/// 保护最近 N 个真实 user run（= N 个 Run）的 ToolResult 不被清理。
 /// 主循环与 sub-agent 共用同一阈值，保证行为一致。
-const PROTECT_RECENT_TURNS: usize = 2;
+const PROTECT_RECENT_RUNS: usize = 2;
 
 /// 占位符模板。
 const PLACEHOLDER_TEMPLATE: &str = "[Old tool result cleared (was {n} chars)]";
 
 // ── 主循环入口 ──────────────────────────────────────
 
-/// 对 ChatChain 执行 microcompact：保护最近 `PROTECT_RECENT_TURNS` 个 Run（真实 user turn），
+/// 对 ChatChain 执行 microcompact：保护最近 `PROTECT_RECENT_RUNS` 个 Run（真实 user run），
 /// 折叠更早 Run 中的探索类 ToolResult 为占位符。
 ///
 /// 返回被清理的 ToolResult 数量。
 pub fn microcompact_chain(chain: &mut ChatChain) -> usize {
-    // 扁平化所有 active messages，按 user turn 计算保护边界
+    // 扁平化所有 active messages，按 user run 计算保护边界
     let flat: Vec<&Message> = chain
         .active_segments()
         .iter()
@@ -47,20 +47,20 @@ pub fn microcompact_chain(chain: &mut ChatChain) -> usize {
         return 0;
     }
 
-    // 从末尾向前数 PROTECT_RECENT_TURNS 个真实 user turn，得到扁平 index 保护边界
+    // 从末尾向前数 PROTECT_RECENT_RUNS 个真实 user run，得到扁平 index 保护边界
     let mut user_count = 0usize;
     let mut protect_from = 0usize;
     for (i, msg) in flat.iter().enumerate().rev() {
-        if is_real_user_turn(msg) {
+        if is_real_user_run(msg) {
             user_count += 1;
-            if user_count == PROTECT_RECENT_TURNS {
+            if user_count == PROTECT_RECENT_RUNS {
                 protect_from = i;
                 break;
             }
         }
     }
-    if protect_from == 0 && user_count < PROTECT_RECENT_TURNS {
-        return 0; // 不够 2 个 turn，整条链都在保护范围内
+    if protect_from == 0 && user_count < PROTECT_RECENT_RUNS {
+        return 0; // 不够 2 个 run，整条链都在保护范围内
     }
     if protect_from == 0 {
         return 0; // protect_from=0 表示保护起点在第一条，无可清理
@@ -97,8 +97,8 @@ pub fn microcompact_chain(chain: &mut ChatChain) -> usize {
 
 /// 对扁平 messages 执行 microcompact（供 sub-agent 使用）。
 ///
-/// 修复 turn 检测：用 `is_real_user_turn` 替代裸 `Role::User` 计数，
-/// 避免 ToolResult / 系统注入被误判为 turn 边界。
+/// 修复 run 检测：用 `is_real_user_run` 替代裸 `Role::User` 计数，
+/// 避免 ToolResult / 系统注入被误判为 run 边界。
 ///
 /// 返回被清理的 ToolResult 数量。不改变 messages 的长度。
 pub fn microcompact_messages(messages: &mut [Message]) -> usize {
@@ -129,8 +129,8 @@ fn is_exploratory(tool_name: &str) -> bool {
     EXPLORATORY_TOOLS.contains(&tool_name)
 }
 
-/// 判断一条消息是否为真实用户 turn（排除 ToolResult 批次和系统注入）。
-fn is_real_user_turn(msg: &Message) -> bool {
+/// 判断一条消息是否为真实用户 run（排除 ToolResult 批次和系统注入）。
+fn is_real_user_run(msg: &Message) -> bool {
     if !matches!(msg.role, Role::User) {
         return false;
     }
@@ -213,14 +213,14 @@ fn build_tool_name_map_flat(chain: &ChatChain) -> HashMap<String, String> {
 
 /// 计算保护边界的 message index（sub-agent 用）。
 ///
-/// 从末尾向前数 `PROTECT_RECENT_TURNS` 个真实 user turn，
-/// 最后一个 real user turn 的 index 就是保护边界。
+/// 从末尾向前数 `PROTECT_RECENT_RUNS` 个真实 user run，
+/// 最后一个 real user run 的 index 就是保护边界。
 fn protect_from_index(messages: &[Message]) -> usize {
     let mut user_count = 0;
     for (i, msg) in messages.iter().enumerate().rev() {
-        if is_real_user_turn(msg) {
+        if is_real_user_run(msg) {
             user_count += 1;
-            if user_count == PROTECT_RECENT_TURNS {
+            if user_count == PROTECT_RECENT_RUNS {
                 return i;
             }
         }
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn test_protect_from_index_few_turns() {
         // 只有 1 个 User → 保护全部
-        let msgs = vec![user_msg("only turn"), assistant_msg("a")];
+        let msgs = vec![user_msg("only run"), assistant_msg("a")];
         assert_eq!(protect_from_index(&msgs), 0);
     }
 
@@ -476,24 +476,24 @@ mod tests {
         }
     }
 
-    // ── microcompact_messages 修复后的 turn 检测 ──────────
+    // ── microcompact_messages 修复后的 run 检测 ──────────
 
     #[test]
     fn test_tool_result_not_counted_as_turn_boundary() {
-        // 修复前：ToolResult 是 Role::User，被误算为 turn → 保护边界偏移。
-        // 修复后：is_real_user_turn 排除纯 ToolResult，保护边界正确。
+        // 修复前：ToolResult 是 Role::User，被误算为 run → 保护边界偏移。
+        // 修复后：is_real_user_run 排除纯 ToolResult，保护边界正确。
         let mut msgs = vec![
-            user_msg("turn1"),                 // 0 — real user turn
+            user_msg("turn1"),                 // 0 — real user run
             tool_use_msg("t1", "Read"),        // 1
-            tool_result_msg("t1", "content1"), // 2 — User but NOT a turn
+            tool_result_msg("t1", "content1"), // 2 — User but NOT a run
             tool_use_msg("t2", "Read"),        // 3
-            tool_result_msg("t2", "content2"), // 4 — User but NOT a turn
+            tool_result_msg("t2", "content2"), // 4 — User but NOT a run
             assistant_msg("ok"),               // 5
-            user_msg("turn2"),                 // 6 — real user turn
+            user_msg("turn2"),                 // 6 — real user run
             assistant_msg("done"),             // 7
         ];
-        // PROTECT_RECENT_TURNS=2 → protect_from = 倒数第 2 个 real user turn
-        // 倒数第 2 个 real user turn = index 0 (turn1)
+        // PROTECT_RECENT_RUNS=2 → protect_from = 倒数第 2 个 real user run
+        // 倒数第 2 个 real user run = index 0 (turn1)
         // 所以 protect_from = 0 → 全部保护
         let cleared = microcompact_messages(&mut msgs);
         assert_eq!(cleared, 0);
@@ -511,7 +511,7 @@ mod tests {
                 parent_id: parent.clone(),
                 kind: crate::domain::session::SegmentKind::Normal,
                 summary: None,
-                messages: vec![user_msg(&format!("turn{s}")), assistant_msg("reply")],
+                messages: vec![user_msg(&format!("run{s}")), assistant_msg("reply")],
             };
             for t in 0..tool_per_seg {
                 let id = format!("tu-{s}-{t}");
@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn test_microcompact_chain_protects_recent_2_runs() {
         // 5 segments, each = 1 Run (user + assistant + Read result)
-        // 保护最近 2 个 Run（user turn），清理前 3 个
+        // 保护最近 2 个 Run（user run），清理前 3 个
         let mut chain = make_chain(5, 1);
         let cleared = microcompact_chain(&mut chain);
         assert_eq!(cleared, 3, "应清理前 3 个 Run 的探索类 ToolResult");
@@ -566,7 +566,7 @@ mod tests {
                 parent_id: parent.clone(),
                 kind: SegmentKind::Normal,
                 summary: None,
-                messages: vec![user_msg(&format!("turn{s}")), assistant_msg("reply")],
+                messages: vec![user_msg(&format!("run{s}")), assistant_msg("reply")],
             };
             parent = Some(seg.id.clone());
             segs.push(seg);

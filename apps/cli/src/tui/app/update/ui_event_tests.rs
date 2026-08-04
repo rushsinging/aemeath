@@ -4,7 +4,7 @@ use crate::tui::adapter::runtime_view::{
 };
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use crate::tui::update::msg::TuiMsg;
 use std::path::PathBuf;
 
@@ -551,7 +551,7 @@ fn test_api_error_then_done_clears_processing() {
         UiEvent::DoneWithDuration {
             context: crate::tui::app::event::UiTurnContext {
                 chat_id: ChatId::new("chat-test"),
-                turn_id: ChatTurnId::new("turn-test"),
+                run_id: ChatRunId::new("turn-test"),
             },
             duration: std::time::Duration::from_secs(1),
         },
@@ -670,9 +670,9 @@ fn runtime_batch_applies_all_events_before_the_next_render() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
-    let context = crate::tui::adapter::tui_runtime_event::TuiTurnContext {
+    let context = crate::tui::adapter::tui_runtime_event::TuiRunContext {
         chat_id: "batch-chat".to_string(),
-        turn_id: "batch-turn".to_string(),
+        run_id: "batch-turn".to_string(),
     };
 
     let result = app.update(

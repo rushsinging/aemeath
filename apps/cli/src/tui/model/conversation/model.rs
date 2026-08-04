@@ -2,8 +2,8 @@ use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationM
 use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
-use super::chat_turn::ChatTurn;
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::chat_turn::ChatRun;
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::interaction::InteractionState;
 use super::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
@@ -18,7 +18,7 @@ use std::time::Instant;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ConversationRetainedStateSnapshot {
     pub chats: usize,
-    pub turns: usize,
+    pub runs: usize,
     pub tool_calls: usize,
     pub timeline_items: usize,
     pub agent_progress_entries: usize,
@@ -43,9 +43,9 @@ pub struct ConversationModel {
     revision: u64,
     output_view_journal: OutputViewJournal,
     pub(super) active_text_block_id: Option<String>,
-    pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_text_context: Option<(ChatId, ChatRunId)>,
     pub(super) active_thinking_block_id: Option<String>,
-    pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_thinking_context: Option<(ChatId, ChatRunId)>,
     pub(super) active_interaction: Option<InteractionState>,
     activity_observations: ActivityObservationModel,
 
@@ -118,15 +118,15 @@ impl ConversationModel {
     pub(crate) fn tool_call(
         &self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_call_id: &ToolCallId,
     ) -> Option<&super::tool_call::ToolCall> {
         self.chats
             .iter()
             .find(|chat| &chat.id == chat_id)?
-            .turns
+            .runs
             .iter()
-            .find(|turn| &turn.id == turn_id)?
+            .find(|turn| &turn.id == run_id)?
             .tool_calls
             .iter()
             .find(|call| call.id.as_ref() == Some(tool_call_id))
@@ -157,11 +157,11 @@ impl ConversationModel {
 
     #[cfg(test)]
     pub(crate) fn retained_state_snapshot(&self) -> ConversationRetainedStateSnapshot {
-        let turns = self.chats.iter().map(|chat| chat.turns.len()).sum();
+        let runs = self.chats.iter().map(|chat| chat.runs.len()).sum();
         let tool_calls = self
             .chats
             .iter()
-            .flat_map(|chat| &chat.turns)
+            .flat_map(|chat| &chat.runs)
             .map(|turn| turn.tool_calls.len())
             .sum();
         let agent_progress_bytes = self
@@ -174,7 +174,7 @@ impl ConversationModel {
 
         ConversationRetainedStateSnapshot {
             chats: self.chats.len(),
-            turns,
+            runs,
             tool_calls,
             timeline_items: self.timeline.items().len(),
             agent_progress_entries: self.agent_progress.len(),
@@ -233,7 +233,7 @@ impl ConversationModel {
         self.active_chat_id = Some(chat_id.clone());
         self.chats.push(chat);
         let user_block_id = self.next_block_id("user");
-        let turn_id = ChatTurnId::new_v7();
+        let run_id = ChatRunId::new_v7();
         self.timeline.push(OutputTimelineItem::UserMessage {
             id: user_block_id.clone(),
             text: submission,
@@ -244,7 +244,7 @@ impl ConversationModel {
             },
             ConversationChange::ChatTurnStarted {
                 chat_id: chat_id.to_string(),
-                turn_id: turn_id.to_string(),
+                run_id: run_id.to_string(),
             },
             ConversationChange::UserMessageAppended {
                 block_id: user_block_id,
@@ -268,38 +268,38 @@ impl ConversationModel {
     pub(crate) fn ensure_runtime_turn(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
-    ) -> (ChatId, ChatTurnId) {
+        run_id: ChatRunId,
+    ) -> (ChatId, ChatRunId) {
         if let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) {
             chat.status = ChatStatus::Running;
-            if !chat.turns.iter().any(|turn| turn.id == turn_id) {
-                let sequence = chat.turns.len();
-                chat.turns.push(ChatTurn::new(turn_id.clone(), sequence));
+            if !chat.runs.iter().any(|turn| turn.id == run_id) {
+                let sequence = chat.runs.len();
+                chat.runs.push(ChatRun::new(run_id.clone(), sequence));
             }
-            return (chat_id, turn_id);
+            return (chat_id, run_id);
         }
         let mut chat = Chat::new(chat_id.clone(), String::new());
-        chat.turns.clear();
-        chat.turns.push(ChatTurn::new(turn_id.clone(), 0));
+        chat.runs.clear();
+        chat.runs.push(ChatRun::new(run_id.clone(), 0));
         self.chats.push(chat);
-        (chat_id, turn_id)
+        (chat_id, run_id)
     }
 
     pub(super) fn runtime_turn_mut(
         &mut self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
-    ) -> Option<&mut ChatTurn> {
+        run_id: &ChatRunId,
+    ) -> Option<&mut ChatRun> {
         self.chats
             .iter_mut()
             .find(|chat| &chat.id == chat_id)
-            .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
+            .and_then(|chat| chat.runs.iter_mut().find(|turn| &turn.id == run_id))
     }
 
     pub(super) fn complete_chat(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
     ) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
         self.active_text_context = None;
@@ -308,7 +308,7 @@ impl ConversationModel {
         let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) else {
             return Vec::new();
         };
-        if !chat.turns.iter().any(|turn| turn.id == turn_id) {
+        if !chat.runs.iter().any(|turn| turn.id == run_id) {
             return Vec::new();
         }
         chat.status = ChatStatus::Completing;
@@ -440,21 +440,21 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         ConversationChange::OutputDirty => None,
         ConversationChange::ToolCallBound {
             chat_id,
-            turn_id,
+            run_id,
             id,
             ..
         }
         | ConversationChange::ToolCallCompleted {
             chat_id,
-            turn_id,
+            run_id,
             id,
             ..
         }
         | ConversationChange::AgentMetaUpdated {
             chat_id,
-            turn_id,
+            run_id,
             tool_id: id,
-        } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
+        } => Some(format!("tool-call-{chat_id}/{run_id}/{id}")),
         _ => None,
     }
 }
@@ -499,7 +499,7 @@ mod tests {
         // 空文本的 AssistantText 返回空 change（no-op）。
         let changes = model.apply(AssistantText {
             chat_id: ChatId::new("c1"),
-            turn_id: ChatTurnId::new("t1"),
+            run_id: ChatRunId::new("t1"),
             text: String::new(),
         });
         assert!(changes.is_empty(), "空文本 AssistantText 应为 no-op");

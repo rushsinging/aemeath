@@ -7,14 +7,14 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 fn tool_call<'a>(
     model: &'a ConversationModel,
     chat_id: &super::ids::ChatId,
-    turn_id: &super::ids::ChatTurnId,
+    run_id: &super::ids::ChatRunId,
     id: &super::ids::ToolCallId,
 ) -> Option<&'a super::tool_call::ToolCall> {
     model
         .chats
         .iter()
         .find(|chat| &chat.id == chat_id)
-        .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
+        .and_then(|chat| chat.runs.iter().find(|turn| &turn.id == run_id))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()
@@ -25,7 +25,7 @@ fn tool_call<'a>(
 fn timeline_tool_call_ref_exists(
     model: &ConversationModel,
     chat_id: &super::ids::ChatId,
-    turn_id: &super::ids::ChatTurnId,
+    run_id: &super::ids::ChatRunId,
     id: &super::ids::ToolCallId,
 ) -> bool {
     model.timeline.items().iter().any(|item| {
@@ -33,7 +33,7 @@ fn timeline_tool_call_ref_exists(
             item,
             OutputTimelineItem::ToolCall { reference }
                 if &reference.context.chat_id == chat_id
-                    && &reference.context.turn_id == turn_id
+                    && &reference.context.run_id == run_id
                     && reference.tool_call_id == *id
         )
     })

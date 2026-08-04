@@ -88,21 +88,21 @@ where
         UiEvent::Text { context, text } => {
             conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::Thinking { context, text } => {
             conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
             }))
         }
         UiEvent::ToolCallStart {
@@ -113,9 +113,9 @@ where
             index,
         } => {
             crate::tui::log_debug!(
-                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                "map tool_call_start chat_id={} run_id={} id={} provider_id={:?} name={} index={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 name,
@@ -123,7 +123,7 @@ where
             );
             conversation(ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -144,9 +144,9 @@ where
                 .clone()
                 .or_else(|| arguments.as_ref().map(|value| value.to_string()));
             crate::tui::log_debug!(
-                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} args_len={}",
+                "map tool_call_update chat_id={} run_id={} id={} provider_id={:?} name={} index={} args_len={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 name,
@@ -155,7 +155,7 @@ where
             );
             conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -177,9 +177,9 @@ where
             images,
         } => {
             crate::tui::log_debug!(
-                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                "map tool_result chat_id={} run_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 tool_name,
@@ -190,7 +190,7 @@ where
             );
             conversation(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 tool_name: tool_name.clone(),
@@ -209,7 +209,7 @@ where
             sdk::AgentProgressKindView::Started { role, model } => {
                 conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
                     chat_id: attachment_context.chat_id.clone(),
-                    turn_id: attachment_context.turn_id.clone(),
+                    run_id: attachment_context.run_id.clone(),
                     tool_id: ToolCallId::new(tool_id.as_str()),
                     role: role.clone(),
                     model: model.clone(),
@@ -229,7 +229,7 @@ where
                 conversation(ConversationIntent::RecordAgentProgress(
                     RecordAgentProgress {
                         chat_id: attachment_context.chat_id.clone(),
-                        turn_id: attachment_context.turn_id.clone(),
+                        run_id: attachment_context.run_id.clone(),
                         tool_id: ToolCallId::new(tool_id.as_str()),
                         message,
                     },
@@ -241,7 +241,7 @@ where
         | UiEvent::Cancelled { context, .. } => {
             conversation(ConversationIntent::CompleteChat(CompleteChat {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
             }))
         }
 
@@ -361,21 +361,21 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::Text { context, text } => {
             conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 text: text.clone(),
             }))
         }
         TuiRuntimeEvent::Thinking { context, text } => {
             conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 text: text.clone(),
             }))
         }
         TuiRuntimeEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             }))
         }
         TuiRuntimeEvent::ToolCallStart {
@@ -386,7 +386,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             index,
         } => conversation(ConversationIntent::ToolCallStart(ToolCallStart {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             id: ToolCallId::new(id),
             provider_id: provider_id.clone(),
             name: name.clone(),
@@ -407,7 +407,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 .or_else(|| arguments.as_ref().map(ToString::to_string));
             conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 id: ToolCallId::new(id),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -433,7 +433,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             images,
         } => conversation(ConversationIntent::ToolResult(ToolResult {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             id: ToolCallId::new(id),
             provider_id: provider_id.clone(),
             tool_name: tool_name.clone(),
@@ -535,9 +535,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             conversation: vec![
                 ConversationIntent::CompleteChat(CompleteChat {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
-                    ),
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 }),
                 ConversationIntent::TerminalNotice(TerminalNotice {
                     cause: crate::tui::model::conversation::terminal::TerminalCause::Completed,
@@ -553,9 +551,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             conversation: vec![
                 ConversationIntent::CompleteChat(CompleteChat {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
-                    ),
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 }),
                 ConversationIntent::TerminalNotice(TerminalNotice {
                     cause: crate::tui::model::conversation::terminal::TerminalCause::UserCancelled,
@@ -587,7 +583,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ),
             },
         )),
-        TuiRuntimeEvent::TurnChanged(_) => AgentEventMapping::default(),
+        TuiRuntimeEvent::RunChanged(_) => AgentEventMapping::default(),
         TuiRuntimeEvent::AgentProgress {
             attachment_context,
             tool_id,
@@ -599,8 +595,8 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
                         &attachment_context.chat_id,
                     ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                        &attachment_context.run_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     role: role.clone(),
@@ -613,8 +609,8 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
                         &attachment_context.chat_id,
                     ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                        &attachment_context.run_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     message: format_agent_progress_text(text),
@@ -625,8 +621,8 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
                         &attachment_context.chat_id,
                     ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                        &attachment_context.run_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
                     message: format_agent_progress_calls(calls),

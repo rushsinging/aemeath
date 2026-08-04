@@ -7,12 +7,12 @@ use super::super::testing::TuiScenarioHarness;
 fn context() -> UiTurnContext {
     UiTurnContext {
         chat_id: ChatId::new("chat-link"),
-        turn_id: ChatTurnId::new("turn-link"),
+        run_id: ChatRunId::new("turn-link"),
     }
 }
 
 use crate::tui::app::event::UiTurnContext;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 
 #[test]
 fn markdown_link_in_assistant_message_produces_clickable_linkspan() {

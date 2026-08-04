@@ -241,7 +241,7 @@ pub struct TaskLifecycleConfigPatch {
     #[serde(default)]
     pub interrupt_default_action: Option<String>,
     #[serde(default)]
-    pub stale_remind_after_turns: Option<usize>,
+    pub stale_remind_after_run_steps: Option<usize>,
     #[serde(default)]
     pub stale_remind_repeat_interval: Option<usize>,
 }
@@ -303,7 +303,7 @@ pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
-    pub interval_turns: Option<usize>,
+    pub interval_run_steps: Option<usize>,
     #[serde(default)]
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
@@ -637,8 +637,8 @@ pub(crate) fn apply_task_lifecycle_patch(
     if let Some(v) = patch.interrupt_default_action {
         base.interrupt_default_action = v;
     }
-    if let Some(v) = patch.stale_remind_after_turns {
-        base.stale_remind_after_turns = v;
+    if let Some(v) = patch.stale_remind_after_run_steps {
+        base.stale_remind_after_run_steps = v;
     }
     if let Some(v) = patch.stale_remind_repeat_interval {
         base.stale_remind_repeat_interval = v;
@@ -735,8 +735,8 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.enabled {
         base.enabled = v;
     }
-    if let Some(v) = patch.interval_turns {
-        base.interval_turns = v;
+    if let Some(v) = patch.interval_run_steps {
+        base.interval_run_steps = v;
     }
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;

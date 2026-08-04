@@ -2,7 +2,7 @@
 //! Run's lifetime and provides `drain_or_seal` for step-level consumption within the
 //! same Run, unlike the session-owned `PendingInputBuffer` which creates a fresh Run.
 //!
-//! #1272 Per-turn drain-or-seal linearization:
+//! #1272 Per-run drain-or-seal linearization:
 //! `drain_or_seal` atomically drains user inputs AND seals if empty — a single
 //! synchronous decision point, rather than separate source drains followed by
 //! checking emptiness separately. Once sealed, late-arriving `UserMessage`s are
@@ -193,7 +193,7 @@ impl RunInputBuffer {
     /// Drain user inputs and advance epoch for engine-driven continuations
     /// (StopHookFeedback / ToolResults). Unlike `drain_or_seal`, this
     /// never seals the buffer — only the normal drain-or-seal path seals
-    /// (#1272 per-turn drain linearization).
+    /// (#1272 per-run drain linearization).
     ///
     /// Returns `Ready` with the drained batch and the consumed epoch.
     /// Returns `EpochMismatch` / `AlreadySealed` on the same guards as
@@ -256,7 +256,7 @@ impl RunInputBuffer {
 
     /// Atomically drain user inputs OR seal the buffer if empty.
     ///
-    /// This is the single linearization point for the per-turn drain-or-seal
+    /// This is the single linearization point for the per-run drain-or-seal
     /// contract (#1272). After this returns `EmptyAndSealed`, the buffer is
     /// sealed — future `UserMessage` pushes via `push_or_reject` are rejected.
     ///

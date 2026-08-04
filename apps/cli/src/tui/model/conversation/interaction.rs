@@ -537,7 +537,7 @@ impl ConversationModel {
         let result = self.ask_user_reply_payload(request_id);
         let mut changes = Vec::new();
         for chat in &mut self.chats {
-            for turn in &mut chat.turns {
+            for turn in &mut chat.runs {
                 for call in &mut turn.tool_calls {
                     if call.name == "AskUserQuestion"
                         && call
@@ -555,7 +555,7 @@ impl ConversationModel {
                         call.complete(result.clone());
                         changes.push(ConversationChange::ToolCallCompleted {
                             chat_id: chat.id.to_string(),
-                            turn_id: turn.id.to_string(),
+                            run_id: turn.id.to_string(),
                             id: call
                                 .id
                                 .as_ref()
@@ -582,7 +582,7 @@ impl ConversationModel {
         }
         let mut changes = Vec::new();
         for chat in &mut self.chats {
-            for turn in &mut chat.turns {
+            for turn in &mut chat.runs {
                 for call in &mut turn.tool_calls {
                     if call.name == "AskUserQuestion"
                         && call
@@ -593,7 +593,7 @@ impl ConversationModel {
                     {
                         changes.push(ConversationChange::ToolCallCompleted {
                             chat_id: chat.id.to_string(),
-                            turn_id: turn.id.to_string(),
+                            run_id: turn.id.to_string(),
                             id: call
                                 .id
                                 .as_ref()

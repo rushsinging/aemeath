@@ -3,7 +3,7 @@
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
 use super::block::AskUserSlot;
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
 };
@@ -30,9 +30,9 @@ pub struct ResumeConversation {
     pub steps: Vec<TuiResumedSessionStep>,
 }
 
-/// 仅追加一条用户消息回显块，不创建新的 chat/turn。
+/// 仅追加一条用户消息回显块，不创建新的 chat/run。
 ///
-/// 用于 ask_user 应答、队列输入冲刷等「在已激活的对话回合内回显用户输入」的场景。
+/// 用于 ask_user 应答、队列输入冲刷等「在已激活的对话run内回显用户输入」的场景。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendUserMessage {
     pub text: String,
@@ -41,27 +41,27 @@ pub struct AppendUserMessage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssistantText {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThinkingText {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteBlock {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCallStart {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: Option<String>,
     pub name: String,
@@ -71,7 +71,7 @@ pub struct ToolCallStart {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCallUpdate {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: Option<String>,
     pub name: String,
@@ -83,7 +83,7 @@ pub struct ToolCallUpdate {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolResult {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: String,
     pub tool_name: String,
@@ -131,7 +131,7 @@ pub struct ClearAllQueuedSubmissions;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordAgentProgress {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub tool_id: ToolCallId,
     pub message: String,
 }
@@ -142,7 +142,7 @@ pub struct RecordAgentProgress {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpdateAgentMeta {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub tool_id: ToolCallId,
     pub role: Option<String>,
     pub model: String,
@@ -261,7 +261,7 @@ pub struct InteractionCancelRejected {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteChat {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

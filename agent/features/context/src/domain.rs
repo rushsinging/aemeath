@@ -92,7 +92,7 @@ pub struct ContextRequest {
     pub context_size: usize,
     pub max_output_tokens: usize,
     /// The most recent API-reported total tokens: normalized input plus output.
-    /// `None` while no turn has completed yet (first turn or after baseline reset).
+    /// `None` while no run has completed yet (first run or after baseline reset).
     pub last_api_total_tokens: Option<u64>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub tool_schema_tokens: usize,

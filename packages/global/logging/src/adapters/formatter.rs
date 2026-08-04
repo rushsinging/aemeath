@@ -1,6 +1,6 @@
 //! 日志格式化：`&log::Record` → 14 字段紧凑 JSON 行。
 //!
-//! 字段固定：`ts / boot_ts / pid / ver / session / chat / turn / request_id /
+//! 字段固定：`ts / boot_ts / pid / ver / session / chat / run_step / request_id /
 //! model / provider / role / level / target / msg`。
 //!
 //! 写入格式为 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
@@ -20,7 +20,7 @@ pub fn timestamp_local_rfc3339() -> String {
 
 /// 把诊断日志 `Record` 序列化为一行紧凑 JSON。
 ///
-/// `turn` 字段在未设置时为 `null`（其他字段若无值用 `"-"` 占位）。
+/// `run_step` 字段在未设置时为 `null`（其他字段若无值用 `"-"` 占位）。
 pub fn format_diag_json_line(record: &Record) -> String {
     format_diag_json_line_from_parts(
         record.level().as_str(),
@@ -52,7 +52,7 @@ pub(crate) fn format_diag_json_line_with_context(
         "ver": log_context::app_version(),
         "session": Value::String(context_snapshot.session_id.as_deref().unwrap_or("-").to_string()),
         "chat": Value::String(context_snapshot.chat_id.as_deref().unwrap_or("-").to_string()),
-        "turn": context_snapshot.turn,
+        "run_step": context_snapshot.run_step,
         "request_id": context_snapshot.request_id,
         "model": Value::String(context_snapshot.model.as_deref().unwrap_or("-").to_string()),
         "provider": context_snapshot.provider,

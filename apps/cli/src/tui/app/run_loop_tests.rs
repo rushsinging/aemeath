@@ -1,9 +1,9 @@
 use super::*;
 
-fn context() -> crate::tui::adapter::tui_runtime_event::TuiTurnContext {
-    crate::tui::adapter::tui_runtime_event::TuiTurnContext {
+fn context() -> crate::tui::adapter::tui_runtime_event::TuiRunContext {
+    crate::tui::adapter::tui_runtime_event::TuiRunContext {
         chat_id: "batch-chat".to_string(),
-        turn_id: "batch-turn".to_string(),
+        run_id: "batch-turn".to_string(),
     }
 }
 

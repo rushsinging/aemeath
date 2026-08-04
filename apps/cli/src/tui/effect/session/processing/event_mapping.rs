@@ -168,8 +168,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             duration: std::time::Duration::from_millis(duration_ms),
         },
         sdk::ChatEvent::LiveTps(tps) => UiEvent::LiveTps(tps),
-        sdk::ChatEvent::CurrentTurnChanged(turn) | sdk::ChatEvent::TurnChanged(turn) => {
-            UiEvent::CurrentTurnChanged(turn)
+        sdk::ChatEvent::CurrentRunChanged(run_step) | sdk::ChatEvent::RunChanged(run_step) => {
+            UiEvent::CurrentRunChanged(run_step)
         }
         // #944 5B: AskUserBatch legacy bridge removed.
         sdk::ChatEvent::AskUserBatch { .. } => {

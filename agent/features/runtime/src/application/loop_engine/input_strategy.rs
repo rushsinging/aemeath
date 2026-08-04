@@ -4,7 +4,7 @@
 //! feeds from a channel + run-scoped buffer, while the Sub adapter feeds from
 //! a fixed prompt with epoch tracking.
 //!
-//! #1272 Per-turn drain-or-seal is the contract both strategies must honour.
+//! #1272 Per-run drain-or-seal is the contract both strategies must honour.
 
 use sdk::ChatInputEvent;
 use share::message::Message;
@@ -229,7 +229,7 @@ where
             }
         }
 
-        // #1272 Per-turn drain-or-seal contract:
+        // #1272 Per-run drain-or-seal contract:
         //   StopHookFeedback > ToolResults > user input (Ready) > EmptyAndSealed.
         if let Some(feedback) = self.continuation.take_stop_hook_feedback() {
             let text = feedback.text_content();
@@ -519,13 +519,13 @@ where
 ///
 /// The Sub adapter has a fixed prompt that is drained as `Ready` exactly
 /// once (epoch 0), then `InternalContinuation::ToolResults` for each
-/// subsequent tool-result turn, and finally `EmptyAndSealed` when the model
+/// subsequent tool-result run, and finally `EmptyAndSealed` when the model
 /// produces no further tool calls.
 pub(crate) struct FixedInputAdapter<'a> {
     pub prompt: &'a str,
     /// Whether the initial prompt has already been consumed (#1272).
     pub prompt_drained: bool,
-    /// Sub maintains its own epoch counter for per-turn drain linearization.
+    /// Sub maintains its own epoch counter for per-run drain linearization.
     /// First drain (Ready) uses epoch 0, then advances to 1; subsequent
     /// continuations/seal use the current epoch.
     pub next_epoch: DrainEpoch,

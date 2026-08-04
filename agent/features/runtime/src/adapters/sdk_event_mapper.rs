@@ -1,6 +1,6 @@
 //! Runtime-owned mappers to the SDK Published Language.
 
-use crate::application::loop_engine::chat::RuntimeTurnContext;
+use crate::application::loop_engine::chat::RuntimeRunContext;
 use crate::domain::agent_run::RunDomainEvent;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
@@ -175,8 +175,8 @@ fn run_status_to_sdk(status: crate::domain::agent_run::RunStatus) -> RunStatusVi
     }
 }
 
-fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
-    ChatEventContext::new(context.chat_id, context.turn_id)
+fn turn_context_to_sdk(context: RuntimeRunContext) -> ChatEventContext {
+    ChatEventContext::new(context.chat_id, context.run_id)
 }
 
 fn tool_call_status_to_sdk(
@@ -459,8 +459,8 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::LiveTps(tps) => {
             ChatEvent::LiveTps(tps)
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::TurnChanged(turn) => {
-            ChatEvent::CurrentTurnChanged(turn)
+        crate::application::loop_engine::chat::RuntimeStreamEvent::RunChanged(run_step) => {
+            ChatEvent::CurrentRunChanged(run_step)
         }
         crate::application::loop_engine::chat::RuntimeStreamEvent::AskUserBatch {
             items,

@@ -359,7 +359,7 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ToolResult {
         context: sdk::ChatEventContext::new(
             sdk::ChatId::new("chat-tool-result"),
-            sdk::ChatTurnId::new("turn-tool-result"),
+            sdk::ChatRunId::new("turn-tool-result"),
         ),
         id: sdk::ToolCallId::new("runtime-call"),
         provider_id: "provider-call".to_string(),
@@ -413,10 +413,10 @@ fn session_resume_keeps_context_run_step_boundaries() {
 #[test]
 fn authoritative_cancelled_terminal_maps_without_run_or_step_correlation() {
     let chat_id = sdk::ChatId::new("chat-cancelled");
-    let turn_id = sdk::ChatTurnId::new("turn-cancelled");
+    let run_id = sdk::ChatRunId::new("turn-cancelled");
 
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::Cancelled {
-        context: sdk::ChatEventContext::new(chat_id.clone(), turn_id.clone()),
+        context: sdk::ChatEventContext::new(chat_id.clone(), run_id.clone()),
         duration_ms: 6_000,
     });
 
@@ -425,7 +425,7 @@ fn authoritative_cancelled_terminal_maps_without_run_or_step_correlation() {
         SdkEventMapping::Runtime(TuiRuntimeEvent::Cancelled {
             context,
             duration_ms: 6_000,
-        }) if context.chat_id == chat_id.as_str() && context.turn_id == turn_id.as_str()
+        }) if context.chat_id == chat_id.as_str() && context.run_id == run_id.as_str()
     ));
 }
 
@@ -532,9 +532,9 @@ fn config_reload_preserves_permission_mode_in_tui_owned_event() {
 #[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     let expected_chat_id = sdk::ids::ChatId::new("chat-retry");
-    let expected_turn_id = sdk::ids::ChatTurnId::new("turn-retry");
+    let expected_run_id = sdk::ids::ChatRunId::new("turn-retry");
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ModelInvocationRetrying {
-        context: sdk::ChatEventContext::new(expected_chat_id.clone(), expected_turn_id.clone()),
+        context: sdk::ChatEventContext::new(expected_chat_id.clone(), expected_run_id.clone()),
         attempt: 2,
         delay: std::time::Duration::from_millis(10_250),
     });
@@ -546,6 +546,6 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
             attempt: 2,
             delay_ms: 10_250,
         }) if context.chat_id == expected_chat_id.as_str()
-            && context.turn_id == expected_turn_id.as_str()
+            && context.run_id == expected_run_id.as_str()
     ));
 }

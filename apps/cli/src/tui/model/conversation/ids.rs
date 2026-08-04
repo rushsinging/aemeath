@@ -41,28 +41,23 @@ macro_rules! tui_id {
 }
 
 tui_id!(ChatId);
-tui_id!(ChatTurnId);
+tui_id!(ChatRunId);
 tui_id!(ToolCallId);
 
 /// Tool stream key for identifying tool call streams.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ToolStreamKey {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub name: String,
     pub index: usize,
 }
 
 impl ToolStreamKey {
-    pub fn new(
-        chat_id: ChatId,
-        turn_id: ChatTurnId,
-        name: impl Into<String>,
-        index: usize,
-    ) -> Self {
+    pub fn new(chat_id: ChatId, run_id: ChatRunId, name: impl Into<String>, index: usize) -> Self {
         Self {
             chat_id,
-            turn_id,
+            run_id,
             name: name.into(),
             index,
         }

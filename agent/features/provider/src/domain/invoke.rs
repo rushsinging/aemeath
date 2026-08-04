@@ -214,9 +214,9 @@ pub struct Usage {
     /// or `usage.cache_read_input_tokens` (Anthropic).
     #[serde(default, alias = "cache_read_input_tokens")]
     pub cached_tokens: Option<u32>,
-    /// Tokens written to prompt cache this turn (Anthropic
+    /// Tokens written to prompt cache this run (Anthropic
     /// `cache_creation_input_tokens`). Charged at a premium rate; subsequent
-    /// turns read from cache at a steep discount.
+    /// runs read from cache at a steep discount.
     #[serde(default, alias = "cache_creation_input_tokens")]
     pub cache_creation_tokens: Option<u32>,
     /// Tokens consumed by reasoning/thinking within the decoder's compatibility aggregate.

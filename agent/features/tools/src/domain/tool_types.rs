@@ -270,14 +270,14 @@ mod tests {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProgressSourceContext {
     pub chat_id: String,
-    pub turn_id: String,
+    pub run_id: String,
 }
 
 impl AgentProgressSourceContext {
-    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+    pub fn new(chat_id: impl Into<String>, run_id: impl Into<String>) -> Self {
         Self {
             chat_id: chat_id.into(),
-            turn_id: turn_id.into(),
+            run_id: run_id.into(),
         }
     }
 }

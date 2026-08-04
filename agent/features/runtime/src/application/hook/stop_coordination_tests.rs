@@ -44,7 +44,7 @@ async fn continue_decision_preserves_typed_dispatch_for_mapping() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
@@ -67,7 +67,7 @@ async fn cancelled_stop_hook_does_not_materialize_llm_feedback() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
@@ -87,7 +87,7 @@ async fn block_outcome_materializes_feedback_message_once() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "zh".to_string(),
@@ -111,7 +111,7 @@ async fn block_returns_typed_reason_not_string() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),

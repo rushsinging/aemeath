@@ -194,7 +194,7 @@ pub fn needs_compaction_actual(
     _reasoning_tokens: Option<u64>,
     context_size: usize,
 ) -> bool {
-    // Next-turn input ≈ current input + current output. Reasoning tokens are a subset
+    // Next run-step input ≈ current input + current output. Reasoning tokens are a subset
     // of output_tokens (completion_tokens_details.reasoning_tokens ⊂ completion_tokens),
     // so they are already accounted for — adding them back would double-count.
     let total = last_input_tokens + last_output_tokens;
@@ -219,7 +219,7 @@ pub fn needs_compaction_total(last_total_tokens: u64, context_size: usize) -> bo
 /// - `last_input_tokens`: Total input tokens reported by the API (includes cached tokens).
 /// - `cached_tokens`: Tokens served from prompt cache (still consume context, but cost less/free).
 /// - `reasoning_tokens`: Tokens consumed by reasoning/thinking. **Already included in the
-///   API's input_tokens** for the next turn — NOT summed separately here.
+///   API's input_tokens** for the next run step — NOT summed separately here.
 /// - `context_size`: The model's context window size.
 pub fn compaction_urgency(
     last_input_tokens: u64,
@@ -227,7 +227,7 @@ pub fn compaction_urgency(
     _reasoning_tokens: Option<u64>,
     context_size: usize,
 ) -> u8 {
-    // Current context occupancy = input_tokens (what the API consumed this turn).
+    // Current context occupancy = input_tokens (what the API consumed this run step).
     // Reasoning tokens are a subset of output_tokens and do not add to current occupancy.
     let total = last_input_tokens;
 

@@ -1,17 +1,17 @@
-use super::ids::ChatTurnId;
+use super::ids::ChatRunId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssistantStream {
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub kind: AssistantStreamKind,
     pub buffer: String,
     pub synthetic_think_open: bool,
 }
 
 impl AssistantStream {
-    pub fn new(turn_id: ChatTurnId, kind: AssistantStreamKind) -> Self {
+    pub fn new(run_id: ChatRunId, kind: AssistantStreamKind) -> Self {
         Self {
-            turn_id,
+            run_id,
             kind,
             buffer: String::new(),
             synthetic_think_open: false,
@@ -32,17 +32,17 @@ pub enum AssistantStreamKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::ids::ChatTurnId;
+    use crate::tui::model::conversation::ids::ChatRunId;
 
     #[test]
     fn test_assistant_stream_starts_empty() {
-        let stream = AssistantStream::new(ChatTurnId::new("turn-1"), AssistantStreamKind::Text);
+        let stream = AssistantStream::new(ChatRunId::new("turn-1"), AssistantStreamKind::Text);
         assert_eq!(stream.buffer, "");
     }
 
     #[test]
     fn test_assistant_stream_appends_text() {
-        let mut stream = AssistantStream::new(ChatTurnId::new("turn-1"), AssistantStreamKind::Text);
+        let mut stream = AssistantStream::new(ChatRunId::new("turn-1"), AssistantStreamKind::Text);
         stream.append("hello");
         stream.append(" world");
         assert_eq!(stream.buffer, "hello world");
@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn test_assistant_stream_tracks_kind() {
-        let stream = AssistantStream::new(ChatTurnId::new("turn-1"), AssistantStreamKind::Thinking);
+        let stream = AssistantStream::new(ChatRunId::new("turn-1"), AssistantStreamKind::Thinking);
         assert_eq!(stream.kind, AssistantStreamKind::Thinking);
     }
 }

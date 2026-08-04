@@ -10,9 +10,7 @@ use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
-use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
-};
+use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
 use crate::application::loop_engine::input_strategy::{
     BufferedInputAdapter, InputContinuationState, SessionInputPort,
@@ -182,7 +180,7 @@ pub(crate) fn make_agent(
 pub(crate) struct ChatEventPort {
     pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub session_id: String,
-    pub turn_context: RuntimeTurnContext,
+    pub turn_context: RuntimeRunContext,
     pub task_access: Arc<dyn task::TaskAccess>,
     pub model: String,
 }
@@ -201,7 +199,7 @@ impl EventSinkPort for ChatEventPort {
             task_access: &self.task_access,
             model: &self.model,
             started_at: execution.started_at().unwrap_or_else(Instant::now),
-            turn_count: execution.turn_count(),
+            step_count: execution.step_count(),
             messages_snapshot: execution.messages_snapshot(),
         }
         .emit(events)
@@ -306,7 +304,7 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
 pub(crate) struct ChatToolRoundObserver {
     pub runtime_context: RuntimeContext,
     pub workspace_root: std::path::PathBuf,
-    pub turn_context: RuntimeTurnContext,
+    pub turn_context: RuntimeRunContext,
     pub session_id: String,
     pub materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
@@ -359,7 +357,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
         &mut self,
         step_id: &sdk::RunStepId,
         call_count: usize,
-        turn: usize,
+        run_step: usize,
         cancel: &CancellationToken,
     ) {
         run_post_tool_batch(
@@ -368,7 +366,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
             step_id,
             cancel,
             call_count,
-            turn,
+            run_step,
             &self.workspace_root,
         )
         .await;
@@ -385,7 +383,7 @@ where
     pub context_size: usize,
     pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
     pub language: String,
-    pub turn_context: RuntimeTurnContext,
+    pub turn_context: RuntimeRunContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
     /// #1494：边流边执行句柄（流中 ToolCallCompleted → 立即执行，结果缓冲）。
     pub streaming_tool:
@@ -555,7 +553,7 @@ where
         let memory_config = self.runtime_context.config_ref().config().memory();
         if should_run_turn_reflection(
             memory_config,
-            execution.turn_count(),
+            execution.step_count(),
             false,
             &response.stop_reason,
             false,
@@ -563,7 +561,7 @@ where
             let _ = submit_interval_reflection(
                 &self.reflection_tasks,
                 memory_config,
-                execution.turn_count(),
+                execution.step_count(),
                 execution.messages(),
                 self.runtime_context.provider_ref(),
                 &self.system_prompt,

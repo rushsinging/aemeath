@@ -1,16 +1,16 @@
 use crate::tui::adapter::runtime_view::{
     TuiChatMessage, TuiDisplayHistoryIndex, TuiDisplayHistoryStepReference, TuiResumedSessionStep,
 };
-use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext};
+use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiRuntimeEvent, TuiToolCallStatus};
 use crate::tui::effect::effect::Effect;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::super::testing::{input, TuiScenarioHarness};
 
-fn context(index: usize) -> TuiTurnContext {
-    TuiTurnContext {
+fn context(index: usize) -> TuiRunContext {
+    TuiRunContext {
         chat_id: format!("history-chat-{index}"),
-        turn_id: format!("history-turn-{index}"),
+        run_id: format!("history-turn-{index}"),
     }
 }
 

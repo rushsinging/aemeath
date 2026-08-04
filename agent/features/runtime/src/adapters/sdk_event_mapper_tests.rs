@@ -1,6 +1,6 @@
 use super::sdk_event_mapper::map_stream_event;
 use crate::application::loop_engine::chat::{
-    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
+    RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
 #[test]
 fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
@@ -114,13 +114,13 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
 
 #[test]
 fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
-    let source_context = RuntimeTurnContext::new(
+    let source_context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("child-chat"),
-        sdk::ids::ChatTurnId::new("child-turn"),
+        sdk::ids::ChatRunId::new("child-turn"),
     );
-    let attachment_context = RuntimeTurnContext::new(
+    let attachment_context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("parent-chat"),
-        sdk::ids::ChatTurnId::new("parent-turn"),
+        sdk::ids::ChatRunId::new("parent-turn"),
     );
     let expected_source = source_context.clone();
     let expected_attachment = attachment_context.clone();
@@ -146,9 +146,9 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
             event,
         } => {
             assert_eq!(source_context.chat_id, expected_source.chat_id);
-            assert_eq!(source_context.turn_id, expected_source.turn_id);
+            assert_eq!(source_context.run_id, expected_source.run_id);
             assert_eq!(attachment_context.chat_id, expected_attachment.chat_id);
-            assert_eq!(attachment_context.turn_id, expected_attachment.turn_id);
+            assert_eq!(attachment_context.run_id, expected_attachment.run_id);
             assert_eq!(mapped_tool_id, tool_id);
             assert_eq!(event.sequence, 7);
         }
@@ -272,9 +272,9 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
         }
     });
     let event = RuntimeStreamEvent::ToolResult {
-        context: RuntimeTurnContext::new(
+        context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-tool-result"),
-            sdk::ids::ChatTurnId::new("turn-tool-result"),
+            sdk::ids::ChatRunId::new("turn-tool-result"),
         ),
         id: sdk::ids::ToolCallId::new("runtime-call"),
         provider_id: "provider-call".to_string(),
@@ -307,9 +307,9 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
 #[test]
 fn tool_call_projection_preserves_canonical_name() {
     let event = RuntimeStreamEvent::ToolCallStart {
-        context: RuntimeTurnContext::new(
+        context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-1"),
-            sdk::ids::ChatTurnId::new("turn-1"),
+            sdk::ids::ChatRunId::new("turn-1"),
         ),
         id: sdk::ids::ToolCallId::new("tool-1"),
         provider_id: Some("provider-1".to_string()),
@@ -353,12 +353,12 @@ fn config_reload_mapping_preserves_immediate_scope_and_committed_view() {
 
 #[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
-    let context = RuntimeTurnContext::new(
+    let context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("chat-retry"),
-        sdk::ids::ChatTurnId::new("turn-retry"),
+        sdk::ids::ChatRunId::new("turn-retry"),
     );
     let expected_chat_id = context.chat_id.clone();
-    let expected_turn_id = context.turn_id.clone();
+    let expected_run_id = context.run_id.clone();
     let event = RuntimeStreamEvent::ModelInvocationRetrying {
         context,
         attempt: 2,
@@ -372,7 +372,7 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
             delay,
         } => {
             assert_eq!(context.chat_id, expected_chat_id);
-            assert_eq!(context.turn_id, expected_turn_id);
+            assert_eq!(context.run_id, expected_run_id);
             assert_eq!(attempt, 2);
             assert_eq!(delay, std::time::Duration::from_millis(10_250));
         }
