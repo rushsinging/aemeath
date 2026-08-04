@@ -207,6 +207,60 @@ fn loaded_window_projects_skill_as_json_and_hook_as_notice_not_user_messages() {
         .any(|item| matches!(item.kind, ResumedHistoryItemKind::HookNotice { .. })));
 }
 
+fn terminal_block(
+    cause: crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause,
+    duration_ms: Option<u64>,
+) -> String {
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(index("session", 7, 1)));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].finalize_cause = Some(cause);
+    loaded.steps[0].duration_ms = duration_ms;
+    assert!(display_history.apply_window(loaded));
+    let terminal_item = display_history
+        .items()
+        .iter()
+        .find(|item| matches!(item.kind, ResumedHistoryItemKind::TerminalNotice))
+        .expect("terminal history item");
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        terminal_item,
+    )
+    .expect("terminal block");
+    let OutputBlockKind::SystemNotice(notice) = block.kind else {
+        panic!("expected terminal system notice");
+    };
+    notice.text
+}
+
+#[test]
+fn lazy_loaded_terminal_blocks_share_live_semantics_for_completed_cancelled_and_terminated() {
+    let completed = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+        Some(125_000),
+    );
+    assert!(completed.starts_with("✻ "));
+    assert!(completed.ends_with(" for 2m 5s"));
+    assert!(!completed.contains("Completed"));
+    assert!(!completed.contains("Cancelled"));
+
+    let cancelled = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+        Some(125_000),
+    );
+    assert_eq!(cancelled, "✻ Cancelled, ran 2m 5s");
+    assert!(!cancelled.contains("Completed"));
+    assert!(!cancelled.contains(" for "));
+
+    let terminated = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+        None,
+    );
+    assert_eq!(terminated, "此 Run 已终止");
+    assert!(!terminated.contains("Completed"));
+    assert!(!terminated.contains("Cancelled"));
+}
+
 #[test]
 fn stale_window_cannot_pollute_replaced_session() {
     let mut backing = ResumedHistoryBacking::from_index(index("new-session", 11, 2));

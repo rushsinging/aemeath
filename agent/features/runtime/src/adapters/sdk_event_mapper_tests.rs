@@ -254,28 +254,37 @@ fn compact_finished_preserves_runtime_owned_notice() {
 }
 
 #[test]
-fn session_resume_mapping_preserves_context_run_step_boundaries() {
-    let event = RuntimeStreamEvent::SessionResumed {
-        steps: vec![RuntimeResumedSessionStep {
-            run_id: "run-1".into(),
-            step_id: "step-1".into(),
-            message_segments: vec![vec![share::message::Message::user("hello")].into()],
-            finalize_cause: None,
-            duration_ms: None,
-        }],
-        display_history: None,
-        session_id: "session-1".into(),
-        created_at: 0,
-        compacted: false,
-    };
+fn session_resume_mapping_preserves_context_run_step_boundaries_and_terminal_facts() {
+    for finalize_cause in [
+        context::domain::FinalizeCause::Completed,
+        context::domain::FinalizeCause::UserCancelledStep,
+        context::domain::FinalizeCause::RunTerminated,
+    ] {
+        let event = RuntimeStreamEvent::SessionResumed {
+            steps: vec![RuntimeResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                message_segments: vec![vec![share::message::Message::user("hello")].into()],
+                finalize_cause: Some(finalize_cause),
+                duration_ms: Some(125_000),
+            }],
+            display_history: None,
+            session_id: "session-1".into(),
+            created_at: 0,
+            compacted: false,
+        };
 
-    match map_stream_event(event) {
-        sdk::ChatEvent::SessionResumed { steps, .. } => {
-            assert_eq!(steps[0].run_id, "run-1");
-            assert_eq!(steps[0].step_id, "step-1");
-            assert_eq!(steps[0].messages[0].text_content(), "hello");
+        let expected_cause = crate::application::client::map_finalize_cause_to_sdk(finalize_cause);
+        match map_stream_event(event) {
+            sdk::ChatEvent::SessionResumed { steps, .. } => {
+                assert_eq!(steps[0].run_id, "run-1");
+                assert_eq!(steps[0].step_id, "step-1");
+                assert_eq!(steps[0].messages[0].text_content(), "hello");
+                assert_eq!(steps[0].finalize_cause, Some(expected_cause));
+                assert_eq!(steps[0].duration_ms, Some(125_000));
+            }
+            other => panic!("unexpected event: {other:?}"),
         }
-        other => panic!("unexpected event: {other:?}"),
     }
 }
 

@@ -234,19 +234,20 @@ fn terminal_text(
     cause: crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause,
     duration_ms: Option<u64>,
 ) -> String {
-    let status = match cause {
-        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => "✓ Completed",
+    use crate::tui::model::conversation::terminal::{terminal_notice, TerminalCause};
+
+    let cause = match cause {
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => {
+            TerminalCause::Completed
+        }
         crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep => {
-            "已取消"
+            TerminalCause::UserCancelled
         }
         crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated => {
-            "此 Run 已终止"
+            TerminalCause::RunTerminated
         }
     };
-    match duration_ms {
-        Some(duration_ms) => format!("{status} ({:.1}s)", duration_ms as f64 / 1000.0),
-        None => status.to_string(),
-    }
+    terminal_notice(cause, duration_ms.map(std::time::Duration::from_millis)).unwrap_or_default()
 }
 
 fn text_leaf(block_id: String, kind: OutputBlockKind) -> Option<BlockNode> {

@@ -734,10 +734,23 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains("终止")
         )));
     }
 
@@ -781,10 +794,23 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text == "✻ Cancelled, ran 2m 5s"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text == "✻ Cancelled, ran 2m 5s"
+                if text.contains("Completed") || text.contains(" for ") || text.contains("终止")
         )));
     }
 
@@ -854,9 +880,22 @@ mod tests {
             .items()
             .iter()
             .any(|item| matches!(item, OutputTimelineItem::ToolResult { .. })));
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
-            OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+            OutputTimelineItem::System { text, .. }
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains(" for ")
         )));
     }
 

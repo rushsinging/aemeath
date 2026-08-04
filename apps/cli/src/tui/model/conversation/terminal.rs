@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "terminal_tests.rs"]
+mod tests;
+
 /// Conversation 终态原因。实时事件与 Session Resume 必须投影为同一语义。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalCause {
