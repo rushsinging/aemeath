@@ -355,6 +355,21 @@ pub(crate) fn map_stream_event(
                 .map(crate::application::client::message_to_sdk)
                 .collect(),
         },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::StopHookFeedback(feedback) => {
+            ChatEvent::StopHookFeedback {
+                feedback: sdk::StopHookFeedbackView {
+                    summary: feedback.summary,
+                    command: feedback.command,
+                    exit_code: feedback.exit_code,
+                    reason: feedback.reason,
+                    stdout_preview: feedback.stdout_preview,
+                    stderr_preview: feedback.stderr_preview,
+                    stdout_truncated: feedback.stdout_truncated,
+                    stderr_truncated: feedback.stderr_truncated,
+                    output_file: feedback.output_file,
+                },
+            }
+        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::ApiError { messages, error } => {
             ChatEvent::ApiError {
                 messages: messages

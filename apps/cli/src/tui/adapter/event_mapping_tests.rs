@@ -6,6 +6,37 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn stop_hook_feedback_maps_complete_payload_without_message_snapshot() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::StopHookFeedback {
+        feedback: sdk::StopHookFeedbackView {
+            summary: "Stop hook 阻止了停止。".to_string(),
+            command: "check-agent-stop.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2".to_string(),
+            stdout_preview: "stdout preview".to_string(),
+            stderr_preview: "stderr preview".to_string(),
+            stdout_truncated: true,
+            stderr_truncated: false,
+            output_file: Some("/tmp/stop-hook.txt".to_string()),
+        },
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::StopHookFeedback(feedback))
+            if feedback.summary == "Stop hook 阻止了停止。"
+                && feedback.command == "check-agent-stop.sh"
+                && feedback.exit_code == Some(2)
+                && feedback.reason == "exit code 2"
+                && feedback.stdout_preview == "stdout preview"
+                && feedback.stderr_preview == "stderr preview"
+                && feedback.stdout_truncated
+                && !feedback.stderr_truncated
+                && feedback.output_file.as_deref() == Some("/tmp/stop-hook.txt")
+    ));
+}
+
+#[test]
 fn activity_increment_maps_complete_typed_fact_without_sdk_types() {
     let run_id = sdk::RunId::new("run-activity");
     let step_id = sdk::RunStepId::new("step-activity");

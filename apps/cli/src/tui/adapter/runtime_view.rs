@@ -64,6 +64,40 @@ pub(crate) struct TuiStopHookFeedback {
     pub(crate) output_file: Option<String>,
 }
 
+impl TuiStopHookFeedback {
+    pub(crate) fn display_text(&self) -> String {
+        let exit_code = self
+            .exit_code
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string());
+        let mut lines = vec![
+            self.summary.clone(),
+            format!("Command: {}", self.command),
+            format!("Exit code: {exit_code}"),
+            format!("Reason: {}", self.reason),
+        ];
+        if !self.stdout_preview.is_empty() {
+            let truncated = if self.stdout_truncated {
+                " (truncated)"
+            } else {
+                ""
+            };
+            lines.push(format!("stdout{truncated}:\n{}", self.stdout_preview));
+        }
+        if !self.stderr_preview.is_empty() {
+            let truncated = if self.stderr_truncated {
+                " (truncated)"
+            } else {
+                ""
+            };
+            lines.push(format!("stderr{truncated}:\n{}", self.stderr_preview));
+        }
+        if let Some(output_file) = self.output_file.as_ref() {
+            lines.push(format!("Full output: {output_file}"));
+        }
+        lines.join("\n")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiResumedStepFinalizeCause {
     Completed,

@@ -65,6 +65,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
         UiEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
+        UiEvent::StopHookFeedback(_) => "StopHookFeedback",
         UiEvent::ApiError { .. } => "ApiError",
         UiEvent::CompactRollback { .. } => "CompactRollback",
         UiEvent::CompactFinished { .. } => "CompactFinished",
@@ -338,6 +339,7 @@ impl App {
             TuiRuntimeEvent::Text { .. } => Some("Text"),
             TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
             TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
+            TuiRuntimeEvent::StopHookFeedback(_) => Some("StopHookFeedback"),
             TuiRuntimeEvent::Done { .. } => Some("Done"),
             _ => None,
         };
@@ -380,7 +382,7 @@ impl App {
                             let text = item
                                 .stop_hook
                                 .as_ref()
-                                .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                                .map(crate::tui::adapter::runtime_view::TuiStopHookFeedback::display_text)
                                 .unwrap_or_else(|| item.text_content());
                             self.append_system_notice(text);
                         }

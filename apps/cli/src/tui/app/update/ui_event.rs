@@ -35,6 +35,7 @@ impl App {
             | UiEvent::TurnStarted { .. }
             | UiEvent::MicrocompactDone { .. }
             | UiEvent::PostToolExecutionSync { .. }
+            | UiEvent::StopHookFeedback(_)
             | UiEvent::CompactRollback { .. }
             | UiEvent::CompactFinished { .. }
             | UiEvent::GraphPhaseChanged { .. }

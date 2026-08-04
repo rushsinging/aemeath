@@ -3,6 +3,35 @@ use super::{
 };
 
 #[test]
+fn stop_hook_feedback_display_text_includes_visible_fields_and_truncation() {
+    let feedback = TuiStopHookFeedback {
+        summary: "Stop hook 阻止了停止。".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(2),
+        reason: "guard failed".to_string(),
+        stdout_preview: "stdout preview".to_string(),
+        stderr_preview: "stderr preview".to_string(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        output_file: Some("/tmp/stop-hook.txt".to_string()),
+    };
+
+    let text = feedback.display_text();
+    for expected in [
+        "Stop hook 阻止了停止。",
+        "check-agent-stop.sh",
+        "Exit code: 2",
+        "guard failed",
+        "stdout (truncated)",
+        "stdout preview",
+        "stderr preview",
+        "/tmp/stop-hook.txt",
+    ] {
+        assert!(text.contains(expected), "missing {expected:?} in {text:?}");
+    }
+}
+
+#[test]
 fn message_value_preserves_identity_content_and_stop_hook_metadata() {
     let message = TuiChatMessage {
         role: "user".to_string(),

@@ -700,6 +700,9 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
+            RuntimeStreamEvent::StopHookFeedback(feedback) => {
+                format!("StopHookFeedback:{}", feedback.reason)
+            }
             RuntimeStreamEvent::Cancelled { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
                 "Cancelled".to_string()
@@ -1782,12 +1785,21 @@ async fn test_continue_false_json_treated_as_block() {
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
-    // continue:false 应产生普通反馈同步并终结 Hook Activity。
+    // continue:false 应产生独立 typed feedback、消息同步并终结 Hook Activity。
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.starts_with("StopHookFeedback:"))
+            .count(),
+        1,
+        "continue:false should publish one typed feedback event: {:?}",
+        events
+    );
     assert!(
-        events.iter().any(|event| {
-            event.starts_with("PostToolExecutionSync:") && event.contains("must keep working")
-        }),
-        "continue:false JSON should be recognized as block: {:?}",
+        events
+            .iter()
+            .any(|event| event.starts_with("PostToolExecutionSync:")),
+        "continue:false should still synchronize the canonical message snapshot: {:?}",
         events
     );
     // 应有反馈注入（stopReason 内容）

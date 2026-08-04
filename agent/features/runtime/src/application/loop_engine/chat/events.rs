@@ -103,6 +103,8 @@ pub enum RuntimeStreamEvent {
     PostToolExecutionSync {
         messages: Vec<Message>,
     },
+    /// Stop Hook 阻断后的用户可见 typed feedback；与消息快照同步职责分离。
+    StopHookFeedback(share::message::StopHookFeedback),
     ApiError {
         messages: Vec<Message>,
         error: String,

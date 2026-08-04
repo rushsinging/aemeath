@@ -489,6 +489,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
+        TuiRuntimeEvent::StopHookFeedback(feedback) => conversation(
+            ConversationIntent::AppendSystemMessage(AppendSystemMessage {
+                text: feedback.display_text(),
+            }),
+        ),
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
         | TuiRuntimeEvent::PostToolExecutionSync { messages }

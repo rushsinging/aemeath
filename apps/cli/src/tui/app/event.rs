@@ -106,6 +106,7 @@ pub enum AppEvent {
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
+    StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback),
     /// Provider API 调用失败，TUI stop spinner + 显示错误。
     ApiError {
         messages: Vec<TuiChatMessage>,

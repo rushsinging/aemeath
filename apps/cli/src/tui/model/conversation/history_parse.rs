@@ -60,7 +60,7 @@ impl HistoryDisplayMessage {
                     let text = msg
                         .stop_hook
                         .as_ref()
-                        .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                        .map(crate::tui::adapter::runtime_view::TuiStopHookFeedback::display_text)
                         .unwrap_or_else(|| msg.text_content());
                     return Ok(Self::TypedJson { text });
                 }

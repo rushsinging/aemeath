@@ -102,6 +102,19 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
+        sdk::ChatEvent::StopHookFeedback { feedback } => {
+            UiEvent::StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback {
+                summary: feedback.summary,
+                command: feedback.command,
+                exit_code: feedback.exit_code,
+                reason: feedback.reason,
+                stdout_preview: feedback.stdout_preview,
+                stderr_preview: feedback.stderr_preview,
+                stdout_truncated: feedback.stdout_truncated,
+                stderr_truncated: feedback.stderr_truncated,
+                output_file: feedback.output_file,
+            })
+        }
         sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError {
             messages: messages.into_iter().map(chat_message).collect(),
             error,

@@ -187,6 +187,36 @@ fn session_resume_mapping_preserves_body_free_history_index() {
 }
 
 #[test]
+fn stop_hook_feedback_mapping_preserves_all_fields_for_sdk() {
+    let feedback = share::message::StopHookFeedback {
+        summary: "Stop hook 阻止了停止。".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(2),
+        reason: "exit code 2".to_string(),
+        stdout_preview: "stdout preview".to_string(),
+        stderr_preview: "stderr preview".to_string(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        output_file: Some("/tmp/stop-hook.txt".to_string()),
+    };
+
+    match map_stream_event(RuntimeStreamEvent::StopHookFeedback(feedback)) {
+        sdk::ChatEvent::StopHookFeedback { feedback } => {
+            assert_eq!(feedback.summary, "Stop hook 阻止了停止。");
+            assert_eq!(feedback.command, "check-agent-stop.sh");
+            assert_eq!(feedback.exit_code, Some(2));
+            assert_eq!(feedback.reason, "exit code 2");
+            assert_eq!(feedback.stdout_preview, "stdout preview");
+            assert_eq!(feedback.stderr_preview, "stderr preview");
+            assert!(feedback.stdout_truncated);
+            assert!(!feedback.stderr_truncated);
+            assert_eq!(feedback.output_file.as_deref(), Some("/tmp/stop-hook.txt"));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn compact_finished_preserves_runtime_owned_notice() {
     let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
         messages: vec![share::message::Message::user("recent")],

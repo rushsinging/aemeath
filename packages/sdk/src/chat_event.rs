@@ -527,6 +527,10 @@ pub enum ChatEvent {
     PostToolExecutionSync {
         messages: Vec<ChatMessage>,
     },
+    /// Stop Hook 阻断后的用户可见 typed feedback。
+    StopHookFeedback {
+        feedback: crate::StopHookFeedbackView,
+    },
     /// Provider API 调用失败。TUI 据此 stop spinner + 显示错误。
     ApiError {
         messages: Vec<ChatMessage>,

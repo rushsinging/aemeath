@@ -563,6 +563,7 @@ pub(crate) enum TuiRuntimeEvent {
     PostToolExecutionSync {
         messages: Vec<TuiChatMessage>,
     },
+    StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback),
     ApiError {
         messages: Vec<TuiChatMessage>,
         error: String,

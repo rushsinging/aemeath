@@ -119,6 +119,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
         }
+        sdk::ChatEvent::StopHookFeedback { feedback } => crate::tui::log_trace!(
+            "{} stop_hook_feedback command={} exit_code={:?} has_output_file={}",
+            stage,
+            feedback.command,
+            feedback.exit_code,
+            feedback.output_file.is_some()
+        ),
         sdk::ChatEvent::ApiError { messages, error } => {
             crate::tui::log_trace!("{} api_error count={} err={}", stage, messages.len(), error)
         }

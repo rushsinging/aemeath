@@ -149,6 +149,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::PostToolExecutionSync { messages } => TuiRuntimeEvent::PostToolExecutionSync {
             messages: messages.into_iter().map(chat_message).collect(),
         },
+        ChatEvent::StopHookFeedback { feedback } => {
+            TuiRuntimeEvent::StopHookFeedback(stop_hook_feedback(feedback))
+        }
         ChatEvent::ApiError { messages, error } => TuiRuntimeEvent::ApiError {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
@@ -782,6 +785,20 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
     }
 }
 
+fn stop_hook_feedback(hook: sdk::StopHookFeedbackView) -> TuiStopHookFeedback {
+    TuiStopHookFeedback {
+        summary: hook.summary,
+        command: hook.command,
+        exit_code: hook.exit_code,
+        reason: hook.reason,
+        stdout_preview: hook.stdout_preview,
+        stderr_preview: hook.stderr_preview,
+        stdout_truncated: hook.stdout_truncated,
+        stderr_truncated: hook.stderr_truncated,
+        output_file: hook.output_file,
+    }
+}
+
 pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
     let (source, stop_hook, skill_request) = match value.metadata {
         Some(metadata) => (
@@ -791,17 +808,7 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
                 sdk::ChatMessageSource::StopHook => TuiMessageSource::StopHook,
                 sdk::ChatMessageSource::SkillRequest => TuiMessageSource::SkillRequest,
             },
-            metadata.stop_hook.map(|hook| TuiStopHookFeedback {
-                summary: hook.summary,
-                command: hook.command,
-                exit_code: hook.exit_code,
-                reason: hook.reason,
-                stdout_preview: hook.stdout_preview,
-                stderr_preview: hook.stderr_preview,
-                stdout_truncated: hook.stdout_truncated,
-                stderr_truncated: hook.stderr_truncated,
-                output_file: hook.output_file,
-            }),
+            metadata.stop_hook.map(stop_hook_feedback),
             metadata
                 .skill_request
                 .map(|request| TuiSkillRequestMetadata {
