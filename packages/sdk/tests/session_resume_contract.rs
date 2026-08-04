@@ -94,7 +94,7 @@ fn resumed_session_step_round_trip_preserves_typed_skill_request_display_metadat
             content: vec![sdk::ContentBlock::text("LLM skill prompt")],
             metadata: Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::SkillRequest,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: Some(sdk::SkillRequestMetadataView {
                     skill: "superpowers:brainstorming".to_string(),
                     arguments: "feature scope".to_string(),

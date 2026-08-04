@@ -5,7 +5,7 @@ use crate::tui::model::conversation::model::ConversationModel;
 #[cfg(test)]
 use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
-use crate::tui::view_model::output::StopHookFeedbackBlockView;
+use crate::tui::view_model::output::HookNoticeBlockView;
 #[cfg(test)]
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
@@ -168,12 +168,18 @@ impl OutputViewAssembler {
                     }),
                 ))
             }
-            OutputTimelineItem::StopHookFeedback { id, text } => Some(leaf(
+            OutputTimelineItem::HookNotice {
+                id,
+                title,
+                text,
+                kind,
+            } => Some(leaf(
                 id.clone(),
-                OutputBlockKind::StopHookFeedback(StopHookFeedbackBlockView {
+                OutputBlockKind::HookNotice(HookNoticeBlockView {
                     key: id.clone(),
-                    title: "Stop hook blocked".to_string(),
+                    title: title.clone(),
                     body: text.clone(),
+                    kind: kind.clone(),
                 }),
             )),
             OutputTimelineItem::System { id, text } => Some(leaf(

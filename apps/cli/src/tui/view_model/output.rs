@@ -72,7 +72,7 @@ pub enum OutputBlockKind {
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
     DiagnosticNotice(TextBlockView),
-    StopHookFeedback(StopHookFeedbackBlockView),
+    HookNotice(HookNoticeBlockView),
     SystemNotice(TextBlockView),
     AskUserBatch(AskUserBatchBlockView),
 }
@@ -121,10 +121,11 @@ pub enum AskUserPhaseView {
     Confirming,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct StopHookFeedbackBlockView {
+pub struct HookNoticeBlockView {
     pub key: String,
     pub title: String,
     pub body: String,
+    pub kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

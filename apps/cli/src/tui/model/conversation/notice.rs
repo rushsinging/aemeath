@@ -21,12 +21,19 @@ impl ConversationModel {
         changes
     }
 
-    pub(super) fn append_stop_hook_feedback(&mut self, text: String) -> Vec<ConversationChange> {
+    pub(super) fn append_hook_notice(
+        &mut self,
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+    ) -> Vec<ConversationChange> {
         self.clear_active_text_blocks();
-        let block_id = self.next_block_id("stop-hook-feedback");
-        self.timeline.push(OutputTimelineItem::StopHookFeedback {
+        let block_id = self.next_block_id("hook-notice");
+        self.timeline.push(OutputTimelineItem::HookNotice {
             id: block_id.clone(),
+            title,
             text,
+            kind,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },

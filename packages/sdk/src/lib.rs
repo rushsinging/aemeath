@@ -87,13 +87,14 @@ pub use run::{
     TerminateRunOutcome,
 };
 pub use session::{
-    ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
-    SkillRequestMetadataView, StopHookFeedbackView,
+    ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
+    SessionSnapshot, SessionSummary, SkillRequestMetadataView,
 };
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{
+    HookNotice as LocalResumeHookNotice, HookNoticeKind as LocalResumeHookNoticeKind,
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
-    Role as LocalResumeRole, StopHookFeedback as LocalResumeStopHookFeedback,
+    Role as LocalResumeRole,
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,

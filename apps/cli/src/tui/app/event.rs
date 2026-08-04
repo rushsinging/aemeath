@@ -107,7 +107,7 @@ pub enum AppEvent {
         message_count: usize,
         revision: u64,
     },
-    StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback),
+    HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice),
     /// Provider API 调用失败，TUI stop spinner + 显示错误。
     ApiError {
         messages: Vec<TuiChatMessage>,

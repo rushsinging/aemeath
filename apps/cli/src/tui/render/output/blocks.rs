@@ -4,8 +4,8 @@ pub mod ask_user;
 pub mod assistant_message;
 pub mod diagnostic;
 pub mod edit_diff;
+pub mod hook_notice;
 pub mod separator;
-pub mod stop_hook_feedback;
 pub mod thinking;
 pub mod tool_call;
 pub mod tool_result;
@@ -18,14 +18,14 @@ mod tests {
     use crate::tui::view_model::style::SemanticStyle;
 
     #[test]
-    fn stop_hook_feedback_uses_error_title_and_prohibited_gutter() {
-        let kind = OutputBlockKind::StopHookFeedback(
-            crate::tui::view_model::output::StopHookFeedbackBlockView {
+    fn blocked_hook_notice_uses_error_title_muted_body_and_prohibited_gutter() {
+        let kind =
+            OutputBlockKind::HookNotice(crate::tui::view_model::output::HookNoticeBlockView {
                 key: "stop".into(),
                 title: "Stop hook blocked".into(),
                 body: "Command: check.sh".into(),
-            },
-        );
+                kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
+            });
         let block = kind
             .component()
             .render_self("stop", &RenderCtx::for_width(80));

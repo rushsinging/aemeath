@@ -204,8 +204,10 @@ fn message_state_mapping_preserves_count_and_revision_without_snapshot() {
 }
 
 #[test]
-fn stop_hook_feedback_mapping_preserves_all_fields_for_sdk() {
-    let feedback = share::message::StopHookFeedback {
+fn hook_notice_mapping_preserves_point_kind_and_all_fields_for_sdk() {
+    let notice = share::message::HookNotice {
+        point: "PreToolUse".to_string(),
+        kind: share::message::HookNoticeKind::Blocked,
         summary: "Stop hook 阻止了停止。".to_string(),
         command: "check-agent-stop.sh".to_string(),
         exit_code: Some(2),
@@ -217,17 +219,19 @@ fn stop_hook_feedback_mapping_preserves_all_fields_for_sdk() {
         output_file: Some("/tmp/stop-hook.txt".to_string()),
     };
 
-    match map_stream_event(RuntimeStreamEvent::StopHookFeedback(feedback)) {
-        sdk::ChatEvent::StopHookFeedback { feedback } => {
-            assert_eq!(feedback.summary, "Stop hook 阻止了停止。");
-            assert_eq!(feedback.command, "check-agent-stop.sh");
-            assert_eq!(feedback.exit_code, Some(2));
-            assert_eq!(feedback.reason, "exit code 2");
-            assert_eq!(feedback.stdout_preview, "stdout preview");
-            assert_eq!(feedback.stderr_preview, "stderr preview");
-            assert!(feedback.stdout_truncated);
-            assert!(!feedback.stderr_truncated);
-            assert_eq!(feedback.output_file.as_deref(), Some("/tmp/stop-hook.txt"));
+    match map_stream_event(RuntimeStreamEvent::HookNotice(notice)) {
+        sdk::ChatEvent::HookNotice { notice } => {
+            assert_eq!(notice.point, "PreToolUse");
+            assert_eq!(notice.kind, sdk::HookNoticeKindView::Blocked);
+            assert_eq!(notice.summary, "Stop hook 阻止了停止。");
+            assert_eq!(notice.command, "check-agent-stop.sh");
+            assert_eq!(notice.exit_code, Some(2));
+            assert_eq!(notice.reason, "exit code 2");
+            assert_eq!(notice.stdout_preview, "stdout preview");
+            assert_eq!(notice.stderr_preview, "stderr preview");
+            assert!(notice.stdout_truncated);
+            assert!(!notice.stderr_truncated);
+            assert_eq!(notice.output_file.as_deref(), Some("/tmp/stop-hook.txt"));
         }
         other => panic!("unexpected event: {other:?}"),
     }

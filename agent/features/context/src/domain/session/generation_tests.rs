@@ -6,7 +6,7 @@ use crate::domain::session::{
     AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, RunStepCursor,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
-use share::message::{Message, MessageSource, StopHookFeedback};
+use share::message::{HookNotice, HookNoticeKind, Message, MessageSource};
 
 fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -526,8 +526,10 @@ fn step_member_round_trips_without_storage_types() {
 }
 
 #[test]
-fn step_member_round_trips_stop_hook_feedback_metadata() {
-    let feedback = StopHookFeedback {
+fn step_member_round_trips_hook_notice_metadata() {
+    let notice = HookNotice {
+        point: "Stop".to_string(),
+        kind: HookNoticeKind::Blocked,
         summary: "Stop hook prevented stopping.".to_string(),
         command: "check-agent-stop.sh".to_string(),
         exit_code: Some(1),
@@ -546,11 +548,8 @@ fn step_member_round_trips_stop_hook_feedback_metadata() {
         CommittedRunStep::accepted_only(
             "step",
             AcceptedInputProjection::new(
-                vec![Message::stop_hook_feedback(
-                    "model feedback",
-                    feedback.clone(),
-                )],
-                "stop-hook-fingerprint",
+                vec![Message::hook_notice("model feedback", notice.clone())],
+                "hook-notice-fingerprint",
                 1,
             ),
         ),
@@ -566,15 +565,15 @@ fn step_member_round_trips_stop_hook_feedback_metadata() {
         .expect("accepted input")
         .messages
         .first()
-        .expect("Stop Hook message");
+        .expect("Hook notice message");
 
-    assert_eq!(message.source(), MessageSource::StopHook);
+    assert_eq!(message.source(), MessageSource::Hook);
     assert_eq!(
         message
             .metadata
             .as_ref()
-            .and_then(|metadata| metadata.stop_hook.as_ref()),
-        Some(&feedback)
+            .and_then(|metadata| metadata.hook_notice.as_ref()),
+        Some(&notice)
     );
 }
 

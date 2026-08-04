@@ -183,7 +183,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::TurnStarted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
         | sdk::ChatEvent::SessionMessageStateChanged { .. }
-        | sdk::ChatEvent::StopHookFeedback { .. }
+        | sdk::ChatEvent::HookNotice { .. }
         | sdk::ChatEvent::CompactRollback { .. }
         | sdk::ChatEvent::CompactFinished { .. }
         | sdk::ChatEvent::UserMessagesAdopted { .. }

@@ -105,8 +105,10 @@ pub struct PresentCancelledStep {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppendStopHookFeedback {
+pub struct AppendHookNotice {
+    pub title: String,
     pub text: String,
+    pub kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -376,7 +378,7 @@ pub enum ConversationIntent {
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
     PresentCancelledStep(PresentCancelledStep),
-    AppendStopHookFeedback(AppendStopHookFeedback),
+    AppendHookNotice(AppendHookNotice),
     AppendSystemMessage(AppendSystemMessage),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),

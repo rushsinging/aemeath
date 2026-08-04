@@ -283,13 +283,13 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
         outcome: &crate::application::hook::stop_coordination::StopHookOutcome,
     ) -> Result<(), LoopEngineError> {
         if let Some(message) = outcome.feedback_message.as_ref() {
-            let feedback = message
+            let notice = message
                 .metadata
                 .as_ref()
-                .and_then(|metadata| metadata.stop_hook.clone())
-                .expect("Stop Hook feedback message must carry typed payload");
+                .and_then(|metadata| metadata.hook_notice.clone())
+                .expect("Stop Hook feedback message must carry typed Hook notice");
             self.sink
-                .send_event(RuntimeStreamEvent::StopHookFeedback(feedback))
+                .send_event(RuntimeStreamEvent::HookNotice(notice))
                 .await;
             self.sink
                 .send_message_state_changed(execution.messages_len())

@@ -354,18 +354,24 @@ pub(crate) fn map_stream_event(
             message_count,
             revision,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::StopHookFeedback(feedback) => {
-            ChatEvent::StopHookFeedback {
-                feedback: sdk::StopHookFeedbackView {
-                    summary: feedback.summary,
-                    command: feedback.command,
-                    exit_code: feedback.exit_code,
-                    reason: feedback.reason,
-                    stdout_preview: feedback.stdout_preview,
-                    stderr_preview: feedback.stderr_preview,
-                    stdout_truncated: feedback.stdout_truncated,
-                    stderr_truncated: feedback.stderr_truncated,
-                    output_file: feedback.output_file,
+        crate::application::loop_engine::chat::RuntimeStreamEvent::HookNotice(notice) => {
+            ChatEvent::HookNotice {
+                notice: sdk::HookNoticeView {
+                    point: notice.point,
+                    kind: match notice.kind {
+                        share::message::HookNoticeKind::Blocked => sdk::HookNoticeKindView::Blocked,
+                        share::message::HookNoticeKind::Failed => sdk::HookNoticeKindView::Failed,
+                        share::message::HookNoticeKind::Info => sdk::HookNoticeKindView::Info,
+                    },
+                    summary: notice.summary,
+                    command: notice.command,
+                    exit_code: notice.exit_code,
+                    reason: notice.reason,
+                    stdout_preview: notice.stdout_preview,
+                    stderr_preview: notice.stderr_preview,
+                    stdout_truncated: notice.stdout_truncated,
+                    stderr_truncated: notice.stderr_truncated,
+                    output_file: notice.output_file,
                 },
             }
         }

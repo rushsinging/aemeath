@@ -78,7 +78,11 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::ThinkingMessage(_) => "💭",
         // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "⎿",
-        OutputBlockKind::StopHookFeedback(_) => "⊘",
+        OutputBlockKind::HookNotice(notice) => match notice.kind {
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+            | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => "⊘",
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info => "ℹ",
+        },
         _ => " ",
     }
 }
@@ -98,7 +102,11 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
         OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
-        OutputBlockKind::StopHookFeedback(_) => theme::ERROR,
+        OutputBlockKind::HookNotice(notice) => match notice.kind {
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+            | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => theme::ERROR,
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info => theme::TEXT_MUTED,
+        },
         _ => theme::TEXT_MUTED,
     }
 }

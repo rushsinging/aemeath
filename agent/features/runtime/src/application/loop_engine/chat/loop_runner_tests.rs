@@ -702,8 +702,8 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
-            RuntimeStreamEvent::StopHookFeedback(feedback) => {
-                format!("StopHookFeedback:{}", feedback.reason)
+            RuntimeStreamEvent::HookNotice(notice) => {
+                format!("HookNotice:{}", notice.reason)
             }
             RuntimeStreamEvent::Cancelled { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
@@ -1433,7 +1433,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::StopHook);
+    assert_eq!(feedback.source(), MessageSource::Hook);
 }
 
 #[tokio::test]
@@ -1810,7 +1810,7 @@ async fn test_continue_false_json_treated_as_block() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.starts_with("StopHookFeedback:"))
+            .filter(|event| event.starts_with("HookNotice:"))
             .count(),
         1,
         "continue:false should publish one typed feedback event: {:?}",

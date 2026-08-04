@@ -2,11 +2,21 @@ use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum HistoryDisplayMessage {
-    User { text: String },
-    TypedJson { text: String },
-    StopHookFeedback { text: String },
+    User {
+        text: String,
+    },
+    TypedJson {
+        text: String,
+    },
+    HookNotice {
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+    },
     ToolResults,
-    Assistant { blocks: Vec<HistoryAssistantBlock> },
+    Assistant {
+        blocks: Vec<HistoryAssistantBlock>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -57,13 +67,16 @@ impl HistoryDisplayMessage {
                         .map(|text| Self::TypedJson { text })
                         .ok_or(HistoryDisplayParseError::NonUserVisibleMessage);
                 }
-                crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
-                    let text = msg
-                        .stop_hook
+                crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {
+                    let notice = msg
+                        .hook_notice
                         .as_ref()
-                        .map(crate::tui::adapter::runtime_view::TuiStopHookFeedback::display_text)
-                        .unwrap_or_else(|| msg.text_content());
-                    return Ok(Self::StopHookFeedback { text });
+                        .ok_or(HistoryDisplayParseError::NonUserVisibleMessage)?;
+                    return Ok(Self::HookNotice {
+                        title: notice.title(),
+                        text: notice.display_text(),
+                        kind: notice.kind.clone(),
+                    });
                 }
                 crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {
                     return Err(HistoryDisplayParseError::NonUserVisibleMessage);
@@ -307,7 +320,7 @@ mod tests {
             role: role.to_string(),
             content,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
             input_id: None,
         }
@@ -354,14 +367,31 @@ mod tests {
     // ── parse: user 分支 ──
 
     #[test]
-    fn parse_stop_hook_message_projects_typed_system_payload() {
+    fn parse_hook_message_projects_typed_notice() {
         let mut message = msg("user", vec![text_block("hook feedback")]);
-        message.source = TuiMessageSource::StopHook;
+        let notice = crate::tui::adapter::runtime_view::TuiHookNotice {
+            point: "Stop".to_string(),
+            kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
+            summary: "blocked".to_string(),
+            command: "check.sh".to_string(),
+            exit_code: Some(1),
+            reason: "exit code 1".to_string(),
+            stdout_preview: String::new(),
+            stderr_preview: "stderr".to_string(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            output_file: None,
+        };
+        let expected_text = notice.display_text();
+        message.source = TuiMessageSource::Hook;
+        message.hook_notice = Some(notice);
 
         assert_eq!(
             HistoryDisplayMessage::parse(&message),
-            Ok(HistoryDisplayMessage::StopHookFeedback {
-                text: "hook feedback".to_string()
+            Ok(HistoryDisplayMessage::HookNotice {
+                title: "Stop hook blocked".to_string(),
+                text: expected_text,
+                kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
             })
         );
     }

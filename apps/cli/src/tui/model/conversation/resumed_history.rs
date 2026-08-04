@@ -31,7 +31,6 @@ pub(crate) struct ResumedHistoryStep {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TypedJsonHistorySource {
     SkillRequest,
-    StopHook,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +58,11 @@ pub(crate) enum ResumedHistoryItemKind {
         message_index: usize,
         source: TypedJsonHistorySource,
         text: String,
+    },
+    HookNotice {
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
     },
     StepPlaceholder,
     TerminalNotice,
@@ -370,23 +374,35 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
         crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {
             Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: None,
             })
         }
-        crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
+        crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {
             Some(sdk::ChatMessageMetadata {
-                source: sdk::ChatMessageSource::StopHook,
-                stop_hook: message.stop_hook.map(|feedback| sdk::StopHookFeedbackView {
-                    summary: feedback.summary,
-                    command: feedback.command,
-                    exit_code: feedback.exit_code,
-                    reason: feedback.reason,
-                    stdout_preview: feedback.stdout_preview,
-                    stderr_preview: feedback.stderr_preview,
-                    stdout_truncated: feedback.stdout_truncated,
-                    stderr_truncated: feedback.stderr_truncated,
-                    output_file: feedback.output_file,
+                source: sdk::ChatMessageSource::Hook,
+                hook_notice: message.hook_notice.map(|notice| sdk::HookNoticeView {
+                    point: notice.point,
+                    kind: match notice.kind {
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked => {
+                            sdk::HookNoticeKindView::Blocked
+                        }
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => {
+                            sdk::HookNoticeKindView::Failed
+                        }
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info => {
+                            sdk::HookNoticeKindView::Info
+                        }
+                    },
+                    summary: notice.summary,
+                    command: notice.command,
+                    exit_code: notice.exit_code,
+                    reason: notice.reason,
+                    stdout_preview: notice.stdout_preview,
+                    stderr_preview: notice.stderr_preview,
+                    stdout_truncated: notice.stdout_truncated,
+                    stderr_truncated: notice.stderr_truncated,
+                    output_file: notice.output_file,
                 }),
                 skill_request: None,
             })
@@ -394,7 +410,7 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
         crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
             Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::SkillRequest,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: message
                     .skill_request
                     .map(|request| sdk::SkillRequestMetadataView {
@@ -484,19 +500,32 @@ fn resumed_step_from_tui(
     }
 }
 
-fn stop_hook_feedback_display_text(feedback: &sdk::LocalResumeStopHookFeedback) -> String {
-    let feedback = crate::tui::adapter::runtime_view::TuiStopHookFeedback {
-        summary: feedback.summary.clone(),
-        command: feedback.command.clone(),
-        exit_code: feedback.exit_code,
-        reason: feedback.reason.clone(),
-        stdout_preview: feedback.stdout_preview.clone(),
-        stderr_preview: feedback.stderr_preview.clone(),
-        stdout_truncated: feedback.stdout_truncated,
-        stderr_truncated: feedback.stderr_truncated,
-        output_file: feedback.output_file.clone(),
-    };
-    feedback.display_text()
+fn hook_notice_from_local(
+    notice: &sdk::LocalResumeHookNotice,
+) -> crate::tui::adapter::runtime_view::TuiHookNotice {
+    crate::tui::adapter::runtime_view::TuiHookNotice {
+        point: notice.point.clone(),
+        kind: match notice.kind {
+            sdk::LocalResumeHookNoticeKind::Blocked => {
+                crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+            }
+            sdk::LocalResumeHookNoticeKind::Failed => {
+                crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed
+            }
+            sdk::LocalResumeHookNoticeKind::Info => {
+                crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info
+            }
+        },
+        summary: notice.summary.clone(),
+        command: notice.command.clone(),
+        exit_code: notice.exit_code,
+        reason: notice.reason.clone(),
+        stdout_preview: notice.stdout_preview.clone(),
+        stderr_preview: notice.stderr_preview.clone(),
+        stdout_truncated: notice.stdout_truncated,
+        stderr_truncated: notice.stderr_truncated,
+        output_file: notice.output_file.clone(),
+    }
 }
 
 fn build_items(steps: &[ResumedHistoryStep]) -> Vec<ResumedHistoryItem> {
@@ -545,24 +574,26 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                 }
             }
             Role::User
-                if message.source() == MessageSource::StopHook && !message.has_tool_results() =>
+                if message.source() == MessageSource::Hook && !message.has_tool_results() =>
             {
-                let text = message
+                if let Some(notice) = message
                     .metadata
                     .as_ref()
-                    .and_then(|metadata| metadata.stop_hook.as_ref())
-                    .map(stop_hook_feedback_display_text)
-                    .unwrap_or_else(|| message.text_content());
-                items.push(ResumedHistoryItem {
-                    id: format!("history-{step_index}-message-{message_index}-stop-hook"),
-                    estimated_lines: text.lines().count().max(1).saturating_add(1),
-                    step_index,
-                    kind: ResumedHistoryItemKind::TypedJson {
-                        message_index,
-                        source: TypedJsonHistorySource::StopHook,
-                        text,
-                    },
-                });
+                    .and_then(|metadata| metadata.hook_notice.as_ref())
+                {
+                    let notice = hook_notice_from_local(notice);
+                    let text = notice.display_text();
+                    items.push(ResumedHistoryItem {
+                        id: format!("history-{step_index}-message-{message_index}-hook"),
+                        estimated_lines: text.lines().count().max(1).saturating_add(1),
+                        step_index,
+                        kind: ResumedHistoryItemKind::HookNotice {
+                            title: notice.title(),
+                            text,
+                            kind: notice.kind,
+                        },
+                    });
+                }
             }
             Role::User
                 if message.source() != MessageSource::User && !message.has_tool_results() => {}

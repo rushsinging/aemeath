@@ -92,7 +92,7 @@ impl RunExecutionState {
                     && message.metadata.as_ref().is_none_or(|metadata| {
                         !matches!(
                             metadata.source,
-                            MessageSource::SystemGenerated | MessageSource::StopHook
+                            MessageSource::SystemGenerated | MessageSource::Hook
                         )
                     })
             })

@@ -144,7 +144,7 @@ impl OutputWindowIndex {
             }
             OutputTimelineItem::AssistantText { text, .. }
             | OutputTimelineItem::Thinking { text, .. }
-            | OutputTimelineItem::StopHookFeedback { text, .. }
+            | OutputTimelineItem::HookNotice { text, .. }
             | OutputTimelineItem::System { text, .. }
             | OutputTimelineItem::Error { text, .. } => {
                 text.lines().count().max(1).saturating_add(1)

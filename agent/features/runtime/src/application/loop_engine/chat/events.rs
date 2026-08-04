@@ -104,8 +104,8 @@ pub enum RuntimeStreamEvent {
         message_count: usize,
         revision: u64,
     },
-    /// Stop Hook 阻断后的用户可见 typed feedback；与消息快照同步职责分离。
-    StopHookFeedback(share::message::StopHookFeedback),
+    /// Hook 用户可见 typed notice；与活动观测及消息状态同步职责分离。
+    HookNotice(share::message::HookNotice),
     ApiError {
         messages: Vec<Message>,
         error: String,

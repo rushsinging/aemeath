@@ -564,7 +564,7 @@ pub(crate) enum TuiRuntimeEvent {
         message_count: usize,
         revision: u64,
     },
-    StopHookFeedback(crate::tui::adapter::runtime_view::TuiStopHookFeedback),
+    HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice),
     ApiError {
         messages: Vec<TuiChatMessage>,
         error: String,

@@ -495,11 +495,13 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
-        TuiRuntimeEvent::StopHookFeedback(feedback) => conversation(
-            ConversationIntent::AppendStopHookFeedback(AppendStopHookFeedback {
-                text: feedback.display_text(),
-            }),
-        ),
+        TuiRuntimeEvent::HookNotice(notice) => {
+            conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                title: notice.title(),
+                text: notice.display_text(),
+                kind: notice.kind.clone(),
+            }))
+        }
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactDone { messages, .. }
         | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {

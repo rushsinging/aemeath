@@ -22,9 +22,11 @@ fn session_message_state_maps_count_and_revision_without_messages() {
 }
 
 #[test]
-fn stop_hook_feedback_maps_complete_payload_without_message_snapshot() {
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::StopHookFeedback {
-        feedback: sdk::StopHookFeedbackView {
+fn hook_notice_maps_point_kind_and_complete_payload() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookNotice {
+        notice: sdk::HookNoticeView {
+            point: "PreToolUse".to_string(),
+            kind: sdk::HookNoticeKindView::Blocked,
             summary: "Stop hook 阻止了停止。".to_string(),
             command: "check-agent-stop.sh".to_string(),
             exit_code: Some(2),
@@ -39,8 +41,10 @@ fn stop_hook_feedback_maps_complete_payload_without_message_snapshot() {
 
     assert!(matches!(
         mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::StopHookFeedback(feedback))
-            if feedback.summary == "Stop hook 阻止了停止。"
+        SdkEventMapping::Runtime(TuiRuntimeEvent::HookNotice(feedback))
+            if feedback.point == "PreToolUse"
+                && feedback.kind == crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+                && feedback.summary == "Stop hook 阻止了停止。"
                 && feedback.command == "check-agent-stop.sh"
                 && feedback.exit_code == Some(2)
                 && feedback.reason == "exit code 2"

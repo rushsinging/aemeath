@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::adapter::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata, TuiStopHookFeedback,
+    TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiMessageSource, TuiSkillRequestMetadata,
 };
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -233,7 +233,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             content: vec![TuiContentBlock::text("hi")],
             input_id: Some(id_a.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         },
         TuiChatMessage {
@@ -241,7 +241,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             content: vec![TuiContentBlock::text("yo")],
             input_id: Some(id_b.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         },
     ];
@@ -333,7 +333,7 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         ],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
         skill_request: None,
     }];
 
@@ -379,7 +379,7 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
 }
 
 #[test]
-fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
+fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echoes() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
@@ -396,7 +396,7 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
                     content: vec![TuiContentBlock::text("LLM skill prompt")],
                     input_id: Some(skill_id),
                     source: TuiMessageSource::SkillRequest,
-                    stop_hook: None,
+                    hook_notice: None,
                     skill_request: Some(TuiSkillRequestMetadata {
                         skill: "superpowers:brainstorming".to_string(),
                         arguments: "feature scope".to_string(),
@@ -407,8 +407,10 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("LLM hook prompt")],
                     input_id: Some(hook_id),
-                    source: TuiMessageSource::StopHook,
-                    stop_hook: Some(TuiStopHookFeedback {
+                    source: TuiMessageSource::Hook,
+                    hook_notice: Some(TuiHookNotice {
+                        point: "Stop".to_string(),
+                        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
                         summary: "blocked".to_string(),
                         command: "check.sh".to_string(),
                         exit_code: Some(2),
@@ -441,7 +443,18 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
         )));
     let notices = system_notice_texts(&app);
     assert!(notices.iter().any(|text| text.contains("raw_input")));
-    assert!(notices.iter().any(|text| text.contains("guard failed")));
+    assert!(!notices.iter().any(|text| text.contains("guard failed")));
+    assert!(app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(
+            item,
+            crate::tui::model::output_timeline::OutputTimelineItem::HookNotice { title, text, .. }
+                if title == "Stop hook blocked" && text.contains("guard failed")
+        )));
     assert!(!notices.iter().any(|text| text.contains("LLM skill prompt")));
     assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
@@ -601,7 +614,7 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         )],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
         skill_request: None,
     }];
     app.update(

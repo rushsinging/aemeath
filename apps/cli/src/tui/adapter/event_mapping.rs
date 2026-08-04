@@ -1,6 +1,6 @@
 use super::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata,
-    TuiStopHookFeedback, TuiToolResultImage,
+    TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiHookNoticeKind, TuiMessageSource,
+    TuiSkillRequestMetadata, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
@@ -153,9 +153,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             message_count,
             revision,
         },
-        ChatEvent::StopHookFeedback { feedback } => {
-            TuiRuntimeEvent::StopHookFeedback(stop_hook_feedback(feedback))
-        }
+        ChatEvent::HookNotice { notice } => TuiRuntimeEvent::HookNotice(hook_notice(notice)),
         ChatEvent::ApiError { messages, error } => TuiRuntimeEvent::ApiError {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
@@ -789,30 +787,36 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
     }
 }
 
-fn stop_hook_feedback(hook: sdk::StopHookFeedbackView) -> TuiStopHookFeedback {
-    TuiStopHookFeedback {
-        summary: hook.summary,
-        command: hook.command,
-        exit_code: hook.exit_code,
-        reason: hook.reason,
-        stdout_preview: hook.stdout_preview,
-        stderr_preview: hook.stderr_preview,
-        stdout_truncated: hook.stdout_truncated,
-        stderr_truncated: hook.stderr_truncated,
-        output_file: hook.output_file,
+fn hook_notice(notice: sdk::HookNoticeView) -> TuiHookNotice {
+    TuiHookNotice {
+        point: notice.point,
+        kind: match notice.kind {
+            sdk::HookNoticeKindView::Blocked => TuiHookNoticeKind::Blocked,
+            sdk::HookNoticeKindView::Failed => TuiHookNoticeKind::Failed,
+            sdk::HookNoticeKindView::Info => TuiHookNoticeKind::Info,
+        },
+        summary: notice.summary,
+        command: notice.command,
+        exit_code: notice.exit_code,
+        reason: notice.reason,
+        stdout_preview: notice.stdout_preview,
+        stderr_preview: notice.stderr_preview,
+        stdout_truncated: notice.stdout_truncated,
+        stderr_truncated: notice.stderr_truncated,
+        output_file: notice.output_file,
     }
 }
 
 pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
-    let (source, stop_hook, skill_request) = match value.metadata {
+    let (source, hook_notice, skill_request) = match value.metadata {
         Some(metadata) => (
             match metadata.source {
                 sdk::ChatMessageSource::User => TuiMessageSource::User,
                 sdk::ChatMessageSource::SystemGenerated => TuiMessageSource::SystemGenerated,
-                sdk::ChatMessageSource::StopHook => TuiMessageSource::StopHook,
+                sdk::ChatMessageSource::Hook => TuiMessageSource::Hook,
                 sdk::ChatMessageSource::SkillRequest => TuiMessageSource::SkillRequest,
             },
-            metadata.stop_hook.map(stop_hook_feedback),
+            metadata.hook_notice.map(hook_notice),
             metadata
                 .skill_request
                 .map(|request| TuiSkillRequestMetadata {
@@ -828,7 +832,7 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
         content: value.content.into_iter().map(content_block).collect(),
         input_id: value.input_id.map(|id| id.as_str().to_string()),
         source,
-        stop_hook,
+        hook_notice,
         skill_request,
     }
 }

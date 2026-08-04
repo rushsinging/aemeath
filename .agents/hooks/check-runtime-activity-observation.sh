@@ -117,8 +117,6 @@ my @hook_parallel_symbols = (
   'UiEvent::HookEvent',
   'UiEvent::HookMessage',
   'UiEvent::StopHookBlocked',
-  'AppendHookNotice',
-  'HookNotice',
 );
 for my $path (rust_files($runtime, "$root/packages/sdk/src", $tui)) {
   next if is_test($path) || $path =~ m{/scenario_tests/};

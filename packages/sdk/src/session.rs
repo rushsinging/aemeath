@@ -22,8 +22,8 @@ pub struct ChatMessage {
 pub struct ChatMessageMetadata {
     #[serde(default)]
     pub source: ChatMessageSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop_hook: Option<StopHookFeedbackView>,
+    #[serde(default, alias = "stop_hook", skip_serializing_if = "Option::is_none")]
+    pub hook_notice: Option<HookNoticeView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_request: Option<SkillRequestMetadataView>,
 }
@@ -35,8 +35,21 @@ pub struct SkillRequestMetadataView {
     pub raw_input: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HookNoticeKindView {
+    #[default]
+    Blocked,
+    Failed,
+    Info,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct StopHookFeedbackView {
+pub struct HookNoticeView {
+    #[serde(default = "default_stop_hook_point")]
+    pub point: String,
+    #[serde(default)]
+    pub kind: HookNoticeKindView,
     pub summary: String,
     pub command: String,
     pub exit_code: Option<i32>,
@@ -49,13 +62,18 @@ pub struct StopHookFeedbackView {
     pub output_file: Option<String>,
 }
 
+fn default_stop_hook_point() -> String {
+    "Stop".to_string()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatMessageSource {
     #[default]
     User,
     SystemGenerated,
-    StopHook,
+    #[serde(alias = "stop_hook")]
+    Hook,
     SkillRequest,
 }
 
@@ -75,7 +93,7 @@ impl ChatMessage {
             content: vec![ContentBlock::text(text)],
             metadata: Some(ChatMessageMetadata {
                 source: ChatMessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: None,
             }),
             input_id: None,

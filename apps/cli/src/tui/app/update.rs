@@ -65,7 +65,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
         UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
-        UiEvent::StopHookFeedback(_) => "StopHookFeedback",
+        UiEvent::HookNotice(_) => "HookNotice",
         UiEvent::ApiError { .. } => "ApiError",
         UiEvent::CompactRollback { .. } => "CompactRollback",
         UiEvent::CompactFinished { .. } => "CompactFinished",
@@ -339,7 +339,7 @@ impl App {
             TuiRuntimeEvent::Text { .. } => Some("Text"),
             TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
             TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
-            TuiRuntimeEvent::StopHookFeedback(_) => Some("StopHookFeedback"),
+            TuiRuntimeEvent::HookNotice(_) => Some("HookNotice"),
             TuiRuntimeEvent::Done { .. } => Some("Done"),
             _ => None,
         };
@@ -378,13 +378,29 @@ impl App {
                                 }
                             }
                         }
-                        crate::tui::adapter::runtime_view::TuiMessageSource::StopHook => {
-                            let text = item
-                                .stop_hook
-                                .as_ref()
-                                .map(crate::tui::adapter::runtime_view::TuiStopHookFeedback::display_text)
-                                .unwrap_or_else(|| item.text_content());
-                            self.append_system_notice(text);
+                        crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {
+                            if let Some(notice) = item.hook_notice.as_ref() {
+                                let mapping = crate::tui::adapter::agent_event::AgentEventMapping {
+                                    conversation: vec![
+                                        crate::tui::model::conversation::intent::ConversationIntent::AppendHookNotice(
+                                            crate::tui::model::conversation::intent::AppendHookNotice {
+                                                title: notice.title(),
+                                                text: notice.display_text(),
+                                                kind: notice.kind.clone(),
+                                            },
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                };
+                                let reduced = crate::tui::update::root_reducer::reduce_agent_event(
+                                    &mut self.model,
+                                    mapping,
+                                );
+                                crate::tui::update::dirty::merge_dirty(
+                                    &mut self.view_state.dirty,
+                                    reduced.dirty,
+                                );
+                            }
                         }
                         crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {}
                     }
