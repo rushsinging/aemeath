@@ -27,7 +27,7 @@ pub struct Run {
     /// `apply_drain_decision(EmptyAndSealed, …)`.  Set via
     /// `set_pending_completion_result` before sealing.
     pending_completion_result: Option<String>,
-    /// #1272: next expected drain epoch for per-turn linearization.
+    /// #1272: next expected drain epoch for per-run linearization.
     /// Persisted across `run_loop` calls so that AwaitUser→re-enter
     /// does not reset the epoch.  Each successful drain increments it.
     next_drain_epoch: u64,

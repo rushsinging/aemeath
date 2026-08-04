@@ -15,7 +15,7 @@ pub type ReflectionInputMessage = share::message::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionTaskTrigger {
-    Interval { turn_count: usize },
+    Interval { step_count: usize },
     PreCompact,
     Manual,
 }
@@ -178,7 +178,10 @@ impl ReflectionTaskAdapter {
         memory: std::sync::Arc<dyn MemoryPort>,
         history: std::sync::Arc<dyn ReflectionHistoryStore>,
     ) -> ReflectionTaskSubmitOutcome {
-        if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
+        if !config.enabled
+            || !config.reflection.enabled
+            || config.reflection.interval_run_steps == 0
+        {
             return ReflectionTaskSubmitOutcome::DisabledSkipped;
         }
         let trigger = request.trigger;

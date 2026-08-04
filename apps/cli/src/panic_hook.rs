@@ -6,7 +6,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-static CURRENT_TURN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static CURRENT_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// TUI 是否持有终端（raw mode + alternate screen）。为真时向 stderr 写 panic
 /// 会糊到屏幕上，故此时只落 panic.log，不打印 stderr。
 static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -20,14 +20,14 @@ pub fn set_tui_active(active: bool) {
     TUI_ACTIVE.store(active, Ordering::SeqCst);
 }
 
-pub fn set_current_turn(turn: usize) {
-    CURRENT_TURN.store(turn, std::sync::atomic::Ordering::Relaxed);
+pub fn set_current_run(run_step: usize) {
+    CURRENT_RUN.store(run_step, std::sync::atomic::Ordering::Relaxed);
 }
 
-fn current_turn_for_log() -> Option<usize> {
-    match CURRENT_TURN.load(std::sync::atomic::Ordering::Relaxed) {
+fn current_run_for_log() -> Option<usize> {
+    match CURRENT_RUN.load(std::sync::atomic::Ordering::Relaxed) {
         0 => None,
-        turn => Some(turn),
+        run_step => Some(run_step),
     }
 }
 
@@ -67,7 +67,7 @@ pub fn init_panic_hook() {
 
         let line = serde_json::json!({
             "session": session,
-            "turn": current_turn_for_log(),
+            "run_step": current_run_for_log(),
             "level": "ERROR",
             "module": "panic",
             "message": format!("{} at {}", payload, location),

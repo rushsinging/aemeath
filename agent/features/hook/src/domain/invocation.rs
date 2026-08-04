@@ -176,7 +176,7 @@ pub struct UserPromptInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreCompactInput {
     /// agent 循环执行的轮次。
-    pub turns: usize,
+    pub run_steps: usize,
     /// 压缩前消息数量。
     pub messages_count: usize,
 }
@@ -214,7 +214,7 @@ pub struct UserPromptExpansionInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StopInput {
     /// agent 循环执行的轮次。
-    pub turns: usize,
+    pub run_steps: usize,
 }
 
 // ── 后置增强 ──
@@ -247,7 +247,7 @@ pub struct PostToolUseFailureInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostCompactInput {
     /// agent 循环执行的轮次。
-    pub turns: usize,
+    pub run_steps: usize,
     /// 压缩前消息数量。
     pub messages_before: usize,
     /// 压缩后消息数量。
@@ -303,7 +303,7 @@ pub struct SubRunStopInput {
     /// 执行结果。
     pub result: String,
     /// 执行的轮次。
-    pub turns: usize,
+    pub run_steps: usize,
     /// 是否为错误结果。
     pub is_error: bool,
 }
@@ -341,7 +341,7 @@ pub struct InstructionsInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StopFailureInput {
     /// agent 循环执行的轮次。
-    pub turns: usize,
+    pub run_steps: usize,
     /// 导致停止失败的错误信息。
     pub error: String,
 }

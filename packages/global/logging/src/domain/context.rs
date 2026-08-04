@@ -25,7 +25,7 @@ impl<T: Clone> FieldPatch<T> {
 pub struct LogContext {
     pub session_id: Option<String>,
     pub chat_id: Option<String>,
-    pub turn: Option<usize>,
+    pub run_step: Option<usize>,
     pub request_id: Option<String>,
     pub model: Option<String>,
     pub provider: Option<String>,
@@ -37,7 +37,7 @@ pub struct LogContext {
 pub struct LogContextPatch {
     pub session_id: FieldPatch<String>,
     pub chat_id: FieldPatch<String>,
-    pub turn: FieldPatch<usize>,
+    pub run_step: FieldPatch<usize>,
     pub request_id: FieldPatch<String>,
     pub model: FieldPatch<String>,
     pub provider: FieldPatch<String>,
@@ -50,7 +50,7 @@ impl LogContext {
         Self {
             session_id: patch.session_id.resolve(&self.session_id),
             chat_id: patch.chat_id.resolve(&self.chat_id),
-            turn: patch.turn.resolve(&self.turn),
+            run_step: patch.run_step.resolve(&self.run_step),
             request_id: patch.request_id.resolve(&self.request_id),
             model: patch.model.resolve(&self.model),
             provider: patch.provider.resolve(&self.provider),

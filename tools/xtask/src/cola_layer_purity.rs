@@ -132,6 +132,15 @@ fn project_domain_adapter_pattern() -> Regex {
         .expect("project_domain_adapter regex")
 }
 
+fn tool_profile_struct_pattern() -> Regex {
+    Regex::new(r"\bpub\s+struct\s+ToolProfile\b").expect("tool_profile_struct regex")
+}
+
+fn storage_domain_io_pattern() -> Regex {
+    Regex::new(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b")
+        .expect("storage_domain_io regex")
+}
+
 fn tool_name_match_pattern() -> Regex {
     Regex::new(concat!(
         r"(?:\bmatch\s+[^{}]*?(?:\btool_?name\b|\.name\b)|",
@@ -504,11 +513,6 @@ fn run_sanity() {
 pub fn check(root: &Path) -> Result<()> {
     run_sanity();
     let mut violations: Vec<String> = Vec::new();
-    let tool_profile_definition_pattern =
-        Regex::new(r"\bpub\s+struct\s+ToolProfile\b").expect("tool profile definition regex");
-    let storage_domain_adapter_pattern =
-        Regex::new(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b")
-            .expect("storage domain adapter regex");
     let mut seen_runtime_exceptions: BTreeSet<(String, String)> = BTreeSet::new();
 
     let policy_production_adapter = root.join("agent/features/policy/src/adapters.rs");
@@ -755,7 +759,7 @@ pub fn check(root: &Path) -> Result<()> {
             for violation in tools_boundary_violations(&rel_s, &source) {
                 violations.push(format!("{rel_s}: {violation}"));
             }
-            if tool_profile_definition_pattern.is_match(&strip_rust_comments(&source)) {
+            if tool_profile_struct_pattern().is_match(&strip_rust_comments(&source)) {
                 for violation in tool_profile_violations(&source) {
                     violations.push(format!("{rel_s}: {violation}"));
                 }
@@ -763,7 +767,7 @@ pub fn check(root: &Path) -> Result<()> {
         }
         if (rel_s.starts_with("agent/features/storage/src/domain/")
             || rel_s == "agent/features/storage/src/domain.rs")
-            && storage_domain_adapter_pattern.is_match(&source)
+            && storage_domain_io_pattern().is_match(&source)
         {
             violations.push(format!(
                 "{rel_s}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"

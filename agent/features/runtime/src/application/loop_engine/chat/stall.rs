@@ -46,7 +46,7 @@ impl StallDetector {
         }
         if repeat_count >= Self::FINGERPRINT_MAX_REPEAT {
             log::warn!(target: crate::LOG_TARGET,
-                "[stall] assistant text repeated {} times in recent {} turns (max: {})",
+                "[stall] assistant text repeated {} times in recent {} run steps (max: {})",
                 repeat_count,
                 self.recent_fingerprints.len(),
                 self.max_fingerprint_repeat

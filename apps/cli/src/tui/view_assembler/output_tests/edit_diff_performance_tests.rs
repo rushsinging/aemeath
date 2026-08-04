@@ -1,5 +1,5 @@
 use super::super::{assemble_output_view, assemble_output_window};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
     AppendSystemMessage, StartChat, ToolCallUpdate, ToolResult,
 };
@@ -36,7 +36,7 @@ fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationMo
         submission: "恢复长会话并检查 Edit 历史".to_string(),
     });
     let chat_id = ChatId::new("chat-main");
-    let turn_id = ChatTurnId::new("turn-main");
+    let run_id = ChatRunId::new("turn-main");
 
     for index in 0..edit_count {
         let id = ToolCallId::new(format!("edit-{index}"));
@@ -51,7 +51,7 @@ fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationMo
         .to_string();
         conversation.apply(ToolCallUpdate {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id: id.clone(),
             provider_id: Some(provider_id.clone()),
             name: "Edit".to_string(),
@@ -61,7 +61,7 @@ fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationMo
         });
         conversation.apply(ToolResult {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id,
             provider_id,
             tool_name: "Edit".to_string(),

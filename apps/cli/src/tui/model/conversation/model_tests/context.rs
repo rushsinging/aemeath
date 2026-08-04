@@ -8,7 +8,7 @@ fn test_ensure_runtime_turn_does_not_change_active_chat() {
 
     model.ensure_runtime_turn(
         super::ids::ChatId::new("runtime-chat"),
-        super::ids::ChatTurnId::new("runtime-turn"),
+        super::ids::ChatRunId::new("runtime-turn"),
     );
 
     assert_eq!(model.active_chat_id, active_before);
@@ -22,15 +22,15 @@ fn test_ensure_runtime_turn_does_not_change_active_chat() {
 fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_drifted() {
     let mut model = ConversationModel::default();
     let live_chat = super::ids::ChatId::new("session-live");
-    let live_turn = super::ids::ChatTurnId::new("turn-live");
+    let live_turn = super::ids::ChatRunId::new("turn-live");
     let stale_chat = super::ids::ChatId::new("session-stale");
-    let stale_turn = super::ids::ChatTurnId::new("turn-stale");
+    let stale_turn = super::ids::ChatRunId::new("turn-stale");
 
     model.ensure_runtime_turn(live_chat.clone(), live_turn.clone());
     let agent_tool_id = super::ids::ToolCallId::new("agent-tool");
     model.apply(ToolCallStart {
         chat_id: live_chat.clone(),
-        turn_id: live_turn.clone(),
+        run_id: live_turn.clone(),
         id: agent_tool_id.clone(),
         provider_id: Some("provider-agent".to_string()),
         name: "Agent".to_string(),
@@ -40,7 +40,7 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
 
     model.apply(RecordAgentProgress {
         chat_id: live_chat.clone(),
-        turn_id: live_turn.clone(),
+        run_id: live_turn.clone(),
         tool_id: agent_tool_id.clone(),
         message: "reading files".to_string(),
     });
@@ -49,7 +49,7 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
         .chats
         .iter()
         .find(|chat| chat.id == live_chat)
-        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == live_turn))
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == live_turn))
         .and_then(|turn| {
             turn.tool_calls
                 .iter()
@@ -64,9 +64,9 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
 fn test_complete_chat_uses_explicit_runtime_context_when_active_chat_drifted() {
     let mut model = ConversationModel::default();
     let live_chat = super::ids::ChatId::new("session-live");
-    let live_turn = super::ids::ChatTurnId::new("turn-live");
+    let live_turn = super::ids::ChatRunId::new("turn-live");
     let stale_chat = super::ids::ChatId::new("session-stale");
-    let stale_turn = super::ids::ChatTurnId::new("turn-stale");
+    let stale_turn = super::ids::ChatRunId::new("turn-stale");
 
     model.ensure_runtime_turn(live_chat.clone(), live_turn.clone());
     model.ensure_runtime_turn(stale_chat.clone(), stale_turn);
@@ -74,7 +74,7 @@ fn test_complete_chat_uses_explicit_runtime_context_when_active_chat_drifted() {
 
     let changes = model.apply(CompleteChat {
         chat_id: live_chat.clone(),
-        turn_id: live_turn,
+        run_id: live_turn,
     });
 
     let live = model

@@ -22,7 +22,7 @@ use tools::{ToolCatalogSnapshot, ToolName};
 pub(crate) struct ToolRoundContext<'a> {
     pub runtime_context: &'a crate::application::run::context::RuntimeContext,
     pub agent: crate::application::tool::agent::Agent,
-    pub turn_context: crate::application::loop_engine::chat::RuntimeTurnContext,
+    pub turn_context: crate::application::loop_engine::chat::RuntimeRunContext,
     pub language: &'a str,
     pub workspace_root: std::path::PathBuf,
     pub session_id: &'a str,
@@ -159,7 +159,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     .map(|call| call.call)
     .collect::<Vec<_>>();
     observer
-        .execution_started(execution.turn_count(), &raw_calls, &executable)
+        .execution_started(execution.step_count(), &raw_calls, &executable)
         .await;
     let sink = context.runtime_context.event_sink();
     let round = crate::application::loop_engine::chat::tools::execute_tool_round(
@@ -180,7 +180,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     )
     .await;
     observer
-        .execution_finished(execution, execution.turn_count(), &round.results)
+        .execution_finished(execution, execution.step_count(), &round.results)
         .await;
     let interaction_ids: std::collections::HashSet<_> = round
         .suspensions
@@ -353,7 +353,7 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
         });
     }
     observer
-        .round_finished(step_id, result_count, execution.turn_count(), run_cancel)
+        .round_finished(step_id, result_count, execution.step_count(), run_cancel)
         .await;
     Ok(ToolRoundOutcome {
         step: crate::application::loop_engine::tool_strategy::step_from_fuse_bypass(fuse_bypassed),

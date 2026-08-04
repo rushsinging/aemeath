@@ -3,7 +3,7 @@ use crate::application::loop_engine::chat::agent_calls::execute_agent_calls;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::non_agent::execute_non_agent;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::loop_engine::{ApprovalRequiredCall, SuspendedQuestion, SuspendedToolCall};
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
@@ -30,7 +30,7 @@ pub(crate) struct ToolRoundResult {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn policy::PolicyPort,
@@ -192,7 +192,7 @@ async fn publish_guard_blocked<S>(
     blocked: Vec<ToolExecution>,
     calls: &[ToolCall],
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
 ) -> Vec<ToolExecution>
 where
@@ -220,7 +220,7 @@ where
 async fn deny_tool_calls<S>(
     denied: &[crate::application::tool::coordination::DeniedToolCall],
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     hook_port: &Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     step_id: &sdk::RunStepId,
@@ -340,7 +340,7 @@ pub(crate) async fn run_post_tool_hooks(
 
 pub(crate) async fn send_tool_call_status<S>(
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     call: &ToolCall,
     status: RuntimeToolCallStatus,
 ) where
@@ -362,7 +362,7 @@ pub(crate) async fn send_tool_call_status<S>(
 
 pub(crate) async fn send_tool_result<S>(
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     execution: &ToolExecution,
     materializer: &crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     session_id: &str,
@@ -406,14 +406,14 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 mod tests {
     use super::{execute_tool_round, send_tool_result};
     use crate::application::loop_engine::chat::{
-        ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
+        ChatEventSink, EventFuture, RuntimeRunContext, RuntimeStreamEvent,
     };
     use crate::application::loop_engine::ToolGuardDecision;
     use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
     use crate::application::tool::coordination::complete_cancelled_tool_round;
     use async_trait::async_trait;
     use hook::{HookInvocation, HookOutcome, HookPort};
-    use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+    use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
@@ -571,7 +571,7 @@ mod tests {
         let agent = Arc::new(Agent::for_test(registry.as_ref(), ctx, 10));
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = ToolCall {
             id: ToolCallId::from_legacy_or_new("agent-cancel"),
@@ -633,7 +633,7 @@ mod tests {
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
         let activities = crate::application::activity::ActivityCoordinator::new(
@@ -681,7 +681,7 @@ mod tests {
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let activities = crate::application::activity::ActivityCoordinator::new(
             sdk::RunId::new_v7(),
@@ -744,7 +744,7 @@ mod tests {
             ),
         );
         let sink = RecordingSink::default();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let materializer = crate::application::tool::test_support::test_tool_result_materializer();
 
         send_tool_result(

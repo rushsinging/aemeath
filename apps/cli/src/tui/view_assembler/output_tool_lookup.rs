@@ -1,4 +1,4 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCall;
 
@@ -6,7 +6,7 @@ pub(super) trait ToolCallLookup {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall>;
 }
@@ -25,9 +25,9 @@ impl ToolCallLookup for ConversationToolLookup<'_> {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.conversation.tool_call(chat_id, turn_id, tool_id)
+        self.conversation.tool_call(chat_id, run_id, tool_id)
     }
 }

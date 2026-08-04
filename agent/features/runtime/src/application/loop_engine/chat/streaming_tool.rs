@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::tools::execute_tool_round;
-use crate::application::loop_engine::chat::RuntimeTurnContext;
+use crate::application::loop_engine::chat::RuntimeRunContext;
 use crate::application::loop_engine::ToolGuardDecision;
 use crate::application::run::context::RuntimeContext;
 use crate::application::tool::agent::{Agent, ToolCall};
@@ -38,7 +38,7 @@ pub(crate) struct StreamingToolExecutor {
 struct StreamingToolInner {
     runtime_context: Arc<RuntimeContext>,
     agent: Agent,
-    turn_context: RuntimeTurnContext,
+    turn_context: RuntimeRunContext,
     run_id: sdk::RunId,
     language: String,
     workspace_root: PathBuf,
@@ -128,7 +128,7 @@ impl StreamingToolExecutor {
     pub(crate) fn new(
         runtime_context: Arc<RuntimeContext>,
         agent: Agent,
-        turn_context: RuntimeTurnContext,
+        turn_context: RuntimeRunContext,
         run_id: sdk::RunId,
         language: String,
         workspace_root: PathBuf,

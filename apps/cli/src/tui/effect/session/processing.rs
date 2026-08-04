@@ -62,7 +62,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::tui_runtime_event::TuiTurnContext;
+    use crate::tui::adapter::tui_runtime_event::TuiRunContext;
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -70,7 +70,7 @@ mod tests {
     fn test_sdk_event_context() -> sdk::ChatEventContext {
         sdk::ChatEventContext::new(
             sdk::ids::ChatId::new("chat-test"),
-            sdk::ids::ChatTurnId::new("turn-test"),
+            sdk::ids::ChatRunId::new("run_step-test"),
         )
     }
 
@@ -134,11 +134,11 @@ mod tests {
         let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
             source_context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("child-chat"),
-                sdk::ids::ChatTurnId::new("child-turn"),
+                sdk::ids::ChatRunId::new("child-run_step"),
             ),
             attachment_context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("parent-chat"),
-                sdk::ids::ChatTurnId::new("parent-turn"),
+                sdk::ids::ChatRunId::new("parent-run_step"),
             ),
             tool_id: expected_tool_id.clone(),
             event: sdk::AgentProgressEventView {
@@ -157,9 +157,9 @@ mod tests {
                 tool_id,
                 ..
             }) if source_context.chat_id == sdk::ids::ChatId::new("child-chat").as_str()
-                && source_context.turn_id == sdk::ids::ChatTurnId::new("child-turn").as_str()
+                && source_context.run_id == sdk::ids::ChatRunId::new("child-run_step").as_str()
                 && attachment_context.chat_id == sdk::ids::ChatId::new("parent-chat").as_str()
-                && attachment_context.turn_id == sdk::ids::ChatTurnId::new("parent-turn").as_str()
+                && attachment_context.run_id == sdk::ids::ChatRunId::new("parent-run_step").as_str()
                 && tool_id == expected_tool_id.as_str()
         ));
     }
@@ -283,9 +283,9 @@ mod tests {
                 local_tx,
                 input_event_port: input_port,
                 agent_client: client,
-                fallback_context: TuiTurnContext {
+                fallback_context: TuiRunContext {
                     chat_id: "fallback-chat".to_string(),
-                    turn_id: "fallback-turn".to_string(),
+                    run_id: "fallback-run_step".to_string(),
                 },
             });
         })
@@ -333,9 +333,9 @@ mod tests {
             local_tx,
             input_event_port: input_port,
             agent_client: client.clone(),
-            fallback_context: TuiTurnContext {
+            fallback_context: TuiRunContext {
                 chat_id: "fallback-chat".to_string(),
-                turn_id: "fallback-turn".to_string(),
+                run_id: "fallback-run_step".to_string(),
             },
         });
 
@@ -347,7 +347,7 @@ mod tests {
             event,
             TuiRuntimeEvent::Done { context, .. }
                 if context.chat_id == sdk::ids::ChatId::new("chat-test").as_str()
-                    && context.turn_id == sdk::ids::ChatTurnId::new("turn-test").as_str()
+                    && context.run_id == sdk::ids::ChatRunId::new("run_step-test").as_str()
         ));
         assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
     }

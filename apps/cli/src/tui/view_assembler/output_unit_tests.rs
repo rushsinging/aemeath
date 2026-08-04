@@ -14,7 +14,7 @@ fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallB
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-status"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-status"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-status"),
         id: ToolCallId::new("tool-status"),
         provider_id: None,
         name: "Bash".to_string(),
@@ -22,7 +22,7 @@ fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallB
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-status"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-status"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-status"),
         provider_id: Some("provider-status".to_string()),
         id: ToolCallId::new("tool-status"),
         name: "Bash".to_string(),
@@ -68,7 +68,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: ToolCallId::new("tool-orphan"),
         tool_name: "Read".to_string(),
@@ -114,7 +114,7 @@ fn test_non_embedded_tool_result_uses_summary() {
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -122,7 +122,7 @@ fn test_non_embedded_tool_result_uses_summary() {
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -132,7 +132,7 @@ fn test_non_embedded_tool_result_uses_summary() {
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: ToolCallId::new("tool-1"),
         tool_name: "Read".to_string(),
@@ -167,7 +167,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         .join("\n");
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: ToolCallId::new("tool-orphan"),
         tool_name: "Bash".to_string(),
@@ -254,14 +254,14 @@ fn test_summarize_non_embedded_empty() {
 /// assembler 静默跳过（find_tool_call → None → continue），不产出任何块。
 #[test]
 fn test_timeline_tool_result_with_unknown_id_is_silently_skipped() {
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 
     let mut conversation = ConversationModel::default();
     // 直接向 timeline 注入一个 ToolResult，但 chats 中没有对应的 tool_call。
     // A4.5 后：find_tool_call → None → continue，不产出任何块（不泄漏原始内容）。
     conversation.timeline.push_tool_result_ref(
         ChatId::new("chat-x"),
-        ChatTurnId::new("turn-x"),
+        ChatRunId::new("turn-x"),
         ToolCallId::new("call-missing"),
     );
 
@@ -276,17 +276,17 @@ fn test_timeline_tool_result_with_unknown_id_is_silently_skipped() {
 #[test]
 fn test_tool_index_call_matches_linear_scan() {
     use super::ToolIndex;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 
     use crate::tui::model::conversation::model::ConversationModel;
 
     let mut conv = ConversationModel::default();
     let chat = ChatId::new("c1");
-    let turn = ChatTurnId::new("t1");
+    let turn = ChatRunId::new("t1");
     let tool = ToolCallId::new("tool-1");
     conv.apply(ToolCallStart {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         id: tool.clone(),
         provider_id: Some("p".to_string()),
         name: "Read".to_string(),
@@ -309,19 +309,19 @@ fn test_tool_index_call_matches_linear_scan() {
 #[test]
 fn test_tool_index_call_result_payload_matches_observed_values() {
     use super::ToolIndex;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 
     use crate::tui::model::conversation::model::ConversationModel;
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
     let mut conv = ConversationModel::default();
     let chat = ChatId::new("c1");
-    let turn = ChatTurnId::new("t1");
+    let turn = ChatRunId::new("t1");
     let tool = ToolCallId::new("tool-r1");
 
     conv.apply(ToolCallStart {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         id: tool.clone(),
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
@@ -329,7 +329,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     });
     conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         id: tool.clone(),
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
@@ -343,7 +343,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     let expected_image_count: usize = 2;
     conv.apply(ToolResult {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         provider_id: "prov-1".to_string(),
         id: tool.clone(),
         tool_name: "Bash".to_string(),
@@ -386,17 +386,17 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
 /// 断言：is_error=true → style=Error；image_count>0 → 文本含 `[图片: N]`。
 #[test]
 fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 
     let mut conv = ConversationModel::default();
     let chat = ChatId::new("chat-1");
-    let turn = ChatTurnId::new("turn-1");
+    let turn = ChatRunId::new("turn-1");
     let tool = ToolCallId::new("tool-img");
 
     // 注册 tool call，使 find_tool_call 能命中（tool_result_is_embedded 需要）。
     conv.apply(ToolCallStart {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         id: tool.clone(),
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
@@ -404,7 +404,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     });
     conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         id: tool.clone(),
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
@@ -416,7 +416,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     // is_error=true、image_count=2 → style=Error、文本含 "[图片: 2]"。
     conv.apply(ToolResult {
         chat_id: chat.clone(),
-        turn_id: turn.clone(),
+        run_id: turn.clone(),
         provider_id: "prov-1".to_string(),
         id: tool.clone(),
         tool_name: "Bash".to_string(),

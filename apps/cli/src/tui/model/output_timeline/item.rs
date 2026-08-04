@@ -1,16 +1,16 @@
 use std::borrow::Cow;
 
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TimelineRuntimeContext {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 impl TimelineRuntimeContext {
-    pub fn new(chat_id: ChatId, turn_id: ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+    pub fn new(chat_id: ChatId, run_id: ChatRunId) -> Self {
+        Self { chat_id, run_id }
     }
 }
 
@@ -21,9 +21,9 @@ pub struct TimelineToolCallRef {
 }
 
 impl TimelineToolCallRef {
-    pub fn new(chat_id: ChatId, turn_id: ChatTurnId, tool_call_id: ToolCallId) -> Self {
+    pub fn new(chat_id: ChatId, run_id: ChatRunId, tool_call_id: ToolCallId) -> Self {
         Self {
-            context: TimelineRuntimeContext::new(chat_id, turn_id),
+            context: TimelineRuntimeContext::new(chat_id, run_id),
             tool_call_id,
         }
     }
@@ -108,13 +108,13 @@ impl OutputTimelineItem {
             OutputTimelineItem::ToolCall { reference } => Cow::Owned(format!(
                 "tool-call-{}/{}/{}",
                 reference.context.chat_id.as_ref(),
-                reference.context.turn_id.as_ref(),
+                reference.context.run_id.as_ref(),
                 reference.tool_call_id.as_ref()
             )),
             OutputTimelineItem::ToolResult { reference } => Cow::Owned(format!(
                 "tool-result-{}/{}/{}",
                 reference.context.chat_id.as_ref(),
-                reference.context.turn_id.as_ref(),
+                reference.context.run_id.as_ref(),
                 reference.tool_call_id.as_ref()
             )),
         }

@@ -82,7 +82,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
         UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
         UiEvent::TaskStatusChanged(_) => "TaskStatusChanged",
-        UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
+        UiEvent::CurrentRunChanged(_) => "CurrentRunChanged",
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
         UiEvent::SessionReset => "SessionReset",
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",

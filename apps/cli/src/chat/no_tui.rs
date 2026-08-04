@@ -205,8 +205,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::InteractionRequested { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
-        | sdk::ChatEvent::TurnChanged(_)
-        | sdk::ChatEvent::CurrentTurnChanged(_)
+        | sdk::ChatEvent::RunChanged(_)
+        | sdk::ChatEvent::CurrentRunChanged(_)
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::ConfigChanged { .. }
         | sdk::ChatEvent::ConfigReloaded { .. }

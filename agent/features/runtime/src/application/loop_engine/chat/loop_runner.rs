@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use sdk::ids::{ChatId, ChatTurnId};
+use sdk::ids::{ChatId, ChatRunId};
 use share::message::Message;
 
 use crate::application::loop_engine::chat::idle_lifecycle::{
@@ -9,8 +9,8 @@ use crate::application::loop_engine::chat::idle_lifecycle::{
 use crate::application::loop_engine::chat::input_gate::apply_gate;
 use crate::application::loop_engine::chat::loop_phases::handle_turn_boundary_config;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, GateKind, PendingCommand, PendingInputBuffer, RuntimeStreamEvent,
-    RuntimeTurnContext,
+    ChatEventSink, GateKind, PendingCommand, PendingInputBuffer, RuntimeRunContext,
+    RuntimeStreamEvent,
 };
 use crate::domain::agent_run::RunSpec;
 
@@ -20,6 +20,9 @@ use super::loop_context::SessionCommandDriverInput;
 pub(crate) mod main_run_port;
 
 /// Drives one Main session across idle commands and sequential Runs.
+/// The session itself only idles, accepts one real user input, creates one fresh `Run`,
+/// drives it to a terminal state through the shared engine, then idles again.
+/// `Run` is the only production state machine inside an active run step.
 pub async fn run_session_command_driver<S, I>(input: SessionCommandDriverInput<S, I>)
 where
     S: ChatEventSink,
@@ -82,7 +85,7 @@ where
                 );
             let mut cwd = workspace.read().current_workspace_root();
             // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
-            let mut turn_count = 0;
+            let mut step_count = 0;
             let mut pending_input = PendingInputBuffer::default();
                 let tool_identity =
                     crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
@@ -599,10 +602,10 @@ where
                     }
                 };
 
-                turn_count += 1;
-                let turn_id = ChatTurnId::new_v7();
-                let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id.clone());
-                sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
+                step_count += 1;
+                let run_id = ChatRunId::new_v7();
+                let turn_context = RuntimeRunContext::new(chat_id.clone(), run_id.clone());
+                sink.send_event(RuntimeStreamEvent::RunChanged(step_count))
                     .await;
                 cwd = workspace.read().current_workspace_root();
                 shell
@@ -618,7 +621,7 @@ where
                     &mut config_snapshot,
                     config_reader.as_ref(),
                     wiring.as_ref(),
-                    turn_count,
+                    step_count,
                     &sink,
                     &mut messages,
                     &language,
@@ -689,7 +692,7 @@ where
                         .unwrap_or_else(|error| error.into_inner())
                         .update_session(session_id.clone(), prepared_session.config().clone());
                 }
-                run_instance.initialize(messages.clone(), turn_count);
+                run_instance.initialize(messages.clone(), step_count);
                 let runtime_context = run_instance.context().clone();
                 let run_id = run_instance.run().id().clone();
                 let spec = run_instance.run().spec().clone();
@@ -910,7 +913,7 @@ where
                 );
                 let launch_result = logging::within(
                     logging::LogContextPatch {
-                        turn: logging::FieldPatch::Set(turn_count),
+                        run_step: logging::FieldPatch::Set(step_count),
                         ..logging::LogContextPatch::default()
                     },
                     crate::application::run::launcher::launch(

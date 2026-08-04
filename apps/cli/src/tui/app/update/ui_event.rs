@@ -93,8 +93,8 @@ impl App {
                     }),
                 ));
             }
-            UiEvent::CurrentTurnChanged(turn) => {
-                return UpdateResult::one(Effect::SetCurrentTurn { turn });
+            UiEvent::CurrentRunChanged(run_step) => {
+                return UpdateResult::one(Effect::SetCurrentRun { run_step });
             }
             UiEvent::WorkingDirectoryChanged(ctx) => {
                 self.session.cwd = ctx.raw_path_base;
@@ -216,12 +216,12 @@ impl App {
                 );
             }
             UiEvent::Done { .. } => {
-                // 不清 processing_handle：Done 只表示这一个 turn 结束，常驻 loop
+                // 不清 processing_handle：Done 只表示这一个 run 结束，常驻 loop
                 // 回 Idle 继续等待下一条输入，任务本身没退出。见 #624。
                 effects.extend(self.handle_done(ui_tx, None));
             }
             UiEvent::DoneWithDuration { duration, .. } => {
-                // 同上：DoneWithDuration 同样只是「这一回合完成」，不是任务退出。
+                // 同上：DoneWithDuration 同样只是「这一run完成」，不是任务退出。
                 effects.extend(self.handle_done(ui_tx, Some(duration)));
             }
         }

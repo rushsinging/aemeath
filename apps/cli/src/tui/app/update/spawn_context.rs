@@ -1,4 +1,4 @@
-use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiTurnContext};
+use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiRuntimeEvent};
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::session::processing::{SpawnContext, SpawnContextRefs};
 use tokio::sync::mpsc;
@@ -22,23 +22,23 @@ impl App {
         })
     }
 
-    fn fallback_runtime_context(&self) -> TuiTurnContext {
+    fn fallback_runtime_context(&self) -> TuiRunContext {
         self.model
             .conversation
             .chats
             .iter()
             .rev()
             .find_map(|chat| {
-                chat.turns.last().map(|turn| TuiTurnContext {
+                chat.runs.last().map(|run_step| TuiRunContext {
                     chat_id: chat.id.as_str().to_string(),
-                    turn_id: turn.id.as_str().to_string(),
+                    run_id: run_step.id.as_str().to_string(),
                 })
             })
-            .unwrap_or_else(|| TuiTurnContext {
+            .unwrap_or_else(|| TuiRunContext {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new_v7()
                     .as_str()
                     .to_string(),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new_v7()
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new_v7()
                     .as_str()
                     .to_string(),
             })

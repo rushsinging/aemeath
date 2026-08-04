@@ -60,9 +60,9 @@ mod tests {
     async fn test_chat_stream_recv_returns_sent_event() {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let chat_id = crate::ids::ChatId::new_v7();
-        let turn_id = crate::ids::ChatTurnId::new_v7();
+        let run_id = crate::ids::ChatRunId::new_v7();
         tx.send(ChatEvent::Token {
-            context: ChatEventContext::new(chat_id.clone(), turn_id.clone()),
+            context: ChatEventContext::new(chat_id.clone(), run_id.clone()),
             text: "hello".to_string(),
         })
         .unwrap();
@@ -74,7 +74,7 @@ mod tests {
         match event {
             Some(ChatEvent::Token { context, text }) => {
                 assert_eq!(context.chat_id, chat_id);
-                assert_eq!(context.turn_id, turn_id);
+                assert_eq!(context.run_id, run_id);
                 assert_eq!(text, "hello");
             }
             other => panic!("unexpected event: {other:?}"),

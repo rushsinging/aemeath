@@ -561,7 +561,7 @@ fn main_logging_path_uses_scopes_and_no_legacy_setters() {
     assert!(chat_source.contains("logging::spawn_instrumented(session_context"));
     assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
-    assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
+    assert!(runner_source.contains("run_step: logging::FieldPatch::Set(step_count)"));
     assert!(invocation_source.contains("logging::instrument(request_context"));
     for source in [chat_source, runner_source, port_source, invocation_source] {
         assert!(!source.contains("logging::set_current_"));
@@ -585,7 +585,7 @@ fn each_request_attempt_has_complete_fresh_context() {
     let parent = logging::LogContext {
         session_id: Some("session".into()),
         chat_id: Some("chat".into()),
-        turn: Some(3),
+        run_step: Some(3),
         ..logging::LogContext::default()
     };
     let first = loop_runner::main_run_port::request_log_context(
@@ -603,7 +603,7 @@ fn each_request_attempt_has_complete_fresh_context() {
 
     assert_eq!(first.session_id.as_deref(), Some("session"));
     assert_eq!(first.chat_id.as_deref(), Some("chat"));
-    assert_eq!(first.turn, Some(3));
+    assert_eq!(first.run_step, Some(3));
     assert_eq!(first.model.as_deref(), Some("model-a"));
     assert_eq!(first.provider.as_deref(), Some("provider-a"));
     assert_eq!(first.role.as_deref(), Some("default"));
@@ -699,7 +699,7 @@ impl RecordingSink {
                 self.done_durations.lock().unwrap().push(*duration);
                 "DoneWithDuration".to_string()
             }
-            RuntimeStreamEvent::TurnChanged(turn) => format!("TurnChanged:{turn}"),
+            RuntimeStreamEvent::RunChanged(turn) => format!("RunChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
@@ -2372,7 +2372,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
 async fn test_idle_pending_command_does_not_run_spurious_turn() {
     // 回归 #628：idle 收到的 PendingCommand（ListReminders 等纯查询或动作命令）
     // 处理后应回 idle 等下一条输入，而不是掉进 execute_tool_round 跑一轮幽灵 LLM turn。
-    // bug 表现：命令处理完无 continue，掉进 turn_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
+    // bug 表现：命令处理完无 continue，掉进 step_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
     //
     // 与 test_idle_control_command_does_not_run_spurious_turn 的区别：前者走 ControlCommand 路径
     // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::ListReminders → PendingCommand 路径，
@@ -3027,13 +3027,13 @@ async fn test_chat_impl_idle_until_first_input_event() {
             driver_sink.events()
         );
         // Finding 2：idle gate 已前置到回合头之前，空 seed 启动在收到首条输入前
-        // 不得发出任何 TurnChanged（否则是「回合 1 / 处理中」假信号）。
+        // 不得发出任何 RunChanged（否则是「回合 1 / 处理中」假信号）。
         assert!(
             driver_sink
                 .events()
                 .iter()
-                .all(|e| !e.starts_with("TurnChanged")),
-            "未投递输入前不得发出 TurnChanged（前置 idle gate 避免假回合）: {:?}",
+                .all(|e| !e.starts_with("RunChanged")),
+            "未投递输入前不得发出 RunChanged（前置 idle gate 避免假回合）: {:?}",
             driver_sink.events()
         );
 
@@ -3091,26 +3091,26 @@ async fn test_chat_impl_idle_until_first_input_event() {
         1,
         "应产出恰好一个 DoneWithDuration: {events:?}"
     );
-    // Finding 2：全程恰好一次 TurnChanged，且回合编号为 1（首个真实回合 = 1，
+    // Finding 2：全程恰好一次 RunChanged，且回合编号为 1（首个真实回合 = 1，
     // 前置 idle gate 不会消耗回合号）。空 seed 启动不产生假回合。
     let turn_changes: Vec<&String> = events
         .iter()
-        .filter(|e| e.starts_with("TurnChanged"))
+        .filter(|e| e.starts_with("RunChanged"))
         .collect();
     assert_eq!(
         turn_changes,
-        vec![&"TurnChanged:1".to_string()],
-        "空 seed 启动应恰好发出一次 TurnChanged:1（首个真实回合编号为 1）: {events:?}"
+        vec![&"RunChanged:1".to_string()],
+        "空 seed 启动应恰好发出一次 RunChanged:1（首个真实回合编号为 1）: {events:?}"
     );
 }
 
 /// Finding 2 专项：空 seed 启动时，loop-top idle gate 位于回合头之前，
-/// 收到首条真实输入前 NEVER 发出任何回合信号（`TurnChanged`）或 turn 边界副作用。
+/// 收到首条真实输入前 NEVER 发出任何回合信号（`RunChanged`）或 turn 边界副作用。
 ///
 /// 与 `test_chat_impl_idle_until_first_input_event` 的区别：本测试以 `RecordingSink`
-/// 捕获「投递首条输入的那一刻」的事件快照，**确定性**断言该快照内不含 `TurnChanged`
-/// （前置 idle gate 的直接观测）。若 gate 仍位于 `TurnChanged` 之后（回归），快照会
-/// 含 `TurnChanged:1` 假信号 → 断言失败。随后真实输入触发恰好一个回合（`TurnChanged:1`
+/// 捕获「投递首条输入的那一刻」的事件快照，**确定性**断言该快照内不含 `RunChanged`
+/// （前置 idle gate 的直接观测）。若 gate 仍位于 `RunChanged` 之后（回归），快照会
+/// 含 `RunChanged:1` 假信号 → 断言失败。随后真实输入触发恰好一个回合（`RunChanged:1`
 /// 在输入之后出现），drop 发送端关闭通道使 loop shutdown 退出。
 #[tokio::test]
 async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
@@ -3122,7 +3122,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
     let driver_sink = sink.clone();
     let driver_provider = provider.clone();
     let driver = tokio::spawn(async move {
-        // 给 loop 充分调度机会去（错误地）跑回合头、发 TurnChanged。
+        // 给 loop 充分调度机会去（错误地）跑回合头、发 RunChanged。
         for _ in 0..200 {
             tokio::task::yield_now().await;
         }
@@ -3131,8 +3131,8 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         assert!(
             snapshot_before_input
                 .iter()
-                .all(|e| !e.starts_with("TurnChanged")),
-            "空 seed 启动在收到首条输入前不得发出 TurnChanged（前置 idle gate 避免假回合）: {snapshot_before_input:?}"
+                .all(|e| !e.starts_with("RunChanged")),
+            "空 seed 启动在收到首条输入前不得发出 RunChanged（前置 idle gate 避免假回合）: {snapshot_before_input:?}"
         );
         assert_eq!(
             driver_provider.calls().len(),
@@ -3171,17 +3171,17 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // 首条输入触发后：恰好一次 TurnChanged，编号 1（首个真实回合 = 1）。
+    // 首条输入触发后：恰好一次 RunChanged，编号 1（首个真实回合 = 1）。
     let turn_changes: Vec<&String> = events
         .iter()
-        .filter(|e| e.starts_with("TurnChanged"))
+        .filter(|e| e.starts_with("RunChanged"))
         .collect();
     assert_eq!(
         turn_changes,
-        vec![&"TurnChanged:1".to_string()],
-        "真实输入后应恰好发出一次 TurnChanged:1: {events:?}"
+        vec![&"RunChanged:1".to_string()],
+        "真实输入后应恰好发出一次 RunChanged:1: {events:?}"
     );
-    // TurnChanged 必在首次 LLM 调用（输入处理后）之前的同一回合内；整体恰好一次 LLM 调用。
+    // RunChanged 必在首次 LLM 调用（输入处理后）之前的同一回合内；整体恰好一次 LLM 调用。
     assert_eq!(
         provider.calls(),
         vec!["hello".to_string()],
@@ -3192,7 +3192,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
 /// #672/#503：resume 后 messages 末尾为 User 消息（纯文本）时，loop-top idle 门
 /// 强制等待新输入，而非自动发起 LLM 请求恢复被中断的对话。
 #[tokio::test]
-async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
+async fn test_resume_skip_pending_user_run_idles_until_new_input() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 

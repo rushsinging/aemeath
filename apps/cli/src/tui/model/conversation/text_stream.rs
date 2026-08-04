@@ -1,5 +1,5 @@
 use super::change::ConversationChange;
-use super::ids::{ChatId, ChatTurnId};
+use super::ids::{ChatId, ChatRunId};
 use super::model::ConversationModel;
 use crate::tui::model::output_timeline::{OutputTimelineItem, TimelineRuntimeContext};
 
@@ -7,19 +7,19 @@ impl ConversationModel {
     pub(super) fn append_assistant_text(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         text: String,
     ) -> Vec<ConversationChange> {
         if text.is_empty() {
             return Vec::new();
         }
-        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+        self.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
             turn.assistant_stream.push_str(&text);
         }
         self.active_thinking_block_id = None;
         self.active_thinking_context = None;
-        let block_id = self.append_or_extend_text_block(chat_id, turn_id, text, false);
+        let block_id = self.append_or_extend_text_block(chat_id, run_id, text, false);
         vec![
             ConversationChange::AssistantTextAppended { block_id },
             ConversationChange::OutputDirty,
@@ -29,16 +29,16 @@ impl ConversationModel {
     pub(super) fn append_thinking_text(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         text: String,
     ) -> Vec<ConversationChange> {
         if text.is_empty() {
             return Vec::new();
         }
-        self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        self.ensure_runtime_turn(chat_id.clone(), run_id.clone());
         self.active_text_block_id = None;
         self.active_text_context = None;
-        let block_id = self.append_or_extend_text_block(chat_id, turn_id, text, true);
+        let block_id = self.append_or_extend_text_block(chat_id, run_id, text, true);
         vec![
             ConversationChange::ThinkingTextAppended { block_id },
             ConversationChange::OutputDirty,
@@ -48,9 +48,9 @@ impl ConversationModel {
     pub(super) fn complete_block(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
     ) -> Vec<ConversationChange> {
-        let context = (chat_id, turn_id);
+        let context = (chat_id, run_id);
         let block_id = if self.active_text_context.as_ref() == Some(&context) {
             self.active_text_context = None;
             self.active_text_block_id.take()
@@ -70,11 +70,11 @@ impl ConversationModel {
     pub(super) fn append_or_extend_text_block(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         text: String,
         thinking: bool,
     ) -> String {
-        let context = (chat_id.clone(), turn_id.clone());
+        let context = (chat_id.clone(), run_id.clone());
         let active_id = if thinking {
             (self.active_thinking_context.as_ref() == Some(&context))
                 .then(|| self.active_thinking_block_id.clone())
@@ -107,7 +107,7 @@ impl ConversationModel {
             self.active_thinking_context = Some(context);
             self.timeline.push(OutputTimelineItem::Thinking {
                 id: block_id.clone(),
-                context: Some(TimelineRuntimeContext::new(chat_id, turn_id)),
+                context: Some(TimelineRuntimeContext::new(chat_id, run_id)),
                 text,
             });
         } else {
@@ -115,7 +115,7 @@ impl ConversationModel {
             self.active_text_context = Some(context);
             self.timeline.push(OutputTimelineItem::AssistantText {
                 id: block_id.clone(),
-                context: Some(TimelineRuntimeContext::new(chat_id, turn_id)),
+                context: Some(TimelineRuntimeContext::new(chat_id, run_id)),
                 text,
             });
         }

@@ -1,9 +1,9 @@
 use super::*;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::domain::agent_run::{RunDomainEvent, RunId};
-use sdk::ids::{ChatId, ChatTurnId};
+use sdk::ids::{ChatId, ChatRunId};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -40,7 +40,7 @@ impl ChatEventSink for RecordingSink {
 #[tokio::test]
 async fn completed_seal_after_cancelled_step_projects_only_cancelled_terminal() {
     let sink = RecordingSink::default();
-    let turn_context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+    let turn_context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
     let task_access = crate::application::run::test_task_access();
     let mut observer = ChatStreamEventObserver {
         sink: ChatEventSinkHandle::new(sink.clone()),
@@ -49,7 +49,7 @@ async fn completed_seal_after_cancelled_step_projects_only_cancelled_terminal() 
         task_access: &task_access,
         model: "model",
         started_at: std::time::Instant::now(),
-        turn_count: 1,
+        step_count: 1,
         messages_snapshot: Vec::new(),
     };
 

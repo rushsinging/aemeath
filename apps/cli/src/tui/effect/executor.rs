@@ -144,7 +144,7 @@ impl App {
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
             Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
-            Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
+            Effect::SetCurrentRun { run_step } => self.set_current_run_effect(run_step),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
@@ -405,7 +405,7 @@ impl App {
         self.chat.push_input_event(event);
     }
 
-    /// `/save` 命令——仅 UX 反馈。Runtime 已有 turn-level auto-save + loop-exit auto-save，
+    /// `/save` 命令——仅 UX 反馈。Runtime 已有 run_step-level auto-save + loop-exit auto-save，
     /// TUI 不再发 ChatInputEvent::SaveSession。
     fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
         if notify {
@@ -487,8 +487,8 @@ impl App {
         }
     }
 
-    fn set_current_turn_effect(&mut self, _turn: usize) {
-        // #567：set_current_turn 删除——runtime loop 内部自维护 turn 计数器。
+    fn set_current_run_effect(&mut self, _turn: usize) {
+        // #567：set_current_run 删除——runtime loop 内部自维护 run_step 计数器。
     }
 
     fn query_reflection_history_effect(&mut self, limit: usize) {

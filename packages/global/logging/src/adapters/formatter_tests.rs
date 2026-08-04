@@ -14,7 +14,7 @@ fn diag_line_has_fourteen_fields() {
         "ver",
         "session",
         "chat",
-        "turn",
+        "run_step",
         "request_id",
         "model",
         "provider",
@@ -35,7 +35,7 @@ fn explicit_context_formats_one_complete_snapshot() {
     let context = crate::domain::LogContext {
         session_id: Some("session-scope".to_string()),
         chat_id: Some("chat-scope".to_string()),
-        turn: Some(0),
+        run_step: Some(0),
         request_id: Some("request-scope".to_string()),
         model: Some("model-scope".to_string()),
         provider: Some("provider-scope".to_string()),
@@ -46,7 +46,7 @@ fn explicit_context_formats_one_complete_snapshot() {
     let value: Value = serde_json::from_str(&line).expect("valid json");
     assert_eq!(value["session"], "session-scope");
     assert_eq!(value["chat"], "chat-scope");
-    assert_eq!(value["turn"], 0);
+    assert_eq!(value["run_step"], 0);
     assert_eq!(value["request_id"], "request-scope");
     assert_eq!(value["model"], "model-scope");
     assert_eq!(value["provider"], "provider-scope");

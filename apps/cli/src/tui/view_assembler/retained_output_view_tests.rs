@@ -1,6 +1,6 @@
 use super::RetainedOutputView;
 use crate::tui::model::conversation::block::AskUserSlot;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use crate::tui::model::conversation::intent::{
     AppendUserMessage, AssistantText, DismissAskUserBatch, ShowAskUserBatch,
 };
@@ -235,7 +235,7 @@ fn streaming_update_replaces_only_the_changed_root() {
     });
     model.apply(AssistantText {
         chat_id: ChatId::new("chat-1"),
-        turn_id: ChatTurnId::new("turn-1"),
+        run_id: ChatRunId::new("turn-1"),
         text: "first".to_string(),
     });
     let display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
@@ -246,7 +246,7 @@ fn streaming_update_replaces_only_the_changed_root() {
 
     model.apply(AssistantText {
         chat_id: ChatId::new("chat-1"),
-        turn_id: ChatTurnId::new("turn-1"),
+        run_id: ChatRunId::new("turn-1"),
         text: " second".to_string(),
     });
     let update = materialize_all(&mut view, &model, &display_history, None);

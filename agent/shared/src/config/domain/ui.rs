@@ -110,7 +110,7 @@ impl Default for TaskListConfig {
 /// Task lifecycle management configuration (跨轮次生命周期策略)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskLifecycleConfig {
-    /// 新 turn 开始时自动清除已完成 batch
+    /// 新 run 开始时自动清除已完成 batch
     #[serde(default = "default_true")]
     pub auto_clear_completed_on_new_turn: bool,
     /// 中断未完成时弹出提示
@@ -120,8 +120,8 @@ pub struct TaskLifecycleConfig {
     #[serde(default = "default_interrupt_action")]
     pub interrupt_default_action: String,
     /// 沉默提醒阈值（轮数）
-    #[serde(default = "default_stale_remind_after_turns")]
-    pub stale_remind_after_turns: usize,
+    #[serde(default = "default_stale_remind_after_run_steps")]
+    pub stale_remind_after_run_steps: usize,
     /// 沉默提醒重复间隔（轮数）
     #[serde(default = "default_stale_remind_repeat_interval")]
     pub stale_remind_repeat_interval: usize,
@@ -130,7 +130,7 @@ pub struct TaskLifecycleConfig {
 fn default_interrupt_action() -> String {
     "pause".to_string()
 }
-fn default_stale_remind_after_turns() -> usize {
+fn default_stale_remind_after_run_steps() -> usize {
     3
 }
 fn default_stale_remind_repeat_interval() -> usize {
@@ -143,7 +143,7 @@ impl Default for TaskLifecycleConfig {
             auto_clear_completed_on_new_turn: true,
             interrupt_prompt_enabled: true,
             interrupt_default_action: "pause".to_string(),
-            stale_remind_after_turns: 3,
+            stale_remind_after_run_steps: 3,
             stale_remind_repeat_interval: 5,
         }
     }

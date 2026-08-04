@@ -1,5 +1,5 @@
 use crate::application::loop_engine::chat::events::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::RawUsageSnapshot;
@@ -64,7 +64,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     pub fn with_tool_identity(
         sink: S,
         tool_identity: ToolIdentityRegistry,
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     ) -> Self {
         Self {
             handler: RuntimeEventProjector::with_tool_identity(sink, tool_identity, context),
@@ -197,7 +197,7 @@ struct RuntimeEventProjector<S: ChatEventSink> {
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
-    pub context: RuntimeTurnContext,
+    pub context: RuntimeRunContext,
     progress: Arc<Mutex<StreamProgressState>>,
     /// #1494：边流边执行句柄；`Some` 时流中 `ToolCallCompleted` 立即触发执行。
     streaming_tool: Option<
@@ -210,14 +210,14 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         Self::with_tool_identity(
             sink,
             ToolIdentityRegistry::new(),
-            RuntimeTurnContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatTurnId::new_v7()),
+            RuntimeRunContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatRunId::new_v7()),
         )
     }
 
     pub fn with_tool_identity(
         sink: S,
         tool_identity: ToolIdentityRegistry,
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     ) -> Self {
         Self {
             sink,
@@ -261,10 +261,10 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         };
         if first {
             log::debug!(target: crate::LOG_TARGET,
-                "model stream first visible event: kind={} {} turn_id={}",
+                "model stream first visible event: kind={} {} run_id={}",
                 kind,
                 detail(),
-                self.context.turn_id,
+                self.context.run_id,
             );
         }
     }
@@ -315,8 +315,8 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             )
         });
         log::debug!(target: crate::LOG_TARGET,
-            "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
-            name, provider_id, index, self.context.turn_id,
+            "on_tool_use_start: name={} provider_id={:?} index={} run_id={}",
+            name, provider_id, index, self.context.run_id,
         );
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
