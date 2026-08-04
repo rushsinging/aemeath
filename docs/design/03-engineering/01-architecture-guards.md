@@ -233,11 +233,8 @@
 - **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
-- **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
-
-| 路径 | 目标层 | 上下文 |
-|---|---|---|
-| `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
+- **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**：无。tools 已完成迁移（`agent/features/tools/src/business/` 已不存在），历史 business→core 例外记录已清理。
+- **实现载体**：perl 单进程核心（`.agents/hooks/check-cola-layer-purity.sh` 内联，含与语义等价的 23 项启动自检）。原 `cargo run -p xtask -- cola-layer-purity` 实现因 Stop Hook 每次触发的编译/运行成本（实测 40~80s，占 fast 总耗时 96%+）于 #1521 退役，xtask 不再提供 `cola-layer-purity` 子命令；perl 版实测 0.22s，与 xtask 版在 clean 仓库及违规样本上输出逐字一致。
 
 - **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：空集合。Runtime application 不得依赖 `crate::adapters`；旧容器、角色 adapter 与兼容参数袋由 `check-runtime-capability-assembly.sh` 同时禁止复活。
 
@@ -717,6 +714,7 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-04 | #1521 cola-layer-purity 守卫从 xtask 移植为 perl 单进程核心（Stop Hook fast 瓶颈 40~80s → 0.22s）；退役 xtask `cola-layer-purity` / `run-test` / `changed-lines` 子命令与 `flaky.rs` / `changed_lines.rs`（净删 1042 行）；清理 §5 stale `LAYER_MIGRATION_EXCEPTIONS` 白名单表（tools business 目录已不存在） | [#1521](https://github.com/rushsinging/aemeath/issues/1521) |
 | 2026-08-04 | #1399 退役 Runtime 旧容器、`ChatLoopContext` 参数袋、Runtime-owned TUI launch adapter 与 Tokio cancellation adapter；具体 SDK ingress/egress 构造归 Runtime adapter façade并由 Composition 注入；`RUNTIME_LAYER_MIGRATION_EXCEPTIONS` 清零，registry migration debt 收敛为 repository 1 / Runtime 0 / TUI 1；Runtime capability Guard 新增旧符号与 application→adapters 反向依赖禁入 | [#1399](https://github.com/rushsinging/aemeath/issues/1399) |
 | 2026-07-17 | 登记 #983 的 AtomicDataset crate-root public façade；因跨 crate Memory 消费 deferred 至 #896，不提前修改 `ROOT_ACCESS_ALLOW.storage`，且 #983 无 Guard exception / allowlist 净增 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-17 | #903 收紧 `check-provider-pull-stream.sh`：Runtime/Context 的生产代码与测试替身统一禁止跨 crate 使用 legacy sink；同时为 Stop 单 crate 测试增加 180 秒默认超时、进程组回收与失败快速退出，避免单 crate 卡住整个 Hook | [#903](https://github.com/rushsinging/aemeath/issues/903) |
