@@ -133,7 +133,6 @@ pub struct RuntimeContextFactory {
     services: RuntimeServices,
     provider_factory: Option<Arc<dyn crate::ports::ProviderFactory>>,
     skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
-    #[cfg(test)]
     use_injected_hooks: bool,
 }
 
@@ -181,8 +180,7 @@ impl RuntimeContextFactory {
             },
             provider_factory: None,
             skill_catalog: None,
-            #[cfg(test)]
-            use_injected_hooks: true,
+            use_injected_hooks: cfg!(test),
         }
     }
 
@@ -200,7 +198,6 @@ impl RuntimeContextFactory {
             services: self.services.clone(),
             provider_factory: Some(provider_factory),
             skill_catalog: Some(skill_catalog),
-            #[cfg(test)]
             use_injected_hooks: self.use_injected_hooks,
         }
     }
@@ -530,8 +527,7 @@ impl RuntimeContextFactory {
         config: &crate::application::run::config::RunConfigSnapshot,
         parent: Option<&RuntimeContext>,
     ) -> Result<HookSelection, RunCreationError> {
-        #[cfg(test)]
-        let run_hooks: Arc<dyn HookPort> = if self.use_injected_hooks {
+        let run_hooks: Arc<dyn HookPort> = if cfg!(test) && self.use_injected_hooks {
             self.services.hooks.clone()
         } else {
             Arc::new(
@@ -539,11 +535,6 @@ impl RuntimeContextFactory {
                     .map_err(|_| RunCreationError::ContextAssembly)?,
             )
         };
-        #[cfg(not(test))]
-        let run_hooks: Arc<dyn HookPort> = Arc::new(
-            hook::build_dispatcher(config.config().hooks())
-                .map_err(|_| RunCreationError::ContextAssembly)?,
-        );
         let port = match spec.hook_binding() {
             HookBindingMode::Full => run_hooks,
             HookBindingMode::BoundaryOnly => {
