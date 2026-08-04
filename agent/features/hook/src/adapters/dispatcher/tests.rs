@@ -1336,12 +1336,12 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
     let subs = vec![
         sub(
             HookPoint::PreToolUse,
-            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh --secret value",
+            "${AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh --secret value",
         )
         .with_order(20),
         sub(
             HookPoint::PreToolUse,
-            "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
         )
         .with_order(10),
     ];
@@ -1379,6 +1379,57 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
             },
         ]
     );
+}
+
+/// `{AEMEATH_PROJECT_DIR}` / `{CLAUDE_PROJECT_DIR}` 占位符写法已移除：
+/// 命令原样传给执行器，项目目录只经 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`
+/// 环境变量注入（shell 内用 `${AEMEATH_PROJECT_DIR}` 展开）。
+#[tokio::test]
+async fn commands_pass_through_verbatim_and_project_dir_reaches_env_only() {
+    let subs = vec![
+        sub(
+            HookPoint::PreToolUse,
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+        ),
+        sub(
+            HookPoint::PreToolUse,
+            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh",
+        ),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+    let workspace = std::path::PathBuf::from("/tmp/aemeath-project-dir-env");
+
+    dispatcher
+        .dispatch_at(
+            pre_tool_use("Bash"),
+            HookDispatchContext::new(&workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    // 命令不再做 `{}` 占位符替换，原样传给执行器（含历史 `{}` 写法也不改写）。
+    assert_eq!(
+        scripted.commands(),
+        [
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh",
+        ]
+    );
+    // 项目目录只经环境变量注入，供 shell 展开。
+    let calls = scripted.calls();
+    assert_eq!(calls.len(), 2);
+    for call in &calls {
+        assert_eq!(call.cwd, workspace);
+        assert_eq!(
+            call.env["AEMEATH_PROJECT_DIR"],
+            "/tmp/aemeath-project-dir-env"
+        );
+        assert_eq!(
+            call.env["CLAUDE_PROJECT_DIR"],
+            "/tmp/aemeath-project-dir-env"
+        );
+    }
 }
 
 #[tokio::test]

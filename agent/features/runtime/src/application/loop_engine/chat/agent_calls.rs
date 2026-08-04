@@ -132,27 +132,20 @@ where
         call.input.to_string().len(),
     );
     let original_input = call.input.clone();
-    let pre_dispatch = if authorization.enforce_permission_hooks {
-        dispatch_hook(
-            &hook_port,
-            activities,
-            step_id,
-            HookInvocation::PreToolUse(PreToolUseInput {
-                tool_name: call.name.clone(),
-                tool_input: call.input.clone(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await
-    } else {
-        crate::application::hook::outcome_mapper::RuntimeHookDispatch {
-            directive: crate::application::hook::outcome_mapper::RuntimeHookDirective::Continue,
-            executions: Vec::new(),
-            messages: Vec::new(),
-            block_detail: None,
-        }
-    };
+    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行——
+    // `enforce_permission_hooks` 只门控授权类 hook（PermissionRequest）。
+    let pre_dispatch = dispatch_hook(
+        &hook_port,
+        activities,
+        step_id,
+        HookInvocation::PreToolUse(PreToolUseInput {
+            tool_name: call.name.clone(),
+            tool_input: call.input.clone(),
+        }),
+        workspace_root,
+        cancel,
+    )
+    .await;
     if crate::application::loop_engine::chat::hook_ui::dispatch_is_blocking(&pre_dispatch) {
         let last_exec = pre_dispatch.executions.last();
         let exit_code = last_exec.and_then(|e| e.exit_code);

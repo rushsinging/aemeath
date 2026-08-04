@@ -39,6 +39,8 @@ Standard：
 
 AllowAll：上述授权性限制全部反转；不设置敏感路径 hard deny 或白名单。仅保留 schema/参数、Tool 注册与 capability 元数据、文件存在性、OS 权限、I/O、取消和超时等客观错误。
 
+事件 hook（PreToolUse / PostToolUse / PostToolUseFailure / Stop 等）不属于授权性限制，AllowAll **NEVER** 跳过；`enforce_permission_hooks` 只门控授权类 hook（PermissionRequest / PermissionDenied）。
+
 ## 4. 边界
 
 - Project 只提供 lexical normalize、canonicalize、symlink resolution 与显式授权参数下的路径解析，不读取 Config/Policy。
