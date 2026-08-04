@@ -359,24 +359,46 @@ impl HookPort for Dispatcher {
 }
 
 fn hook_script_file_name(command: &str) -> String {
-    let executable = command
-        .trim_start()
-        .strip_prefix('"')
-        .and_then(|quoted| quoted.split_once('"').map(|(value, _)| value))
-        .or_else(|| {
-            command
-                .trim_start()
-                .strip_prefix('\'')
-                .and_then(|quoted| quoted.split_once('\'').map(|(value, _)| value))
-        })
-        .or_else(|| command.split_whitespace().next())
-        .unwrap_or("hook");
-    std::path::Path::new(executable)
+    let executable = first_shell_command_word(command);
+    std::path::Path::new(&executable)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .unwrap_or("hook")
         .to_string()
+}
+
+fn first_shell_command_word(command: &str) -> String {
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for character in command.trim_start().chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+            continue;
+        }
+        match (quote, character) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => word.push(character),
+            (Some('"'), '\\') => escaped = true,
+            (Some('"'), _) => word.push(character),
+            (Some(_), _) => word.push(character),
+            (None, '\'') | (None, '"') => quote = Some(character),
+            (None, '\\') => escaped = true,
+            (None, character) if character.is_whitespace() => break,
+            (None, _) => word.push(character),
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if word.is_empty() {
+        "hook".to_string()
+    } else {
+        word
+    }
 }
 
 fn invocation_environment(
