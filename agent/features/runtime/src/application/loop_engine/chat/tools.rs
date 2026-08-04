@@ -675,10 +675,9 @@ mod tests {
         );
     }
 
-    /// #1515: PreToolUse 事件 hook 必须无条件执行——AllowAll 只跳过授权类 hook
-    /// （PermissionRequest），不得跳过事件 hook。修复前 PreToolUse 被
-    /// `enforce_permission_hooks` 门控跳过、工具正常执行；修复后 hook exit 2
-    /// 阻断工具。
+    /// #1515: PreToolUse 事件 hook 必须无条件执行——AllowAll 只放行授权性
+    /// 限制，不得跳过事件 hook。修复前 PreToolUse 被错误门控跳过、工具正常
+    /// 执行；修复后 hook exit 2 阻断工具。
     #[tokio::test]
     async fn allow_all_still_runs_blocking_pre_tool_hook() {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
@@ -697,7 +696,7 @@ mod tests {
         );
         let hook_port: Arc<dyn HookPort> =
             Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap());
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
         let activities = crate::application::activity::ActivityCoordinator::new(

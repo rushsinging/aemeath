@@ -14,7 +14,7 @@ PermissionModeConfig::Ask | AutoRead -> PolicyMode::Standard
 PermissionModeConfig::AllowAll       -> PolicyMode::AllowAll
 ```
 
-v0.1.0 尚无审批状态机，因此 Ask/AutoRead 暂时映射为 Standard：保留 workspace containment、read-before-write、Bash safety、Tool fuse 与 permission hooks，但不伪造审批。
+v0.1.0 尚无审批状态机，因此 Ask/AutoRead 暂时映射为 Standard：保留 workspace containment、read-before-write、Bash safety 与 Tool fuse，但不伪造审批。
 
 `ConfiguredPolicy` 每次 evaluate 都经 `PolicyModeSource` 读取 committed ConfigSnapshot，动态 permission update 对下一次 ToolCall 立即生效。Config 固定优先级为 `CLI > Env > Local config > Global config > Default`：CLI/Env 是启动期永久覆盖，动态 update 属 Local 层，仅在上层未指定时生效。CLI `--yolo` / `--allow-all` 不向 Runtime/Tool 传播第二个业务 bool。
 
@@ -35,11 +35,10 @@ Standard：
 - `require_read_before_write = true`
 - `enforce_bash_safety = true`
 - `enforce_tool_fuse = true`
-- `enforce_permission_hooks = true`
 
 AllowAll：上述授权性限制全部反转；不设置敏感路径 hard deny 或白名单。仅保留 schema/参数、Tool 注册与 capability 元数据、文件存在性、OS 权限、I/O、取消和超时等客观错误。
 
-事件 hook（PreToolUse / PostToolUse / PostToolUseFailure / Stop 等）不属于授权性限制，AllowAll **NEVER** 跳过；`enforce_permission_hooks` 只门控授权类 hook（PermissionRequest / PermissionDenied）。
+hook 触发 = 事件产生，授权上下文不含 hook 开关维度：事件 hook（PreToolUse / PostToolUse / PostToolUseFailure / Stop 等）无条件执行，AllowAll **NEVER** 跳过；PermissionDenied 由 Policy 的 Deny 决策自然产生（AllowAll 下决策恒为 Allow → 无事件 → 不触发），PermissionRequest 属于 Future 审批状态机的决策流，当前无触发源。
 
 ## 4. 边界
 
@@ -64,8 +63,8 @@ Policy 保持单能力扁平 `domain.rs + adapters.rs`：domain 定义 Request/D
 
 ## 7. 验证
 
-- L1：Config mode 映射和五维授权矩阵。
-- L2：路径、read-before-write、Bash、fuse、permission hooks。
+- L1：Config mode 映射和四维授权矩阵。
+- L2：路径、read-before-write、Bash、fuse；permission hook 由决策流触发的契约。
 - L3：动态 Config 更新、Main/Sub/MCP 同一授权契约。
 - L4：CLI/config AllowAll 读取项目外 hook 结果并执行原 safety 会拒绝的操作。
 - L0：守卫禁止重复权限类型、Tool-local allow_all 与 Project 自主授权。

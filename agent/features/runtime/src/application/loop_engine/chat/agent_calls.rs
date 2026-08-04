@@ -132,8 +132,8 @@ where
         call.input.to_string().len(),
     );
     let original_input = call.input.clone();
-    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行——
-    // `enforce_permission_hooks` 只门控授权类 hook（PermissionRequest）。
+    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行；
+    // 授权上下文不含 hook 开关（permission hook 由授权决策流触发）。
     let pre_dispatch = dispatch_hook(
         &hook_port,
         activities,

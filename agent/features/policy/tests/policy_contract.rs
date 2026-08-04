@@ -42,7 +42,6 @@ fn allow_all_authorization_disables_every_authorization_guard() {
             require_read_before_write: false,
             enforce_bash_safety: false,
             enforce_tool_fuse: false,
-            enforce_permission_hooks: false,
         }
     );
 }
@@ -56,7 +55,6 @@ fn standard_authorization_preserves_existing_guards() {
             require_read_before_write: true,
             enforce_bash_safety: true,
             enforce_tool_fuse: true,
-            enforce_permission_hooks: true,
         }
     );
 }

@@ -7,7 +7,7 @@ use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PermissionInput, PreToolUseInput, TaskInput};
+use hook::{HookInvocation, HookPort, PreToolUseInput, TaskInput};
 use policy::PolicyPort;
 use std::path::Path;
 use std::sync::Arc;
@@ -237,21 +237,8 @@ where
     S: ChatEventSink,
 {
     let call = &prepared.call;
-    let authorization = prepared.authorization;
-    if authorization.enforce_permission_hooks {
-        let _ = dispatch_hook(
-            hook_port,
-            activities,
-            step_id,
-            HookInvocation::PermissionRequest(PermissionInput {
-                tool_name: call.name.clone(),
-                permission_rule: "auto".to_string(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
+    // #1515: 不再构造 PermissionRequest 伪事件——permission hook 的触发
+    // 由授权决策流自然产生（allow_all 下无决策 → 无事件），无需授权开关。
     let owned_call = ToolCall {
         id: call.id.clone(),
         provider_id: call.provider_id.clone(),
@@ -267,8 +254,8 @@ where
         owned_call.index,
         owned_call.input.to_string().len(),
     );
-    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行——
-    // `enforce_permission_hooks` 只门控授权类 hook（PermissionRequest）。
+    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行；
+    // 授权上下文不含 hook 开关（permission hook 由授权决策流触发）。
     let pre_dispatch = dispatch_hook(
         hook_port,
         activities,
@@ -326,7 +313,7 @@ where
         workspace_root,
     );
     let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
-        HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
+        HookDirectiveOutcome::Continue { call, context } => (call, prepared.authorization, context),
         HookDirectiveOutcome::Ready {
             call,
             authorization,
