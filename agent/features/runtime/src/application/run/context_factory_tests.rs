@@ -103,8 +103,10 @@ fn session_run_factory_creates_independent_per_run_resources() {
         .with_lock(|buffer| buffer.is_empty()));
     first.context().cancel().token().cancel();
     assert!(!second.context().cancel().token().is_cancelled());
+    // usage tracker is now per-Session (shared across runs) — see
+    // session_run_factory_shares_usage_tracker_across_runs
     first.context().usage().update(17);
-    assert_eq!(second.context().usage().get(), None);
+    assert_eq!(second.context().usage().get(), Some(17));
 
     assert!(Arc::ptr_eq(
         &first.context().tool_execution(),
@@ -114,6 +116,23 @@ fn session_run_factory_creates_independent_per_run_resources() {
         &first.context().policy(),
         &second.context().policy()
     ));
+}
+
+#[test]
+fn session_run_factory_shares_usage_tracker_across_runs() {
+    let fixture = SessionRunFixture::default();
+    let first = fixture.create(main_spec()).expect("create first run");
+    let second = fixture.create(main_spec()).expect("create second run");
+
+    // Per-Session tracker: second Run inherits the value set by the first,
+    // so the compaction decision can use the last known API total instead
+    // of falling back to a heuristic estimate on the first step.
+    first.context().usage().update(42_000);
+    assert_eq!(second.context().usage().get(), Some(42_000));
+
+    // Mutations from the second Run are also visible to the first.
+    second.context().usage().update(99_000);
+    assert_eq!(first.context().usage().get(), Some(99_000));
 }
 
 #[test]

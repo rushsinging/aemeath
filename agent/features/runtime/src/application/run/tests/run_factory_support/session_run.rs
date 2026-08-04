@@ -137,6 +137,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     config: share::config::domain::snapshot::ConfigSnapshot,
     session_id: String,
     workspace_root: PathBuf,
+    usage: crate::application::run::context::RunUsageTracker,
 }
 
 impl SessionRunFixtureBuilder {
@@ -164,6 +165,7 @@ impl SessionRunFixtureBuilder {
                 "aemeath-session-run-fixture-{}",
                 uuid::Uuid::now_v7()
             )),
+            usage: crate::application::run::context::RunUsageTracker::new(),
         }
     }
 
@@ -308,6 +310,7 @@ impl SessionRunFixtureBuilder {
             self.interaction.clone(),
             self.reasoning.clone(),
             event_sink_handle,
+            self.usage.clone(),
         );
         let tool_catalog = self.tool_catalog;
         let tool_execution = self.tool_execution;

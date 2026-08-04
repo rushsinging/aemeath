@@ -84,7 +84,11 @@ where
                     std::time::Duration::from_secs(120),
                 );
             let mut cwd = workspace.read().current_workspace_root();
-            // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
+            // Per-Session usage tracker — shared across all Main Runs so a
+            // new Run inherits the last known API total tokens instead of
+            // falling back to a heuristic estimate (#1531).
+            let session_usage =
+                crate::application::run::context::RunUsageTracker::new();
             let mut step_count = 0;
             let mut pending_input = PendingInputBuffer::default();
                 let tool_identity =
@@ -650,6 +654,7 @@ where
                         shell.interaction_bridge.clone(),
                         reasoning.clone(),
                         sink_handle.clone(),
+                        session_usage.clone(),
                     );
                 log::debug!(target: crate::LOG_TARGET,                    "[config] starting main run with revision={} allow_all={} session_revision={}",
                     run_config.revision().get(),
