@@ -1,5 +1,6 @@
 use super::resumed_history::{ResumedHistoryBacking, ResumedHistoryItemKind};
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::view_model::OutputBlockKind;
 
 fn index(session_id: &str, revision: u64, count: usize) -> sdk::DisplayHistoryIndex {
     sdk::DisplayHistoryIndex {
@@ -108,6 +109,50 @@ fn loaded_window_excludes_llm_only_user_role_messages() {
         1
     );
     assert!(backing.user_input_history().is_empty());
+}
+
+#[test]
+fn loaded_stop_hook_window_assembles_dedicated_feedback_block() {
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(index("session", 7, 1)));
+    let feedback = crate::tui::adapter::runtime_view::TuiStopHookFeedback {
+        summary: "Stop hook prevented stopping.".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(1),
+        reason: "exit code 1".to_string(),
+        stdout_preview: "stdout".to_string(),
+        stderr_preview: "stderr".to_string(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        output_file: None,
+    };
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![TuiChatMessage::stop_hook_feedback(
+        "model feedback",
+        feedback,
+    )];
+    assert!(display_history.apply_window(loaded));
+
+    let item = display_history
+        .items()
+        .iter()
+        .find(|item| {
+            matches!(
+                item.kind,
+                ResumedHistoryItemKind::TypedJson {
+                    source: super::resumed_history::TypedJsonHistorySource::StopHook,
+                    ..
+                }
+            )
+        })
+        .expect("Stop Hook history item");
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        item,
+    )
+    .expect("Stop Hook block");
+
+    assert!(matches!(block.kind, OutputBlockKind::StopHookFeedback(_)));
 }
 
 #[test]

@@ -1,11 +1,12 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 use crate::tui::model::conversation::resumed_history::{
-    ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep,
+    ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep, TypedJsonHistorySource,
 };
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::model::display_history::DisplayHistoryModel;
 use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
+use crate::tui::view_model::output::StopHookFeedbackBlockView;
 use crate::tui::view_model::{BlockNode, OutputBlockKind, SemanticStyle, TextBlockView};
 use sdk::LocalResumeContentBlock as ContentBlock;
 
@@ -54,7 +55,23 @@ pub(crate) fn assemble_resumed_history_item(
         ResumedHistoryItemKind::ToolCall { .. } | ResumedHistoryItemKind::ToolResult { .. } => {
             materialize_tool_item(step, item)
         }
-        ResumedHistoryItemKind::TypedJson { ref text, .. } => text_leaf(
+        ResumedHistoryItemKind::TypedJson {
+            source: TypedJsonHistorySource::StopHook,
+            ref text,
+            ..
+        } => text_leaf(
+            item.id.clone(),
+            OutputBlockKind::StopHookFeedback(StopHookFeedbackBlockView {
+                key: item.id.clone(),
+                title: "Stop hook blocked".to_string(),
+                body: text.clone(),
+            }),
+        ),
+        ResumedHistoryItemKind::TypedJson {
+            source: TypedJsonHistorySource::SkillRequest,
+            ref text,
+            ..
+        } => text_leaf(
             item.id.clone(),
             OutputBlockKind::SystemNotice(TextBlockView {
                 key: item.id.clone(),
