@@ -29,6 +29,7 @@ pub struct RunExecutionState {
     context_window: Option<ContextWindow>,
     step_count: usize,
     started_at: Option<Instant>,
+    step_started_at: Option<Instant>,
     terminal: Option<AgentRunTerminal>,
     pending_interaction_work: Option<PendingInteractionWork>,
     adopted_input: Vec<(sdk::InputId, Message)>,
@@ -209,6 +210,10 @@ impl RunExecutionState {
             .unwrap_or_default()
     }
 
+    pub(crate) fn step_elapsed(&self) -> Option<std::time::Duration> {
+        self.step_started_at.map(|started_at| started_at.elapsed())
+    }
+
     pub(crate) fn step_count(&self) -> usize {
         self.step_count
     }
@@ -295,5 +300,6 @@ impl RunExecutionState {
         self.context_request = None;
         self.context_window = None;
         self.pending_interaction_work = None;
+        self.step_started_at = Some(Instant::now());
     }
 }
