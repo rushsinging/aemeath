@@ -11,7 +11,7 @@ pub fn render_stop_hook_feedback(
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
     let title_style = Style::default().fg(theme::ERROR);
-    let body_style = Style::default().fg(theme::TEXT);
+    let body_style = Style::default().fg(theme::TEXT_MUTED);
     let mut lines = vec![RenderedLine::new(vec![Span::styled(
         view.title.clone(),
         title_style,

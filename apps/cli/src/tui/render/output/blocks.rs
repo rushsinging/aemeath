@@ -34,6 +34,10 @@ mod tests {
             block.lines[0].spans[0].style.fg,
             Some(crate::tui::render::theme::ERROR)
         );
+        assert_eq!(
+            block.lines[1].spans[0].style.fg,
+            Some(crate::tui::render::theme::TEXT_MUTED)
+        );
         assert_eq!(crate::tui::render::output::gutter::marker_glyph(&kind), "⊘");
     }
 
