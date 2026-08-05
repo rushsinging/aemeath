@@ -160,8 +160,13 @@ where
         _cancel: &CancellationToken,
         progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError> {
+        // #1537：渲染当前 Task 状态，compact summary 定稿后拼接到末尾。
+        let task_context =
+            crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+                &*self.runtime_context.task_ref().clone(),
+            );
         CompactionCoordinator::from_context(self.runtime_context)
-            .compact(execution, &mut self.observer, progress)
+            .compact(execution, &mut self.observer, progress, task_context)
             .await
     }
 }

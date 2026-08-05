@@ -17,7 +17,8 @@ pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultI
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView,
     ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
-    ChildRunTerminalOutcomeView, OptionItem, WorkspaceContextView, WorkspaceStackEntryView,
+    ChildRunTerminalOutcomeView, OptionItem, ToolProgressEventView, WorkspaceContextView,
+    WorkspaceStackEntryView,
 };
 
 /// AskUserQuestion 批量事件中的单个问题项。

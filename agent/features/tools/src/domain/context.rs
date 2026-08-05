@@ -5,7 +5,7 @@ mod tests;
 use crate::domain::CatalogQuery;
 use crate::domain::{
     AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillLoadScope,
-    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName,
+    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName, ToolProgressEvent,
 };
 use async_trait::async_trait;
 use project::{WorkspaceId, WorkspaceRead};
@@ -110,6 +110,7 @@ pub trait CancellationSignal: Send + Sync {
 }
 pub trait ProgressSink: Send + Sync {
     fn emit(&self, event: AgentProgressEvent);
+    fn emit_tool_stream(&self, event: ToolProgressEvent);
 }
 pub trait ReadSet: Send + Sync {
     fn record(&self, path: &str);

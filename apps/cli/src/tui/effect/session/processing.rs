@@ -164,6 +164,32 @@ mod tests {
     }
 
     #[test]
+    fn sdk_event_to_tui_runtime_event_preserves_tool_progress_identity() {
+        let expected_chat = sdk::ids::ChatId::new("chat-1");
+        let expected_run = sdk::ids::ChatRunId::new("run-1");
+        let expected_tool_id = sdk::ids::ToolCallId::new("bash-1");
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::ToolProgress {
+            context: sdk::ChatEventContext::new(expected_chat.clone(), expected_run.clone()),
+            tool_id: expected_tool_id.clone(),
+            event: sdk::ToolProgressEventView {
+                text: "stdout line\n".to_string(),
+            },
+        });
+
+        assert!(matches!(
+            event,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolProgress {
+                context,
+                tool_id,
+                event,
+            }) if context.chat_id == expected_chat.as_str()
+                && context.run_id == expected_run.as_str()
+                && tool_id == expected_tool_id.as_str()
+                && event.text == "stdout line\n"
+        ));
+    }
+
+    #[test]
     fn sdk_event_to_tui_runtime_event_maps_compact_finished() {
         let event = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],

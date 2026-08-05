@@ -153,6 +153,17 @@ pub struct RecordAgentProgress {
     pub message: String,
 }
 
+/// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
+/// 由 `ToolProgressEvent` 触发，直接写入 `ToolCall.streaming_preview`，
+/// 供 TUI 实时 tail 显示。与 `RecordAgentProgress` 语义独立。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordToolStreamingOutput {
+    pub chat_id: ChatId,
+    pub run_id: ChatRunId,
+    pub tool_id: ToolCallId,
+    pub text: String,
+}
+
 /// 更新 Agent 工具的元数据（issue #499）。
 /// 由 `AgentProgressKind::Started` 事件触发，携带 sub-agent resolve 后的
 /// role/model，用于 header 渲染。
@@ -399,6 +410,7 @@ pub enum ConversationIntent {
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordChildRunActivity(RecordChildRunActivity),
     RecordAgentProgress(RecordAgentProgress),
+    RecordToolStreamingOutput(RecordToolStreamingOutput),
     UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),
     AnswerCurrentAskUser(AnswerCurrentAskUser),

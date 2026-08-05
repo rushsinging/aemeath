@@ -161,6 +161,12 @@ impl RunExecutionState {
         self.task_reminder_injected = true;
     }
 
+    /// #1537：compact 成功后重置注入标志，使得后续 LLM 请求能重新注入
+    /// Task 进度 reminder（compact 已替换历史，原 reminder 上下文不再存在）。
+    pub(crate) fn reset_task_reminder_injected(&mut self) {
+        self.task_reminder_injected = false;
+    }
+
     pub(crate) fn message_tokens(&self) -> usize {
         context::compact::estimate_messages_tokens(&self.messages)
     }

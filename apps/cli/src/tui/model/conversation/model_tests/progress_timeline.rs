@@ -312,11 +312,11 @@ fn test_bash_streaming_preview_tails_complete_lines() {
         index: 0,
     });
 
-    model.apply(RecordAgentProgress {
+    model.apply(RecordToolStreamingOutput {
         chat_id: chat_id.clone(),
         run_id: run_id.clone(),
         tool_id: tool_id.clone(),
-        message: "a\nb\nc\nd\ne\nf".to_string(),
+        text: "a\nb\nc\nd\ne\nf".to_string(),
     });
 
     let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
@@ -353,5 +353,105 @@ fn test_agent_progress_preview_limits_activity_lines() {
         .map(|call| call.activities.clone())
         .unwrap_or_default();
     assert_eq!(activities, vec!["two", "three", "four", "five", "six"]);
+}
+
+/// 全链路场景测试：模拟 Bash 逐行 stdout 输出，验证多次
+/// `RecordToolStreamingOutput` 经 `ToolStreamingPreviewBuffer` tail 后
+/// `ToolCall.activities` 始终只保留最后 5 行。
+#[test]
+fn bash_tool_streaming_output_multiple_chunks_tail_five_lines() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-bash-multi");
+    let run_id = super::ids::ChatRunId::new("turn-bash-multi");
+    let tool_id = super::ids::ToolCallId::new("tool-bash-multi");
+
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+
+    // 模拟逐行到达的 stdout（如 `gh pr checks --watch` 轮询输出）
+    let lines = [
+        "line-alpha\n",
+        "line-beta\n",
+        "line-gamma\n",
+        "line-delta\n",
+        "line-epsilon\n",
+        "line-zeta\n",
+        "line-eta\n",
+    ];
+
+    for chunk in &lines {
+        model.apply(RecordToolStreamingOutput {
+            chat_id: chat_id.clone(),
+            run_id: run_id.clone(),
+            tool_id: tool_id.clone(),
+            text: chunk.to_string(),
+        });
+    }
+
+    let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
+        .map(|call| call.activities.clone())
+        .unwrap_or_default();
+
+    // tail 5 行 = 最后 5 行
+    assert_eq!(
+        activities,
+        vec![
+            "line-gamma",
+            "line-delta",
+            "line-epsilon",
+            "line-zeta",
+            "line-eta",
+        ]
+    );
+
+    // 确保旧行已被 evict（line-alpha、line-beta 不再出现）
+    assert!(
+        !activities.iter().any(|a| a.contains("alpha") || a.contains("beta")),
+        "tail buffer 应已 evict 旧行，实际: {activities:?}"
+    );
+}
+
+/// 场景测试：Agent 工具的 sub-agent progress 仍走 `RecordAgentProgress`
+/// 并经 streaming_preview 显示 tail 行（确保重构未破坏 Agent 路径）。
+#[test]
+fn agent_tool_progress_still_uses_streaming_preview_after_refactor() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-agent-refactor");
+    let run_id = super::ids::ChatRunId::new("turn-agent-refactor");
+    let tool_id = super::ids::ToolCallId::new("tool-agent-refactor");
+
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    model.apply(RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        tool_id: tool_id.clone(),
+        message: "step-1\nstep-2\nstep-3\nstep-4\nstep-5\nstep-6\nstep-7".to_string(),
+    });
+
+    let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
+        .map(|call| call.activities.clone())
+        .unwrap_or_default();
+
+    // Agent tail 5 行
+    assert_eq!(
+        activities,
+        vec!["step-3", "step-4", "step-5", "step-6", "step-7"]
+    );
 }
 

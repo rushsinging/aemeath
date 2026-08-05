@@ -323,6 +323,12 @@ impl ConversationUpdate for RecordAgentProgress {
     }
 }
 
+impl ConversationUpdate for RecordToolStreamingOutput {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
+    }
+}
+
 impl ConversationUpdate for UpdateAgentMeta {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_agent_meta(
@@ -661,6 +667,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
             Self::RecordChildRunActivity(s) => s.update(model),
             Self::RecordAgentProgress(s) => s.update(model),
+            Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
             Self::AnswerCurrentAskUser(s) => s.update(model),

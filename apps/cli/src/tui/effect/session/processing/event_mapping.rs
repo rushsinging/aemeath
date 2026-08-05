@@ -296,7 +296,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::CostUpdate { .. } => UiEvent::SystemMessage(String::new()),
+        | sdk::ChatEvent::CostUpdate { .. }
+        | sdk::ChatEvent::ToolProgress { .. } => UiEvent::SystemMessage(String::new()),
         sdk::ChatEvent::TaskStateChanged { state } => UiEvent::TaskStateChanged(*state),
     }
 }
