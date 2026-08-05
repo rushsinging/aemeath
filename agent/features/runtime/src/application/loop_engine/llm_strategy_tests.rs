@@ -48,8 +48,8 @@ fn invocation_context_preserves_non_user_message_sources() {
             text: "hook".into(),
         }],
         metadata: Some(MessageMetadata {
-            source: MessageSource::StopHook,
-            stop_hook: None,
+            source: MessageSource::Hook,
+            hook_notice: None,
             skill_request: None,
         }),
     };

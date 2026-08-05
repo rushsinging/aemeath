@@ -649,7 +649,6 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
-            | RuntimeStreamEvent::PostToolExecutionSync { messages }
             | RuntimeStreamEvent::CompactFinished { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
@@ -658,7 +657,6 @@ impl RecordingSink {
                         "TurnStarted"
                     }
                     RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
-                    RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
                     RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
                     _ => "Sync",
                 };
@@ -698,6 +696,7 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
+            RuntimeStreamEvent::HookNotice(notice) => format!("HookNotice:{}", notice.reason),
             RuntimeStreamEvent::Cancelled { duration, .. } => {
                 self.done_durations.lock().unwrap().push(*duration);
                 "Cancelled".to_string()
@@ -726,6 +725,10 @@ impl RecordingSink {
                 "UserMessagesAdopted".to_string()
             }
             RuntimeStreamEvent::UserMessagesQueued { .. } => "UserMessagesQueued".to_string(),
+            RuntimeStreamEvent::SessionMessageStateChanged {
+                message_count,
+                revision,
+            } => format!("SessionMessageStateChanged:{message_count}:{revision}"),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
@@ -886,4 +889,3 @@ async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -
     }
     panic!("timed out waiting for {description}");
 }
-

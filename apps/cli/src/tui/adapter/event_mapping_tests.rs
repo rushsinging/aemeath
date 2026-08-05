@@ -6,6 +6,57 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn session_message_state_maps_count_and_revision_without_messages() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
+        message_count: 7,
+        revision: 3,
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 7,
+            revision: 3,
+        })
+    ));
+}
+
+#[test]
+fn hook_notice_maps_point_kind_and_complete_payload() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookNotice {
+        notice: sdk::HookNoticeView {
+            point: "PreToolUse".to_string(),
+            kind: sdk::HookNoticeKindView::Blocked,
+            summary: "Stop hook 阻止了停止。".to_string(),
+            command: "check-agent-stop.sh".to_string(),
+            exit_code: Some(2),
+            reason: "exit code 2".to_string(),
+            stdout_preview: "stdout preview".to_string(),
+            stderr_preview: "stderr preview".to_string(),
+            stdout_truncated: true,
+            stderr_truncated: false,
+            output_file: Some("/tmp/stop-hook.txt".to_string()),
+        },
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::HookNotice(feedback))
+            if feedback.point == "PreToolUse"
+                && feedback.kind == crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+                && feedback.summary == "Stop hook 阻止了停止。"
+                && feedback.command == "check-agent-stop.sh"
+                && feedback.exit_code == Some(2)
+                && feedback.reason == "exit code 2"
+                && feedback.stdout_preview == "stdout preview"
+                && feedback.stderr_preview == "stderr preview"
+                && feedback.stdout_truncated
+                && !feedback.stderr_truncated
+                && feedback.output_file.as_deref() == Some("/tmp/stop-hook.txt")
+    ));
+}
+
+#[test]
 fn activity_increment_maps_complete_typed_fact_without_sdk_types() {
     let run_id = sdk::RunId::new("run-activity");
     let step_id = sdk::RunStepId::new("step-activity");
@@ -353,30 +404,45 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
 }
 
 #[test]
-fn session_resume_keeps_context_run_step_boundaries() {
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionResumed {
-        steps: vec![sdk::ResumedSessionStep {
-            run_id: "run-1".into(),
-            step_id: "step-1".into(),
-            messages: vec![sdk::ChatMessage::user_text("hello")],
-            finalize_cause: Some(sdk::ResumedStepFinalizeCause::UserCancelledStep),
-            duration_ms: Some(125_000),
-        }],
-        display_history: None,
-        session_id: "session-1".into(),
-        created_at: 0,
-        compacted: false,
-    });
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::SessionResumed { steps, .. })
-            if steps.len() == 1
-                && steps[0].run_id == "run-1"
-                && steps[0].step_id == "step-1"
-                && steps[0].finalize_cause == Some(super::super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep)
-                && steps[0].duration_ms == Some(125_000)
-                && steps[0].messages[0].text_content() == "hello"
-    ));
+fn session_resume_keeps_context_run_step_boundaries_and_all_terminal_causes() {
+    for (sdk_cause, tui_cause) in [
+        (
+            sdk::ResumedStepFinalizeCause::Completed,
+            super::super::runtime_view::TuiResumedStepFinalizeCause::Completed,
+        ),
+        (
+            sdk::ResumedStepFinalizeCause::UserCancelledStep,
+            super::super::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+        ),
+        (
+            sdk::ResumedStepFinalizeCause::RunTerminated,
+            super::super::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+        ),
+    ] {
+        let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionResumed {
+            steps: vec![sdk::ResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                messages: vec![sdk::ChatMessage::user_text("hello")],
+                finalize_cause: Some(sdk_cause),
+                duration_ms: Some(125_000),
+            }],
+            display_history: None,
+            session_id: "session-1".into(),
+            created_at: 0,
+            compacted: false,
+        });
+        assert!(matches!(
+            mapped,
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SessionResumed { steps, .. })
+                if steps.len() == 1
+                    && steps[0].run_id == "run-1"
+                    && steps[0].step_id == "step-1"
+                    && steps[0].finalize_cause == Some(tui_cause)
+                    && steps[0].duration_ms == Some(125_000)
+                    && steps[0].messages[0].text_content() == "hello"
+        ));
+    }
 }
 
 #[test]

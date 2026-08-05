@@ -22,8 +22,10 @@ pub struct BashResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct BashInput {
+    /// A short description of the command goal/intent, shown as the TUI header.
+    pub goal: String,
     /// The bash command to execute
     pub command: String,
-    /// Timeout in milliseconds (default 120000)
+    /// Timeout in milliseconds (default 120000, max 3600000)
     pub timeout: Option<u64>,
 }

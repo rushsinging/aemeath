@@ -4,6 +4,7 @@ use std::sync::Arc;
 use share::config::domain::snapshot::ConfigSnapshot;
 
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
+use crate::application::run::context::RunUsageTracker;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{Run, RunId, RunSpec, RunSpecError};
@@ -16,6 +17,10 @@ pub(crate) struct SessionRunBindings {
     interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: ChatEventSinkHandle,
+    /// Per-Session usage tracker — shared across all Main Runs in the same
+    /// session so a new Run inherits the last known API total tokens instead
+    /// of falling back to a heuristic estimate on its first step.
+    usage: RunUsageTracker,
 }
 
 impl SessionRunBindings {
@@ -25,6 +30,7 @@ impl SessionRunBindings {
         interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
         reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
         event_sink: ChatEventSinkHandle,
+        usage: RunUsageTracker,
     ) -> Self {
         Self {
             wiring,
@@ -32,6 +38,7 @@ impl SessionRunBindings {
             interaction,
             reasoning,
             event_sink,
+            usage,
         }
     }
 
@@ -55,6 +62,10 @@ impl SessionRunBindings {
 
     pub(crate) fn event_sink(&self) -> &ChatEventSinkHandle {
         &self.event_sink
+    }
+
+    pub(crate) fn usage(&self) -> &RunUsageTracker {
+        &self.usage
     }
 }
 

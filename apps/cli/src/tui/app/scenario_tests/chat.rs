@@ -16,6 +16,36 @@ fn ctx() -> TuiRunContext {
     }
 }
 
+fn normalize_completed_terminal_verb(screen: &str) -> String {
+    const DONE_VERBS: [&str; 20] = [
+        "Sautéed",
+        "Baked",
+        "Grilled",
+        "Simmered",
+        "Roasted",
+        "Brewed",
+        "Toasted",
+        "Stewed",
+        "Marinated",
+        "Charred",
+        "Poached",
+        "Steamed",
+        "Smoked",
+        "Brûléed",
+        "Flambéed",
+        "Fermented",
+        "Pickled",
+        "Cured",
+        "Seared",
+        "Blanched",
+    ];
+    DONE_VERBS
+        .iter()
+        .fold(screen.to_string(), |normalized, verb| {
+            normalized.replace(verb, "CompletedVerb")
+        })
+}
+
 struct ActivityFixture<'a> {
     id: &'a str,
     revision: u64,
@@ -504,11 +534,17 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
     });
     harness.runtime_event(TuiRuntimeEvent::Done {
         context: ctx(),
-        duration_ms: None,
+        duration_ms: Some(5_000),
     });
     harness.render();
-    assert!(harness.screen().contains("The result is ready."));
-    insta::assert_snapshot!("chat_streaming__completed__100x30", harness.screen());
+    let completed_screen = harness.screen();
+    assert!(completed_screen.contains("The result is ready."));
+    assert!(completed_screen.contains(" for 5s"));
+    assert!(!completed_screen.contains("Completed"));
+    insta::assert_snapshot!(
+        "chat_streaming__completed__100x30",
+        normalize_completed_terminal_verb(&completed_screen)
+    );
     harness.assert_idle();
 }
 
@@ -682,7 +718,7 @@ fn chat_retry_after_partial_preserves_output_append_only() {
     });
     harness.runtime_event(TuiRuntimeEvent::Done {
         context: ctx(),
-        duration_ms: None,
+        duration_ms: Some(5_000),
     });
     harness.render();
 
@@ -698,6 +734,11 @@ fn chat_retry_after_partial_preserves_output_append_only() {
         .expect("replacement output should be visible");
     assert!(partial < retry && retry < replacement);
     assert!(!screen.contains("rollback"));
-    insta::assert_snapshot!("chat_retry_after_partial__100x30", screen);
+    assert!(screen.contains(" for 5s"));
+    assert!(!screen.contains("Completed"));
+    insta::assert_snapshot!(
+        "chat_retry_after_partial__100x30",
+        normalize_completed_terminal_verb(&screen)
+    );
     harness.assert_idle();
 }

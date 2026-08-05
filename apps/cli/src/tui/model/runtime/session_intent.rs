@@ -7,6 +7,10 @@ pub enum SessionIntent {
     MessagesSynced {
         message_count: usize,
     },
+    MessageStateChanged {
+        message_count: usize,
+        revision: u64,
+    },
     SaveStarted,
     SaveFinished,
     SaveFailed {

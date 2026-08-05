@@ -57,6 +57,12 @@ impl SessionRunFixture {
         self.context_factory.clone()
     }
 
+    pub(crate) fn use_snapshot_hooks(&mut self) {
+        Arc::get_mut(&mut self.context_factory)
+            .expect("fixture owns its context factory")
+            .use_snapshot_hooks_for_test();
+    }
+
     pub(crate) fn session_revision(&self) -> u64 {
         self.session_state.snapshot_for_run().revision()
     }
@@ -137,6 +143,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     config: share::config::domain::snapshot::ConfigSnapshot,
     session_id: String,
     workspace_root: PathBuf,
+    usage: crate::application::run::context::RunUsageTracker,
 }
 
 impl SessionRunFixtureBuilder {
@@ -164,6 +171,7 @@ impl SessionRunFixtureBuilder {
                 "aemeath-session-run-fixture-{}",
                 uuid::Uuid::now_v7()
             )),
+            usage: crate::application::run::context::RunUsageTracker::new(),
         }
     }
 
@@ -308,6 +316,7 @@ impl SessionRunFixtureBuilder {
             self.interaction.clone(),
             self.reasoning.clone(),
             event_sink_handle,
+            self.usage.clone(),
         );
         let tool_catalog = self.tool_catalog;
         let tool_execution = self.tool_execution;

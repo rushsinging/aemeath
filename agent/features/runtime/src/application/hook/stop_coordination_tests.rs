@@ -101,7 +101,7 @@ async fn block_outcome_materializes_feedback_message_once() {
     let message = outcome
         .feedback_message
         .expect("blocked outcome must carry one feedback message");
-    assert_eq!(message.source(), share::message::MessageSource::StopHook);
+    assert_eq!(message.source(), share::message::MessageSource::Hook);
     assert!(message.text_content().contains("<system-reminder>"));
 }
 
@@ -180,7 +180,7 @@ fn feedback_material_truncates_long_output() {
         stderr: String::new(),
     };
     let feedback = super::build_stop_hook_feedback(&detail, &reason, "en", None);
-    let payload = feedback.payload;
+    let payload = feedback.notice;
 
     // stdout preview should be truncated to TUI_STDOUT_PREVIEW_LINES (3)
     let stdout_lines: Vec<&str> = payload.stdout_preview.lines().collect();
@@ -220,7 +220,7 @@ async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
 
     let feedback = super::materialize_stop_hook_feedback(&detail, &reason, &session_id, "zh").await;
     let path = feedback
-        .payload
+        .notice
         .output_file
         .as_deref()
         .expect("long output must be persisted");

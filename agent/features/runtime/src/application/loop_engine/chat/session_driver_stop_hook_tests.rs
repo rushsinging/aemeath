@@ -58,11 +58,8 @@ async fn test_run_session_command_driver_stop_hook_blocked_continues_until_succe
     let events = sink.events();
     let feedback_sync = events
         .iter()
-        .position(|event| {
-            event.starts_with("PostToolExecutionSync:")
-                && event.contains("Stop hook prevented stopping")
-        })
-        .expect("blocked Stop hook feedback should be synced through ordinary message flow");
+        .position(|event| event.starts_with("SessionMessageStateChanged:"))
+        .expect("blocked Stop hook feedback should publish message state");
     let hook_activity = events
         .iter()
         .position(|event| event.starts_with("HookActivityChanged:Finished:"))
@@ -291,7 +288,7 @@ async fn test_stop_hook_feedback_message_is_marked_stop_hook() {
         .expect("blocked Stop hook feedback should be synced into messages");
 
     assert_eq!(feedback.role, Role::User);
-    assert_eq!(feedback.source(), MessageSource::StopHook);
+    assert_eq!(feedback.source(), MessageSource::Hook);
 }
 
 #[tokio::test]
@@ -664,12 +661,21 @@ async fn test_continue_false_json_treated_as_block() {
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
-    // continue:false 应产生普通反馈同步并终结 Hook Activity。
+    // continue:false 应产生独立 typed feedback、消息同步并终结 Hook Activity。
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.starts_with("HookNotice:"))
+            .count(),
+        1,
+        "continue:false should publish one typed feedback event: {:?}",
+        events
+    );
     assert!(
-        events.iter().any(|event| {
-            event.starts_with("PostToolExecutionSync:") && event.contains("must keep working")
-        }),
-        "continue:false JSON should be recognized as block: {:?}",
+        events
+            .iter()
+            .any(|event| event.starts_with("SessionMessageStateChanged:")),
+        "continue:false should still synchronize the canonical message snapshot: {:?}",
         events
     );
     // 应有反馈注入（stopReason 内容）
@@ -763,11 +769,10 @@ async fn test_stall_triggers_stop_hook_check() {
     // soft text repetition but does not expose it as a domain/UI event; importantly, it still
     // preserves stop-hook feedback in this same Run and eventually reaches one terminal event.
     assert!(
-        events.iter().any(|event| {
-            event.starts_with("PostToolExecutionSync:")
-                && event.contains("Stop hook prevented stopping")
-        }),
-        "stop hook should be checked while the shared Run continues: {:?}",
+        events
+            .iter()
+            .any(|event| event.starts_with("SessionMessageStateChanged:")),
+        "stop hook should publish message state while the shared Run continues: {:?}",
         events
     );
     // stall 后 Stop hook 阻断，应有第 4 次 LLM 响应（说明 detector 重置并继续了）
@@ -844,4 +849,3 @@ impl InputEventDrainPort for ChannelInputEvents {
         })
     }
 }
-

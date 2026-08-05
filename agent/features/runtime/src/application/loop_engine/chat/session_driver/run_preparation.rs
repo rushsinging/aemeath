@@ -17,6 +17,7 @@ pub(super) fn prepare_main_run(
     wiring: &Arc<context::MainSessionWiring>,
     reasoning: &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     sink_handle: &crate::application::loop_engine::chat::ChatEventSinkHandle,
+    session_usage: &crate::application::run::context::RunUsageTracker,
 ) -> Result<MainRunPreparation, RunCreationError> {
     let run_config =
         crate::application::run::config::RunConfigSnapshot::capture(wiring.committed_config());
@@ -35,6 +36,7 @@ pub(super) fn prepare_main_run(
         shell.interaction_bridge.clone(),
         reasoning.clone(),
         sink_handle.clone(),
+        session_usage.clone(),
     );
     let request = RunCreationRequest::new(RunSpec::main(), session_snapshot, None)?;
     Ok(MainRunPreparation {

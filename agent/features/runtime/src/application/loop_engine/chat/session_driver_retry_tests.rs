@@ -242,4 +242,3 @@ fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<d
     );
     Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
 }
-

@@ -5,6 +5,7 @@ use crate::tui::model::conversation::model::ConversationModel;
 #[cfg(test)]
 use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_model::output::HookNoticeBlockView;
 #[cfg(test)]
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
@@ -167,6 +168,20 @@ impl OutputViewAssembler {
                     }),
                 ))
             }
+            OutputTimelineItem::HookNotice {
+                id,
+                title,
+                text,
+                kind,
+            } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::HookNotice(HookNoticeBlockView {
+                    key: id.clone(),
+                    title: title.clone(),
+                    body: text.clone(),
+                    kind: kind.clone(),
+                }),
+            )),
             OutputTimelineItem::System { id, text } => Some(leaf(
                 id.clone(),
                 OutputBlockKind::SystemNotice(TextBlockView {

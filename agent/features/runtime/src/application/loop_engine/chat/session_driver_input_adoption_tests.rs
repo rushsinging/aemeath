@@ -818,7 +818,7 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
 /// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
 ///  - 首请求 messages 含 `<system-reminder>`（计数 + 任务列表）
 ///  - 同 run 第二次请求（tool 往返后）不再注入
-///  - TUI 同步快照（TurnStarted / PostToolExecutionSync）不含注入内容
+///  - TUI 同步快照（TurnStarted / SessionMessageStateChanged）不含注入内容
 #[tokio::test]
 async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
     let after_first = Arc::new(tokio::sync::Notify::new());

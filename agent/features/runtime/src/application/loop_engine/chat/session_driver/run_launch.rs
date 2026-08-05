@@ -81,7 +81,8 @@ where
                     std::time::Duration::from_secs(120),
                 );
             let mut cwd = workspace.read().current_workspace_root();
-            // #1385 Task 12: last_total_tokens eliminated — usage tracker is per-Run via RuntimeContext.
+            // Per-Session usage tracker shared across all Main Runs.
+            let session_usage = crate::application::run::context::RunUsageTracker::new();
             let mut step_count = 0;
             let mut pending_input = PendingInputBuffer::default();
                 let tool_identity =
@@ -614,6 +615,7 @@ where
                 // returns Ready with user input.
 
                 let config_reader = wiring.config_reader();
+                let message_count_before_config_reload = messages.len();
                 let _refresh = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
@@ -625,11 +627,15 @@ where
                     &segment_id,
                 )
                 .await;
+                if messages.len() != message_count_before_config_reload {
+                    sink_handle.send_message_state_changed(messages.len()).await;
+                }
                 let preparation = match prepare_main_run(
                     &shell,
                     &wiring,
                     &reasoning,
                     &sink_handle,
+                    &session_usage,
                 ) {
                     Ok(preparation) => preparation,
                     Err(error) => {

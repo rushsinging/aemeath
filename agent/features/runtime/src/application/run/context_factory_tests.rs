@@ -16,6 +16,146 @@ fn main_spec() -> RunSpec {
     RunSpec::main()
 }
 
+async fn dispatch_stop_hook(context: &crate::application::run::context::RuntimeContext) -> bool {
+    use hook::{HookDirective, HookInvocation, StopInput};
+    use tokio_util::sync::CancellationToken;
+
+    let outcome = context
+        .hooks()
+        .dispatch(
+            HookInvocation::Stop(StopInput { run_steps: 1 }),
+            &CancellationToken::new(),
+        )
+        .await;
+    matches!(outcome.directive, HookDirective::Block { .. })
+}
+
+async fn dispatch_sub_run_stop_hook(
+    context: &crate::application::run::context::RuntimeContext,
+) -> bool {
+    use hook::{HookInvocation, SubRunStopInput};
+    use tokio_util::sync::CancellationToken;
+
+    let outcome = context
+        .hooks()
+        .dispatch(
+            HookInvocation::SubRunStop(SubRunStopInput {
+                prompt: "prompt".to_string(),
+                system: "system".to_string(),
+                model_spec: None,
+                result: "result".to_string(),
+                run_steps: 1,
+                is_error: false,
+            }),
+            &CancellationToken::new(),
+        )
+        .await;
+    !outcome.executions.is_empty()
+}
+
+fn blocking_hook_snapshot(revision: u64) -> share::config::domain::snapshot::ConfigSnapshot {
+    use share::config::hooks::{HookEntry, HookEvent};
+    use std::collections::HashMap;
+
+    let mut config = share::config::Config::default();
+    config.hooks.events = HashMap::from([
+        (
+            HookEvent::Stop,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "printf 'refreshed hook' >&2; exit 1".to_string(),
+                timeout: 2,
+            }],
+        ),
+        (
+            HookEvent::SubagentStop,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "printf 'refreshed sub hook' >&2; exit 1".to_string(),
+                timeout: 2,
+            }],
+        ),
+    ]);
+    share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
+        share::config::domain::snapshot::ConfigRevision::new(revision),
+        config,
+    )
+}
+
+#[tokio::test]
+async fn main_run_uses_hooks_from_its_committed_config_snapshot() {
+    let mut fixture = SessionRunFixture::builder()
+        .with_config(blocking_hook_snapshot(2))
+        .build();
+    fixture.use_snapshot_hooks();
+    let instance = fixture.create(main_spec()).expect("create main run");
+    assert!(
+        dispatch_stop_hook(instance.context()).await,
+        "run-scoped Stop hook should block"
+    );
+}
+
+#[tokio::test]
+async fn sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen() {
+    use crate::application::run::run_factory_support::derived_run::ParentRunFixture;
+
+    let mut parent_fixture = SessionRunFixture::default();
+    parent_fixture.use_snapshot_hooks();
+    let parent = parent_fixture
+        .create(main_spec())
+        .expect("create parent run");
+    assert!(!dispatch_stop_hook(parent.context()).await);
+
+    let mut sub_config = blocking_hook_snapshot(2).to_config();
+    sub_config.agents.roles.insert(
+        "coder".to_string(),
+        share::config::AgentRoleConfig {
+            model: "test-provider/test-model".to_string(),
+            ..Default::default()
+        },
+    );
+    sub_config.models.default = "test-provider/test-model".to_string();
+    sub_config.models.providers.insert(
+        "test-provider".to_string(),
+        share::config::models::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 128_000,
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    let sub_snapshot = share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
+        share::config::domain::snapshot::ConfigRevision::new(2),
+        sub_config,
+    );
+    let sub_session = SessionState::new(
+        "sub-hook-session",
+        std::path::PathBuf::from("/workspace/sub-hook"),
+        "test-provider/test-model",
+        sub_snapshot,
+    );
+    let sub_spec = main_spec()
+        .derive_sub("coder", std::time::Duration::from_secs(30))
+        .expect("derive sub spec");
+    let sub = ParentRunFixture::new(parent_fixture.context_factory())
+        .create(
+            sub_spec,
+            sub_session.snapshot_for_run(),
+            parent.run().id().clone(),
+            main_spec(),
+            Arc::new(parent.context().clone()),
+            crate::application::run::workspace_test_support::test_runtime_workspace_access(),
+        )
+        .expect("create sub run");
+
+    assert!(dispatch_sub_run_stop_hook(sub.context()).await);
+    assert!(!dispatch_stop_hook(parent.context()).await);
+}
+
 #[test]
 fn test_fixture_uses_the_production_run_factory_chain() {
     let fixture_source = include_str!("tests/run_factory_support.rs");
@@ -103,8 +243,10 @@ fn session_run_factory_creates_independent_per_run_resources() {
         .with_lock(|buffer| buffer.is_empty()));
     first.context().cancel().token().cancel();
     assert!(!second.context().cancel().token().is_cancelled());
+    // usage tracker is now per-Session (shared across runs) — see
+    // session_run_factory_shares_usage_tracker_across_runs
     first.context().usage().update(17);
-    assert_eq!(second.context().usage().get(), None);
+    assert_eq!(second.context().usage().get(), Some(17));
 
     assert!(Arc::ptr_eq(
         &first.context().tool_execution(),
@@ -114,6 +256,23 @@ fn session_run_factory_creates_independent_per_run_resources() {
         &first.context().policy(),
         &second.context().policy()
     ));
+}
+
+#[test]
+fn session_run_factory_shares_usage_tracker_across_runs() {
+    let fixture = SessionRunFixture::default();
+    let first = fixture.create(main_spec()).expect("create first run");
+    let second = fixture.create(main_spec()).expect("create second run");
+
+    // Per-Session tracker: second Run inherits the value set by the first,
+    // so the compaction decision can use the last known API total instead
+    // of falling back to a heuristic estimate on the first step.
+    first.context().usage().update(42_000);
+    assert_eq!(second.context().usage().get(), Some(42_000));
+
+    // Mutations from the second Run are also visible to the first.
+    second.context().usage().update(99_000);
+    assert_eq!(first.context().usage().get(), Some(99_000));
 }
 
 #[test]

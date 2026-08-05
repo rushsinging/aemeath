@@ -287,10 +287,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 }
 
 #[tokio::test]
-#[cfg_attr(
-    coverage,
-    ignore = "llvm-cov 下 spawn 真实 bash（sleep 60）+ 进程组清理与 coverage 进程管理交互，触发 CI runner 取消（见 #1508）"
-)]
+#[ignore = "spawn 真实 bash（sleep 60）+ 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 async fn bash_cancellation_returns_visible_command_cancelled_result() {
     struct Cancelled;
 
@@ -324,10 +321,7 @@ async fn bash_cancellation_returns_visible_command_cancelled_result() {
 }
 
 #[tokio::test]
-#[cfg_attr(
-    coverage,
-    ignore = "llvm-cov 下 spawn 真实 bash（sleep 60）+ 进程组清理与 coverage 进程管理交互，触发 CI runner 取消（见 #1508）"
-)]
+#[ignore = "spawn 真实 bash（sleep 60）+ 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
     struct SharedCancellation {
         cancelled: std::sync::atomic::AtomicBool,
@@ -512,12 +506,41 @@ fn test_preview_respects_utf8_char_boundary() {
     );
 }
 
+// ---- BashInput goal 字段：反序列化兼容 + schema required ----
+
+#[test]
+fn bash_input_goal_required_and_deserialization() {
+    use crate::domain::types::ToolSchema;
+
+    // 1. 老 session 缺 goal 字段时反序列化仍成功（serde default 兼容）
+    let old_json = json!({"command": "ls -la", "timeout": 5000});
+    let input: BashInput = serde_json::from_value(old_json).unwrap();
+    assert_eq!(input.command, "ls -la");
+    assert!(input.goal.is_empty(), "老 session 缺 goal 应反序列化为空串");
+
+    // 2. goal 字段正常解析
+    let new_json = json!({"goal": "列出文件", "command": "ls -la"});
+    let input: BashInput = serde_json::from_value(new_json).unwrap();
+    assert_eq!(input.goal, "列出文件");
+    assert_eq!(input.command, "ls -la");
+
+    // 3. schema 中 goal 和 command 均在 required 列表
+    let schema = BashInput::data_schema();
+    let required = schema.get("required").expect("schema 应有 required 字段");
+    let required_str = required.to_string();
+    assert!(
+        required_str.contains("\"goal\""),
+        "goal 应在 required 中，实际: {required_str}"
+    );
+    assert!(
+        required_str.contains("\"command\""),
+        "command 应在 required 中，实际: {required_str}"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
-#[cfg_attr(
-    coverage,
-    ignore = "llvm-cov 下 spawn 真实 bash（process_group + kill -9）与 coverage 进程管理交互，tools 测试启动瞬间触发 CI runner 取消 job（见 #1508）"
-)]
+#[ignore = "spawn 真实 bash（process_group + kill -9）与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
@@ -543,5 +566,35 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
         result.text.contains("SIGKILL"),
         "error message should contain signal name, got: {}",
         result.text
+    );
+}
+
+#[test]
+fn bash_tool_timeout_secs_allows_up_to_one_hour() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    // Outer override must cover the full 3600s schema max so the outer
+    // guard does not kill a command before its internal timeout fires.
+    assert_eq!(tool.timeout_secs(), 3600);
+}
+
+#[test]
+fn bash_tool_description_advertises_60_minute_max() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    assert!(
+        tool.description().contains("max 3600s"),
+        "description should advertise 60-minute max, got: {}",
+        tool.description()
     );
 }

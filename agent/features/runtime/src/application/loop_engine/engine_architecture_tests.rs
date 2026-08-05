@@ -371,6 +371,10 @@ fn p6_6_step_transaction_calculation_has_single_engine_owner() {
 
     assert!(engine.contains("struct StepCommit"));
     assert!(engine.contains("fn prepare_step_commit"));
+    assert!(engine.contains("duration_ms: execution"));
+    assert!(engine.contains(".step_elapsed()"));
+    let persistence = include_str!("step_persistence.rs");
+    assert!(persistence.contains("commit.duration_ms"));
     for adapter in [main_adapter, sub_adapter] {
         assert!(!adapter.contains("committed_message_count() + execution.accepted_input_len()"));
         assert!(!adapter.contains("execution.commit_all_messages()"));
@@ -1324,4 +1328,3 @@ fn call(name: &str, input: serde_json::Value) -> ToolCall {
         input,
     }
 }
-

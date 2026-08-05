@@ -1,6 +1,6 @@
 use super::*;
 use crate::tui::adapter::runtime_view::{
-    TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiSkillRequestMetadata, TuiStopHookFeedback,
+    TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiMessageSource, TuiSkillRequestMetadata,
 };
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -98,38 +98,33 @@ fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
     );
 }
 
-/// 消息同步事件（如 PostToolExecutionSync）只镜像 chat.messages，不产生 UserMessage 回显块，
+/// 消息状态投影只更新 session metadata，不产生 UserMessage 回显块，
 /// 也不清除占位（回显与占位清理由 UserMessagesAdopted 负责）。
 #[test]
-fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
+fn test_update_message_state_only_updates_metadata_without_echo() {
     let mut app = test_app();
     let echo_id = "echo-1".to_string();
     app.enqueue_submission_echo(echo_id, "[Copied Text 1]");
-    let messages = vec![
-        TuiChatMessage::user_text("first"),
-        TuiChatMessage::user_text("a\nb\nc"),
-    ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 2,
+            revision: 1,
+        }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // chat.messages 已删除，不再断言镜像数量
-
-    // 不产生任何 UserMessage 回显块（退出 display）
+    assert_eq!(app.model.session.message_count, 2);
     assert!(app.model.conversation.timeline.items().iter().all(|item| {
         !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "a\nb\nc")
     }));
-
-    // 占位未被清除（归 UserMessagesAdopted 负责）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,
-        "消息同步不应清占位"
+        "消息状态投影不应清占位"
     );
 }
 
@@ -137,15 +132,14 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
 fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
-    let messages = vec![
-        TuiChatMessage::user_text("first"),
-        TuiChatMessage::system_generated_user_text(reminder),
-    ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 2,
+            revision: 1,
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -159,7 +153,7 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
 ///
 /// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的同步事件。
 /// 期望：
-/// - handler 后 PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+/// - handler 后 SessionMessageStateChanged 不再镜像 chat.messages（字段已删除）
 /// - 不产生任何 UserMessage 回显块（退出 display）
 /// - 占位未被清除（清占位归 UserMessagesAdopted 负责）
 #[test]
@@ -173,17 +167,16 @@ fn test_post_tool_sync_no_display() {
     app.enqueue_submission_echo(id_a, "hello");
     assert_eq!(app.model.conversation.queued_submissions.len(), 1);
 
-    // 构造包含该 user message 的 msgs
-    let msgs = vec![TuiChatMessage::user_text("hello")];
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync {
-            messages: msgs.clone(),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 1,
+            revision: 1,
         }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+    // SessionMessageStateChanged 不再镜像 chat.messages（字段已删除）
     // 不产生 UserMessage 回显块
 
     // 不产生 UserMessage 回显块
@@ -240,7 +233,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             content: vec![TuiContentBlock::text("hi")],
             input_id: Some(id_a.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         },
         TuiChatMessage {
@@ -248,7 +241,7 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             content: vec![TuiContentBlock::text("yo")],
             input_id: Some(id_b.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         },
     ];
@@ -340,7 +333,7 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         ],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
         skill_request: None,
     }];
 
@@ -386,7 +379,7 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
 }
 
 #[test]
-fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
+fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echoes() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
@@ -403,7 +396,7 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
                     content: vec![TuiContentBlock::text("LLM skill prompt")],
                     input_id: Some(skill_id),
                     source: TuiMessageSource::SkillRequest,
-                    stop_hook: None,
+                    hook_notice: None,
                     skill_request: Some(TuiSkillRequestMetadata {
                         skill: "superpowers:brainstorming".to_string(),
                         arguments: "feature scope".to_string(),
@@ -414,8 +407,10 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("LLM hook prompt")],
                     input_id: Some(hook_id),
-                    source: TuiMessageSource::StopHook,
-                    stop_hook: Some(TuiStopHookFeedback {
+                    source: TuiMessageSource::Hook,
+                    hook_notice: Some(TuiHookNotice {
+                        point: "Stop".to_string(),
+                        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
                         summary: "blocked".to_string(),
                         command: "check.sh".to_string(),
                         exit_code: Some(2),
@@ -448,7 +443,18 @@ fn adopted_typed_skill_and_stop_hook_render_system_json_without_user_echoes() {
         )));
     let notices = system_notice_texts(&app);
     assert!(notices.iter().any(|text| text.contains("raw_input")));
-    assert!(notices.iter().any(|text| text.contains("guard failed")));
+    assert!(!notices.iter().any(|text| text.contains("guard failed")));
+    assert!(app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(
+            item,
+            crate::tui::model::output_timeline::OutputTimelineItem::HookNotice { title, text, .. }
+                if title == "Stop hook blocked" && text.contains("guard failed")
+        )));
     assert!(!notices.iter().any(|text| text.contains("LLM skill prompt")));
     assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
@@ -608,7 +614,7 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         )],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
         skill_request: None,
     }];
     app.update(

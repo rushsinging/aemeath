@@ -240,7 +240,7 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
                     }],
                     input_id: Some(input_id.clone()),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
                     skill_request: None,
                 }],
             },

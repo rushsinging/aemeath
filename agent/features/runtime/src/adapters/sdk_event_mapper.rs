@@ -347,14 +347,34 @@ pub(crate) fn map_stream_event(
                 .collect(),
             cleared_count,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::PostToolExecutionSync {
-            messages,
-        } => ChatEvent::PostToolExecutionSync {
-            messages: messages
-                .into_iter()
-                .map(crate::application::client::message_to_sdk)
-                .collect(),
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
         },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::HookNotice(notice) => {
+            ChatEvent::HookNotice {
+                notice: sdk::HookNoticeView {
+                    point: notice.point,
+                    kind: match notice.kind {
+                        share::message::HookNoticeKind::Blocked => sdk::HookNoticeKindView::Blocked,
+                        share::message::HookNoticeKind::Failed => sdk::HookNoticeKindView::Failed,
+                        share::message::HookNoticeKind::Info => sdk::HookNoticeKindView::Info,
+                    },
+                    summary: notice.summary,
+                    command: notice.command,
+                    exit_code: notice.exit_code,
+                    reason: notice.reason,
+                    stdout_preview: notice.stdout_preview,
+                    stderr_preview: notice.stderr_preview,
+                    stdout_truncated: notice.stdout_truncated,
+                    stderr_truncated: notice.stderr_truncated,
+                    output_file: notice.output_file,
+                },
+            }
+        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::ApiError { messages, error } => {
             ChatEvent::ApiError {
                 messages: messages

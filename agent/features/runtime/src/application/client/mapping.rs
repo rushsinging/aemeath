@@ -161,19 +161,25 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 share::message::MessageSource::SystemGenerated => {
                     sdk::ChatMessageSource::SystemGenerated
                 }
-                share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
+                share::message::MessageSource::Hook => sdk::ChatMessageSource::Hook,
                 share::message::MessageSource::SkillRequest => sdk::ChatMessageSource::SkillRequest,
             },
-            stop_hook: metadata.stop_hook.map(|payload| sdk::StopHookFeedbackView {
-                summary: payload.summary,
-                command: payload.command,
-                exit_code: payload.exit_code,
-                reason: payload.reason,
-                stdout_preview: payload.stdout_preview,
-                stderr_preview: payload.stderr_preview,
-                stdout_truncated: payload.stdout_truncated,
-                stderr_truncated: payload.stderr_truncated,
-                output_file: payload.output_file,
+            hook_notice: metadata.hook_notice.map(|notice| sdk::HookNoticeView {
+                point: notice.point,
+                kind: match notice.kind {
+                    share::message::HookNoticeKind::Blocked => sdk::HookNoticeKindView::Blocked,
+                    share::message::HookNoticeKind::Failed => sdk::HookNoticeKindView::Failed,
+                    share::message::HookNoticeKind::Info => sdk::HookNoticeKindView::Info,
+                },
+                summary: notice.summary,
+                command: notice.command,
+                exit_code: notice.exit_code,
+                reason: notice.reason,
+                stdout_preview: notice.stdout_preview,
+                stderr_preview: notice.stderr_preview,
+                stdout_truncated: notice.stdout_truncated,
+                stderr_truncated: notice.stderr_truncated,
+                output_file: notice.output_file,
             }),
             skill_request: metadata
                 .skill_request
@@ -243,10 +249,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn message_mapping_preserves_stop_hook_payload() {
-        let message = share::message::Message::stop_hook_feedback(
+    fn message_mapping_preserves_hook_notice() {
+        let message = share::message::Message::hook_notice(
             "<system-reminder>blocked</system-reminder>",
-            share::message::StopHookFeedback {
+            share::message::HookNotice {
+                point: "Stop".to_string(),
+                kind: share::message::HookNoticeKind::Blocked,
                 summary: "blocked".to_string(),
                 command: "check-agent-stop.sh".to_string(),
                 exit_code: Some(2),
@@ -260,12 +268,13 @@ mod tests {
         );
 
         let mapped = message_to_sdk(message);
-        let payload = mapped.metadata.unwrap().stop_hook.unwrap();
+        let notice = mapped.metadata.unwrap().hook_notice.unwrap();
 
-        assert_eq!(payload.command, "check-agent-stop.sh");
-        assert_eq!(payload.exit_code, Some(2));
-        assert!(payload.stderr_truncated);
-        assert_eq!(payload.output_file.as_deref(), Some("/tmp/hook.txt"));
+        assert_eq!(notice.point, "Stop");
+        assert_eq!(notice.command, "check-agent-stop.sh");
+        assert_eq!(notice.exit_code, Some(2));
+        assert!(notice.stderr_truncated);
+        assert_eq!(notice.output_file.as_deref(), Some("/tmp/hook.txt"));
     }
 
     #[test]

@@ -138,11 +138,14 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     content: vec![TuiContentBlock::ToolUse {
                         id: "bash-1".into(),
                         name: "Bash".into(),
-                        input: serde_json::json!({ "command": "git status --short --branch" }),
+                        input: serde_json::json!({
+                            "goal": "查看分支状态",
+                            "command": "git status --short --branch"
+                        }),
                     }],
                     input_id: None,
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
                     skill_request: None,
                 },
                 TuiChatMessage {
@@ -161,7 +164,7 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
                     }],
                     input_id: None,
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
                     skill_request: None,
                 },
             ],
@@ -176,13 +179,12 @@ fn resume_renders_bash_tool_with_typed_header_and_output() {
 
     let screen = harness.screen();
     assert!(
-        screen.contains("Run git status --short --branch"),
-        "resume 后 Bash 应走 typed ToolDisplay header\n{screen}"
+        screen.contains("查 看 分 支 状 态"),
+        "resume 后 Bash header 应显示 goal\n{screen}"
     );
-    assert_eq!(
-        screen.matches("git status --short --branch").count(),
-        1,
-        "Bash 命令在 header 已显示，不能再重复为 details\n{screen}"
+    assert!(
+        screen.contains("git status --short --branch"),
+        "Bash 命令全文应在 details 中显示\n{screen}"
     );
     assert!(
         screen.contains("## feature/resume...origin/main"),
@@ -214,7 +216,7 @@ fn resume_restores_all_answered_ask_batches() {
             }],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }
     }
@@ -231,7 +233,7 @@ fn resume_restores_all_answered_ask_batches() {
                         content: vec![ask_tool_use("resume-ask-1", "恢复问题一")],
                         input_id: None,
                         source: TuiMessageSource::User,
-                        stop_hook: None,
+                        hook_notice: None,
                         skill_request: None,
                     },
                     ask_result("resume-ask-1", "恢复答案一"),
@@ -240,7 +242,7 @@ fn resume_restores_all_answered_ask_batches() {
                         content: vec![ask_tool_use("resume-ask-2", "恢复问题二")],
                         input_id: None,
                         source: TuiMessageSource::User,
-                        stop_hook: None,
+                        hook_notice: None,
                         skill_request: None,
                     },
                     ask_result("resume-ask-2", "恢复答案二"),
@@ -488,7 +490,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         content: vec![ask_tool_use("history-ask", "之前想吃什么？")],
                         input_id: None,
                         source: TuiMessageSource::User,
-                        stop_hook: None,
+                        hook_notice: None,
                         skill_request: None,
                     },
                     TuiChatMessage {
@@ -501,7 +503,7 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
                         }],
                         input_id: None,
                         source: TuiMessageSource::User,
-                        stop_hook: None,
+                        hook_notice: None,
                         skill_request: None,
                     },
                 ],
