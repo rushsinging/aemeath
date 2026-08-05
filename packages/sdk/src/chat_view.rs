@@ -60,6 +60,59 @@ impl OptionItem {
     }
 }
 
+/// Child Run identity published with every structured activity event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChildRunIdentityView {
+    pub agent_id: crate::AgentId,
+    pub run_id: crate::RunId,
+    pub parent_run_id: crate::RunId,
+    pub spawned_by_tool_call_id: crate::ToolCallId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChildRunActivityKindView {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: crate::ToolCallId,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: crate::ToolCallId,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: ChildRunTerminalOutcomeView,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ChildRunTerminalOutcomeView {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChildRunActivityEventView {
+    pub identity: ChildRunIdentityView,
+    pub sequence: u64,
+    pub kind: ChildRunActivityKindView,
+}
+
 /// Sub-agent 工具调用进度。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentToolCallProgressView {
@@ -153,6 +206,26 @@ pub struct WorkspaceContextView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_run_activity_round_trips_without_field_loss() {
+        let event = ChildRunActivityEventView {
+            identity: ChildRunIdentityView {
+                agent_id: crate::AgentId::from_legacy_or_new("agent-child-a"),
+                run_id: crate::RunId::from_legacy_or_new("run-child-a"),
+                parent_run_id: crate::RunId::from_legacy_or_new("run-main"),
+                spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
+            },
+            sequence: 9,
+            kind: ChildRunActivityKindView::Thinking {
+                text: "分析配置".to_string(),
+            },
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: ChildRunActivityEventView = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, event);
+    }
 
     #[test]
     fn test_agent_progress_view_supports_message_tool_calls_and_tool_output() {

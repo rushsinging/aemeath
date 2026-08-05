@@ -202,6 +202,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             tool_id,
             event,
         },
+        sdk::ChatEvent::ChildRunActivity { .. } => UiEvent::SessionReset,
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,

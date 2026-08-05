@@ -199,25 +199,32 @@ impl DerivedModelObserver {
         );
     }
 
-    fn send_text_progress(&self, run_step: usize, response: &InvocationResponse) {
+    fn send_response_progress(&self, run_step: usize, response: &InvocationResponse) {
         let Some(sink) = self.progress_sink.as_ref() else {
             return;
         };
-        let text = response.assistant_message.text_content();
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return;
+        let mut sequence = run_step.saturating_mul(1024);
+        for block in &response.assistant_message.content {
+            let kind = match block {
+                share::message::ContentBlock::Text { text } if !text.trim().is_empty() => {
+                    AgentProgressKind::Message { text: text.clone() }
+                }
+                share::message::ContentBlock::Thinking { thinking, .. }
+                    if !thinking.trim().is_empty() =>
+                {
+                    AgentProgressKind::Thinking {
+                        text: thinking.clone(),
+                    }
+                }
+                _ => continue,
+            };
+            sequence = sequence.saturating_add(1);
+            sink.emit(super::progress::build_progress_event(
+                self.source_context.clone(),
+                sequence,
+                kind,
+            ));
         }
-        let text = if trimmed.len() > 300 {
-            format!("{}...", slice_head(trimmed, 300))
-        } else {
-            trimmed.to_string()
-        };
-        sink.emit(super::progress::build_progress_event(
-            self.source_context.clone(),
-            run_step,
-            AgentProgressKind::Message { text },
-        ));
     }
 }
 
@@ -291,7 +298,7 @@ impl ModelInvocationObserver for DerivedModelObserver {
         _elapsed_secs: f64,
     ) {
         self.progress_api_ok(execution.step_count(), response);
-        self.send_text_progress(execution.step_count(), response);
+        self.send_response_progress(execution.step_count(), response);
     }
 
     async fn classify_terminal(
@@ -383,6 +390,20 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
                 results.len(),
             ),
         );
+        if let Some(sink) = self.progress_sink.as_ref() {
+            for (offset, result) in results.iter().enumerate() {
+                sink.emit(super::progress::build_progress_event(
+                    self.source_context.clone(),
+                    run_step.saturating_mul(1024).saturating_add(512 + offset),
+                    AgentProgressKind::ToolResult {
+                        tool_call_id: result.call_id.to_string(),
+                        output: result.outcome.text.clone(),
+                        content: result.outcome.data.clone(),
+                        is_error: result.outcome.is_error,
+                    },
+                ));
+            }
+        }
         for result in results {
             let output = &result.outcome.text;
             let label = if result.outcome.is_error { "ERR" } else { "OK" };

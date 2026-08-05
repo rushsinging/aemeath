@@ -643,6 +643,16 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }),
             ),
         },
+        TuiRuntimeEvent::ChildRunActivity(event) => conversation(
+            ConversationIntent::RecordChildRunActivity(RecordChildRunActivity {
+                agent_id: event.identity.agent_id.clone(),
+                child_run_id: event.identity.run_id.as_str().to_string(),
+                parent_run_id: event.identity.parent_run_id.as_str().to_string(),
+                spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                sequence: event.sequence,
+                kind: event.kind.clone(),
+            }),
+        ),
         TuiRuntimeEvent::ConfigChanged { view, .. } => AgentEventMapping {
             ui_preferences: vec![
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(

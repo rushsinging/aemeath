@@ -29,7 +29,7 @@ mod skills_updated_tests {
 use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
 use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
-use crate::chat_view::{AgentProgressEventView, WorkspaceContextView};
+use crate::chat_view::{AgentProgressEventView, ChildRunActivityEventView, WorkspaceContextView};
 use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -692,6 +692,10 @@ pub enum ChatEvent {
         attachment_context: ChatEventContext,
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
+    },
+    /// Structured activity emitted by one Child Run spawned from a Main Agent ToolCall.
+    ChildRunActivity {
+        event: ChildRunActivityEventView,
     },
     /// 工作目录变化。
     WorkingDirectoryChanged {

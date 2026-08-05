@@ -30,6 +30,26 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
         terminal: &tools::AgentRunTerminal,
     ) {
         log_agent_outcome(outcome, self.session_id);
+        if let Some(sink) = self.progress_sink {
+            let terminal_outcome = match terminal {
+                tools::AgentRunTerminal::Completed { .. } => {
+                    tools::ChildRunTerminalOutcome::Completed
+                }
+                tools::AgentRunTerminal::Failed { error } => {
+                    tools::ChildRunTerminalOutcome::Failed {
+                        error: error.clone(),
+                    }
+                }
+                tools::AgentRunTerminal::Cancelled => tools::ChildRunTerminalOutcome::Cancelled,
+            };
+            sink.emit(super::progress::build_progress_event(
+                self.source_context.clone(),
+                outcome.run_steps.saturating_mul(1024).saturating_add(1023),
+                AgentProgressKind::Terminal {
+                    outcome: terminal_outcome,
+                },
+            ));
+        }
         let is_error = matches!(
             outcome.status,
             AgentRunStatus::Cancelled
