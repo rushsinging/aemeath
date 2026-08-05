@@ -228,6 +228,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.sequence,
             event
         ),
+        sdk::ChatEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => crate::tui::log_trace!(
+            "{} tool_progress chat_id={} run_id={} tool_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            event.text.len(),
+        ),
         sdk::ChatEvent::ChildRunActivity { event } => crate::tui::log_trace!(
             "{} child_run_activity agent_id={} run_id={} parent_run_id={} tool_id={} seq={}",
             stage,
@@ -452,6 +464,18 @@ pub(crate) fn log_tui_runtime_delivery(
             "event_delivery boundary=sdk_to_tui kind=Done chat_id={} run_id={} size=0 outcome={}",
             context.chat_id,
             context.run_id,
+            outcome
+        ),
+        TuiRuntimeEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=ToolProgress chat_id={} run_id={} tool_id={} text_len={} outcome={}",
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            event.text.len(),
             outcome
         ),
         _ => {}

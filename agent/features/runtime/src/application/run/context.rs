@@ -100,18 +100,41 @@ impl Default for RunCancellationScope {
     }
 }
 
-struct ToolProgressSink(tokio::sync::mpsc::Sender<tools::AgentProgressEvent>);
+struct ToolProgressSink {
+    agent_tx: Option<tokio::sync::mpsc::Sender<tools::AgentProgressEvent>>,
+    tool_tx: Option<tokio::sync::mpsc::Sender<tools::ToolProgressEvent>>,
+}
 
 impl tools::ProgressSink for ToolProgressSink {
     fn emit(&self, event: tools::AgentProgressEvent) {
-        let _ = self.0.try_send(event);
+        if let Some(tx) = &self.agent_tx {
+            let _ = tx.try_send(event);
+        }
+    }
+    fn emit_tool_stream(&self, event: tools::ToolProgressEvent) {
+        if let Some(tx) = &self.tool_tx {
+            let _ = tx.try_send(event);
+        }
     }
 }
 
 pub(crate) fn tool_progress_sink(
     tx: tokio::sync::mpsc::Sender<tools::AgentProgressEvent>,
 ) -> Arc<dyn tools::ProgressSink> {
-    Arc::new(ToolProgressSink(tx))
+    Arc::new(ToolProgressSink {
+        agent_tx: Some(tx),
+        tool_tx: None,
+    })
+}
+
+/// 为 Bash 等长输出工具构造 progress sink，仅转发 [`ToolProgressEvent`]。
+pub(crate) fn tool_stream_progress_sink(
+    tx: tokio::sync::mpsc::Sender<tools::ToolProgressEvent>,
+) -> Arc<dyn tools::ProgressSink> {
+    Arc::new(ToolProgressSink {
+        agent_tx: None,
+        tool_tx: Some(tx),
+    })
 }
 
 // ── I/O seams (#1385 Task 11) ──

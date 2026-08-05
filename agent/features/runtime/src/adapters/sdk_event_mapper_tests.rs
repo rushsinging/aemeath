@@ -199,6 +199,37 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
+fn sdk_tool_progress_preserves_context_tool_id_and_text() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-1"),
+        sdk::ids::ChatRunId::new("run-1"),
+    );
+    let expected_context = context.clone();
+    let tool_id = sdk::ids::ToolCallId::new("bash-tool");
+    let event = RuntimeStreamEvent::ToolProgress {
+        context,
+        tool_id: tool_id.clone(),
+        event: tools::ToolProgressEvent {
+            text: "checking PRs…\n".to_string(),
+        },
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ToolProgress {
+            context,
+            tool_id: mapped_tool_id,
+            event,
+        } => {
+            assert_eq!(context.chat_id, expected_context.chat_id);
+            assert_eq!(context.run_id, expected_context.run_id);
+            assert_eq!(mapped_tool_id, tool_id);
+            assert_eq!(event.text, "checking PRs…\n");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn session_resume_mapping_preserves_body_free_history_index() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: Vec::new(),

@@ -420,10 +420,12 @@ where
         tool_ctx.cancellation().is_cancelled()
     );
     let exec_results = if is_bash {
-        // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+        // Set up tool stream channel for stdout streaming.
+        // Uses ToolProgressEvent (not AgentProgressEvent) since Bash stdout
+        // is tool output, not sub-agent progress.
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::ToolProgressEvent>(32);
         let streaming_ctx = tool_ctx.with_progress(Some(
-            crate::application::run::context::tool_progress_sink(prog_tx),
+            crate::application::run::context::tool_stream_progress_sink(prog_tx),
         ));
         let call_id = effective_call.id.clone();
         let stream_sink = sink.clone();
@@ -432,9 +434,8 @@ where
         let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
             while let Some(event) = prog_rx.recv().await {
                 let _ = stream_sink
-                    .send_event(RuntimeStreamEvent::AgentProgress {
-                        source_context: stream_context.clone(),
-                        attachment_context: stream_context.clone(),
+                    .send_event(RuntimeStreamEvent::ToolProgress {
+                        context: stream_context.clone(),
                         tool_id: call_id.clone(),
                         event,
                     })

@@ -262,6 +262,9 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");
         }
+        sdk::ChatEvent::ToolProgress { event, .. } => {
+            eprintln!("[tool] {}", event.text);
+        }
         sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
             use sdk::SessionResumeFailureKind;
             let label = match kind {

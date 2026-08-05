@@ -57,6 +57,10 @@ pub enum ConversationChange {
         block_id: String,
         tool_id: String,
     },
+    /// 工具 stdout 流式输出已写入 ToolCall.activities，需 invalidate 该 block 的 root_cache。
+    ToolStreamingOutputRecorded {
+        block_id: String,
+    },
     /// Agent 工具的 role/model 元数据已写入（issue #499）。
     AgentMetaUpdated {
         chat_id: String,

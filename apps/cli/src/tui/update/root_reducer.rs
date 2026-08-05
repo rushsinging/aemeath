@@ -196,6 +196,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::QueuedSubmissionAdded { .. }
             | ConversationChange::QueuedSubmissionsCleared { .. }
             | ConversationChange::AgentProgressRecorded { .. }
+            | ConversationChange::ToolStreamingOutputRecorded { .. }
             | ConversationChange::AgentMetaUpdated { .. }
             | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }

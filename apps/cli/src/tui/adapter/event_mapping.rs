@@ -307,6 +307,15 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             tool_id: tool_id.as_str().to_string(),
             event: agent_progress(event),
         },
+        ChatEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => TuiRuntimeEvent::ToolProgress {
+            context: turn_context(context),
+            tool_id: tool_id.as_str().to_string(),
+            event: super::tui_runtime_event::TuiToolProgressEvent { text: event.text },
+        },
         ChatEvent::ChildRunActivity { event } => {
             TuiRuntimeEvent::ChildRunActivity(child_run_activity(event))
         }

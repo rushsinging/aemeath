@@ -693,6 +693,12 @@ pub enum ChatEvent {
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
     },
+    /// 工具 stdout 流式输出（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
+    ToolProgress {
+        context: ChatEventContext,
+        tool_id: crate::ids::ToolCallId,
+        event: crate::chat_view::ToolProgressEventView,
+    },
     /// Structured activity emitted by one Child Run spawned from a Main Agent ToolCall.
     ChildRunActivity {
         event: ChildRunActivityEventView,

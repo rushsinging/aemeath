@@ -1,4 +1,4 @@
-use crate::domain::{AgentProgressEvent, AgentProgressKind, ProgressSink};
+use crate::domain::{ProgressSink, ToolProgressEvent};
 use std::sync::Arc;
 use tokio::process::{ChildStderr, ChildStdout};
 
@@ -13,7 +13,6 @@ pub(super) async fn read_stdout(
     progress_tx: Option<Arc<dyn ProgressSink>>,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
-    let mut sequence: usize = 0;
     // Line-buffer for coalescing: accumulate partial lines and emit at
     // line boundaries (or when the buffer reaches MAX_STREAM_LINE bytes).
     // This drastically reduces the number of progress events vs per-read
@@ -27,17 +26,10 @@ pub(super) async fn read_stdout(
     const MAX_STREAM_LINE: usize = 16 * 1024;
 
     macro_rules! send_progress {
-        ($tx:expr, $seq:expr, $text:expr) => {{
+        ($tx:expr, $text:expr) => {{
             if !$text.is_empty() {
-                $seq += 1;
-                // Best-effort: drop chunks if channel is full/closed.
-                $tx.emit(AgentProgressEvent {
-                    source_context: None,
-                    sequence: $seq,
-                    kind: AgentProgressKind::ToolOutput {
-                        tool_name: "Bash".to_string(),
-                        text: $text.to_string(),
-                    },
+                $tx.emit_tool_stream(ToolProgressEvent {
+                    text: $text.to_string(),
                 });
             }
         }};
@@ -54,28 +46,41 @@ pub(super) async fn read_stdout(
                     }
                     // If over limit, keep reading (to drain the pipe) but don't store.
                     if let Some(tx) = &progress_tx {
+                        let new_data = String::from_utf8_lossy(&tmp[..n]);
                         let mut combined = std::mem::take(&mut suffix_carry);
-                        combined.push_str(&String::from_utf8_lossy(&tmp[..n]));
+                        combined.push_str(&new_data);
 
-                        let display_text = match combined.find(CWD_MARKER) {
-                            Some(pos) => &combined[..pos],
-                            None => &combined[..],
-                        };
-
-                        if !display_text.contains(CWD_MARKER) {
-                            let carry_len = marker_len.saturating_sub(1).min(display_text.len());
-                            suffix_carry =
-                                share::string_idx::slice_tail(display_text, carry_len).to_string();
+                        // marker 前的 `\n` 是 bash.rs 包装脚本的分隔符（printf '\n{MARKER}...'），
+                        // 非命令输出，与 cwd.rs 的 trim_end_matches('\n') 保持一致。
+                        match combined.find(CWD_MARKER) {
+                            Some(pos) => {
+                                let display_text =
+                                    if pos > 0 && combined.as_bytes()[pos - 1] == b'\n' {
+                                        &combined[..pos - 1]
+                                    } else {
+                                        &combined[..pos]
+                                    };
+                                // 命令结束：flush marker 前的全部内容（含 carry，跨 chunk 收尾）。
+                                line_buf.push_str(display_text);
+                                suffix_carry.clear();
+                            }
+                            None => {
+                                // marker 未出现：carry 的数据已在上次 read 处理过，
+                                // 只处理新数据，避免重复发送产生重复行/空行。
+                                line_buf.push_str(&new_data);
+                                let carry_len = marker_len.saturating_sub(1).min(combined.len());
+                                suffix_carry =
+                                    share::string_idx::slice_tail(&combined, carry_len).to_string();
+                            }
                         }
 
-                        line_buf.push_str(display_text);
                         while let Some(nl) = line_buf.find('\n') {
                             let line: String = line_buf.drain(..=nl).collect();
-                            send_progress!(tx, sequence, line);
+                            send_progress!(tx, line);
                         }
                         if line_buf.len() > MAX_STREAM_LINE {
                             let flush: String = std::mem::take(&mut line_buf);
-                            send_progress!(tx, sequence, flush);
+                            send_progress!(tx, flush);
                         }
                     }
                 }
@@ -85,7 +90,7 @@ pub(super) async fn read_stdout(
     }
     if let Some(tx) = &progress_tx {
         if !line_buf.is_empty() {
-            send_progress!(tx, sequence, line_buf);
+            send_progress!(tx, line_buf);
         }
     }
     buf

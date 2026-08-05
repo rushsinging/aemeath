@@ -239,12 +239,6 @@ mod tests {
         // 不同变体不相等
         let d = AgentProgressKind::Message { text: "x".into() };
         assert_ne!(a, d);
-
-        let e = AgentProgressKind::ToolOutput {
-            tool_name: "Bash".into(),
-            text: "stdout".into(),
-        };
-        assert_ne!(a, e);
     }
 
     #[test]
@@ -289,6 +283,30 @@ mod tests {
             }
             other => panic!("expected ToolOutput, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_progress_event_carries_text() {
+        let ev = ToolProgressEvent {
+            text: "checking PR status…\n".to_string(),
+        };
+        assert_eq!(ev.text, "checking PR status…\n");
+    }
+
+    #[test]
+    fn tool_progress_event_partial_eq() {
+        let a = ToolProgressEvent {
+            text: "line1".into(),
+        };
+        let b = ToolProgressEvent {
+            text: "line1".into(),
+        };
+        assert_eq!(a, b);
+
+        let c = ToolProgressEvent {
+            text: "line2".into(),
+        };
+        assert_ne!(a, c);
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,10 +394,10 @@ pub enum AgentProgressKind {
     ToolCalls {
         calls: Vec<AgentToolCallProgress>,
     },
-    /// Output streamed by a tool running inside a sub-agent.
+    /// Sub-agent 内部工具执行的输出流（`agent_calls.rs` 转发）。
     ///
-    /// TUI may use this for diagnostics or future expandable views, but it
-    /// must not be rendered as normal sub-agent progress activity.
+    /// 顶层 Bash stdout 已独立为 [`ToolProgressEvent`] 通道，不再使用此 variant；
+    /// 此 variant 仅保留给 sub-agent 内部工具的嵌套输出转发。
     ToolOutput {
         tool_name: String,
         text: String,
@@ -399,6 +417,17 @@ pub enum AgentProgressKind {
     Terminal {
         outcome: ChildRunTerminalOutcome,
     },
+}
+
+/// 工具 stdout 流式输出事件。
+///
+/// 与 [`AgentProgressEvent`] 平级但语义独立：不寄居在 sub-agent 事件模型中。
+/// Bash 等长输出工具按行产出此事件，经 runtime → sdk → tui 全链路独立转发，
+/// 最终写入 `ToolCall.streaming_preview` 供 TUI 实时 tail 显示。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolProgressEvent {
+    /// 单行或多行 stdout 文本片段。
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

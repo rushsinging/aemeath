@@ -76,5 +76,5 @@ pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolRes
 pub use tool_types::{
     AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext, AgentToolCallProgress,
     ChildRunActivityEvent, ChildRunActivityKind, ChildRunIdentity, ChildRunTerminalOutcome,
-    ImageData, SessionReminder, SessionReminders, ToolOutcome, ToolResult,
+    ImageData, SessionReminder, SessionReminders, ToolOutcome, ToolProgressEvent, ToolResult,
 };
