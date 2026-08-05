@@ -633,21 +633,33 @@ impl ChatEventSink for RecordingSink {
     fn try_send_event(&self, event: RuntimeStreamEvent) {
         self.record(event);
     }
+
+    fn send_activity_event(
+        &self,
+        event: crate::application::loop_engine::chat::RuntimeActivityEvent,
+    ) {
+        let name = match event {
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
+                kind,
+                activity,
+            } if activity.kind == sdk::ActivityKindView::HookDispatch => {
+                format!("HookActivityChanged:{kind:?}:{}", activity.id)
+            }
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
+                kind,
+                activity,
+            } => format!("ActivityChanged:{kind:?}:{}", activity.id),
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot) => {
+                format!("ActivitySnapshot:{}", snapshot.revision)
+            }
+        };
+        self.events.lock().unwrap().push(name);
+    }
 }
 
 impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
-            RuntimeStreamEvent::ActivityChanged { kind, activity } => {
-                if activity.kind == sdk::ActivityKindView::HookDispatch {
-                    format!("HookActivityChanged:{kind:?}:{}", activity.id)
-                } else {
-                    format!("ActivityChanged:{kind:?}:{}", activity.id)
-                }
-            }
-            RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
-                format!("ActivitySnapshot:{}", snapshot.revision)
-            }
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactDone { messages, .. }
             | RuntimeStreamEvent::CompactFinished { messages, .. } => {

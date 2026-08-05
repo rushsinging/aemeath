@@ -38,7 +38,7 @@
 | [05-recovery-semantics.md](05-recovery-semantics.md) | 从头开始恢复、持久化边界、无 durable |
 | [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站 OHS、Runtime 消费的能力契约、RuntimeContext 装配、Composition Root |
 | [07-runtime-ownership-and-assembly.md](07-runtime-ownership-and-assembly.md) | Runtime IoC 终态：去除 Main/Sub 生产类型、静动态所有权、统一 prepare/factory、Interaction/Hook capability adapter 与 Composition 边界 |
-| [08-event-pipeline-and-published-language.md](08-event-pipeline-and-published-language.md) | Runtime domain/stream 事件目录、SDK Published Language、TUI ACL 消费矩阵与 terminal authority |
+| [08-event-pipeline-and-published-language.md](08-event-pipeline-and-published-language.md) | Runtime lifecycle/activity/stream 三类事件目录、SDK Published Language、TUI ACL 消费矩阵与 terminal authority |
 
 ## 相关文档
 
@@ -55,4 +55,4 @@
 | 2026-07-15 | 曾将 Runtime 内部角色误判为多个平级能力并递归竖切；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-15 | 明确 CancelRunStep/TerminateRun 共用 deterministic StepFinalizer；Session committed content 是唯一回放源，未入 Session 的 InputBuffer 在 Terminate 时可丢弃 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-08-01 | 补充统一 Activity 观测机制与 Runtime / SDK / TUI 边界 | 统一 Activity 观测 |
-| 2026-08-05 | 增加 Runtime domain/stream → SDK → TUI 全链路事件与 Published Language 权威目录 | 事件管线梳理 |
+| 2026-08-05 | 增加 Runtime lifecycle/activity/stream → SDK → TUI 全链路事件与 Published Language 权威目录 | 事件管线梳理 |

@@ -1,6 +1,8 @@
-use super::sdk_event_mapper::{map_stream_event, project_agent_progress_event};
+use super::sdk_event_mapper::{
+    map_activity_event, map_stream_event, project_agent_progress_event,
+};
 use crate::application::loop_engine::chat::{
-    RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
+    RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
 #[test]
 fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
@@ -86,17 +88,15 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
         timing: sdk::ActivityTimingView::default(),
     };
 
-    let changed = map_stream_event(RuntimeStreamEvent::ActivityChanged {
+    let changed = map_activity_event(RuntimeActivityEvent::Changed {
         kind: sdk::ActivityChangeKind::Updated,
-        activity: activity.clone(),
+        activity: Box::new(activity.clone()),
     });
-    let snapshot = map_stream_event(RuntimeStreamEvent::ActivitySnapshot(
-        sdk::ActivitySnapshotView {
-            run_id: activity.run_id.clone(),
-            revision: 3,
-            activities: vec![activity.clone()],
-        },
-    ));
+    let snapshot = map_activity_event(RuntimeActivityEvent::Snapshot(sdk::ActivitySnapshotView {
+        run_id: activity.run_id.clone(),
+        revision: 3,
+        activities: vec![activity.clone()],
+    }));
 
     assert!(matches!(
         changed,

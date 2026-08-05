@@ -8,12 +8,12 @@
 
 全链路事件契约归 Runtime 模块所有，因为事件表达的业务事实、identity、权威性和发布时机均由 Runtime 决定。SDK 负责稳定 Published Language，TUI 负责防腐转换、事实镜像与展示投影。
 
-本文覆盖两条生产发布管线：
+本文覆盖三条职责分离的生产发布管线；三者只在 SDK `ChatEvent` 传输语言汇合：
 
 ```text
 Run 聚合
-  → RunDomainEvent
-  → sdk_event_mapper::map_domain_event
+  → RuntimeLifecycleEvent
+  → sdk_event_mapper::map_lifecycle_event
   → sdk::ChatEvent
   → TUI event_mapping
   → TuiRuntimeEvent
@@ -25,29 +25,35 @@ Runtime 应用编排、Provider、Tool、Session 服务
   → sdk_event_mapper::map_stream_event
   → sdk::ChatEvent
   → 同一 TUI 管线
+
+ActivityCoordinator
+  → RuntimeActivityEvent
+  → sdk_event_mapper::map_activity_event
+  → sdk::ChatEvent
+  → 同一 TUI 管线
 ```
 
 本文不把以下对象混作 Runtime event：
 
 - `CancelCurrentRunOutcome`、`CancelRunStepOutcome`、`TerminateRunOutcome` 和 interaction command outcome 是同步 command ACK，只表达 accepted / rejected / failed；它们不是 `ChatEvent`，NEVER 成为 terminal source。
 - Activity 是 Runtime lifecycle 的 observational projection；它可修复展示镜像，但 NEVER 决定 Run、Run Step 或 processing 终态。
-- Context durable Step / ToolCall receipt 是恢复与 cancellation terminal 的事实输入，不是 UI event；Runtime 从 receipt 派生权威 domain event 后才发布。
+- Context durable Step / ToolCall receipt 是恢复与 cancellation terminal 的事实输入，不是 UI event；Runtime 从 receipt 派生权威 lifecycle event 后才发布。
 
 ## 2. 事件源与权威性
 
 | 事件源 | 代码类型 | 权威性 | SDK 出口 | TUI 责任 |
 |---|---|---|---|---|
-| Run 聚合生命周期 | `RunDomainEvent` | Run / Run Step 状态与终态的唯一权威事件源 | `map_domain_event` | 按 identity 投影；不得由 ACK、Activity 或 turn 兼容事件覆盖 |
+| Run 聚合生命周期 | `RuntimeLifecycleEvent` | Run / Run Step 状态与终态的唯一权威事件源 | `map_lifecycle_event` | 按 identity 投影；不得由 ACK、Activity 或 turn 兼容事件覆盖 |
 | Chat/Provider/Tool/Session 流 | `RuntimeStreamEvent` | 内容、进度、命令结果和 session 投影的 Runtime-owned 流 | `map_stream_event` | ACL 转换并更新对应 Model；仅明确 terminal 事件可结束 processing |
-| Activity 投影 | `RuntimeStreamEvent::{ActivityChanged, ActivitySnapshot}` | observational | SDK 同名 DTO | 维护 revision 化事实镜像与摘要，不驱动 terminal |
+| Activity 观察流 | `RuntimeActivityEvent::{Changed, Snapshot}` | observational | `map_activity_event` | 维护 revision 化事实镜像与摘要，不驱动 terminal |
 | 控制 ACK | client / control trait 返回值 | 非事件、非终态 | 不进入 `ChatEvent` | 只更新 cancelling/rejected/failed presentation |
 | Resume | `SessionResumed` + durable finalized Step | 已持久化事实的重建投影 | SDK `SessionResumed` | 通过同一 TUI Model/reducer 语义还原历史，不伪造 live terminal |
 
-## 3. RunDomainEvent 全链路矩阵
+## 3. RuntimeLifecycleEvent 全链路矩阵
 
-`RunDomainEvent` 定义于 `agent/features/runtime/src/domain/agent_run/event.rs`，通过 `agent/features/runtime/src/adapters/sdk_event_mapper.rs::map_domain_event` 一对一进入 SDK。除表中注明外，TUI 第一层 ACL 将 SDK 事件包装为带 `UiRunId` / `UiRunStepId` 的 `TuiRuntimeEvent::{Run, RunStep}`。
+`RuntimeLifecycleEvent` 定义于 `agent/features/runtime/src/domain/agent_run/event.rs`，通过 `agent/features/runtime/src/adapters/sdk_event_mapper.rs::map_lifecycle_event` 一对一进入 SDK。该名称表达 Runtime 执行生命周期职责，NEVER 以宽泛的 `DomainEvent` 技术分类替代。除表中注明外，TUI 第一层 ACL 将 SDK 事件包装为带 `UiRunId` / `UiRunStepId` 的 `TuiRuntimeEvent::{Run, RunStep}`。
 
-| Runtime domain event | SDK `ChatEvent` | TUI 第一层 | TUI reducer / 展示 | 权威与终态规则 |
+| Runtime lifecycle event | SDK `ChatEvent` | TUI 第一层 | TUI reducer / 展示 | 权威与终态规则 |
 |---|---|---|---|---|
 | `Started` | `RunStarted` | `Run { Started }` | lifecycle 观察；Main/Sub 按 `parent_run_id` 区分 | Run 已激活；非终态 |
 | `StepStarted` | `RunStepStarted` | `RunStep { Started }` | Main Step 缓存 active `(run_id, step_id)`；其他投影 no-op | active Main identity 的唯一建立点 |
@@ -67,25 +73,27 @@ Runtime 应用编排、Provider、Tool、Session 服务
 
 ### 3.1 Run 事件的并行观察路径
 
-Runtime 在发布 domain event 时还会由 `ActivityRunObserver` 更新 Activity 树；这是并行投影，不是串行 terminal authority：
+Runtime 在发布 lifecycle event 时还会由 `ActivityRunObserver` 更新 Activity 树；这是并行投影，不是串行 terminal authority：
 
 ```text
-RunDomainEvent ──▶ SDK ChatEvent ──▶ TUI lifecycle / terminal projection
-       └────────▶ ActivityCoordinator ──▶ ActivityChanged/Snapshot ──▶ TUI activity mirror
+RuntimeLifecycleEvent ──▶ SDK ChatEvent ──▶ TUI lifecycle / terminal projection
+             └────────▶ ActivityCoordinator ──▶ RuntimeActivityEvent ──▶ SDK/TUI activity mirror
 ```
 
 Activity 更新失败或 revision gap 不得改变 domain terminal；TUI 应等待 snapshot 修复 activity mirror，而不是从 activity 反推出 terminal。
 
-## 4. RuntimeStreamEvent 全链路矩阵
+## 4. RuntimeActivityEvent 与 RuntimeStreamEvent 全链路矩阵
 
-`RuntimeStreamEvent` 定义于 `agent/features/runtime/src/application/loop_engine/chat/events.rs`。表中“直接”表示 SDK 与 TUI 仅做无损 DTO 转换；“App 级”表示 `App::update_runtime_event` 在 ACL/reducer 前后执行明确的交付层协调。
+Activity 不属于内容流。`RuntimeActivityEvent` 与 `RuntimeStreamEvent` 均定义于 `agent/features/runtime/src/application/loop_engine/chat/events.rs`，但分别经 `map_activity_event` 与 `map_stream_event` 发布。`ChatEventSink::send_activity_event` 保持 Activity 在 Runtime 内部的独立类型边界；SDK 为传输便利才将三类事件汇合为 `ChatEvent`。
+
+表中“直接”表示 SDK 与 TUI 仅做无损 DTO 转换；“App 级”表示 `App::update_runtime_event` 在 ACL/reducer 前后执行明确的交付层协调。
 
 ### 4.1 Activity、模型内容与工具流
 
-| Runtime stream event | SDK `ChatEvent` | TUI event | TUI 处理 |
+| Runtime event | SDK `ChatEvent` | TUI event | TUI 处理 |
 |---|---|---|---|
-| `ActivityChanged` | `ActivityChanged` | `ActivityChanged` | `ObserveActivityChange`；按 revision 增量更新事实镜像 |
-| `ActivitySnapshot` | `ActivitySnapshot` | `ActivitySnapshot` | `ReplaceActivitySnapshot`；修复 revision gap |
+| `RuntimeActivityEvent::Changed` | `ActivityChanged` | `ActivityChanged` | `ObserveActivityChange`；按 revision 增量更新事实镜像 |
+| `RuntimeActivityEvent::Snapshot` | `ActivitySnapshot` | `ActivitySnapshot` | `ReplaceActivitySnapshot`；修复 revision gap |
 | `Text` | `Token` | `Text` | `AssistantText`，非空内容重置模型静默计时 |
 | `Thinking` | `Thinking` | `Thinking` | `ThinkingText`，非空内容重置模型静默计时 |
 | `BlockComplete` | `BlockComplete` | `BlockComplete` | `CompleteBlock` |
@@ -170,7 +178,8 @@ SDK `ChatEvent` 还包含由其他 Runtime-owned adapter/control-plane 路径发
 | `ConfigChanged` | config control-plane | `ConfigChanged`；更新 config view 与 markdown spacing | 不由 `RuntimeStreamEvent` mapper 产生 |
 | `CurrentRunChanged` | `RuntimeStreamEvent::RunChanged` | `RunChanged` no-op | `ChatEvent::RunChanged` 变体也仍存在，TUI 合并消费两者；前者是当前生产映射 |
 | `Result` | 旧 ChatInput 兼容结果 | `CommandResultText` | compatibility Published Language；新 Runtime command 应使用 typed event |
-| `RunStep*`、`RunDrainingInput`、`RunTerminationRequested`、`RunTerminated`、`RunCompleted`、`RunFailed`、`RunStuckDetected`、`RunTransitioned`、`RunAwaitingUser`、`RunResumed` | `RunDomainEvent` | 见 §3 | 不属于 `RuntimeStreamEvent` 主体 |
+| `RunStep*`、`RunDrainingInput`、`RunTerminationRequested`、`RunTerminated`、`RunCompleted`、`RunFailed`、`RunStuckDetected`、`RunTransitioned`、`RunAwaitingUser`、`RunResumed` | `RuntimeLifecycleEvent` | 见 §3 | 不属于 `RuntimeStreamEvent` 主体 |
+| `ActivityChanged`、`ActivitySnapshot` | `RuntimeActivityEvent` | Activity ACL/reducer | 不属于 `RuntimeStreamEvent` 主体 |
 
 ## 6. TUI 消费层级与明确丢弃
 
@@ -208,7 +217,7 @@ sdk::ChatEvent
 2. Main/Sub 事件共享同一 Published Language；不得通过不同 enum 或 adapter 改变终态词汇。
 3. `RunStepCancelled.terminal` MUST 保持 typed：`Cancelled | CancellationUnconfirmed`；SDK/TUI transport NEVER 恢复 `confirmed: bool`。
 4. Step cancellation terminal 只由 Runtime 从同一 durable receipt set 派生并发布一次；TUI 不从 ACK、Activity、tool result 文本或 timeout 字符串推断。
-5. `Done` / `Cancelled` 只结束 Chat processing；Step / Run terminal 仍由各自 domain event 表达。
+5. `Done` / `Cancelled` 只结束 Chat processing；Step / Run terminal 仍由各自 lifecycle event 表达。
 6. Parent → child cancellation 单向传播；child terminal 不回写或终止 parent，除非 parent 自己的 Runtime state machine 基于 tool result 作出后续转移。
 7. 同一 identity 的重复 observational event 可幂等；陈旧 identity、乱序 ACK 或旧 activity revision 不得回滚已接纳的权威 terminal。
 
@@ -216,7 +225,7 @@ sdk::ChatEvent
 
 新增或修改 Runtime 对外事件时 MUST：
 
-1. 在 `RunDomainEvent` 或 `RuntimeStreamEvent` 中明确事件所属事实源，NEVER 两边重复定义同一 terminal。
+1. 在 `RuntimeLifecycleEvent`、`RuntimeActivityEvent` 或 `RuntimeStreamEvent` 中明确事件所属事实源，NEVER 在多个事件族重复定义同一 terminal；Activity NEVER 放回 `RuntimeStreamEvent`。
 2. 同步 Runtime → SDK mapper，并由穷尽 match 保证编译期覆盖。
 3. 同步 SDK schema / wire registry（若该 DTO 可出站）。
 4. 同步 TUI 第一层结构转换、TUI-owned DTO、第二层语义映射或明确 App 级消费。
@@ -228,8 +237,8 @@ sdk::ChatEvent
 
 | 层 | 权威文件 |
 |---|---|
-| Run domain events | `agent/features/runtime/src/domain/agent_run/event.rs` |
-| Runtime stream events | `agent/features/runtime/src/application/loop_engine/chat/events.rs` |
+| Runtime lifecycle events | `agent/features/runtime/src/domain/agent_run/event.rs` |
+| Runtime Activity / stream events | `agent/features/runtime/src/application/loop_engine/chat/events.rs` |
 | Runtime → SDK mapping | `agent/features/runtime/src/adapters/sdk_event_mapper.rs` |
 | SDK Published Language | `packages/sdk/src/chat_event.rs`、`packages/sdk/src/activity.rs`、`packages/sdk/src/run.rs` |
 | SDK → TUI structural ACL | `apps/cli/src/tui/adapter/event_mapping.rs` |
@@ -242,4 +251,4 @@ sdk::ChatEvent
 
 | 日期 | 变更 |
 |---|---|
-| 2026-08-05 | 首次建立 Runtime domain/stream → SDK → TUI 全链路事件目录，明确 terminal authority、Activity observational、ACK 非 terminal 与 Live/Resume 边界。 |
+| 2026-08-05 | 首次建立 Runtime lifecycle/activity/stream → SDK → TUI 全链路事件目录，明确三类事件族、terminal authority、Activity observational、ACK 非 terminal 与 Live/Resume 边界。 |

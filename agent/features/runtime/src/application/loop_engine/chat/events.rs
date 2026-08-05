@@ -39,12 +39,16 @@ pub struct RuntimeResumedSessionStep {
 }
 
 #[derive(Debug)]
-pub enum RuntimeStreamEvent {
-    ActivityChanged {
+pub enum RuntimeActivityEvent {
+    Changed {
         kind: sdk::ActivityChangeKind,
-        activity: sdk::ActivityView,
+        activity: Box<sdk::ActivityView>,
     },
-    ActivitySnapshot(sdk::ActivitySnapshotView),
+    Snapshot(sdk::ActivitySnapshotView),
+}
+
+#[derive(Debug)]
+pub enum RuntimeStreamEvent {
     Text {
         context: RuntimeRunContext,
         text: String,
@@ -265,9 +269,11 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 
     fn try_send_event(&self, event: RuntimeStreamEvent);
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, _event: RuntimeActivityEvent) {}
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        _event: crate::domain::agent_run::RunDomainEvent,
+        _event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
         Box::pin(async {})
     }
@@ -276,9 +282,10 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 trait DynChatEventSink: Send + Sync {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
     fn try_send_event(&self, event: RuntimeStreamEvent);
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent);
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a>;
 }
 
@@ -294,11 +301,15 @@ where
         ChatEventSink::try_send_event(self, event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        ChatEventSink::send_activity_event(self, event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        ChatEventSink::send_domain_event(self, event)
+        ChatEventSink::send_lifecycle_event(self, event)
     }
 }
 
@@ -344,10 +355,14 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.try_send_event(event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        self.inner.send_activity_event(event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        self.inner.send_domain_event(event)
+        self.inner.send_lifecycle_event(event)
     }
 }

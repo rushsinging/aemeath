@@ -397,7 +397,7 @@ pub trait EventSinkPort: Send {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError>;
 }
 

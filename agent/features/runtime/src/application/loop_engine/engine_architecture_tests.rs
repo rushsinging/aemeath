@@ -67,6 +67,22 @@ fn step_cancellation_terminal_never_regresses_to_boolean_payload() {
 }
 
 #[test]
+fn lifecycle_and_activity_events_have_separate_runtime_languages() {
+    let lifecycle_source = include_str!("../../domain/agent_run/event.rs");
+    let stream_source = include_str!("chat/events.rs");
+    let sdk_mapper = include_str!("../../adapters/sdk_event_mapper.rs");
+
+    assert!(lifecycle_source.contains("pub enum RuntimeLifecycleEvent"));
+    assert!(!lifecycle_source.contains("RunDomainEvent"));
+    assert!(stream_source.contains("pub enum RuntimeActivityEvent"));
+    assert!(!stream_source.contains("RuntimeStreamEvent {\n    ActivityChanged"));
+    assert!(!stream_source.contains("RuntimeStreamEvent {\n    ActivitySnapshot"));
+    assert!(sdk_mapper.contains("pub fn map_lifecycle_event"));
+    assert!(sdk_mapper.contains("pub(crate) fn map_activity_event"));
+    assert!(!sdk_mapper.contains("map_domain_event"));
+}
+
+#[test]
 fn domain_events_are_observed_by_activity_before_external_publish() {
     let source = include_str!("run_loop.rs");
 
@@ -455,7 +471,7 @@ fn p6_9_3_shared_run_services_delegate_to_role_neutral_owners() {
 }
 
 use crate::domain::agent_run::{
-    InteractionContinuation, Run, RunControl, RunDomainEvent, RunSpec, RunStatus, ToolCallStatus,
+    InteractionContinuation, Run, RunControl, RuntimeLifecycleEvent, RunSpec, RunStatus, ToolCallStatus,
 };
 
 /// #1248: Fake ToolExecutionPort that counts execute calls and returns configurable results.
@@ -518,7 +534,7 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
 #[derive(Default)]
 struct ScriptedObservations {
     calls: Vec<&'static str>,
-    events: Vec<RunDomainEvent>,
+    events: Vec<RuntimeLifecycleEvent>,
     guarded_calls: Vec<Vec<ToolGuardDecision>>,
     cancelled_steps: Vec<sdk::RunStepId>,
     finalized_steps: Vec<sdk::RunStepId>,
@@ -685,7 +701,7 @@ impl ScenarioLoopHarness {
         self.scenario
             .events()
             .iter()
-            .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+            .filter(|event| matches!(event, RuntimeLifecycleEvent::Completed { .. }))
             .count()
     }
 
@@ -850,7 +866,7 @@ impl ScriptedScenario {
         self.state.lock().unwrap().observations.calls.clone()
     }
 
-    fn events(&self) -> Vec<RunDomainEvent> {
+    fn events(&self) -> Vec<RuntimeLifecycleEvent> {
         self.state.lock().unwrap().observations.events.clone()
     }
 
@@ -970,7 +986,7 @@ impl EventSinkPort for EventSinkFake {
     async fn emit(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
         let mut state = self.0.lock().unwrap();
         state.observations.calls.push("emit");
