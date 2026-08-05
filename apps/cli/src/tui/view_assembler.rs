@@ -12,3 +12,4 @@ pub(crate) mod output_window_index;
 pub(crate) mod resumed_history;
 pub mod retained_output_view;
 pub mod status;
+pub(crate) mod tool_group;
