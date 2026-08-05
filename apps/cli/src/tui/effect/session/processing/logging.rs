@@ -114,11 +114,27 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         ),
         sdk::ChatEvent::TurnStarted { messages }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
-        | sdk::ChatEvent::PostToolExecutionSync { messages }
         | sdk::ChatEvent::CompactRollback { messages }
         | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
         }
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => crate::tui::log_trace!(
+            "{} message_state_changed count={} revision={}",
+            stage,
+            message_count,
+            revision
+        ),
+        sdk::ChatEvent::HookNotice { notice } => crate::tui::log_trace!(
+            "{} hook_notice point={} command={} exit_code={:?} has_output_file={}",
+            stage,
+            notice.point,
+            notice.command,
+            notice.exit_code,
+            notice.output_file.is_some()
+        ),
         sdk::ChatEvent::ApiError { messages, error } => {
             crate::tui::log_trace!("{} api_error count={} err={}", stage, messages.len(), error)
         }

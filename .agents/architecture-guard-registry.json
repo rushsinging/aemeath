@@ -663,6 +663,22 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Runtime capability assembly policy",
       "status": "active"
+    },
+    {
+      "id": "policy.runtime.large-file-responsibilities",
+      "guard": "check-runtime-large-file-responsibilities.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src/application"
+      },
+      "classification": "target_capability_policy",
+      "owner": "runtime",
+      "reason": "Runtime post-migration orchestration roots stay narrow and delegate contracts, phases, interaction, control, session commands, Run preparation, assembly and launch to named responsibility owners; giant roots, mod.rs and retired compatibility paths may not return",
+      "tracking_issue": 1400,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Runtime responsibility and file-size policy",
+      "status": "active"
     }
   ]
 }

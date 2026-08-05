@@ -1,0 +1,1446 @@
+#[tokio::test]
+async fn test_loop_persists_across_turns_until_shutdown() {
+    // 常驻 loop 跨回合：喂 "first" → 完成回合 1 → 喂 "second" → 完成回合 2
+    // → drop 发送端关闭通道 → loop shutdown 退出（不 hang）。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    // driver：轮询 sink 事件，见到第 1 个 DoneWithDuration 后投递 "second"，
+    // 见到第 2 个 DoneWithDuration 后 drop 发送端关闭通道触发 shutdown。
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        // 等回合 2 完成（第 2 个 DoneWithDuration），再关闭通道。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let shell = test_shell_with_hooks(always_blocking_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            SequenceProvider::new(vec!["turn one final", "turn two final"]),
+        )),
+    );
+    shell.set_test_session_id("test-persistent-loop");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 两回合各产生一个 DoneWithDuration（常驻 loop 跨回合存活）。
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 2,
+        "常驻 loop 应跨两回合产生 2 个 DoneWithDuration: {events:?}"
+    );
+    // 两回合的用户消息均被处理（first 在回合 1，second 在回合 2）。
+    assert!(
+        events.iter().any(|event| event == "Text:turn one final"),
+        "回合 1 应调用 LLM: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| event == "Text:turn two final"),
+        "回合 2 应调用 LLM: {events:?}"
+    );
+}
+
+/// 每次 LLM 调用固定返回同一条极短回复，并 sleep 固定时长。
+/// 用于 #390 A1 跨回合泄漏回归：
+/// - 相同回复 → 若 `stall_detector` 跨回合泄漏，第 3 回合会误判 stall 停机。
+/// - 固定 sleep → 若 `turn_start` 跨回合泄漏，`DoneWithDuration` 的 duration
+///   会随回合累加（第 N 回合 ≈ N*sleep）；重置后每回合 ≈ 单次 sleep。
+#[derive(Clone)]
+struct IdenticalReplyProvider {
+    reply: String,
+    per_turn_delay: std::time::Duration,
+}
+
+impl IdenticalReplyProvider {
+    fn new(reply: &str, per_turn_delay: std::time::Duration) -> Self {
+        Self {
+            reply: reply.to_string(),
+            per_turn_delay,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for IdenticalReplyProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        tokio::time::sleep(self.per_turn_delay).await;
+        Ok(text_completion_stream(self.reply.clone(), 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_stall_detector_resets_across_user_turns() {
+    // #390 A1 回归：常驻 loop 跨 3 个独立 USER 回合，每回合 LLM 返回**完全相同**的
+    // 极短回复（"Done."）。重构前每个 `chat()` 持有独立 StallDetector，跨回合不可能
+    // 累积；A1 把 loop 改为常驻后 detector 在 loop 外只构造一次，3 个相同回复会在第 3
+    // 回合触发 "[agent loop stopped: LLM is producing repetitive output]" 误报。
+    //
+    // 修复：每个新 USER 回合开始时重置 stall_detector（同时重置 turn_start）。
+    // 期望：3 个回合都正常完成（3 个 DoneWithDuration），无 stall 停机 SystemMessage。
+    //
+    // 同时验证 turn_start 不跨回合泄漏（Finding 2）：每回合 LLM sleep 固定时长，
+    // 若 turn_start 泄漏，第 3 回合 duration 会累积成 ~3*delay；重置后各回合 ~delay。
+    let per_turn_delay = std::time::Duration::from_millis(40);
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 回合 1 的用户消息在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("turn-1", Vec::new()))
+        .unwrap();
+
+    // driver：每见到一个新的 DoneWithDuration 就投递下一回合输入；最后无条件关闭通道。
+    //
+    // **必须有界**：修复前第 3 回合会误触发 stall 停机，loop 直接 break（不产生第 3 个
+    // DoneWithDuration）。若 driver 无界轮询「done_count>=3」会永久阻塞，掩盖失败为 hang。
+    // 改为「有界等待 + stall 信号提前退出 + 无条件 drop 发送端」，使修复前以**断言失败**
+    // （而非 hang）暴露 RED；修复后 3 回合正常完成 → GREEN。
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 有界等待 done_count 达到 target 或观测到 stall 停机（提前退出）。
+        async fn wait_for(sink: &RecordingSink, target: usize) {
+            for _ in 0..400 {
+                let events = sink.events();
+                let done_count = events
+                    .iter()
+                    .filter(|event| event.as_str() == "DoneWithDuration")
+                    .count();
+                let stalled = events.iter().any(|e| e.contains("repetitive output"));
+                if done_count >= target || stalled {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+        for (next, target) in [("turn-2", 1usize), ("turn-3", 2usize)] {
+            wait_for(&driver_sink, target).await;
+            let _ = input_tx.send(sdk::ChatInputEvent::user_message(next, Vec::new()));
+        }
+        wait_for(&driver_sink, 3).await;
+        drop(input_tx); // 无条件关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            IdenticalReplyProvider::new("Done.", per_turn_delay),
+        )),
+    );
+    shell.set_test_session_id("test-stall-reset-across-turns");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // Finding 1：3 个相同短回复回合均正常完成，无 stall 误报。
+    assert!(
+        !events.iter().any(|e| e.contains("repetitive output")),
+        "相同短回复不应跨独立 USER 回合触发 stall 停机: {events:?}"
+    );
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 3,
+        "3 个独立 USER 回合应各产生 1 个 DoneWithDuration: {events:?}"
+    );
+
+    // Finding 2（轻量断言）：turn_start 每回合重置，duration 不随回合累积。
+    // 若未重置，第 3 回合 duration ≈ 3*delay；重置后各回合 ≈ delay。
+    // 取「第 3 回合 < 前两回合 duration 之和」作为非累积的稳健判据。
+    let durations = sink.done_durations();
+    assert_eq!(durations.len(), 3, "应有 3 个 duration: {durations:?}");
+    assert!(
+        durations[2] < durations[0] + durations[1],
+        "turn_start 应每回合重置：第 3 回合 duration ({:?}) 不应累积到 >= 前两回合之和 ({:?} + {:?})",
+        durations[2],
+        durations[0],
+        durations[1]
+    );
+}
+
+/// 记录每次 LLM 调用时 messages 中最后一条用户消息的文本。
+/// 用于确定性地检测「空闲期命令触发的陈旧历史空回合」：
+/// 合法回合每次调用前都有新用户消息（"first" / "second"）；
+/// bug 触发的空回合会在 "first" 之后、"second" 之前再次以 "first" 为末条用户消息调用 LLM。
+#[derive(Clone)]
+struct RecordingProvider {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for RecordingProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let last_user = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == Role::User)
+            .map(|message| message.text_content())
+            .unwrap_or_default();
+        self.calls.lock().unwrap().push(last_user.clone());
+        let text = format!("response to {last_user}");
+        Ok(text_completion_stream(text, 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_idle_control_command_does_not_run_spurious_turn() {
+    // #390 A1（Important）：空闲期收到一个不 append 任何用户消息的 ControlCommand
+    // （如 /save / /model / /provider，apply_gate 返回 Proceed 且 appended_user_messages=0）
+    // 时，loop 必须保持空闲，NEVER 在陈旧历史上跑空回合。随后投递真实 UserMessage
+    // 才恢复运行并产出恰好一个新回合；drop 发送端关闭通道后 loop shutdown 退出。
+    //
+    // 确定性检测：RecordingProvider 记录每次 LLM 调用时末条用户消息文本。合法序列恰为
+    // ["first", "second"]；bug 会插入一次陈旧 "first" 调用 → 序列变
+    // ["first", "first", "second"]（断言失败）。
+    //
+    // 同步屏障：driver 等 DoneWithDuration（回合 1 完成、loop 已进入空闲态、下一处通道
+    // 消费者必为 await_idle_input）后再投递 /save，确保命令落到 idle 臂而非被回合终结
+    // 路径的 BeforeFinish gate 提前 drain 掉。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）→ loop 已进入空闲态阻塞于
+        // await_idle_input；此时投递的 /save 必由 idle 臂消费。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 空闲期投递一个 ControlCommand（/save：SideEffect，append 0 条用户消息）。
+        input_tx
+            .send(sdk::ChatInputEvent::ControlCommand {
+                raw: "/save".to_string(),
+            })
+            .unwrap();
+        // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
+        // 若 bug 存在，这会产生第 2 次 LLM 调用（末条用户消息仍为 "first"）。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 命令处理后 LLM 调用数仍应为 1（保持空闲，无空回合）。
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 ControlCommand 不得触发 LLM 调用（应仍只有 first 一次）"
+        );
+
+        // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-idle-control-command");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    // 关键断言（确定性）：LLM 调用序列恰为 ["first", "second"]。
+    // bug 会插入陈旧 "first" 调用 → ["first", "first", "second"]，断言失败。
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "LLM 应恰好被两条真实用户消息触发；命令不得引发陈旧历史空回合"
+    );
+    // 命令的 raw 文本绝不应作为 user message 进入消息历史。
+    assert!(
+        sink.synced_messages()
+            .into_iter()
+            .flatten()
+            .all(|message| message.text_content() != "/save"),
+        "ControlCommand 永不作为 user message 进入历史: {:?}",
+        sink.events()
+    );
+}
+
+#[tokio::test]
+async fn test_idle_pending_command_does_not_run_spurious_turn() {
+    // 回归 #628：idle 收到的 PendingCommand（ListReminders 等纯查询或动作命令）
+    // 处理后应回 idle 等下一条输入，而不是掉进 execute_tool_round 跑一轮幽灵 LLM turn。
+    // bug 表现：命令处理完无 continue，掉进 step_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
+    //
+    // 与 test_idle_control_command_does_not_run_spurious_turn 的区别：前者走 ControlCommand 路径
+    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::ListReminders → PendingCommand 路径，
+    // 命中 loop_runner.rs 中 6 处漏 continue 的 match 臂。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）→ loop 已进入空闲态阻塞于 await_idle_input。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 空闲期投递 ListReminders（PendingCommand 路径）。
+        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
+        // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 命令处理后 LLM 调用数仍应为 1（保持空闲，无空回合）。
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用（应仍只有 first 一次）"
+        );
+
+        // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-idle-pending-save");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
+        sink.events()
+    );
+}
+
+#[tokio::test]
+async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
+    // 回归 #628：idle 收到 ChatInputEvent::ListReminders（PendingCommand 路径）应直接回 idle，
+    // 不应掉进 turn 跑一轮幽灵 LLM 调用。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用"
+        );
+
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-idle-pending-list-reminders");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
+        sink.events()
+    );
+}
+
+#[tokio::test]
+async fn test_stop_hook_block_limit_stops_loop() {
+    // #1248 Task 6：Stop hook 连续阻断超过 16 次由 Run 状态机触发 RetryExhausted → Failed
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if !driver_sink.done_durations.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    // #1248 Task 6: Need 16+ unique responses — Run counts blocks, not StuckGuard.
+    let responses: Vec<String> = (1..=18).map(|i| format!("r{i}")).collect();
+    let response_refs: Vec<&str> = responses.iter().map(|s| s.as_str()).collect();
+    let shell = test_shell_with_hooks(always_blocking_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            SequenceProvider::new(response_refs),
+        )),
+    );
+    shell.set_test_session_id("test-block-limit");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver should complete after shutdown");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // #1248 Task 6: RetryExhausted 由 Run 状态机产生，消息在 fail_run 中。
+    assert!(
+        events
+            .iter()
+            .any(|event| event.contains("stop hook blocked completion 16 times (retry exhausted)")),
+        "should emit Run RetryExhausted reason: {:?}",
+        events
+    );
+    // #604：blocked 上限退出时必须发出 DoneWithDuration，否则 TUI spinner 永不停
+    assert!(
+        !sink.done_durations.lock().unwrap().is_empty(),
+        "blocked-limit exit must emit DoneWithDuration, got events: {:?}",
+        events
+    );
+}
+
+/// 第 1 次调用阻塞直到 cancel 被触发后返回取消错误，
+/// 第 2 次及以后调用立即返回正常响应。用于模拟「回合进行中被取消、
+/// 随后新回合正常完成」的场景。
+#[derive(Clone)]
+struct CancellableThenNormalProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl CancellableThenNormalProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for CancellableThenNormalProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        if call_index == 0 {
+            // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
+            cancel.cancelled().await;
+            return Err(ProviderError::cancelled());
+        }
+        // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
+        if cancel.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+        let text = format!("turn {} final", call_index + 1);
+        Ok(text_completion_stream(text, 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_aborts_turn_then_returns_to_idle() {
+    // #390 A1 Task 3：回合进行中 cancel → 发出 Cancelled、回滚本回合消息、
+    // **回到空闲**（不退 loop）；随后投递新 UserMessage → 新回合正常完成；
+    // 最后 drop 发送端关闭通道 → loop shutdown 退出。
+    //
+    // 取消令牌生命周期（并发关键）：每个 Run 在 ActiveRunRegistry 中独占 token，
+    // cancel_run(run_id) 只取消目标 Run；Session 回到 idle 后创建新 Run 和新 token。
+    // 若错误复用已取消 token，回合 2 的 LLM 调用会立即 Cancelled。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    // Active Run registry：模拟 RuntimeHandle.active_run 的同步 cancel_run 入口。
+    let active_run =
+        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let provider = CancellableThenNormalProvider::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 的 LLM 调用真正开始（call count >= 1），此时 provider 正阻塞于
+        // cancel.cancelled()。再触发取消，确保取消落在「回合进行中」。
+        loop {
+            if *driver_provider.calls.lock().unwrap() >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.terminate(
+                &run_id,
+                sdk::RunTerminationReason::SessionShutdown,
+                sdk::ControlDeadline::from_unix_millis(1),
+            ),
+            sdk::TerminateRunOutcome::Accepted
+        );
+
+        // 等回合 1 被取消（出现 Cancelled 事件）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // 投递真实用户消息：应恢复运行并完成回合 2（新 Run 拥有独立 token）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let mut shell = test_shell();
+    shell.active_run = active_run.clone();
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-cancel-then-idle");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 cancel→idle→新回合→shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 回合 1 被取消：发出 Cancelled。
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "回合 1 进行中 cancel 应发出 Cancelled 事件: {events:?}"
+    );
+    // cancel 后未退 loop：回合 2 正常完成，恰好一个 DoneWithDuration。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "cancel 应回空闲、不退 loop；新回合应正常完成产出 1 个 DoneWithDuration: {events:?}"
+    );
+    // 回合 2 的 LLM 响应文本出现（说明新 token 未被陈旧 cancel 污染）。
+    assert!(
+        events.iter().any(|e| e == "Text:turn 2 final"),
+        "重置 token 后回合 2 应正常调用 LLM 并完成: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "finalized partial Step 由 Context append 保存，取消不得恢复旧 rollback 路径: {events:?}"
+    );
+}
+
+/// 回合 1 正常完成、回合 2 进行中阻塞等待 cancel、回合 3 正常完成。
+/// 用于验证「取消晚于首回合的回合时，先前已完成回合的消息必须存活」。
+#[derive(Clone)]
+struct CompleteThenCancellableProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl CompleteThenCancellableProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for CompleteThenCancellableProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        // 回合 2（call_index == 1）：阻塞等 cancel，被取消后返回 Cancelled。
+        // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
+        if call_index == 1 {
+            cancel.cancelled().await;
+            return Err(ProviderError::cancelled());
+        }
+        if cancel.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+        let text = format!("turn {} assistant", call_index + 1);
+        Ok(text_completion_stream(text, 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_later_turn_preserves_completed_prior_turns() {
+    // #390 A1（Important，data-loss）：常驻 loop 中先前回合已完成的消息累积在同一个
+    // `messages` Vec。若 cancel 回滚用「loop 启动时的固定基线」，取消任何「非首回合」会把
+    // 先前已完成回合一并截掉（整段对话坍缩到首条）。修复后 cancel 改用 per-turn 基线，
+    // 只回滚当前回合的 partial 输出，先前已完成回合的 user+assistant 必须存活。
+    //
+    // 时序：
+    //   回合 1：投递 "turn1-user" → LLM 正常返回 "turn 1 assistant" → 完成、进入空闲。
+    //   回合 2：投递 "turn2-user" → LLM 阻塞等 cancel → 外部 cancel → 回滚回空闲。
+    //   回合 3：投递 "turn3-user" → LLM 正常完成（新 token 未被污染）→ shutdown。
+    //
+    // 关键断言：回合 2 被取消后的 MessagesSync 中，回合 1 的 "turn1-user" 与
+    // "turn 1 assistant" 必须仍存在（pre-fix `truncate(loop_start_baseline=0)` 会删除它们）。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    // Active Run registry：模拟同步 cancel_run(run_id)。
+    let active_run =
+        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let provider = CompleteThenCancellableProvider::new();
+
+    // 回合 1 的用户消息在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("turn1-user", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver_registry = active_run.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration），loop 进入空闲。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递回合 2 的用户消息：恢复运行，LLM（第 2 次调用）阻塞等 cancel。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("turn2-user", Vec::new()))
+            .unwrap();
+        // 等回合 2 的 LLM 调用真正开始（call count >= 2），确保 cancel 落在「回合进行中」。
+        loop {
+            if *driver_provider.calls.lock().unwrap() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.terminate(
+                &run_id,
+                sdk::RunTerminationReason::SessionShutdown,
+                sdk::ControlDeadline::from_unix_millis(1),
+            ),
+            sdk::TerminateRunOutcome::Accepted
+        );
+        // 等回合 2 被取消（出现 Cancelled 事件）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递回合 3 的用户消息：恢复运行并完成回合 3。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("turn3-user", Vec::new()))
+            .unwrap();
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let mut shell = test_shell_with_hooks(test_hook_port());
+    shell.active_run = active_run.clone();
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-cancel-preserves-prior-turns");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 回合1→回合2取消→回合3→shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 回合 2 被取消：发出 Cancelled。
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "回合 2 进行中 cancel 应发出 Cancelled 事件: {events:?}"
+    );
+
+    assert!(
+        events
+            .iter()
+            .all(|event| !event.starts_with("CompactRollback")),
+        "回合 2 取消应提交 finalized partial Step，禁止恢复旧 rollback 路径: {events:?}"
+    );
+
+    // cancel 后未退 loop：回合 3 正常完成，总计 2 个 DoneWithDuration。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 2,
+        "回合 1 与回合 3 各产出一个 DoneWithDuration（cancel 不退 loop）: {events:?}"
+    );
+    // 回合 3 的 assistant 响应出现（新 token 未被陈旧 cancel 污染）。
+    assert!(
+        events.iter().any(|e| e == "Text:turn 3 assistant"),
+        "重置 token 后回合 3 应正常调用 LLM 并完成: {events:?}"
+    );
+}
+
+/// Task 4：loop 顶部无待答回合时必须先 idle-wait，收到 UserMessage 后才调 LLM。
+///
+/// 用一个计数 provider 追踪 LLM 调用次数。在投递任何输入前，先给 loop 充分调度
+/// 机会（yield 若干轮），断言此时 LLM 调用数为 0（loop 正处于 loop-top idle-wait）。
+/// 随后投递一条 UserMessage，等 DoneWithDuration 出现，断言恰好一次 LLM 调用。
+/// 最后 drop 发送端，loop shutdown 退出（无 hang）。
+///
+/// RED 阶段：当前 loop 在 `run_session_command_driver` 顶部直接进入 BeforeLlm gate，
+/// 即使 messages 为空也不会 idle-wait，调用 LLM 时 messages_for_api 为空
+/// 导致 LLM provider 被调用（或回合逻辑异常）。实现 `has_pending_user_turn` +
+/// 顶部 idle 门后，测试应变绿。
+#[tokio::test]
+async fn test_chat_impl_idle_until_first_input_event() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // === 计数 provider：记录 LLM 调用次数 ===
+    #[derive(Clone)]
+    struct CountingProvider {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    #[async_trait]
+    impl LlmProvider for CountingProvider {
+        async fn invocation_stream(
+            &self,
+            _scope: &InvocationScope,
+            _system: &[SystemBlock],
+            _messages: &[Message],
+            _tool_schemas: &[serde_json::Value],
+            _cancel: &CancellationToken,
+        ) -> Result<InvocationStream, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(text_completion_stream("hi response", 1, 1))
+        }
+
+        fn model_name(&self) -> &str {
+            "test-model"
+        }
+
+        fn provider_name(&self) -> &str {
+            "test-provider"
+        }
+    }
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let call_counter = Arc::new(AtomicUsize::new(0));
+    let provider = CountingProvider {
+        calls: call_counter.clone(),
+    };
+
+    // driver：先给 loop 充分调度机会（不投递任何输入），断言 LLM 未被调用；
+    // 再投递 UserMessage("hi")，等 DoneWithDuration；最后关闭通道触发 shutdown。
+    let driver_sink = sink.clone();
+    let driver_counter = call_counter.clone();
+    let driver = tokio::spawn(async move {
+        // 给 loop 充分调度机会（200 次 yield）——若 loop 不 idle-wait，
+        // 会直接进入 BeforeLlm gate 并调用 LLM。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+
+        // 关键断言 RED：当前 loop 无 loop-top idle，此时 LLM 已被调用（test 失败）。
+        // 实现后 loop 在 loop-top idle-wait 阻塞，LLM 调用数应为 0。
+        assert_eq!(
+            driver_counter.load(Ordering::SeqCst),
+            0,
+            "无待答用户回合时 loop 必须 idle-wait，不得立即调用 LLM"
+        );
+        // 此时也不应有 Done（无 LLM 调用必然无完成）。
+        assert!(
+            driver_sink.events().iter().all(|e| e != "DoneWithDuration"),
+            "未投递输入前不得出现 DoneWithDuration: {:?}",
+            driver_sink.events()
+        );
+        // Finding 2：idle gate 已前置到回合头之前，空 seed 启动在收到首条输入前
+        // 不得发出任何 RunChanged（否则是「回合 1 / 处理中」假信号）。
+        assert!(
+            driver_sink
+                .events()
+                .iter()
+                .all(|e| !e.starts_with("RunChanged")),
+            "未投递输入前不得发出 RunChanged（前置 idle gate 避免假回合）: {:?}",
+            driver_sink.events()
+        );
+
+        // 投递首条 UserMessage，loop 应从 idle 恢复、运行一个回合、发出 DoneWithDuration。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("hi", Vec::new()))
+            .unwrap();
+
+        // 等 DoneWithDuration（最多 10s）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // 恰好一次 LLM 调用。
+        assert_eq!(
+            driver_counter.load(Ordering::SeqCst),
+            1,
+            "投递 UserMessage 后应恰好调用一次 LLM"
+        );
+
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+    );
+    shell.set_test_session_id("test-idle-until-first-input");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 整个生命周期内恰好一次 LLM 调用（"hi" 回合）。
+    assert_eq!(
+        call_counter.load(Ordering::SeqCst),
+        1,
+        "全程应恰好一次 LLM 调用: {events:?}"
+    );
+    // 产出一个 DoneWithDuration（一个完整回合）。
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.as_str() == "DoneWithDuration")
+            .count(),
+        1,
+        "应产出恰好一个 DoneWithDuration: {events:?}"
+    );
+    // Finding 2：全程恰好一次 RunChanged，且回合编号为 1（首个真实回合 = 1，
+    // 前置 idle gate 不会消耗回合号）。空 seed 启动不产生假回合。
+    let turn_changes: Vec<&String> = events
+        .iter()
+        .filter(|e| e.starts_with("RunChanged"))
+        .collect();
+    assert_eq!(
+        turn_changes,
+        vec![&"RunChanged:1".to_string()],
+        "空 seed 启动应恰好发出一次 RunChanged:1（首个真实回合编号为 1）: {events:?}"
+    );
+}
+
+/// Finding 2 专项：空 seed 启动时，loop-top idle gate 位于回合头之前，
+/// 收到首条真实输入前 NEVER 发出任何回合信号（`RunChanged`）或 turn 边界副作用。
+///
+/// 与 `test_chat_impl_idle_until_first_input_event` 的区别：本测试以 `RecordingSink`
+/// 捕获「投递首条输入的那一刻」的事件快照，**确定性**断言该快照内不含 `RunChanged`
+/// （前置 idle gate 的直接观测）。若 gate 仍位于 `RunChanged` 之后（回归），快照会
+/// 含 `RunChanged:1` 假信号 → 断言失败。随后真实输入触发恰好一个回合（`RunChanged:1`
+/// 在输入之后出现），drop 发送端关闭通道使 loop shutdown 退出。
+#[tokio::test]
+async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    // 注意：loop 启动前 NEVER 投递任何输入（空 seed + 无 pending）→ loop 必先 idle-wait。
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 给 loop 充分调度机会去（错误地）跑回合头、发 RunChanged。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 捕获「投递首条输入前」的事件快照。
+        let snapshot_before_input = driver_sink.events();
+        assert!(
+            snapshot_before_input
+                .iter()
+                .all(|e| !e.starts_with("RunChanged")),
+            "空 seed 启动在收到首条输入前不得发出 RunChanged（前置 idle gate 避免假回合）: {snapshot_before_input:?}"
+        );
+        assert_eq!(
+            driver_provider.calls().len(),
+            0,
+            "收到首条输入前不得调用 LLM: {snapshot_before_input:?}"
+        );
+
+        // 投递首条真实用户消息 → 恢复运行、产出恰好一个回合。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            provider.clone(),
+        )),
+    );
+    shell.set_test_session_id("test-no-turn-signal-before-first-input");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 首条输入触发后：恰好一次 RunChanged，编号 1（首个真实回合 = 1）。
+    let turn_changes: Vec<&String> = events
+        .iter()
+        .filter(|e| e.starts_with("RunChanged"))
+        .collect();
+    assert_eq!(
+        turn_changes,
+        vec![&"RunChanged:1".to_string()],
+        "真实输入后应恰好发出一次 RunChanged:1: {events:?}"
+    );
+    // RunChanged 必在首次 LLM 调用（输入处理后）之前的同一回合内；整体恰好一次 LLM 调用。
+    assert_eq!(
+        provider.calls(),
+        vec!["hello".to_string()],
+        "全程应恰好被首条真实用户消息触发一次 LLM 调用: {events:?}"
+    );
+}
+
+/// #672/#503：resume 后 messages 末尾为 User 消息（纯文本）时，loop-top idle 门
+/// 强制等待新输入，而非自动发起 LLM 请求恢复被中断的对话。
+#[tokio::test]
+async fn test_resume_skip_pending_user_run_idles_until_new_input() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // messages 模拟 resume 加载的历史：末条是 User（等待 assistant 回复）
+    let _messages = [Message::user("unfinished question")];
+
+    // driver：先确认 loop 在 idle（无 LLM 调用），再投递新消息触发回合
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // yield 若干轮，确认 loop 没自动发起 LLM 请求
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        // 投递新用户消息 → loop idle 门恢复，进入回合
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("new input", Vec::new()))
+            .unwrap();
+        // 等回合完成
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = SequenceProvider::new(vec!["response to new input"]);
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+    );
+    shell.set_test_session_id("test-resume-skip-pending");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    // 验证：收到新输入后产生回合（DoneWithDuration），证明 loop idle 等待了
+    let events = sink.events();
+    assert!(
+        events.iter().any(|e| e == "DoneWithDuration"),
+        "resume 后应 idle 等待新输入，收到新输入后才完成回合: {events:?}"
+    );
+    // 验证：LLM 响应文本出现（说明新消息触发后正常处理）
+    assert!(
+        events.iter().any(|e| e.contains("response to new input")),
+        "新输入应触发 LLM 响应: {events:?}"
+    );
+}
+
+/// #672：runtime 启动后永远等待用户输入，不管 messages 末尾是什么角色。
+/// 末条 User 消息 + pending_input 空 → idle 等待，不自动触发 LLM。
+#[tokio::test]
+async fn test_messages_with_user_tail_idles_without_pending_input() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let _messages = [Message::user("hello")];
+
+    // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
+    let _driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 给 loop 充分时间进入 idle
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = SequenceProvider::new(vec!["hi there"]);
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+    );
+    shell.set_test_session_id("test-user-tail-idle");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // #672：pending_input 空时，即使 messages 末尾是 User，也不应触发 LLM 响应
+    assert!(
+        !events.iter().any(|e| e.contains("hi there")),
+        "messages 末尾 User + pending_input 空 → 应 idle 等待，不应触发 LLM: {events:?}"
+    );
+}
+
+/// 首次 LLM 调用返回普通协议错误，模拟
+/// "stream error: stream interrupted..."），后续调用正常完成。
+/// 用于验证 API 错误 turn 终止收口（#749）。
+#[derive(Clone)]
+struct ApiErrorThenNormalProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl ApiErrorThenNormalProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ApiErrorThenNormalProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        if call_index == 0 {
+            // 回合 1：模拟 provider 流中断（非取消类 API 错误）。
+            return Err(ProviderError::fatal(
+                ProviderErrorKind::Protocol,
+                "stream interrupted after partial output: error decoding response body".to_string(),
+            ));
+        }
+        Ok(text_completion_stream("recovered final response", 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+/// #749：provider 流中断后，API 错误 turn 终止必须收口 ——
+/// 1. 发出 `ApiError`（携带错误供展示）；
+/// 2. 紧随发出 `DoneWithDuration` 作为统一 turn 结束信号（TUI 据此清 processing）；
+/// 3. NOT 再发 `Error`（消除 TUI 双渲染）；
+/// 4. loop 回到 idle，后续新输入能正常触发下一回合。
+#[tokio::test]
+async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 首条输入触发回合 1（会命中 API 错误）。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 的 API 错误收口（出现 DoneWithDuration）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递新用户消息：验证 API 错误后 loop 回到 idle、能正常开启回合 2。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("retry", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|e| e.contains("recovered final response"))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = ApiErrorThenNormalProvider::new();
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+    );
+    shell.set_test_session_id("test-api-error-finalize");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // 1. API 错误路径发出 ApiError 事件（携带错误文本供展示）。
+    let api_error = events
+        .iter()
+        .position(|e| e.starts_with("ApiError:") && e.contains("stream interrupted"))
+        .expect("API 错误应发出 ApiError 事件");
+
+    // 2. ApiError 之后紧随 DoneWithDuration，统一 turn 结束信号。
+    let done_after_error = events
+        .iter()
+        .skip(api_error)
+        .position(|e| e == "DoneWithDuration")
+        .expect("API 错误后应发出 DoneWithDuration 作为 turn 结束信号");
+    assert!(
+        done_after_error > 0,
+        "DoneWithDuration 应在 ApiError 之后: {events:?}"
+    );
+
+    // 3. NOT 再发 Error 事件（消除 TUI 双渲染）。
+    assert!(
+        !events.iter().any(|e| e.starts_with("Error:")),
+        "API 错误路径不应再发 Error 事件（避免 TUI 双渲染）: {events:?}"
+    );
+
+    // 4. API 错误后 loop 回 idle，新输入正常触发回合 2。
+    assert!(
+        events
+            .iter()
+            .any(|e| e.contains("recovered final response")),
+        "API 错误后应能正常开启下一回合: {events:?}"
+    );
+}

@@ -338,7 +338,7 @@ mod tests {
                 TuiContentBlock::text("world"),
             ],
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
             input_id: None,
         }];

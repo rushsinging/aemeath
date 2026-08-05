@@ -18,19 +18,19 @@ impl Message {
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: None,
             }),
         }
     }
 
-    pub fn stop_hook_feedback(text: impl Into<String>, payload: StopHookFeedback) -> Self {
+    pub fn hook_notice(text: impl Into<String>, notice: HookNotice) -> Self {
         Self {
             role: Role::User,
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
-                source: MessageSource::StopHook,
-                stop_hook: Some(payload),
+                source: MessageSource::Hook,
+                hook_notice: Some(notice),
                 skill_request: None,
             }),
         }
@@ -42,7 +42,7 @@ impl Message {
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SkillRequest,
-                stop_hook: None,
+                hook_notice: None,
                 skill_request: Some(payload),
             }),
         }

@@ -6,7 +6,7 @@ use crate::domain::session::{
     AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, RunStepCursor,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
-use share::message::Message;
+use share::message::{HookNotice, HookNoticeKind, Message, MessageSource};
 
 fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -522,6 +522,58 @@ fn step_member_round_trips_without_storage_types() {
     assert_eq!(
         serde_json::to_value(decoded.step()).expect("decoded step value"),
         serde_json::to_value(member.step()).expect("member step value")
+    );
+}
+
+#[test]
+fn step_member_round_trips_hook_notice_metadata() {
+    let notice = HookNotice {
+        point: "Stop".to_string(),
+        kind: HookNoticeKind::Blocked,
+        summary: "Stop hook prevented stopping.".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(1),
+        reason: "exit code 1".to_string(),
+        stdout_preview: "stdout".to_string(),
+        stderr_preview: "stderr".to_string(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        output_file: Some("/tmp/stop-hook.txt".to_string()),
+    };
+    let member = SessionStepMember::new(
+        RunStepCursor {
+            run_id: "run".to_string(),
+            step_id: "step".to_string(),
+        },
+        CommittedRunStep::accepted_only(
+            "step",
+            AcceptedInputProjection::new(
+                vec![Message::hook_notice("model feedback", notice.clone())],
+                "hook-notice-fingerprint",
+                1,
+            ),
+        ),
+    )
+    .expect("step member");
+
+    let bytes = SessionGenerationCodec::encode_step(&member).expect("encode step");
+    let decoded = SessionGenerationCodec::decode_step(&bytes).expect("decode step");
+    let message = decoded
+        .step()
+        .accepted_input
+        .as_ref()
+        .expect("accepted input")
+        .messages
+        .first()
+        .expect("Hook notice message");
+
+    assert_eq!(message.source(), MessageSource::Hook);
+    assert_eq!(
+        message
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.hook_notice.as_ref()),
+        Some(&notice)
     );
 }
 

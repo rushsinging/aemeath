@@ -21,6 +21,27 @@ impl ConversationModel {
         changes
     }
 
+    pub(super) fn append_hook_notice(
+        &mut self,
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+    ) -> Vec<ConversationChange> {
+        self.clear_active_text_blocks();
+        let block_id = self.next_block_id("hook-notice");
+        self.timeline.push(OutputTimelineItem::HookNotice {
+            id: block_id.clone(),
+            title,
+            text,
+            kind,
+        });
+        vec![
+            ConversationChange::SystemMessageAppended { block_id },
+            ConversationChange::StyleBoundaryResetRequired,
+            ConversationChange::OutputDirty,
+        ]
+    }
+
     pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
         let text = strip_system_reminder_envelope_owned(text);
         if let Some(OutputTimelineItem::System { text: existing, .. }) =

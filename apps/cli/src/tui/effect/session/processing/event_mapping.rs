@@ -99,9 +99,38 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
-        sdk::ChatEvent::PostToolExecutionSync { messages } => UiEvent::PostToolExecutionSync {
-            messages: messages.into_iter().map(chat_message).collect(),
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => UiEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
         },
+        sdk::ChatEvent::HookNotice { notice } => {
+            UiEvent::HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice {
+                point: notice.point,
+                kind: match notice.kind {
+                    sdk::HookNoticeKindView::Blocked => {
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+                    }
+                    sdk::HookNoticeKindView::Failed => {
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed
+                    }
+                    sdk::HookNoticeKindView::Info => {
+                        crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info
+                    }
+                },
+                summary: notice.summary,
+                command: notice.command,
+                exit_code: notice.exit_code,
+                reason: notice.reason,
+                stdout_preview: notice.stdout_preview,
+                stderr_preview: notice.stderr_preview,
+                stdout_truncated: notice.stdout_truncated,
+                stderr_truncated: notice.stderr_truncated,
+                output_file: notice.output_file,
+            })
+        }
         sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError {
             messages: messages.into_iter().map(chat_message).collect(),
             error,

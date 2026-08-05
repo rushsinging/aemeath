@@ -610,9 +610,11 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    PostToolExecutionSync {
-        messages: Vec<TuiChatMessage>,
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
+    HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice),
     ApiError {
         messages: Vec<TuiChatMessage>,
         error: String,

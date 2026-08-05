@@ -40,7 +40,7 @@ pub(crate) enum TuiContentBlock {
 pub(crate) enum TuiMessageSource {
     User,
     SystemGenerated,
-    StopHook,
+    Hook,
     SkillRequest,
 }
 
@@ -51,8 +51,17 @@ pub(crate) struct TuiSkillRequestMetadata {
     pub(crate) raw_input: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+pub(crate) enum TuiHookNoticeKind {
+    Blocked,
+    Failed,
+    Info,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub(crate) struct TuiStopHookFeedback {
+pub(crate) struct TuiHookNotice {
+    pub(crate) point: String,
+    pub(crate) kind: TuiHookNoticeKind,
     pub(crate) summary: String,
     pub(crate) command: String,
     pub(crate) exit_code: Option<i32>,
@@ -62,6 +71,49 @@ pub(crate) struct TuiStopHookFeedback {
     pub(crate) stdout_truncated: bool,
     pub(crate) stderr_truncated: bool,
     pub(crate) output_file: Option<String>,
+}
+
+impl TuiHookNotice {
+    pub(crate) fn title(&self) -> String {
+        let status = match self.kind {
+            TuiHookNoticeKind::Blocked => "blocked",
+            TuiHookNoticeKind::Failed => "failed",
+            TuiHookNoticeKind::Info => "message",
+        };
+        format!("{} hook {status}", self.point)
+    }
+
+    pub(crate) fn display_text(&self) -> String {
+        let exit_code = self
+            .exit_code
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string());
+        let mut lines = vec![
+            self.summary.clone(),
+            format!("Command: {}", self.command),
+            format!("Exit code: {exit_code}"),
+            format!("Reason: {}", self.reason),
+        ];
+        if !self.stdout_preview.is_empty() {
+            let truncated = if self.stdout_truncated {
+                " (truncated)"
+            } else {
+                ""
+            };
+            lines.push(format!("stdout{truncated}:\n{}", self.stdout_preview));
+        }
+        if !self.stderr_preview.is_empty() {
+            let truncated = if self.stderr_truncated {
+                " (truncated)"
+            } else {
+                ""
+            };
+            lines.push(format!("stderr{truncated}:\n{}", self.stderr_preview));
+        }
+        if let Some(output_file) = self.output_file.as_ref() {
+            lines.push(format!("Full output: {output_file}"));
+        }
+        lines.join("\n")
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -111,7 +163,7 @@ pub(crate) struct TuiChatMessage {
     pub(crate) content: Vec<TuiContentBlock>,
     pub(crate) input_id: Option<String>,
     pub(crate) source: TuiMessageSource,
-    pub(crate) stop_hook: Option<TuiStopHookFeedback>,
+    pub(crate) hook_notice: Option<TuiHookNotice>,
     pub(crate) skill_request: Option<TuiSkillRequestMetadata>,
 }
 
@@ -128,7 +180,7 @@ impl TuiChatMessage {
             content: vec![TuiContentBlock::text(text)],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }
     }
@@ -139,7 +191,7 @@ impl TuiChatMessage {
             content: vec![TuiContentBlock::text(text)],
             input_id: None,
             source: TuiMessageSource::SystemGenerated,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }
     }
@@ -150,21 +202,18 @@ impl TuiChatMessage {
             content: vec![TuiContentBlock::text(text)],
             input_id: None,
             source: TuiMessageSource::SkillRequest,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: Some(payload),
         }
     }
 
-    pub(crate) fn stop_hook_feedback(
-        text: impl Into<String>,
-        payload: TuiStopHookFeedback,
-    ) -> Self {
+    pub(crate) fn hook_notice(text: impl Into<String>, notice: TuiHookNotice) -> Self {
         Self {
             role: "user".to_string(),
             content: vec![TuiContentBlock::text(text)],
             input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: Some(payload),
+            source: TuiMessageSource::Hook,
+            hook_notice: Some(notice),
             skill_request: None,
         }
     }
@@ -175,7 +224,7 @@ impl TuiChatMessage {
             content: vec![TuiContentBlock::text(text)],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
             skill_request: None,
         }
     }

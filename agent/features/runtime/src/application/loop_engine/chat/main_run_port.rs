@@ -49,7 +49,7 @@ fn loop_input_messages(inputs: &[crate::application::loop_engine::LoopInput]) ->
             if input.images.is_empty() {
                 Message::user(input.text.clone())
             } else {
-                super::super::input_gate::user_message_with_images(
+                super::input_gate::user_message_with_images(
                     input.text.clone(),
                     input.images.clone(),
                 )
@@ -282,11 +282,17 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
         execution: &RunExecutionState,
         outcome: &crate::application::hook::stop_coordination::StopHookOutcome,
     ) -> Result<(), LoopEngineError> {
-        if outcome.feedback_message.is_some() {
+        if let Some(message) = outcome.feedback_message.as_ref() {
+            let notice = message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.hook_notice.clone())
+                .expect("Stop Hook feedback message must carry typed Hook notice");
             self.sink
-                .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                    messages: execution.messages_snapshot(),
-                })
+                .send_event(RuntimeStreamEvent::HookNotice(notice))
+                .await;
+            self.sink
+                .send_message_state_changed(execution.messages_len())
                 .await;
         }
         Ok(())
@@ -327,9 +333,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
     ) {
         self.runtime_context
             .event_sink()
-            .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: execution.messages_snapshot(),
-            })
+            .send_message_state_changed(execution.messages_len())
             .await;
         if has_task_mutation {
             let snapshot =

@@ -5,8 +5,8 @@
 /// Bash description。
 pub fn bash(lang: &str) -> &'static str {
     match lang {
-        "zh" => "执行 bash 命令并返回输出。工作目录在多次调用间保持，但 shell 状态不保持。用 && 链接命令。可选 timeout 参数（默认 120 秒，最大 600 秒）。",
-        _ => "Executes a bash command and returns its output. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s).",
+        "zh" => "执行 bash 命令并返回输出。必填参数 `goal` 为命令目标/意图的简短描述，显示在 TUI header 中。工作目录在多次调用间保持，但 shell 状态不保持。用 && 链接命令。可选 timeout 参数（默认 120 秒，最大 600 秒）。",
+        _ => "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s).",
     }
 }
 
@@ -57,7 +57,9 @@ mod tests {
     #[test]
     fn filesystem_bilingual_and_fallback() {
         assert!(bash("zh").contains("执行 bash 命令"));
+        assert!(bash("zh").contains("goal"));
         assert!(bash("en").contains("Executes a bash command"));
+        assert!(bash("en").contains("goal"));
         assert_eq!(bash("fr"), bash("en"));
         assert!(grep("zh").contains("搜索文件内容"));
         assert!(file_read("zh").contains("读取文件"));

@@ -22,6 +22,7 @@ RUN_MODULE = root / "agent/features/runtime/src/application/run.rs"
 APPLICATION_MODULE = root / "agent/features/runtime/src/application.rs"
 RUNTIME_LIB = root / "agent/features/runtime/src/lib.rs"
 ENGINE = root / "agent/features/runtime/src/application/loop_engine/engine.rs"
+ENGINE_RESPONSIBILITIES = root / "agent/features/runtime/src/application/loop_engine/engine"
 RUN_LOOP = root / "agent/features/runtime/src/application/loop_engine/run_loop.rs"
 STUCK = root / "agent/features/runtime/src/application/loop_engine/stuck_guard.rs"
 RUN_DOMAIN = root / "agent/features/runtime/src/domain/agent_run/domain.rs"
@@ -294,6 +295,10 @@ for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/applicati
 # ── 5. record_stop_hook_block() called from shared engine, NOT from StuckGuard ──
 if ENGINE.is_file():
     prod = production_text(ENGINE)
+    if ENGINE_RESPONSIBILITIES.is_dir():
+        prod += "\n" + "\n".join(
+            production_text(path) for path in sorted(ENGINE_RESPONSIBILITIES.glob("*.rs"))
+        )
     if not re.search(r'record_stop_hook_block\s*\(', prod):
         violations.append("5. Shared engine must call record_stop_hook_block()")
 
@@ -366,7 +371,10 @@ if FACTORY.is_file():
         violations.append("12. Factory preparation must return typed RunCreationError")
 
 # ── 13. P6.9.9 pure-value Run creation entry and aggregate launch ──
-MAIN_CALLER = root / "agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+MAIN_CALLERS = [
+    root / "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs",
+    root / "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs",
+]
 DERIVED_CALLER = root / "agent/features/runtime/src/application/run/derived/setup.rs"
 DERIVED_LAUNCHER = root / "agent/features/runtime/src/application/run/derived/loop_run.rs"
 if RUN_FACTORY.is_file():
@@ -402,7 +410,7 @@ if RUN_LAUNCHER.is_file():
         if retired in prod:
             violations.append(f"13. RunLauncher retains split or legacy launch shape: {retired}")
 
-for caller in [MAIN_CALLER, DERIVED_CALLER]:
+for caller in [*MAIN_CALLERS, DERIVED_CALLER]:
     if not caller.is_file():
         continue
     prod = production_text(caller)
@@ -414,9 +422,9 @@ for caller in [MAIN_CALLER, DERIVED_CALLER]:
     if "run_instance.into_parts()" in prod:
         violations.append(f"13. Production Run caller unpacks RunInstance before launch: {caller}")
 
-if MAIN_CALLER.is_file():
-    prod = production_text(MAIN_CALLER)
-    if "run_factory.create(request)" not in prod or "run::launcher::launch(" not in prod:
+main_prod = "\n".join(production_text(caller) for caller in MAIN_CALLERS if caller.is_file())
+if main_prod:
+    if "run_factory.create(preparation.request)" not in main_prod or "run::launcher::launch(" not in main_prod:
         violations.append("13. Main Run must use RunFactory::create and RunLauncher::launch")
 if DERIVED_CALLER.is_file():
     prod = production_text(DERIVED_CALLER)
