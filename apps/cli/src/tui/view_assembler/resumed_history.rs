@@ -143,9 +143,11 @@ pub(crate) fn assemble_resumed_history_display_unit(
                 else {
                     continue;
                 };
-                let parent = root.children.iter_mut().find(|child| {
-                    matches!(child.kind, OutputBlockKind::ToolCall(_))
-                        && child.block_id.contains(&attached_result.call_id)
+                let parent = root.children.iter_mut().find(|child| match &child.kind {
+                    OutputBlockKind::ToolCall(tool_call) => {
+                        tool_call.tool_call_id.as_deref() == Some(attached_result.call_id.as_str())
+                    }
+                    _ => false,
                 })?;
                 parent.children.push(result);
             }

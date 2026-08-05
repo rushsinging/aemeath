@@ -106,9 +106,11 @@ impl OutputViewAssembler {
                 .iter()
                 .any(|item| item.id().as_ref() == item_id),
             DisplayUnitPlan::ToolGroup { member_ids, .. } => member_ids.iter().any(|member_id| {
-                timeline_items.iter().any(|item| {
-                    matches!(item, OutputTimelineItem::ToolCall { .. })
-                        && item.id().contains(member_id)
+                timeline_items.iter().any(|item| match item {
+                    OutputTimelineItem::ToolCall { reference } => {
+                        reference.tool_call_id.as_ref() == member_id
+                    }
+                    _ => false,
                 })
             }),
         };
@@ -196,9 +198,12 @@ impl OutputViewAssembler {
                     else {
                         continue;
                     };
-                    let parent = group.children.iter_mut().find(|child| {
-                        matches!(child.kind, OutputBlockKind::ToolCall(_))
-                            && child.block_id.contains(&attached_result.call_id)
+                    let parent = group.children.iter_mut().find(|child| match &child.kind {
+                        OutputBlockKind::ToolCall(tool_call) => {
+                            tool_call.tool_call_id.as_deref()
+                                == Some(attached_result.call_id.as_str())
+                        }
+                        _ => false,
                     })?;
                     push_child_checked(parent, result, 2);
                 }

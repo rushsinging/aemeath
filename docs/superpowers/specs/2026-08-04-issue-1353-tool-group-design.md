@@ -1,7 +1,7 @@
 # TUI 连续相关工具分组设计
 
-> 对应 Issue：https://github.com/rushsinging/aemeath/issues/1353  
-> 状态：已确认设计  
+> 对应 Issue：https://github.com/rushsinging/aemeath/issues/1353
+> 状态：已确认设计
 > 范围：仅调整 TUI 展示投影、窗口物化与渲染，不改变 Runtime、ConversationModel、OutputTimeline 或 Session 持久化事实
 
 ## 1. 背景

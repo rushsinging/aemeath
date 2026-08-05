@@ -1,7 +1,7 @@
 # #1353 TUI 连续相关工具分组实施计划
 
-> 对应设计：`docs/superpowers/specs/2026-08-04-issue-1353-tool-group-design.md`  
-> 对应 Issue：https://github.com/rushsinging/aemeath/issues/1353  
+> 对应设计：`docs/superpowers/specs/2026-08-04-issue-1353-tool-group-design.md`
+> 对应 Issue：https://github.com/rushsinging/aemeath/issues/1353
 > 执行方式：TDD；每项任务单一、可验证；生产逻辑必须在对应失败测试之后修改
 
 ## 0. 范围与执行约束
@@ -130,7 +130,7 @@ gh issue view 1353 --repo rushsinging/aemeath --json milestone,body,updatedAt
 
 ### 任务 2：为工具分类写失败测试
 
-**新增**：`view_assembler/tool_group_tests.rs`  
+**新增**：`view_assembler/tool_group_tests.rs`
 **修改**：`view_assembler.rs`
 
 **测试先行**
@@ -535,7 +535,7 @@ cargo test -p cli --bin aemeath tool_group_render -- --nocapture
 
 ### 任务 17：实现 ToolGroup renderer 与双深度遍历
 
-**新增**：`render/output/blocks/tool_group.rs`  
+**新增**：`render/output/blocks/tool_group.rs`
 **修改**：
 
 - `render/output/blocks.rs`
@@ -571,7 +571,7 @@ feat(tui): #1353 渲染轻量工具分组
 
 ### 任务 18：增加 L4 TUI 场景测试
 
-**新增**：`app/scenario_tests/tool_group.rs`  
+**新增**：`app/scenario_tests/tool_group.rs`
 **修改**：`app/scenario_tests.rs`
 
 使用现有 `TuiScenarioHarness` 和 TestBackend，覆盖用户可见旅程：
