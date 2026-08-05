@@ -10,6 +10,166 @@ use crate::tui::view_model::output::HookNoticeBlockView;
 use crate::tui::view_model::{BlockNode, OutputBlockKind, SemanticStyle, TextBlockView};
 use sdk::LocalResumeContentBlock as ContentBlock;
 
+pub(crate) fn resumed_history_candidate(
+    display_history: &DisplayHistoryModel,
+    item: &ResumedHistoryItem,
+) -> crate::tui::view_assembler::tool_group::ToolGroupCandidate {
+    let step = display_history.step(item.step_index);
+    let (tool_name, tool_id, result_call_id) = step
+        .and_then(|step| match item.kind {
+            ResumedHistoryItemKind::ToolCall {
+                message_index,
+                block_index,
+            } => match step.message(message_index)?.content.get(block_index)? {
+                ContentBlock::ToolUse { id, name, .. } => Some((name.as_str(), id.as_str(), None)),
+                _ => None,
+            },
+            ResumedHistoryItemKind::ToolResult {
+                message_index,
+                block_index,
+            } => match step.message(message_index)?.content.get(block_index)? {
+                ContentBlock::ToolResult { tool_use_id, .. } => {
+                    Some(("", item.id.as_str(), Some(tool_use_id.as_str())))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or(("", item.id.as_str(), None));
+    crate::tui::view_assembler::tool_group::ToolGroupCandidate {
+        item_id: item.id.clone(),
+        call_id: Some(tool_id.to_string()),
+        tool_kind: super::tool_group::classify_runtime_tool_name(tool_name),
+        step_id: step
+            .map(|step| step.step_id.clone())
+            .unwrap_or_else(|| item.step_index.to_string()),
+        result_call_id: result_call_id.map(str::to_string),
+    }
+}
+
+pub(crate) fn resumed_history_display_unit_plans(
+    display_history: &DisplayHistoryModel,
+) -> Vec<crate::tui::view_assembler::tool_group::DisplayUnitPlan> {
+    let candidates = display_history
+        .items()
+        .iter()
+        .map(|item| resumed_history_candidate(display_history, item))
+        .collect::<Vec<_>>();
+    crate::tui::view_assembler::tool_group::plan_display_units(&candidates)
+}
+
+#[cfg(test)]
+pub(crate) fn assemble_resumed_history_display_units(
+    display_history: &DisplayHistoryModel,
+) -> Vec<BlockNode> {
+    resumed_history_display_unit_plans(display_history)
+        .iter()
+        .filter_map(|unit| assemble_resumed_history_display_unit(display_history, unit))
+        .collect()
+}
+
+pub(crate) fn assemble_resumed_history_display_unit(
+    display_history: &DisplayHistoryModel,
+    unit: &crate::tui::view_assembler::tool_group::DisplayUnitPlan,
+) -> Option<BlockNode> {
+    let belongs_to_history = match unit {
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::Single { item_id, .. } => {
+            display_history.item(item_id).is_some()
+        }
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::ToolGroup {
+            member_ids, ..
+        } => member_ids.iter().any(|member_id| {
+            display_history.items().iter().any(|item| {
+                matches!(item.kind, ResumedHistoryItemKind::ToolCall { .. })
+                    && resumed_history_candidate(display_history, item)
+                        .call_id
+                        .as_deref()
+                        == Some(member_id)
+            })
+        }),
+    };
+    if !belongs_to_history {
+        return None;
+    }
+    match unit {
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::Single {
+            item_id,
+            attached_results,
+        } => {
+            let item = display_history.item(item_id)?;
+            let mut root = assemble_resumed_history_item(display_history, item)?;
+            for attached_result in attached_results {
+                let result_item = display_history.item(&attached_result.item_id)?;
+                let Some(result) = assemble_resumed_history_item(display_history, result_item)
+                else {
+                    continue;
+                };
+                if let Some(parent) = root.children.last_mut() {
+                    if matches!(parent.kind, OutputBlockKind::ToolCall(_)) {
+                        parent.children.push(result);
+                    }
+                }
+            }
+            Some(root)
+        }
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::ToolGroup {
+            group_id,
+            kind,
+            member_ids,
+            attached_results,
+        } => {
+            let mut root = text_leaf(
+                group_id.clone(),
+                OutputBlockKind::ToolGroup(crate::tui::view_model::output::ToolGroupBlockView {
+                    key: group_id.clone(),
+                    kind: *kind,
+                    title: kind.title().to_string(),
+                    semantic_status: crate::tui::view_model::output::ToolSemanticStatus::Running,
+                    style: SemanticStyle::Running,
+                }),
+            )?;
+            for member_id in member_ids {
+                let item = display_history.items().iter().find(|item| {
+                    resumed_history_candidate(display_history, item)
+                        .call_id
+                        .as_deref()
+                        == Some(member_id)
+                })?;
+                let member = assemble_resumed_history_item(display_history, item)?;
+                root.children.push(member);
+            }
+            let member_statuses = root
+                .children
+                .iter()
+                .filter_map(|child| match &child.kind {
+                    OutputBlockKind::ToolCall(tool_call) => Some(tool_call.semantic_status),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if let OutputBlockKind::ToolGroup(tool_group) = &mut root.kind {
+                tool_group.semantic_status =
+                    super::tool_group::aggregate_tool_group_status(&member_statuses);
+                tool_group.style =
+                    super::output::semantic_style_for_group_status(tool_group.semantic_status);
+            }
+            for attached_result in attached_results {
+                let result_item = display_history.item(&attached_result.item_id)?;
+                let Some(result) = assemble_resumed_history_item(display_history, result_item)
+                else {
+                    continue;
+                };
+                let parent = root.children.iter_mut().find(|child| match &child.kind {
+                    OutputBlockKind::ToolCall(tool_call) => {
+                        tool_call.tool_call_id.as_deref() == Some(attached_result.call_id.as_str())
+                    }
+                    _ => false,
+                })?;
+                parent.children.push(result);
+            }
+            Some(root)
+        }
+    }
+}
 pub(crate) fn assemble_resumed_history_item(
     display_history: &DisplayHistoryModel,
     item: &ResumedHistoryItem,
@@ -259,3 +419,7 @@ fn text_leaf(block_id: String, kind: OutputBlockKind) -> Option<BlockNode> {
         children: Vec::new(),
     })
 }
+
+#[cfg(test)]
+#[path = "resumed_history_tests.rs"]
+mod tests;

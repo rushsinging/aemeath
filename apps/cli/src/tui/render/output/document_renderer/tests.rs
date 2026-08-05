@@ -4,7 +4,7 @@ use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
     BlockNode, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus,
+    ToolGroupBlockView, ToolGroupKind, ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -80,6 +80,137 @@ fn test_render_tree_dfs_flattens_parent_then_children() {
     assert_eq!(doc.blocks.len(), 2);
     assert_eq!(doc.blocks[0].block_id, "p");
     assert_eq!(doc.blocks[1].block_id, "c");
+}
+
+#[test]
+fn group_marker_refreshes_from_running_to_success_for_same_stable_id() {
+    let group_node = |status| {
+        let kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
+            key: "stable-group".into(),
+            kind: ToolGroupKind::Explore,
+            title: "Explore".into(),
+            semantic_status: status,
+            style: match status {
+                ToolSemanticStatus::Running => SemanticStyle::Running,
+                ToolSemanticStatus::Success => SemanticStyle::Success,
+                _ => SemanticStyle::Muted,
+            },
+        });
+        BlockNode {
+            block_id: "stable-group".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: Vec::new(),
+        }
+    };
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let running = renderer.render_tree(
+        &vm_with_roots(vec![group_node(ToolSemanticStatus::Running)]),
+        80,
+    );
+    assert_eq!(running.blocks[0].lines[1].spans[0].content.as_ref(), "● ");
+    assert_eq!(
+        running.blocks[0].lines[1].animation,
+        Some(crate::tui::render::output::rendered::LineAnimation::RunningToolMarker)
+    );
+
+    let success = renderer.render_tree(
+        &vm_with_roots(vec![group_node(ToolSemanticStatus::Success)]),
+        80,
+    );
+    assert_eq!(success.blocks[0].lines[1].spans[0].content.as_ref(), "✓ ");
+}
+
+#[test]
+fn tool_group_renders_as_tool_header_with_only_first_member_result_marker() {
+    let group_kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
+        key: "group".into(),
+        kind: ToolGroupKind::Explore,
+        title: "Explore".into(),
+        semantic_status: ToolSemanticStatus::Running,
+        style: SemanticStyle::Running,
+    });
+    let member_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "member".into(),
+        chat_id: None,
+        run_id: None,
+        tool_call_id: Some("member".into()),
+        title: "Read".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(r#"{"file_path":"Cargo.toml"}"#.into()),
+        activity_lines: Vec::new(),
+        result_summary: None,
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    let second_member_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "second-member".into(),
+        tool_call_id: Some("second-member".into()),
+        title: "Glob".into(),
+        args_preview: Some(r#"{"pattern":"**/*.rs"}"#.into()),
+        ..match member_kind.clone() {
+            OutputBlockKind::ToolCall(tool_call) => tool_call,
+            _ => unreachable!("fixture is a tool call"),
+        }
+    });
+    let view_model = vm_with_roots(vec![BlockNode {
+        block_id: "group".into(),
+        block_version: group_kind.cache_version(),
+        kind: group_kind,
+        children: vec![
+            BlockNode {
+                block_id: "member".into(),
+                block_version: member_kind.cache_version(),
+                kind: member_kind,
+                children: Vec::new(),
+            },
+            BlockNode {
+                block_id: "second-member".into(),
+                block_version: second_member_kind.cache_version(),
+                kind: second_member_kind,
+                children: Vec::new(),
+            },
+        ],
+    }]);
+
+    let mut renderer = OutputDocumentRenderer::default();
+    let document = renderer.render_tree(&view_model, 80);
+    let group = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "group")
+        .expect("group block exists");
+    let member = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "member")
+        .expect("member block exists");
+
+    let second_member = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "second-member")
+        .expect("second member block exists");
+
+    assert_eq!(group.lines[1].plain, "Explore");
+    assert_eq!(group.lines[1].spans[0].content.as_ref(), "● ");
+    assert_eq!(group.lines[1].spans[0].style.fg, Some(theme::TOOL_RUNNING));
+    assert_eq!(group.lines[1].style.fg, Some(theme::TEXT));
+    assert!(!group.lines[1].plain.contains('─'));
+
+    assert_eq!(member.lines[0].spans[0].content.as_ref(), "  ⎿ ");
+    assert_eq!(member.lines[0].spans[0].style.fg, Some(theme::TEXT_MUTED));
+    assert_eq!(member.lines[0].style.fg, Some(theme::TEXT));
+    assert!(member.lines[0].plain.contains("Read"));
+    assert_eq!(second_member.lines[0].spans[0].content.as_ref(), "    ");
+    assert_eq!(second_member.lines[0].style.fg, Some(theme::TEXT));
+    assert!(!second_member.lines[0].plain.is_empty());
 }
 
 #[test]

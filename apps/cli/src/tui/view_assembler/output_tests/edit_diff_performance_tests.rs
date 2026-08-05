@@ -82,11 +82,12 @@ fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationMo
 }
 
 fn tool_result_count(vm: &crate::tui::view_model::output::OutputViewModel) -> usize {
-    vm.roots
-        .iter()
-        .flat_map(|root| root.children.iter())
-        .filter(|child| matches!(child.kind, OutputBlockKind::ToolResult(_)))
-        .count()
+    fn count_results(node: &crate::tui::view_model::BlockNode) -> usize {
+        usize::from(matches!(node.kind, OutputBlockKind::ToolResult(_)))
+            + node.children.iter().map(count_results).sum::<usize>()
+    }
+
+    vm.roots.iter().map(|root| count_results(root)).sum()
 }
 
 #[test]
@@ -122,8 +123,8 @@ fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
     assert_eq!(warm.diff_build_calls, 0);
     assert_eq!(warm.syntax_highlight_calls, 0);
     assert_eq!(
-        warm.gutted_cache_hits, 13,
-        "用户 root + 每个 Edit 的 ToolCall/ToolResult"
+        warm.gutted_cache_hits, 14,
+        "用户 root + ToolGroup + 每个 Edit 的 ToolCall/ToolResult"
     );
 }
 

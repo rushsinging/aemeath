@@ -450,3 +450,47 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         notice.text
     );
 }
+
+#[test]
+fn live_timeline_assembles_consecutive_tool_calls_under_one_group_root() {
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
+    use crate::tui::model::conversation::intent::{StartChat, ToolCallStart};
+    use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
+    use crate::tui::view_model::output::{OutputBlockKind, ToolGroupKind};
+
+    let chat_id = ChatId::new("chat-live-group");
+    let run_id = ChatRunId::new("run-live-group");
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "inspect files".to_string(),
+    });
+    for (index, (tool_id, tool_name)) in [(0, ("tool-read", "Read")), (1, ("tool-glob", "Glob"))] {
+        conversation.apply(ToolCallStart {
+            chat_id: chat_id.clone(),
+            run_id: run_id.clone(),
+            id: ToolCallId::new(tool_id),
+            provider_id: None,
+            name: tool_name.to_string(),
+            index,
+        });
+    }
+
+    let lookup = ConversationToolLookup::new(&conversation);
+    let roots = super::OutputViewAssembler::assemble_timeline_display_units(
+        conversation.timeline.items(),
+        &lookup,
+        None,
+    );
+
+    assert_eq!(roots.len(), 2);
+    assert!(matches!(roots[0].kind, OutputBlockKind::UserMessage(_)));
+    let OutputBlockKind::ToolGroup(group) = &roots[1].kind else {
+        panic!("consecutive live tool calls should materialize a ToolGroup root");
+    };
+    assert_eq!(group.kind, ToolGroupKind::Explore);
+    assert_eq!(roots[1].children.len(), 2);
+    assert!(roots[1]
+        .children
+        .iter()
+        .all(|child| matches!(child.kind, OutputBlockKind::ToolCall(_))));
+}

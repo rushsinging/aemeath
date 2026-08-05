@@ -10,7 +10,8 @@ use crate::tui::view_model::output::HookNoticeBlockView;
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    OutputBlockKind, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    OutputBlockKind, SemanticStyle, TextBlockView, ToolGroupBlockView, ToolResultBlockView,
+    MAX_BLOCK_DEPTH,
 };
 #[cfg(test)]
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ use super::output_tool_view::{
     display_text_for_tool_result, find_tool_call, find_tool_view, summarize_non_embedded_result,
     tool_result_is_embedded,
 };
+use super::tool_group::DisplayUnitPlan;
 
 #[cfg(test)]
 /// 测试参考装配使用的完整工具索引。
@@ -69,6 +71,198 @@ impl ToolCallLookup for ToolIndex<'_> {
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
+    pub(super) fn timeline_display_unit_plans(
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+    ) -> Vec<DisplayUnitPlan> {
+        let candidates = timeline_items
+            .iter()
+            .map(|item| super::tool_group::timeline_candidate(item, tool_lookup))
+            .collect::<Vec<_>>();
+        super::tool_group::plan_display_units(&candidates)
+    }
+
+    #[cfg(test)]
+    pub(super) fn assemble_timeline_display_units(
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+        workspace_root: Option<&std::path::Path>,
+    ) -> Vec<BlockNode> {
+        Self::timeline_display_unit_plans(timeline_items, tool_lookup)
+            .iter()
+            .filter_map(|unit| {
+                Self::assemble_display_unit(unit, timeline_items, tool_lookup, workspace_root)
+            })
+            .collect()
+    }
+    pub(super) fn assemble_display_unit(
+        unit: &DisplayUnitPlan,
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+        workspace_root: Option<&std::path::Path>,
+    ) -> Option<BlockNode> {
+        let belongs_to_timeline = match unit {
+            DisplayUnitPlan::Single { item_id, .. } => timeline_items
+                .iter()
+                .any(|item| item.id().as_ref() == item_id),
+            DisplayUnitPlan::ToolGroup { member_ids, .. } => member_ids.iter().any(|member_id| {
+                timeline_items.iter().any(|item| match item {
+                    OutputTimelineItem::ToolCall { reference } => {
+                        reference.tool_call_id.as_ref() == member_id
+                    }
+                    _ => false,
+                })
+            }),
+        };
+        if !belongs_to_timeline {
+            return None;
+        }
+        match unit {
+            DisplayUnitPlan::Single {
+                item_id,
+                attached_results,
+            } => {
+                let source_item = timeline_items
+                    .iter()
+                    .find(|item| item.id().as_ref() == item_id)?;
+                let mut root = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
+                for attached_result in attached_results {
+                    let result_item = timeline_items
+                        .iter()
+                        .find(|item| item.id().as_ref() == attached_result.item_id)?;
+                    if let Some(result) =
+                        Self::assemble_item(result_item, tool_lookup, workspace_root)
+                    {
+                        push_child_checked(&mut root, result, 1);
+                        let embedded = tool_result_is_embedded(
+                            tool_lookup,
+                            match result_item {
+                                OutputTimelineItem::ToolResult { reference } => {
+                                    &reference.context.chat_id
+                                }
+                                _ => continue,
+                            },
+                            match result_item {
+                                OutputTimelineItem::ToolResult { reference } => {
+                                    &reference.context.run_id
+                                }
+                                _ => continue,
+                            },
+                            match result_item {
+                                OutputTimelineItem::ToolResult { reference } => {
+                                    &reference.tool_call_id
+                                }
+                                _ => continue,
+                            },
+                        );
+                        if !embedded {
+                            if let Some(standalone_result) =
+                                Self::assemble_non_embedded_tool_result(result_item, tool_lookup)
+                            {
+                                return Some(standalone_result);
+                            }
+                        }
+                    }
+                }
+                Some(root)
+            }
+            DisplayUnitPlan::ToolGroup {
+                group_id,
+                kind,
+                member_ids,
+                attached_results,
+            } => {
+                let mut group = leaf(
+                    group_id.clone(),
+                    OutputBlockKind::ToolGroup(ToolGroupBlockView {
+                        key: group_id.clone(),
+                        kind: *kind,
+                        title: kind.title().to_string(),
+                        semantic_status:
+                            crate::tui::view_model::output::ToolSemanticStatus::Running,
+                        style: SemanticStyle::Running,
+                    }),
+                );
+                for member_id in member_ids {
+                    let source_item = timeline_items.iter().find(|item| {
+                        matches!(item, OutputTimelineItem::ToolCall { .. })
+                            && item.id().to_string().contains(member_id)
+                    })?;
+                    let member = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
+                    push_child_checked(&mut group, member, 1);
+                }
+                let member_statuses = group
+                    .children
+                    .iter()
+                    .filter_map(|child| match &child.kind {
+                        OutputBlockKind::ToolCall(tool_call) => Some(tool_call.semantic_status),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if let OutputBlockKind::ToolGroup(tool_group) = &mut group.kind {
+                    tool_group.semantic_status =
+                        super::tool_group::aggregate_tool_group_status(&member_statuses);
+                    tool_group.style = semantic_style_for_group_status(tool_group.semantic_status);
+                }
+                for attached_result in attached_results {
+                    let result_item = timeline_items
+                        .iter()
+                        .find(|item| item.id().as_ref() == attached_result.item_id)?;
+                    let Some(result) =
+                        Self::assemble_item(result_item, tool_lookup, workspace_root)
+                    else {
+                        continue;
+                    };
+                    let parent = group.children.iter_mut().find(|child| match &child.kind {
+                        OutputBlockKind::ToolCall(tool_call) => {
+                            tool_call.tool_call_id.as_deref()
+                                == Some(attached_result.call_id.as_str())
+                        }
+                        _ => false,
+                    })?;
+                    push_child_checked(parent, result, 2);
+                }
+                Some(group)
+            }
+        }
+    }
+
+    fn assemble_non_embedded_tool_result(
+        item: &OutputTimelineItem,
+        tool_lookup: &impl ToolCallLookup,
+    ) -> Option<BlockNode> {
+        let OutputTimelineItem::ToolResult { reference } = item else {
+            return None;
+        };
+        let call = find_tool_call(
+            tool_lookup,
+            &reference.context.chat_id,
+            &reference.context.run_id,
+            &reference.tool_call_id,
+        )?;
+        let payload = call.result.as_ref()?;
+        let display_output =
+            display_text_for_tool_result(Some(&call.name), &payload.output, &payload.content);
+        let mut text =
+            summarize_non_embedded_result(Some(&call.name), &display_output, payload.is_error);
+        if payload.image_count > 0 {
+            text = format!("{text}\n[图片: {}]", payload.image_count);
+        }
+        let id = format!("{}-result", reference.tool_call_id.as_ref());
+        Some(leaf(
+            id.clone(),
+            OutputBlockKind::DiagnosticNotice(TextBlockView {
+                key: id,
+                text,
+                style: if payload.is_error {
+                    SemanticStyle::Error
+                } else {
+                    SemanticStyle::Success
+                },
+            }),
+        ))
+    }
+
     pub(super) fn assemble_item(
         item: &OutputTimelineItem,
         tool_lookup: &impl ToolCallLookup,
@@ -137,36 +331,7 @@ impl OutputViewAssembler {
                 ) {
                     return None;
                 }
-                let call = find_tool_call(
-                    tool_lookup,
-                    &reference.context.chat_id,
-                    &reference.context.run_id,
-                    &reference.tool_call_id,
-                )?;
-                let payload = call.result.as_ref()?;
-                let tool_name = Some(call.name.as_str());
-                let display_output =
-                    display_text_for_tool_result(tool_name, &payload.output, &payload.content);
-                let text =
-                    summarize_non_embedded_result(tool_name, &display_output, payload.is_error);
-                let text = if payload.image_count > 0 {
-                    format!("{text}\n[图片: {}]", payload.image_count)
-                } else {
-                    text
-                };
-                let id = format!("{}-result", reference.tool_call_id.as_ref());
-                Some(leaf(
-                    id.clone(),
-                    OutputBlockKind::DiagnosticNotice(TextBlockView {
-                        key: id,
-                        text,
-                        style: if payload.is_error {
-                            SemanticStyle::Error
-                        } else {
-                            SemanticStyle::Success
-                        },
-                    }),
-                ))
+                Self::assemble_non_embedded_tool_result(item, tool_lookup)
             }
             OutputTimelineItem::HookNotice {
                 id,
@@ -303,6 +468,19 @@ impl OutputViewAssembler {
 }
 
 /// 构造无子的叶子 BlockNode（block_version 取 kind 语义指纹）。
+pub(super) fn semantic_style_for_group_status(
+    status: crate::tui::view_model::output::ToolSemanticStatus,
+) -> SemanticStyle {
+    use crate::tui::view_model::output::ToolSemanticStatus;
+    match status {
+        ToolSemanticStatus::Pending => SemanticStyle::Muted,
+        ToolSemanticStatus::Running => SemanticStyle::Running,
+        ToolSemanticStatus::Success => SemanticStyle::Success,
+        ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => SemanticStyle::Error,
+        ToolSemanticStatus::Warning | ToolSemanticStatus::Orphaned => SemanticStyle::Warning,
+    }
+}
+
 fn leaf(block_id: String, kind: OutputBlockKind) -> BlockNode {
     let block_version = kind.cache_version();
     BlockNode {

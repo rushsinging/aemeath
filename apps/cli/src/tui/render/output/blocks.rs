@@ -8,6 +8,7 @@ pub mod hook_notice;
 pub mod separator;
 pub mod thinking;
 pub mod tool_call;
+pub mod tool_group;
 pub mod tool_result;
 pub mod user_message;
 

@@ -38,6 +38,9 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::ToolCall(tool) => {
                 blocks::tool_call::render_tool_call(block_id, tool, ctx)
             }
+            OutputBlockKind::ToolGroup(group) => {
+                blocks::tool_group::render_tool_group(block_id, group, ctx)
+            }
             OutputBlockKind::ToolResult(result) => {
                 blocks::tool_result::render_tool_result(block_id, result, ctx)
             }

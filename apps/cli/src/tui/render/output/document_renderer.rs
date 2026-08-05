@@ -31,6 +31,7 @@ struct GuttedKey {
     block_version: u64,
     text_width: u16,
     depth: usize,
+    gutter_role: gutter::GutterRole,
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
@@ -222,6 +223,7 @@ impl OutputDocumentRenderer {
             root,
             outer_width,
             0,
+            gutter::GutterRole::Block,
             animation_frame,
             markdown_spacing,
             &mut group,
@@ -234,6 +236,7 @@ impl OutputDocumentRenderer {
         node: &BlockNode,
         outer_width: u16,
         depth: usize,
+        gutter_role: gutter::GutterRole,
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
         out: &mut Vec<RenderedBlock>,
@@ -253,6 +256,7 @@ impl OutputDocumentRenderer {
             block_version: node.block_version,
             text_width,
             depth,
+            gutter_role,
             markdown_spacing,
         };
         // gutted 缓存命中：key 完全一致时直接复用（lines 为 Rc，clone 廉价）。
@@ -261,11 +265,12 @@ impl OutputDocumentRenderer {
                 #[cfg(test)]
                 crate::tui::render::performance::record_gutted_cache_hit();
                 out.push(cached_block.clone());
-                for child in &node.children {
+                for (child_index, child) in node.children.iter().enumerate() {
                     self.render_node(
                         child,
                         outer_width,
                         depth + 1,
+                        child_gutter_role(&node.kind, &child.kind, child_index),
                         animation_frame,
                         markdown_spacing,
                         out,
@@ -323,10 +328,11 @@ impl OutputDocumentRenderer {
             // 极窄屏：完全跳过 gutter
             (*rendered.lines).clone()
         } else {
-            crate::tui::render::output::gutter::apply_gutter(
+            crate::tui::render::output::gutter::apply_gutter_with_role(
                 &node.kind,
                 effective_depth,
                 (*rendered.lines).clone(),
+                gutter_role,
             )
         };
         let mut gutted = gutted;
@@ -349,11 +355,12 @@ impl OutputDocumentRenderer {
         self.gutted
             .insert(node.block_id.clone(), (gkey, block.clone()));
         out.push(block);
-        for child in &node.children {
+        for (child_index, child) in node.children.iter().enumerate() {
             self.render_node(
                 child,
                 outer_width,
                 depth + 1,
+                child_gutter_role(&node.kind, &child.kind, child_index),
                 animation_frame,
                 markdown_spacing,
                 out,
@@ -382,6 +389,24 @@ impl OutputDocumentRenderer {
     }
 }
 
+fn child_gutter_role(
+    parent: &OutputBlockKind,
+    child: &OutputBlockKind,
+    child_index: usize,
+) -> gutter::GutterRole {
+    if matches!(parent, OutputBlockKind::ToolGroup(_))
+        && matches!(child, OutputBlockKind::ToolCall(_))
+    {
+        if child_index == 0 {
+            gutter::GutterRole::ToolGroupFirstMember
+        } else {
+            gutter::GutterRole::ToolGroupContinuation
+        }
+    } else {
+        gutter::GutterRole::Block
+    }
+}
+
 fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
     match kind {
         OutputBlockKind::UserMessage(view) => {
@@ -401,6 +426,7 @@ fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
             });
             1usize.saturating_add(activity_lines)
         }
+        OutputBlockKind::ToolGroup(_) => 1,
         OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
         OutputBlockKind::HookNotice(view) => 1usize.saturating_add(
             view.body

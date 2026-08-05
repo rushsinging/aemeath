@@ -69,6 +69,7 @@ pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
+    ToolGroup(ToolGroupBlockView),
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
     DiagnosticNotice(TextBlockView),
@@ -133,6 +134,34 @@ pub struct TextBlockView {
     pub key: String,
     pub text: String,
     pub style: SemanticStyle,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ToolGroupBlockView {
+    pub key: String,
+    pub kind: ToolGroupKind,
+    pub title: String,
+    pub semantic_status: ToolSemanticStatus,
+    pub style: SemanticStyle,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum ToolGroupKind {
+    Explore,
+    Run,
+    Write,
+    Tasks,
+}
+
+impl ToolGroupKind {
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Explore => "Explore",
+            Self::Run => "Run",
+            Self::Write => "Write",
+            Self::Tasks => "Tasks",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -209,6 +238,7 @@ pub enum ToolSemanticStatus {
     Running,
     Success,
     Error,
+    Warning,
     Cancelled,
     Orphaned,
 }

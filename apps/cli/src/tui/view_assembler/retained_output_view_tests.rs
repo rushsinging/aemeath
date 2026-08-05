@@ -1,12 +1,14 @@
 use super::RetainedOutputView;
 use crate::tui::model::conversation::block::AskUserSlot;
-use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AppendUserMessage, AssistantText, DismissAskUserBatch, ShowAskUserBatch,
+    AppendUserMessage, AssistantText, DismissAskUserBatch, ShowAskUserBatch, ToolCallStart,
+    ToolResult,
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::resumed_history::ResumedHistoryBacking;
-use crate::tui::view_model::OutputRenderWindow;
+use crate::tui::view_model::output::ToolSemanticStatus;
+use crate::tui::view_model::{OutputBlockKind, OutputRenderWindow};
 use std::sync::Arc;
 
 fn full_window() -> OutputRenderWindow {
@@ -30,6 +32,51 @@ fn root_ids(view: &RetainedOutputView) -> Vec<&str> {
         .iter()
         .map(|root| root.block_id.as_str())
         .collect()
+}
+
+#[test]
+fn retained_group_refreshes_header_after_all_members_complete() {
+    let chat_id = ChatId::new("chat-group-status");
+    let run_id = ChatRunId::new("run-group-status");
+    let mut model = ConversationModel::default();
+    for (index, (tool_id, tool_name)) in [(0, ("tool-read", "Read")), (1, ("tool-glob", "Glob"))] {
+        model.apply(ToolCallStart {
+            chat_id: chat_id.clone(),
+            run_id: run_id.clone(),
+            id: ToolCallId::new(tool_id),
+            provider_id: None,
+            name: tool_name.to_string(),
+            index,
+        });
+    }
+    let display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    let mut view = RetainedOutputView::default();
+
+    let running = materialize_all(&mut view, &model, &display_history, None);
+    let OutputBlockKind::ToolGroup(group) = &running.view_model.roots[0].kind else {
+        panic!("consecutive tools should group");
+    };
+    assert_eq!(group.semantic_status, ToolSemanticStatus::Running);
+
+    for (tool_id, tool_name) in [("tool-read", "Read"), ("tool-glob", "Glob")] {
+        model.apply(ToolResult {
+            chat_id: chat_id.clone(),
+            run_id: run_id.clone(),
+            id: ToolCallId::new(tool_id),
+            provider_id: tool_id.to_string(),
+            tool_name: tool_name.to_string(),
+            output: "ok".to_string(),
+            content: serde_json::json!({"text":"ok"}),
+            is_error: false,
+            image_count: 0,
+        });
+    }
+
+    let completed = materialize_all(&mut view, &model, &display_history, None);
+    let OutputBlockKind::ToolGroup(group) = &completed.view_model.roots[0].kind else {
+        panic!("completed tools should stay grouped");
+    };
+    assert_eq!(group.semantic_status, ToolSemanticStatus::Success);
 }
 
 #[test]
@@ -72,6 +119,77 @@ fn indexed_resume_requests_only_selected_window_members() {
     assert_eq!(request.generation_revision, 13);
     assert_eq!(request.member_names, ["step-98.json", "step-99.json"]);
     assert!(window.view_model.roots.is_empty());
+}
+
+#[test]
+fn retained_resume_path_materializes_group_before_window_selection() {
+    let model = ConversationModel::default();
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(
+        sdk::DisplayHistoryIndex {
+            session_id: "session-group".to_string(),
+            generation_revision: 1,
+            steps: vec![sdk::DisplayHistoryStepReference {
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+                member_name: "step-1.json".to_string(),
+                estimated_lines: 20,
+                user_input_history: Vec::new(),
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        },
+    ));
+    assert!(display_history.apply_window(
+        crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow {
+            session_id: "session-group".to_string(),
+            generation_revision: 1,
+            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+                run_id: "run-1".to_string(),
+                step_id: "step-1".to_string(),
+                messages: vec![crate::tui::adapter::runtime_view::TuiChatMessage {
+                    role: "assistant".to_string(),
+                    content: vec![
+                        crate::tui::adapter::runtime_view::TuiContentBlock::ToolUse {
+                            id: "call-1".to_string(),
+                            name: "Read".to_string(),
+                            input: serde_json::json!({}),
+                        },
+                        crate::tui::adapter::runtime_view::TuiContentBlock::ToolUse {
+                            id: "call-2".to_string(),
+                            name: "Glob".to_string(),
+                            input: serde_json::json!({}),
+                        },
+                    ],
+                    source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
+                    hook_notice: None,
+                    skill_request: None,
+                    input_id: None,
+                }],
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        }
+    ));
+    let mut view = RetainedOutputView::default();
+
+    let window = view.materialize_window(
+        &model,
+        &display_history,
+        None,
+        OutputRenderWindow {
+            line_limit: 1,
+            tail_offset: 0,
+        },
+    );
+
+    assert_eq!(window.indexed_items, 1);
+    assert_eq!(window.view_model.roots.len(), 1);
+    assert!(matches!(
+        window.view_model.roots[0].kind,
+        OutputBlockKind::ToolGroup(_)
+    ));
+    assert_eq!(window.view_model.roots[0].children.len(), 2);
 }
 
 #[test]
