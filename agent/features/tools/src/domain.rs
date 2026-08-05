@@ -75,5 +75,5 @@ pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuesti
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{
     AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext, AgentToolCallProgress,
-    ImageData, SessionReminder, SessionReminders, ToolOutcome, ToolResult,
+    ImageData, SessionReminder, SessionReminders, ToolOutcome, ToolProgressEvent, ToolResult,
 };

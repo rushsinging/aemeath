@@ -485,6 +485,15 @@ pub(crate) fn map_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => ChatEvent::ToolProgress {
+            context: turn_context_to_sdk(context),
+            tool_id,
+            event: sdk::ToolProgressEventView { text: event.text },
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::SkillsUpdated { snapshot } => {
             ChatEvent::SkillsUpdated {
                 event: crate::application::client::skill_snapshot_to_sdk(snapshot),
@@ -626,9 +635,6 @@ pub(crate) fn project_agent_progress_event(
                 })
                 .collect(),
         },
-        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
-            AgentProgressKindView::ToolOutput { tool_name, text }
-        }
         tools::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
         tools::AgentProgressKind::Started { role, model } => {
             AgentProgressKindView::Started { role, model }

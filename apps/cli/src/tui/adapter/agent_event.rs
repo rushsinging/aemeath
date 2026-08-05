@@ -215,7 +215,6 @@ where
                     model: model.clone(),
                 }))
             }
-            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
             _ => {
                 let message = format_agent_progress(event, &mut format_subagent_tool_header);
                 let preview: String = message.chars().take(200).collect();
@@ -617,7 +616,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     model: model.clone(),
                 }))
             }
-            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
             TuiAgentProgressKind::Message { text } => conversation(
                 ConversationIntent::RecordAgentProgress(RecordAgentProgress {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
@@ -643,6 +641,18 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }),
             ),
         },
+        TuiRuntimeEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => conversation(ConversationIntent::RecordToolStreamingOutput(
+            RecordToolStreamingOutput {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+                tool_id: ToolCallId::new(tool_id),
+                text: event.text.clone(),
+            },
+        )),
         TuiRuntimeEvent::ConfigChanged { view, .. } => AgentEventMapping {
             ui_preferences: vec![
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(

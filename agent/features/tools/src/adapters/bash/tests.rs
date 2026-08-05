@@ -6,7 +6,7 @@ fn bash_tool(ctx: &ToolExecutionContext) -> BashTool {
         control: crate::domain::test_support::workspace_control(ctx),
     }
 }
-use crate::domain::{AgentProgressEvent, AgentProgressKind};
+use crate::domain::ToolProgressEvent;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -206,15 +206,16 @@ async fn test_bash_result_cwd_on_empty_output() {
 async fn test_bash_streams_stdout_via_progress_tx() {
     use tokio::sync::mpsc;
 
-    struct ChannelProgressSink(mpsc::Sender<AgentProgressEvent>);
+    struct ChannelProgressSink(mpsc::Sender<ToolProgressEvent>);
     impl crate::domain::ProgressSink for ChannelProgressSink {
-        fn emit(&self, event: AgentProgressEvent) {
+        fn emit(&self, _event: crate::domain::AgentProgressEvent) {}
+        fn emit_tool_stream(&self, event: ToolProgressEvent) {
             let _ = self.0.try_send(event);
         }
     }
 
     let workspace = tempdir().unwrap();
-    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
+    let (tx, mut rx) = mpsc::channel::<ToolProgressEvent>(256);
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
     )
@@ -248,15 +249,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
     );
 
     // All collected text fragments concatenated should contain the echoed marker
-    let all_text: String = events
-        .iter()
-        .filter_map(|ev| match &ev.kind {
-            AgentProgressKind::ToolOutput { tool_name, text } if tool_name == "Bash" => {
-                Some(text.as_str())
-            }
-            _ => None,
-        })
-        .collect();
+    let all_text: String = events.iter().map(|ev| ev.text.as_str()).collect();
 
     assert!(
         all_text.contains("progress_stream_test_marker"),
@@ -266,24 +259,26 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 
     // No event should contain the internal CWD marker
     for ev in &events {
-        if let AgentProgressKind::ToolOutput { tool_name, text } = &ev.kind {
-            assert_eq!(tool_name, "Bash");
-            assert!(
-                !text.contains("__AEMEATH_CWD__"),
-                "progress event must not contain __AEMEATH_CWD__ marker: {}",
-                text
-            );
-        }
-    }
-
-    // Sequence must be monotonically increasing and > 0
-    for ev in &events {
         assert!(
-            ev.sequence > 0,
-            "progress event sequence must be > 0, got {}",
-            ev.sequence
+            !ev.text.contains("__AEMEATH_CWD__"),
+            "progress event must not contain __AEMEATH_CWD__ marker: {}",
+            ev.text
         );
     }
+
+    // 拼接后的输出应恰好出现一次 marker 文本（无重复行/空行注入）。
+    // 回归：suffix_carry 重复处理曾导致短输出产生重复行与空行事件。
+    assert_eq!(
+        all_text.matches("progress_stream_test_marker").count(),
+        1,
+        "marker 文本应恰好出现一次（无重复行），got: {:?}",
+        events
+    );
+    assert!(
+        !events.iter().any(|ev| ev.text.trim().is_empty()),
+        "不应产生空行事件（marker 前缀 \\n 已被剥离），got: {:?}",
+        events
+    );
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@ use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
-use tools::{AgentProgressEvent, ImageData};
+use tools::{AgentProgressEvent, ImageData, ToolProgressEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunContext {
@@ -171,6 +171,12 @@ pub enum RuntimeStreamEvent {
         attachment_context: RuntimeRunContext,
         tool_id: ToolCallId,
         event: AgentProgressEvent,
+    },
+    /// 工具 stdout 流式输出（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
+    ToolProgress {
+        context: RuntimeRunContext,
+        tool_id: ToolCallId,
+        event: ToolProgressEvent,
     },
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,

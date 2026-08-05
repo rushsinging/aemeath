@@ -54,8 +54,8 @@ pub use chat::{
     ChatInputImage, ChatRequest, ChatResult, ChatStream, OptionItem, ReflectionApplyStatusView,
     ReflectionErrorCategoryView, ReflectionHistoryView, ReflectionStatusView,
     ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep, ResumedStepFinalizeCause,
-    RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView, ToolResultImage,
-    WorkspaceContextView, WorkspaceStackEntryView,
+    RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView, ToolProgressEventView,
+    ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{

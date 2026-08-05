@@ -82,7 +82,7 @@ TOOLS_DOMAIN_FACADE = {
     "ToolCapability", "ToolCatalogError", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
     "ToolErrorKind", "ToolExecutionContext", "ToolExecutionOutcome", "ToolExecutionPort",
     "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
-    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "ToolTerminalDetails",
+    "ToolProfile", "ToolProfileName", "ToolProgressEvent", "ToolResult", "ToolSuspension", "ToolTerminalDetails",
     "TypedTool",
     "TypedToolAdapter", "TypedToolResult", "UserInteractionSpec", "UserOption", "UserQuestion",
     "WorkspaceReadAccess",

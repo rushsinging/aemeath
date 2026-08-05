@@ -454,7 +454,11 @@ pub(crate) enum TuiAgentProgressKind {
     Started { role: Option<String>, model: String },
     Message { text: String },
     ToolCalls { calls: Vec<TuiAgentToolCall> },
-    ToolOutput { tool_name: String, text: String },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TuiToolProgressEvent {
+    pub(crate) text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -604,6 +608,11 @@ pub(crate) enum TuiRuntimeEvent {
         attachment_context: TuiRunContext,
         tool_id: String,
         event: TuiAgentProgress,
+    },
+    ToolProgress {
+        context: TuiRunContext,
+        tool_id: String,
+        event: TuiToolProgressEvent,
     },
     Cancelled {
         context: TuiRunContext,

@@ -718,6 +718,7 @@ impl RecordingSink {
             RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),
             RuntimeStreamEvent::InteractionRequested { .. } => "InteractionRequested".to_string(),
             RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
+            RuntimeStreamEvent::ToolProgress { .. } => "ToolProgress".to_string(),
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
             }
