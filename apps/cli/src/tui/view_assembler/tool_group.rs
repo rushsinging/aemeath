@@ -37,8 +37,8 @@ pub(crate) fn aggregate_tool_group_status(statuses: &[ToolSemanticStatus]) -> To
     ToolSemanticStatus::Warning
 }
 
-pub(crate) fn classify_tool_name(tool_name: &str) -> Option<ToolGroupKind> {
-    match tool_name {
+pub(crate) fn classify_runtime_tool_name(runtime_tool_name: &str) -> Option<ToolGroupKind> {
+    match runtime_tool_name {
         "Read" | "Glob" | "Grep" => Some(ToolGroupKind::Explore),
         "Bash" => Some(ToolGroupKind::Run),
         "Write" | "Edit" => Some(ToolGroupKind::Write),
@@ -62,7 +62,7 @@ pub(super) fn timeline_candidate(
                     &reference.context.run_id,
                     &reference.tool_call_id,
                 )
-                .and_then(|call| classify_tool_name(&call.name));
+                .and_then(|call| classify_runtime_tool_name(&call.name));
             ToolGroupCandidate {
                 item_id: item.id().into_owned(),
                 call_id: Some(reference.tool_call_id.as_ref().to_string()),
@@ -110,11 +110,16 @@ pub(crate) struct ToolGroupCandidate {
 
 impl ToolGroupCandidate {
     #[cfg(test)]
-    pub(crate) fn tool_call(item_id: &str, call_id: &str, tool_name: &str, step_id: &str) -> Self {
+    pub(crate) fn tool_call(
+        item_id: &str,
+        call_id: &str,
+        runtime_tool_name: &str,
+        step_id: &str,
+    ) -> Self {
         Self {
             item_id: item_id.to_string(),
             call_id: Some(call_id.to_string()),
-            tool_kind: classify_tool_name(tool_name),
+            tool_kind: classify_runtime_tool_name(runtime_tool_name),
             step_id: step_id.to_string(),
             result_call_id: None,
         }

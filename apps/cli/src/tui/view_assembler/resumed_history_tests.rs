@@ -84,6 +84,26 @@ fn loaded_tool_result_window() -> crate::tui::adapter::runtime_view::TuiDisplayH
 }
 
 #[test]
+fn loaded_resume_display_names_do_not_alias_runtime_tool_names_for_grouping() {
+    let mut window = loaded_tool_window();
+    let crate::tui::adapter::runtime_view::TuiContentBlock::ToolUse { name, .. } =
+        &mut window.steps[0].messages[0].content[1]
+    else {
+        panic!("fixture must contain a tool use");
+    };
+    *name = "Find".into();
+    let mut display_history = DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(history_index()));
+    assert!(display_history.apply_window(window));
+
+    let plans = super::resumed_history_display_unit_plans(&display_history);
+
+    assert!(plans
+        .iter()
+        .all(|plan| !matches!(plan, DisplayUnitPlan::ToolGroup { .. })));
+}
+
+#[test]
 fn loaded_resume_display_units_attach_each_result_to_its_matching_tool_call() {
     let mut display_history = DisplayHistoryModel::default();
     display_history.replace(ResumedHistoryBacking::from_index(history_index()));

@@ -107,6 +107,30 @@ fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
 }
 
 #[test]
+fn tool_call_start_preserves_runtime_name_instead_of_display_name() {
+    let mapping = map_agent_event(&UiEvent::ToolCallStart {
+        context: ctx(),
+        id: sdk::ids::ToolCallId::new("tool-glob"),
+        provider_id: Some("provider-glob".to_string()),
+        name: "Glob".to_string(),
+        index: 0,
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::ToolCallStart(ToolCallStart { name, .. })]
+            if name == "Glob"
+    ));
+    assert_ne!(
+        match mapping.conversation.as_slice() {
+            [ConversationIntent::ToolCallStart(ToolCallStart { name, .. })] => name.as_str(),
+            _ => panic!("expected tool call start"),
+        },
+        crate::tui::view_model::tool_name::tool_display_name("Glob")
+    );
+}
+
+#[test]
 fn unknown_tool_result_content_is_bounded_before_entering_model() {
     let oversized = "界".repeat(TOOL_RESULT_PREVIEW_LIMIT);
     assert!(oversized.len() > TOOL_RESULT_PREVIEW_LIMIT);

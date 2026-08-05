@@ -39,7 +39,7 @@ pub(crate) fn resumed_history_candidate(
     crate::tui::view_assembler::tool_group::ToolGroupCandidate {
         item_id: item.id.clone(),
         call_id: Some(tool_id.to_string()),
-        tool_kind: super::tool_group::classify_tool_name(tool_name),
+        tool_kind: super::tool_group::classify_runtime_tool_name(tool_name),
         step_id: step
             .map(|step| step.step_id.clone())
             .unwrap_or_else(|| item.step_index.to_string()),

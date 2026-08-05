@@ -1,6 +1,6 @@
 use super::{
-    aggregate_tool_group_status, classify_tool_name, plan_display_units, timeline_candidate,
-    DisplayUnitPlan, ToolGroupCandidate,
+    aggregate_tool_group_status, classify_runtime_tool_name, plan_display_units,
+    timeline_candidate, DisplayUnitPlan, ToolGroupCandidate,
 };
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
@@ -41,6 +41,21 @@ fn aggregates_group_status_across_running_and_terminal_members() {
     assert_eq!(
         aggregate_tool_group_status(&[ToolSemanticStatus::Orphaned, ToolSemanticStatus::Success]),
         ToolSemanticStatus::Orphaned
+    );
+}
+
+#[test]
+fn rejects_display_names_even_when_they_alias_groupable_runtime_names() {
+    assert_eq!(classify_runtime_tool_name("Find"), None);
+    assert_eq!(classify_runtime_tool_name("Search"), None);
+    assert_eq!(classify_runtime_tool_name("Run"), None);
+    assert_eq!(
+        crate::tui::view_model::tool_name::tool_display_name("Glob"),
+        "Find"
+    );
+    assert_eq!(
+        crate::tui::view_model::tool_name::tool_display_name("Grep"),
+        "Search"
     );
 }
 
@@ -87,7 +102,7 @@ fn groups_interleaved_matching_results_without_breaking_explore_sequence() {
 fn classifies_explore_tools_with_stable_display_kind() {
     for tool_name in ["Read", "Glob", "Grep"] {
         assert_eq!(
-            classify_tool_name(tool_name),
+            classify_runtime_tool_name(tool_name),
             Some(ToolGroupKind::Explore),
             "expected {tool_name} to belong to Explore",
         );
@@ -96,10 +111,10 @@ fn classifies_explore_tools_with_stable_display_kind() {
 
 #[test]
 fn classifies_run_and_write_tools_without_cross_category_fallback() {
-    assert_eq!(classify_tool_name("Bash"), Some(ToolGroupKind::Run));
+    assert_eq!(classify_runtime_tool_name("Bash"), Some(ToolGroupKind::Run));
     for tool_name in ["Write", "Edit"] {
         assert_eq!(
-            classify_tool_name(tool_name),
+            classify_runtime_tool_name(tool_name),
             Some(ToolGroupKind::Write),
             "expected {tool_name} to belong to Write",
         );
@@ -120,7 +135,7 @@ fn classifies_only_the_explicit_task_allowlist() {
         "TaskStop",
     ] {
         assert_eq!(
-            classify_tool_name(tool_name),
+            classify_runtime_tool_name(tool_name),
             Some(ToolGroupKind::Tasks),
             "expected {tool_name} to belong to Tasks",
         );
@@ -137,7 +152,7 @@ fn leaves_unknown_and_task_prefixed_tools_unclassified() {
         "UnknownTool",
     ] {
         assert_eq!(
-            classify_tool_name(tool_name),
+            classify_runtime_tool_name(tool_name),
             None,
             "expected {tool_name} to remain independently displayed",
         );
