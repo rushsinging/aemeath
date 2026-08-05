@@ -83,6 +83,46 @@ fn test_render_tree_dfs_flattens_parent_then_children() {
 }
 
 #[test]
+fn group_marker_refreshes_from_running_to_success_for_same_stable_id() {
+    let group_node = |status| {
+        let kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
+            key: "stable-group".into(),
+            kind: ToolGroupKind::Explore,
+            title: "Explore".into(),
+            semantic_status: status,
+            style: match status {
+                ToolSemanticStatus::Running => SemanticStyle::Running,
+                ToolSemanticStatus::Success => SemanticStyle::Success,
+                _ => SemanticStyle::Muted,
+            },
+        });
+        BlockNode {
+            block_id: "stable-group".into(),
+            block_version: kind.cache_version(),
+            kind,
+            children: Vec::new(),
+        }
+    };
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let running = renderer.render_tree(
+        &vm_with_roots(vec![group_node(ToolSemanticStatus::Running)]),
+        80,
+    );
+    assert_eq!(running.blocks[0].lines[1].spans[0].content.as_ref(), "● ");
+    assert_eq!(
+        running.blocks[0].lines[1].animation,
+        Some(crate::tui::render::output::rendered::LineAnimation::RunningToolMarker)
+    );
+
+    let success = renderer.render_tree(
+        &vm_with_roots(vec![group_node(ToolSemanticStatus::Success)]),
+        80,
+    );
+    assert_eq!(success.blocks[0].lines[1].spans[0].content.as_ref(), "✓ ");
+}
+
+#[test]
 fn tool_group_renders_as_tool_header_with_only_first_member_result_marker() {
     let group_kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
         key: "group".into(),

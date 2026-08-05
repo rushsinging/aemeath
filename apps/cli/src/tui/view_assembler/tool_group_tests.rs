@@ -45,6 +45,45 @@ fn aggregates_group_status_across_running_and_terminal_members() {
 }
 
 #[test]
+fn groups_interleaved_matching_results_without_breaking_explore_sequence() {
+    let inputs = vec![
+        ToolGroupCandidate::tool_call("item-read", "call-read", "Read", "step-1"),
+        ToolGroupCandidate::result("result-read", "call-read", "step-1"),
+        ToolGroupCandidate::tool_call("item-glob", "call-glob", "Glob", "step-1"),
+        ToolGroupCandidate::result("result-glob", "call-glob", "step-1"),
+        ToolGroupCandidate::tool_call("item-grep", "call-grep", "Grep", "step-1"),
+        ToolGroupCandidate::result("result-grep", "call-grep", "step-1"),
+    ];
+
+    assert_eq!(
+        plan_display_units(&inputs),
+        vec![DisplayUnitPlan::ToolGroup {
+            group_id: "tool-group:step-1:call-read".to_string(),
+            kind: ToolGroupKind::Explore,
+            member_ids: vec![
+                "call-read".to_string(),
+                "call-glob".to_string(),
+                "call-grep".to_string(),
+            ],
+            attached_results: vec![
+                super::AttachedToolResult {
+                    item_id: "result-read".to_string(),
+                    call_id: "call-read".to_string(),
+                },
+                super::AttachedToolResult {
+                    item_id: "result-glob".to_string(),
+                    call_id: "call-glob".to_string(),
+                },
+                super::AttachedToolResult {
+                    item_id: "result-grep".to_string(),
+                    call_id: "call-grep".to_string(),
+                },
+            ],
+        }]
+    );
+}
+
+#[test]
 fn classifies_explore_tools_with_stable_display_kind() {
     for tool_name in ["Read", "Glob", "Grep"] {
         assert_eq!(

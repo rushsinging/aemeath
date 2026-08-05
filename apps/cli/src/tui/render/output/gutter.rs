@@ -239,10 +239,15 @@ fn apply_gutter_with_frame_and_role(
             gutted.links = line.links;
             gutted.animation = if i == 0
                 && role == GutterRole::Block
-                && matches!(
-                    kind,                    OutputBlockKind::ToolCall(tool)
+                && (matches!(
+                    kind,
+                    OutputBlockKind::ToolCall(tool)
                         if tool.semantic_status == ToolSemanticStatus::Running
-                ) {
+                ) || matches!(
+                    kind,
+                    OutputBlockKind::ToolGroup(group)
+                        if group.semantic_status == ToolSemanticStatus::Running
+                )) {
                 Some(LineAnimation::RunningToolMarker)
             } else {
                 line.animation
