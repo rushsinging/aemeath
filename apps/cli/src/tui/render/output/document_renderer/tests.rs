@@ -4,7 +4,7 @@ use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
     BlockNode, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus,
+    ToolGroupBlockView, ToolGroupKind, ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -80,6 +80,69 @@ fn test_render_tree_dfs_flattens_parent_then_children() {
     assert_eq!(doc.blocks.len(), 2);
     assert_eq!(doc.blocks[0].block_id, "p");
     assert_eq!(doc.blocks[1].block_id, "c");
+}
+
+#[test]
+fn tool_group_renders_as_tool_header_with_member_as_result_row() {
+    let group_kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
+        key: "group".into(),
+        kind: ToolGroupKind::Explore,
+        title: "Explore".into(),
+        style: SemanticStyle::Muted,
+    });
+    let member_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "member".into(),
+        chat_id: None,
+        run_id: None,
+        tool_call_id: Some("member".into()),
+        title: "Read".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: Some(r#"{"file_path":"Cargo.toml"}"#.into()),
+        activity_lines: Vec::new(),
+        result_summary: None,
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    let view_model = vm_with_roots(vec![BlockNode {
+        block_id: "group".into(),
+        block_version: group_kind.cache_version(),
+        kind: group_kind,
+        children: vec![BlockNode {
+            block_id: "member".into(),
+            block_version: member_kind.cache_version(),
+            kind: member_kind,
+            children: Vec::new(),
+        }],
+    }]);
+
+    let mut renderer = OutputDocumentRenderer::default();
+    let document = renderer.render_tree(&view_model, 80);
+    let group = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "group")
+        .expect("group block exists");
+    let member = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "member")
+        .expect("member block exists");
+
+    assert_eq!(group.lines[1].plain, "Explore");
+    assert_eq!(group.lines[1].spans[0].content.as_ref(), "● ");
+    assert_eq!(group.lines[1].spans[0].style.fg, Some(theme::TOOL_RUNNING));
+    assert_eq!(group.lines[1].style.fg, Some(theme::TEXT));
+    assert!(!group.lines[1].plain.contains('─'));
+
+    assert_eq!(member.lines[0].spans[0].content.as_ref(), "  ⎿ ");
+    assert_eq!(member.lines[0].spans[0].style.fg, Some(theme::TEXT_MUTED));
+    assert_eq!(member.lines[0].style.fg, Some(theme::TEXT));
+    assert!(member.lines[0].plain.contains("Read"));
 }
 
 #[test]

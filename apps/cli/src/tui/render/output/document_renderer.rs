@@ -31,6 +31,7 @@ struct GuttedKey {
     block_version: u64,
     text_width: u16,
     depth: usize,
+    gutter_role: gutter::GutterRole,
     markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
 }
 
@@ -222,6 +223,7 @@ impl OutputDocumentRenderer {
             root,
             outer_width,
             0,
+            gutter::GutterRole::Block,
             animation_frame,
             markdown_spacing,
             &mut group,
@@ -234,6 +236,7 @@ impl OutputDocumentRenderer {
         node: &BlockNode,
         outer_width: u16,
         depth: usize,
+        gutter_role: gutter::GutterRole,
         animation_frame: u64,
         markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy,
         out: &mut Vec<RenderedBlock>,
@@ -253,6 +256,7 @@ impl OutputDocumentRenderer {
             block_version: node.block_version,
             text_width,
             depth,
+            gutter_role,
             markdown_spacing,
         };
         // gutted 缓存命中：key 完全一致时直接复用（lines 为 Rc，clone 廉价）。
@@ -266,6 +270,7 @@ impl OutputDocumentRenderer {
                         child,
                         outer_width,
                         depth + 1,
+                        child_gutter_role(&node.kind, &child.kind),
                         animation_frame,
                         markdown_spacing,
                         out,
@@ -323,10 +328,11 @@ impl OutputDocumentRenderer {
             // 极窄屏：完全跳过 gutter
             (*rendered.lines).clone()
         } else {
-            crate::tui::render::output::gutter::apply_gutter(
+            crate::tui::render::output::gutter::apply_gutter_with_role(
                 &node.kind,
                 effective_depth,
                 (*rendered.lines).clone(),
+                gutter_role,
             )
         };
         let mut gutted = gutted;
@@ -354,6 +360,7 @@ impl OutputDocumentRenderer {
                 child,
                 outer_width,
                 depth + 1,
+                child_gutter_role(&node.kind, &child.kind),
                 animation_frame,
                 markdown_spacing,
                 out,
@@ -379,6 +386,16 @@ impl OutputDocumentRenderer {
     #[cfg(test)]
     pub fn gutted_render_count(&self) -> usize {
         self.gutted_render_count.get()
+    }
+}
+
+fn child_gutter_role(parent: &OutputBlockKind, child: &OutputBlockKind) -> gutter::GutterRole {
+    if matches!(parent, OutputBlockKind::ToolGroup(_))
+        && matches!(child, OutputBlockKind::ToolCall(_))
+    {
+        gutter::GutterRole::ToolGroupMember
+    } else {
+        gutter::GutterRole::Block
     }
 }
 

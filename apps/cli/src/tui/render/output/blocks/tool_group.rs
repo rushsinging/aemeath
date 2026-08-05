@@ -1,5 +1,5 @@
-use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
+use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolGroupBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
@@ -10,13 +10,13 @@ pub fn render_tool_group(
     view: &ToolGroupBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let title = format!("── {} ──", view.title);
     RenderedBlock {
         block_id: block_id.to_string(),
         lines: Rc::new(vec![RenderedLine::new(vec![Span::styled(
-            title,
-            Style::default().fg(semantic_color(view.style)),
-        )])]),
+            view.title.clone(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        )])
+        .with_style(Style::default().fg(theme::TEXT))]),
     }
 }
 

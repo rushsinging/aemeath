@@ -122,7 +122,7 @@ const MAX_BLOCK_DEPTH: usize = 4;
 ```
 
 - `ToolGroup` 只能容纳 `ToolCall`；`ToolCall` 继续独占其结果和活动子块
-- 逻辑树深度与视觉缩进分离：组标题和 ToolCall 保持根级视觉宽度，ToolResult 仍相对 ToolCall 缩进
+- 逻辑树深度与视觉角色分离：`ToolGroup` 按普通 ToolCall header 渲染，直属 `ToolCall` 按 `⎿` result row 渲染，成员自身 `ToolResult` 仍相对成员缩进
 - 独立或孤儿 ToolResult 作为顶层诊断块渲染，并切断当前组
 
 ## 3. ViewAssembler
@@ -536,6 +536,7 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-05 | 调整 ToolGroup 视觉角色：分组为普通工具 header，直属成员为 result row，保持三层逻辑树 | — |
 | 2026-08-05 | 增加 ToolGroup display unit、Live/Resume 共享 planner、20 成员上限、窗口原子性与三层工具树契约 | #1353 |
 | 2026-07-12 | 初稿：封闭 block 类型、ViewAssembler 组装、ViewState 状态机、三层缓存、Render 管线与架构门禁 | #798 |
 | 2026-07-14 | 收敛 Target-only 视图契约：只读 Model、瞬时 ViewState、bounded cache、穷尽 timeline 组装与可执行门禁 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
