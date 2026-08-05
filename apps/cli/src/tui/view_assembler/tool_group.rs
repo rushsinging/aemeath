@@ -109,17 +109,61 @@ impl ToolGroupCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttachedToolResult {
+    pub(crate) item_id: String,
+    pub(crate) call_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DisplayUnitPlan {
     Single {
         item_id: String,
-        attached_result_ids: Vec<String>,
+        attached_results: Vec<AttachedToolResult>,
     },
     ToolGroup {
         group_id: String,
         kind: ToolGroupKind,
         member_ids: Vec<String>,
-        attached_result_ids: Vec<String>,
+        attached_results: Vec<AttachedToolResult>,
     },
+}
+
+impl DisplayUnitPlan {
+    pub(crate) fn id(&self) -> &str {
+        match self {
+            Self::Single { item_id, .. } => item_id,
+            Self::ToolGroup { group_id, .. } => group_id,
+        }
+    }
+
+    pub(crate) fn source_item_ids(&self) -> impl Iterator<Item = &str> {
+        let ids = match self {
+            Self::Single {
+                item_id,
+                attached_results,
+            } => std::iter::once(item_id.as_str())
+                .chain(
+                    attached_results
+                        .iter()
+                        .map(|result| result.item_id.as_str()),
+                )
+                .collect::<Vec<_>>(),
+            Self::ToolGroup {
+                member_ids,
+                attached_results,
+                ..
+            } => member_ids
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    attached_results
+                        .iter()
+                        .map(|result| result.item_id.as_str()),
+                )
+                .collect(),
+        };
+        ids.into_iter()
+    }
 }
 
 pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<DisplayUnitPlan> {
@@ -133,12 +177,15 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
                 .iter()
                 .any(|call| call.call_id.as_deref() == Some(result_call_id))
             {
-                pending_results.push(candidate.item_id.clone());
+                pending_results.push(AttachedToolResult {
+                    item_id: candidate.item_id.clone(),
+                    call_id: result_call_id.to_string(),
+                });
             } else {
                 flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
                 display_units.push(DisplayUnitPlan::Single {
                     item_id: candidate.item_id.clone(),
-                    attached_result_ids: Vec::new(),
+                    attached_results: Vec::new(),
                 });
             }
             continue;
@@ -148,7 +195,7 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
             flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
             display_units.push(DisplayUnitPlan::Single {
                 item_id: candidate.item_id.clone(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             });
             continue;
         };
@@ -171,7 +218,7 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
 fn flush_pending_calls(
     display_units: &mut Vec<DisplayUnitPlan>,
     pending_calls: &mut Vec<&ToolGroupCandidate>,
-    pending_results: &mut Vec<String>,
+    pending_results: &mut Vec<AttachedToolResult>,
 ) {
     if pending_calls.is_empty() {
         pending_results.clear();
@@ -182,7 +229,7 @@ fn flush_pending_calls(
         let call = pending_calls[0];
         display_units.push(DisplayUnitPlan::Single {
             item_id: call.item_id.clone(),
-            attached_result_ids: std::mem::take(pending_results),
+            attached_results: std::mem::take(pending_results),
         });
     } else {
         let first_call = pending_calls[0];
@@ -210,7 +257,7 @@ fn flush_pending_calls(
             group_id,
             kind,
             member_ids,
-            attached_result_ids: std::mem::take(pending_results),
+            attached_results: std::mem::take(pending_results),
         });
     }
     pending_calls.clear();

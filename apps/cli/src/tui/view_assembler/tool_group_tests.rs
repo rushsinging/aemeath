@@ -135,7 +135,7 @@ fn plans_two_or_more_consecutive_tool_calls_as_one_group() {
                 "call-2".to_string(),
                 "call-3".to_string()
             ],
-            attached_result_ids: Vec::new(),
+            attached_results: Vec::new(),
         }]
     );
 }
@@ -150,7 +150,7 @@ fn keeps_single_tool_call_as_an_independent_display_unit() {
         plan_display_units(&inputs),
         vec![DisplayUnitPlan::Single {
             item_id: "item-1".to_string(),
-            attached_result_ids: Vec::new(),
+            attached_results: Vec::new(),
         }]
     );
 }
@@ -172,19 +172,19 @@ fn cuts_groups_at_non_tool_output_and_category_changes() {
                 group_id: "tool-group:step-1:call-1".to_string(),
                 kind: ToolGroupKind::Explore,
                 member_ids: vec!["call-1".to_string(), "call-2".to_string()],
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
             DisplayUnitPlan::Single {
                 item_id: "item-3".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
             DisplayUnitPlan::Single {
                 item_id: "item-4".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
             DisplayUnitPlan::Single {
                 item_id: "item-5".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
         ]
     );
@@ -207,17 +207,49 @@ fn matching_results_are_transparent_but_orphans_cut_and_remain_visible() {
                 group_id: "tool-group:step-1:call-1".to_string(),
                 kind: ToolGroupKind::Explore,
                 member_ids: vec!["call-1".to_string(), "call-2".to_string()],
-                attached_result_ids: vec!["result-1".to_string()],
+                attached_results: vec![super::AttachedToolResult {
+                    item_id: "result-1".to_string(),
+                    call_id: "call-1".to_string()
+                }],
             },
             DisplayUnitPlan::Single {
                 item_id: "orphan-1".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
             DisplayUnitPlan::Single {
                 item_id: "item-3".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
         ]
+    );
+}
+
+#[test]
+fn records_matching_results_against_their_exact_tool_call_identity() {
+    let inputs = vec![
+        ToolGroupCandidate::tool_call("item-1", "call-1", "Read", "step-1"),
+        ToolGroupCandidate::result("result-1", "call-1", "step-1"),
+        ToolGroupCandidate::tool_call("item-2", "call-2", "Glob", "step-1"),
+        ToolGroupCandidate::result("result-2", "call-2", "step-1"),
+    ];
+
+    assert_eq!(
+        plan_display_units(&inputs),
+        vec![DisplayUnitPlan::ToolGroup {
+            group_id: "tool-group:step-1:call-1".to_string(),
+            kind: ToolGroupKind::Explore,
+            member_ids: vec!["call-1".to_string(), "call-2".to_string()],
+            attached_results: vec![
+                super::AttachedToolResult {
+                    item_id: "result-1".to_string(),
+                    call_id: "call-1".to_string(),
+                },
+                super::AttachedToolResult {
+                    item_id: "result-2".to_string(),
+                    call_id: "call-2".to_string(),
+                },
+            ],
+        }]
     );
 }
 
@@ -233,11 +265,11 @@ fn does_not_group_calls_across_run_step_boundaries() {
         vec![
             DisplayUnitPlan::Single {
                 item_id: "item-1".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
             DisplayUnitPlan::Single {
                 item_id: "item-2".to_string(),
-                attached_result_ids: Vec::new(),
+                attached_results: Vec::new(),
             },
         ]
     );

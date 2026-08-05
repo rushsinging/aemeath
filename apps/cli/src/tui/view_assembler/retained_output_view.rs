@@ -6,6 +6,7 @@ use crate::tui::model::display_history::DisplayHistoryModel;
 use crate::tui::view_assembler::output::OutputViewAssembler;
 use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
 use crate::tui::view_assembler::output_window_index::{OutputWindowIndex, OutputWindowIndexChange};
+use crate::tui::view_assembler::tool_group::DisplayUnitPlan;
 use crate::tui::view_model::{BlockNode, OutputRenderWindow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ pub(crate) struct MaterializedOutputWindow {
 pub(crate) struct RetainedOutputView {
     cursor: Option<OutputViewCursor>,
     workspace_root: Option<PathBuf>,
+    display_units: Vec<DisplayUnitPlan>,
     window_index: OutputWindowIndex,
     current_window: crate::tui::view_model::OutputViewModel,
     display_history_invalidated: bool,
@@ -83,36 +85,51 @@ impl RetainedOutputView {
         let requested_item_ids = selection
             .item_range
             .clone()
-            .filter_map(|position| self.window_index.entry_id(position))
-            .map(str::to_string)
+            .flat_map(|position| {
+                self.display_units
+                    .get(position)
+                    .into_iter()
+                    .flat_map(DisplayUnitPlan::source_item_ids)
+                    .map(str::to_string)
+            })
             .collect::<Vec<_>>();
-        let visible_item_ids = requested_item_ids.iter().cloned().collect::<HashSet<_>>();
+        let visible_unit_ids = selection
+            .item_range
+            .clone()
+            .filter_map(|position| self.display_units.get(position))
+            .map(DisplayUnitPlan::id)
+            .map(str::to_string)
+            .collect::<HashSet<_>>();
         let missing_history_request = display_history.window_request(&requested_item_ids);
         self.root_cache
-            .retain(|item_id, _| visible_item_ids.contains(item_id));
+            .retain(|unit_id, _| visible_unit_ids.contains(unit_id));
         let lookup = ConversationToolLookup::new(conversation);
         let mut reused_roots = 0;
         let roots = selection
             .item_range
             .clone()
             .filter_map(|position| {
-                let item_id = self.window_index.entry_id(position)?;
-                if let Some(root) = self.root_cache.get(item_id) {
+                let unit = self.display_units.get(position)?;
+                let unit_id = unit.id();
+                if let Some(root) = self.root_cache.get(unit_id) {
                     reused_roots += 1;
                     return Some(Arc::clone(root));
                 }
-                let root = if let Some(item) = display_history.item(item_id) {
-                    crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
-                        display_history,
-                        item,
+                let root = crate::tui::view_assembler::resumed_history::assemble_resumed_history_display_unit(
+                    display_history,
+                    unit,
+                )
+                .or_else(|| {
+                    OutputViewAssembler::assemble_display_unit(
+                        unit,
+                        conversation.timeline.items(),
+                        &lookup,
+                        workspace_root,
                     )
-                } else {
-                    let item = conversation.timeline.item(item_id)?;
-                    OutputViewAssembler::assemble_item(item, &lookup, workspace_root)
-                }?;
+                })?;
                 let root = Arc::new(root);
                 self.root_cache
-                    .insert(item_id.to_string(), Arc::clone(&root));
+                    .insert(unit_id.to_string(), Arc::clone(&root));
                 Some(root)
             })
             .collect::<Vec<_>>();
@@ -135,14 +152,22 @@ impl RetainedOutputView {
         }
     }
 
-    fn rebuild_index(
+    fn rebuild_display_units_and_index(
         &mut self,
         conversation: &ConversationModel,
         display_history: &DisplayHistoryModel,
-        workspace_root: Option<PathBuf>,
-        stats: &mut RetainedOutputViewStats,
     ) {
-        let entries = display_history
+        let lookup = ConversationToolLookup::new(conversation);
+        let history_units =
+            crate::tui::view_assembler::resumed_history::resumed_history_display_unit_plans(
+                display_history,
+            );
+        let live_units = OutputViewAssembler::timeline_display_unit_plans(
+            conversation.timeline.items(),
+            &lookup,
+        );
+        self.display_units = history_units.into_iter().chain(live_units).collect();
+        let source_estimates = display_history
             .items()
             .iter()
             .map(|item| {
@@ -151,22 +176,34 @@ impl RetainedOutputView {
                     OutputWindowIndex::estimated_lines_for_history_item(item),
                 )
             })
-            .chain(
-                conversation
-                    .timeline
-                    .items()
-                    .iter()
-                    .filter(|item| OutputWindowIndex::estimated_lines_for_item(item) > 0)
-                    .map(|item| {
-                        (
-                            item.id().into_owned(),
-                            OutputWindowIndex::estimated_lines_for_item(item),
-                        )
-                    }),
-            )
+            .chain(conversation.timeline.items().iter().map(|item| {
+                (
+                    item.id().into_owned(),
+                    OutputWindowIndex::estimated_lines_for_item(item),
+                )
+            }))
+            .collect::<HashMap<_, _>>();
+        let entries = self
+            .display_units
+            .iter()
+            .filter_map(|unit| {
+                let estimated_lines =
+                    OutputWindowIndex::estimated_lines_for_display_unit(unit, &source_estimates);
+                (estimated_lines > 0).then(|| (unit.id().to_string(), estimated_lines))
+            })
             .collect::<Vec<_>>();
         self.window_index
             .apply_change(OutputWindowIndexChange::Reset { entries });
+    }
+
+    fn rebuild_index(
+        &mut self,
+        conversation: &ConversationModel,
+        display_history: &DisplayHistoryModel,
+        workspace_root: Option<PathBuf>,
+        stats: &mut RetainedOutputViewStats,
+    ) {
+        self.rebuild_display_units_and_index(conversation, display_history);
         self.root_cache.clear();
         self.cursor = Some(conversation.output_view_cursor());
         self.workspace_root = workspace_root;
@@ -196,54 +233,46 @@ impl RetainedOutputView {
                 next_cursor,
                 changes,
             } => {
-                let mut invalidated_item_ids = HashSet::new();
-                for change in changes {
-                    match change {
-                        OutputViewChange::Append { item_id } => {
-                            invalidated_item_ids.insert(item_id.clone());
-                            if let Some(item) = conversation.timeline.item(&item_id) {
-                                let estimated_lines =
-                                    OutputWindowIndex::estimated_lines_for_item(item);
-                                if estimated_lines > 0 {
-                                    self.window_index.apply_change(
-                                        OutputWindowIndexChange::Append {
-                                            item_id,
-                                            estimated_lines,
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                        OutputViewChange::Update { item_id } => {
-                            invalidated_item_ids.insert(item_id.clone());
-                            if let Some(item) = conversation.timeline.item(&item_id) {
-                                self.window_index
-                                    .apply_change(OutputWindowIndexChange::Update {
-                                        item_id,
-                                        estimated_lines:
-                                            OutputWindowIndex::estimated_lines_for_item(item),
-                                    });
-                            }
-                        }
-                        OutputViewChange::Remove { item_id } => {
-                            invalidated_item_ids.insert(item_id.clone());
-                            self.window_index
-                                .apply_change(OutputWindowIndexChange::Remove { item_id });
-                        }
-                        OutputViewChange::Reset => {
-                            self.rebuild_index(
-                                conversation,
-                                display_history,
-                                workspace_root.map(Path::to_path_buf),
-                                stats,
-                            );
-                            return;
-                        }
-                    }
+                if changes.is_empty() {
+                    self.cursor = Some(next_cursor);
+                    return;
                 }
-                for item_id in invalidated_item_ids {
-                    self.root_cache.remove(&item_id);
+                let changed_item_ids = changes
+                    .iter()
+                    .filter_map(|change| match change {
+                        OutputViewChange::Append { .. } => None,
+                        OutputViewChange::Update { item_id }
+                        | OutputViewChange::Remove { item_id } => Some(item_id.clone()),
+                        OutputViewChange::Reset => None,
+                    })
+                    .collect::<HashSet<_>>();
+                if changes
+                    .iter()
+                    .any(|change| matches!(change, OutputViewChange::Reset))
+                {
+                    self.rebuild_index(
+                        conversation,
+                        display_history,
+                        workspace_root.map(Path::to_path_buf),
+                        stats,
+                    );
+                    return;
                 }
+                let old_units = self.display_units.clone();
+                self.rebuild_display_units_and_index(conversation, display_history);
+                let unchanged_unit_ids = old_units
+                    .iter()
+                    .filter(|old_unit| {
+                        !old_unit
+                            .source_item_ids()
+                            .any(|item_id| changed_item_ids.contains(item_id))
+                            && self.display_units.iter().any(|unit| unit == *old_unit)
+                    })
+                    .map(DisplayUnitPlan::id)
+                    .map(str::to_string)
+                    .collect::<HashSet<_>>();
+                self.root_cache
+                    .retain(|unit_id, _| unchanged_unit_ids.contains(unit_id));
                 self.cursor = Some(next_cursor);
             }
         }

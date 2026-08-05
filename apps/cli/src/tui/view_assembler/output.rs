@@ -71,16 +71,24 @@ impl ToolCallLookup for ToolIndex<'_> {
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
-    pub(super) fn assemble_timeline_display_units(
+    pub(super) fn timeline_display_unit_plans(
         timeline_items: &[OutputTimelineItem],
         tool_lookup: &impl ToolCallLookup,
-        workspace_root: Option<&std::path::Path>,
-    ) -> Vec<BlockNode> {
+    ) -> Vec<DisplayUnitPlan> {
         let candidates = timeline_items
             .iter()
             .map(|item| super::tool_group::timeline_candidate(item, tool_lookup))
             .collect::<Vec<_>>();
         super::tool_group::plan_display_units(&candidates)
+    }
+
+    #[cfg(test)]
+    pub(super) fn assemble_timeline_display_units(
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+        workspace_root: Option<&std::path::Path>,
+    ) -> Vec<BlockNode> {
+        Self::timeline_display_unit_plans(timeline_items, tool_lookup)
             .iter()
             .filter_map(|unit| {
                 Self::assemble_display_unit(unit, timeline_items, tool_lookup, workspace_root)
@@ -96,16 +104,16 @@ impl OutputViewAssembler {
         match unit {
             DisplayUnitPlan::Single {
                 item_id,
-                attached_result_ids,
+                attached_results,
             } => {
                 let source_item = timeline_items
                     .iter()
                     .find(|item| item.id().as_ref() == item_id)?;
                 let mut root = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
-                for result_id in attached_result_ids {
+                for attached_result in attached_results {
                     let result_item = timeline_items
                         .iter()
-                        .find(|item| item.id().as_ref() == result_id)?;
+                        .find(|item| item.id().as_ref() == attached_result.item_id)?;
                     let result = Self::assemble_item(result_item, tool_lookup, workspace_root)?;
                     push_child_checked(&mut root, result, 1);
                 }
@@ -115,7 +123,7 @@ impl OutputViewAssembler {
                 group_id,
                 kind,
                 member_ids,
-                attached_result_ids,
+                attached_results,
             } => {
                 let mut group = leaf(
                     group_id.clone(),
@@ -134,12 +142,15 @@ impl OutputViewAssembler {
                     let member = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
                     push_child_checked(&mut group, member, 1);
                 }
-                for result_id in attached_result_ids {
+                for attached_result in attached_results {
                     let result_item = timeline_items
                         .iter()
-                        .find(|item| item.id().as_ref() == result_id)?;
+                        .find(|item| item.id().as_ref() == attached_result.item_id)?;
                     let result = Self::assemble_item(result_item, tool_lookup, workspace_root)?;
-                    let parent = group.children.last_mut()?;
+                    let parent = group.children.iter_mut().find(|child| {
+                        matches!(child.kind, OutputBlockKind::ToolCall(_))
+                            && child.block_id.contains(&attached_result.call_id)
+                    })?;
                     push_child_checked(parent, result, 2);
                 }
                 Some(group)

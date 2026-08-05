@@ -34,6 +34,7 @@ impl OutputWindowEntry {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum OutputWindowIndexChange {
     Append {
         item_id: String,
@@ -127,12 +128,6 @@ impl OutputWindowIndex {
         }
     }
 
-    pub(crate) fn entry_id(&self, position: usize) -> Option<&str> {
-        self.entries
-            .get(position)
-            .map(|entry| entry.item_id.as_str())
-    }
-
     pub(crate) fn estimated_lines_for_item(
         item: &crate::tui::model::output_timeline::OutputTimelineItem,
     ) -> usize {
@@ -156,6 +151,22 @@ impl OutputWindowIndex {
             OutputTimelineItem::ToolCall { .. }
             | OutputTimelineItem::ToolResult { .. }
             | OutputTimelineItem::AgentProgress { .. } => 10,
+        }
+    }
+
+    pub(crate) fn estimated_lines_for_display_unit(
+        plan: &crate::tui::view_assembler::tool_group::DisplayUnitPlan,
+        source_estimates: &HashMap<String, usize>,
+    ) -> usize {
+        let source_lines = plan
+            .source_item_ids()
+            .filter_map(|item_id| source_estimates.get(item_id))
+            .fold(0usize, |total, lines| total.saturating_add(*lines));
+        match plan {
+            crate::tui::view_assembler::tool_group::DisplayUnitPlan::ToolGroup { .. } => {
+                source_lines.saturating_add(1)
+            }
+            crate::tui::view_assembler::tool_group::DisplayUnitPlan::Single { .. } => source_lines,
         }
     }
 

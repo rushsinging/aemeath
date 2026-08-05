@@ -168,3 +168,50 @@ fn reset_replaces_order_without_retaining_output_bodies() {
         .all(|entry| entry.exact_lines_for_width(80).is_none()));
     assert_eq!(index.retained_block_nodes(), 0);
 }
+
+#[test]
+fn display_unit_group_is_selected_as_one_atomic_window_entry() {
+    let mut index = OutputWindowIndex::default();
+    index.apply_change(OutputWindowIndexChange::Append {
+        item_id: "user-1".to_string(),
+        estimated_lines: 2,
+    });
+    index.apply_change(OutputWindowIndexChange::Append {
+        item_id: "group:explore:call-1".to_string(),
+        estimated_lines: 12,
+    });
+    index.apply_change(OutputWindowIndexChange::Append {
+        item_id: "assistant-2".to_string(),
+        estimated_lines: 2,
+    });
+
+    let selection = index.select_window(OutputRenderWindow {
+        line_limit: 8,
+        tail_offset: 0,
+    });
+
+    assert_eq!(
+        ids(&index),
+        vec!["user-1", "group:explore:call-1", "assistant-2"]
+    );
+    assert_eq!(selection.item_range, 1..3);
+    assert_eq!(selection.folded_earlier_lines, 2);
+}
+
+#[test]
+fn oversized_display_unit_remains_whole_instead_of_splitting() {
+    let mut index = OutputWindowIndex::default();
+    index.apply_change(OutputWindowIndexChange::Append {
+        item_id: "group:run:call-1".to_string(),
+        estimated_lines: 50,
+    });
+
+    let selection = index.select_window(OutputRenderWindow {
+        line_limit: 8,
+        tail_offset: 0,
+    });
+
+    assert_eq!(selection.item_range, 0..1);
+    assert_eq!(selection.source_total_lines, 50);
+    assert_eq!(selection.folded_earlier_lines, 0);
+}
