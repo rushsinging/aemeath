@@ -70,14 +70,14 @@ pub(super) fn find_tool_view(
         None => (None, None),
     };
     crate::tui::log_debug!(
-        "assemble tool_call_view chat_id={} run_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
+        "assemble tool_call_view chat_id={} run_id={} id={} name={} status={:?} args_len={} result_len={} activities={}",
         chat_id.as_ref(),
         run_id.as_ref(),
         tool_id.as_ref(),
         call.name,
         call.status,
         call.args_preview.len(),
-                result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                  result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         call.activities.len(),
     );
     Some(ToolCallBlockView {
@@ -95,15 +95,16 @@ pub(super) fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-        // 工具已完成时不再显示 activity_lines（结果已在 ToolResult 子块展示，
-        // 避免子代理最终输出同时出现在 activity 行和 result 子块中造成重复）。
-        activity_lines: if matches!(
+        // #1547：工具未完成时将 activities 合并为 streaming_preview 文本（供 assembler
+        // 装配临时 `<tool-id>-streaming-result` ToolResult 子块）；完成态为 None。
+        streaming_preview: if matches!(
             call.status,
             ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
-        ) {
-            Vec::new()
+        ) || call.activities.is_empty()
+        {
+            None
         } else {
-            call.activities.clone()
+            Some(call.activities.join("\n"))
         },
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id

@@ -146,7 +146,12 @@ pub struct ToolCallBlockView {
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
-    pub activity_lines: Vec<String>,
+    /// 运行中工具的流式预览文本（由 assembler 合并 `call.activities` 生成）。
+    /// 完成态为 None——结果已由权威 ToolResult 子块展示。
+    /// renderer 不再消费此字段渲染内联行；assembler 将其装配为临时
+    /// `<tool-id>-streaming-result` ToolResult 子块（depth=1），marker/缩进/续行
+    /// 全部由 gutter 统一管理（#1547）。
+    pub streaming_preview: Option<String>,
     pub result_summary: Option<String>,
     /// Owned structured payload of the tool result (output/content/is_error/image_count).
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
