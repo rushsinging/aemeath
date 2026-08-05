@@ -78,9 +78,11 @@ ViewModel 定义封闭分类：
 | `Explore` | `Explore` | `Read`、`Glob`、`Grep` |
 | `Run` | `Run` | `Bash` |
 | `Write` | `Write` | `Write`、`Edit` |
-| `Tasks` | `Tasks` | `TaskListCreate`、`TaskCreate`、`TaskUpdate`、`TaskGet`、`TaskList`、`TaskListComplete`、`TaskStop` |
+| `Tasks` | `Tasks` | `TaskCreate`、`TaskUpdate`、`TaskBlockBy`、`TaskListGet`、`TaskLists`、`TaskListCreate`、`TaskListComplete`、`TaskGet`、`TaskStop` |
 
-分类函数是封闭纯函数：已知工具返回对应类别，其他工具返回 `None`。未知工具保持独立展示，禁止按前缀、参数或到达位置猜测分类。
+Task 分类已按当前 Main builtin registry 与 TUI `task_impls` 逐项核对。Issue 原文中的 `TaskList` 不是当前注册工具名；当前对应“读取 active task list”的工具名是 `TaskListGet`。Issue 原文还缺少后续新增的 `TaskBlockBy` 与 `TaskLists`。
+
+分类函数是封闭纯函数：已知工具返回对应类别，其他工具返回 `None`。未知工具保持独立展示，禁止按 `Task*` 前缀、参数或到达位置猜测分类。分类清单在 TUI 展示规划模块中只定义一次，live 与 resume adapter 必须共同调用；测试必须逐项锁定当前 9 个 Task 工具，新增或重命名 Task 工具时必须显式更新该清单及其契约测试。
 
 Issue 原文使用 `Explor`，本设计统一为语义完整的 `Explore`，避免把截断拼写固化为类型和用户可见术语。
 
@@ -220,9 +222,81 @@ RetainedOutputView 缓存展示单元和成员节点：
 
 缓存容量仍由现有 bounded LRU 约束，不新增无界集合。
 
-## 9. Renderer 与视觉深度
+## 9. Resume 历史分组
 
-### 9.1 分组标题
+Resume 使用独立的惰性展示历史，不把历史内容逐条恢复进 live `ConversationModel.timeline`。首次 resume 通常只有 `DisplayHistoryIndex`，每个 Run Step 先以 `StepPlaceholder` 参与窗口选择；窗口选中后才加载对应 step 文件，并由 `apply_window` 将 placeholder 替换为具体 `ResumedHistoryItem`。因此 Resume 不能在 placeholder 阶段预判工具分组。
+
+### 9.1 两阶段行为
+
+未加载阶段：
+
+- `StepPlaceholder` 不产生 ToolGroup；
+- 不依据 step 行数、member name 或相邻 placeholder 猜测工具类别；
+- 继续使用 step 的整体 `estimated_lines` 选择窗口并请求完整 step；
+- placeholder 本身是窗口加载原子。
+
+加载完成后：
+
+```text
+DisplayHistoryWindow
+  → replace StepPlaceholder with ResumedHistoryItem sequence
+  → resume item adapter
+  → shared tool grouping planner
+  → DisplayUnitPlan
+  → rebuild OutputWindowIndex
+  → materialize the same requested window
+```
+
+`apply_window` 成功后继续通过 `invalidate_display_history()` 触发确定性索引重建；该过程不得修改 `ConversationModel.revision()`。
+
+### 9.2 live 与 resume 共享规则
+
+工具分类、切断条件、最短分组长度和 group ID 规则只能定义一次。两条输入路径只各自负责把来源 item 映射为统一规划输入：
+
+- live adapter 读取 `OutputTimelineItem` 与 `ToolCallLookup`；
+- resume adapter 读取 `ResumedHistoryItem` 及其 `LocalResumeContentBlock`；
+- shared planner 只消费“可分组 ToolCall 候选 / 透明关联项 / 切断项”，不感知来源。
+
+禁止在 `resumed_history.rs` 复制第二份 Task/Explore/Run/Write 工具清单或分段算法。
+
+### 9.3 ToolResult 透明关联
+
+恢复数据把 ToolUse 与 ToolResult 保存为不同 content block，但当前 materializer 已能按 provider `tool_use_id` 找到 ToolResult，并将其作为 ToolCall 的结果子节点。Resume 分段必须遵循：
+
+- 与 ToolCall identity 匹配的 ToolResult 是透明关联项，吸收到对应 ToolCall，不切断分组，也不产生第二个根；ToolResult 即使位于后续 user-role tool-result message 中，也按 identity 回绑，不要求在原始 content block 序列中紧邻 ToolUse；
+- ToolResult 不得按“最近一个工具”或到达位置猜测绑定；
+- 找不到 ToolUse 的 ToolResult 是 orphan，必须切断分组并产生独立诊断；
+- 父 ToolCall 的结果状态不影响相邻工具是否同组。
+
+### 9.4 Run Step 边界
+
+ToolGroup 永不跨 `ResumedHistoryStep`。即使前一个 step 的最后一个工具和下一个 step 的第一个工具属于同一类别，也必须形成两个独立展示单元。原因是 Run Step 同时是：
+
+- 持久化 member 和惰性加载边界；
+- loaded-step LRU 的淘汰边界；
+- terminal notice 与完成语义边界。
+
+跨 step 分组会让一个 ToolGroup 依赖多个历史文件并破坏加载、淘汰和窗口原子性，因此禁止。
+
+### 9.5 淘汰与重新加载
+
+当前 Resume backing 最多保留 128 个已加载 step。step 被淘汰时：
+
+- 该 step 的 Single / ToolGroup 展示单元和成员缓存一起退出 live set；
+- 历史 items 恢复为一个 `StepPlaceholder`；
+- 其他 step 的分组 identity 不变。
+
+同一 step 重新加载时，group ID 使用 `step identity + ToolGroupKind + first ToolCall stable identity`，必须恢复相同 ID。group ID 不使用窗口位置、加载顺序或成员数量。
+
+### 9.6 窗口稳定性
+
+placeholder 的估算行数与具体 ToolGroup 的实际估算可能不同。加载后必须按真实展示单元重建 prefix lines，并保持原请求的 `line_limit` / `tail_offset` 语义；禁止为了维持旧 placeholder 行数而使用错误边界。
+
+窗口仍只选择完整展示单元。如果一个 ToolGroup 自身超过 `line_limit`，必须完整显示该组并允许本窗口超过限制，不能截断成员；这与现有“至少选择一个完整 root”的行为一致。
+
+## 10. Renderer 与视觉深度
+
+### 10.1 分组标题
 
 ToolGroup 自身只渲染一行轻量标题：
 
@@ -234,7 +308,7 @@ ToolGroup 自身只渲染一行轻量标题：
 - 不显示 Running marker；
 - 不承担成员动画。
 
-### 9.2 逻辑深度与视觉深度分离
+### 10.2 逻辑深度与视觉深度分离
 
 逻辑树增加一层，但 Issue 要求组标题和 ToolCall 成员维持根级视觉宽度，ToolResult 仍只相对 ToolCall 缩进一级。因此 renderer 必须区分：
 
@@ -255,7 +329,7 @@ GuttedCache 的 depth 分量必须使用视觉深度，因为它决定文本宽�
 
 ToolGroup 内成员不插入普通根块的额外呼吸空行；分组作为一个 root group 只在组标题前保留一次根级分隔。成员之间依靠现有 ToolCall/ToolResult布局和轻量标题形成连续区段。
 
-## 10. 缓存与动画不变量
+## 11. 缓存与动画不变量
 
 - ToolGroup 标题 `block_version` 只取决于 kind 和标题展示字段。
 - ToolCall 的状态、参数、activity 和 result payload 继续进入自己的 version。
@@ -265,7 +339,7 @@ ToolGroup 内成员不插入普通根块的额外呼吸空行；分组作为一�
 - live-set retain 必须 DFS 收集 ToolGroup、ToolCall 和 ToolResult 的全部 ID。
 - 淘汰缓存不能改变 ViewModel 或用户可见内容。
 
-## 11. 错误与降级
+## 12. 错误与降级
 
 - 未知工具：作为独立 ToolCall 展示。
 - ToolCall 查询失败：不得进入分组；沿用现有独立诊断展示，并携带 timeline item ID 与 ToolCall identity，禁止为了凑分组吞掉 item。
@@ -274,7 +348,7 @@ ToolGroup 内成员不插入普通根块的额外呼吸空行；分组作为一�
 - 窗口增量无法证明安全：全量重建展示计划和索引。
 - 分组失败不进入 Model，不产生持久化状态，也不改变工具业务生命周期。
 
-## 12. 测试策略
+## 13. 测试策略
 
 遵循 `docs/design/03-engineering/04-testing-and-coverage.md` 的 L0–L5 分层，并遵守测试先行。
 
@@ -303,7 +377,12 @@ ToolGroup 内成员不插入普通根块的额外呼吸空行；分组作为一�
 - 追加第三个工具时组 ID 与已有成员 ID 保持稳定；
 - 状态更新只重建对应成员；
 - 删除和边界变化正确重分段；
-- resume history 与 live timeline 使用同一分组规则。
+- resume adapter 对 placeholder、具体历史 item 和 step 边界的映射；
+- resume 中匹配 ToolResult 作为透明关联项，orphan ToolResult 作为切断项；
+- 加载 step 后连续工具形成组且不跨 step；
+- step 淘汰恢复 placeholder，重新加载后 group ID 稳定；
+- display history 重建不修改 `ConversationModel.revision()`；
+- 超过 `line_limit` 的 ToolGroup 仍完整选择；
 
 ### L3：契约测试
 
@@ -333,7 +412,7 @@ ToolGroup 内成员不插入普通根块的额外呼吸空行；分组作为一�
 
 Issue 当前预先勾选的 L1/L2/L3 不能视为完成证据；实施开始前应恢复为未完成，只有对应测试实际通过并可追溯后再勾选。
 
-## 13. 设计文档同步
+## 14. 设计文档同步
 
 实现过程中必须同步核对并更新：
 
@@ -344,26 +423,27 @@ Issue 当前预先勾选的 L1/L2/L3 不能视为完成证据；实施开始前�
 
 Target 文档必须使用最终代码中的同一术语：`ToolGroup`、`ToolGroupKind::Explore`、展示单元、逻辑深度和视觉深度。
 
-## 14. 实施顺序
+## 15. 实施顺序
 
 1. 修正 Issue 测试 checklist 的预勾选状态，并记录开发前文档—代码差异。
 2. 为分类与分段写失败测试。
 3. 引入 `ToolGroupKind`、`ToolGroupBlockView` 与 nesting 失败测试。
-4. 建立 `DisplayUnitPlan` 与分组感知窗口索引。
-5. 调整 RetainedOutputView 的展示单元缓存和邻接失效。
-6. 让 OutputViewAssembler 物化 `ToolGroup → ToolCall → ToolResult`。
-7. 增加 ToolGroup renderer，并分离逻辑深度与视觉深度。
-8. 补齐成员级缓存、窗口、resume 与场景测试。
-9. 同步 Target 文档、执行格式化、定向测试、clippy 与架构守卫。
+4. 建立共享 grouping planner，以及 live / resume 两个来源 adapter。
+5. 建立分组感知窗口索引，覆盖 placeholder 加载、step 边界和超长组原子选择。
+6. 调整 RetainedOutputView 的展示单元缓存、邻接失效、step 淘汰与重新加载。
+7. 让 OutputViewAssembler 物化 `ToolGroup → ToolCall → ToolResult`。
+8. 增加 ToolGroup renderer，并分离逻辑深度与视觉深度。
+9. 补齐成员级缓存、窗口、resume 与场景测试。
+10. 同步 Target 文档、执行格式化、定向测试、clippy 与架构守卫。
 
 每一步保持可编译；生产实现必须在对应失败测试之后落地。
 
-## 15. 完成定义
+## 16. 完成定义
 
 - 四类连续工具按规则形成 ToolGroup，单项和未知工具保持独立。
 - 所有切断条件、失败/取消、流式追加和边界变化行为确定。
 - ViewModel 结构为 `ToolGroup → ToolCall → ToolResult`。
-- 分组在窗口滚动和 resume history 中保持原子、稳定。
+- 分组在窗口滚动和 resume history 中保持原子、稳定；placeholder 不预判分组，加载后不跨 step 分组，淘汰/重载保持稳定 identity。
 - 组标题不折叠、无计数、无状态汇总，成员视觉宽度和既有 gutter 语义不变。
 - 成员独立更新，未变标题和成员保持缓存命中。
 - L0–L4 适用证据通过，L5 有不适用说明。
