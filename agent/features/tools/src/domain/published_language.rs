@@ -12,6 +12,7 @@
 //! - `ToolCapabilities` 只能通过 baseline 或 `derive_restricted` 收缩，不可扩权；
 //! - `ToolOutcome` 是单一结果通道（含错误），不额外暴露 `Result::Err`。
 
+use super::task_change::CommittedTaskChange;
 use super::{ExecutionScope, ToolSuspension};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -377,6 +378,8 @@ pub struct ToolSuccess {
     /// 结构化数据（给 TUI / server 边界反序列化）。
     pub data: Option<serde_json::Value>,
     pub metadata: ToolExecutionMetadata,
+    #[serde(skip)]
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl ToolSuccess {
@@ -386,6 +389,7 @@ impl ToolSuccess {
             content: vec![ContentBlock::text(text)],
             data: None,
             metadata: ToolExecutionMetadata::default(),
+            task_change: None,
         }
     }
 }

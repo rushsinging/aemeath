@@ -1,6 +1,7 @@
 use super::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiHookNoticeKind, TuiMessageSource,
-    TuiSkillRequestMetadata, TuiToolResultImage,
+    TuiSkillRequestMetadata, TuiTaskBatch, TuiTaskBatchStatus, TuiTaskItem, TuiTaskItemStatus,
+    TuiTaskPriority, TuiTaskState, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
@@ -462,7 +463,46 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 git_branch: project.git_branch,
             },
         },
-        ChatEvent::TasksSnapshot { tasks } => TuiRuntimeEvent::TasksSnapshot { lines: tasks.lines },
+        ChatEvent::TaskStateChanged { state } => TuiRuntimeEvent::TaskStateChanged {
+            state: Box::new(TuiTaskState {
+                session_id: state.session_id,
+                revision: state.revision,
+                current_batch: state.current_batch.map(|batch| TuiTaskBatch {
+                    id: batch.id,
+                    summary: batch.summary,
+                    status: match batch.status {
+                        sdk::TaskBatchStatusView::Active => TuiTaskBatchStatus::Active,
+                        sdk::TaskBatchStatusView::Paused => TuiTaskBatchStatus::Paused,
+                        sdk::TaskBatchStatusView::Archived => TuiTaskBatchStatus::Archived,
+                    },
+                }),
+                total: state.total,
+                completed: state.completed,
+                in_progress: state.in_progress,
+                items: state
+                    .items
+                    .into_iter()
+                    .map(|item| TuiTaskItem {
+                        id: item.id,
+                        sequence: item.sequence,
+                        subject: item.subject,
+                        status: match item.status {
+                            sdk::TaskItemStatusView::Pending => TuiTaskItemStatus::Pending,
+                            sdk::TaskItemStatusView::InProgress => TuiTaskItemStatus::InProgress,
+                            sdk::TaskItemStatusView::Completed => TuiTaskItemStatus::Completed,
+                        },
+                        priority: match item.priority {
+                            sdk::TaskPriorityView::Low => TuiTaskPriority::Low,
+                            sdk::TaskPriorityView::Normal => TuiTaskPriority::Normal,
+                            sdk::TaskPriorityView::High => TuiTaskPriority::High,
+                            sdk::TaskPriorityView::Urgent => TuiTaskPriority::Urgent,
+                        },
+                        blocked_by_sequences: item.blocked_by_sequences,
+                    })
+                    .collect(),
+                hidden_count: state.hidden_count,
+            }),
+        },
         ChatEvent::CostUpdate { cost } => TuiRuntimeEvent::CostUpdate {
             input_tokens: cost.input_tokens,
             output_tokens: cost.output_tokens,

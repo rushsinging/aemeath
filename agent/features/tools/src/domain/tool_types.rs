@@ -1,3 +1,5 @@
+use crate::domain::CommittedTaskChange;
+
 #[derive(Debug, Clone)]
 pub struct ImageData {
     pub base64: String,
@@ -25,6 +27,7 @@ pub struct ToolOutcome {
     pub data: serde_json::Value,
     pub is_error: bool,
     pub images: Vec<ImageData>,
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl ToolOutcome {
@@ -35,7 +38,13 @@ impl ToolOutcome {
             data,
             is_error: false,
             images,
+            task_change: None,
         }
+    }
+
+    pub fn with_task_change(mut self, task_change: Option<CommittedTaskChange>) -> Self {
+        self.task_change = task_change;
+        self
     }
 
     /// 错误结果。
@@ -49,6 +58,7 @@ impl ToolOutcome {
             text,
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         }
     }
 
@@ -59,6 +69,7 @@ impl ToolOutcome {
             data: r.data,
             is_error: r.is_error,
             images: r.images,
+            task_change: r.task_change,
         }
     }
 }
@@ -93,6 +104,7 @@ mod tool_outcome_tests {
             is_error: false,
             error_kind: None,
             images: vec![],
+            task_change: None,
         };
         let o = ToolOutcome::from_tool_result(r);
         assert_eq!(o.text, "out");
@@ -127,6 +139,7 @@ pub struct ToolResult {
     pub error_kind: Option<crate::domain::ToolErrorKind>,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl ToolResult {
@@ -145,7 +158,13 @@ impl ToolResult {
             is_error,
             error_kind: is_error.then_some(crate::domain::ToolErrorKind::InvalidInput),
             images: Vec::new(),
+            task_change: None,
         }
+    }
+
+    pub fn with_task_change(mut self, task_change: Option<CommittedTaskChange>) -> Self {
+        self.task_change = task_change;
+        self
     }
 
     pub fn with_image(mut self, base64: String, media_type: String) -> Self {
@@ -162,6 +181,7 @@ impl Default for ToolResult {
             is_error: false,
             error_kind: None,
             images: Vec::new(),
+            task_change: None,
         }
     }
 }

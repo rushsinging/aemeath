@@ -1998,6 +1998,158 @@
       ],
       "type": "object"
     },
+    "TaskBatchStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "archived"
+      ],
+      "title": "TaskBatchStatusView",
+      "type": "string"
+    },
+    "TaskBatchView": {
+      "properties": {
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskBatchStatusView"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "title": "TaskBatchView",
+      "type": "object"
+    },
+    "TaskItemStatusView": {
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed"
+      ],
+      "title": "TaskItemStatusView",
+      "type": "string"
+    },
+    "TaskItemView": {
+      "properties": {
+        "blocked_by_sequences": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "priority": {
+          "$ref": "#/$defs/TaskPriorityView"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskItemStatusView"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "subject",
+        "status",
+        "priority",
+        "blocked_by_sequences"
+      ],
+      "title": "TaskItemView",
+      "type": "object"
+    },
+    "TaskPriorityView": {
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "urgent"
+      ],
+      "title": "TaskPriorityView",
+      "type": "string"
+    },
+    "TaskStateView": {
+      "properties": {
+        "completed": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "current_batch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskBatchView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hidden_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "in_progress": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TaskItemView"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "total": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "revision",
+        "total",
+        "completed",
+        "in_progress",
+        "items",
+        "hidden_count"
+      ],
+      "title": "TaskStateView",
+      "type": "object"
+    },
     "TerminateRunOutcome": {
       "enum": [
         "Accepted",

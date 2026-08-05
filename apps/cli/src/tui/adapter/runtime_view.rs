@@ -10,6 +10,57 @@
 #![allow(dead_code)]
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiTaskState {
+    pub session_id: String,
+    pub revision: u64,
+    pub current_batch: Option<TuiTaskBatch>,
+    pub total: usize,
+    pub completed: usize,
+    pub in_progress: usize,
+    pub items: Vec<TuiTaskItem>,
+    pub hidden_count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiTaskBatch {
+    pub id: u64,
+    pub summary: Option<String>,
+    pub status: TuiTaskBatchStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiTaskBatchStatus {
+    Active,
+    Paused,
+    Archived,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiTaskItem {
+    pub id: u64,
+    pub sequence: u64,
+    pub subject: String,
+    pub status: TuiTaskItemStatus,
+    pub priority: TuiTaskPriority,
+    pub blocked_by_sequences: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiTaskItemStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiTaskPriority {
+    Low,
+    Normal,
+    High,
+    Urgent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TuiContentBlock {
     Text {
         text: String,

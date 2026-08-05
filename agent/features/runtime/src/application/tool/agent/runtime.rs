@@ -83,6 +83,7 @@ async fn call_tool_with_timeout(
             is_error: true,
             error_kind: Some(tools::ToolErrorKind::InvalidInput),
             images: Vec::new(),
+            task_change: None,
         });
     }
     let timeout = tool.timeout_secs();
@@ -286,12 +287,14 @@ pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
                 .join("\n"),
             success.data.unwrap_or(serde_json::Value::Null),
             Vec::new(),
-        ),
+        )
+        .with_task_change(success.task_change),
         ToolExecutionOutcome::Failure(failure) => ToolOutcome {
             text: failure.safe_message,
             data: failure.data.unwrap_or(serde_json::Value::Null),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         },
         ToolExecutionOutcome::Cancelled(cancelled) => ToolOutcome::error(cancelled.reason),
         ToolExecutionOutcome::TimedOut(details)

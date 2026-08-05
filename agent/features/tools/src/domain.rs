@@ -26,8 +26,19 @@ pub mod suspension;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod tool;
+#[cfg(test)]
+#[path = "domain/tool_tests.rs"]
+mod tool_tests;
 pub mod tool_types;
 pub mod types;
+
+pub use task_change::{CommittedTaskChange, TaskChangeFact};
+
+pub mod task_change;
+
+#[cfg(test)]
+#[path = "domain/task_change_tests.rs"]
+mod task_change_tests;
 
 #[cfg(test)]
 mod command_pl_tests;

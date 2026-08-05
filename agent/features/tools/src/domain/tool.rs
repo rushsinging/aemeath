@@ -1,5 +1,7 @@
 use super::ToolExecutionContext;
-use crate::domain::{types::tool_search::ToolInfo, ImageData, ToolResult, ToolSuspension};
+use crate::domain::{
+    types::tool_search::ToolInfo, CommittedTaskChange, ImageData, ToolResult, ToolSuspension,
+};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
@@ -83,6 +85,7 @@ pub struct TypedToolResult<T: Serialize + Send + 'static> {
     pub is_error: bool,
     pub error_kind: Option<crate::domain::ToolErrorKind>,
     pub images: Vec<ImageData>,
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl<T: Serialize + Send + 'static> TypedToolResult<T> {
@@ -93,6 +96,7 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
             is_error: false,
             error_kind: None,
             images: vec![],
+            task_change: None,
         }
     }
 
@@ -103,7 +107,14 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
             is_error: true,
             error_kind: Some(crate::domain::ToolErrorKind::InvalidInput),
             images: vec![],
+            task_change: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_task_change(mut self, task_change: Option<CommittedTaskChange>) -> Self {
+        self.task_change = task_change;
+        self
     }
 
     /// 添加图片。
@@ -112,7 +123,6 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
         self
     }
 }
-
 /// Typed tool trait（工具源实现这个）。
 #[async_trait]
 pub trait TypedTool: Send + Sync {
@@ -239,6 +249,7 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
             is_error: result.is_error,
             error_kind: result.error_kind,
             images: result.images,
+            task_change: result.task_change,
         }
     }
 }

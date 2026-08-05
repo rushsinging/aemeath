@@ -42,6 +42,7 @@
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块 |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
+| 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
@@ -98,7 +99,7 @@
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
 - **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
-- **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Child Run 活动链登记 `ChildRunIdentity`、`ChildRunActivityEvent`、`ChildRunActivityKind` 与 `ChildRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
+- **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Task committed-change 链额外登记仅供 Tools/Runtime 协调的 `CommittedTaskChange` 与 `TaskChangeFact`；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Child Run 活动链登记 `ChildRunIdentity`、`ChildRunActivityEvent`、`ChildRunActivityKind` 与 `ChildRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
 - **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。
 - **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
 - **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。

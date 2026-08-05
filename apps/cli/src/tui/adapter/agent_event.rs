@@ -580,8 +580,8 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             )))
         }
         TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::TasksSnapshot { lines } => conversation(
-            ConversationIntent::UpdateTaskLines(UpdateTaskLines(lines.clone())),
+        TuiRuntimeEvent::TaskStateChanged { state } => conversation(
+            ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),
         TuiRuntimeEvent::SessionReset => AgentEventMapping::default(),
         TuiRuntimeEvent::UserMessagesWithdrawn { texts: _ } => conversation(

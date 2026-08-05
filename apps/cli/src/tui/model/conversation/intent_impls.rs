@@ -518,6 +518,7 @@ impl ConversationUpdate for UpdateTaskStatus {
             completed: self.completed,
             in_progress: self.in_progress,
             lines: std::mem::take(&mut model.runtime.task_status.lines),
+            ..TaskStatusSnapshot::default()
         };
         vec![ConversationChange::TaskStatusChanged {
             total: self.total,
@@ -553,6 +554,16 @@ impl ConversationUpdate for FinishProcessingJob {
             };
         }
         vec![ConversationChange::ProcessingJobChanged { id: self.id }]
+    }
+}
+
+impl ConversationUpdate for ReplaceTaskState {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.runtime.task_status.replace(self.0) {
+            vec![ConversationChange::TaskLinesChanged]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -682,7 +693,8 @@ impl ConversationUpdate for ConversationIntent {
             Self::UpdateTaskStatus(s) => s.update(model),
             Self::StartProcessingJob(s) => s.update(model),
             Self::FinishProcessingJob(s) => s.update(model),
-            Self::UpdateTaskLines(s) => s.update(model),
+            Self::ReplaceTaskState(state) => state.update(model),
+            Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
             Self::SetGraphPhase(s) => s.update(model),

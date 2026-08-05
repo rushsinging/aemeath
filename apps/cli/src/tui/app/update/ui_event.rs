@@ -101,11 +101,7 @@ impl App {
                 self.session.cwd = ctx.raw_path_base;
             }
             UiEvent::WorkspaceMetadataResolved(_) => {}
-            UiEvent::TaskStatusChanged(view) => {
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::UpdateTaskLines(UpdateTaskLines(view.lines)),
-                ));
-            }
+            UiEvent::TaskStateChanged(_) => {}
             UiEvent::UpdateAvailable {
                 current,
                 latest,

@@ -713,7 +713,7 @@ impl RecordingSink {
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
             }
-            RuntimeStreamEvent::TasksSnapshot { .. } => "TasksSnapshot".to_string(),
+            RuntimeStreamEvent::TaskStateChanged { .. } => "TaskStateChanged".to_string(),
             RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
             RuntimeStreamEvent::UserMessagesAdopted { items, .. } => {
                 self.adopted_ids.lock().unwrap().push(

@@ -245,30 +245,13 @@ pub enum RuntimeStreamEvent {
     ProjectInfo {
         project: sdk::ProjectContext,
     },
-    /// #567：任务状态快照回传（携带数据，替代轮询）。
-    TasksSnapshot {
-        tasks: Box<sdk::TaskStatusView>,
+    TaskStateChanged {
+        state: Box<sdk::TaskStateView>,
     },
     /// #567：成本信息回传。
     CostUpdate {
         cost: sdk::CostInfo,
     },
-}
-
-/// 判断 tool 名是否属于 task store mutation（会改变 task 状态）。
-///
-/// 用于 `TasksSnapshot` 事件推送触发点：只有 task mutation 工具执行后，
-/// 才需要重新取 task snapshot 并推送给前端（#642）。
-pub(crate) fn is_task_store_mutation(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "TaskCreate"
-            | "TaskUpdate"
-            | "TaskBlockBy"
-            | "TaskStop"
-            | "TaskListCreate"
-            | "TaskListComplete"
-    )
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

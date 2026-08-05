@@ -248,9 +248,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             workspace_root,
             workspace.context_stack.len()
         ),
-        sdk::ChatEvent::TasksSnapshot { tasks } => {
-            crate::tui::log_trace!("{} tasks_snapshot lines={}", stage, tasks.lines.len())
-        }
+        sdk::ChatEvent::TaskStateChanged { state } => crate::tui::log_trace!(
+            "{} task_state_changed session_id={} revision={} items={}",
+            stage,
+            state.session_id,
+            state.revision,
+            state.items.len()
+        ),
         sdk::ChatEvent::ConfigChanged { event } => crate::tui::log_trace!(
             "{} config_changed fields={:?}",
             stage,

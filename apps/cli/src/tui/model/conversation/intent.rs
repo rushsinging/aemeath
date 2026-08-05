@@ -332,6 +332,9 @@ pub struct FinishProcessingJob {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct UpdateTaskLines(pub Vec<String>);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -429,6 +432,7 @@ pub enum ConversationIntent {
     UpdateTaskStatus(UpdateTaskStatus),
     StartProcessingJob(StartProcessingJob),
     FinishProcessingJob(FinishProcessingJob),
+    ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),

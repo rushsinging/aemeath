@@ -609,8 +609,8 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::ProjectInfo { project } => {
             ChatEvent::ProjectInfo { project }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::TasksSnapshot { tasks } => {
-            ChatEvent::TasksSnapshot { tasks }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::TaskStateChanged { state } => {
+            ChatEvent::TaskStateChanged { state }
         }
         crate::application::loop_engine::chat::RuntimeStreamEvent::CostUpdate { cost } => {
             ChatEvent::CostUpdate { cost }

@@ -1,31 +1,109 @@
-//! Task snapshot 构造——纯渲染逻辑，从 `TaskAccess` 取当前 batch 的
-//! Task 投影并渲染为 `TaskStatusView.lines`。
+//! Task state ACL：从 `TaskAccess` 构造结构化 SDK 状态，并为 LLM reminder
+//! 保留独立的文本渲染出口。
 //!
 //! 放在 business 层而非 core/client 层（COLA 分层：business 不可依赖 core，
 //! core 可依赖 business；详见 `docs/design/02-architecture-guards.md`）。
 
 use std::collections::HashMap;
 
-use sdk::TaskStatusView;
+use sdk::{
+    TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
+    TaskStateView,
+};
 use share::config::TaskListConfig;
-use task::{Task, TaskAccess, TaskId, TaskStatus};
+use task::{BatchStatus, Task, TaskAccess, TaskId, TaskPriority, TaskStatus};
 
-/// 从 `TaskAccess` 构造一份 `TaskStatusView` 快照（lines 已渲染好）。
-///
-/// 用于事件推送链路：runtime 在 task 生命周期关键点取快照，
-/// 通过 `RuntimeStreamEvent::TasksSnapshot` 推送给前端，
-/// 替代已被删除的 `changes()` 轮询路径（见 #567 / #642）。
-///
-/// #889：改为同步 low-privilege 读取并按 current batch 过滤 Task PL。
-/// 任务标题隐藏持久化 ID；任务自身和依赖均通过当前 batch 的稳定 `seq()` 显示。
-pub(crate) fn build_task_snapshot(access: &dyn TaskAccess) -> TaskStatusView {
-    let Some(active) = current_batch_tasks(access) else {
-        return TaskStatusView::default();
+/// 从 `TaskAccess` 构造带 Session/revision 的完整结构化 Task state。
+pub(crate) fn build_task_state_view(
+    access: &dyn TaskAccess,
+    session_id: impl Into<String>,
+) -> TaskStateView {
+    let session_id = session_id.into();
+    let revision = access.revision().get();
+    let Some(current_batch_id) = access.current_batch() else {
+        return TaskStateView::empty(session_id, revision);
     };
-
-    let max_lines = TaskListConfig::default().max_lines;
-    let lines = task_status_lines(&active, max_lines);
-    TaskStatusView { lines }
+    let Some(batch_snapshot) = access.batch_snapshot(current_batch_id) else {
+        return TaskStateView::empty(session_id, revision);
+    };
+    let tasks = batch_snapshot.tasks();
+    let total = tasks.len();
+    let completed = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Completed)
+        .count();
+    let in_progress = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::InProgress)
+        .count();
+    let mut completed_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Completed)
+        .collect();
+    let mut in_progress_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::InProgress)
+        .collect();
+    let mut pending_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Pending)
+        .collect();
+    completed_tasks.sort_by_key(|task| task.updated_at());
+    in_progress_tasks.sort_by_key(|task| task.updated_at());
+    pending_tasks.sort_by_key(|task| task.id());
+    let max_items = TaskListConfig::default().max_lines;
+    let visible_tasks = if tasks.len() <= max_items {
+        ordered_tasks(completed_tasks, in_progress_tasks, pending_tasks)
+    } else {
+        select_task_window(completed_tasks, in_progress_tasks, pending_tasks, max_items)
+    };
+    let hidden_count = tasks.len().saturating_sub(visible_tasks.len());
+    let sequence_by_id: HashMap<TaskId, u64> =
+        tasks.iter().map(|task| (task.id(), task.seq())).collect();
+    let items = visible_tasks
+        .into_iter()
+        .map(|task| TaskItemView {
+            id: task.id().get(),
+            sequence: task.seq(),
+            subject: task.subject().to_owned(),
+            status: match task.status() {
+                TaskStatus::Pending => TaskItemStatusView::Pending,
+                TaskStatus::InProgress => TaskItemStatusView::InProgress,
+                TaskStatus::Completed => TaskItemStatusView::Completed,
+                TaskStatus::Deleted => unreachable!("batch snapshot excludes deleted tasks"),
+            },
+            priority: match task.priority() {
+                TaskPriority::Low => TaskPriorityView::Low,
+                TaskPriority::Normal => TaskPriorityView::Normal,
+                TaskPriority::High => TaskPriorityView::High,
+                TaskPriority::Urgent => TaskPriorityView::Urgent,
+            },
+            blocked_by_sequences: task
+                .blocked_by()
+                .iter()
+                .filter_map(|task_id| sequence_by_id.get(task_id).copied())
+                .collect(),
+        })
+        .collect();
+    let batch = batch_snapshot.batch();
+    TaskStateView {
+        session_id,
+        revision,
+        current_batch: Some(TaskBatchView {
+            id: batch.id().get(),
+            summary: batch.summary().map(str::to_owned),
+            status: match batch.status() {
+                BatchStatus::Active => TaskBatchStatusView::Active,
+                BatchStatus::Paused => TaskBatchStatusView::Paused,
+                BatchStatus::Archived => TaskBatchStatusView::Archived,
+            },
+        }),
+        total,
+        completed,
+        in_progress,
+        items,
+        hidden_count,
+    }
 }
 
 /// 当前 batch 的 live（非 Deleted）Task 列表；无 batch 或无任务时返回 `None`。
