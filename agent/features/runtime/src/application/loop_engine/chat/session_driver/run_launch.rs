@@ -126,12 +126,17 @@ where
                         }
                     };
                     let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
+                    // #1537：idle 手动 compact 同样拼接 Task 状态。
+                    let task_context = crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+                        task_access.as_ref(),
+                    );
                     let request = crate::ports::ManualCompactRequest {
                         session_id: crate::ports::SessionId::new(bound.session().id.clone()),
                         run_id: sdk::RunId::new(uuid::Uuid::now_v7().to_string()),
                         system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
                         context_size,
                         progress: None,
+                        task_context,
                     };
                     log::debug!(
                         target: crate::LOG_TARGET,

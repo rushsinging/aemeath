@@ -104,6 +104,7 @@ async fn runtime_fake_compiles_against_context_owned_port() {
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
