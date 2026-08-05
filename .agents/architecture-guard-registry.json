@@ -679,6 +679,22 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Runtime responsibility and file-size policy",
       "status": "active"
+    },
+    {
+      "id": "scope.all.unsafe-text-long-statement-files",
+      "guard": "check-unsafe-text-ops.sh",
+      "module": "shared",
+      "scope": {
+        "kind": "pattern",
+        "value": "tool_result.rs,reflection.rs,conversion.rs,append.rs,routing_guard.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "shared",
+      "reason": "Long-statement files where rustfmt reflow moves trailing comments, making line-level allow comments unstable; all slices confirmed find/char_indices offsets or Vec/byte slices",
+      "tracking_issue": 1545,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retain while these files contain only offset/byte-safe slices; prefer line-level allow for new short statements",
+      "status": "active"
     }
   ]
 }

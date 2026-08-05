@@ -198,7 +198,7 @@ fn current_timestamp_secs() -> u64 {
 
 fn short_id(id: &Id) -> String {
     let s = id.to_string();
-    s[..8.min(s.len())].to_string()
+    s[..8.min(s.len())].to_string() // allow unsafe_text_op: UUID is ASCII
 }
 
 pub(super) fn add_reminder(

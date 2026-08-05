@@ -34,7 +34,7 @@ fn test_render_tool_result_plain_wraps_long_lines_to_render_width() {
 
     assert_eq!(block.lines[0].plain, "abcd");
     assert_eq!(block.lines[1].plain, "ef");
-    assert!(block.lines[..2].iter().all(|line| line
+    assert!(block.lines[..2].iter().all(|line| line // allow unsafe_text_op: Vec slice
         .spans
         .iter()
         .all(|span| span.style.fg == Some(theme::TEXT_DIM))));

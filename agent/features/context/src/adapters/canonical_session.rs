@@ -426,7 +426,7 @@ impl CanonicalSessionRepository {
             None => {
                 let compacted = crate::adapters::compact_summary::compact_messages(messages)?;
                 let window = crate::adapters::compact_summary::compact_window(messages.len())?;
-                let early = &messages[..window.split_point];
+                let early = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
                 let summary =
                     crate::adapters::compact_summary::build_summary_text(early, previous_summary);
                 log::info!(

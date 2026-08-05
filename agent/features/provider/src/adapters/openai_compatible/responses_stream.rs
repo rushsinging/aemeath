@@ -84,7 +84,7 @@ pub(crate) async fn parse_responses_stream(
             continue;
         }
 
-        let data = &line[6..];
+        let data = &line[6..]; // allow unsafe_text_op: fixed ascii prefix "data: "
         if data == "[DONE]" {
             break;
         }

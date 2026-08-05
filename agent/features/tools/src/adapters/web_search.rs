@@ -286,7 +286,7 @@ fn parse_bing_html(html: &str, limit: usize) -> Vec<SearchResult> {
             Some(e) => result_start + e,
             None => break,
         };
-        let block = &html[result_start..result_end];
+        let block = &html[result_start..result_end]; // allow unsafe_text_op: find offset (char boundary)
 
         let h2_start = match block.find("<h2") {
             Some(s) => s,
@@ -309,7 +309,7 @@ fn parse_bing_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let link_tag = &block[link_start..=link_tag_end];
+        let link_tag = &block[link_start..=link_tag_end]; // allow unsafe_text_op: find offset (char boundary)
         let raw_url = match extract_attr(link_tag, "href") {
             Some(url) => url,
             None => {
@@ -324,13 +324,13 @@ fn parse_bing_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let title = strip_html_tags(&block[link_tag_end + 1..title_end]);
+        let title = strip_html_tags(&block[link_tag_end + 1..title_end]); // allow unsafe_text_op: find offset (char boundary)
 
         let snippet = if let Some(caption_start) = block.find("<p") {
             if let Some(text_start) = block[caption_start..].find('>') {
                 let start = caption_start + text_start + 1;
                 if let Some(end) = block[start..].find("</p>") {
-                    strip_html_tags(&block[start..start + end])
+                    strip_html_tags(&block[start..start + end]) // allow unsafe_text_op: find offset (char boundary)
                 } else {
                     String::new()
                 }
@@ -374,7 +374,7 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
             None => break,
         };
 
-        let block = &html[result_start..result_end];
+        let block = &html[result_start..result_end]; // allow unsafe_text_op: find offset (char boundary)
 
         let title_start = match block.find(title_pattern) {
             Some(s) => s,
@@ -400,12 +400,12 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
                 continue;
             }
         };
-        let raw_url = &block[href_start..href_start + href_end];
+        let raw_url = &block[href_start..href_start + href_end]; // allow unsafe_text_op: find offset (char boundary)
 
         // DuckDuckGo wraps URLs: extract the actual URL from uddg= parameter
         let decoded_url = percent_decode_str(raw_url).decode_utf8_lossy().to_string();
         let actual_url = if let Some(idx) = decoded_url.find("uddg=") {
-            &decoded_url[idx + 5..]
+            &decoded_url[idx + 5..] // allow unsafe_text_op: fixed ascii prefix
         } else {
             &decoded_url
         };
@@ -426,13 +426,13 @@ fn parse_duckduckgo_html(html: &str, limit: usize) -> Vec<SearchResult> {
             }
         };
         let title =
-            decode_html_entities(&block[title_text_start..title_text_start + title_text_end]);
+            decode_html_entities(&block[title_text_start..title_text_start + title_text_end]); // allow unsafe_text_op: find offset (char boundary)
 
         let snippet = if let Some(snippet_pos) = block.find(snippet_pattern) {
             if let Some(text_pos) = block[snippet_pos..].find('>') {
                 let start = snippet_pos + text_pos + 1;
                 if let Some(end_pos) = block[start..].find("</a>") {
-                    decode_html_entities(&block[start..start + end_pos])
+                    decode_html_entities(&block[start..start + end_pos]) // allow unsafe_text_op: find offset (char boundary)
                 } else {
                     String::new()
                 }

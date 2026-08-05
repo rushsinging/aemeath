@@ -279,7 +279,7 @@ async fn read_bounded(
             break;
         }
         let retained = limit.saturating_sub(bytes.len()).min(count);
-        bytes.extend_from_slice(&buffer[..retained]);
+        bytes.extend_from_slice(&buffer[..retained]); // allow unsafe_text_op: Vec slice (bytes)
         truncated |= retained < count;
     }
     Ok(BoundedOutput { bytes, truncated })

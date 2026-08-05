@@ -243,7 +243,7 @@ pub(super) async fn emit_events(
 pub(super) fn short(id: &sdk::RunId) -> String {
     let s = id.to_string();
     if s.len() > 8 {
-        s.split_at(8).0.to_string()
+        s.split_at(8).0.to_string() // allow unsafe_text_op: UUID is ASCII
     } else {
         s
     }

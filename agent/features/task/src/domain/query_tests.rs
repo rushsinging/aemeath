@@ -199,7 +199,7 @@ fn progress_snapshot_sorts_limits_and_classifies_current_batch_tasks() {
             .iter()
             .map(|item| item.id)
             .collect::<Vec<_>>(),
-        ready[..2]
+        ready[..2] // allow unsafe_text_op: Vec slice
     );
     assert_eq!(snapshot.ready_omitted, 1);
     assert_eq!(snapshot.blocked_count, 2);

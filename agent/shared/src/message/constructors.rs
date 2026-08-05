@@ -125,7 +125,7 @@ impl Message {
                 Some((start, end, idx)) => {
                     if start > cursor {
                         content.push(ContentBlock::Text {
-                            text: text[cursor..start].to_string(),
+                            text: text[cursor..start].to_string(), // allow unsafe_text_op: find offset (char boundary)
                         });
                     }
                     let (placeholder, data, media_type) = sorted_images[idx].clone();

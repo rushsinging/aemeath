@@ -6,8 +6,8 @@ pub(super) fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
     let Some(pos) = stdout.rfind(CWD_MARKER) else {
         return (stdout.to_string(), None);
     };
-    let before_marker = &stdout[..pos];
-    let after_marker = &stdout[pos + CWD_MARKER.len()..];
+    let before_marker = &stdout[..pos]; // allow unsafe_text_op: find offset (char boundary)
+    let after_marker = &stdout[pos + CWD_MARKER.len()..]; // allow unsafe_text_op: find offset (char boundary)
     let Some(first_line_end) = after_marker.find('\n') else {
         return (stdout.to_string(), None);
     };

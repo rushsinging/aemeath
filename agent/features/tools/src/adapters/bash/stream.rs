@@ -42,11 +42,11 @@ pub(super) async fn read_stdout(
                 Ok(0) => break,
                 Ok(n) => {
                     if buf.len() + n <= MAX_CAPTURE_BYTES {
-                        buf.extend_from_slice(&tmp[..n]);
+                        buf.extend_from_slice(&tmp[..n]); // allow unsafe_text_op: Vec slice (bytes)
                     }
                     // If over limit, keep reading (to drain the pipe) but don't store.
                     if let Some(tx) = &progress_tx {
-                        let new_data = String::from_utf8_lossy(&tmp[..n]);
+                        let new_data = String::from_utf8_lossy(&tmp[..n]); // allow unsafe_text_op: Vec slice (bytes)
                         let mut combined = std::mem::take(&mut suffix_carry);
                         combined.push_str(&new_data);
 
@@ -56,9 +56,9 @@ pub(super) async fn read_stdout(
                             Some(pos) => {
                                 let display_text =
                                     if pos > 0 && combined.as_bytes()[pos - 1] == b'\n' {
-                                        &combined[..pos - 1]
+                                        &combined[..pos - 1] // allow unsafe_text_op: find offset (char boundary)
                                     } else {
-                                        &combined[..pos]
+                                        &combined[..pos] // allow unsafe_text_op: find offset (char boundary)
                                     };
                                 // 命令结束：flush marker 前的全部内容（含 carry，跨 chunk 收尾）。
                                 line_buf.push_str(display_text);
@@ -105,7 +105,7 @@ pub(super) async fn read_stderr(mut stderr_pipe: Option<ChildStderr>) -> Vec<u8>
                 Ok(0) => break,
                 Ok(n) => {
                     if buf.len() + n <= MAX_CAPTURE_BYTES {
-                        buf.extend_from_slice(&tmp[..n]);
+                        buf.extend_from_slice(&tmp[..n]); // allow unsafe_text_op: Vec slice (bytes)
                     }
                 }
                 Err(_) => break,

@@ -508,7 +508,7 @@ impl HttpAttemptExecutor {
             };
             observed = observed.saturating_add(chunk.len());
             let remaining = ERROR_BODY_LIMIT.saturating_sub(bytes.len());
-            bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]); // allow unsafe_text_op: Vec slice (bytes)
             if observed > ERROR_BODY_LIMIT {
                 truncated = true;
                 break;
@@ -532,7 +532,7 @@ pub(crate) struct BoundedErrorBody {
 impl BoundedErrorBody {
     pub(crate) fn from_bytes(bytes: &[u8], limit: usize) -> Self {
         let end = bytes.len().min(limit);
-        let text = String::from_utf8_lossy(&bytes[..end]).into_owned();
+        let text = String::from_utf8_lossy(&bytes[..end]).into_owned(); // allow unsafe_text_op: Vec slice (bytes)
         Self {
             text: text.trim_end_matches('\u{fffd}').to_string(),
             observed_bytes: bytes.len(),

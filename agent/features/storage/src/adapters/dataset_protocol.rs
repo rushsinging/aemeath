@@ -134,7 +134,7 @@ pub(super) fn decode_revision(hex: &str) -> Result<[u8; 32], StorageError> {
     let mut bytes = [0u8; 32];
     for (index, slot) in bytes.iter_mut().enumerate() {
         let start = index * 2;
-        *slot = u8::from_str_radix(&hex[start..start + 2], 16)
+        *slot = u8::from_str_radix(&hex[start..start + 2], 16) // allow unsafe_text_op: hex is ASCII fixed 2-byte window
             .map_err(|_| StorageError::new(StorageErrorKind::Io, "manifest 修订号编码损坏"))?;
     }
     Ok(bytes)

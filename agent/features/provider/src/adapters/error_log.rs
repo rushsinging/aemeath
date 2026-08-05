@@ -290,7 +290,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
         }
         let Some(key_close) = find_closing_quote(&chars, i + 1) else {
             // Unterminated quote: copy the rest verbatim and stop.
-            output.extend(&chars[i..]);
+            output.extend(&chars[i..]); // allow unsafe_text_op: Vec slice
             break;
         };
         let key: String = chars[i + 1..key_close].iter().collect();
@@ -300,7 +300,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
         }
         if j >= len || chars[j] != ':' {
             // Not followed by a colon — just a quoted string, copy as-is.
-            output.extend(&chars[i..=key_close]);
+            output.extend(&chars[i..=key_close]); // allow unsafe_text_op: Vec slice
             i = key_close + 1;
             continue;
         }
@@ -310,7 +310,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
         }
         if k < len && chars[k] == '"' {
             let Some(value_close) = find_closing_quote(&chars, k + 1) else {
-                output.extend(&chars[i..]);
+                output.extend(&chars[i..]); // allow unsafe_text_op: Vec slice
                 break;
             };
             if is_secret_key(&key) {
@@ -318,7 +318,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
                 output.push_str(&key);
                 output.push_str("\":\"[REDACTED]\"");
             } else {
-                output.extend(&chars[i..=value_close]);
+                output.extend(&chars[i..=value_close]); // allow unsafe_text_op: Vec slice
             }
             i = value_close + 1;
         } else {
@@ -329,7 +329,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
             }
             if m == value_start {
                 // No bare value found; copy the key quote and move on.
-                output.extend(&chars[i..=key_close]);
+                output.extend(&chars[i..=key_close]); // allow unsafe_text_op: Vec slice
                 i = key_close + 1;
                 continue;
             }
@@ -338,7 +338,7 @@ fn redact_quoted_key_value_pairs(raw: &str) -> String {
                 output.push_str(&key);
                 output.push_str("\":[REDACTED]");
             } else {
-                output.extend(&chars[i..m]);
+                output.extend(&chars[i..m]); // allow unsafe_text_op: Vec slice
             }
             i = m;
         }
