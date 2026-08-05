@@ -36,7 +36,7 @@ pub async fn launch(
     if instance.run().parent_id().is_none() {
         active_run.activate_main(run_id.clone(), cancel.clone());
     } else {
-        active_run.activate(run_id.clone(), cancel.clone());
+        active_run.activate_child(run_id.clone(), cancel.clone());
     }
     let (run, execution, context) = instance.execution_parts_mut();
     let activities = context.activities().clone();
