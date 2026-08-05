@@ -49,15 +49,31 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
 /// 只出现在 invocation-only 的请求侧 messages；**NEVER** 写入 canonical
 /// message、SDK/TUI 事件或持久化 JSON（spec 3.4.5 的显式例外）。
 pub(crate) fn build_task_reminder(access: &dyn TaskAccess, max_lines: usize) -> Option<String> {
+    let text = build_task_snapshot_text_with_max_lines(access, max_lines)?;
+    Some(format!(
+        "<system-reminder>当前任务进度：\n{text}\n</system-reminder>",
+    ))
+}
+
+/// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。
+///
+/// 使用默认 `max_lines`（`TaskListConfig::default().max_lines`）；无活跃 batch
+/// 或无任务时返回 `None`。
+pub(crate) fn build_task_snapshot_text(access: &dyn TaskAccess) -> Option<String> {
+    let max_lines = TaskListConfig::default().max_lines;
+    build_task_snapshot_text_with_max_lines(access, max_lines)
+}
+
+fn build_task_snapshot_text_with_max_lines(
+    access: &dyn TaskAccess,
+    max_lines: usize,
+) -> Option<String> {
     let active = current_batch_tasks(access)?;
     let lines = task_status_lines(&active, max_lines);
     if lines.is_empty() {
         return None;
     }
-    Some(format!(
-        "<system-reminder>当前任务进度：\n{}\n</system-reminder>",
-        lines.join("\n")
-    ))
+    Some(lines.join("\n"))
 }
 
 fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {

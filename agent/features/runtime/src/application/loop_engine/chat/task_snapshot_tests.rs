@@ -141,3 +141,30 @@ fn task_reminder_none_without_active_batch() {
     let access: &dyn TaskAccess = &store;
     assert!(build_task_reminder(access, 7).is_none());
 }
+
+/// #1537：build_task_snapshot_text 返回纯文本（无标签包装），供 compact 拼接。
+#[test]
+fn task_snapshot_text_renders_without_reminder_tags() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    let completed = access.create_task(task_spec("done"), 2).unwrap().value;
+    let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
+    access
+        .transition(completed.id(), TaskStatus::Completed, 4)
+        .unwrap();
+
+    let text = build_task_snapshot_text(access).expect("snapshot text rendered");
+
+    assert!(!text.contains("<system-reminder>"));
+    assert!(text.contains("━━ Tasks: 1/2 ━━"));
+    assert!(text.contains("✓ #1 done"));
+    assert!(text.contains("□ #2 todo"));
+}
+
+/// #1537：无活跃 task 时 build_task_snapshot_text 返回 None。
+#[test]
+fn task_snapshot_text_none_without_tasks() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_snapshot_text(access).is_none());
+}

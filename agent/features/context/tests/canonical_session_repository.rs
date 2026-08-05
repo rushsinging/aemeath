@@ -358,6 +358,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -501,6 +502,7 @@ async fn compaction_preserves_skill_load_records() {
             source: compact_request(SessionId::new(&session_id)),
             trigger: CompactTrigger::Automatic,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -716,6 +718,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
+            task_context: None,
         }),
     )
     .await;
@@ -1323,6 +1326,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -1346,6 +1350,7 @@ async fn manual_compaction_bypasses_automatic_threshold() {
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 1_000_000,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -1437,6 +1442,7 @@ async fn compaction_rejects_stale_source_revision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
+            task_context: None,
         })
         .await;
 
@@ -1538,4 +1544,32 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             .is_none_or(|summary| !summary.contains("## User Requests")),
         "不应使用本地 fallback 模板"
     );
+}
+
+/// #1537：compact summary 出口拼接当前 Task 状态，防止递进压缩后上下文丢失。
+#[tokio::test]
+async fn commit_compaction_appends_task_context_to_summary() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let (base_repository, _holder) =
+        repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
+
+    let request = compact_request(session_id.clone());
+    let outcome = base_repository
+        .commit_compaction(&context::domain::CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: context::domain::CompactTrigger::Automatic,
+            progress: None,
+            task_context: Some("■ #1 实现压缩拼接".to_string()),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Committed(ref result)
+            if result.summary.contains("## Current Task State")
+            && result.summary.contains("■ #1 实现压缩拼接")
+    ));
 }

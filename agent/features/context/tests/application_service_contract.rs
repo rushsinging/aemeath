@@ -253,6 +253,7 @@ async fn manual_compact_and_clear_session_delegate_to_session_repository() {
             system_prompt: context::domain::SystemPromptSpec::new("system"),
             context_size: 128_000,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
