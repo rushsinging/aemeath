@@ -17,7 +17,7 @@ fn legacy_launcher_entries_are_retired_after_instance_migration() {
 #[test]
 fn launcher_consumes_run_instance_without_requiring_callers_to_unpack_runtime_state() {
     let launcher = include_str!("launcher.rs");
-    let main = include_str!("../loop_engine/chat/loop_runner.rs");
+    let main = include_str!("../loop_engine/chat/session_driver/run_launch.rs");
     let derived_setup = include_str!("derived/setup.rs");
     let derived_loop = include_str!("derived/loop_run.rs");
 

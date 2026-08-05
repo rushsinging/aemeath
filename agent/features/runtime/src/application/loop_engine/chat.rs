@@ -18,6 +18,7 @@ mod loop_phases;
 mod loop_runner;
 #[cfg(test)]
 mod loop_runner_tests;
+mod main_run_port;
 mod non_agent;
 mod post_batch;
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub(crate) mod reflection;
 #[cfg(test)]
 mod reflection_trigger_tests;
 pub(crate) mod run_input_buffer;
+mod session_driver;
 mod snapshot_registry;
 pub(crate) mod stall;
 mod stream_handler;
