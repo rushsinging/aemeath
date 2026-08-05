@@ -10,7 +10,8 @@ use crate::tui::view_model::output::HookNoticeBlockView;
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    OutputBlockKind, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    OutputBlockKind, SemanticStyle, TextBlockView, ToolGroupBlockView, ToolResultBlockView,
+    MAX_BLOCK_DEPTH,
 };
 #[cfg(test)]
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ use super::output_tool_view::{
     display_text_for_tool_result, find_tool_call, find_tool_view, summarize_non_embedded_result,
     tool_result_is_embedded,
 };
+use super::tool_group::DisplayUnitPlan;
 
 #[cfg(test)]
 /// 测试参考装配使用的完整工具索引。
@@ -69,6 +71,82 @@ impl ToolCallLookup for ToolIndex<'_> {
 pub struct OutputViewAssembler;
 
 impl OutputViewAssembler {
+    pub(super) fn assemble_timeline_display_units(
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+        workspace_root: Option<&std::path::Path>,
+    ) -> Vec<BlockNode> {
+        let candidates = timeline_items
+            .iter()
+            .map(|item| super::tool_group::timeline_candidate(item, tool_lookup))
+            .collect::<Vec<_>>();
+        super::tool_group::plan_display_units(&candidates)
+            .iter()
+            .filter_map(|unit| {
+                Self::assemble_display_unit(unit, timeline_items, tool_lookup, workspace_root)
+            })
+            .collect()
+    }
+    pub(super) fn assemble_display_unit(
+        unit: &DisplayUnitPlan,
+        timeline_items: &[OutputTimelineItem],
+        tool_lookup: &impl ToolCallLookup,
+        workspace_root: Option<&std::path::Path>,
+    ) -> Option<BlockNode> {
+        match unit {
+            DisplayUnitPlan::Single {
+                item_id,
+                attached_result_ids,
+            } => {
+                let source_item = timeline_items
+                    .iter()
+                    .find(|item| item.id().as_ref() == item_id)?;
+                let mut root = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
+                for result_id in attached_result_ids {
+                    let result_item = timeline_items
+                        .iter()
+                        .find(|item| item.id().as_ref() == result_id)?;
+                    let result = Self::assemble_item(result_item, tool_lookup, workspace_root)?;
+                    push_child_checked(&mut root, result, 1);
+                }
+                Some(root)
+            }
+            DisplayUnitPlan::ToolGroup {
+                group_id,
+                kind,
+                member_ids,
+                attached_result_ids,
+            } => {
+                let mut group = leaf(
+                    group_id.clone(),
+                    OutputBlockKind::ToolGroup(ToolGroupBlockView {
+                        key: group_id.clone(),
+                        kind: *kind,
+                        title: kind.title().to_string(),
+                        style: SemanticStyle::Muted,
+                    }),
+                );
+                for member_id in member_ids {
+                    let source_item = timeline_items.iter().find(|item| {
+                        matches!(item, OutputTimelineItem::ToolCall { .. })
+                            && item.id().to_string().contains(member_id)
+                    })?;
+                    let member = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
+                    push_child_checked(&mut group, member, 1);
+                }
+                for result_id in attached_result_ids {
+                    let result_item = timeline_items
+                        .iter()
+                        .find(|item| item.id().as_ref() == result_id)?;
+                    let result = Self::assemble_item(result_item, tool_lookup, workspace_root)?;
+                    let parent = group.children.last_mut()?;
+                    push_child_checked(parent, result, 2);
+                }
+                Some(group)
+            }
+        }
+    }
+
     pub(super) fn assemble_item(
         item: &OutputTimelineItem,
         tool_lookup: &impl ToolCallLookup,

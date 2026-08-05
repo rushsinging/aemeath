@@ -1,3 +1,5 @@
+use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
 use crate::tui::view_model::output::ToolGroupKind;
 
 pub(crate) fn classify_tool_name(tool_name: &str) -> Option<ToolGroupKind> {
@@ -13,13 +15,62 @@ pub(crate) fn classify_tool_name(tool_name: &str) -> Option<ToolGroupKind> {
     }
 }
 
+pub(super) fn timeline_candidate(
+    item: &OutputTimelineItem,
+    tool_lookup: &impl ToolCallLookup,
+) -> ToolGroupCandidate {
+    match item {
+        OutputTimelineItem::ToolCall { reference } => {
+            let tool_kind = tool_lookup
+                .call(
+                    &reference.context.chat_id,
+                    &reference.context.run_id,
+                    &reference.tool_call_id,
+                )
+                .and_then(|call| classify_tool_name(&call.name));
+            ToolGroupCandidate {
+                item_id: item.id().into_owned(),
+                call_id: Some(reference.tool_call_id.as_ref().to_string()),
+                tool_kind,
+                step_id: reference.context.run_id.as_ref().to_string(),
+                result_call_id: None,
+            }
+        }
+        OutputTimelineItem::ToolResult { reference } => ToolGroupCandidate {
+            item_id: item.id().into_owned(),
+            call_id: None,
+            tool_kind: None,
+            step_id: reference.context.run_id.as_ref().to_string(),
+            result_call_id: Some(reference.tool_call_id.as_ref().to_string()),
+        },
+        _ => ToolGroupCandidate {
+            item_id: item.id().into_owned(),
+            call_id: None,
+            tool_kind: None,
+            step_id: timeline_step_id(item),
+            result_call_id: None,
+        },
+    }
+}
+
+fn timeline_step_id(item: &OutputTimelineItem) -> String {
+    match item {
+        OutputTimelineItem::AssistantText { context, .. }
+        | OutputTimelineItem::Thinking { context, .. } => context
+            .as_ref()
+            .map(|context| context.run_id.as_ref().to_string())
+            .unwrap_or_else(|| "unscoped".to_string()),
+        _ => "unscoped".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ToolGroupCandidate {
-    item_id: String,
-    call_id: Option<String>,
-    tool_kind: Option<ToolGroupKind>,
-    step_id: String,
-    result_call_id: Option<String>,
+    pub(crate) item_id: String,
+    pub(crate) call_id: Option<String>,
+    pub(crate) tool_kind: Option<ToolGroupKind>,
+    pub(crate) step_id: String,
+    pub(crate) result_call_id: Option<String>,
 }
 
 impl ToolGroupCandidate {

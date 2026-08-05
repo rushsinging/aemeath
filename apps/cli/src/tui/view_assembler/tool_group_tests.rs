@@ -1,4 +1,11 @@
-use super::{classify_tool_name, plan_display_units, DisplayUnitPlan, ToolGroupCandidate};
+use super::{
+    classify_tool_name, plan_display_units, timeline_candidate, DisplayUnitPlan, ToolGroupCandidate,
+};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
+use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
+use crate::tui::model::output_timeline::{OutputTimelineItem, TimelineToolCallRef};
+use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
 use crate::tui::view_model::output::ToolGroupKind;
 
 #[test]
@@ -66,6 +73,48 @@ fn leaves_unknown_and_task_prefixed_tools_unclassified() {
 fn exposes_the_user_facing_explore_title() {
     assert_eq!(ToolGroupKind::Explore.title(), "Explore");
     assert_ne!(ToolGroupKind::Explore.title(), "Explor");
+}
+
+#[test]
+fn live_timeline_adapter_reads_tool_name_and_run_boundary_from_model() {
+    let chat_id = ChatId::new("chat-live");
+    let run_id = ChatRunId::new("run-live");
+    let tool_id = ToolCallId::new("tool-1");
+    let mut conversation = ConversationModel::default();
+    let mut call = ToolCall::pending(
+        tool_id.clone(),
+        crate::tui::model::conversation::ids::ToolStreamKey::new(
+            chat_id.clone(),
+            run_id.clone(),
+            "Read",
+            0,
+        ),
+    );
+    call.status = ToolCallStatus::Ready;
+    let mut run = crate::tui::model::conversation::chat_turn::ChatRun::new(run_id.clone(), 0);
+    run.tool_calls.push(call);
+    conversation
+        .chats
+        .push(crate::tui::model::conversation::chat::Chat {
+            id: chat_id.clone(),
+            user_submission: String::new(),
+            status: crate::tui::model::conversation::chat::ChatStatus::Running,
+            runs: vec![run],
+        });
+    let item = OutputTimelineItem::ToolCall {
+        reference: TimelineToolCallRef::new(chat_id, run_id, tool_id),
+    };
+    let lookup = ConversationToolLookup::new(&conversation);
+
+    assert_eq!(
+        timeline_candidate(&item, &lookup),
+        ToolGroupCandidate::tool_call(
+            "tool-call-chat-live/run-live/tool-1",
+            "tool-1",
+            "Read",
+            "run-live",
+        )
+    );
 }
 
 #[test]
