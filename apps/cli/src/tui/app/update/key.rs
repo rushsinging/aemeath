@@ -183,7 +183,7 @@ impl App {
                     crate::tui::log_debug!(
                         "mid_turn.enter is_slash={} text_preview={:?}",
                         is_slash,
-                        &submission.text[..submission.text.len().min(60)]
+                        &submission.text[..submission.text.floor_char_boundary(60)]
                     );
                     // slash 命令无论 idle/busy 都由统一 CommandRouter 解析，再由各 owner
                     // 产生 typed ChatInputEvent。直接压成 ControlCommand 会丢失 `/compact`

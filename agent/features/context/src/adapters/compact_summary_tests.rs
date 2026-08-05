@@ -453,7 +453,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
             self.current.fetch_sub(1, Ordering::SeqCst);
             Ok(format!(
                 "<summary>chunk summary: {}</summary>",
-                &text[..text.len().min(30)]
+                &text[..text.floor_char_boundary(30)]
             ))
         }
     }
