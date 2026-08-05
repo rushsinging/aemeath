@@ -19,7 +19,7 @@ pub enum RunControl {
 }
 
 pub trait ActiveRunPort: Send + Sync {
-    fn activate(&self, run_id: RunId, cancel: CancellationToken);
+    fn activate_child(&self, run_id: RunId, cancel: CancellationToken);
     fn activate_main(&self, run_id: RunId, cancel: CancellationToken);
     fn set_main_active_step(
         &self,

@@ -637,7 +637,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             tools.catalog_port(),
             skill_wiring.catalog(),
             tool_result_materializer,
-            active_run,
+            active_run.clone(),
         ),
         crate::composition::wire_sdk_chat_ingress(),
         initial_provider,
@@ -647,6 +647,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: Arc::new(NoopRunner),
             parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
+            active_run: active_run.clone(),
             max_tool_concurrency: 10,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
