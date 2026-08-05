@@ -183,15 +183,6 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
                     item_id: candidate.item_id.clone(),
                     call_id: result_call_id.to_string(),
                 });
-            } else if candidates
-                .iter()
-                .any(|known| known.call_id.as_deref() == Some(result_call_id))
-            {
-                flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
-                display_units.push(DisplayUnitPlan::Single {
-                    item_id: candidate.item_id.clone(),
-                    attached_results: Vec::new(),
-                });
             } else {
                 flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
                 display_units.push(DisplayUnitPlan::Single {
