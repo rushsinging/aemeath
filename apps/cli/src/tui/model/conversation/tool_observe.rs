@@ -242,8 +242,8 @@ impl ConversationModel {
         tool_id: ToolCallId,
         message: String,
     ) -> Vec<ConversationChange> {
-        // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
-        // activity_lines），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        // 查找匹配的 ToolCall，将进度信息写入其 activities（供 View Assembler 投影为
+        // streaming preview 子块），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
             if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
                 c.id.as_ref()

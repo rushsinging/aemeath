@@ -77,7 +77,10 @@ pub(super) fn find_tool_view(
         call.name,
         call.status,
         call.args_preview.len(),
-                  result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        result_summary
+            .as_ref()
+            .map(|value| value.len())
+            .unwrap_or(0),
         call.activities.len(),
     );
     Some(ToolCallBlockView {
