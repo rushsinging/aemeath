@@ -88,7 +88,10 @@ fn runtime_cancelled_step_maps_to_presentation_only_intent() {
         run_id: UiRunId::from("run-1"),
         parent_run_id: None,
         step_id: UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
 
     assert!(matches!(
@@ -105,7 +108,10 @@ fn child_cancelled_step_remains_observational_only() {
         run_id: UiRunId::from("child-run"),
         parent_run_id: Some(UiRunId::from("root-run")),
         step_id: UiRunStepId::from("child-step"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
 
     assert!(mapping.conversation.is_empty());

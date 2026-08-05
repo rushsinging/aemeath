@@ -273,7 +273,15 @@ pub(crate) enum TuiRunStepEvent {
     Completed,
     CancellationRequested,
     FinalizationStarted,
-    Cancelled { confirmed: bool },
+    Cancelled {
+        terminal: TuiRunStepCancellationTerminal,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunStepCancellationTerminal {
+    Cancelled,
+    CancellationUnconfirmed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

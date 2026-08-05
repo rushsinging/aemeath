@@ -100,14 +100,18 @@ pub(super) async fn finish_cancelled_step(
     emit_events(run, execution, port).await?;
     run.begin_step_finalization(step_id)?;
     emit_events(run, execution, port).await?;
-    run_step_finalization_phase(
+    let mut commit = prepare_step_commit(
         execution,
-        port.persistence_mut(),
         step_id,
         crate::ports::FinalizeCause::UserCancelledStep,
-    )
-    .await?;
-    run.finish_cancelled_step(step_id)?;
+    );
+    if let Some(request) = commit.request.as_ref() {
+        commit.receipts = port.persistence_mut().load_step_receipts(request).await?;
+    }
+    let terminal = terminal_from_cleanup_receipts(&commit.receipts);
+    port.persistence_mut().persist_step_commit(&commit).await?;
+    execution.commit_step_messages();
+    run.finish_step_cancellation(step_id, terminal)?;
     log::debug!(
         target: crate::LOG_TARGET,
         "step cancellation finalization completed: run_id={} step_id={}",

@@ -186,7 +186,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         }
         sdk::ChatEvent::RunStepCancellationRequested { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_cancellation_requested run_id={} step_id={}", stage, run_id, step_id),
         sdk::ChatEvent::RunStepFinalizationStarted { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_finalization_started run_id={} step_id={}", stage, run_id, step_id),
-        sdk::ChatEvent::RunStepCancelled { run_id, step_id, confirmed, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} confirmed={}", stage, run_id, step_id, confirmed),
+        sdk::ChatEvent::RunStepCancelled { run_id, step_id, terminal, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} terminal={:?}", stage, run_id, step_id, terminal),
         sdk::ChatEvent::RunDrainingInput { run_id, .. } => crate::tui::log_trace!("{} run_draining_input run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminationRequested { run_id, .. } => crate::tui::log_trace!("{} run_termination_requested run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminated { run_id, .. } => crate::tui::log_trace!("{} run_terminated run_id={}", stage, run_id),

@@ -47,10 +47,10 @@ pub use spec::{
 pub use spec::{HookBindingMode, InteractionBindingMode, RunSpec, RunSpecError};
 pub use state::{
     DrainDecision, InteractionContinuation, RunStatus, RunStepCancellationRequest, RunStepId,
-    RunTerminationRequest, RunTransition, RunTransitionError, StopHookBlockResult,
+    RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError, StopHookBlockResult,
 };
 #[cfg(test)]
-pub use state::{PendingInteraction, RunStepStatus, RunTransitionReason};
+pub use state::{PendingInteraction, RunTransitionReason};
 pub use step::{ModelInvocation, ToolCall, ToolCallStatus};
 
 #[cfg(test)]

@@ -744,7 +744,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             step_id,
             event,
         } => match event {
-            TuiRunStepEvent::Cancelled { confirmed } if parent_run_id.is_none() => {
+            TuiRunStepEvent::Cancelled { terminal } if parent_run_id.is_none() => {
+                let confirmed = matches!(
+                    terminal,
+                    crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled
+                );
                 crate::tui::log_debug!(
                     "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
                     run_id,
@@ -752,9 +756,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     confirmed
                 );
                 conversation(ConversationIntent::PresentCancelledStep(
-                    PresentCancelledStep {
-                        confirmed: *confirmed,
-                    },
+                    PresentCancelledStep { confirmed },
                 ))
             }
             TuiRunStepEvent::Started

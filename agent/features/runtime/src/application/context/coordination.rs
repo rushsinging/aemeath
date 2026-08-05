@@ -137,6 +137,15 @@ impl ContextCoordinator {
         self.port.advance_tool_receipt(mutation).await
     }
 
+    pub(crate) async fn step_receipts(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+        self.port
+            .step_receipts(&request.session_id, &request.run_id, &request.step_id)
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn append_finalized(
         &self,

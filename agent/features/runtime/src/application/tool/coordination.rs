@@ -200,9 +200,11 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     };
     let cancelled = cancel.is_cancelled();
     let results = if cancelled && interaction_ids.is_empty() {
-        let completed = complete_cancelled_tool_round(&raw_calls, selected);
-        observer.cancelled_results_completed(&completed).await;
-        completed
+        let convergence = complete_cancelled_tool_round(&raw_calls, selected);
+        observer
+            .cancelled_results_completed(&convergence.results)
+            .await;
+        convergence.results
     } else {
         selected
     };
@@ -265,9 +267,24 @@ pub(crate) async fn finalize_streaming_rounds<O: ToolRoundObserver>(
         .filter(|result| !interaction_ids.contains(&result.call_id))
         .cloned()
         .collect();
-    // 取消时旁路结果整体丢弃（step 作废语义），不构造取消占位。
     let results = if cancel.is_cancelled() && interaction_ids.is_empty() {
-        Vec::new()
+        let calls = selected
+            .iter()
+            .enumerate()
+            .map(|(index, result)| ToolCall {
+                id: result.call_id.clone(),
+                provider_id: result.provider_id.clone(),
+                name: result.tool_name.clone(),
+                index,
+                input: serde_json::Value::Null,
+            })
+            .collect::<Vec<_>>();
+        let convergence = converge_cancelled_tool_round(&calls, selected);
+        coordinator
+            .observer
+            .cancelled_results_completed(&convergence.results)
+            .await;
+        convergence.results
     } else {
         selected
     };
@@ -471,22 +488,49 @@ pub(crate) fn prepare_tool_round(
     prepared
 }
 
-pub(crate) fn complete_cancelled_tool_round(
+#[derive(Debug)]
+pub struct CancelledToolRoundConvergence {
+    pub results: Vec<ToolExecution>,
+}
+
+pub(crate) fn converge_cancelled_tool_round(
     calls: &[ToolCall],
     results: Vec<ToolExecution>,
-) -> Vec<ToolExecution> {
+) -> CancelledToolRoundConvergence {
     let mut by_id: HashMap<_, _> = results
         .into_iter()
         .map(|result| (result.call_id.clone(), result))
         .collect();
-    calls
+    let results = calls
         .iter()
         .map(|call| {
             by_id.remove(&call.id).unwrap_or_else(|| {
-                ToolExecution::new(call, tools::ToolOutcome::error("Command cancelled by user"))
+                ToolExecution::new_typed(
+                    call,
+                    tools::ToolExecutionOutcome::cancelled("Command cancelled by user"),
+                )
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for result in &results {
+        debug_assert!(matches!(
+            result.typed_outcome,
+            tools::ToolExecutionOutcome::Success(_)
+                | tools::ToolExecutionOutcome::Failure(_)
+                | tools::ToolExecutionOutcome::Cancelled(_)
+                | tools::ToolExecutionOutcome::TimedOut(_)
+                | tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
+                | tools::ToolExecutionOutcome::Suspended(_)
+        ));
+    }
+    CancelledToolRoundConvergence { results }
+}
+
+pub(crate) fn complete_cancelled_tool_round(
+    calls: &[ToolCall],
+    results: Vec<ToolExecution>,
+) -> CancelledToolRoundConvergence {
+    converge_cancelled_tool_round(calls, results)
 }
 
 /// Restores original model call order after concurrent execution and gate paths.

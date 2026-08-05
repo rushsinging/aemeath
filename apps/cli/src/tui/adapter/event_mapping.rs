@@ -274,12 +274,21 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         } => run_step_event(
             run_id,
             parent_run_id,
             step_id,
-            TuiRunStepEvent::Cancelled { confirmed },
+            TuiRunStepEvent::Cancelled {
+                terminal: match terminal {
+                    sdk::RunStepCancellationTerminal::Cancelled => {
+                        TuiRunStepCancellationTerminal::Cancelled
+                    }
+                    sdk::RunStepCancellationTerminal::CancellationUnconfirmed => {
+                        TuiRunStepCancellationTerminal::CancellationUnconfirmed
+                    }
+                },
+            },
         ),
         ChatEvent::InteractionRequested { request } => {
             TuiRuntimeEvent::InteractionRequested(interaction_request(request))

@@ -57,12 +57,12 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         } => ChatEvent::RunStepCancelled {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         },
         RunDomainEvent::DrainingInput {
             run_id,

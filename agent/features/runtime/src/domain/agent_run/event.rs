@@ -47,7 +47,7 @@ pub enum RunDomainEvent {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         step_id: RunStepId,
-        confirmed: bool,
+        terminal: sdk::RunStepCancellationTerminal,
     },
     DrainingInput {
         run_id: RunId,

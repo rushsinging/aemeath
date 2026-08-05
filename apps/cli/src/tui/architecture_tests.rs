@@ -497,6 +497,26 @@ fn test_runtime_lifecycle_events_are_observational_only() {
     );
 }
 #[test]
+fn run_control_ack_cannot_become_a_terminal_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let executor = fs::read_to_string(root.join("effect/executor.rs")).expect("read executor");
+    let key = fs::read_to_string(root.join("app/update/key.rs")).expect("read key update");
+
+    assert!(key.contains("Effect::CancelRunStep"));
+    assert!(executor.contains("CancelRunStepOutcome::Accepted"));
+    for forbidden in [
+        "CancelRunStepOutcome::Accepted => self.chat.stop_processing",
+        "CancelRunStepOutcome::Accepted => ConversationIntent::TerminalNotice",
+        "CancelRunStepOutcome::Accepted => ConversationIntent::PresentCancelledStep",
+    ] {
+        assert!(
+            !executor.contains(forbidden),
+            "ACK must not publish terminal: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn test_phase_four_interaction_model_is_sender_free() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))

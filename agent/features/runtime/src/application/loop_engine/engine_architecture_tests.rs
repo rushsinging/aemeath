@@ -36,6 +36,37 @@ fn execution_state_is_owned_by_engine_and_not_exposed_as_a_port() {
 }
 
 #[test]
+fn step_commit_carries_durable_receipts_into_context_finalization() {
+    let contracts = include_str!("engine/contracts.rs");
+    let persistence = include_str!("step_persistence.rs");
+
+    assert!(contracts.contains("pub receipts: Vec<crate::ports::StepReceipt>"));
+    assert!(persistence.contains("commit.receipts.clone()"));
+    assert!(!persistence.contains("vec![],\n                self.usage.get()"));
+}
+
+#[test]
+fn step_terminal_is_derived_from_receipts_before_domain_finalization() {
+    let phases = include_str!("engine/phases.rs");
+    let domain = include_str!("../../domain/agent_run/domain.rs");
+
+    assert!(phases.contains("terminal_from_cleanup_receipts"));
+    assert!(domain.contains("finish_controlled_step(step_id, status)"));
+}
+
+#[test]
+fn step_cancellation_terminal_never_regresses_to_boolean_payload() {
+    let domain_event = include_str!("../../domain/agent_run/event.rs");
+    let sdk_mapper = include_str!("../../adapters/sdk_event_mapper.rs");
+    let sdk_event = include_str!("../../../../../../packages/sdk/src/chat_event.rs");
+
+    for source in [domain_event, sdk_mapper, sdk_event] {
+        assert!(!source.contains("StepCancelled {\n        run_id") || !source.contains("confirmed: bool"));
+        assert!(source.contains("RunStepCancellationTerminal") || source.contains("terminal,"));
+    }
+}
+
+#[test]
 fn domain_events_are_observed_by_activity_before_external_publish() {
     let source = include_str!("run_loop.rs");
 

@@ -116,6 +116,15 @@ where
             .await
     }
 
+    async fn load_step_receipts(
+        &mut self,
+        request: &ContextRequest,
+    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
+            .load_step_receipts(request)
+            .await
+    }
+
     async fn persist_step_commit(&mut self, commit: &StepCommit) -> Result<(), LoopEngineError> {
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .persist_step_commit(commit)

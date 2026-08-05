@@ -150,6 +150,8 @@ enum TuiRunStatus {
 
 `RunStarted`、`RunAwaitingUser`、`RunResumed`、控制 ACK 和 terminal 事件在兼容期仍可承担身份、交互或用户终态职责，但 spinner / 活动展示的生命周期只能由 typed `RunStatusView` 更新的 snapshot 决定。
 
+控制链使用 typed target identity：TUI 在 `RunStepStarted` 时缓存当前 Main `(run_id, step_id)`，Esc / Ctrl+C 优先发出 `CancelRunStep`；仅在 identity 尚不可用的兼容窗口回退到 `CancelCurrentRun`。`CancelRunStepOutcome` 仅是 command ACK：`Accepted / AlreadyCancelling` 可更新 cancelling 提示，但不得停止 processing、追加 terminal notice 或生成取消内容。Step 取消终态只消费 Runtime 发布的 `RunStepCancellationTerminal::{Cancelled, CancellationUnconfirmed}`；Live 与 Resume 均以 Context finalized Step 中同一 typed receipt 事实为输入。
+
 ### 3.3 RunStep 投影与 RunStepStatus 状态机
 
 ```rust

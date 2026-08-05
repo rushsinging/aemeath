@@ -336,7 +336,10 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
         run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
         parent_run_id: None,
         step_id: crate::tui::model::conversation::interaction::UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
     harness.runtime_event(TuiRuntimeEvent::Cancelled {
         context: context.clone(),

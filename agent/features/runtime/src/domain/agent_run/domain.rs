@@ -668,8 +668,23 @@ impl Run {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn finish_cancelled_step(&mut self, step_id: &RunStepId) -> Result<(), RunTransitionError> {
         self.finish_controlled_step(step_id, RunStepStatus::Cancelled)
+    }
+
+    pub fn finish_step_cancellation(
+        &mut self,
+        step_id: &RunStepId,
+        status: RunStepStatus,
+    ) -> Result<(), RunTransitionError> {
+        if !matches!(
+            status,
+            RunStepStatus::Cancelled | RunStepStatus::CancellationUnconfirmed
+        ) {
+            return Err(RunTransitionError::StepNotActive);
+        }
+        self.finish_controlled_step(step_id, status)
     }
 
     #[cfg(test)]
@@ -699,7 +714,11 @@ impl Run {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             step_id: step_id.clone(),
-            confirmed,
+            terminal: if confirmed {
+                sdk::RunStepCancellationTerminal::Cancelled
+            } else {
+                sdk::RunStepCancellationTerminal::CancellationUnconfirmed
+            },
         });
         self.events.push(RunDomainEvent::DrainingInput {
             run_id: self.id.clone(),

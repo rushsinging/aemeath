@@ -550,8 +550,20 @@ impl App {
                     self.show_ask_user_batch(req.request_id.clone(), slots);
                 }
             }
+            TuiRuntimeEvent::RunStep {
+                run_id,
+                parent_run_id: None,
+                step_id,
+                event: crate::tui::adapter::tui_runtime_event::TuiRunStepEvent::Started,
+            } => {
+                self.chat.active_run_step = Some((
+                    sdk::RunId::from_legacy_or_new(run_id.as_str()),
+                    sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
+                ));
+            }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
                 // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
+                self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }

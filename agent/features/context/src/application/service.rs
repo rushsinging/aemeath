@@ -222,6 +222,17 @@ impl ContextPort for ContextApplicationService {
         self.session.advance_tool_receipt(mutation).await
     }
 
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        self.session
+            .step_receipts(session_id, run_id, step_id)
+            .await
+    }
+
     async fn compare_and_record_skill_load(
         &self,
         mutation: tools::SkillLoadMutation,

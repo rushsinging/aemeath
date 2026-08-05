@@ -862,7 +862,7 @@ mod tests {
             &calls[0],
             ToolOutcome::new("finished", Value::Null, Vec::new()),
         );
-        let results = complete_cancelled_tool_round(&calls, vec![completed]);
+        let results = complete_cancelled_tool_round(&calls, vec![completed]).results;
         let materializer = crate::application::tool::test_support::test_tool_result_materializer();
 
         let message = crate::application::loop_engine::shared::materialize_tool_results(

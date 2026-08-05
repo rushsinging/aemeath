@@ -131,6 +131,7 @@ impl App {
                 self.load_display_history_window_effect(request, ui_tx)
             }
             Effect::CancelCurrentRun => self.cancel_current_run(),
+            Effect::CancelRunStep { run_id, step_id } => self.cancel_run_step(&run_id, &step_id),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
             }
@@ -298,6 +299,43 @@ impl App {
             }),
         };
         self.apply_agent_intent(AgentIntent::Conversation(intent));
+    }
+
+    fn cancel_run_step(&mut self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let deadline = sdk::ControlDeadline::from_unix_millis(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64 + 10_000)
+                .unwrap_or(0),
+        );
+        let outcome = self
+            .run_control_client
+            .as_ref()
+            .map(|client| client.cancel_run_step(run_id, Some(step_id), deadline))
+            .unwrap_or(sdk::CancelRunStepOutcome::NotFound);
+        match outcome {
+            sdk::CancelRunStepOutcome::Accepted | sdk::CancelRunStepOutcome::AlreadyCancelling => {
+                self.chat.start_cancelling();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
+                        "Cancelling current response…",
+                    ))),
+                ));
+            }
+            sdk::CancelRunStepOutcome::RunTerminating => {
+                self.chat.start_cancelling();
+                self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
+            }
+            sdk::CancelRunStepOutcome::NoActiveStep => {
+                self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
+            }
+            sdk::CancelRunStepOutcome::RunTerminal => {
+                self.set_transient_notice(StatusNotice::warning("Current run already finished"));
+            }
+            sdk::CancelRunStepOutcome::NotFound => {
+                self.set_transient_notice(StatusNotice::warning("Current run step was not found"));
+            }
+        }
     }
 
     fn cancel_current_run(&mut self) {

@@ -618,7 +618,7 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
         step_id: crate::RunStepId,
-        confirmed: bool,
+        terminal: crate::RunStepCancellationTerminal,
     },
     RunDrainingInput {
         run_id: crate::RunId,
