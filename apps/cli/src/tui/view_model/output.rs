@@ -141,6 +141,7 @@ pub struct ToolGroupBlockView {
     pub key: String,
     pub kind: ToolGroupKind,
     pub title: String,
+    pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
 }
 
@@ -237,6 +238,7 @@ pub enum ToolSemanticStatus {
     Running,
     Success,
     Error,
+    Warning,
     Cancelled,
     Orphaned,
 }

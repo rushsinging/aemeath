@@ -239,7 +239,7 @@ Model + ViewState → ViewAssembler → ViewModel → Render
 
 `OutputViewAssembler` 的 Live timeline adapter 与 Resume history adapter **MUST** 共享唯一显式工具分类器和纯 display-unit planner。planner 先按同类别、同 Run Step 的连续 ToolCall 形成 `Single` / `ToolGroup`，再进入 retained window/materialization；每组包含 2–20 个 ToolCall，matching ToolResult 按稳定 call identity 归属成员。普通输出、未知工具、类别或 Step 变化、orphan result 均切组；未加载的 Resume `StepPlaceholder` 不预测分组。
 
-`ToolGroup → ToolCall → ToolResult` 是实际 ViewModel tree。ToolGroup 是窗口原子，窗口选择 **NEVER** 从组中间切断；稳定 unit ID 驱动 retained root cache，成员状态变化只失效受影响展示单元。逻辑树深度与视觉角色分离：ToolGroup 使用普通 ToolCall header 的文字与 gutter 样式，直属 ToolCall 以 `⎿` result row 视觉展示，成员自己的 ToolResult 仍由成员独占。
+`ToolGroup → ToolCall → ToolResult` 是实际 ViewModel tree。ToolGroup 是窗口原子，窗口选择 **NEVER** 从组中间切断；稳定 unit ID 驱动 retained root cache，成员状态变化只失效受影响展示单元。逻辑树深度与视觉角色分离：ToolGroup 使用普通 ToolCall header 的文字与聚合状态 gutter（执行中、全成功、全失败、部分失败、取消与 orphan），直属 ToolCall 组成 result rows，仅首成员绘制 `⎿`，后续成员保持同列空 gutter；成员自己的 ToolResult 仍由成员独占。
 
 ### 7.4 三层缓存
 

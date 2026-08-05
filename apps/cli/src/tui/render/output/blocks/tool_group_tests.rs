@@ -9,7 +9,8 @@ fn renders_group_as_a_plain_tool_header_without_separator_or_summary() {
         key: "group-1".into(),
         kind: ToolGroupKind::Explore,
         title: ToolGroupKind::Explore.title().into(),
-        style: SemanticStyle::Muted,
+        semantic_status: crate::tui::view_model::output::ToolSemanticStatus::Running,
+        style: SemanticStyle::Running,
     };
 
     let rendered = render_tool_group("group-1", &view, &RenderCtx::for_width(80));

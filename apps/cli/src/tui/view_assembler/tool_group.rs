@@ -1,8 +1,41 @@
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
-use crate::tui::view_model::output::ToolGroupKind;
+use crate::tui::view_model::output::{ToolGroupKind, ToolSemanticStatus};
 
 const MAX_TOOL_CALLS_PER_GROUP: usize = 20;
+
+pub(crate) fn aggregate_tool_group_status(statuses: &[ToolSemanticStatus]) -> ToolSemanticStatus {
+    if statuses.iter().any(|status| {
+        matches!(
+            status,
+            ToolSemanticStatus::Pending | ToolSemanticStatus::Running
+        )
+    }) {
+        return ToolSemanticStatus::Running;
+    }
+    if statuses.contains(&ToolSemanticStatus::Orphaned) {
+        return ToolSemanticStatus::Orphaned;
+    }
+    let all_success = statuses
+        .iter()
+        .all(|status| *status == ToolSemanticStatus::Success);
+    if all_success {
+        return ToolSemanticStatus::Success;
+    }
+    let all_error = statuses
+        .iter()
+        .all(|status| *status == ToolSemanticStatus::Error);
+    if all_error {
+        return ToolSemanticStatus::Error;
+    }
+    let all_cancelled = statuses
+        .iter()
+        .all(|status| *status == ToolSemanticStatus::Cancelled);
+    if all_cancelled {
+        return ToolSemanticStatus::Cancelled;
+    }
+    ToolSemanticStatus::Warning
+}
 
 pub(crate) fn classify_tool_name(tool_name: &str) -> Option<ToolGroupKind> {
     match tool_name {

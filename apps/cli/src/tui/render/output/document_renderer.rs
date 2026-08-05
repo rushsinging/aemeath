@@ -265,12 +265,12 @@ impl OutputDocumentRenderer {
                 #[cfg(test)]
                 crate::tui::render::performance::record_gutted_cache_hit();
                 out.push(cached_block.clone());
-                for child in &node.children {
+                for (child_index, child) in node.children.iter().enumerate() {
                     self.render_node(
                         child,
                         outer_width,
                         depth + 1,
-                        child_gutter_role(&node.kind, &child.kind),
+                        child_gutter_role(&node.kind, &child.kind, child_index),
                         animation_frame,
                         markdown_spacing,
                         out,
@@ -355,12 +355,12 @@ impl OutputDocumentRenderer {
         self.gutted
             .insert(node.block_id.clone(), (gkey, block.clone()));
         out.push(block);
-        for child in &node.children {
+        for (child_index, child) in node.children.iter().enumerate() {
             self.render_node(
                 child,
                 outer_width,
                 depth + 1,
-                child_gutter_role(&node.kind, &child.kind),
+                child_gutter_role(&node.kind, &child.kind, child_index),
                 animation_frame,
                 markdown_spacing,
                 out,
@@ -389,11 +389,19 @@ impl OutputDocumentRenderer {
     }
 }
 
-fn child_gutter_role(parent: &OutputBlockKind, child: &OutputBlockKind) -> gutter::GutterRole {
+fn child_gutter_role(
+    parent: &OutputBlockKind,
+    child: &OutputBlockKind,
+    child_index: usize,
+) -> gutter::GutterRole {
     if matches!(parent, OutputBlockKind::ToolGroup(_))
         && matches!(child, OutputBlockKind::ToolCall(_))
     {
-        gutter::GutterRole::ToolGroupMember
+        if child_index == 0 {
+            gutter::GutterRole::ToolGroupFirstMember
+        } else {
+            gutter::GutterRole::ToolGroupContinuation
+        }
     } else {
         gutter::GutterRole::Block
     }

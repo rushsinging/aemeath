@@ -1,12 +1,48 @@
 use super::{
-    classify_tool_name, plan_display_units, timeline_candidate, DisplayUnitPlan, ToolGroupCandidate,
+    aggregate_tool_group_status, classify_tool_name, plan_display_units, timeline_candidate,
+    DisplayUnitPlan, ToolGroupCandidate,
 };
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::{OutputTimelineItem, TimelineToolCallRef};
 use crate::tui::view_assembler::output_tool_lookup::ConversationToolLookup;
-use crate::tui::view_model::output::ToolGroupKind;
+use crate::tui::view_model::output::{ToolGroupKind, ToolSemanticStatus};
+
+#[test]
+fn aggregates_group_status_across_running_and_terminal_members() {
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Success, ToolSemanticStatus::Success]),
+        ToolSemanticStatus::Success
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Error, ToolSemanticStatus::Error]),
+        ToolSemanticStatus::Error
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Success, ToolSemanticStatus::Error]),
+        ToolSemanticStatus::Warning
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Success, ToolSemanticStatus::Cancelled,]),
+        ToolSemanticStatus::Warning
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[
+            ToolSemanticStatus::Cancelled,
+            ToolSemanticStatus::Cancelled,
+        ]),
+        ToolSemanticStatus::Cancelled
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Success, ToolSemanticStatus::Running]),
+        ToolSemanticStatus::Running
+    );
+    assert_eq!(
+        aggregate_tool_group_status(&[ToolSemanticStatus::Orphaned, ToolSemanticStatus::Success]),
+        ToolSemanticStatus::Orphaned
+    );
+}
 
 #[test]
 fn classifies_explore_tools_with_stable_display_kind() {

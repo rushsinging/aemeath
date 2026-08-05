@@ -83,12 +83,13 @@ fn test_render_tree_dfs_flattens_parent_then_children() {
 }
 
 #[test]
-fn tool_group_renders_as_tool_header_with_member_as_result_row() {
+fn tool_group_renders_as_tool_header_with_only_first_member_result_marker() {
     let group_kind = OutputBlockKind::ToolGroup(ToolGroupBlockView {
         key: "group".into(),
         kind: ToolGroupKind::Explore,
         title: "Explore".into(),
-        style: SemanticStyle::Muted,
+        semantic_status: ToolSemanticStatus::Running,
+        style: SemanticStyle::Running,
     });
     let member_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "member".into(),
@@ -108,16 +109,34 @@ fn tool_group_renders_as_tool_header_with_member_as_result_row() {
         collapsed: false,
         agent_meta: None,
     });
+    let second_member_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "second-member".into(),
+        tool_call_id: Some("second-member".into()),
+        title: "Glob".into(),
+        args_preview: Some(r#"{"pattern":"**/*.rs"}"#.into()),
+        ..match member_kind.clone() {
+            OutputBlockKind::ToolCall(tool_call) => tool_call,
+            _ => unreachable!("fixture is a tool call"),
+        }
+    });
     let view_model = vm_with_roots(vec![BlockNode {
         block_id: "group".into(),
         block_version: group_kind.cache_version(),
         kind: group_kind,
-        children: vec![BlockNode {
-            block_id: "member".into(),
-            block_version: member_kind.cache_version(),
-            kind: member_kind,
-            children: Vec::new(),
-        }],
+        children: vec![
+            BlockNode {
+                block_id: "member".into(),
+                block_version: member_kind.cache_version(),
+                kind: member_kind,
+                children: Vec::new(),
+            },
+            BlockNode {
+                block_id: "second-member".into(),
+                block_version: second_member_kind.cache_version(),
+                kind: second_member_kind,
+                children: Vec::new(),
+            },
+        ],
     }]);
 
     let mut renderer = OutputDocumentRenderer::default();
@@ -133,6 +152,12 @@ fn tool_group_renders_as_tool_header_with_member_as_result_row() {
         .find(|block| block.block_id == "member")
         .expect("member block exists");
 
+    let second_member = document
+        .blocks
+        .iter()
+        .find(|block| block.block_id == "second-member")
+        .expect("second member block exists");
+
     assert_eq!(group.lines[1].plain, "Explore");
     assert_eq!(group.lines[1].spans[0].content.as_ref(), "● ");
     assert_eq!(group.lines[1].spans[0].style.fg, Some(theme::TOOL_RUNNING));
@@ -143,6 +168,9 @@ fn tool_group_renders_as_tool_header_with_member_as_result_row() {
     assert_eq!(member.lines[0].spans[0].style.fg, Some(theme::TEXT_MUTED));
     assert_eq!(member.lines[0].style.fg, Some(theme::TEXT));
     assert!(member.lines[0].plain.contains("Read"));
+    assert_eq!(second_member.lines[0].spans[0].content.as_ref(), "    ");
+    assert_eq!(second_member.lines[0].style.fg, Some(theme::TEXT));
+    assert!(!second_member.lines[0].plain.is_empty());
 }
 
 #[test]

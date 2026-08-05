@@ -42,7 +42,8 @@ fn group() -> OutputBlockKind {
         key: "group".into(),
         kind: ToolGroupKind::Explore,
         title: "Explore".into(),
-        style: SemanticStyle::Muted,
+        semantic_status: ToolSemanticStatus::Running,
+        style: SemanticStyle::Running,
     })
 }
 

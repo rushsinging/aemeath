@@ -124,7 +124,8 @@ pub(crate) fn assemble_resumed_history_display_unit(
                     key: group_id.clone(),
                     kind: *kind,
                     title: kind.title().to_string(),
-                    style: SemanticStyle::Muted,
+                    semantic_status: crate::tui::view_model::output::ToolSemanticStatus::Running,
+                    style: SemanticStyle::Running,
                 }),
             )?;
             for member_id in member_ids {
@@ -136,6 +137,20 @@ pub(crate) fn assemble_resumed_history_display_unit(
                 })?;
                 let member = assemble_resumed_history_item(display_history, item)?;
                 root.children.push(member);
+            }
+            let member_statuses = root
+                .children
+                .iter()
+                .filter_map(|child| match &child.kind {
+                    OutputBlockKind::ToolCall(tool_call) => Some(tool_call.semantic_status),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if let OutputBlockKind::ToolGroup(tool_group) = &mut root.kind {
+                tool_group.semantic_status =
+                    super::tool_group::aggregate_tool_group_status(&member_statuses);
+                tool_group.style =
+                    super::output::semantic_style_for_group_status(tool_group.semantic_status);
             }
             for attached_result in attached_results {
                 let result_item = display_history.item(&attached_result.item_id)?;

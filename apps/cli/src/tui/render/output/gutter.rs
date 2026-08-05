@@ -16,7 +16,8 @@ pub const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GutterRole {
     Block,
-    ToolGroupMember,
+    ToolGroupFirstMember,
+    ToolGroupContinuation,
 }
 /// 窄屏阈值：低于此宽度时缩减 gutter 缩进为 0（仅保留 marker）。
 const NARROW_NO_INDENT_THRESHOLD: u16 = 50;
@@ -66,8 +67,8 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
             ToolSemanticStatus::Pending => "○",
             ToolSemanticStatus::Success => "✓",
-            ToolSemanticStatus::Error => "✗",
-            ToolSemanticStatus::Cancelled => "✗",
+            ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => "✗",
+            ToolSemanticStatus::Warning => "!",
             ToolSemanticStatus::Orphaned => "?",
             ToolSemanticStatus::Running => {
                 let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
@@ -84,7 +85,21 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::ThinkingMessage(_) => "💭",
         // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "⎿",
-        OutputBlockKind::ToolGroup(_) => "●",
+        OutputBlockKind::ToolGroup(group) => match group.semantic_status {
+            ToolSemanticStatus::Pending => "○",
+            ToolSemanticStatus::Running => {
+                let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
+                if blink_frame.is_multiple_of(2) {
+                    "●"
+                } else {
+                    "○"
+                }
+            }
+            ToolSemanticStatus::Success => "✓",
+            ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => "✗",
+            ToolSemanticStatus::Warning => "!",
+            ToolSemanticStatus::Orphaned => "?",
+        },
         OutputBlockKind::HookNotice(notice) => match notice.kind {
             crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
             | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => "⊘",
@@ -100,16 +115,21 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
             ToolSemanticStatus::Pending => theme::TEXT_MUTED,
             ToolSemanticStatus::Success => theme::SUCCESS,
-            ToolSemanticStatus::Error => theme::ERROR,
+            ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
-            ToolSemanticStatus::Cancelled => theme::ERROR,
-            ToolSemanticStatus::Orphaned => theme::WARNING,
+            ToolSemanticStatus::Warning | ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
         OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
-        OutputBlockKind::ToolGroup(_) => theme::TOOL_RUNNING,
+        OutputBlockKind::ToolGroup(group) => match group.semantic_status {
+            ToolSemanticStatus::Pending => theme::TEXT_MUTED,
+            ToolSemanticStatus::Running => theme::TOOL_RUNNING,
+            ToolSemanticStatus::Success => theme::SUCCESS,
+            ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => theme::ERROR,
+            ToolSemanticStatus::Warning | ToolSemanticStatus::Orphaned => theme::WARNING,
+        },
         OutputBlockKind::HookNotice(notice) => match notice.kind {
             crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
             | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => theme::ERROR,
@@ -188,7 +208,8 @@ fn apply_gutter_with_frame_and_role(
             animated_marker_glyph(kind, animation_frame),
             marker_color(kind),
         ),
-        GutterRole::ToolGroupMember => ("⎿", theme::TEXT_MUTED),
+        GutterRole::ToolGroupFirstMember => ("⎿", theme::TEXT_MUTED),
+        GutterRole::ToolGroupContinuation => (" ", theme::TEXT_MUTED),
     };
     // cap depth 防 `" ".repeat()` 爆内存（`gutter_width` 路径已 saturating，
     // 但 repeat 仍会按 saturating 后的 usize 分配，可能 OOM）。

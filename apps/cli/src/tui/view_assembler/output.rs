@@ -178,7 +178,9 @@ impl OutputViewAssembler {
                         key: group_id.clone(),
                         kind: *kind,
                         title: kind.title().to_string(),
-                        style: SemanticStyle::Muted,
+                        semantic_status:
+                            crate::tui::view_model::output::ToolSemanticStatus::Running,
+                        style: SemanticStyle::Running,
                     }),
                 );
                 for member_id in member_ids {
@@ -188,6 +190,19 @@ impl OutputViewAssembler {
                     })?;
                     let member = Self::assemble_item(source_item, tool_lookup, workspace_root)?;
                     push_child_checked(&mut group, member, 1);
+                }
+                let member_statuses = group
+                    .children
+                    .iter()
+                    .filter_map(|child| match &child.kind {
+                        OutputBlockKind::ToolCall(tool_call) => Some(tool_call.semantic_status),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if let OutputBlockKind::ToolGroup(tool_group) = &mut group.kind {
+                    tool_group.semantic_status =
+                        super::tool_group::aggregate_tool_group_status(&member_statuses);
+                    tool_group.style = semantic_style_for_group_status(tool_group.semantic_status);
                 }
                 for attached_result in attached_results {
                     let result_item = timeline_items
@@ -453,6 +468,19 @@ impl OutputViewAssembler {
 }
 
 /// 构造无子的叶子 BlockNode（block_version 取 kind 语义指纹）。
+pub(super) fn semantic_style_for_group_status(
+    status: crate::tui::view_model::output::ToolSemanticStatus,
+) -> SemanticStyle {
+    use crate::tui::view_model::output::ToolSemanticStatus;
+    match status {
+        ToolSemanticStatus::Pending => SemanticStyle::Muted,
+        ToolSemanticStatus::Running => SemanticStyle::Running,
+        ToolSemanticStatus::Success => SemanticStyle::Success,
+        ToolSemanticStatus::Error | ToolSemanticStatus::Cancelled => SemanticStyle::Error,
+        ToolSemanticStatus::Warning | ToolSemanticStatus::Orphaned => SemanticStyle::Warning,
+    }
+}
+
 fn leaf(block_id: String, kind: OutputBlockKind) -> BlockNode {
     let block_version = kind.cache_version();
     BlockNode {
