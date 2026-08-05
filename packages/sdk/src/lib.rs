@@ -30,6 +30,7 @@ pub use chat_event::{
     DisplayHistoryWindowRequest, LocalResumedSessionStep, LocalSessionResumeBacking,
     SessionResumeFailureKind, SessionResumeView,
 };
+pub mod task;
 pub mod tool_input;
 pub mod tool_result;
 pub mod tui;
@@ -97,11 +98,15 @@ pub use share::message::{
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
     Role as LocalResumeRole,
 };
+pub use task::{
+    TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
+    TaskStateView,
+};
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
     ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
-    TaskStatusView, TuiLaunchContext,
+    TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

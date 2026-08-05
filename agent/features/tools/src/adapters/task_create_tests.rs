@@ -31,6 +31,14 @@ async fn task_create_uses_task_access_and_active_batch() {
     assert_eq!(tasks[0].batch(), batch.value.id());
     assert_eq!(tasks[0].priority(), task::TaskPriority::High);
     assert_eq!(tasks[0].session_id(), None);
+    let task_change = result
+        .task_change
+        .expect("successful create must carry change");
+    assert_eq!(task_change.revision(), store.revision());
+    assert!(matches!(
+        task_change.facts(),
+        [crate::domain::TaskChangeFact::Created { task_id }] if *task_id == tasks[0].id()
+    ));
 }
 
 #[tokio::test]
@@ -50,4 +58,5 @@ async fn task_create_without_active_batch_returns_typed_error() {
     assert!(result.text.contains("active"), "{}", result.text);
     assert!(store.list().is_empty());
     assert!(store.list_batches().is_empty());
+    assert!(result.task_change.is_none());
 }

@@ -314,9 +314,9 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
 ) -> Result<ToolRoundOutcome, LoopEngineError> {
     let result_count = results.len();
     if !results.is_empty() {
-        let has_task_mutation = results.iter().any(|result| {
-            crate::application::loop_engine::chat::events::is_task_store_mutation(&result.tool_name)
-        });
+        let has_task_mutation = results
+            .iter()
+            .any(|result| result.outcome.task_change.is_some());
         let message = crate::application::loop_engine::shared::materialize_tool_results(
             context.materializer,
             results,
@@ -520,6 +520,7 @@ pub(crate) fn blocked_tool_execution(call: &ToolCall, reason: &str) -> ToolExecu
             }),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         },
     )
 }

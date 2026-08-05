@@ -172,7 +172,7 @@ pub enum AppEvent {
     WorkingDirectoryChanged(StatusContextUpdate),
     WorkspaceMetadataResolved(WorkspaceMetadataResolved),
     /// Runtime task store changed; refresh TUI task list window.
-    TaskStatusChanged(sdk::TaskStatusView),
+    TaskStateChanged(sdk::TaskStateView),
     /// 版本检查结果（后台 spawn 完成后回送）。
     UpdateAvailable {
         current: String,

@@ -504,20 +504,16 @@ fn ask_user_batch_is_retired_and_mapped_to_nop() {
 }
 
 #[test]
-fn tasks_snapshot_preserves_sequence_prefixed_lines() {
-    let expected = vec![
-        "━━ Tasks: 0/1 ━━".to_string(),
-        "□ #1 实现适配器".to_string(),
-    ];
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TasksSnapshot {
-        tasks: Box::new(sdk::TaskStatusView {
-            lines: expected.clone(),
-        }),
+fn task_state_preserves_structured_payload() {
+    let expected = sdk::TaskStateView::empty("session-a", 42);
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {
+        state: Box::new(expected.clone()),
     });
 
     assert!(matches!(
         mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::TasksSnapshot { lines }) if lines == expected
+        SdkEventMapping::Runtime(TuiRuntimeEvent::TaskStateChanged { state })
+            if state.session_id == "session-a" && state.revision == 42 && state.items.is_empty()
     ));
 }
 

@@ -113,6 +113,7 @@ impl RuntimeState {
             completed,
             in_progress,
             lines: std::mem::take(&mut self.task_status.lines),
+            ..TaskStatusSnapshot::default()
         };
     }
 

@@ -274,6 +274,7 @@ where
             }),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         };
         let execution = ToolExecution::from_parts(
             call_id,

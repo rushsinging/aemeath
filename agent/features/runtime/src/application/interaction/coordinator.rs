@@ -199,6 +199,7 @@ impl InteractionCoordinator {
                         data: serde_json::json!({"status": "ok", "answers": answers}),
                         is_error: false,
                         images: Vec::new(),
+                        task_change: None,
                     };
                     (
                         id.clone(),

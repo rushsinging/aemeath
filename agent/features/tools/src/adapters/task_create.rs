@@ -1,5 +1,5 @@
 use crate::domain::types::task_create::{TaskCreateInput, TaskCreateResult};
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -80,13 +80,15 @@ impl TypedTool for TaskCreateTool {
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
         // Task BC deliberately returns NoActiveBatch; the tool must not create one implicitly.
-        let created = match self
+        let command_result = match self
             .access
             .create_task(spec, chrono::Utc::now().timestamp_millis() as u64)
         {
-            Ok(result) => result.value,
+            Ok(result) => result,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
+        let task_change = CommittedTaskChange::from_command_result(&command_result);
+        let created = command_result.value;
         let display_id = created.seq().to_string();
         TypedToolResult::success(
             format!("Task #{} created: {}", display_id, created.subject()),
@@ -98,9 +100,9 @@ impl TypedTool for TaskCreateTool {
                 priority: priority_label(created.priority()).to_owned(),
             },
         )
+        .with_task_change(task_change)
     }
 }
-
 #[cfg(test)]
 #[path = "task_create_tests.rs"]
 mod tests;

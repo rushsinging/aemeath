@@ -1,5 +1,5 @@
 use crate::domain::types::task_list_complete::TaskListCompleteResult;
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -49,12 +49,14 @@ impl TypedTool for TaskListCompleteTool {
             return TypedToolResult::error("no active task list");
         };
         match self.access.archive_batch(batch_id) {
-            Ok(result) => {
-                let batch_id = result.value.id().to_string();
+            Ok(command_result) => {
+                let task_change = CommittedTaskChange::from_command_result(&command_result);
+                let batch_id = command_result.value.id().to_string();
                 TypedToolResult::success(
                     format!("Task list #{} completed", batch_id),
                     TaskListCompleteResult { batch_id },
                 )
+                .with_task_change(task_change)
             }
             Err(error) => TypedToolResult::error(error.to_string()),
         }

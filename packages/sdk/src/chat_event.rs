@@ -781,9 +781,8 @@ pub enum ChatEvent {
     ProjectInfo {
         project: crate::ProjectContext,
     },
-    /// #567：任务状态快照回传（携带数据，替代轮询）。
-    TasksSnapshot {
-        tasks: Box<crate::TaskStatusView>,
+    TaskStateChanged {
+        state: Box<crate::TaskStateView>,
     },
     /// #567：成本信息回传。
     CostUpdate {

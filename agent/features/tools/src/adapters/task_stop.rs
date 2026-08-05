@@ -1,5 +1,5 @@
 use crate::domain::types::task_stop::{TaskStopInput, TaskStopResult};
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -75,17 +75,20 @@ impl TypedTool for TaskStopTool {
             }
             _ => {}
         }
-        if let Err(error) = self
+        let command_result = match self
             .access
             .delete(id, chrono::Utc::now().timestamp_millis() as u64)
         {
-            return TypedToolResult::error(error.to_string());
-        }
+            Ok(result) => result,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let task_change = CommittedTaskChange::from_command_result(&command_result);
         TypedToolResult::success(
             format!("Task #{} stopped and marked as deleted", task.seq()),
             TaskStopResult {
                 task_id: task.seq().to_string(),
             },
         )
+        .with_task_change(task_change)
     }
 }

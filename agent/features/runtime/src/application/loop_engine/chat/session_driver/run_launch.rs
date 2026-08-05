@@ -421,22 +421,31 @@ where
                                         .display_steps
                                         .into_iter()
                                         .map(|step| super::super::RuntimeResumedSessionStep {
-                                        run_id: step.run_id,
-                                        step_id: step.step_id,
-                                        message_segments: step.message_segments,
-                                        finalize_cause: step.finalize_cause,
-                                        duration_ms: step.duration_ms,
-                                    })
+                                            run_id: step.run_id,
+                                            step_id: step.step_id,
+                                            message_segments: step.message_segments,
+                                            finalize_cause: step.finalize_cause,
+                                            duration_ms: step.duration_ms,
+                                        })
                                         .collect(),
                                     display_history: resume_view.display_history,
-                                    session_id: resume_view.session_id,                                    created_at: chrono::DateTime::parse_from_rfc3339(
+                                    session_id: resume_view.session_id,
+                                    created_at: chrono::DateTime::parse_from_rfc3339(
                                         &resume_view.created_at,
                                     )
                                     .map(|dt| dt.timestamp_millis() as u64)
                                     .unwrap_or(0),
-                                    compacted: resume_view.compacted,                                })
+                                    compacted: resume_view.compacted,
+                                })
                                 .await;
-                        }
+                            let task_state = crate::application::loop_engine::chat::task_snapshot::build_task_state_view(
+                                &*task_access,
+                                session_id.as_str(),
+                            );
+                            sink.send_event(RuntimeStreamEvent::TaskStateChanged {
+                                state: Box::new(task_state),
+                            })
+                            .await;                        }
                         Err(error) => {
                             use sdk::SessionResumeFailureKind;
                             let kind = match error {

@@ -505,13 +505,12 @@ where
             activities,
             step_id,
             &effective_call,
-            &ex.outcome.text,
-            is_error,
+            &ex.outcome,
             workspace_root,
             cancel,
         )
         .await;
-        // TasksSnapshot 由 loop_runner 在 SessionMessageStateChanged 之后统一推送（#642），
+        // Task state 由 loop runner 在 materialization 后依据 typed committed change 统一发布。
         // 不再在此处发 TasksChanged 通知。
         send_tool_result(
             sink,
@@ -531,34 +530,29 @@ async fn run_task_hooks(
     activities: &ActivityCoordinator,
     step_id: &sdk::RunStepId,
     call: &ToolCall,
-    output: &str,
-    is_error: bool,
+    outcome: &tools::ToolOutcome,
     workspace_root: &Path,
     cancel: &tokio_util::sync::CancellationToken,
 ) {
-    if !is_error && call.name == "TaskCreate" {
+    let Some(task_change) = outcome.task_change.as_ref() else {
+        return;
+    };
+    for fact in task_change.facts() {
+        let invocation = match fact {
+            tools::TaskChangeFact::Created { .. } => HookInvocation::TaskCreated(TaskInput {
+                tool_input: call.input.clone(),
+                tool_output: outcome.text.clone(),
+            }),
+            tools::TaskChangeFact::Completed { .. } => HookInvocation::TaskCompleted(TaskInput {
+                tool_input: call.input.clone(),
+                tool_output: outcome.text.clone(),
+            }),
+        };
         let _ = dispatch_hook(
             hook_port,
             activities,
             step_id,
-            HookInvocation::TaskCreated(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: output.to_string(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
-    if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
-        let _ = dispatch_hook(
-            hook_port,
-            activities,
-            step_id,
-            HookInvocation::TaskCompleted(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: output.to_string(),
-            }),
+            invocation,
             workspace_root,
             cancel,
         )

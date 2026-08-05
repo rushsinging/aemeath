@@ -13,7 +13,8 @@ use crate::{
     InteractionCancelReason, InteractionCommandOutcome, InteractionReply, InteractionRequest,
     InteractionRequestBody, MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary,
     ProjectContext, ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind,
-    SessionSnapshot, SessionSummary, TerminateRunOutcome, WorkspaceContextView,
+    SessionSnapshot, SessionSummary, TaskBatchStatusView, TaskBatchView, TaskItemStatusView,
+    TaskItemView, TaskPriorityView, TaskStateView, TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -52,6 +53,12 @@ pub fn components_document() -> Value {
     register::<ChatMessage>(&mut definitions);
     register::<WorkspaceContextView>(&mut definitions);
     register::<SessionResumeFailureKind>(&mut definitions);
+    register::<TaskStateView>(&mut definitions);
+    register::<TaskBatchView>(&mut definitions);
+    register::<TaskBatchStatusView>(&mut definitions);
+    register::<TaskItemView>(&mut definitions);
+    register::<TaskItemStatusView>(&mut definitions);
+    register::<TaskPriorityView>(&mut definitions);
 
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",

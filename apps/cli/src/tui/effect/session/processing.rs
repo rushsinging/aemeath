@@ -223,17 +223,15 @@ mod tests {
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_maps_tasks_snapshot() {
-        let event = sdk_event_to_tui_event(sdk::ChatEvent::TasksSnapshot {
-            tasks: Box::new(sdk::TaskStatusView {
-                lines: vec!["[ ] #1 task".to_string()],
-            }),
+    fn sdk_event_to_tui_runtime_event_maps_task_state() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {
+            state: Box::new(sdk::TaskStateView::empty("session-a", 1)),
         });
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::TasksSnapshot { lines })
-                if lines == vec!["[ ] #1 task".to_string()]
+            SdkEventMapping::Runtime(TuiRuntimeEvent::TaskStateChanged { state })
+                if state.session_id == "session-a" && state.revision == 1
         ));
     }
 

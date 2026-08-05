@@ -20,23 +20,36 @@ fn access_with_active_batch() -> task::TaskStore {
 }
 
 #[test]
-fn task_snapshot_displays_batch_sequence_before_summary() {
+fn task_state_view_preserves_structured_fields() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
-    access.create_task(task_spec("实现适配器"), 2).unwrap();
+    let created = access.create_task(task_spec("实现适配器"), 2).unwrap();
 
-    let snapshot = build_task_snapshot(access);
+    let state = build_task_state_view(access, "session-a");
 
-    assert_eq!(snapshot.lines[0], "━━ Tasks: 0/1 ━━");
-    assert_eq!(snapshot.lines[1], "□ #1 实现适配器");
-    assert!(!snapshot.lines[1].contains('@'));
+    assert_eq!(state.session_id, "session-a");
+    assert_eq!(state.revision, access.revision().get());
+    assert_eq!(
+        state.current_batch.unwrap().summary.as_deref(),
+        Some("batch")
+    );
+    assert_eq!(state.items[0].id, created.value.id().get());
+    assert_eq!(state.items[0].sequence, 1);
+    assert_eq!(state.items[0].subject, "实现适配器");
+    assert_eq!(state.items[0].status, sdk::TaskItemStatusView::Pending);
+    assert_eq!(state.items[0].priority, sdk::TaskPriorityView::Normal);
 }
 
 #[test]
-fn task_snapshot_empty_without_active_batch() {
+fn task_state_view_empty_without_active_batch_keeps_revision() {
     let store = task::TaskStore::new();
     let access: &dyn TaskAccess = &store;
-    assert!(build_task_snapshot(access).lines.is_empty());
+    let state = build_task_state_view(access, "session-b");
+
+    assert_eq!(state.session_id, "session-b");
+    assert_eq!(state.revision, access.revision().get());
+    assert!(state.current_batch.is_none());
+    assert!(state.items.is_empty());
 }
 
 #[test]

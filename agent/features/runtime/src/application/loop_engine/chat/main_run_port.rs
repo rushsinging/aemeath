@@ -336,14 +336,14 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
             .send_message_state_changed(execution.messages_len())
             .await;
         if has_task_mutation {
-            let snapshot =
-                crate::application::loop_engine::chat::task_snapshot::build_task_snapshot(
-                    &**self.runtime_context.task_ref(),
-                );
+            let state = crate::application::loop_engine::chat::task_snapshot::build_task_state_view(
+                &**self.runtime_context.task_ref(),
+                self.session_id.as_str(),
+            );
             self.runtime_context
                 .event_sink()
-                .send_event(RuntimeStreamEvent::TasksSnapshot {
-                    tasks: Box::new(snapshot),
+                .send_event(RuntimeStreamEvent::TaskStateChanged {
+                    state: Box::new(state),
                 })
                 .await;
         }

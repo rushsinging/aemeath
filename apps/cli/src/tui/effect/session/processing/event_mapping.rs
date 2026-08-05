@@ -298,6 +298,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::ProjectInfo { .. }
         | sdk::ChatEvent::CostUpdate { .. }
         | sdk::ChatEvent::ToolProgress { .. } => UiEvent::SystemMessage(String::new()),
-        sdk::ChatEvent::TasksSnapshot { tasks } => UiEvent::TaskStatusChanged(*tasks),
+        sdk::ChatEvent::TaskStateChanged { state } => UiEvent::TaskStateChanged(*state),
     }
 }

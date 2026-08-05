@@ -1,5 +1,5 @@
 use crate::domain::types::task_list_create::{TaskListCreateInput, TaskListCreateResult};
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -59,18 +59,21 @@ impl TypedTool for TaskListCreateTool {
             Ok(spec) => spec,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
-        let batch = match self
+        let command_result = match self
             .access
             .create_batch(spec, chrono::Utc::now().timestamp_millis() as u64)
         {
-            Ok(result) => result.value,
+            Ok(result) => result,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
+        let task_change = CommittedTaskChange::from_command_result(&command_result);
+        let batch = command_result.value;
         let batch_id = batch.id().to_string();
         TypedToolResult::success(
             format!("Task list #{} created. Subject: {}", batch_id, subject),
             TaskListCreateResult { batch_id },
         )
+        .with_task_change(task_change)
     }
 }
 
