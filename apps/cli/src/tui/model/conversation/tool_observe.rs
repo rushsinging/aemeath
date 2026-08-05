@@ -242,10 +242,6 @@ impl ConversationModel {
         tool_id: ToolCallId,
         message: String,
     ) -> Vec<ConversationChange> {
-        // Maximum bytes of accumulated stdout to retain for live display.
-        // Older content is trimmed to keep memory bounded for high-volume output.
-        const STREAM_CAP: usize = 4 * 1024;
-
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
         // activity_lines），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
@@ -253,7 +249,9 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                if call.name == "Bash" || call.name == "Agent" {
+                // Agent 工具的 sub-agent progress 走 streaming preview（tail N 行）。
+                // Bash stdout 不再走此路径——改由 record_tool_streaming_output 处理。
+                if call.name == "Agent" {
                     push_streaming_preview_activity(call, &message);
                 } else {
                     call.activities.push(message.clone());
@@ -268,6 +266,33 @@ impl ConversationModel {
             ConversationChange::AgentProgressRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),
                 tool_id: tool_id.to_string(),
+            },
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    /// 工具 stdout 流式输出（如 Bash 长输出命令）。
+    ///
+    /// 直接写入目标 `ToolCall.streaming_preview`，不经 `agent_progress` 列表。
+    /// 与 sub-agent 的 `record_agent_progress` 职责完全独立。
+    pub(super) fn record_tool_streaming_output(
+        &mut self,
+        chat_id: ChatId,
+        run_id: ChatRunId,
+        tool_id: ToolCallId,
+        text: String,
+    ) -> Vec<ConversationChange> {
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
+            if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
+                c.id.as_ref()
+                    .is_some_and(|id| id.as_ref() == tool_id.to_string())
+            }) {
+                push_streaming_preview_activity(call, &text);
+            }
+        }
+        vec![
+            ConversationChange::ToolStreamingOutputRecorded {
+                block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),
             },
             ConversationChange::OutputDirty,
         ]

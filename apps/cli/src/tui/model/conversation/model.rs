@@ -436,7 +436,8 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         | ConversationChange::AgentProgressRecorded {
             block_id,
             tool_id: _,
-        } => Some(block_id.clone()),
+        }
+        | ConversationChange::ToolStreamingOutputRecorded { block_id } => Some(block_id.clone()),
         ConversationChange::AskUserDismissed { .. } => None,
         ConversationChange::ToolCallObserved { .. } => None,
         ConversationChange::OutputDirty => None,

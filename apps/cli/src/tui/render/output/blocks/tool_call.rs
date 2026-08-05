@@ -82,16 +82,30 @@ pub fn render_tool_call(
     }
     // 渲染 activity_lines：Bash/Agent 等长时间工具执行过程中显示当前进度，
     // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
+    // 视觉对齐 ToolResult 子块：仅首行带 ⎿ marker（TEXT_MUTED，与 gutter 的
+    // ToolResult marker 色一致），后续行等宽空白；内容用 TEXT_DIM。
+    let marker_style = Style::default().fg(theme::TEXT_MUTED);
+    let activity_style = Style::default().fg(theme::TEXT_DIM);
+    let activity_indent = "  ".to_string();
+    let mut first_activity = true;
     for activity in &view.activity_lines {
+        let mut spans = Vec::new();
+        if first_activity {
+            spans.push(Span::styled("⎿ ", marker_style));
+            first_activity = false;
+        } else {
+            spans.push(Span::styled(activity_indent.clone(), activity_style));
+        }
+        spans.push(Span::styled(activity.clone(), activity_style));
         lines.extend(
             wrap_spans_with_prefix(
-                vec![Span::styled(activity.clone(), detail_style)],
+                spans,
                 width,
-                None,
+                Some(Span::styled(activity_indent.clone(), activity_style)),
                 WrapMode::Word,
             )
             .into_iter()
-            .map(|line| line.with_style(detail_style)),
+            .map(|line| line.with_style(activity_style)),
         );
     }
 
@@ -337,11 +351,15 @@ mod tests {
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
-        assert!(rendered.contains(&"2"));
-        assert!(rendered.contains(&"3"));
-        assert!(rendered.contains(&"4"));
-        assert!(rendered.contains(&"5"));
-        assert!(rendered.contains(&"6"));
+        // 首行带 ⎿ marker（对齐 ToolResult 子块），后续行等宽缩进对齐。
+        assert!(rendered.iter().any(|line| line.contains("2")));
+        assert!(rendered.iter().any(|line| line.contains("3")));
+        assert!(rendered.iter().any(|line| line.contains("4")));
+        assert!(rendered.iter().any(|line| line.contains("5")));
+        assert!(rendered.iter().any(|line| line.contains("6")));
+        // 仅首行带 ⎿ marker，其余 activity 行为空白缩进
+        let marker_count = rendered.iter().filter(|line| line.contains('⎿')).count();
+        assert_eq!(marker_count, 1, "仅首行应带 ⎿ marker，实际: {rendered:?}");
     }
 
     #[test]

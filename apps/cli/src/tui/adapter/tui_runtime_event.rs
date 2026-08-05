@@ -508,6 +508,11 @@ pub(crate) enum TuiAgentProgressKind {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TuiToolProgressEvent {
+    pub(crate) text: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TuiAgentToolCall {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -654,6 +659,11 @@ pub(crate) enum TuiRuntimeEvent {
         attachment_context: TuiRunContext,
         tool_id: String,
         event: TuiAgentProgress,
+    },
+    ToolProgress {
+        context: TuiRunContext,
+        tool_id: String,
+        event: TuiToolProgressEvent,
     },
     ChildRunActivity(TuiChildRunActivity),
     Cancelled {

@@ -151,6 +151,13 @@ pub enum AgentProgressKindView {
     },
 }
 
+/// 工具 stdout 流式输出事件 view（与 [`AgentProgressEventView`] 平级但语义独立）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolProgressEventView {
+    /// stdout 文本片段。
+    pub text: String,
+}
+
 impl std::fmt::Display for AgentProgressKindView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -228,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_progress_view_supports_message_tool_calls_and_tool_output() {
+    fn test_agent_progress_view_supports_message_and_tool_calls() {
         let message = AgentProgressEventView {
             sequence: 1,
             kind: AgentProgressKindView::Message {
@@ -261,7 +268,6 @@ mod tests {
         match tools.kind {
             AgentProgressKindView::ToolCalls { calls } => {
                 assert_eq!(calls[0].name, "Read");
-                // summary 已移除
             }
             other => panic!("unexpected kind: {other:?}"),
         }
@@ -307,15 +313,11 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_progress_display_tool_output() {
-        let event = AgentProgressEventView {
-            sequence: 3,
-            kind: AgentProgressKindView::ToolOutput {
-                tool_name: "Bash".to_string(),
-                text: "stdout".to_string(),
-            },
+    fn test_tool_progress_event_view_carries_text() {
+        let view = ToolProgressEventView {
+            text: "checking…\n".to_string(),
         };
-        assert_eq!(format!("{event}"), "Bash: stdout");
+        assert_eq!(view.text, "checking…\n");
     }
 
     #[test]
