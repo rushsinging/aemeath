@@ -2,7 +2,7 @@
 
 > 层级：02-modules / tui（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#798（S2）
-> 本文深入视图层细节——10 种 block 类型、ViewAssembler 组装规则、ViewState 状态机、三层缓存策略、Render widget 设计。总览见 [01-architecture-and-dataflow.md](01-architecture-and-dataflow.md) §7。
+> 本文深入视图层细节——封闭 block 类型、ViewAssembler 组装规则、ViewState 状态机、三层缓存策略、Render widget 设计。总览见 [01-architecture-and-dataflow.md](01-architecture-and-dataflow.md) §7。
 
 ## 1. 定位
 
@@ -17,13 +17,13 @@
 - **ViewState**：可变的瞬时交互 / 渲染状态（scroll/collapse/selection/animation），**NEVER** 复制 Model 业务投影
 - **Render**：读 ViewModel + ViewState + Cache → 写 ratatui Buffer
 
-本文定义封闭的 10 种 Target block；新增种类 **MUST** 同步更新 assembler 穷尽匹配、cache version 与 render 测试。
+本文定义当前 Target block 的封闭枚举；新增种类 **MUST** 同步更新 assembler 穷尽匹配、cache version 与 render 测试。
 
-## 2. 10 种 Block 类型
+## 2. Block 类型
 
 ### 2.1 完整列表
 
-OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。每个块是以下 10 种之一：
+OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。每个块来自 `OutputBlockKind` 的当前封闭枚举；下表列出其稳定业务角色：
 
 | # | Block 类型 | 共享结构 | 来源 Model | 说明 |
 |---|---|---|---|---|
@@ -32,11 +32,11 @@ OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。�
 | 3 | `ThinkingMessage` | TextBlockView | `ThinkingText` timeline item | LLM reasoning 文本 |
 | 4 | `SystemNotice` | TextBlockView | `SystemMessage` / owning ToolCall 下的 `AgentProgress` | 系统消息与嵌套 sub-agent 进度 |
 | 5 | `DiagnosticNotice` | TextBlockView | `Error` timeline item | 错误/警告/提示 |
-| 6 | `ToolCall` | ToolCallBlockView | `ToolCall` timeline item + `runs` 重叠投影 | 工具调用（含子块） |
-| 7 | `ToolResult` | ToolResultBlockView | `ToolResult` timeline item + `runs` 重叠投影 | 工具结果（嵌入或独立） |
-| 8 | `HookNotice` | TextBlockView | `HookNotice` timeline item | Hook 执行通知 |
-| 9 | `ModelStreamPlaceholder` | TextBlockView | ConversationModel 只读 placeholder projection | 流式输出占位（"…" 动画） |
-| 10 | `Interaction` | InteractionBlockView | `Interaction` timeline item | UserQuestions / ToolApproval / PlanApproval / HardPause typed 交互 |
+| 6 | `ToolGroup` | ToolGroupBlockView | Live timeline / loaded Resume history 的 display-unit planner | 同类别、同 Run Step 的连续工具展示父节点；每组 2–20 个 ToolCall |
+| 7 | `ToolCall` | ToolCallBlockView | `ToolCall` timeline item + `runs` 重叠投影 | 工具调用（含子块） |
+| 8 | `ToolResult` | ToolResultBlockView | `ToolResult` timeline item + `runs` 重叠投影 | 工具结果（嵌入或独立） |
+| 9 | `HookNotice` | HookNoticeBlockView | `HookNotice` timeline item | Hook 执行通知 |
+| 10 | `AskUserBatch` | AskUserBatchBlockView | `AskUserBatch` timeline item | AskUserQuestion 批量交互 |
 
 ### 2.2 结构体定义
 
@@ -54,6 +54,14 @@ struct TextBlockView {
 ```
 
 ```rust
+struct ToolGroupBlockView {
+    block_id: BlockId,
+    kind: ToolGroupKind,                 // Explore / Run / Write / Tasks
+    title: String,
+    style: SemanticStyle,
+    children: Vec<OutputBlockView>,      // 2–20 个 ToolCall
+}
+
 struct ToolCallBlockView {
     block_id: BlockId,
     tool_name: String,
@@ -73,31 +81,17 @@ struct ToolResultBlockView {
     style_kind: BlockStyleKind,
 }
 
-struct InteractionBlockView {
+struct AskUserBatchBlockView {
     block_id: BlockId,
-    request_id: UiInteractionRequestId,
-    body: InteractionBodyView,
-    phase: InteractionPhaseView,
+    slots: Vec<AskUserSlotView>,
+    active_index: usize,
+    phase: AskUserPhaseView,
 }
-
-enum InteractionBodyView {
-    UserQuestions { questions: Vec<UserQuestionView>, current: usize },
-    ToolApproval { title: String, detail: String, selected: Option<ApprovalDecisionView> },
-    PlanApproval { title: String, detail: String, selected: Option<ApprovalDecisionView> },
-    HardPause { reason: String, recent_actions: Vec<String>, continue_selected: bool },
-}
-
-enum InteractionPhaseView {
-    Collecting,
+enum AskUserPhaseView {
+    Answering,
     Confirming,
-    Pending,       // ← ReplyPending + CancelPending 合并
-    Replied,
-    Cancelled,
-    ReplyFailed { message: String },  // ← ReplyFailed 重命名以与 Model 一致
 }
 ```
-
-> **Model → View 映射**：`InteractionPhase::ReplyPending` 与 `CancelPending` 在 ViewModel 合并为 `Pending`（用户无需区分两种等待）。`ReplyFailed` 保持同名。`InvalidReply`（源自 `ReplyPending`）与 `CancelRejected`（源自 `CancelPending`）都退回 `Collecting` / `Confirming`，ViewModel 复用既有的 `Collecting` / `Confirming` 变体，**NEVER** 新增专属 phase view。
 
 ### 2.3 cache_version()
 
@@ -110,25 +104,26 @@ enum InteractionPhaseView {
 | ThinkingMessage | 内容 hash | 同上 |
 | SystemNotice | 内容 hash | 系统消息不变 → 永不失效 |
 | DiagnosticNotice | 内容 hash | 错误状态变化 |
+| ToolGroup | kind + title + style hash | 分类或标题样式变化；成员由独立 block version 管理 |
 | ToolCall | 状态 hash（name + args + status + collapsed + workspace_root） | 状态变化 / worktree 切换 / 折叠切换 |
 | ToolResult | 所有 display-affecting 字段 hash（result_text + data projection + style） | 文本、结构化 diff 或样式变化 |
 | HookNotice | 内容 hash | Hook 通知不变 → 永不失效 |
-| ModelStreamPlaceholder | 固定版本 + animation_frame | 每个 blink 周期失效 |
-| Interaction | request id + body + draft + phase hash | 问题 / decision / diagnostic / 光标 / phase 变化 |
+| AskUserBatch | slots + active index + draft + phase hash | 问题、回答草稿、光标或 phase 变化 |
 
 ### 2.4 嵌套规则
 
 ```rust
 // view_model/nesting.rs
 // 允许的父子关系：
+// ToolGroup → ToolCall
 // ToolCall → { AssistantMessage, DiagnosticNotice, SystemNotice, ToolResult }
 // 其他 block 不允许有子块
-const MAX_BLOCK_DEPTH: usize = 3;
+const MAX_BLOCK_DEPTH: usize = 4;
 ```
 
-- 只有 `ToolCall` 可以有子块——嵌入的 `ToolResult` 作为子块
-- `push_child_checked` 只在 depth=1 使用；Target 嵌套深度固定为一层
-- 独立 `ToolResult`（无对应 ToolCall）作为顶层块渲染
+- `ToolGroup` 只能容纳 `ToolCall`；`ToolCall` 继续独占其结果和活动子块
+- 逻辑树深度与视觉缩进分离：组标题和 ToolCall 保持根级视觉宽度，ToolResult 仍相对 ToolCall 缩进
+- 独立或孤儿 ToolResult 作为顶层诊断块渲染，并切断当前组
 
 ## 3. ViewAssembler
 
@@ -144,26 +139,21 @@ const MAX_BLOCK_DEPTH: usize = 3;
 ### 3.2 OutputViewAssembler 组装流程
 
 ```
-ConversationModel.timeline().items()
+ConversationModel.timeline().items() / DisplayHistoryModel.items()
   │
-  ├─ 遍历 OutputTimelineItem
-  │   ├─ UserMessage → TextBlockView (UserMessage, delivery=Submitted)
-  │   ├─ AssistantText → TextBlockView (AssistantMessage)
-  │   ├─ ThinkingText → TextBlockView (ThinkingMessage)
-  │   ├─ ToolCall → ToolCallBlockView
-  │   │   └─ 嵌入的 ToolResult 作为 children
-  │   ├─ ToolResult（非嵌入）→ ToolResultBlockView（顶层）
-  │   ├─ HookNotice → TextBlockView (HookNotice)
-  │   ├─ SystemMessage → TextBlockView (SystemNotice)
-  │   ├─ Error → TextBlockView (DiagnosticNotice)
-  │   ├─ QueuedUserMessage → UserMessage (delivery=Queued)
-  │   ├─ AgentProgress → owning ToolCall 下的 SystemNotice child
-  │   └─ Interaction → InteractionBlockView（穷尽四种 body）
-  │
-  ├─ Main Run 连续 `InvokingModel` 静默达到 10 秒
-  │   └─ 从 RunActivityState 派生稳定 identity 的临时 Thinking block
-  │
-  ├─ 组装 OutputBlockView 树（按嵌套规则）  │
+  ├─ Live 与 Resume source adapter 分别生成 ToolGroupCandidate
+  ├─ 共享显式 classifier + pure display-unit planner
+  │   ├─ 同类别、同 Run Step 的 2–20 个连续 ToolCall → ToolGroup
+  │   ├─ 第 21 个开始下一展示单元；尾部单项保持 singleton
+  │   ├─ matching ToolResult 按稳定 call identity 透明归属
+  │   └─ 普通输出、未知工具、类别/Step 变化、orphan result 切组
+  ├─ grouping 在 retained window/materialization 前完成
+  │   ├─ Single / ToolGroup 都是窗口原子
+  │   ├─ Resume StepPlaceholder 不预测分组；加载后再规划
+  │   └─ stable unit ID 驱动 retained root cache 与增量失效
+  ├─ 物化 OutputBlockView 树
+  │   ├─ ToolGroup → ToolCall → ToolResult
+  │   └─ planner/物化失败降级为独立 roots，不丢事实项
   └─ 产出 OutputViewModel { roots: Vec<OutputBlockView> }
 ```
 
@@ -546,7 +536,8 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-12 | 初稿：10 种 block 类型、ViewAssembler 组装、ViewState 状态机、三层缓存、Render 管线与架构门禁 | #798 |
+| 2026-08-05 | 增加 ToolGroup display unit、Live/Resume 共享 planner、20 成员上限、窗口原子性与三层工具树契约 | #1353 |
+| 2026-07-12 | 初稿：封闭 block 类型、ViewAssembler 组装、ViewState 状态机、三层缓存、Render 管线与架构门禁 | #798 |
 | 2026-07-14 | 收敛 Target-only 视图契约：只读 Model、瞬时 ViewState、bounded cache、穷尽 timeline 组装与可执行门禁 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | OutputViewCache memo key 统一为三元组 `(revision, workspace_root, collapsed_revision)`（§3.3 / §5.1）（外部评审 finding #10，非架构门禁编号） | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | §7 Effect 表补 `ResolveWorkspaceMetadata`（结果回填为 `WorkspaceIntent::ApplyMetadata`）；§8.1 门禁编号改为独立的 `V1`–`V8`（原与全局 1–8 数字冲突），并标注 `V1`/`V2`/`V6` 与全局门禁 #1/#4/#10 的交叉引用；Model → View 映射note 补 `InvalidReply` / `CancelRejected` 退回 Collecting/Confirming 说明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

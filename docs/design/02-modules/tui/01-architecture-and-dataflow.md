@@ -230,12 +230,18 @@ Model + ViewState → ViewAssembler → ViewModel → Render
 
 | Assembler | 产出 | 输入 |
 |---|---|---|
-| OutputViewAssembler | OutputViewModel（对话块列表） | ConversationModel 只读 projection + OutputViewState |
+| OutputViewAssembler | OutputViewModel（分组感知的对话块树） | ConversationModel timeline 只读 projection + lazy DisplayHistory projection + OutputViewState |
 | StatusViewAssembler | StatusLineViewModel（状态栏） | ConversationModel.run_runtime() + SessionModel 只读 projection |
 | InputViewAssembler | InputAreaViewModel（输入框） | InputModel 只读 projection |
 | DialogViewAssembler | DialogViewModel（弹窗） | DiagnosticModel.active_prompt() |
 
-### 7.3 三层缓存
+### 7.3 分组感知展示单元与窗口
+
+`OutputViewAssembler` 的 Live timeline adapter 与 Resume history adapter **MUST** 共享唯一显式工具分类器和纯 display-unit planner。planner 先按同类别、同 Run Step 的连续 ToolCall 形成 `Single` / `ToolGroup`，再进入 retained window/materialization；每组包含 2–20 个 ToolCall，matching ToolResult 按稳定 call identity 归属成员。普通输出、未知工具、类别或 Step 变化、orphan result 均切组；未加载的 Resume `StepPlaceholder` 不预测分组。
+
+`ToolGroup → ToolCall → ToolResult` 是实际 ViewModel tree。ToolGroup 是窗口原子，窗口选择 **NEVER** 从组中间切断；稳定 unit ID 驱动 retained root cache，成员状态变化只失效受影响展示单元。逻辑树深度与视觉缩进分离，组标题和 ToolCall 维持根级视觉宽度。
+
+### 7.4 三层缓存
 
 | 缓存层 | 位置 | Key | 失效条件 |
 |---|---|---|---|
@@ -248,7 +254,7 @@ Model + ViewState → ViewAssembler → ViewModel → Render
 - Running ToolCall 的 `marker_frame = animation_frame / BLINK_DIVISOR`——每个 blink 周期强制 re-cache
 - `workspace_root` 纳入 CacheKey——worktree 切换时自动失效
 
-### 7.4 ViewState
+### 7.5 ViewState
 
 ```rust
 struct AppViewState {
