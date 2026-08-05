@@ -143,8 +143,9 @@ fn task_reminder_none_without_active_batch() {
 }
 
 /// #1537：build_task_snapshot_text 返回纯文本（无标签包装），供 compact 拼接。
+/// compact 路径携带完整标识（batch id / task id / seq），与 TUI 路径不同。
 #[test]
-fn task_snapshot_text_renders_without_reminder_tags() {
+fn task_snapshot_text_renders_with_full_identifiers_for_compact() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
@@ -155,10 +156,20 @@ fn task_snapshot_text_renders_without_reminder_tags() {
 
     let text = build_task_snapshot_text(access).expect("snapshot text rendered");
 
+    // 不含 TUI 标签包装
     assert!(!text.contains("<system-reminder>"));
-    assert!(text.contains("━━ Tasks: 1/2 ━━"));
-    assert!(text.contains("✓ #1 done"));
-    assert!(text.contains("□ #2 todo"));
+    // 携带 batch 标题
+    assert!(text.contains("Batch #"));
+    assert!(text.contains("Tasks: 1/2"));
+    // 携带完整标识：task id + seq
+    assert!(text.contains("task:"));
+    assert!(text.contains("seq:"));
+    // 携带 subject
+    assert!(text.contains("done"));
+    assert!(text.contains("todo"));
+    // ✓ 用于 Completed，□ 用于 Pending
+    assert!(text.contains("✓"));
+    assert!(text.contains("□"));
 }
 
 /// #1537：无活跃 task 时 build_task_snapshot_text 返回 None。

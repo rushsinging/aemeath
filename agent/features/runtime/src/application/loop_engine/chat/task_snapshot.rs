@@ -49,31 +49,84 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
 /// 只出现在 invocation-only 的请求侧 messages；**NEVER** 写入 canonical
 /// message、SDK/TUI 事件或持久化 JSON（spec 3.4.5 的显式例外）。
 pub(crate) fn build_task_reminder(access: &dyn TaskAccess, max_lines: usize) -> Option<String> {
-    let text = build_task_snapshot_text_with_max_lines(access, max_lines)?;
-    Some(format!(
-        "<system-reminder>当前任务进度：\n{text}\n</system-reminder>",
-    ))
-}
-
-/// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。
-///
-/// 使用默认 `max_lines`（`TaskListConfig::default().max_lines`）；无活跃 batch
-/// 或无任务时返回 `None`。
-pub(crate) fn build_task_snapshot_text(access: &dyn TaskAccess) -> Option<String> {
-    let max_lines = TaskListConfig::default().max_lines;
-    build_task_snapshot_text_with_max_lines(access, max_lines)
-}
-
-fn build_task_snapshot_text_with_max_lines(
-    access: &dyn TaskAccess,
-    max_lines: usize,
-) -> Option<String> {
     let active = current_batch_tasks(access)?;
     let lines = task_status_lines(&active, max_lines);
     if lines.is_empty() {
         return None;
     }
+    Some(format!(
+        "<system-reminder>当前任务进度：\n{}\n</system-reminder>",
+        lines.join("\n")
+    ))
+}
+
+/// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。
+///
+/// 与 TUI/reminder 路径不同：compact summary 给 LLM 读，**MUST** 携带完整标识
+///（batch id、task id、seq），使 LLM 能在压缩后精确引用 task。无活跃 batch
+/// 或无任务时返回 `None`。
+pub(crate) fn build_task_snapshot_text(access: &dyn TaskAccess) -> Option<String> {
+    let batch_id = access.current_batch()?;
+    let mut tasks: Vec<Task> = access
+        .list()
+        .into_iter()
+        .filter(|task| task.batch() == batch_id && task.status() != TaskStatus::Deleted)
+        .collect();
+    if tasks.is_empty() {
+        return None;
+    }
+
+    let total = tasks.len();
+    let completed_count = tasks
+        .iter()
+        .filter(|t| t.status() == TaskStatus::Completed)
+        .count();
+
+    // 排序：Completed → InProgress → Pending，组内按 updated_at 升序。
+    tasks.sort_by(|a, b| {
+        let rank = |t: &Task| match t.status() {
+            TaskStatus::Completed => 0,
+            TaskStatus::InProgress => 1,
+            TaskStatus::Pending => 2,
+            TaskStatus::Deleted => 3,
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a.updated_at().cmp(&b.updated_at()))
+    });
+
+    let display_map: HashMap<TaskId, u64> =
+        tasks.iter().map(|task| (task.id(), task.seq())).collect();
+
+    let mut lines = vec![format!(
+        "Batch #{batch_id} — Tasks: {completed_count}/{total}"
+    )];
+    for task in &tasks {
+        lines.push(format_compact_task_line(task, &display_map));
+    }
     Some(lines.join("\n"))
+}
+
+/// compact summary 专用渲染：携带完整标识（batch id / task id / seq）。
+///
+/// 与 TUI 的 `format_task_status_line`（隐藏持久化 ID）互补——compact 后
+/// Agent 需要精确引用 task，标识不能丢失。
+fn format_compact_task_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> String {
+    let icon = match task.status() {
+        TaskStatus::Completed => "✓",
+        TaskStatus::InProgress => "■",
+        TaskStatus::Pending => "□",
+        TaskStatus::Deleted => "?",
+    };
+    let blocked_by = format_blocked_by(task.blocked_by(), display_map);
+    format!(
+        "{} [task:{} seq:{}] {}{}",
+        icon,
+        task.id().get(),
+        task.seq(),
+        task.subject(),
+        blocked_by,
+    )
 }
 
 fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
