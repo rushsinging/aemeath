@@ -3,6 +3,8 @@
 > 层级：02-modules / tui（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#943 / #944 / #947 / [#972](https://github.com/rushsinging/aemeath/issues/972) / [#1438](https://github.com/rushsinging/aemeath/issues/1438)
 > 本文定义 TUI 事件流的唯一链路、AgentEventMapper 防腐层（ACL）、SDK DTO 边界、四类 Interaction reply 资源协议、agent_id 与 sub-agent 事件路由（#612）、转换集中化策略与架构门禁。
+>
+> Runtime 事件事实、SDK Published Language 及逐事件跨层矩阵的权威目录见 [Runtime · 事件管线与 Published Language](../runtime/08-event-pipeline-and-published-language.md)。本文只拥有 SDK 进入 TUI 后的 ACL、Model 与展示规则，NEVER 在此重新定义 Runtime terminal 语义。
 
 > **解耦铁律**（[01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)）：
 > - **R4**：TUI 只经 `AgentClient`，**NEVER** import 核心内部类型
@@ -15,24 +17,28 @@
 
 事件流是 TUI 三条信息流之一（#795 §4.2），承载 Runtime → TUI 的单向数据流：
 
-```
-Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
-  → sdk_event_to_ui_event（adapter/event_mapping.rs，第一层转换）
-  → UiEvent → mpsc channel (cap 256)
-  → ui_rx → tokio::select! → TuiMsg::Ui(ui_event)
-  → map_agent_event（adapter/agent_event.rs，第二层 ACL）
+```text
+Runtime ChatStream → sdk::ChatEvent
+  → sdk_event_to_tui_event（adapter/event_mapping.rs，第一层转换）
+  → TuiRuntimeEvent → mpsc channel (cap 256)
+  → runtime_rx → tokio::select! → TuiMsg::Runtime / RuntimeBatch
+  → App::update_runtime_event
+  → map_runtime_event（adapter/agent_event.rs，第二层 ACL）
   → AgentEventMapping { intents }
   → root_reducer → Model Change
   → Coordinator::effects_for(Change) → async Effect runner → result Intent
   → ViewModelDirty → ViewAssembler → Render
 ```
 
+`UiEvent → TuiMsg::Ui → map_agent_event` 仍承载 TUI 本地事件和兼容入口，但不是 SDK Runtime stream 的生产主链。两条入口在同一 `AgentEventMapping → root_reducer` 边界汇合。
+
 **两层转换的职责边界**：
 
 | 层 | 位置 | 职责 | 输入 → 输出 |
 |---|---|---|---|
-| 第一层 | `event_mapping.rs` | **结构转换**——SDK 类型 → TUI 类型，消除 SDK 类型依赖 | `sdk::ChatEvent` → `UiEvent` |
-| 第二层 | `agent_event.rs` | **语义翻译**——事件 → Intent 拆分，防腐层核心 | `UiEvent` → `AgentEventMapping` |
+| 第一层 | `event_mapping.rs` | **结构转换**——SDK 类型 → TUI-owned runtime DTO，消除 SDK 类型依赖 | `sdk::ChatEvent` → `TuiRuntimeEvent` / `SdkEventMapping::Nop` |
+| 第二层 | `agent_event.rs` | **语义翻译**——Runtime event → Intent 拆分，防腐层核心 | `TuiRuntimeEvent` → `AgentEventMapping` |
+| 本地兼容入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译 | `UiEvent` → `AgentEventMapping` |
 
 > **设计原则**：两层分离是因为结构转换（类型映射）和语义翻译（Intent 拆分）是不同关注点。第一层是机械式 1:1 映射，第二层涉及业务逻辑（sanitize、progress 格式化、hook notice 派生等）。
 
@@ -40,24 +46,24 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 
 ### 2.1 链路图
 
-```
+```text
 ┌─ Runtime / SDK Published Language ────────────────────────────┐
 │  AgentClient::chat() → ChatStream<Item = sdk::ChatEvent>      │
 └──────────┬────────────────────────────────────────────────────┘
            │ sdk::ChatEvent
 ┌──────────────────────────────────────────────────────────────┐
-│  tokio::spawn task（effect/session/processing.rs）            │
+│  instrumented spawn task（effect/session/processing.rs）      │
 │  持 Arc<dyn AgentClient> → chat() → ChatStream                │
-│  每条 event → sdk_event_to_ui_event（event_mapping.rs）       │
-│    → UiEvent → mpsc::channel(cap 256)                         │
+│  每条 event → sdk_event_to_tui_event（event_mapping.rs）      │
+│    → TuiRuntimeEvent → mpsc::channel(cap 256)                 │
 └──────────┬───────────────────────────────────────────────────┘
-           │  UiEvent（TUI 内部事件类型）
+           │ TuiRuntimeEvent（TUI-owned runtime DTO）
            ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  App::update（主线程 / TEA Update）                           │
-│  tokio::select! → TuiMsg::Ui(ui_event)                        │
-│  → update_agent_event()                                       │
-│  → map_agent_event（adapter/agent_event.rs）                  │
+│  tokio::select! → TuiMsg::Runtime / RuntimeBatch              │
+│  → update_runtime_event()                                     │
+│  → map_runtime_event（adapter/agent_event.rs）                │
 │    → AgentEventMapping { intents: Vec<AgentIntent> }          │
 │  → root_reducer（apply intents → Model Changes）              │
 │  → Coordinator::effects_for(changes)                          │
@@ -66,15 +72,18 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 └──────────────────────────────────────────────────────────────┘
 ```
 
+TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event`，在 `AgentEventMapping` 处与 Runtime 主链汇合。
+
 ### 2.2 涉及文件
 
 | 文件 | 职责 |
 |---|---|
 | Runtime-owned SDK contract | `AgentClient` / `ChatEvent` Published Language 的单一来源 |
-| `apps/cli/.../effect/session/processing.rs` | `spawn_processing`：持 `AgentClient` → `ChatStream`；把纯值 SDK event 转换并转发 UiEvent |
-| `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_ui_event`：第一层结构转换；只产 TUI-owned DTO |
-| `apps/cli/.../app/event.rs` | `UiEvent`（`AppEvent`）定义 |
-| `apps/cli/.../adapter/agent_event.rs` | `map_agent_event`：第二层 ACL；只产 Intent |
+| `apps/cli/.../effect/session/processing.rs` | `spawn_processing`：持 `AgentClient` → `ChatStream`；把纯值 SDK event 转换并转发 `TuiRuntimeEvent` |
+| `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_tui_event`：第一层结构转换；只产 `TuiRuntimeEvent` 或明确 `Nop` |
+| `apps/cli/.../adapter/tui_runtime_event.rs` | TUI-owned Runtime DTO 定义；SDK 类型不得越过此边界 |
+| `apps/cli/.../app/event.rs` | TUI 本地/兼容 `UiEvent` 定义，不是 SDK Runtime stream 的生产主载体 |
+| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event` / `map_agent_event`：第二层 ACL；只产 Intent |
 | `apps/cli/.../adapter/agent_event/progress.rs` | sub-agent progress 格式化 |
 | `apps/cli/.../adapter/agent_event/sanitize.rs` | tool 输出/参数截断 |
 | `apps/cli/.../adapter/hook_notice.rs` | Hook 事件 → TUI notice |
@@ -401,7 +410,7 @@ Runtime 停止在途工作并完成回滚 → SDK RunCancelled { run_id }
 
 `RunCancelling` 是取消 accepted 的权威 Published Language 事件；它必须立即让 TUI 展示 Cancelling，但仍是 live 非终态。仅 `RunCancelled` 可进入 Cancelled / Idle。`CancelInteraction` 发送 typed `InteractionCancelReason::UserCancelled`，只取消当前 interaction，**NEVER** 发送空答案，也 **NEVER** 等价为 `RequestRunCancellation`。
 
-> **AgentClient trait 的特殊性**：`AgentClient` 是 Runtime-owned 入站 OHS，由 SDK 发布。TUI 的 processing / effect 边界 **MUST** 依赖此 trait（R4 允许），但 trait 方法返回的 `ChatEvent` / `ChatStream` **MUST** 在 ACL 层转换为 TUI 自有类型后才能进入 UiEvent。
+> **AgentClient trait 的特殊性**：`AgentClient` 是 Runtime-owned 入站 OHS，由 SDK 发布。TUI 的 processing / effect 边界 **MUST** 依赖此 trait（R4 允许），但 trait 方法返回的 `ChatEvent` / `ChatStream` **MUST** 在 ACL 层转换为 TUI-owned `TuiRuntimeEvent` 后才能进入 runtime channel；本地 `UiEvent` 不承载 SDK 类型。
 
 ### 4.6 Interaction command outcome 类型化投影
 
@@ -533,13 +542,14 @@ enum AgentProgressKindView {
 
 | 层 | 位置 | 输入 → 输出 | 职责 | 禁止 |
 |---|---|---|---|---|
-| 第一层 | `adapter/event_mapping.rs` | `sdk::ChatEvent` → `UiEvent` | 结构转换、SDK 类型消除 | **NEVER** 产生 Intent / Effect 或执行 I/O |
-| 第二层 | `adapter/agent_event.rs` | `&UiEvent` → `AgentEventMapping` | Intent 拆分、sanitize、格式化 | **NEVER** 接触 SDK 类型或产生 Effect |
+| 第一层 | `adapter/event_mapping.rs` | `sdk::ChatEvent` → `TuiRuntimeEvent` / `Nop` | 结构转换、SDK 类型消除 | **NEVER** 产生 Intent / Effect 或执行 I/O |
+| 第二层 | `adapter/agent_event.rs` | `&TuiRuntimeEvent` → `AgentEventMapping` | Intent 拆分、sanitize、格式化 | **NEVER** 接触 SDK 类型或产生 Effect |
+| 本地入口 | `app/event.rs` + `adapter/agent_event.rs` | `&UiEvent` → `AgentEventMapping` | TUI 本地/兼容事件语义翻译 | **NEVER** 绕过同一 reducer |
 
 ### 7.2 集中化规则
 
-1. **MUST** 所有 `sdk::ChatEvent` → `UiEvent` 转换 **只在** `event_mapping.rs` 中完成
-2. **MUST** 所有 `UiEvent` → `AgentEventMapping` 转换 **只在** `agent_event.rs` 中完成
+1. **MUST** 所有 `sdk::ChatEvent` → `TuiRuntimeEvent` / `Nop` 转换 **只在** `event_mapping.rs` 中完成
+2. **MUST** 所有 `TuiRuntimeEvent` → `AgentEventMapping` 和本地 `UiEvent` → `AgentEventMapping` 转换 **只在** `agent_event.rs` 中完成
 3. **MUST** `event_mapping.rs` 和 `agent_event.rs` 位于 `adapter/`；结构 / 语义转换 **NEVER** 放进 `effect/`、`model/` 或 `render/`
 4. **MUST** Composition 根负责装配——`spawn_processing` 与 EffectRunner 持 `AgentClient`；event_mapping 和 agent_event 保持纯函数，TUI 不装配 pending reply registry
 5. **NEVER** 在 `model/` 中 import `sdk::*` 类型（架构门禁 #2 + #6）
@@ -548,56 +558,36 @@ enum AgentProgressKindView {
 
 ### 7.3 Composition 根装配
 
-```rust
+```text
 // effect/session/processing.rs — AgentClient stream 的纯值 SDK event 边界
-struct ProcessingSession {
-    client: Arc<dyn AgentClient>,
-    ui_tx: mpsc::Sender<UiEvent>,
-}
-
-impl ProcessingSession {
-    async fn spawn(self) {
-        let stream = self.client.chat(request).await;
-        while let Some(event) = stream.next().await {
-            let ui_event = sdk_event_to_ui_event(event); // InteractionRequested 也只含纯值
-            self.ui_tx.send(ui_event).await?;
-        }
-    }
-}
+Arc<dyn AgentClient>::chat(ChatRequest)
+  → ChatStream::recv
+  → sdk_event_to_tui_event(ChatEvent)
+  → SdkEventMapping::Runtime(TuiRuntimeEvent) / Nop
+  → runtime_tx.send(TuiRuntimeEvent)
 
 // app/update.rs — 主线程 TEA Update
-impl App {
-    fn update_agent_event(&mut self, event: UiEvent) {
-        let mapping = map_agent_event(&event);                  // 第二层，只含 Intent
-        let changes = self.root_reducer.apply(mapping.intents); // 唯一 Model 写入
-        let effects = self.coordinator.effects_for(changes);    // Change 决定 Effect
-        self.effect_queue.extend(effects);                      // update 本身不执行 I/O
-    }
+TuiMsg::Runtime(event) / RuntimeBatch(events)
+  → App::update_runtime_event
+  → App 级明确消费（catalog、resume、config、active identity 等）
+  → map_runtime_event(&event)
+  → reduce_agent_event(&mut model, mapping)
+  → Coordinator::effects_for(Change)
 
-    fn update_result_intent(&mut self, intent: AgentIntent) {
-        let changes = self.root_reducer.apply([intent]);        // 与事件 Intent 同一 reducer
-        self.effect_queue.extend(self.coordinator.effects_for(changes));
-    }
-}
+// 本地事件兼容入口
+TuiMsg::Ui(event)
+  → App::update_agent_event
+  → map_agent_event_with_tool_header(&event, ...)
+  → 同一 reduce_agent_event 边界
 
-// effect/runner.rs — 唯一副作用执行点
-impl EffectRunner {
-    async fn run(&self, effect: Effect) {
-        let result_intents = match effect {
-            Effect::SendInteractionReply { request_id, reply } =>
-                self.agent_client.reply_interaction(request_id.into_sdk(), reply.into_sdk()),
-            Effect::CancelInteraction { request_id } =>
-                self.agent_client.cancel_interaction(request_id.into_sdk(), UserCancelled),
-            effect => self.run_other(effect).await,
-        };
-        for intent in result_intents {
-            self.msg_tx.send(TuiMsg::Intent(intent)).await?;
-        }
-    }
-}
+// effect runner — 唯一副作用执行点
+Effect
+  → async side effect
+  → TUI-owned Intent / TuiMsg
+  → 同一 reducer
 ```
 
-`ProcessingSession` 与 EffectRunner 持有 Runtime-owned `AgentClient` 契约；v0.1.0 由 Composition 注入 local adapter。转换层不关心具体实现，远端 transport 明确留给 Server future boundary，本文 **NEVER** 预建 WSS 帧或重连语义。
+`spawn_processing` 与 Effect runner 持有 Runtime-owned client 契约；v0.1.0 由 Composition 注入 local adapter。转换层不关心具体实现，远端 transport 明确留给 Server future boundary，本文 **NEVER** 预建 WSS 帧或重连语义。
 
 ## 8. 架构门禁
 
