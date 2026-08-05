@@ -84,7 +84,7 @@ pub(crate) async fn parse_responses_stream(
             continue;
         }
 
-        let data = &line[6..];
+        let data = &line[6..]; // allow unsafe_text_op: fixed ascii prefix "data: "
         if data == "[DONE]" {
             break;
         }
@@ -94,7 +94,7 @@ pub(crate) async fn parse_responses_stream(
             Err(e) => {
                 log::debug!(target: crate::LOG_TARGET,
                     "[responses-stream] JSON parse error: {} | line: {}",
-                    e, &data[..data.len().min(200)]
+                    e, &data[..data.floor_char_boundary(200)]
                 );
                 continue;
             }

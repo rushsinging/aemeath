@@ -173,7 +173,7 @@ impl ChatMessage {
             match next_pos {
                 Some((start, end, idx)) => {
                     if start > cursor {
-                        content.push(ContentBlock::text(&text[cursor..start]));
+                        content.push(ContentBlock::text(&text[cursor..start])); // allow unsafe_text_op: find offset (char boundary)
                     }
                     let image = &sorted_images[idx];
                     content.push(ContentBlock::Image {
@@ -190,7 +190,7 @@ impl ChatMessage {
             }
         }
         if cursor < text.len() {
-            content.push(ContentBlock::text(&text[cursor..]));
+            content.push(ContentBlock::text(&text[cursor..])); // allow unsafe_text_op: find offset (char boundary)
         }
         // 未配对成功的 image 全堆尾部
         for (idx, image) in sorted_images.iter().enumerate() {

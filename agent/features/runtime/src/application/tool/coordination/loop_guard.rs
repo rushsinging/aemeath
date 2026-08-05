@@ -120,7 +120,7 @@ impl ToolCallFuse {
                 continue;
             }
             let forward = self.recent.iter().cloned().collect::<Vec<_>>();
-            let pattern = &forward[forward.len() - period_len..];
+            let pattern = &forward[forward.len() - period_len..]; // allow unsafe_text_op: Vec slice
             let start = forward.len() - required;
             if forward[start..]
                 .chunks(period_len)

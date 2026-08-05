@@ -222,7 +222,7 @@ pub fn compact_messages(messages: &[Message]) -> Option<CompactResult> {
     // summary 必须覆盖所有将从 active messages 移除的内容。
     // `head_protect` 只参与窗口边界计算；头部消息不进入 recent tail，
     // 因此也必须进入 summary，避免首条用户请求永久丢失。
-    let early_messages = &messages[..window.split_point];
+    let early_messages = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
     let summary = build_summary_text(early_messages, None);
 
     // recent tail：split_point 到末尾的原始消息
@@ -265,7 +265,7 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
 
 pub fn messages_selected_for_precompact_memory(messages: &[Message]) -> Vec<Message> {
     compact_window(messages.len())
-        .map(|window| messages[..window.split_point].to_vec())
+        .map(|window| messages[..window.split_point].to_vec()) // allow unsafe_text_op: Vec slice
         .unwrap_or_default()
 }
 
@@ -370,7 +370,7 @@ pub fn parse_compact_response(response_text: &str) -> String {
         if let Some(end) = response_text.find("</summary>") {
             let start = start + "<summary>".len();
             if start < end {
-                return response_text[start..end].trim().to_string();
+                return response_text[start..end].trim().to_string(); // allow unsafe_text_op: find offset (char boundary)
             }
         }
     }
@@ -573,7 +573,7 @@ pub async fn compact_messages_with_llm(
     let window = compact_window(total)?;
 
     // 与 recent tail 互补：所有不再保留的消息都必须参与 summary。
-    let early_messages = &messages[..window.split_point];
+    let early_messages = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
 
     // 尝试 LLM 摘要，失败则回退到本地
     let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);

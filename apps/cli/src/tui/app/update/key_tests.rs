@@ -138,6 +138,37 @@ fn test_ctrlc_action_cancelling_second_press_requests_cancel_again() {
     );
 }
 
+/// 忙时提交含多字节 UTF-8 字符的长文本时，日志预览截断不得在字符边界内
+/// 用字节索引切片 panic（59 字节 ASCII 后接「任」，60 字节截断点落在字符中间）。
+#[test]
+fn test_busy_enter_multibyte_long_text_does_not_panic() {
+    // log_debug! 在级别未达 Debug 时不求值参数，必须显式打开才能让
+    // mid_turn.enter 的预览截断代码真正执行。
+    log::set_max_level(log::LevelFilter::Debug);
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    // 59 个 ASCII + 1 个「任」：字符区间 59..62，字节截断点 60 落在字符中间。
+    let long_text = format!("{}任", "x".repeat(59));
+    app.model
+        .input
+        .apply(InputIntent::InsertPastedText(long_text.clone()));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+    let result = app.update_key(key, &spawn_refs);
+
+    assert!(matches!(
+        result.effects.as_slice(),
+        [Effect::SendChatInputEvent {
+            event: sdk::ChatInputEvent::UserMessage { text, .. }
+        }] if text == &long_text
+    ));
+}
+
 #[test]
 fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() {
     let mut app = App::new(

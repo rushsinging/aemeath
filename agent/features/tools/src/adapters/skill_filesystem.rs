@@ -464,11 +464,11 @@ fn extract_frontmatter(text: &str) -> Result<&str, &'static str> {
     if !text.starts_with("---") {
         return Err("缺少 YAML frontmatter 起始标记");
     }
-    let rest = &text[3..];
+    let rest = &text[3..]; // allow unsafe_text_op: fixed ascii prefix "---"
     let end = rest
         .find("---")
         .ok_or("YAML frontmatter 未闭合（缺少结束 `---`）")?;
-    Ok(rest[..end].trim())
+    Ok(rest[..end].trim()) // allow unsafe_text_op: find offset (char boundary)
 }
 
 /// 抽取 frontmatter 之后的 markdown 正文。
@@ -476,7 +476,7 @@ fn extract_body(text: &str) -> String {
     if !text.starts_with("---") {
         return text.to_string();
     }
-    let rest = &text[3..];
+    let rest = &text[3..]; // allow unsafe_text_op: fixed ascii prefix "---"
     match rest.find("---") {
         Some(end) => rest[end + 3..].trim().to_string(),
         None => String::new(),

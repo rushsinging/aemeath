@@ -13,21 +13,21 @@ pub fn is_suspicious_dev_write(cmd: &str) -> bool {
             return false;
         };
         // Look backwards to check this is a `>` or `>>` redirection target
-        let before = &rest[..pos];
+        let before = &rest[..pos]; // allow unsafe_text_op: find offset (char boundary)
         let is_redirect = before.trim_end_matches([' ', '\t']).ends_with('>');
         if is_redirect {
             // Check the specific device path
-            let after = &rest[pos..];
+            let after = &rest[pos..]; // allow unsafe_text_op: find offset (char boundary)
             let end = after
                 .find(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == ')')
                 .unwrap_or(after.len());
-            let dev_path = &after[..end];
+            let dev_path = &after[..end]; // allow unsafe_text_op: find offset (char boundary)
             let is_safe = SAFE_DEVS.contains(&dev_path) || dev_path.starts_with("/dev/fd/");
             if !is_safe {
                 return true;
             }
         }
-        rest = &rest[pos + 5..];
+        rest = &rest[pos + 5..]; // allow unsafe_text_op: find offset (char boundary)
     }
 }
 
@@ -93,7 +93,7 @@ pub fn extract_command_substitution_contents(command: &str) -> Vec<String> {
             }
             if i < len {
                 // Found closing backtick
-                let inner: String = chars[start..i].iter().collect();
+                let inner: String = chars[start..i].iter().collect(); // allow unsafe_text_op: Vec slice
                 let inner = inner.trim().to_string();
                 if !inner.is_empty() {
                     results.push(inner);

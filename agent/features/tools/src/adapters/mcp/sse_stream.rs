@@ -114,7 +114,7 @@ pub(super) fn try_parse_incomplete_event(buffer: &str) -> Option<SseEvent> {
     }
 
     // JSON is valid — build the event
-    let event_part = &buffer[..data_start];
+    let event_part = &buffer[..data_start]; // allow unsafe_text_op: find offset (char boundary)
     let event_type = event_part
         .lines()
         .find_map(|line| line.strip_prefix("event:"))

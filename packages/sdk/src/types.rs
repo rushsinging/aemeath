@@ -109,15 +109,15 @@ pub trait StrSlice {
 
 impl StrSlice for str {
     fn bslice(&self, range: ops::Range<ByteIdx>) -> &str {
-        &self[range.start.0..range.end.0]
+        &self[range.start.0..range.end.0] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
 
     fn bslice_to(&self, end: ByteIdx) -> &str {
-        &self[..end.0]
+        &self[..end.0] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
 
     fn bslice_from(&self, start: ByteIdx) -> &str {
-        &self[start.0..]
+        &self[start.0..] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
 }
 

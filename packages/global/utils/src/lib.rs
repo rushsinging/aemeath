@@ -25,11 +25,7 @@ pub fn slice_head(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    &s[..s.floor_char_boundary(max_bytes)]
 }
 
 /// 从末尾保留至多 `max_bytes` 字节，起点向后对齐到字符边界（不拆分 UTF-8）。
@@ -44,7 +40,7 @@ pub fn slice_tail(s: &str, max_bytes: usize) -> &str {
     while start < s.len() && !s.is_char_boundary(start) {
         start += 1;
     }
-    &s[start..]
+    &s[start..] // allow unsafe_text_op: is_char_boundary aligned tail
 }
 
 #[cfg(test)]

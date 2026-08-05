@@ -453,7 +453,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
             self.current.fetch_sub(1, Ordering::SeqCst);
             Ok(format!(
                 "<summary>chunk summary: {}</summary>",
-                &text[..text.len().min(30)]
+                &text[..text.floor_char_boundary(30)]
             ))
         }
     }
@@ -707,7 +707,7 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                 // refresh：返回与输入等长的摘要（模拟 LLM 不缩小）
                 let input = text
                     .find("<current_summary>")
-                    .and_then(|start| text.find("</current_summary>").map(|end| &text[start..end]))
+                    .and_then(|start| text.find("</current_summary>").map(|end| &text[start..end])) // allow unsafe_text_op: find offset (char boundary)
                     .unwrap_or("");
                 Ok(format!("<summary>{input}</summary>"))
             } else {
