@@ -440,6 +440,20 @@ impl CanonicalSessionRepository {
         }
     }
 
+    /// #1537：将当前 Task 状态段落拼接到 compact summary 末尾。
+    ///
+    /// task 状态不经过 LLM 压缩（递进管线的 map/reduce/refresh 均不感知），
+    /// 只在 summary 定稿后追加，保证 compact 后 Agent 仍能看到任务进度。
+    /// `task_context` 为 `None` 或空时原样返回 summary。
+    fn append_task_context(summary: &str, task_context: &Option<String>) -> String {
+        match task_context {
+            Some(context) if !context.trim().is_empty() => {
+                format!("{summary}\n\n## Current Task State\n{context}")
+            }
+            _ => summary.to_string(),
+        }
+    }
+
     fn receipt(append: &ContextAppend, revision: SessionRevision) -> AppendReceipt {
         AppendReceipt {
             run_id: append.run_id.clone(),
@@ -840,6 +854,8 @@ impl SessionRepository for CanonicalSessionRepository {
         else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
+        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
+        let summary = Self::append_task_context(&summary, &request.task_context);
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
         let keep_messages = recent_messages.len();
@@ -912,6 +928,8 @@ impl SessionRepository for CanonicalSessionRepository {
         else {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
+        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
+        let summary = Self::append_task_context(&summary, &request.task_context);
         let mut candidate = (*current).clone();
         let source_revision = SessionRevision::new(candidate.revision);
         let keep_messages = recent_messages.len();

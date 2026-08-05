@@ -232,6 +232,11 @@ fn is_option_type(ty: &syn::Type) -> bool {
 }
 
 fn main() {
+    // --- 0. 注册自定义 cfg ---
+    // `coverage` 由 llvm-cov 覆盖率运行注入（xtask coverage 流程），
+    // 注册后 clippy/rustc 不再报 unexpected cfg condition name。
+    println!("cargo:rustc-check-cfg=cfg(coverage)");
+
     // --- 1. ToolSchema 代码生成（syn 解析） ---
     // 当 AEMEATH_VERSION 环境变量变化时重新运行 build.rs
     // （AEMEATH_VERSION 由 release workflow 显式注入，本地 dev build 通常未设置）

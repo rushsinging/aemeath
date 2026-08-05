@@ -35,5 +35,5 @@ fn launcher_registers_only_root_run_as_current_foreground_run() {
 
     assert!(launcher.contains("instance.run().parent_id().is_none()"));
     assert!(launcher.contains("active_run.activate_main(run_id.clone(), cancel.clone())"));
-    assert!(launcher.contains("active_run.activate(run_id.clone(), cancel.clone())"));
+    assert!(launcher.contains("active_run.activate_child(run_id.clone(), cancel.clone())"));
 }

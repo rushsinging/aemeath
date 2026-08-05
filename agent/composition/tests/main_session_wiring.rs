@@ -484,6 +484,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let agent_runner = runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
+        active_run: active_run.clone(),
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),

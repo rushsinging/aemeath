@@ -504,6 +504,8 @@ struct ScriptedState {
     cancel_when_tools_starts: bool,
     terminate_when_compact_starts: bool,
     cancelled_during_model: bool,
+    model_started: Arc<std::sync::Barrier>,
+    active_run: Option<Arc<dyn crate::domain::agent_run::ActiveRunPort>>,
     require_model_cancellation_cleanup: bool,
     model_cancellation_cleanup_completed: bool,
     block_await_user_input_forever: bool,
@@ -513,8 +515,7 @@ struct ScriptedState {
     fail_emit_once: bool,
     drain_outcomes: VecDeque<DrainOutcome>,
     drain_epoch: DrainEpoch,
-    observations: ScriptedObservations,
-}
+    observations: ScriptedObservations,}
 
 impl Default for ScriptedState {
     fn default() -> Self {
@@ -528,6 +529,8 @@ impl Default for ScriptedState {
             cancel_when_tools_starts: false,
             terminate_when_compact_starts: false,
             cancelled_during_model: false,
+            model_started: Arc::new(std::sync::Barrier::new(1)),
+            active_run: None,
             require_model_cancellation_cleanup: false,
             model_cancellation_cleanup_completed: false,
             block_await_user_input_forever: false,
@@ -539,8 +542,7 @@ impl Default for ScriptedState {
             drain_epoch: DrainEpoch(0),
             observations: ScriptedObservations::default(),
         }
-    }
-}
+    }}
 
 #[derive(Clone)]
 struct InputFake(Arc<std::sync::Mutex<ScriptedState>>);
@@ -614,6 +616,27 @@ impl ScenarioLoopHarness {
         }
     }
 
+    pub(crate) fn blocks_in_model() -> Self {
+        Self {
+            scenario: ScriptedScenario {
+                cancelled_during_model: true,
+                model_started: Arc::new(std::sync::Barrier::new(2)),
+                ..Default::default()
+            },
+        }
+    }
+
+    pub(crate) fn model_started(&self) -> Arc<std::sync::Barrier> {
+        Arc::clone(&self.scenario.model_started)
+    }
+
+    pub(crate) fn use_active_run_control(
+        &mut self,
+        active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    ) {
+        self.scenario.active_run = Some(active_run);
+    }
+
     pub(crate) fn run_loop(&mut self) -> RunLoop<'_> {
         scripted_run_loop(&mut self.scenario)
     }
@@ -624,11 +647,19 @@ impl ScenarioLoopHarness {
     }
 
     pub(crate) fn terminal_event_count(&self) -> usize {
+        self.completed_terminal_event_count()
+    }
+
+    pub(crate) fn completed_terminal_event_count(&self) -> usize {
         self.scenario
             .events()
             .iter()
             .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
             .count()
+    }
+
+    pub(crate) fn cancelled_step_count(&self) -> usize {
+        self.scenario.cancelled_steps().len()
     }
 }
 
@@ -645,6 +676,8 @@ struct ScriptedScenario {
     drain_outcomes: VecDeque<DrainOutcome>,
     drain_epoch: DrainEpoch,
     cancelled_during_model: bool,
+    model_started: Arc<std::sync::Barrier>,
+    active_run: Option<Arc<dyn crate::domain::agent_run::ActiveRunPort>>,
     require_model_cancellation_cleanup: bool,
     model_cancellation_cleanup_completed: bool,
     block_await_user_input_forever: bool,
@@ -687,6 +720,8 @@ impl Default for ScriptedScenario {
             drain_outcomes,
             drain_epoch: DrainEpoch(0),
             cancelled_during_model: false,
+            model_started: Arc::new(std::sync::Barrier::new(1)),
+            active_run: None,
             require_model_cancellation_cleanup: false,
             model_cancellation_cleanup_completed: false,
             block_await_user_input_forever: false,
@@ -701,8 +736,7 @@ impl Default for ScriptedScenario {
             state: Arc::new(std::sync::Mutex::new(ScriptedState::default())),
             ports: None,
         }
-    }
-}
+    }}
 
 impl ScriptedScenario {
     fn ports(&mut self) -> &mut ScriptedPorts {
@@ -716,6 +750,8 @@ impl ScriptedScenario {
                 cancel_when_tools_starts: self.cancel_when_tools_starts,
                 terminate_when_compact_starts: self.terminate_when_compact_starts,
                 cancelled_during_model: self.cancelled_during_model,
+                model_started: Arc::clone(&self.model_started),
+                active_run: self.active_run.clone(),
                 require_model_cancellation_cleanup: self.require_model_cancellation_cleanup,
                 model_cancellation_cleanup_completed: self.model_cancellation_cleanup_completed,
                 block_await_user_input_forever: self.block_await_user_input_forever,
@@ -730,8 +766,7 @@ impl ScriptedScenario {
             self.state = Arc::new(std::sync::Mutex::new(state));
             let state = Arc::clone(&self.state);
             let controls = Arc::clone(&self.controls);
-            self.ports = Some(ScriptedPorts {
-                input: InputFake(Arc::clone(&state)),
+            self.ports = Some(ScriptedPorts {                input: InputFake(Arc::clone(&state)),
                 events: EventSinkFake(Arc::clone(&state)),
                 control: RunControlFake {
                     state: Arc::clone(&state),
@@ -918,9 +953,11 @@ impl EventSinkPort for EventSinkFake {
 
 #[async_trait::async_trait]
 impl RunControlPort for RunControlFake {
-    fn take_control(&self, _run_id: &sdk::RunId) -> Option<RunControl> {
-        let _ = &self.state;
-        self.controls.lock().unwrap().pop_front()
+    fn take_control(&self, run_id: &sdk::RunId) -> Option<RunControl> {
+        let active_run = self.state.lock().unwrap().active_run.clone();
+        active_run
+            .and_then(|active_run| active_run.take_control(run_id))
+            .or_else(|| self.controls.lock().unwrap().pop_front())
     }
 }
 
@@ -932,12 +969,23 @@ impl RunLifecyclePort for RunLifecycleFake {
         step_id: sdk::RunStepId,
         cancel: CancellationToken,
     ) {
-        let _ = run_id;
-        self.state.lock().unwrap().registered_step = Some(step_id);
-        *self.step_cancel.lock().unwrap() = Some(cancel);
+        let active_run = {
+            let mut state = self.state.lock().unwrap();
+            state.registered_step = Some(step_id.clone());
+            state.active_run.clone()
+        };
+        *self.step_cancel.lock().unwrap() = Some(cancel.clone());
+        if let Some(active_run) = active_run {
+            active_run.set_main_active_step(run_id, step_id, cancel);
+        }
     }
 
-    fn clear_step_scope(&self, _run_id: &sdk::RunId, _step_id: &sdk::RunStepId) {}
+    fn clear_step_scope(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let active_run = self.state.lock().unwrap().active_run.clone();
+        if let Some(active_run) = active_run {
+            active_run.clear_main_active_step(run_id, step_id);
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -1103,14 +1151,15 @@ impl ModelInvocationPort for ModelInvocationFake {
             return Err(LoopEngineError::Cancelled);
         }
         if cancelled_during_model {
+            let model_started = Arc::clone(&self.state.lock().unwrap().model_started);
+            model_started.wait();
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
         }
         if let Some(error) = error {
             return Err(error);
         }
-        self.state
-            .lock()
+        self.state            .lock()
             .unwrap()
             .model_steps
             .pop_front()

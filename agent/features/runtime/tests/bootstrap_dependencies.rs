@@ -107,10 +107,12 @@ fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
 
 fn test_agent_runner_assembly(
     runtime_context_factory: Arc<runtime::RuntimeContextFactory>,
+    active_run: Arc<runtime::ActiveRunRegistry>,
 ) -> runtime::AgentRunnerAssembly {
     runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopAgentRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
+        active_run,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -280,7 +282,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),
         test_skill_bootstrap_assembly(),
-        test_agent_runner_assembly(runtime_context_factory.clone()),
+        test_agent_runner_assembly(runtime_context_factory.clone(), active_run.clone()),
     );
 
     assert!(Arc::ptr_eq(

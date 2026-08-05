@@ -486,6 +486,15 @@ pub(crate) fn map_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => ChatEvent::ToolProgress {
+            context: turn_context_to_sdk(context),
+            tool_id,
+            event: sdk::ToolProgressEventView { text: event.text },
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ChildRunActivity(event) => {
             ChatEvent::ChildRunActivity {
                 event: child_run_activity_to_sdk(event),

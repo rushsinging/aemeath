@@ -40,8 +40,9 @@ pub use domain::{
     ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolDescriptor,
     ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
     ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile,
-    ToolProfileName, ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool, TypedToolAdapter,
-    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
+    ToolProfileName, ToolProgressEvent, ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool,
+    TypedToolAdapter, TypedToolResult, UserInteractionSpec, UserOption, UserQuestion,
+    WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).

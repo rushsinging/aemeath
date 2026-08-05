@@ -617,7 +617,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     model: model.clone(),
                 }))
             }
-            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
             TuiAgentProgressKind::Message { text } => conversation(
                 ConversationIntent::RecordAgentProgress(RecordAgentProgress {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
@@ -642,7 +641,22 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     message: format_agent_progress_calls(calls),
                 }),
             ),
+            // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
+            // 顶层工具 stdout 走独立 ToolProgressEvent 通道（ToolProgress 分支）。
+            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
         },
+        TuiRuntimeEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => conversation(ConversationIntent::RecordToolStreamingOutput(
+            RecordToolStreamingOutput {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+                tool_id: ToolCallId::new(tool_id),
+                text: event.text.clone(),
+            },
+        )),
         TuiRuntimeEvent::ChildRunActivity(event) => conversation(
             ConversationIntent::RecordChildRunActivity(RecordChildRunActivity {
                 agent_id: event.identity.agent_id.clone(),

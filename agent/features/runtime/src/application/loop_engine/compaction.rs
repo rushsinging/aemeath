@@ -87,6 +87,7 @@ impl CompactionCoordinator {
         execution: &mut RunExecutionState,
         observer: &mut O,
         progress: std::sync::Arc<dyn CompactProgressView>,
+        task_context: Option<String>,
     ) -> Result<(), LoopEngineError>
     where
         O: CompactionObserver,
@@ -108,10 +109,16 @@ impl CompactionCoordinator {
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         let outcome = self
             .context
-            .compact(&request, source_revision, progress)
+            .compact(&request, source_revision, progress, task_context)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
         apply_automatic_compact_outcome(&outcome, &self.usage, execution.context_window_mut());
+        // #1537：compact 成功后 reset task_reminder_injected，使得 compact 后的
+        // 后续 LLM 请求（仍在同一 run 内）能重新注入 Task 进度 reminder。
+        // summary 已含 task 状态（持久 canonical），reminder 是请求侧临时补充。
+        if matches!(outcome, crate::ports::CompactOutcome::Committed(_)) {
+            execution.reset_task_reminder_injected();
+        }
         observer.on_compacted(&outcome, &discarded_messages).await
     }
 }

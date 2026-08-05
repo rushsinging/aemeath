@@ -225,11 +225,19 @@ impl RuntimeBootstrapDependencies {
         let crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: agent_runner,
             parent_context_source,
+            active_run: agent_runner_active_run,
             max_tool_concurrency,
             max_agent_concurrency,
             agent_semaphore,
             runtime_context_factory,
         } = agent_runner;
+        assert!(
+            Arc::ptr_eq(
+                &(active_run.clone() as Arc<dyn crate::domain::agent_run::ActiveRunPort>),
+                &agent_runner_active_run,
+            ),
+            "Main Runtime 与 Derived Agent Runner 必须共享同一 ActiveRun 控制面",
+        );
         Self {
             workspace,
             wiring,

@@ -166,3 +166,26 @@ fn runtime_workspace_snapshot_maps_without_git_metadata() {
         }]
     );
 }
+
+#[test]
+fn runtime_tool_progress_maps_to_record_tool_streaming_output_intent() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::ToolProgress {
+        context: crate::tui::adapter::tui_runtime_event::TuiRunContext {
+            chat_id: "chat-1".to_string(),
+            run_id: "run-1".to_string(),
+        },
+        tool_id: "bash-1".to_string(),
+        event: crate::tui::adapter::tui_runtime_event::TuiToolProgressEvent {
+            text: "line of stdout\n".to_string(),
+        },
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::RecordToolStreamingOutput(intent)]
+            if intent.chat_id.as_ref() == "chat-1"
+                && intent.run_id.as_ref() == "run-1"
+                && intent.tool_id.as_ref() == "bash-1"
+                && intent.text == "line of stdout\n"
+    ));
+}
