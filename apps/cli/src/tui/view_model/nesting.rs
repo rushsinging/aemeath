@@ -1,118 +1,24 @@
 //! ViewModel block nesting legality rules.
 use crate::tui::view_model::output::OutputBlockKind;
 
-/// 最大嵌套深度：top(0) → tool_call(1) → result-content(2)。深度从 0 计，最深合法子层级为 2。
-pub const MAX_BLOCK_DEPTH: usize = 3;
+/// 最大嵌套深度：top(0) → tool_group(1) → tool_call(2) → result-content(3)。深度从 0 计，最深合法子层级为 3。
+pub const MAX_BLOCK_DEPTH: usize = 4;
 
-/// 仅 ToolCall 可含子（ToolResult 结果子块，或 AssistantMessage 文本 / Diagnostic / SystemNotice）；其余为叶子。
+/// ToolGroup 仅可含 ToolCall；ToolCall 可含 ToolResult 结果子块，或既有文本/notice 子块；其余为叶子。
 pub fn allowed_child(parent: &OutputBlockKind, child: &OutputBlockKind) -> bool {
-    matches!(parent, OutputBlockKind::ToolCall(_))
-        && matches!(
+    match parent {
+        OutputBlockKind::ToolGroup(_) => matches!(child, OutputBlockKind::ToolCall(_)),
+        OutputBlockKind::ToolCall(_) => matches!(
             child,
             OutputBlockKind::ToolResult(_)
                 | OutputBlockKind::AssistantMessage(_)
                 | OutputBlockKind::DiagnosticNotice(_)
                 | OutputBlockKind::SystemNotice(_)
-        )
+        ),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tui::view_model::output::{
-        TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
-    };
-    use crate::tui::view_model::style::SemanticStyle;
-
-    fn tool_result() -> OutputBlockKind {
-        OutputBlockKind::ToolResult(ToolResultBlockView {
-            key: "t-result".into(),
-            tool_title: "Grep".into(),
-            args_preview: None,
-            result_text: "done".into(),
-            data: None,
-            style: SemanticStyle::Success,
-        })
-    }
-
-    fn tool() -> OutputBlockKind {
-        OutputBlockKind::ToolCall(ToolCallBlockView {
-            key: "t".into(),
-            chat_id: None,
-            run_id: None,
-            tool_call_id: None,
-            title: "Grep".into(),
-            icon: "●".into(),
-            semantic_status: ToolSemanticStatus::Success,
-            style: SemanticStyle::Running,
-            args_preview: None,
-            activity_lines: Vec::new(),
-            result_summary: None,
-            result_payload: None,
-            workspace_root: None,
-            collapsible: false,
-            collapsed: false,
-            agent_meta: None,
-        })
-    }
-
-    fn text(kind: fn(TextBlockView) -> OutputBlockKind) -> OutputBlockKind {
-        kind(TextBlockView {
-            key: "k".into(),
-            text: "x".into(),
-            style: SemanticStyle::Muted,
-        })
-    }
-
-    #[test]
-    fn test_allowed_child_tool_allows_assistant_message() {
-        let parent = tool();
-        let child = text(OutputBlockKind::AssistantMessage);
-        assert!(allowed_child(&parent, &child));
-    }
-
-    #[test]
-    fn test_allowed_child_tool_allows_tool_result() {
-        assert!(allowed_child(&tool(), &tool_result()));
-    }
-
-    #[test]
-    fn test_allowed_child_tool_result_is_leaf() {
-        let child = text(OutputBlockKind::AssistantMessage);
-        assert!(!allowed_child(&tool_result(), &child));
-        assert!(!allowed_child(&tool_result(), &tool_result()));
-    }
-
-    #[test]
-    fn test_allowed_child_tool_allows_diagnostic_and_system_notice() {
-        let parent = tool();
-        assert!(allowed_child(
-            &parent,
-            &text(OutputBlockKind::DiagnosticNotice)
-        ));
-        assert!(allowed_child(&parent, &text(OutputBlockKind::SystemNotice)));
-    }
-
-    #[test]
-    fn test_allowed_child_tool_rejects_tool_and_user_message() {
-        let parent = tool();
-        assert!(!allowed_child(&parent, &tool()));
-        assert!(!allowed_child(&parent, &text(OutputBlockKind::UserMessage)));
-    }
-
-    #[test]
-    fn test_allowed_child_non_tool_parent_is_leaf() {
-        let child = text(OutputBlockKind::AssistantMessage);
-        assert!(!allowed_child(
-            &text(OutputBlockKind::AssistantMessage),
-            &child
-        ));
-        assert!(!allowed_child(&text(OutputBlockKind::UserMessage), &child));
-        assert!(!allowed_child(&text(OutputBlockKind::SystemNotice), &child));
-    }
-
-    #[test]
-    fn test_max_block_depth_value() {
-        assert_eq!(MAX_BLOCK_DEPTH, 3);
-    }
-}
+#[path = "nesting_tests.rs"]
+mod tests;

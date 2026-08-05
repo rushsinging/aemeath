@@ -401,6 +401,7 @@ fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
             });
             1usize.saturating_add(activity_lines)
         }
+        OutputBlockKind::ToolGroup(_) => 1,
         OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
         OutputBlockKind::HookNotice(view) => 1usize.saturating_add(
             view.body

@@ -78,6 +78,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::ThinkingMessage(_) => "💭",
         // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "⎿",
+        OutputBlockKind::ToolGroup(_) => " ",
         OutputBlockKind::HookNotice(notice) => match notice.kind {
             crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
             | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => "⊘",

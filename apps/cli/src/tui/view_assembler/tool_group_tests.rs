@@ -1,6 +1,5 @@
-use super::{
-    classify_tool_name, plan_display_units, DisplayUnitPlan, ToolGroupCandidate, ToolGroupKind,
-};
+use super::{classify_tool_name, plan_display_units, DisplayUnitPlan, ToolGroupCandidate};
+use crate::tui::view_model::output::ToolGroupKind;
 
 #[test]
 fn classifies_explore_tools_with_stable_display_kind() {
