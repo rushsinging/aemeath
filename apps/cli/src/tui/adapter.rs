@@ -1,4 +1,6 @@
 pub mod agent_event;
+#[cfg(test)]
+mod child_run_activity_mapping_tests;
 pub mod event_mapping;
 #[cfg(test)]
 pub mod input_widget;

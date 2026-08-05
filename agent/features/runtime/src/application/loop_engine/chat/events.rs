@@ -178,6 +178,7 @@ pub enum RuntimeStreamEvent {
         tool_id: ToolCallId,
         event: ToolProgressEvent,
     },
+    ChildRunActivity(tools::ChildRunActivityEvent),
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,
     },

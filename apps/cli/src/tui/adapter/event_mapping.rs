@@ -316,6 +316,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             tool_id: tool_id.as_str().to_string(),
             event: super::tui_runtime_event::TuiToolProgressEvent { text: event.text },
         },
+        ChatEvent::ChildRunActivity { event } => {
+            TuiRuntimeEvent::ChildRunActivity(child_run_activity(event))
+        }
         ChatEvent::WorkingDirectoryChanged {
             path_base,
             workspace_root,
@@ -882,6 +885,60 @@ fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
     }
 }
 
+fn child_run_activity(value: sdk::ChildRunActivityEventView) -> TuiChildRunActivity {
+    TuiChildRunActivity {
+        identity: TuiChildRunIdentity {
+            agent_id: value.identity.agent_id.as_str().to_string(),
+            run_id: UiRunId::from(value.identity.run_id.as_str()),
+            parent_run_id: UiRunId::from(value.identity.parent_run_id.as_str()),
+            spawned_by_tool_call_id: value.identity.spawned_by_tool_call_id.as_str().to_string(),
+        },
+        sequence: value.sequence,
+        kind: match value.kind {
+            sdk::ChildRunActivityKindView::Text { text } => TuiChildRunActivityKind::Text { text },
+            sdk::ChildRunActivityKindView::Thinking { text } => {
+                TuiChildRunActivityKind::Thinking { text }
+            }
+            sdk::ChildRunActivityKindView::ToolCall { id, name, input } => {
+                TuiChildRunActivityKind::ToolCall {
+                    id: id.as_str().to_string(),
+                    name,
+                    input,
+                }
+            }
+            sdk::ChildRunActivityKindView::ToolOutput { tool_name, text } => {
+                TuiChildRunActivityKind::ToolOutput { tool_name, text }
+            }
+            sdk::ChildRunActivityKindView::ToolResult {
+                tool_call_id,
+                output,
+                content,
+                is_error,
+            } => TuiChildRunActivityKind::ToolResult {
+                tool_call_id: tool_call_id.as_str().to_string(),
+                output,
+                content,
+                is_error,
+            },
+            sdk::ChildRunActivityKindView::Terminal { outcome } => {
+                TuiChildRunActivityKind::Terminal {
+                    outcome: match outcome {
+                        sdk::ChildRunTerminalOutcomeView::Completed => {
+                            TuiChildRunTerminalOutcome::Completed
+                        }
+                        sdk::ChildRunTerminalOutcomeView::Failed { error } => {
+                            TuiChildRunTerminalOutcome::Failed { error }
+                        }
+                        sdk::ChildRunTerminalOutcomeView::Cancelled => {
+                            TuiChildRunTerminalOutcome::Cancelled
+                        }
+                    },
+                }
+            }
+        },
+    }
+}
+
 fn agent_progress(value: sdk::AgentProgressEventView) -> TuiAgentProgress {
     TuiAgentProgress {
         sequence: value.sequence,
@@ -900,6 +957,9 @@ fn agent_progress(value: sdk::AgentProgressEventView) -> TuiAgentProgress {
                     })
                     .collect(),
             },
+            sdk::AgentProgressKindView::ToolOutput { tool_name, text } => {
+                TuiAgentProgressKind::ToolOutput { tool_name, text }
+            }
         },
     }
 }

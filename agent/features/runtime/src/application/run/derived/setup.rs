@@ -301,8 +301,8 @@ impl AgentRunner for CliAgentRunner {
             };
 
             let source_context = AgentProgressSourceContext::new(
-                derived.session_id.clone(),
-                sdk::ChatRunId::new_v7().to_string(),
+                role_name_for_log.clone(),
+                derived.instance.run().id().to_string(),
             );
             // Call SubagentStart hook — workspace root from derived workspace.
             let workspace_root = derived

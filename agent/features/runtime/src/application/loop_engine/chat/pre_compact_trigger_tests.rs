@@ -22,7 +22,7 @@ use share::config::Config;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use super::loop_runner::main_run_port::ChatCompactionObserver;
+use super::main_run_port::ChatCompactionObserver;
 use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
 };

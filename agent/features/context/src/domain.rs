@@ -285,6 +285,9 @@ pub struct CompactRequest {
     /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
+    /// 当前 Task 状态文本（#1537）：compact summary 定稿后拼接到末尾，
+    /// 防止递进压缩后 task 上下文丢失。`None` 表示无活跃 task。
+    pub task_context: Option<String>,
 }
 
 impl std::fmt::Debug for CompactRequest {
@@ -295,6 +298,10 @@ impl std::fmt::Debug for CompactRequest {
             .field("source", &self.source)
             .field("trigger", &self.trigger)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .field(
+                "task_context",
+                &self.task_context.as_ref().map(|_| "<text>"),
+            )
             .finish()
     }
 }
@@ -307,6 +314,8 @@ pub struct ManualCompactRequest {
     pub context_size: usize,
     /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
+    /// 当前 Task 状态文本（#1537），语义同 [`CompactRequest::task_context`]。
+    pub task_context: Option<String>,
 }
 
 impl std::fmt::Debug for ManualCompactRequest {
@@ -317,6 +326,10 @@ impl std::fmt::Debug for ManualCompactRequest {
             .field("system_prompt", &self.system_prompt)
             .field("context_size", &self.context_size)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .field(
+                "task_context",
+                &self.task_context.as_ref().map(|_| "<text>"),
+            )
             .finish()
     }
 }

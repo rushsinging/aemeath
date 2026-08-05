@@ -1,6 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgress, TuiAgentProgressKind, TuiRunContext, TuiRunStepEvent, TuiRuntimeEvent,
-    TuiToolCallStatus,
+    TuiAgentProgress, TuiAgentProgressKind, TuiChildRunActivity, TuiChildRunActivityKind,
+    TuiChildRunIdentity, TuiRunContext, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
 };
 
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -87,6 +87,84 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
     );
     assert_eq!(harness.screen().matches(marker).count(), 1);
     harness.assert_idle();
+}
+
+#[test]
+fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
+    let parent_context = TuiRunContext {
+        chat_id: "parent-chat".to_string(),
+        run_id: "parent-run".to_string(),
+    };
+    let mut harness = TuiScenarioHarness::new(120, 40);
+    for (index, tool_id) in ["agent-a", "agent-b"].into_iter().enumerate() {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+            context: parent_context.clone(),
+            id: tool_id.to_string(),
+            provider_id: Some(format!("provider-{tool_id}")),
+            name: "Agent".to_string(),
+            index,
+        });
+    }
+
+    for (agent_id, child_run_id, tool_id, text, sequence) in [
+        ("researcher", "child-a", "agent-a", "alpha text", 1),
+        ("reviewer", "child-b", "agent-b", "beta thinking", 1),
+        ("researcher", "child-a", "agent-a", "alpha output", 2),
+    ] {
+        let kind = if text.contains("thinking") {
+            TuiChildRunActivityKind::Thinking {
+                text: text.to_string(),
+            }
+        } else if text.contains("output") {
+            TuiChildRunActivityKind::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: text.to_string(),
+            }
+        } else {
+            TuiChildRunActivityKind::Text {
+                text: text.to_string(),
+            }
+        };
+        harness.runtime_event(TuiRuntimeEvent::ChildRunActivity(TuiChildRunActivity {
+            identity: TuiChildRunIdentity {
+                agent_id: agent_id.to_string(),
+                run_id: crate::tui::model::conversation::interaction::UiRunId::from(child_run_id),
+                parent_run_id: crate::tui::model::conversation::interaction::UiRunId::from(
+                    "parent-run",
+                ),
+                spawned_by_tool_call_id: tool_id.to_string(),
+            },
+            sequence,
+            kind,
+        }));
+    }
+    harness.render();
+
+    let calls = harness
+        .app
+        .model
+        .conversation
+        .chats
+        .iter()
+        .flat_map(|chat| &chat.runs)
+        .flat_map(|run| &run.tool_calls)
+        .collect::<Vec<_>>();
+    let first = calls
+        .iter()
+        .find(|call| call.id.as_ref().is_some_and(|id| id.as_ref() == "agent-a"))
+        .expect("first Agent ToolCall");
+    let second = calls
+        .iter()
+        .find(|call| call.id.as_ref().is_some_and(|id| id.as_ref() == "agent-b"))
+        .expect("second Agent ToolCall");
+    assert_eq!(first.activities, vec!["alpha textalpha output"]);
+    assert_eq!(second.activities, vec!["beta thinking"]);
+    let screen = harness.screen();
+    assert!(
+        screen.contains("alpha textalpha output"),
+        "screen: {screen}"
+    );
+    assert!(screen.contains("beta thinking"), "screen: {screen}");
 }
 
 #[test]

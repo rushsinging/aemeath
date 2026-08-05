@@ -62,6 +62,7 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentProgressSourceContext",
+    "ChildRunActivityEvent", "ChildRunActivityKind", "ChildRunIdentity", "ChildRunTerminalOutcome",
     "AgentRunRequest",
     "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
     "CancellationDeclaration", "CleanupConfirmation",

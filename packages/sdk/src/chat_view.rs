@@ -60,6 +60,59 @@ impl OptionItem {
     }
 }
 
+/// Child Run identity published with every structured activity event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChildRunIdentityView {
+    pub agent_id: crate::AgentId,
+    pub run_id: crate::RunId,
+    pub parent_run_id: crate::RunId,
+    pub spawned_by_tool_call_id: crate::ToolCallId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChildRunActivityKindView {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: crate::ToolCallId,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: crate::ToolCallId,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: ChildRunTerminalOutcomeView,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ChildRunTerminalOutcomeView {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChildRunActivityEventView {
+    pub identity: ChildRunIdentityView,
+    pub sequence: u64,
+    pub kind: ChildRunActivityKindView,
+}
+
 /// Sub-agent 工具调用进度。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentToolCallProgressView {
@@ -88,6 +141,14 @@ pub enum AgentProgressKindView {
     ToolCalls {
         calls: Vec<AgentToolCallProgressView>,
     },
+    /// Output streamed by a tool running inside a sub-agent.
+    ///
+    /// This is distinct from human-readable sub-agent progress and should not
+    /// be rendered as a normal activity line by default.
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
 }
 
 /// 工具 stdout 流式输出事件 view（与 [`AgentProgressEventView`] 平级但语义独立）。
@@ -105,6 +166,7 @@ impl std::fmt::Display for AgentProgressKindView {
                 None => write!(f, "{model}"),
             },
             Self::Message { text } => write!(f, "{text}"),
+            Self::ToolOutput { tool_name, text } => write!(f, "{tool_name}: {text}"),
             Self::ToolCalls { calls } => {
                 for (i, call) in calls.iter().enumerate() {
                     if i > 0 {
@@ -153,6 +215,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn child_run_activity_round_trips_without_field_loss() {
+        let event = ChildRunActivityEventView {
+            identity: ChildRunIdentityView {
+                agent_id: crate::AgentId::from_legacy_or_new("agent-child-a"),
+                run_id: crate::RunId::from_legacy_or_new("run-child-a"),
+                parent_run_id: crate::RunId::from_legacy_or_new("run-main"),
+                spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
+            },
+            sequence: 9,
+            kind: ChildRunActivityKindView::Thinking {
+                text: "分析配置".to_string(),
+            },
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: ChildRunActivityEventView = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, event);
+    }
+
+    #[test]
     fn test_agent_progress_view_supports_message_and_tool_calls() {
         let message = AgentProgressEventView {
             sequence: 1,
@@ -170,6 +252,13 @@ mod tests {
                 }],
             },
         };
+        let tool_output = AgentProgressEventView {
+            sequence: 3,
+            kind: AgentProgressKindView::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: "stdout".to_string(),
+            },
+        };
 
         assert_eq!(message.sequence, 1);
         match message.kind {
@@ -179,6 +268,13 @@ mod tests {
         match tools.kind {
             AgentProgressKindView::ToolCalls { calls } => {
                 assert_eq!(calls[0].name, "Read");
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
+        match tool_output.kind {
+            AgentProgressKindView::ToolOutput { tool_name, text } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(text, "stdout");
             }
             other => panic!("unexpected kind: {other:?}"),
         }

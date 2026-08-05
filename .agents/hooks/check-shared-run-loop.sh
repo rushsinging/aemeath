@@ -6,7 +6,7 @@ ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 
 ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
-MAIN="agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+MAIN="agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs"
 SUB="agent/features/runtime/src/application/run/derived/loop_run.rs"
 LAUNCHER="agent/features/runtime/src/application/run/launcher.rs"
 MAIN_PORT="agent/features/runtime/src/application/loop_engine/chat/main_run_port.rs"

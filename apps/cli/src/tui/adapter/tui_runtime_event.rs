@@ -449,11 +449,62 @@ pub(crate) struct TuiConfigView {
     pub(crate) logging_level: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiChildRunIdentity {
+    pub(crate) agent_id: String,
+    pub(crate) run_id: UiRunId,
+    pub(crate) parent_run_id: UiRunId,
+    pub(crate) spawned_by_tool_call_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum TuiChildRunActivityKind {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: TuiChildRunTerminalOutcome,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TuiChildRunTerminalOutcome {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TuiChildRunActivity {
+    pub(crate) identity: TuiChildRunIdentity,
+    pub(crate) sequence: u64,
+    pub(crate) kind: TuiChildRunActivityKind,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum TuiAgentProgressKind {
     Started { role: Option<String>, model: String },
     Message { text: String },
     ToolCalls { calls: Vec<TuiAgentToolCall> },
+    ToolOutput { tool_name: String, text: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -614,6 +665,7 @@ pub(crate) enum TuiRuntimeEvent {
         tool_id: String,
         event: TuiToolProgressEvent,
     },
+    ChildRunActivity(TuiChildRunActivity),
     Cancelled {
         context: TuiRunContext,
         duration_ms: u64,

@@ -164,6 +164,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
             &frozen,
             SessionRevision::new(1),
             std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+            None,
         )
         .await
         .unwrap();
@@ -213,6 +214,7 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
             system_prompt: frozen.system_prompt.clone(),
             context_size: frozen.context_size,
             progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -537,6 +539,7 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
                 &request(),
                 SessionRevision::new(0),
                 std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+                None,
             )
             .await
             .unwrap(),
@@ -602,7 +605,7 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
     };
 
     coordinator
-        .compact(&frozen, SessionRevision::new(1), view)
+        .compact(&frozen, SessionRevision::new(1), view, None)
         .await
         .unwrap();
 

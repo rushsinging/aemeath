@@ -215,6 +215,7 @@ where
                     model: model.clone(),
                 }))
             }
+            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
             _ => {
                 let message = format_agent_progress(event, &mut format_subagent_tool_header);
                 let preview: String = message.chars().take(200).collect();
@@ -640,6 +641,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     message: format_agent_progress_calls(calls),
                 }),
             ),
+            // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
+            // 顶层工具 stdout 走独立 ToolProgressEvent 通道（ToolProgress 分支）。
+            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
         },
         TuiRuntimeEvent::ToolProgress {
             context,
@@ -653,6 +657,16 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 text: event.text.clone(),
             },
         )),
+        TuiRuntimeEvent::ChildRunActivity(event) => conversation(
+            ConversationIntent::RecordChildRunActivity(RecordChildRunActivity {
+                agent_id: event.identity.agent_id.clone(),
+                child_run_id: event.identity.run_id.as_str().to_string(),
+                parent_run_id: event.identity.parent_run_id.as_str().to_string(),
+                spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                sequence: event.sequence,
+                kind: event.kind.clone(),
+            }),
+        ),
         TuiRuntimeEvent::ConfigChanged { view, .. } => AgentEventMapping {
             ui_preferences: vec![
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(

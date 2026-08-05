@@ -49,7 +49,7 @@ fn loop_input_messages(inputs: &[crate::application::loop_engine::LoopInput]) ->
             if input.images.is_empty() {
                 Message::user(input.text.clone())
             } else {
-                super::super::input_gate::user_message_with_images(
+                super::input_gate::user_message_with_images(
                     input.text.clone(),
                     input.images.clone(),
                 )

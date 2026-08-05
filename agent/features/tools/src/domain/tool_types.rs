@@ -242,6 +242,50 @@ mod tests {
     }
 
     #[test]
+    fn child_run_activity_preserves_identity() {
+        let identity = ChildRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        };
+        let event = ChildRunActivityEvent {
+            identity: identity.clone(),
+            sequence: 7,
+            kind: ChildRunActivityKind::Thinking {
+                text: "分析配置".to_string(),
+            },
+        };
+
+        assert_eq!(event.identity, identity);
+        assert_eq!(event.sequence, 7);
+        assert!(matches!(
+            event.kind,
+            ChildRunActivityKind::Thinking { ref text } if text == "分析配置"
+        ));
+    }
+
+    #[test]
+    fn test_agent_progress_tool_output_carries_tool_name_and_text() {
+        let ev = AgentProgressEvent {
+            source_context: None,
+            sequence: 1,
+            kind: AgentProgressKind::ToolOutput {
+                tool_name: "Bash".into(),
+                text: "hello".into(),
+            },
+        };
+
+        match &ev.kind {
+            AgentProgressKind::ToolOutput { tool_name, text } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(text, "hello");
+            }
+            other => panic!("expected ToolOutput, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn tool_progress_event_carries_text() {
         let ev = ToolProgressEvent {
             text: "checking PR status…\n".to_string(),
@@ -265,6 +309,56 @@ mod tests {
         assert_ne!(a, c);
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildRunIdentity {
+    pub agent_id: String,
+    pub run_id: String,
+    pub parent_run_id: String,
+    pub spawned_by_tool_call_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChildRunActivityKind {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: ChildRunTerminalOutcome,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildRunTerminalOutcome {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChildRunActivityEvent {
+    pub identity: ChildRunIdentity,
+    pub sequence: u64,
+    pub kind: ChildRunActivityKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProgressSourceContext {
     pub chat_id: String,
@@ -300,8 +394,28 @@ pub enum AgentProgressKind {
     ToolCalls {
         calls: Vec<AgentToolCallProgress>,
     },
+    /// Sub-agent 内部工具执行的输出流（`agent_calls.rs` 转发）。
+    ///
+    /// 顶层 Bash stdout 已独立为 [`ToolProgressEvent`] 通道，不再使用此 variant；
+    /// 此 variant 仅保留给 sub-agent 内部工具的嵌套输出转发。
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
     Message {
         text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: ChildRunTerminalOutcome,
     },
 }
 

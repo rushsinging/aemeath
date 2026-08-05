@@ -113,6 +113,48 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
 }
 
 #[test]
+fn sdk_event_mapper_child_run_activity_preserves_identity() {
+    let event = RuntimeStreamEvent::ChildRunActivity(tools::ChildRunActivityEvent {
+        identity: tools::ChildRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        },
+        sequence: 3,
+        kind: tools::ChildRunActivityKind::Text {
+            text: "检查配置".to_string(),
+        },
+    });
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ChildRunActivity { event } => {
+            assert_eq!(
+                event.identity.agent_id,
+                sdk::AgentId::from_legacy_or_new("agent-child-a")
+            );
+            assert_eq!(
+                event.identity.run_id,
+                sdk::RunId::from_legacy_or_new("run-child-a")
+            );
+            assert_eq!(
+                event.identity.parent_run_id,
+                sdk::RunId::from_legacy_or_new("run-main")
+            );
+            assert_eq!(
+                event.identity.spawned_by_tool_call_id,
+                sdk::ToolCallId::from_legacy_or_new("tool-agent-a")
+            );
+            assert!(matches!(
+                event.kind,
+                sdk::ChildRunActivityKindView::Text { ref text } if text == "检查配置"
+            ));
+        }
+        other => panic!("expected ChildRunActivity, got {other:?}"),
+    }
+}
+
+#[test]
 fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
     let source_context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("child-chat"),
