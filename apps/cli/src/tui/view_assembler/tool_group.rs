@@ -2,6 +2,8 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
 use crate::tui::view_model::output::ToolGroupKind;
 
+const MAX_TOOL_CALLS_PER_GROUP: usize = 20;
+
 pub(crate) fn classify_tool_name(tool_name: &str) -> Option<ToolGroupKind> {
     match tool_name {
         "Read" | "Glob" | "Grep" => Some(ToolGroupKind::Explore),
@@ -181,6 +183,15 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
                     item_id: candidate.item_id.clone(),
                     call_id: result_call_id.to_string(),
                 });
+            } else if candidates
+                .iter()
+                .any(|known| known.call_id.as_deref() == Some(result_call_id))
+            {
+                flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
+                display_units.push(DisplayUnitPlan::Single {
+                    item_id: candidate.item_id.clone(),
+                    attached_results: Vec::new(),
+                });
             } else {
                 flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
                 display_units.push(DisplayUnitPlan::Single {
@@ -205,7 +216,7 @@ pub(crate) fn plan_display_units(candidates: &[ToolGroupCandidate]) -> Vec<Displ
                 && last_call.tool_kind == Some(tool_kind)
                 && candidate.call_id.is_some()
         });
-        if !can_extend_pending {
+        if !can_extend_pending || pending_calls.len() == MAX_TOOL_CALLS_PER_GROUP {
             flush_pending_calls(&mut display_units, &mut pending_calls, &mut pending_results);
         }
         pending_calls.push(candidate);

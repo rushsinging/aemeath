@@ -276,6 +276,47 @@ fn does_not_group_calls_across_run_step_boundaries() {
 }
 
 #[test]
+fn caps_each_group_at_twenty_tool_calls() {
+    let inputs = (1..=41)
+        .map(|index| {
+            ToolGroupCandidate::tool_call(
+                &format!("item-{index}"),
+                &format!("call-{index}"),
+                "Edit",
+                "step-1",
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let plans = plan_display_units(&inputs);
+
+    assert_eq!(plans.len(), 3);
+    assert!(matches!(
+        &plans[0],
+        DisplayUnitPlan::ToolGroup {
+            group_id,
+            member_ids,
+            ..
+        } if group_id == "tool-group:step-1:call-1" && member_ids.len() == 20
+    ));
+    assert!(matches!(
+        &plans[1],
+        DisplayUnitPlan::ToolGroup {
+            group_id,
+            member_ids,
+            ..
+        } if group_id == "tool-group:step-1:call-21" && member_ids.len() == 20
+    ));
+    assert_eq!(
+        plans[2],
+        DisplayUnitPlan::Single {
+            item_id: "item-41".to_string(),
+            attached_results: Vec::new(),
+        }
+    );
+}
+
+#[test]
 fn keeps_group_id_stable_when_a_matching_call_is_appended() {
     let initial_inputs = vec![
         ToolGroupCandidate::tool_call("item-1", "call-1", "Read", "step-1"),

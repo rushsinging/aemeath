@@ -72,6 +72,25 @@ pub(crate) fn assemble_resumed_history_display_unit(
     display_history: &DisplayHistoryModel,
     unit: &crate::tui::view_assembler::tool_group::DisplayUnitPlan,
 ) -> Option<BlockNode> {
+    let belongs_to_history = match unit {
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::Single { item_id, .. } => {
+            display_history.item(item_id).is_some()
+        }
+        crate::tui::view_assembler::tool_group::DisplayUnitPlan::ToolGroup {
+            member_ids, ..
+        } => member_ids.iter().any(|member_id| {
+            display_history.items().iter().any(|item| {
+                matches!(item.kind, ResumedHistoryItemKind::ToolCall { .. })
+                    && resumed_history_candidate(display_history, item)
+                        .call_id
+                        .as_deref()
+                        == Some(member_id)
+            })
+        }),
+    };
+    if !belongs_to_history {
+        return None;
+    }
     match unit {
         crate::tui::view_assembler::tool_group::DisplayUnitPlan::Single {
             item_id,
