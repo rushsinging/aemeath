@@ -19,6 +19,9 @@ mod loop_runner;
 #[cfg(test)]
 mod loop_runner_tests;
 mod main_run_port;
+#[cfg(test)]
+#[path = "chat/main_run_port_task_state_tests.rs"]
+mod main_run_port_task_state_tests;
 mod non_agent;
 mod post_batch;
 #[cfg(test)]
