@@ -187,12 +187,6 @@ pub enum AppEvent {
     GraphPhaseChanged {
         node: String,
     },
-    /// Compact 进度更新。TUI 渲染 Gauge 进度条。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     /// 模型切换完成（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {
         result: sdk::ModelSwitchResult,

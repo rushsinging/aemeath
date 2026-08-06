@@ -352,6 +352,9 @@ pub struct FinishProcessingJob {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceRuntimeStatus(pub crate::tui::adapter::runtime_status::TuiRuntimeStatus);
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -368,13 +371,6 @@ pub struct SetTransientStatusNotice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetGraphPhase(pub Option<String>);
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SetCompactProgress {
-    pub stage: String,
-    pub current: Option<u32>,
-    pub total: Option<u32>,
-}
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
@@ -454,12 +450,12 @@ pub enum ConversationIntent {
     UpdateTaskStatus(UpdateTaskStatus),
     StartProcessingJob(StartProcessingJob),
     FinishProcessingJob(FinishProcessingJob),
+    ReplaceRuntimeStatus(ReplaceRuntimeStatus),
     ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
     SetGraphPhase(SetGraphPhase),
-    SetCompactProgress(SetCompactProgress),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

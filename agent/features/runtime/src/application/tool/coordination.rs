@@ -115,7 +115,6 @@ pub(crate) trait ToolRoundObserver: Send {
     async fn results_materialized(
         &mut self,
         _execution: &crate::application::run::execution_state::RunExecutionState,
-        _has_task_mutation: bool,
     ) {
     }
     async fn round_finished(
@@ -331,9 +330,6 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
 ) -> Result<ToolRoundOutcome, LoopEngineError> {
     let result_count = results.len();
     if !results.is_empty() {
-        let has_task_mutation = results
-            .iter()
-            .any(|result| result.outcome.task_change.is_some());
         let message = crate::application::loop_engine::shared::materialize_tool_results(
             context.materializer,
             results,
@@ -342,9 +338,7 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
         .await;
         execution.append_message(message.clone());
         execution.record_step_message(message);
-        observer
-            .results_materialized(execution, has_task_mutation)
-            .await;
+        observer.results_materialized(execution).await;
     }
     if cancel.is_cancelled() {
         return Err(crate::application::loop_engine::LoopEngineError::Cancelled);

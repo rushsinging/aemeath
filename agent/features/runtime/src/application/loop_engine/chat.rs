@@ -1,4 +1,5 @@
 mod agent_calls;
+pub(crate) mod committed_side_effect;
 pub(crate) mod config_reload;
 pub(crate) mod events;
 #[cfg(test)]

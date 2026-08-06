@@ -88,7 +88,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SessionReset => "SessionReset",
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
         UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
-        UiEvent::CompactProgress { .. } => "CompactProgress",
         UiEvent::ModelSwitched { .. } => "ModelSwitched",
         UiEvent::ThinkingChanged { .. } => "ThinkingChanged",
         UiEvent::ContextEstimated { .. } => "ContextEstimated",

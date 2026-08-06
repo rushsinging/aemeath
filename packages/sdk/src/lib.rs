@@ -40,12 +40,13 @@ pub mod wire;
 
 pub mod ids;
 pub mod interaction;
+mod runtime_status;
 
 pub use activity::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
-    RunPurposeView,
+    CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
+    RunPhaseKindView, RunPurposeView,
 };
 pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
@@ -88,6 +89,7 @@ pub use run::{
     CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunStepCancellationTerminal,
     RunTerminationReason, TerminateRunOutcome,
 };
+pub use runtime_status::{ContextBudgetView, ContextDecisionSourceView, RuntimeStatusView};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
     SessionSnapshot, SessionSummary, SkillRequestMetadataView,

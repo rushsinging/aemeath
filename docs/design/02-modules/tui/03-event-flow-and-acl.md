@@ -217,6 +217,12 @@ SDK ActivityChanged / ActivitySnapshot
 - LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
 - Activity 事实镜像与 timeline 是互补投影；Activity 不写 Session、不拥有 Interaction reply、不驱动 Runtime command。
 
+### 3.8 Runtime Status full-state ACL
+
+SDK `RuntimeStatusChanged` MUST 在第一层 ACL 无损转换为 TUI-owned typed DTO，第二层只产生 `ReplaceRuntimeStatus`。Model MUST 按同一 session 的 `revision` 单调性以及同 revision 的 `heartbeat_sequence` 原子替换；stale 或 duplicate 状态不得回写。Status assembler 的 context percentage 与 context size MUST 只读该 snapshot，NEVER 使用 `last_input_tokens / context_size` 重建 Context 决策。
+
+Compact 展示 MUST 只消费 Activity 中 typed stage/work；旧 stringly `CompactProgress` 事件与本地镜像状态 NEVER 恢复。terminal Activity NEVER 继续进入 LiveStatus 选择。
+
 
 ### 4.1 类型所有权
 

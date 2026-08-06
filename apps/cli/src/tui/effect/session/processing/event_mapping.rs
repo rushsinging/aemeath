@@ -238,15 +238,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),
-        sdk::ChatEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => UiEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        },
         sdk::ChatEvent::ModelSwitched { result } => UiEvent::ModelSwitched { result },
         sdk::ChatEvent::ThinkingChanged { enabled } => UiEvent::ThinkingChanged { enabled },
         sdk::ChatEvent::ContextEstimated {

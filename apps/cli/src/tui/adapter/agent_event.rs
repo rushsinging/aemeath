@@ -602,7 +602,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 (node != "idle").then(|| node.clone()),
             )))
         }
-        TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
+        TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
+            ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
+        ),
         TuiRuntimeEvent::TaskStateChanged { state } => conversation(
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),

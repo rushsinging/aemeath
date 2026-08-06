@@ -27,7 +27,6 @@ pub enum RuntimeToolCallStatus {
 }
 
 /// Compact 进度阶段（re-export from context crate）。
-pub use context::compact::CompactStage;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeResumedSessionStep {
@@ -197,12 +196,6 @@ pub enum RuntimeStreamEvent {
         view: sdk::ConfigView,
     },
 
-    /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。
-    CompactProgress {
-        stage: CompactStage,
-        current: Option<usize>,
-        total: Option<usize>,
-    },
     /// 模型切换完成通知（#567）。runtime idle 分支解析 selection 构建 client 后回传结果。
     ModelSwitched {
         result: sdk::ModelSwitchResult,
@@ -257,6 +250,9 @@ pub enum RuntimeStreamEvent {
     },
     TaskStateChanged {
         state: Box<sdk::TaskStateView>,
+    },
+    RuntimeStatusChanged {
+        status: Box<sdk::RuntimeStatusView>,
     },
     /// #567：成本信息回传。
     CostUpdate {

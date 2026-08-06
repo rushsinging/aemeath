@@ -7,7 +7,7 @@ use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PreToolUseInput, TaskInput};
+use hook::{HookInvocation, HookPort, PreToolUseInput};
 use policy::PolicyPort;
 use std::path::Path;
 use std::sync::Arc;
@@ -500,18 +500,10 @@ where
             workspace_root,
         )
         .await;
-        run_task_hooks(
-            hook_port,
-            activities,
-            step_id,
-            &effective_call,
-            &ex.outcome,
-            workspace_root,
-            cancel,
-        )
-        .await;
-        // Task state 由 loop runner 在 materialization 后依据 typed committed change 统一发布。
-        // 不再在此处发 TasksChanged 通知。
+        agent
+            .committed_side_effects
+            .observe(&effective_call, &ex, step_id, cancel)
+            .await;
         send_tool_result(
             sink,
             context,
@@ -523,41 +515,6 @@ where
         out.push(ex);
     }
     out
-}
-
-async fn run_task_hooks(
-    hook_port: &Arc<dyn HookPort>,
-    activities: &ActivityCoordinator,
-    step_id: &sdk::RunStepId,
-    call: &ToolCall,
-    outcome: &tools::ToolOutcome,
-    workspace_root: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
-) {
-    let Some(task_change) = outcome.task_change.as_ref() else {
-        return;
-    };
-    for fact in task_change.facts() {
-        let invocation = match fact {
-            tools::TaskChangeFact::Created { .. } => HookInvocation::TaskCreated(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: outcome.text.clone(),
-            }),
-            tools::TaskChangeFact::Completed { .. } => HookInvocation::TaskCompleted(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: outcome.text.clone(),
-            }),
-        };
-        let _ = dispatch_hook(
-            hook_port,
-            activities,
-            step_id,
-            invocation,
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
 }
 
 #[cfg(test)]

@@ -77,6 +77,16 @@ run_tui_single_source_structure_guard() {
     grep -RInE '(total_input_tokens|total_output_tokens|total_api_calls|last_input_tokens|usage_snapshot|record_usage|thinking_enabled)' \
       "$ROOT/apps/cli/src/tui/app/state" --include='*.rs'
 
+  report_matches \
+    "Status context percentage must come from RuntimeStatus context_budget, never legacy last_input_tokens/context_size arithmetic." \
+    grep -RInE 'last_input_tokens[[:space:]]*\*[[:space:]]*100[[:space:]]*/[[:space:]]*.*context_size' \
+      "$ROOT/apps/cli/src/tui" --include='*.rs'
+
+  report_matches \
+    "Retired stringly CompactProgress event/state paths must not return; use typed Activity compact stage/work." \
+    grep -RInE '(ChatEvent|RuntimeStreamEvent|TuiRuntimeEvent|UiEvent)::CompactProgress|SetCompactProgress|CompactProgressModel' \
+      "$ROOT/agent/features/runtime/src" "$ROOT/packages/sdk/src" "$ROOT/apps/cli/src/tui" --include='*.rs'
+
   return "$fail"
 }
 

@@ -1,8 +1,8 @@
 use crate::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    ChatEvent, CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView,
-    RunPhaseKindView, RunPurposeView,
+    ChatEvent, CompactStageView, CompactWorkView, HookPointView, InteractionKindView,
+    ModelStreamStateView, RunPhaseKindView, RunPurposeView,
 };
 
 fn activity_fixture() -> ActivityView {
@@ -97,9 +97,11 @@ fn activity_published_language_serializes_every_closed_variant() {
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Compact {
-            stage: CompactStageView::Summarizing,
-            current: Some(2),
-            total: Some(4),
+            stage: CompactStageView::Mapping,
+            work: CompactWorkView::Determinate {
+                completed: 2,
+                total: 4,
+            },
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Interaction {

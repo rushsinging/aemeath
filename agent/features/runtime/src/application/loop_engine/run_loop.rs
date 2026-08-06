@@ -233,8 +233,11 @@ impl<'a> RunLoop<'a> {
         activity_id: sdk::ActivityId,
         stage: sdk::CompactStageView,
     ) -> Result<(), ActivityError> {
-        self.activities()?
-            .update_compaction(activity_id, stage, None, None)
+        self.activities()?.update_compaction(
+            activity_id,
+            stage,
+            sdk::CompactWorkView::Indeterminate,
+        )
     }
 
     /// #1500：构造 compact 进度视图回调——把 Context 压缩管线进度
@@ -245,9 +248,9 @@ impl<'a> RunLoop<'a> {
         activity_id: sdk::ActivityId,
     ) -> std::sync::Arc<dyn CompactProgressView> {
         let activities = self.activities.clone();
-        std::sync::Arc::new(move |stage, current, total| {
+        std::sync::Arc::new(move |stage, work| {
             if let Some(coordinator) = activities.as_ref() {
-                let _ = coordinator.update_compaction(activity_id.clone(), stage, current, total);
+                let _ = coordinator.update_compaction(activity_id.clone(), stage, work);
             }
         })
     }

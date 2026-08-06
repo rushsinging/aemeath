@@ -62,6 +62,7 @@ mod boundary_tests {
             "loop_engine",
             "model",
             "prompt",
+            "published_state",
             "reflection",
             "run",
             "session",

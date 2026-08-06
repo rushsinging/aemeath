@@ -134,8 +134,17 @@ pub(crate) enum TuiHookPoint {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiCompactStage {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiCompactWork {
+    Indeterminate,
+    Determinate { completed: u32, total: u32 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -171,8 +180,7 @@ pub(crate) enum TuiActivityDetail {
     },
     Compact {
         stage: TuiCompactStage,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: TuiCompactWork,
     },
     Interaction {
         kind: TuiInteractionKind,
@@ -691,11 +699,6 @@ pub(crate) enum TuiRuntimeEvent {
         effort: String,
         previous: String,
     },
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     ThinkingChanged {
         enabled: bool,
     },
@@ -741,6 +744,9 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ProjectInfo {
         project: TuiProjectInfo,
+    },
+    RuntimeStatusChanged {
+        status: Box<super::runtime_status::TuiRuntimeStatus>,
     },
     TaskStateChanged {
         state: Box<super::runtime_view::TuiTaskState>,

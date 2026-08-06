@@ -1,3 +1,4 @@
+use super::runtime_status::{TuiContextBudget, TuiContextDecisionSource, TuiRuntimeStatus};
 use super::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiHookNoticeKind, TuiMessageSource,
     TuiSkillRequestMetadata, TuiTaskBatch, TuiTaskBatchStatus, TuiTaskItem, TuiTaskItemStatus,
@@ -364,15 +365,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             text: result.text,
             is_error: false,
         },
-        ChatEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => TuiRuntimeEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        },
         ChatEvent::ModelSwitched { result } => TuiRuntimeEvent::ModelSwitched {
             display_name: result.display_name,
             context_window: result.context_window,
@@ -480,6 +472,30 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 workspace_root: project.workspace_root,
                 git_branch: project.git_branch,
             },
+        },
+        ChatEvent::RuntimeStatusChanged { status } => TuiRuntimeEvent::RuntimeStatusChanged {
+            status: Box::new(TuiRuntimeStatus {
+                session_id: status.session_id,
+                revision: status.revision,
+                heartbeat_sequence: status.heartbeat_sequence,
+                context_budget: TuiContextBudget {
+                    context_size: status.context_budget.context_size,
+                    effective_window: status.context_budget.effective_window,
+                    decision_token_count: status.context_budget.decision_token_count,
+                    threshold: status.context_budget.threshold,
+                    usage_permille: status.context_budget.usage_permille,
+                    compaction_needed: status.context_budget.compaction_needed,
+                    source: match status.context_budget.source {
+                        sdk::ContextDecisionSourceView::ActualProviderUsage => {
+                            TuiContextDecisionSource::ActualProviderUsage
+                        }
+                        sdk::ContextDecisionSourceView::HeuristicFallback => {
+                            TuiContextDecisionSource::HeuristicFallback
+                        }
+                        sdk::ContextDecisionSourceView::Manual => TuiContextDecisionSource::Manual,
+                    },
+                },
+            }),
         },
         ChatEvent::TaskStateChanged { state } => TuiRuntimeEvent::TaskStateChanged {
             state: Box::new(TuiTaskState {
@@ -695,18 +711,21 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             script,
             attempt,
         },
-        sdk::ActivityDetailView::Compact {
-            stage,
-            current,
-            total,
-        } => TuiActivityDetail::Compact {
+        sdk::ActivityDetailView::Compact { stage, work } => TuiActivityDetail::Compact {
             stage: match stage {
                 sdk::CompactStageView::Preparing => TuiCompactStage::Preparing,
-                sdk::CompactStageView::Summarizing => TuiCompactStage::Summarizing,
+                sdk::CompactStageView::Generating => TuiCompactStage::Generating,
+                sdk::CompactStageView::Mapping => TuiCompactStage::Mapping,
+                sdk::CompactStageView::Reducing => TuiCompactStage::Reducing,
+                sdk::CompactStageView::Refreshing => TuiCompactStage::Refreshing,
                 sdk::CompactStageView::Finalizing => TuiCompactStage::Finalizing,
             },
-            current,
-            total,
+            work: match work {
+                sdk::CompactWorkView::Indeterminate => TuiCompactWork::Indeterminate,
+                sdk::CompactWorkView::Determinate { completed, total } => {
+                    TuiCompactWork::Determinate { completed, total }
+                }
+            },
         },
         sdk::ActivityDetailView::Interaction { kind } => TuiActivityDetail::Interaction {
             kind: match kind {

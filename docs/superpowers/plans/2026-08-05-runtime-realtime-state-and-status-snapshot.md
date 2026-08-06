@@ -1,6 +1,6 @@
 # Runtime 实时状态发布与 TUI Status 快照实施计划
 
-> **范围：** 通用 committed side-effect 实时观察 + Runtime-owned Published State Registry + Status Presentation 快照/心跳
+> **范围：** 通用 committed side-effect 实时观察 + Runtime-owned Published State Registry + Status Presentation 快照/心跳 + Compact committed-work 进度模型
 > **前置关系：** 当前功能分支落后 `origin/main` 的 Task structured state 提交；执行前必须先 rebase 最新 `origin/main`，解决三事件语言重构与 Task 管线的冲突。
 > **执行方式：** 在现有 feature worktree 中按任务顺序执行 TDD；所有跨层链路逐层补测试，先红后绿。计划完成后更新现有 PR #1541，不合并。
 > **交付约束：** 本计划不得只为 Task 增加专用回调后结束；必须一次性建立通用的 commit 观察、Runtime 状态注册、立即发布、心跳重发和 TUI 原子替换架构。Task 与 Status 是同一批交付中的首批完整接入能力。
@@ -32,6 +32,13 @@
    - 单个 Task mutation tool 完成真实 commit 后立即发布该 revision 的完整 `TaskStateChanged` 并触发 typed Task Hook；
    - ordinary、streaming、approval、cancellation-preserved result 共用通用 seam；
    - Task 专属逻辑只存在于 capability handler，禁止侵入 dispatcher、round coordinator 或心跳机制。
+
+5. **Compact committed-work 进度模型**
+  - Context owner 发布的 summarization 计数必须表示已完成工作，禁止把 future 创建、排队或调度计为完成；
+  - map chunks、reduce 合并、refresh 收敛与 canonical finalization/commit 必须有稳定、typed、可扩展的操作阶段语义；
+  - Runtime、SDK 与 TUI 无损传递同一进度事实，TUI 仅将 typed operation progress 转换为视觉比例，不从 context utilization 或 auto-compact threshold 推断操作进度；
+  - ordinary auto-compact、provider context-too-long retry 与 idle `/compact` 共用同一 producer/progress contract，成功、跳过、失败、取消、超时均可靠结束对应 Activity；
+  - 进度必须单调、不得提前到达阶段上限，`Finalizing` 和 Activity terminal 必须可观测，终态 Activity 不再参与 LiveStatus 选择。
 
 ## 2. 根因与边界
 
@@ -80,7 +87,47 @@ provider input + output，或完整候选窗口估算
 
 两者在分子、分母、阈值和 fallback 上都不同。compact 成功后 Runtime 会重置 usage baseline，但 TUI 仍可能保留旧 `last_input_tokens`，造成进一步滞后。
 
-### 2.3 共同架构原则
+### 2.3 Compact 进度长期停在 85% 的根因
+
+当前 TUI 把 `Summarizing(current, total)` 映射为：
+
+```text
+15% + 70% × current / total
+```
+
+因此 `current == total` 精确显示 85%。Context 的 map-reduce producer 当前在构造 chunk futures 时依次发布 `1/N..N/N`，随后才执行 `buffer_unordered` 并等待真实摘要完成。结果是最后一个 `N/N` 表示“所有 chunk 已创建/调度”，而不是“所有 chunk 已完成”。实际耗时更长的 map 执行、reduce 合并和可能的多轮 refresh 收敛发生在 85% 之后，且期间没有新的 typed progress，所以 UI 长时间停在 85%。
+
+这不是以下指标：
+
+- Context utilization；
+- auto-compact threshold；
+- token 准确进度；
+- message 数量进度。
+
+`current/total` 的当前单位是 map chunk；其错误在于 completion 语义，而非 SDK/TUI 字段丢失。成功链路已经具备 `Finalizing` 映射和 Activity terminal，但 producer 的阶段模型不足以表达 reduce/refresh，且 map 计数发布时间错误。
+
+根因修复必须建立稳定的 operation progress contract：
+
+```text
+Preparing
+→ Generating { state }
+→ Mapping { completed_chunks, total_chunks }
+→ Reducing { completed_passes, planned_or_bounded_passes }
+→ Refreshing { completed_rounds, max_rounds }
+→ Finalizing { commit_state }
+→ Activity terminal
+```
+
+约束：
+
+- `completed_*` 只在对应工作成功完成并被本次 compact operation 接纳后递增；
+- future 构造、入队、开始执行不能递增 completed；
+- 并发完成顺序不得改变 chunk 原始顺序或最终摘要拼接顺序；
+- reduce/refresh 的未知总量必须显式表达为 indeterminate 或 bounded，不得伪造精确百分比；
+- fallback、skip、error、cancel、timeout 都必须发布可收敛的 stage/terminal，不允许遗留 Running/Waiting observation；
+- TUI 的视觉权重是 presentation policy，不得反向成为 Context 业务状态或 compact decision authority。
+
+### 2.4 共同架构原则
 
 ```text
 authoritative owner state/fact
@@ -214,7 +261,27 @@ decision_token_count / effective_context_window
 
 `compact_threshold` 单独保留，避免把“窗口占用率”和“阈值进度”混为一个百分比。TUI 不复刻 `reserved_context`、`max_output` 或 0.8 阈值算法。
 
-### 4.5 快照范围限制
+### 4.5 Compact operation progress
+
+Status Presentation 中的 compact 摘要必须引用 Context owner 发布的 typed operation progress，不得复用 Context budget 百分比。稳定视图至少表达：
+
+- operation identity；
+- operation kind：automatic / provider-context-retry / manual；
+- stage：preparing / generating / mapping / reducing / refreshing / finalizing；
+- stage work：determinate `{ completed, total }` 或 indeterminate；
+- operation revision；
+- terminal/Activity identity 关联所需的稳定字段。
+
+阶段内计数的业务语义由 Context 定义；Runtime 只适配、发布并关联 Activity。视觉进度由 TUI 在 typed stage 上应用稳定权重，但必须满足：
+
+- 同一 operation 的视觉比例单调不下降；
+- mapping 的 `completed == total` 只表示 map 完成，不表示 summarization 全部完成；
+- reduce/refresh 未完成时不得提前显示其阶段上限；
+- finalizing 表示摘要已定稿并正在进行 canonical sanitization、Task context append、持久化或 generation publish 等最终提交工作；
+- Activity terminal 后立即停止展示 operation progress；
+- Context utilization、compact threshold 与 operation progress 分别展示或命名，禁止共享一个模糊的“compact 百分比”。
+
+### 4.6 快照范围限制
 
 Status 快照不得包含：
 
@@ -400,12 +467,25 @@ synthetic denied/error/cancelled/no-op 没有 committed change，不查询、不
 
 **验收：** Task 2 测试全部转绿；普通/streaming/approval 无行为分叉；至少通过测试证明第二个非 Task capability 可接入同一 seam，且 Status 相关权威变化进入后续 Registry。
 
-### Task 4：先写 Context budget 与 Status 快照失败测试
+### Task 4：先写 Context budget、Compact committed-work 与 Status 快照失败测试
 
-**路径：** Context decision、Runtime snapshot publisher、SDK mapper、TUI ACL/reducer/model/render tests。
+**路径：** Context compact producer/decision、Runtime progress/activity/snapshot publisher、SDK mapper、TUI ACL/reducer/model/assembler/render tests。
 
 **测试：**
 
+- map-reduce 在 future 创建/入队时不增加 completed，首个 chunk 真正完成后才发布 `1/N`；
+- 并发 chunk 按完成事实推进计数，但最终 sub-summary 按原 chunk index 排序后 reduce；
+- mapping `N/N` 后进入 reducing，而不是把 summarization 操作视为完成；
+- reduce 与每轮 refresh 发布 typed stage/work，未知工作量显式 indeterminate 或 bounded；
+- preparing → generating 或 mapping → reducing → refreshing（按需）→ finalizing 的 operation revision 单调且字段不丢失；
+- 单次摘要路径使用 generating indeterminate，不伪造 chunk counters，并在摘要完成后进入 finalizing；
+- LLM fallback、无 generator、本地路径、resume-protection skip、error、cancel、timeout 均产生正确 terminal，并且不遗留 Running/Waiting compaction Activity；
+- automatic、provider-context-retry、manual compact 共享 progress contract；
+- Runtime progress adapter 保留 operation identity、stage、work 与 revision，Activity update 使用同一 identity；
+- SDK mapper/wire 与 TUI adapter 无损保留所有 stage/work；
+- TUI LiveStatus 不选择 terminal compact Activity，不在 activity observation stale 时继续展示旧 operation；
+- TUI generating/mapping/reducing/refreshing/finalizing 权重单调，mapping 完成不得代表整个 operation 的 85% 完成假象；
+- Context utilization、compact threshold、operation progress 三者在 view model 中使用不同字段和标签；
 - 200K context、16K max output、provider total 145K 时，快照反映 144K threshold 且 `compaction_needed = true`；
 - provider actual 与 heuristic fallback 的 `decision_source`、token count 不丢失；
 - compact 成功后旧 provider baseline 不残留在快照；
@@ -416,25 +496,30 @@ synthetic denied/error/cancelled/no-op 没有 committed change，不查询、不
 - TUI stale revision 丢弃、duplicate revision 幂等、新 Session 独立；
 - TUI `ctx %` 使用 SDK snapshot，不读取旧 `last_input_tokens/context_size` 算法。
 
-**验收：** 跨层测试先红，并分别定位 DTO 缺失、publisher 缺失和 TUI 本地推导。
+**验收：** 跨层测试先红，并分别定位 producer 把 scheduled work 当 completed work、operation stage DTO 缺失、publisher/Activity terminal 缺失和 TUI 本地推导。
 
-### Task 5：实现 Published State Registry 与 Runtime-owned Status snapshot
+### Task 5：实现 Compact committed-work producer、Published State Registry 与 Runtime-owned Status snapshot
 
 **步骤：**
 
-1. 在 Runtime application 层建立窄职责 Published State Registry；
-2. 定义 family-local identity/revision/dirty/update/read contract；
-3. 让 committed capability handlers 与非 Tool Runtime fact observers 共用 Registry update/publish boundary；
-4. 在 Registry 上建立 Status snapshot family，而非另造平行缓存；
-5. 定义稳定的 Runtime Status view 与 SDK DTO；
-6. 将 Context decision 映射成 Context budget view；
-7. 接入 active Main identity、运行 presentation、workspace 与 current/pending config；
-8. 对每个权威事实变化执行更新、revision、dirty publish；
-9. compact finished/failed/reset 明确更新 budget；
-10. 不把 Lifecycle/Activity/Task aggregate 复制成第二真相；
-11. Task 完整 state 也使用相同 Registry 版本/立即发布基础设施，但保留独立 DTO、revision epoch 与 SDK event。
+1. 在 Context compact domain 定义职责单一的 typed operation stage/work，completed 只表示已完成且已接纳的工作；
+2. 重构 map-reduce producer：每个 indexed chunk future 完成后推进 completed，按 chunk index 恢复 sub-summary 原始顺序，再进入 reduce；
+3. 为 reduce 与 refresh 收敛发布独立 typed stage/work；不能预知精确总量时使用 indeterminate 或算法上界；
+4. 将 finalizing 边界覆盖 summary 定稿后的 sanitize、Task context append、canonical persist/generation publish，并明确定义成功/skip/fallback/error/cancel/timeout terminal；
+5. 让 automatic、provider-context-retry、manual compact 共用同一 progress adapter 与 Activity completion helper，删除重复 stage mapping/finish 分支；
+6. 在 Runtime application 层建立窄职责 Published State Registry；
+7. 定义 family-local identity/revision/dirty/update/read contract；
+8. 让 committed capability handlers 与非 Tool Runtime fact observers 共用 Registry update/publish boundary；
+9. 在 Registry 上建立 Status snapshot family，而非另造平行缓存；
+10. 定义稳定的 Runtime Status view 与 SDK DTO，其中 compact operation progress 与 Context budget 分字段表达；
+11. 将 Context decision 映射成 Context budget view；
+12. 接入 active Main identity、运行 presentation、workspace 与 current/pending config；
+13. 对每个权威事实变化执行更新、revision、dirty publish；
+14. compact finished/failed/cancelled/timed-out/skipped/reset 明确更新 operation progress、Activity terminal 与 budget；
+15. 不把 Lifecycle/Activity/Task aggregate 复制成第二真相；
+16. Task 完整 state 也使用相同 Registry 版本/立即发布基础设施，但保留独立 DTO、revision epoch 与 SDK event。
 
-**验收：** Runtime 侧 Task 4 测试转绿；Registry 无业务决策权；Task 与 Status 均通过同一发布基础设施，但 capability 状态与 revision 不互相污染。
+**验收：** Runtime 侧 Task 4 测试转绿；任何 chunk 调度都不会推进 completed；并发不破坏摘要顺序；所有 compact 路径可靠收敛到 typed finalizing/terminal；Registry 无业务决策权；Task、Status 与 Compact presentation 共享发布基础设施但 family 状态与 revision 不互相污染。
 
 ### Task 6：实现心跳与 Live/Resume 交付
 
@@ -453,15 +538,17 @@ synthetic denied/error/cancelled/no-op 没有 committed change，不查询、不
 
 **步骤：**
 
-1. `map_stream_event` 无损映射 Status snapshot；
+1. `map_stream_event` 无损映射 Status snapshot 与 compact operation progress；
 2. 更新 SDK wire schema/golden；
-3. SDK ACL 映射到 typed `TuiRuntimeEvent`；
-4. reducer/model 按 `(session_id, revision)` 原子替换；
+3. SDK ACL 映射到 typed `TuiRuntimeEvent`，不得把 operation stage 压扁成字符串；
+4. reducer/model 按 `(session_id, revision)` 原子替换 Status family，并按 operation identity/revision 更新 Compact presentation；
 5. Status assembler 只读取 snapshot，不读取配置 reader、不重算 Context budget；
-6. renderer 展示 Runtime 提供的 context percentage/threshold；
-7. 退役旧 `last_input_tokens / context_size` 业务推导和无生产消费者的镜像字段。
+6. LiveStatus assembler 只选择同一 active Main run 中最新的非 terminal compact operation，stale observation 时不回退展示旧进度；
+7. renderer 分别展示 Runtime 提供的 context percentage/threshold 与 stage-weighted operation progress；
+8. 将 presentation weights 收口为单一策略，generating/mapping/reducing/refreshing/finalizing 各有稳定区间，indeterminate stage 不伪造完成比例；
+9. 退役旧 `last_input_tokens / context_size` 业务推导、旧三阶段 chunk 调度计数假设和无生产消费者的镜像字段。
 
-**验收：** Runtime → SDK → ACL → reducer → assembler → render 每层均有相邻测试，最终 TUI 场景通过。
+**验收：** Runtime → SDK → ACL → reducer → assembler → render 每层均有相邻测试；最终 TUI 场景证明真实 map 完成前不会到达 mapping 上限、reduce/refresh 可见、terminal 后进度消失，且 context 指标与 operation progress 不混淆。
 
 ### Task 8：更新架构守卫与权威设计文档
 
@@ -481,6 +568,11 @@ synthetic denied/error/cancelled/no-op 没有 committed change，不查询、不
    - heartbeat tick 临时跨 BC 拼装状态而非读取 Registry；
    - TUI 恢复 `last_input_tokens / context_size` compact 指标；
    - Status snapshot 驱动 lifecycle terminal 或 compact decision；
+   - Context compact producer 在 future 创建、排队或开始执行时递增 completed；
+   - compact operation stage 在 Runtime/SDK/TUI 任一层压扁为字符串或丢失 work semantics；
+   - TUI 用 Context utilization 或 compact threshold 推断 operation progress；
+   - automatic/provider-retry/manual compact 复制 progress stage mapping 或 Activity terminal cleanup；
+   - terminal compact Activity 继续进入 LiveStatus progress selection；
    - heartbeat 增加业务 revision。
 
 **验收：** 正例通过，deliberate negative probe 能被 guard 阻断，文档与 enum/mapper/source 一致。
@@ -502,9 +594,11 @@ git diff --check
 另执行：
 
 - Runtime Task ordinary/streaming/approval/cancellation 场景；
-- Context compact decision 单元测试；
+- Context compact decision 与 committed-work progress 单元测试；
+- Context map/reduce/refresh 并发完成计数、摘要顺序和所有 terminal 路径测试；
+- Runtime compact Activity identity/revision/finalizing/terminal 测试；
 - SDK mapper/wire contract；
-- TUI status P0/P1 场景；
+- TUI status 与 LiveStatus compact progress P0/P1 场景；
 - fake-clock heartbeat 测试；
 - 必要的 live/resume 场景。
 
@@ -518,14 +612,14 @@ git diff --check
 
 ## 8. 分层测试矩阵
 
-| 层级 | Task 实时状态 | Status 快照/心跳 |
-|---|---|---|
-| L0 单元 | change/fact、单 query、串行顺序、no-op | budget DTO、revision、heartbeat sequence |
-| L1 reducer/component | observer、round ordering | snapshot owner、dirty publish、reset |
-| L2 contract | Tools metadata 不泄漏；SDK 完整 Task DTO | Runtime/SDK/TUI DTO 无损、wire schema |
-| L3 scenario | 7 次 TaskCreate、混合 tools、approval、streaming | provider actual、fallback、compact/reset/resume |
-| L4 TUI | 每个 revision 立即替换并重绘 | status 原子替换、stale/duplicate/session epoch |
-| L5 system | 完整 Run Tool round 与历史顺序 | heartbeat lifecycle、Live/Resume、真实 compact 展示 |
+| 层级 | Task 实时状态 | Status 快照/心跳 | Compact committed-work progress |
+|---|---|---|---|
+| L0 单元 | change/fact、单 query、串行顺序、no-op | budget DTO、revision、heartbeat sequence | completed-work 语义、indexed chunk ordering、stage monotonicity、terminal matrix |
+| L1 reducer/component | observer、round ordering | snapshot owner、dirty publish、reset | Context producer、Runtime adapter/Activity update、TUI operation model |
+| L2 contract | Tools metadata 不泄漏；SDK 完整 Task DTO | Runtime/SDK/TUI DTO 无损、wire schema | stage/work/identity/revision 在 Context→Runtime→SDK→TUI 无损 |
+| L3 scenario | 7 次 TaskCreate、混合 tools、approval、streaming | provider actual、fallback、compact/reset/resume | automatic/provider-retry/manual；map/reduce/refresh；fallback/cancel/timeout |
+| L4 TUI | 每个 revision 立即替换并重绘 | status 原子替换、stale/duplicate/session epoch | 阶段权重单调、indeterminate、terminal 消失、stale 不回退旧 observation |
+| L5 system | 完整 Run Tool round 与历史顺序 | heartbeat lifecycle、Live/Resume、真实 compact 展示 | 慢 chunk/reduce/refresh 下不提前到阶段上限，最终 Finalizing→terminal |
 
 ## 9. 不变量清单
 
@@ -557,6 +651,18 @@ git diff --check
 - provider order 与 LLM batch materialization 不变；
 - Resume 只发布一份恢复后的完整 Task state。
 
+### Compact operation progress
+
+- `completed` 只表示对应工作已完成且结果已被当前 operation 接纳；
+- 创建 future、排队、获取 semaphore 或开始执行不增加 completed；
+- 并发 chunk 可按完成顺序推进计数，但摘要结果必须按原 chunk index 恢复确定性顺序；
+- generating、mapping、reducing、refreshing、finalizing 是 typed operation stage，不与 Context utilization 或 auto-compact threshold 混用；
+- 未知总量显式 indeterminate，算法上界显式 bounded，禁止伪造精确 total；
+- operation identity 与 revision 在 Context→Runtime→SDK→TUI 无损；
+- automatic、provider-context-retry、manual 路径共享 stage mapping 与 Activity terminal cleanup；
+- success/skip/fallback/error/cancel/timeout 每条路径都必须结束 Running/Waiting compact Activity；
+- TUI presentation ratio 单调，terminal 后不再展示，stale observation 不回退旧进度。
+
 ### Status
 
 - snapshot 是 presentation read model，不是终态或 compact authority；
@@ -572,9 +678,10 @@ git diff --check
 ### 最小补丁
 
 - Task：在现有 `execute_non_agent` 后立即发一次状态；
-- Status：把 TUI 公式改为 `(input + output) / context_size`，compact 后清零。
+- Status：把 TUI 公式改为 `(input + output) / context_size`，compact 后清零；
+- Compact：仅把 chunk progress emit 从 future 创建位置移到 `buffer_unordered` completion loop。
 
-优点是改动小；缺点是漏 streaming/approval、revision/state 仍可能错配，且 Status 仍不等于 Context 决策口径。只适合作为短期止血，不应作为最终实现。
+优点是改动小；缺点是漏 streaming/approval、revision/state 仍可能错配，Status 仍不等于 Context 决策口径；Compact 虽不再把调度当完成，但 reduce/refresh 仍无结构化进度，UI 仍会在 map 阶段上限长期停留。只适合作为短期止血，不应作为最终实现。
 
 ### 根因方案（本计划）
 
@@ -584,7 +691,9 @@ git diff --check
 - Runtime-owned Published State Registry；
 - Task 完整状态与 Status snapshot 在同一批次完整接入；
 - dirty immediate publish + heartbeat convergence；
-- SDK/TUI 仅原子替换完整 DTO。
+- Context-owned compact committed-work stage model，generating/map/reduce/refresh/finalizing 无损发布；
+- automatic/provider-retry/manual compact 共用 progress/terminal contract；
+- SDK/TUI 仅原子替换完整 DTO，并将 Context budget 与 operation progress 分离展示。
 
 成本更高，涉及 Tools/Runtime/Context/Config/Project/SDK/TUI/guards/docs；优势是 ordinary、streaming、approval、Resume、非 Tool Runtime facts 和未来新增 committed capability 共享稳定边界，避免同类延迟和语义漂移复发。本计划不接受“Task 专用回调 + Status 临时心跳”的部分实现。
 
@@ -599,6 +708,10 @@ git diff --check
 - LLM Tool Results 仍按原始顺序整批提交；
 - Published State Registry 为 Task 和 Status 提供独立 versioned full-state delivery；
 - Status Line context 指标与 Runtime compact decision 同源；
+- Compact map completed 只在 chunk 完成后推进，调度/入队不推进；
+- generating/reduce/refresh/finalizing 使用 typed stage/work，并在 Runtime→SDK→TUI 全链路无损；
+- automatic、provider-context-retry、manual compact 的 success/skip/fallback/error/cancel/timeout 均可靠结束 Activity；
+- TUI 明确区分 Context utilization、auto-compact threshold 与 stage-weighted operation progress，不再长期停在由提前 `N/N` 造成的 85%；
 - 当前/待生效配置、workspace 及运行状态由完整快照一致展示；
 - 业务变化立即发布，心跳能幂等重发并在退出时停止；
 - Live/Resume/new Session/reset 行为一致；

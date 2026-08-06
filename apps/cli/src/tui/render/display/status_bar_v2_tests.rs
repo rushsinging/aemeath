@@ -52,7 +52,7 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
             session_id: Some("019-session".to_string()),
             input_tokens: 12_400,
             output_tokens: 1_800,
-            last_input_tokens: 74_000,
+            context_usage_permille: Some(370),
             api_calls: 7,
             context_size: 200_000,
             tps: 42.0,

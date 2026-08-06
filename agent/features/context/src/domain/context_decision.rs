@@ -69,6 +69,8 @@ pub(crate) fn calculate(
         urgency,
         decision_token_count,
         threshold,
+        context_size: request.context_size,
+        effective_window: effective,
         reason,
     }
 }

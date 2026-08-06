@@ -2,8 +2,9 @@ use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
-    TuiActivityTiming, TuiCompactStage, TuiHookPoint, TuiInteractionKind, TuiModelStreamState,
-    TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent, UiActivityId,
+    TuiActivityTiming, TuiCompactStage, TuiCompactWork, TuiHookPoint, TuiInteractionKind,
+    TuiModelStreamState, TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    UiActivityId,
 };
 use crate::tui::model::conversation::interaction::UiRunId;
 
@@ -190,9 +191,11 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
             kind: TuiActivityKind::Compaction,
             state: TuiActivityState::Running,
             detail: TuiActivityDetail::Compact {
-                stage: TuiCompactStage::Summarizing,
-                current: Some(37),
-                total: Some(100),
+                stage: TuiCompactStage::Mapping,
+                work: TuiCompactWork::Determinate {
+                    completed: 37,
+                    total: 100,
+                },
             },
             audience: TuiActivityAudience::Operational,
             total_elapsed_ms: 5_000,

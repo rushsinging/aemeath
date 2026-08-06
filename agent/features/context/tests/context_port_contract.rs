@@ -23,6 +23,8 @@ fn decision() -> CompactionDecision {
         urgency: Urgency::None,
         decision_token_count: 12,
         threshold: 100,
+        context_size: 200_000,
+        effective_window: 180_000,
         reason: DecisionReason::HeuristicFallback,
     }
 }

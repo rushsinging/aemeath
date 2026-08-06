@@ -87,6 +87,8 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             urgency: Urgency::Must,
             decision_token_count: 0,
             threshold: 0,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
     }
@@ -526,8 +528,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
@@ -567,8 +568,7 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
@@ -603,8 +603,7 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_err(),

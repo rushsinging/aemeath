@@ -39,7 +39,6 @@ impl App {
             | UiEvent::CompactRollback { .. }
             | UiEvent::CompactFinished { .. }
             | UiEvent::GraphPhaseChanged { .. }
-            | UiEvent::CompactProgress { .. }
             | UiEvent::UserMessagesWithdrawn(_)
             | UiEvent::SessionReset
             | UiEvent::ApiError { .. } => {

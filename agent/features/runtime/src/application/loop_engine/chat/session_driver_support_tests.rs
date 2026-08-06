@@ -746,7 +746,6 @@ impl RecordingSink {
             } => format!("SessionMessageStateChanged:{message_count}:{revision}"),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
-            RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
             RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),

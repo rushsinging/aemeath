@@ -82,7 +82,13 @@ RuntimeLifecycleEvent ──▶ SDK ChatEvent ──▶ TUI lifecycle / terminal
 
 Activity 更新失败或 revision gap 不得改变 domain terminal；TUI 应等待 snapshot 修复 activity mirror，而不是从 activity 反推出 terminal。
 
-## 4. RuntimeActivityEvent 与 RuntimeStreamEvent 全链路矩阵
+## 4. RuntimeActivityEvent、Published State 与 RuntimeStreamEvent 全链路矩阵
+
+Runtime 的 committed side effect 只能从工具执行返回的 typed committed fact 触发。`CommittedSideEffectDispatcher` 把 fact 路由给 capability handler；Task handler据此读取并发布 revisioned `TaskStateChanged` 完整状态。Tool 名称、成功文本、round materialization 与 Activity 都不是 mutation authority。
+
+`PublishedStateRegistry` 是会话级、跨 Run 复用的 full-state delivery registry。Context decision 更新 revisioned `RuntimeStatusChanged`；heartbeat 只增加 `heartbeat_sequence` 并重发 registry 中已有完整状态，NEVER 增加业务 revision。TUI 按 `(session_id, revision, heartbeat_sequence)` 原子替换并拒绝 stale 状态；context percentage 只读 Runtime 提供的 `usage_permille`。
+
+Compact operation progress 通过 typed Activity detail 传输：stage 为 `Preparing/Generating/Mapping/Reducing/Refreshing/Finalizing`，work 为 `Indeterminate` 或 `Determinate { completed, total }`。旧 stringly `CompactProgress` stream/event/model 已退役。
 
 Activity 不属于内容流。`RuntimeActivityEvent` 与 `RuntimeStreamEvent` 均定义于 `agent/features/runtime/src/application/loop_engine/chat/events.rs`，但分别经 `map_activity_event` 与 `map_stream_event` 发布。`ChatEventSink::send_activity_event` 保持 Activity 在 Runtime 内部的独立类型边界；SDK 为传输便利才将三类事件汇合为 `ChatEvent`。
 

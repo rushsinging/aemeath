@@ -3,7 +3,7 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStage};
+use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStage, CompactWork};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
@@ -38,19 +38,19 @@ fn placeholder_tool_results(messages: &mut [Message]) {
 /// （#1500 上移，adapter 层不再重复定义）。
 /// 发出进度回调的辅助函数（`progress` 为 `None` 时 no-op）。
 fn emit_progress(progress: Option<&dyn CompactProgressFn>, stage: CompactStage) {
-    if let Some(p) = progress {
-        p.emit(stage, None, None);
+    if let Some(progress) = progress {
+        progress.emit(stage, CompactWork::Indeterminate);
     }
 }
 
-fn emit_progress_chunk(
+fn emit_progress_completed(
     progress: Option<&dyn CompactProgressFn>,
     stage: CompactStage,
-    current: usize,
+    completed: usize,
     total: usize,
 ) {
-    if let Some(p) = progress {
-        p.emit(stage, Some(current), Some(total));
+    if let Some(progress) = progress {
+        progress.emit(stage, CompactWork::Determinate { completed, total });
     }
 }
 
@@ -597,7 +597,7 @@ pub async fn compact_messages_with_llm(
                 )
                 .await
             } else {
-                emit_progress(progress, CompactStage::Summarizing);
+                emit_progress(progress, CompactStage::Generating);
                 llm_compact(
                     generator,
                     early_messages,
@@ -734,26 +734,40 @@ async fn compact_messages_map_reduce(
         estimate_messages_tokens(early_messages),
     );
 
-    let mut sub_summaries = Vec::with_capacity(total_chunks);
     let futures = chunks
         .iter()
         .enumerate()
-        .map(|(i, chunk)| {
-            emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
-            let previous_for_chunk = (i == 0).then_some(previous_summary).flatten();
-            llm_compact(generator, chunk, previous_for_chunk, context_size, cancel)
+        .map(|(chunk_index, chunk)| {
+            let previous_for_chunk = (chunk_index == 0).then_some(previous_summary).flatten();
+            async move {
+                let summary =
+                    llm_compact(generator, chunk, previous_for_chunk, context_size, cancel).await?;
+                Ok::<_, String>((chunk_index, summary))
+            }
         })
         .collect::<Vec<_>>();
     let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
-    let mut index = 0usize;
+    let mut indexed_summaries = Vec::with_capacity(total_chunks);
+    let mut completed_chunks = 0usize;
     while let Some(summary) = in_flight.next().await {
-        sub_summaries.push(summary?);
-        index += 1;
+        indexed_summaries.push(summary?);
+        completed_chunks += 1;
+        emit_progress_completed(
+            progress,
+            CompactStage::Mapping,
+            completed_chunks,
+            total_chunks,
+        );
         log::debug!(
             target: crate::LOG_TARGET,
-            "[compact] chunk {index}/{total_chunks} 摘要完成",
+            "[compact] chunk {completed_chunks}/{total_chunks} 摘要完成",
         );
     }
+    indexed_summaries.sort_by_key(|(chunk_index, _)| *chunk_index);
+    let sub_summaries = indexed_summaries
+        .into_iter()
+        .map(|(_, summary)| summary)
+        .collect::<Vec<_>>();
 
     // 只有 1 块时无需 reduce
     if sub_summaries.len() <= 1 {
@@ -761,6 +775,7 @@ async fn compact_messages_map_reduce(
     }
 
     // reduce: 合并子摘要，调用 LLM 生成连贯最终摘要
+    emit_progress(progress, CompactStage::Reducing);
     let combined = sub_summaries
         .iter()
         .enumerate()
@@ -789,8 +804,20 @@ async fn compact_messages_map_reduce(
         if crate::domain::token_budget::estimate_tokens(&final_summary) <= budget {
             break;
         }
+        emit_progress_completed(
+            progress,
+            CompactStage::Refreshing,
+            round - 1,
+            MAX_REDUCE_REFRESH_ROUNDS,
+        );
         let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
         let refreshed = llm_refresh(generator, &final_summary, budget, cancel).await?;
+        emit_progress_completed(
+            progress,
+            CompactStage::Refreshing,
+            round,
+            MAX_REDUCE_REFRESH_ROUNDS,
+        );
         let tokens_after = crate::domain::token_budget::estimate_tokens(&refreshed);
         log::info!(
             target: crate::LOG_TARGET,

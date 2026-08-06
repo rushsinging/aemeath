@@ -722,12 +722,6 @@ pub enum ChatEvent {
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
-    /// Compact 进度通知。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     /// 模型切换完成通知（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {
         result: crate::ModelSwitchResult,
@@ -783,6 +777,9 @@ pub enum ChatEvent {
     },
     TaskStateChanged {
         state: Box<crate::TaskStateView>,
+    },
+    RuntimeStatusChanged {
+        status: Box<crate::RuntimeStatusView>,
     },
     /// #567：成本信息回传。
     CostUpdate {

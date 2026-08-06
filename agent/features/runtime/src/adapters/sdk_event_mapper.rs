@@ -569,15 +569,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesWithdrawn {
             texts,
         } => ChatEvent::UserMessagesWithdrawn { texts },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => ChatEvent::CompactProgress {
-            stage: stage.as_str().to_string(),
-            current: current.map(|n| n as u32),
-            total: total.map(|n| n as u32),
-        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
@@ -647,6 +638,9 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::TaskStateChanged { state } => {
             ChatEvent::TaskStateChanged { state }
         }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::RuntimeStatusChanged {
+            status,
+        } => ChatEvent::RuntimeStatusChanged { status },
         crate::application::loop_engine::chat::RuntimeStreamEvent::CostUpdate { cost } => {
             ChatEvent::CostUpdate { cost }
         }

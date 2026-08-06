@@ -1,8 +1,8 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
-    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiInteractionKind,
-    TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiCompactWork, TuiHookPoint,
+    TuiInteractionKind, TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
 };
 
 #[test]
@@ -222,8 +222,10 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
             sdk::ActivityStateView::Running,
             sdk::ActivityDetailView::Compact {
                 stage: sdk::CompactStageView::Finalizing,
-                current: Some(2),
-                total: Some(3),
+                work: sdk::CompactWorkView::Determinate {
+                    completed: 2,
+                    total: 3,
+                },
             },
             sdk::ActivityAudienceView::Operational,
         ),
@@ -257,7 +259,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
                 && matches!(snapshot.activities[5].detail, TuiActivityDetail::ChildRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
                 && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
-                && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, current: Some(2), total: Some(3) })
+                && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, work: TuiCompactWork::Determinate { completed: 2, total: 3 } })
     ));
 }
 

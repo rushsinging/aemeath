@@ -161,6 +161,12 @@ pub(crate) fn make_agent(
         agent_semaphore,
         workspace_persist: workspace.persist(),
         tool_result_materializer,
+        committed_side_effects:
+            crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                runtime_context,
+                session_id.to_string(),
+                workspace.read().current_workspace_root(),
+            ),
         runtime_cancellation: cancel.clone(),
     }
 }
@@ -314,27 +320,11 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
         }
     }
 
-    async fn results_materialized(
-        &mut self,
-        execution: &RunExecutionState,
-        has_task_mutation: bool,
-    ) {
+    async fn results_materialized(&mut self, execution: &RunExecutionState) {
         self.runtime_context
             .event_sink()
             .send_message_state_changed(execution.messages_len())
             .await;
-        if has_task_mutation {
-            let state = crate::application::loop_engine::chat::task_snapshot::build_task_state_view(
-                &**self.runtime_context.task_ref(),
-                self.session_id.as_str(),
-            );
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::TaskStateChanged {
-                    state: Box::new(state),
-                })
-                .await;
-        }
     }
 
     async fn round_finished(

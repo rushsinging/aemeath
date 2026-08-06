@@ -286,16 +286,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             texts.len()
         ),
-        sdk::ChatEvent::CompactProgress {
-            stage: _,
-            current,
-            total,
-        } => crate::tui::log_trace!(
-            "{} compact_progress current={:?} total={:?}",
-            stage,
-            current,
-            total,
-        ),
         sdk::ChatEvent::ModelSwitched { result } => crate::tui::log_trace!(
             "{} model_switched display={} context_window={} reasoning={:?}",
             stage,
@@ -367,7 +357,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
-         | sdk::ChatEvent::CostUpdate { .. }
+         | sdk::ChatEvent::RuntimeStatusChanged { .. }
+        | sdk::ChatEvent::CostUpdate { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }
 }
 

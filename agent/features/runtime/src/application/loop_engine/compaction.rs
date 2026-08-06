@@ -1,3 +1,4 @@
+use crate::application::loop_engine::chat::ChatEventSink;
 use async_trait::async_trait;
 
 use crate::application::context::coordination::{
@@ -13,22 +14,26 @@ use crate::ports::CompactOutcome;
 pub(crate) struct CompactProgressAdapter(pub(crate) std::sync::Arc<dyn CompactProgressView>);
 
 impl context::compact::CompactProgressFn for CompactProgressAdapter {
-    fn emit(
-        &self,
-        stage: context::compact::CompactStage,
-        current: Option<usize>,
-        total: Option<usize>,
-    ) {
+    fn emit(&self, stage: context::compact::CompactStage, work: context::compact::CompactWork) {
         let view_stage = match stage {
             context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
-            context::compact::CompactStage::Summarizing => sdk::CompactStageView::Summarizing,
+            context::compact::CompactStage::Generating => sdk::CompactStageView::Generating,
+            context::compact::CompactStage::Mapping => sdk::CompactStageView::Mapping,
+            context::compact::CompactStage::Reducing => sdk::CompactStageView::Reducing,
+            context::compact::CompactStage::Refreshing => sdk::CompactStageView::Refreshing,
             context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
         };
-        self.0.emit(
-            view_stage,
-            current.and_then(|value| u32::try_from(value).ok()),
-            total.and_then(|value| u32::try_from(value).ok()),
-        );
+        let view_work = match work {
+            context::compact::CompactWork::Indeterminate => sdk::CompactWorkView::Indeterminate,
+            context::compact::CompactWork::Determinate { completed, total } => {
+                let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
+                else {
+                    return;
+                };
+                sdk::CompactWorkView::Determinate { completed, total }
+            }
+        };
+        self.0.emit(view_stage, view_work);
     }
 }
 
@@ -51,6 +56,9 @@ impl CompactionObserver for NoopCompactionObserver {}
 pub(crate) struct CompactionCoordinator {
     context: ContextCoordinator,
     usage: RunUsageTracker,
+    published_state: crate::application::published_state::PublishedStateRegistry,
+    event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
+    session_id: String,
 }
 
 impl CompactionCoordinator {
@@ -58,6 +66,9 @@ impl CompactionCoordinator {
         Self {
             context: ContextCoordinator::new(runtime_context.context()),
             usage: runtime_context.usage(),
+            published_state: runtime_context.published_state(),
+            event_sink: runtime_context.event_sink(),
+            session_id: runtime_context.skill_load_session_id().to_string(),
         }
     }
 
@@ -73,13 +84,23 @@ impl CompactionCoordinator {
             .build_window(request)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let needed = self
+        let decision = self
             .context
-            .needs_compaction(request)
+            .compaction_decision(request)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let status = self
+            .published_state
+            .update_context_budget(self.session_id.clone(), &decision);
+        self.event_sink
+            .send_event(
+                crate::application::loop_engine::chat::RuntimeStreamEvent::RuntimeStatusChanged {
+                    status: Box::new(status),
+                },
+            )
+            .await;
         *execution.context_window_mut() = Some(window);
-        Ok(needed)
+        Ok(decision.needed)
     }
 
     pub(crate) async fn compact<O>(

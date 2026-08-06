@@ -67,6 +67,8 @@ pub struct Agent {
     pub(crate) session_id: context::domain::SessionId,
     pub(crate) tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
+    pub(crate) committed_side_effects:
+        crate::application::loop_engine::chat::committed_side_effect::CommittedSideEffectDispatcher,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -127,6 +129,7 @@ impl Agent {
             session_id: context::domain::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
+            committed_side_effects: Default::default(),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),

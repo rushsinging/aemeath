@@ -566,15 +566,15 @@ pub trait StepPersistencePort: Send {
 /// Loop Engine 提供实现（转发到 Activity 观测），Runtime 透传给 Context。
 /// 闭包形式可自动实现（F: Fn + Send + Sync）。
 pub trait CompactProgressView: Send + Sync {
-    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>);
+    fn emit(&self, stage: sdk::CompactStageView, work: sdk::CompactWorkView);
 }
 
 impl<F> CompactProgressView for F
 where
-    F: Fn(sdk::CompactStageView, Option<u32>, Option<u32>) + Send + Sync,
+    F: Fn(sdk::CompactStageView, sdk::CompactWorkView) + Send + Sync,
 {
-    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>) {
-        self(stage, current, total)
+    fn emit(&self, stage: sdk::CompactStageView, work: sdk::CompactWorkView) {
+        self(stage, work)
     }
 }
 
