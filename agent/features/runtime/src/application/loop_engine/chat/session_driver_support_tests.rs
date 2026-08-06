@@ -264,9 +264,10 @@ impl ::tools::AgentRunner for NoopAgentRunner {
 /// #1385: Hook port that delegates to a real dispatcher with empty config.
 fn noop_hook_port() -> Arc<dyn hook::HookPort> {
     Arc::new(
-        hook::build_dispatcher(&HooksConfig {
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
             events: HashMap::new(),
-        })
+            ..HooksConfig::default()
+        }, ..share::config::Config::default() }))
         .expect("empty hook dispatcher"),
     )
 }

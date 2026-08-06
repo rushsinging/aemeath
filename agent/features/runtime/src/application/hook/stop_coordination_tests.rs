@@ -21,7 +21,18 @@ fn continue_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
+                },
+                ..share::config::Config::default()
+            },
+        ))
+        .unwrap(),
+    )
 }
 
 /// Helper: build a dispatcher that always blocks (exit code 2).
@@ -35,7 +46,18 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
+                },
+                ..share::config::Config::default()
+            },
+        ))
+        .unwrap(),
+    )
 }
 
 #[tokio::test]

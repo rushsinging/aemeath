@@ -570,8 +570,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let active_run =
         Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::hooks::HooksConfig::default())
-            .expect("test hook dispatcher"),
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ))
+        .expect("test hook dispatcher"),
     );
     let initial_binding = crate::ports::ProviderFactory::build(
         &crate::ports::provider_port::fake::FakeProviderFactory,

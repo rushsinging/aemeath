@@ -695,8 +695,18 @@ mod tests {
                 timeout: 5,
             }],
         );
-        let hook_port: Arc<dyn HookPort> =
-            Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap());
+        let hook_port: Arc<dyn HookPort> = Arc::new(
+            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+                share::config::Config {
+                    hooks: HooksConfig {
+                        events,
+                        ..HooksConfig::default()
+                    },
+                    ..share::config::Config::default()
+                },
+            ))
+            .unwrap(),
+        );
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);

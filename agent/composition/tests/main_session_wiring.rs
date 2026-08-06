@@ -421,8 +421,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     ));
     let active_run = Arc::new(runtime::ActiveRunRegistry::default());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::hooks::HooksConfig::default())
-            .expect("test hook dispatcher"),
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ))
+        .expect("test hook dispatcher"),
     );
 
     let provider_factory = composition::provider::provider_factory();

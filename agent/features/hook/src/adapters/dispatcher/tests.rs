@@ -415,7 +415,26 @@ async fn updated_input_replaces_user_prompt_at_payload_location() {
 // 6. ExecutionFailed 各类最多重试 3 次
 // ════════════════════════════════════════════════════════════
 
-/// 参数化：每种协议级故障连续发生时，最多重试 MAX_ATTEMPTS(3) 次。
+#[tokio::test]
+async fn configured_execution_attempt_limit_controls_failure_retries() {
+    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::fault(ExecutionFault::Spawn),
+    ]);
+    let dispatcher =
+        Dispatcher::with_scripted_and_attempt_limit(subscriptions, scripted.clone(), 2);
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(scripted.call_count(), 2);
+    assert_eq!(outcome.executions.len(), 2);
+}
+
+/// 参数化：每种协议级故障连续发生时，最多执行默认策略的 3 次尝试。
 async fn assert_fault_retries_three_times(kind: ExecutionFault) {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
