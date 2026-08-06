@@ -860,6 +860,7 @@ fn hook_notice(notice: sdk::HookNoticeView) -> TuiHookNotice {
 }
 
 pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
+    let metadata_present = value.metadata.is_some();
     let (source, hook_notice, skill_request) = match value.metadata {
         Some(metadata) => (
             match metadata.source {
@@ -879,6 +880,22 @@ pub(crate) fn chat_message(value: sdk::ChatMessage) -> TuiChatMessage {
         ),
         None => (TuiMessageSource::User, None, None),
     };
+    crate::tui::log_debug!(
+        "skill_request boundary=sdk_to_tui source={:?} role={} content_blocks={} content_text_len={} metadata_present={} skill_metadata_present={} input_id_present={}",
+        source,
+        value.role,
+        value.content.len(),
+        value
+            .content
+            .iter()
+            .map(|block| match block {
+                sdk::ContentBlock::Text { text } => text.len(),
+                _ => 0,
+            })
+            .sum::<usize>(),
+        metadata_present,        skill_request.is_some(),
+        value.input_id.is_some()
+    );
     TuiChatMessage {
         role: value.role,
         content: value.content.into_iter().map(content_block).collect(),
@@ -951,11 +968,13 @@ fn child_run_activity(value: sdk::ChildRunActivityEventView) -> TuiChildRunActiv
             }
             sdk::ChildRunActivityKindView::ToolResult {
                 tool_call_id,
+                tool_name,
                 output,
                 content,
                 is_error,
             } => TuiChildRunActivityKind::ToolResult {
                 tool_call_id: tool_call_id.as_str().to_string(),
+                tool_name,
                 output,
                 content,
                 is_error,

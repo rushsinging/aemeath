@@ -5,7 +5,7 @@ use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStream
 use crate::application::loop_engine::chat::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
-use share::message::Message;
+use crate::application::loop_engine::AcceptedUserInput;
 use share::reasoning::ReasoningLevel;
 
 fn requested_level_for_thinking(
@@ -45,8 +45,7 @@ where
 pub(crate) enum IdleResult {
     Resumed {
         segment_id: String,
-        adopted_messages: Vec<(sdk::InputId, Message)>,
-        adopted_events: Vec<sdk::ChatInputEvent>,
+        accepted_inputs: Vec<AcceptedUserInput>,
     },
     ResetRequested,
     Shutdown,
@@ -71,8 +70,7 @@ async fn await_idle_input<I: InputEventDrainPort>(
             pending.push(event);
             IdleResult::Resumed {
                 segment_id: String::new(),
-                adopted_messages: Vec::new(),
-                adopted_events: Vec::new(),
+                accepted_inputs: Vec::new(),
             }
         }
         None => IdleResult::Shutdown,
@@ -103,8 +101,7 @@ where
                 if gate.appended_user_messages > 0 {
                     return IdleResult::Resumed {
                         segment_id,
-                        adopted_messages: gate.adopted_messages,
-                        adopted_events: gate.adopted_events,
+                        accepted_inputs: gate.accepted_inputs,
                     };
                 }
             }

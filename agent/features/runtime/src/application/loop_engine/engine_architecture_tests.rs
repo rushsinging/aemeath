@@ -701,6 +701,7 @@ impl Default for ScriptedScenario {
                 text: "test-input".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));

@@ -28,11 +28,6 @@ pub(crate) struct ResumedHistoryStep {
     pub(crate) duration_ms: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TypedJsonHistorySource {
-    SkillRequest,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ResumedHistoryItemKind {
     UserMessage {
@@ -53,11 +48,6 @@ pub(crate) enum ResumedHistoryItemKind {
     ToolResult {
         message_index: usize,
         block_index: usize,
-    },
-    TypedJson {
-        message_index: usize,
-        source: TypedJsonHistorySource,
-        text: String,
     },
     HookNotice {
         title: String,
@@ -560,16 +550,11 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                     .as_ref()
                     .and_then(|metadata| metadata.skill_request.as_ref())
                 {
-                    let text = serde_json::to_string_pretty(payload).unwrap_or_default();
                     items.push(ResumedHistoryItem {
                         id: format!("history-{step_index}-message-{message_index}-skill-request"),
-                        estimated_lines: text.lines().count().max(1).saturating_add(1),
+                        estimated_lines: payload.raw_input.lines().count().max(1).saturating_add(2),
                         step_index,
-                        kind: ResumedHistoryItemKind::TypedJson {
-                            message_index,
-                            source: TypedJsonHistorySource::SkillRequest,
-                            text,
-                        },
+                        kind: ResumedHistoryItemKind::UserMessage { message_index },
                     });
                 }
             }

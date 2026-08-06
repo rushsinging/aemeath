@@ -1,4 +1,4 @@
-use super::sdk_event_mapper::map_stream_event;
+use super::sdk_event_mapper::{map_stream_event, project_agent_progress_event};
 use crate::application::loop_engine::chat::{
     RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
@@ -152,6 +152,64 @@ fn sdk_event_mapper_child_run_activity_preserves_identity() {
         }
         other => panic!("expected ChildRunActivity, got {other:?}"),
     }
+}
+
+#[test]
+fn sdk_child_run_tool_result_preserves_tool_name() {
+    let event = RuntimeStreamEvent::ChildRunActivity(tools::ChildRunActivityEvent {
+        identity: tools::ChildRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        },
+        sequence: 4,
+        kind: tools::ChildRunActivityKind::ToolResult {
+            tool_call_id: "skill-call".to_string(),
+            tool_name: "Skill".to_string(),
+            output: "SKILL_BODY_SENTINEL".to_string(),
+            content: serde_json::json!({"name": "using-superpowers"}),
+            is_error: false,
+        },
+    });
+
+    let sdk::ChatEvent::ChildRunActivity { event } = map_stream_event(event) else {
+        panic!("expected ChildRunActivity");
+    };
+    assert!(matches!(
+        event.kind,
+        sdk::ChildRunActivityKindView::ToolResult {
+            ref tool_name,
+            ref output,
+            ..
+        } if tool_name == "Skill" && output == "SKILL_BODY_SENTINEL"
+    ));
+}
+
+#[test]
+fn legacy_agent_progress_drops_tool_result_body() {
+    let projected = project_agent_progress_event(tools::AgentProgressEvent {
+        source_context: Some(tools::AgentProgressSourceContext::new(
+            "agent-child-a",
+            "run-child-a",
+        )),
+        sequence: 5,
+        kind: tools::AgentProgressKind::ToolResult {
+            tool_call_id: "skill-call".to_string(),
+            tool_name: "Skill".to_string(),
+            output: "SKILL_BODY_SENTINEL".to_string(),
+            content: serde_json::json!({"name": "using-superpowers"}),
+            is_error: false,
+        },
+    });
+
+    assert!(matches!(
+        projected.kind,
+        sdk::AgentProgressKindView::ToolOutput {
+            ref tool_name,
+            ref text,
+        } if tool_name == "Skill" && text.is_empty()
+    ));
 }
 
 #[test]

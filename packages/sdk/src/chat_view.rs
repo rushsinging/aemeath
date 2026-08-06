@@ -89,6 +89,7 @@ pub enum ChildRunActivityKindView {
     },
     ToolResult {
         tool_call_id: crate::ToolCallId,
+        tool_name: String,
         output: String,
         content: serde_json::Value,
         is_error: bool,
@@ -224,14 +225,23 @@ mod tests {
                 spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
             },
             sequence: 9,
-            kind: ChildRunActivityKindView::Thinking {
-                text: "分析配置".to_string(),
+            kind: ChildRunActivityKindView::ToolResult {
+                tool_call_id: crate::ToolCallId::from_legacy_or_new("skill-call"),
+                tool_name: "Skill".to_string(),
+                output: "SKILL_BODY_SENTINEL".to_string(),
+                content: serde_json::json!({"name": "using-superpowers"}),
+                is_error: false,
             },
         };
 
         let json = serde_json::to_string(&event).unwrap();
         let restored: ChildRunActivityEventView = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, event);
+        assert!(matches!(
+            restored.kind,
+            ChildRunActivityKindView::ToolResult { ref tool_name, .. }
+                if tool_name == "Skill"
+        ));
     }
 
     #[test]

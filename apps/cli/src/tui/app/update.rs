@@ -362,7 +362,20 @@ impl App {
             } => {
                 self.set_tui_skill_snapshot(revision.clone(), skills.clone(), slash_routes.clone());
             }
-            TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
+            TuiRuntimeEvent::UserMessagesAdopted { items, queued } => {
+                crate::tui::log_debug!(
+                    "skill_request boundary=tui_adopted_event items={} queued={} skill_items={} user_items={}",
+                    items.len(),
+                    queued.len(),
+                    items
+                        .iter()
+                        .filter(|item| matches!(item.source, crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest))
+                        .count(),
+                    items
+                        .iter()
+                        .filter(|item| matches!(item.source, crate::tui::adapter::runtime_view::TuiMessageSource::User))
+                        .count()
+                );
                 for item in items {
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);
@@ -373,9 +386,24 @@ impl App {
                         }
                         crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
                             if let Some(payload) = item.skill_request.as_ref() {
-                                if let Ok(text) = serde_json::to_string_pretty(payload) {
-                                    self.append_system_notice(text);
-                                }
+                                crate::tui::log_debug!(
+                                    "skill_request boundary=tui_adopted_item source=skill input_id={:?} content_blocks={} content_text_len={} metadata_present=true skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                                    item.input_id,
+                                    item.content.len(),
+                                    item.text_content().len(),
+                                    payload.skill,
+                                    payload.arguments.len(),
+                                    payload.raw_input.len(),
+                                    payload.raw_input.chars().take(120).collect::<String>()
+                                );
+                                self.append_user_echo(payload.raw_input.clone());
+                            } else {
+                                crate::tui::log_debug!(
+                                    "skill_request boundary=tui_adopted_item source=skill input_id={:?} content_blocks={} content_text_len={} metadata_present=false action=skip_echo",
+                                    item.input_id,
+                                    item.content.len(),
+                                    item.text_content().len()
+                                );
                             }
                         }
                         crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {

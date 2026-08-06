@@ -551,10 +551,8 @@ where
                               } else if gate.appended_user_messages > 0 {
                                   IdleResult::Resumed {
                                       segment_id: next_segment,
-                                      adopted_messages: gate.adopted_messages,
-                                      adopted_events: gate.adopted_events,
-                                  }
-                              } else {
+                                      accepted_inputs: gate.accepted_inputs,
+                                  }                              } else {
                                   continue;
                               }
                           } else {
@@ -567,8 +565,7 @@ where
                               .await
                           };
 
-                let (segment_id, adopted_events) = match idle_result {
-                    IdleResult::Shutdown => break 'session,
+                let (segment_id, accepted_inputs) = match idle_result {                    IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
                         let bound = match wiring.bind_main_run().await {
                             Ok(bound) => bound,
@@ -599,20 +596,16 @@ where
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
                     IdleResult::Resumed {
                         segment_id: next_segment,
-                        adopted_messages: adopted,
-                        adopted_events,
+                        accepted_inputs,
                     } => {
-                        // 新 Run 只取得本轮 adopted 输入；已提交历史由 Context backing 提供。
+                        // 新 Run 只取得本轮 accepted 输入；已提交历史由 Context backing 提供。
                         messages = initial_git_context
                             .take()
                             .into_iter()
-                            .chain(adopted.into_iter().map(|(_, message)| message))
+                            .chain(accepted_inputs.iter().map(|input| input.model_message()))
                             .collect();
-                        // #1272: seed run_input_buffer with real events (not synthetic)
-                        // to preserve InputId and images through the drain→freeze→adopt pipeline.
-                        (next_segment, adopted_events)
-                    }
-                };
+                        (next_segment, accepted_inputs)
+                    }                };
 
                 step_count += 1;
                 let run_id = ChatRunId::new_v7();
@@ -701,22 +694,20 @@ where
                         run_id: run_id.clone(),
                     };
                 let mut launch_input = input_source.clone();
-                // #1272: The idle gate consumed the user input from the channel
-                // and placed it in `messages`. Seed the run_input_buffer with                // InputId and images are preserved through drain→freeze→adopt.
-                // This ensures drain_input returns Ready (not EmptyAndSealed)
-                // on the first drain call, and freeze_step captures the correct
-                // (InputId, Message) pairs for accept_step_input's Adopted emission.
-                for event in adopted_events {
-                      if let sdk::ChatInputEvent::UserMessage { id, text, images } = &event {
-                          log::debug!(
-                              target: crate::LOG_TARGET,
-                              "[loop_debug] idle_initial seeding run_input_buffer id={} text_len={} image_count={}",
-                              id, text.len(), images.len()
-                          );
-                      }
-                      input_source.run_input_buffer.with_lock(|buffer| buffer.push(event));
-                  }
-                // #1280: Main Run creation, ActiveRun registration, shared
+                // The idle gate consumed and typed the initial user input.
+                // Seed the Run buffer with that canonical input exactly once;
+                // freeze/adoption derive from the same object without rebuilding metadata.
+                for input in accepted_inputs {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[loop_debug] idle_initial seeding run_input_buffer id={} source={:?}",
+                        input.input_id(),
+                        input.model_message().source(),
+                    );
+                    input_source
+                        .run_input_buffer
+                        .with_lock(|buffer| buffer.push_accepted(input));
+                }                // #1280: Main Run creation, ActiveRun registration, shared
                 // run_loop and cleanup are all owned by RunLauncher.
                 // await_user_input is handled inside the Main input strategy (async park
                 // on input_events channel), so run_loop only returns Terminal.

@@ -3,6 +3,105 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn child_run_hidden_tool_result_is_not_attached_to_parent_activity() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let run_id = super::ids::ChatRunId::new("parent-run");
+    let parent_tool_id = super::ids::ToolCallId::new("agent-tool");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: parent_tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: parent_tool_id.clone(),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::ToolCall {
+            id: "skill-call".to_string(),
+            name: "Skill".to_string(),
+            input: serde_json::json!({"skill": "superpowers:using-superpowers"}),
+        },
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: parent_tool_id.clone(),
+        sequence: 2,
+        kind: TuiChildRunActivityKind::ToolResult {
+            tool_call_id: "skill-call".to_string(),
+            tool_name: "Skill".to_string(),
+            output: "SKILL_BODY_SENTINEL\n<system-reminder>LLM_ONLY</system-reminder>".to_string(),
+            content: serde_json::json!({"name": "superpowers:using-superpowers"}),
+            is_error: false,
+        },
+    });
+
+    let parent_call = tool_call(&model, &chat_id, &run_id, &parent_tool_id)
+        .expect("parent Agent ToolCall");
+    assert!(model.child_run_activities.iter().any(|entry| {
+        matches!(entry.kind, TuiChildRunActivityKind::ToolResult { .. })
+    }));
+    assert_eq!(
+        parent_call
+            .activities
+            .iter()
+            .filter(|line| line.contains("Skill superpowers:using-superpowers"))
+            .count(),
+        1,
+        "activities: {:?}",
+        parent_call.activities
+    );
+    assert!(!parent_call.activities.iter().any(|line| {
+        line.contains("SKILL_BODY_SENTINEL") || line.contains("system-reminder")
+    }));
+}
+
+#[test]
+fn child_run_visible_tool_result_remains_attached() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let run_id = super::ids::ChatRunId::new("parent-run");
+    let parent_tool_id = super::ids::ToolCallId::new("agent-tool");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: parent_tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    model.apply(RecordChildRunActivity {
+        agent_id: "researcher".to_string(),
+        child_run_id: "child".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: parent_tool_id.clone(),
+        sequence: 1,
+        kind: TuiChildRunActivityKind::ToolResult {
+            tool_call_id: "grep-call".to_string(),
+            tool_name: "Grep".to_string(),
+            output: "VISIBLE_GREP_RESULT".to_string(),
+            content: serde_json::json!({"text": "VISIBLE_GREP_RESULT"}),
+            is_error: false,
+        },
+    });
+
+    assert!(tool_call(&model, &chat_id, &run_id, &parent_tool_id)
+        .expect("parent Agent ToolCall")
+        .activities
+        .iter()
+        .any(|line| line.contains("VISIBLE_GREP_RESULT")));
+}
+
+#[test]
 fn child_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("parent-chat");
@@ -62,8 +161,11 @@ fn child_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
     assert_eq!(
         tool_call(&model, &chat_id, &run_id, &first_tool_id)
             .expect("first parent Agent ToolCall")
-            .activities,
-        vec!["first child textgrep output"]
+            .activities
+            .iter()
+            .map(|activity| activity.content.as_str())
+            .collect::<Vec<_>>(),
+            vec!["first child text", "grep output"]
     );
     assert_eq!(
         tool_call(&model, &chat_id, &run_id, &second_tool_id)

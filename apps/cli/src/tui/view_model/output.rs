@@ -135,6 +135,39 @@ pub struct TextBlockView {
     pub style: SemanticStyle,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AgentActivityKindView {
+    Message,
+    ToolCall,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct AgentActivityLineView {
+    pub kind: AgentActivityKindView,
+    pub content: String,
+}
+
+impl AgentActivityLineView {
+    pub fn message(content: impl Into<String>) -> Self {
+        Self {
+            kind: AgentActivityKindView::Message,
+            content: content.into(),
+        }
+    }
+}
+
+impl From<&str> for AgentActivityLineView {
+    fn from(content: &str) -> Self {
+        Self::message(content)
+    }
+}
+
+impl PartialEq<&str> for AgentActivityLineView {
+    fn eq(&self, other: &&str) -> bool {
+        self.content == *other
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ToolCallBlockView {
     pub key: String,
@@ -146,12 +179,11 @@ pub struct ToolCallBlockView {
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
+    pub activity_lines: Vec<AgentActivityLineView>,
     /// 运行中工具的流式预览文本（由 assembler 合并 `call.activities` 生成）。
     /// 完成态为 None——结果已由权威 ToolResult 子块展示。
     /// renderer 不再消费此字段渲染内联行；assembler 将其装配为临时
-    /// `<tool-id>-streaming-result` ToolResult 子块（depth=1），marker/缩进/续行
-    /// 全部由 gutter 统一管理（#1547）。
-    pub streaming_preview: Option<String>,
+    /// `<tool-id>-streaming-result` ToolResult 子块。
     pub result_summary: Option<String>,
     /// Owned structured payload of the tool result (output/content/is_error/image_count).
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），

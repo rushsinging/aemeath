@@ -2,7 +2,7 @@ use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapM
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
-use crate::tui::view_model::output::ToolCallBlockView;
+use crate::tui::view_model::output::{AgentActivityKindView, ToolCallBlockView};
 use crate::tui::view_model::AgentMetaView;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -80,7 +80,40 @@ pub fn render_tool_call(
             .map(|line| line.with_style(detail_style)),
         );
     }
-
+    // 渲染 activity_lines：Bash/Agent 等长时间工具执行过程中显示当前进度，
+    // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
+    // ToolCall activity 的 `→ ` 与 activity group 的 `⎿ ` 都是 presentation chrome，
+    // 正文通过 typed kind 原样消费；上游不追加或改写箭头。
+    let marker_style = Style::default().fg(theme::TEXT_MUTED);
+    let activity_style = Style::default().fg(theme::TEXT_DIM);
+    let activity_indent = "  ".to_string();
+    let mut first_activity = true;
+    for activity in &view.activity_lines {
+        let marker = if activity.kind == AgentActivityKindView::ToolCall {
+            "→ "
+        } else {
+            ""
+        };
+        let mut spans = Vec::new();
+        if first_activity {
+            spans.push(Span::styled("⎿ ", marker_style));
+            first_activity = false;
+        } else {
+            spans.push(Span::styled(activity_indent.clone(), activity_style));
+        }
+        spans.push(Span::styled(marker, marker_style));
+        spans.push(Span::styled(activity.content.clone(), activity_style));
+        lines.extend(
+            wrap_spans_with_prefix(
+                spans,
+                width,
+                Some(Span::styled(activity_indent.clone(), activity_style)),
+                WrapMode::Word,
+            )
+            .into_iter()
+            .map(|line| line.with_style(activity_style)),
+        );
+    }
     RenderedBlock {
         block_id: block_id.to_string(),
         lines: Rc::new(lines),
@@ -125,6 +158,7 @@ fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMetaView>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::view_model::output::AgentActivityLineView;
     use crate::tui::view_model::output::ToolSemanticStatus;
     use crate::tui::view_model::style::SemanticStyle;
     use unicode_width::UnicodeWidthStr;
@@ -324,22 +358,39 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
-        view.streaming_preview = Some("2\n3\n4\n5\n6".into());
+        view.activity_lines = vec![
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "2".to_string(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "3".to_string(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "4".to_string(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "5".to_string(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "6".to_string(),
+            },
+        ];
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
-        // ToolCall 不应渲染 streaming_preview 行内容
-        assert!(
-            !rendered.iter().any(|line| line.contains("2")),
-            "ToolCall 不应渲染 streaming 预览内容，实际: {rendered:?}"
-        );
-        // 不应出现任何 ⎿ marker（marker 由 gutter 在 ToolResult 子块注入）
+        assert!(rendered.iter().any(|line| line.contains("→ 2")));
+        assert!(rendered.iter().any(|line| line.contains("→ 3")));
+        assert!(rendered.iter().any(|line| line.contains("→ 4")));
+        assert!(rendered.iter().any(|line| line.contains("→ 5")));
+        assert!(rendered.iter().any(|line| line.contains("→ 6")));
         let marker_count = rendered.iter().filter(|line| line.contains('⎿')).count();
-        assert_eq!(
-            marker_count, 0,
-            "ToolCall 不应有 ⎿ marker，实际: {rendered:?}"
-        );
+        assert_eq!(marker_count, 1, "仅首行应带 ⎿ marker，实际: {rendered:?}");
     }
 
     #[test]
@@ -348,7 +399,6 @@ mod tests {
         let raw = r#"{"prompt":"do something","description":"task"}"#;
         assert_eq!(merge_agent_meta(raw, None), raw);
     }
-
     #[test]
     fn test_merge_agent_meta_fills_role_and_model() {
         // case 2（input 只有 role 无 model）：agent_meta 补上 runtime resolve 的 model
