@@ -531,7 +531,7 @@ impl RuntimeContextFactory {
             self.services.hooks.clone()
         } else {
             Arc::new(
-                hook::build_dispatcher(config.config().hooks())
+                hook::build_dispatcher(config.config())
                     .map_err(|_| RunCreationError::ContextAssembly)?,
             )
         };

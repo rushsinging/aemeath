@@ -41,7 +41,11 @@ if not composition.is_file():
     violations.append("agent/composition/src/runtime.rs: Composition runtime assembly source is missing")
 else:
     source = composition.read_text()
-    for pattern in [r"hook::build_dispatcher\s*\(", r"committed_snapshot\(\)\.hooks\(\)", r"hook_runner"]:
+    for pattern in [
+        r"hook::build_dispatcher\s*\(",
+        r"hook::build_dispatcher\s*\(\s*&?config\.reader\(\)\.committed_snapshot\(\)",
+        r"hook_runner",
+    ]:
         if not re.search(pattern, source):
             violations.append("agent/composition/src/runtime.rs: Composition must construct and inject hook_runner from the committed config snapshot")
             break

@@ -3,15 +3,17 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use share::config::Config;
 
 use crate::adapters::config::{build_dispatcher, subscriptions_from_config};
 use crate::{HookMatcher, HookPoint};
 
 #[test]
 fn build_dispatcher_owns_process_environment_policy() {
-    let dispatcher =
-        build_dispatcher(&HooksConfig::default()).expect("默认 Hook 配置应构造生产 Dispatcher");
+    let dispatcher = build_dispatcher(&ConfigSnapshot::new(Config::default()))
+        .expect("默认 Hook 配置应构造生产 Dispatcher");
     let _hook_port: &dyn crate::HookPort = &dispatcher;
 }
 
@@ -43,6 +45,7 @@ fn subscriptions_from_config_preserves_event_entry_order_and_wire_fields() {
                 }],
             ),
         ]),
+        ..HooksConfig::default()
     };
 
     let subscriptions = subscriptions_from_config(&config);
@@ -86,6 +89,7 @@ fn subscriptions_from_config_maps_subagent_compatibility_points() {
                 timeout: 60,
             }],
         )]),
+        ..HooksConfig::default()
     };
 
     let subscriptions = subscriptions_from_config(&config);

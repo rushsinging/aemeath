@@ -420,7 +420,10 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     });
 
     let mut shell = test_shell_with_hooks(Arc::new(
-        hook::build_dispatcher(&HooksConfig { events }).unwrap(),
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap(),
     ));
     shell.workspace = workspace;
     shell.model_state.update_binding(
@@ -564,7 +567,10 @@ fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn H
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
@@ -588,7 +594,10 @@ fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn 
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
@@ -602,7 +611,10 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }
 
 #[tokio::test]

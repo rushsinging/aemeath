@@ -18,6 +18,67 @@ use crate::config::{
     AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig, ToolSelection,
 };
 
+const DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS: u8 = 3;
+const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct HookExecutionPolicy {
+    max_attempts: u8,
+}
+
+impl HookExecutionPolicy {
+    pub fn new(max_attempts: u8) -> Self {
+        Self {
+            max_attempts: if max_attempts > 0 {
+                max_attempts
+            } else {
+                DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS
+            },
+        }
+    }
+
+    fn from_config(config: &HooksConfig) -> Self {
+        Self::new(
+            config
+                .max_attempts
+                .unwrap_or(DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS),
+        )
+    }
+
+    pub fn max_attempts(self) -> u8 {
+        self.max_attempts
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StopHookPolicy {
+    max_blocks: usize,
+}
+
+impl StopHookPolicy {
+    pub fn new(max_blocks: usize) -> Self {
+        Self {
+            max_blocks: if max_blocks > 0 {
+                max_blocks
+            } else {
+                DEFAULT_STOP_HOOK_MAX_BLOCKS
+            },
+        }
+    }
+
+    fn from_config(config: &HooksConfig) -> Self {
+        Self::new(
+            config
+                .max_stop_hook_blocks
+                .unwrap_or(DEFAULT_STOP_HOOK_MAX_BLOCKS),
+        )
+    }
+
+    pub fn max_blocks(self) -> usize {
+        self.max_blocks
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ToolResultPolicy {
     threshold_chars: usize,
@@ -346,9 +407,17 @@ impl ConfigSnapshot {
         &self.inner.agents
     }
 
-    /// 返回完整 `HooksConfig`，供 `build_hook_runner` 等消费。
+    /// 返回完整 `HooksConfig`，供 subscription 转换消费。
     pub fn hooks(&self) -> &HooksConfig {
         &self.inner.hooks
+    }
+
+    pub fn hook_execution_policy(&self) -> HookExecutionPolicy {
+        HookExecutionPolicy::from_config(&self.inner.hooks)
+    }
+
+    pub fn stop_hook_policy(&self) -> StopHookPolicy {
+        StopHookPolicy::from_config(&self.inner.hooks)
     }
 
     /// 返回完整 `MemoryConfig`，供 memory 命令 / 持久化逻辑消费。

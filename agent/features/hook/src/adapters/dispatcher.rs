@@ -30,6 +30,8 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
+use share::config::domain::snapshot::HookExecutionPolicy;
+
 use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
 use crate::domain::outcome::{
     HookBlockDetail, HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution,
@@ -51,17 +53,6 @@ use helpers::{
     synthesize_cancelled_directive, synthesize_exhausted_directive,
 };
 
-/// 单 Hook 执行重试上限（含第一次）。
-///
-/// 设计 §6：`hook.max_attempts = 3`。任意 ExecutionFailed（spawn / wait / IO /
-/// timeout / 非法 JSON / 能力矩阵违规）连续发生时最多重试到本上限；业务 Block
-/// （非零 exit / JSON `decision:block` / `continue:false`）不重试。
-pub const MAX_ATTEMPTS: u8 = 3;
-
-// ════════════════════════════════════════════════════════════
-// Dispatcher
-// ════════════════════════════════════════════════════════════
-
 /// Hook dispatcher：按 point 匹配 subscription、串行执行、重试与聚合。
 ///
 /// 内部以 `Box<dyn Executor>` 持有执行端口，对外只暴露稳定构造入口
@@ -70,6 +61,7 @@ pub const MAX_ATTEMPTS: u8 = 3;
 pub struct Dispatcher {
     subscriptions: Vec<HookSubscription>,
     executor: Box<dyn Executor>,
+    execution_policy: HookExecutionPolicy,
     subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
@@ -80,12 +72,16 @@ impl Dispatcher {
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
-    pub fn try_new(subscriptions: Vec<HookSubscription>) -> Result<Self, Vec<SubscriptionError>> {
+    pub fn try_new(
+        subscriptions: Vec<HookSubscription>,
+        execution_policy: HookExecutionPolicy,
+    ) -> Result<Self, Vec<SubscriptionError>> {
         Self::build(
             subscriptions,
             Box::new(ProcessDriverExecutor::new(
                 crate::adapters::environment::capture_basic_environment(),
             )),
+            execution_policy,
         )
     }
 
@@ -93,6 +89,7 @@ impl Dispatcher {
     fn build(
         subscriptions: Vec<HookSubscription>,
         executor: Box<dyn Executor>,
+        execution_policy: HookExecutionPolicy,
     ) -> Result<Self, Vec<SubscriptionError>> {
         let mut errors = Vec::new();
         for sub in &subscriptions {
@@ -106,6 +103,7 @@ impl Dispatcher {
         Ok(Self {
             subscriptions,
             executor,
+            execution_policy,
             subscription_execution_observer: None,
         })
     }
@@ -121,8 +119,21 @@ impl Dispatcher {
     /// 测试专用：注入脚本化执行器，subscription 必须全部合法（否则 panic）。
     #[cfg(test)]
     fn with_scripted(subscriptions: Vec<HookSubscription>, executor: Scripted) -> Self {
-        Self::build(subscriptions, Box::new(executor))
-            .expect("测试用 HookSubscription 必须全部合法")
+        Self::with_scripted_and_attempt_limit(subscriptions, executor, 3)
+    }
+
+    #[cfg(test)]
+    fn with_scripted_and_attempt_limit(
+        subscriptions: Vec<HookSubscription>,
+        executor: Scripted,
+        max_attempts: u8,
+    ) -> Self {
+        Self::build(
+            subscriptions,
+            Box::new(executor),
+            HookExecutionPolicy::new(max_attempts),
+        )
+        .expect("测试用 HookSubscription 必须全部合法")
     }
 }
 
@@ -138,7 +149,7 @@ enum AttemptOutcome {
         directive: HookDirective,
         system_message: Option<String>,
     },
-    /// 重试耗尽（ExecutionFailed 达到 MAX_ATTEMPTS）。
+    /// 重试耗尽（ExecutionFailed 达到注入的 execution policy 上限）。
     Exhausted { executions: Vec<HookExecution> },
     /// 被 cancellation 终止（不重试，但仍保留这一次 attempt 的 ExecutionFailed 明细）。
     Cancelled { executions: Vec<HookExecution> },
@@ -582,7 +593,7 @@ impl Dispatcher {
                                 duration,
                             };
                             executions.push(execution);
-                            if attempts >= MAX_ATTEMPTS {
+                            if attempts >= self.execution_policy.max_attempts() {
                                 Self::observe_subscription_execution(
                                     subscription_execution_observer,
                                     HookSubscriptionExecutionEvent::Finished {
@@ -628,7 +639,7 @@ impl Dispatcher {
                         duration,
                     };
                     executions.push(execution);
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= self.execution_policy.max_attempts() {
                         Self::observe_subscription_execution(
                             subscription_execution_observer,
                             HookSubscriptionExecutionEvent::Finished {

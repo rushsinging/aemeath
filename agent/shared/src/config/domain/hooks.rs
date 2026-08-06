@@ -158,6 +158,14 @@ pub fn default_timeout_secs() -> u64 {
 /// 所有 hook 配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HooksConfig {
+    /// 单个 Hook subscription 发生 ExecutionFailed 时的最大执行次数（含首次）。
+    #[serde(default)]
+    pub max_attempts: Option<u8>,
+
+    /// 同一个 Run 可继续处理的 Stop Hook Block 次数。
+    #[serde(default)]
+    pub max_stop_hook_blocks: Option<usize>,
+
     /// 按事件类型分组的 hook 列表
     #[serde(flatten)]
     pub events: HashMap<HookEvent, Vec<HookEntry>>,

@@ -31,10 +31,10 @@ pub struct Run {
     /// Persisted across `run_loop` calls so that AwaitUser→re-enter
     /// does not reset the epoch.  Each successful drain increments it.
     next_drain_epoch: u64,
-    /// #1248 Task 6: Stop hook block count owned by Run (not StuckGuard).
-    /// Incremented each time the stop hook blocks completion.
-    /// After 15 blocks the 16th triggers RetryExhausted → Run Failed.
+    /// Stop hook block count owned by this Run.
     stop_hook_block_count: usize,
+    /// Frozen per-Run Stop hook exhaustion policy.
+    stop_hook_policy: share::config::domain::snapshot::StopHookPolicy,
     /// 当前 Run 是否有由用户取消并完成持久化收口的 Step。
     /// Run 可以随后 drain/seal 为 Completed，但对外终态必须保持 UserCancelled。
     user_cancelled_step: bool,
@@ -48,10 +48,44 @@ pub struct Run {
 impl Run {
     #[allow(dead_code)]
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
-        Self::with_id(RunId::new_v7(), spec, parent_id)
+        Self::with_id_and_stop_hook_policy(
+            RunId::new_v7(),
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(15),
+        )
     }
 
+    #[cfg(test)]
+    pub fn new_with_stop_hook_block_limit(
+        spec: RunSpec,
+        parent_id: Option<RunId>,
+        max_blocks: usize,
+    ) -> Self {
+        Self::with_id_and_stop_hook_policy(
+            RunId::new_v7(),
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(max_blocks),
+        )
+    }
+
+    #[allow(dead_code)]
     pub fn with_id(id: RunId, spec: RunSpec, parent_id: Option<RunId>) -> Self {
+        Self::with_id_and_stop_hook_policy(
+            id,
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(15),
+        )
+    }
+
+    pub fn with_id_and_stop_hook_policy(
+        id: RunId,
+        spec: RunSpec,
+        parent_id: Option<RunId>,
+        stop_hook_policy: share::config::domain::snapshot::StopHookPolicy,
+    ) -> Self {
         Self {
             id,
             spec,
@@ -62,6 +96,7 @@ impl Run {
             pending_completion_result: None,
             next_drain_epoch: 0,
             stop_hook_block_count: 0,
+            stop_hook_policy,
             user_cancelled_step: false,
             steps: Vec::new(),
             started_at: None,
@@ -521,14 +556,11 @@ impl Run {
         self.stop_hook_block_count
     }
 
-    /// #1248 Task 6: Record a stop hook block and return the typed result.
-    ///
-    /// Increments the count.  Blocks 1-15 return `Blocked` (continue with
-    /// feedback).  The 16th block returns `RetryExhausted` (transition to Failed).
+    /// Record a Stop hook block using this Run's frozen policy.
     pub fn record_stop_hook_block(&mut self) -> StopHookBlockResult {
         self.stop_hook_block_count = self.stop_hook_block_count.saturating_add(1);
         let count = self.stop_hook_block_count;
-        if count >= 16 {
+        if count > self.stop_hook_policy.max_blocks() {
             StopHookBlockResult::RetryExhausted { count }
         } else {
             StopHookBlockResult::Blocked { count }
