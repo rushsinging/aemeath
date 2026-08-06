@@ -421,9 +421,8 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
 }
 
 #[test]
-fn test_output_assembler_hides_activity_lines_when_tool_completed() {
-    // 回归：Agent 工具完成后，子代理最终输出同时出现在 activity 行（ToolCall 内）
-    // 和 ToolResult 子块中，造成重复。完成后应隐藏 activity_lines，让位给结果子块。
+fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
+    // 回归：Agent 工具完成后，streaming_preview 应为 None，让位给权威最终 ToolResult 子块。
     let mut conversation = ConversationModel::default();
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
@@ -477,9 +476,9 @@ fn test_output_assembler_hides_activity_lines_when_tool_completed() {
         .expect("tool block");
 
     assert!(
-        tool.activity_lines.is_empty(),
-        "工具完成后不应显示 activity_lines（结果已在 ToolResult 子块），实际: {:?}",
-        tool.activity_lines
+        tool.streaming_preview.is_none(),
+        "工具完成后 streaming_preview 应为 None（结果已在权威 ToolResult 子块），实际: {:?}",
+        tool.streaming_preview
     );
     assert_eq!(
         tool.result_summary.as_deref(),
@@ -489,8 +488,8 @@ fn test_output_assembler_hides_activity_lines_when_tool_completed() {
 }
 
 #[test]
-fn test_output_assembler_shows_activity_lines_while_tool_running() {
-    // 运行中（未完成）的工具仍应显示 activity_lines 作为实时进度。
+fn test_output_assembler_shows_streaming_preview_while_tool_running() {
+    // 运行中（未完成）的工具应将 activities 合并为 streaming_preview 文本。
     let mut conversation = ConversationModel::default();
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
@@ -531,7 +530,191 @@ fn test_output_assembler_shows_activity_lines_while_tool_running() {
         .expect("tool block");
 
     assert_eq!(
-        tool.activity_lines,
-        vec!["Agent turn 1/200, messages: 2, est_tokens: 500"]
+        tool.streaming_preview,
+        Some("Agent turn 1/200, messages: 2, est_tokens: 500".to_string())
+    );
+}
+
+#[test]
+fn test_output_assembler_streaming_preview_is_tool_result_child() {
+    // #1547：运行中工具的 streaming preview 必须是 ToolCall 的 ToolResult 子节点
+    // （block_id = `<tool-id>-streaming-result`），由 gutter 统一管理 marker/缩进，
+    // 而非留在 ToolCall 内部的 activity 行被 renderer 手工拼接。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "run sub-agent".to_string(),
+    });
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: ToolCallId::new("tool-1"),
+        name: "Agent".to_string(),
+        index: 0,
+        arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+    conversation.apply(RecordAgentProgress {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        tool_id: ToolCallId::new("tool-1"),
+        message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+    });
+
+    let vm = assemble_output_view(&conversation, None);
+    let tool_node = vm
+        .roots
+        .iter()
+        .find(|n| matches!(&n.kind, OutputBlockKind::ToolCall(_)))
+        .expect("tool call root");
+
+    assert_eq!(
+        tool_node.children.len(),
+        1,
+        "运行中工具应有一个 streaming ToolResult 子节点"
+    );
+    let result = &tool_node.children[0];
+    assert!(
+        matches!(&result.kind, OutputBlockKind::ToolResult(_)),
+        "子块应为 ToolResult 变体"
+    );
+    assert_eq!(
+        result.block_id, "tool-1-streaming-result",
+        "streaming 子节点 block_id 应为 `<tool-id>-streaming-result`"
+    );
+    let OutputBlockKind::ToolResult(result_view) = &result.kind else {
+        panic!("expected tool result");
+    };
+    assert!(
+        result_view
+            .result_text
+            .contains("Agent turn 1/200, messages: 2, est_tokens: 500"),
+        "streaming 子节点应包含预览文本，实际: {}",
+        result_view.result_text
+    );
+}
+
+#[test]
+fn test_output_assembler_completed_tool_has_single_authoritative_result_child() {
+    // #1547：工具完成后仅有唯一权威最终 ToolResult 子节点（`<tool-id>-result`），
+    // 不应同时存在 streaming-result 子节点（二者互斥）。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "run sub-agent".to_string(),
+    });
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: ToolCallId::new("tool-1"),
+        name: "Agent".to_string(),
+        index: 0,
+        arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+    // 运行中发送 streaming progress
+    conversation.apply(RecordAgentProgress {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        tool_id: ToolCallId::new("tool-1"),
+        message: "intermediate preview".to_string(),
+    });
+    // 工具完成
+    conversation.apply(ToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: "provider-1".to_string(),
+        id: ToolCallId::new("tool-1"),
+        tool_name: "Agent".to_string(),
+        output: "final output".to_string(),
+        content: serde_json::json!({ "text": "final output" }),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = assemble_output_view(&conversation, None);
+    let tool_node = vm
+        .roots
+        .iter()
+        .find(|n| matches!(&n.kind, OutputBlockKind::ToolCall(_)))
+        .expect("tool call root");
+
+    assert_eq!(
+        tool_node.children.len(),
+        1,
+        "完成工具应仅有 1 个权威最终 ToolResult 子节点"
+    );
+    let result = &tool_node.children[0];
+    assert!(
+        matches!(&result.kind, OutputBlockKind::ToolResult(_)),
+        "子块应为 ToolResult 变体"
+    );
+    assert_eq!(
+        result.block_id, "tool-1-result",
+        "完成工具子节点 block_id 应为 `<tool-id>-result`，不应残留 streaming-result"
+    );
+    // 不应同时存在 streaming-result
+    assert!(
+        !tool_node
+            .children
+            .iter()
+            .any(|c| c.block_id.ends_with("-streaming-result")),
+        "完成工具不应同时存在 streaming-result 子节点"
+    );
+}
+
+#[test]
+fn test_output_assembler_pending_tool_without_streaming_has_no_child() {
+    // 边界：未产出结果、无 streaming preview 的工具不附任何子块。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "search".to_string(),
+    });
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: ToolCallId::new("tool-1"),
+        name: "Read".to_string(),
+        index: 0,
+        arguments: Some(r#"{"file_path":"x.rs"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+
+    let vm = assemble_output_view(&conversation, None);
+    let tool_node = vm
+        .roots
+        .iter()
+        .find(|n| matches!(&n.kind, OutputBlockKind::ToolCall(_)))
+        .expect("tool call root");
+
+    assert!(
+        tool_node.children.is_empty(),
+        "无结果且无 streaming preview 的工具不应附带子块，实际: {} children",
+        tool_node.children.len()
     );
 }
