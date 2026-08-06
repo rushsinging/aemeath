@@ -99,8 +99,6 @@ pub(super) fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-        // #1547：工具未完成时将 activities 合并为 streaming_preview 文本（供 assembler
-        // 装配临时 `<tool-id>-streaming-result` ToolResult 子块）；完成态为 None。
         streaming_preview: if matches!(
             call.status,
             ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
@@ -108,16 +106,18 @@ pub(super) fn find_tool_view(
         {
             None
         } else {
-            call.activities
-                  .iter()
-                  .map(|activity| AgentActivityLineView {
-                      kind: match activity.kind {
-                          crate::tui::model::conversation::agent_progress::AgentActivityKind::Message => AgentActivityKindView::Message,
-                          crate::tui::model::conversation::agent_progress::AgentActivityKind::ToolCall => AgentActivityKindView::ToolCall,
-                      },
-                      content: activity.content.clone(),
-                  })
-                  .collect()
+            Some(
+                call.activities
+                    .iter()
+                    .map(|activity| AgentActivityLineView {
+                        kind: match activity.kind {
+                            crate::tui::model::conversation::agent_progress::AgentActivityKind::Message => AgentActivityKindView::Message,
+                            crate::tui::model::conversation::agent_progress::AgentActivityKind::ToolCall => AgentActivityKindView::ToolCall,
+                        },
+                        content: activity.content.clone(),
+                    })
+                    .collect(),
+            )
         },
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id

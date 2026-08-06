@@ -179,11 +179,8 @@ pub struct ToolCallBlockView {
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
-    pub activity_lines: Vec<AgentActivityLineView>,
-    /// 运行中工具的流式预览文本（由 assembler 合并 `call.activities` 生成）。
-    /// 完成态为 None——结果已由权威 ToolResult 子块展示。
-    /// renderer 不再消费此字段渲染内联行；assembler 将其装配为临时
-    /// `<tool-id>-streaming-result` ToolResult 子块。
+    /// 运行中工具的结构化流式 activity；由 assembler 装配为独立 ToolResult 子块。
+    pub streaming_preview: Option<Vec<AgentActivityLineView>>,
     pub result_summary: Option<String>,
     /// Owned structured payload of the tool result (output/content/is_error/image_count).
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
@@ -216,7 +213,8 @@ pub struct AgentMetaView {
 ///
 /// - `args_preview`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断）。
 /// - `summary`：人类可读摘要（如 `"L12-L34 (23 lines)"`）。
-/// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+/// - `result_text`：最终结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+/// - `activity_lines`：仅 running streaming 子块携带的 typed activity；最终结果为 `None`。
 /// - `data`：结构化 typed result JSON（如 `EditResult`），供 diff 等富渲染直接读取（#546）。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolResultBlockView {
@@ -224,18 +222,20 @@ pub struct ToolResultBlockView {
     pub tool_title: String,
     pub args_preview: Option<String>,
     pub result_text: String,
+    pub activity_lines: Option<Vec<AgentActivityLineView>>,
     pub data: Option<serde_json::Value>,
     pub style: SemanticStyle,
 }
 
-// 手写 Hash：serde_json::Value 不 impl Hash，只 hash 标识字段（key/tool_title/result_text/
-// args_preview/style），data 不参与缓存指纹（同 ToolResultPayload 的处理方式）。
+// 手写 Hash：serde_json::Value 不 impl Hash；typed activity 参与缓存指纹，data 不参与
+// （同 ToolResultPayload 的处理方式）。
 impl std::hash::Hash for ToolResultBlockView {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.key.hash(state);
         self.tool_title.hash(state);
         self.args_preview.hash(state);
         self.result_text.hash(state);
+        self.activity_lines.hash(state);
         self.style.hash(state);
     }
 }

@@ -258,6 +258,7 @@ mod tests {
             tool_title: "Bash".into(),
             args_preview: None,
             result_text: "done".into(),
+            activity_lines: None,
             data: None,
             style: SemanticStyle::Success,
         });

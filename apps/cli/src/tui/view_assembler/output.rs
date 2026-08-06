@@ -121,6 +121,7 @@ impl OutputViewAssembler {
                             tool_title: tool.title.clone(),
                             args_preview: tool.args_preview.clone(),
                             result_text,
+                            activity_lines: None,
                             data: tool
                                 .result_payload
                                 .as_ref()
@@ -129,15 +130,21 @@ impl OutputViewAssembler {
                         }),
                     );
                     push_child_checked(&mut parent, child, 1);
-                } else if let Some(preview) = tool.streaming_preview.clone() {
+                } else if let Some(activities) = tool.streaming_preview.clone() {
                     let result_id = format!("{}-streaming-result", reference.tool_call_id.as_ref());
+                    let result_text = activities
+                        .iter()
+                        .map(|activity| activity.content.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     let child = leaf(
                         result_id.clone(),
                         OutputBlockKind::ToolResult(ToolResultBlockView {
                             key: result_id,
                             tool_title: tool.title.clone(),
                             args_preview: tool.args_preview.clone(),
-                            result_text: preview,
+                            result_text,
+                            activity_lines: Some(activities),
                             data: None,
                             style: tool.style,
                         }),
