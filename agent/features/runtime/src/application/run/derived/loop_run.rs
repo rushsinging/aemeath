@@ -397,6 +397,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
                     run_step.saturating_mul(1024).saturating_add(512 + offset),
                     AgentProgressKind::ToolResult {
                         tool_call_id: result.call_id.to_string(),
+                        tool_name: result.tool_name.clone(),
                         output: result.outcome.text.clone(),
                         content: result.outcome.data.clone(),
                         is_error: result.outcome.is_error,

@@ -108,7 +108,7 @@ async fn run_loop(
 
 Engine 不知道某个 Run 来自 Main、Sub、Reflection 或 Scheduler，也不按来源选择流程。`MainRunPort`、`SubAgentRun`、fat `RunLoopPort`、`MainInputStrategy` / `SubInputStrategy`、`MainEventStrategy` / `SubEventStrategy` 均不属于终态。模型调用、Tool 编排、Stop Hook、Interaction、finalization 和 terminal mutation 必须只有一份 application 流程。
 
-`RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream progress；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。
+`RunExecutionState` 持有 messages、accepted inputs、context window、tool working data、continuation working data 与 stream progress；`RuntimeContext` 只持绑定好的外部能力；`Run` 只持领域状态。三者不得反向调用 Engine 或复制状态。`AcceptedUserInput` 是 Session gate 接纳后直到 Step freeze 的唯一 typed 输入事实；`UserMessage` 与 `SkillRequest` 只在模型消息 materialization 规则上分支，**NEVER** 形成 `adopted_messages` / `adopted_events` 双轨。
 
 模型调用边界按职责拆为两面：`ModelInvocationContext` 提供已绑定的 RuntimeContext、日志上下文、Reducer、等待事件上下文与 ToolCall 提取等调用输入；`ModelInvocationLifecycle` 仅承载窗口就绪、输入泵、重试、响应和终态分类回调。两者共同服务唯一 model coordinator，不能成为可替换整个调用流程的 fat port。
 

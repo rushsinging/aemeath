@@ -43,19 +43,7 @@ pub(crate) fn request_log_context(
 
 #[cfg(test)]
 fn loop_input_messages(inputs: &[crate::application::loop_engine::LoopInput]) -> Vec<Message> {
-    inputs
-        .iter()
-        .map(|input| {
-            if input.images.is_empty() {
-                Message::user(input.text.clone())
-            } else {
-                super::input_gate::user_message_with_images(
-                    input.text.clone(),
-                    input.images.clone(),
-                )
-            }
-        })
-        .collect()
+    inputs.iter().map(|input| input.message()).collect()
 }
 
 #[cfg(test)]

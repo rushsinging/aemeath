@@ -217,21 +217,44 @@ where
             }
             sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
             _ => {
-                let message = format_agent_progress(event, &mut format_subagent_tool_header);
-                let preview: String = message.chars().take(200).collect();
+                let activities = format_agent_progress(event, &mut format_subagent_tool_header);
+                let kind_name = match &event.kind {
+                    sdk::AgentProgressKindView::Started { .. } => "Started",
+                    sdk::AgentProgressKindView::Message { .. } => "Message",
+                    sdk::AgentProgressKindView::ToolCalls { .. } => "ToolCalls",
+                    sdk::AgentProgressKindView::ToolOutput { .. } => "ToolOutput",
+                };
+                let source_preview = match &event.kind {
+                    sdk::AgentProgressKindView::Message { text } => {
+                        text.chars().take(200).collect::<String>()
+                    }
+                    sdk::AgentProgressKindView::ToolCalls { calls } => calls
+                        .iter()
+                        .map(|call| format!("{}:{}", call.id, call.name))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    sdk::AgentProgressKindView::Started { role, model } => {
+                        format!("role={role:?} model={model}")
+                    }
+                    sdk::AgentProgressKindView::ToolOutput { tool_name, text } => format!(
+                        "tool_name={tool_name} text_len={} text_preview={:?}",
+                        text.len(),
+                        text.chars().take(120).collect::<String>()
+                    ),
+                };
                 crate::tui::log_debug!(
-                    "agent_progress_format kind={} seq={} msg_len={} msg={:?}",
-                    format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
+                    "agent_progress_format kind={} seq={} source_preview={:?} activity_count={}",
+                    kind_name,
                     event.sequence,
-                    message.len(),
-                    preview,
+                    source_preview,
+                    activities.len(),
                 );
-                conversation(ConversationIntent::RecordAgentProgress(
-                    RecordAgentProgress {
+                conversation(ConversationIntent::RecordAgentActivities(
+                    RecordAgentActivities {
                         chat_id: attachment_context.chat_id.clone(),
                         run_id: attachment_context.run_id.clone(),
                         tool_id: ToolCallId::new(tool_id.as_str()),
-                        message,
+                        activities,
                     },
                 ))
             }
@@ -618,7 +641,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }))
             }
             TuiAgentProgressKind::Message { text } => conversation(
-                ConversationIntent::RecordAgentProgress(RecordAgentProgress {
+                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
                         &attachment_context.chat_id,
                     ),
@@ -626,11 +649,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                         &attachment_context.run_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
-                    message: format_agent_progress_text(text),
+                    activities: format_agent_progress_text(text),
                 }),
             ),
             TuiAgentProgressKind::ToolCalls { calls } => conversation(
-                ConversationIntent::RecordAgentProgress(RecordAgentProgress {
+                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(
                         &attachment_context.chat_id,
                     ),
@@ -638,7 +661,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                         &attachment_context.run_id,
                     ),
                     tool_id: ToolCallId::new(tool_id),
-                    message: format_agent_progress_calls(calls),
+                    activities: format_agent_progress_calls(calls),
                 }),
             ),
             // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
@@ -806,32 +829,32 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     }
 }
 
-fn format_agent_progress_text(text: &str) -> String {
-    if text.is_empty() || text.ends_with('\n') {
-        text.to_string()
-    } else {
-        format!("{text}\n")
-    }
+fn format_agent_progress_text(
+    text: &str,
+) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
+    text.lines()
+        .filter(|line| !line.is_empty())
+        .map(crate::tui::model::conversation::agent_progress::AgentActivityLine::message)
+        .collect()
 }
 
 fn format_agent_progress_calls(
     calls: &[crate::tui::adapter::tui_runtime_event::TuiAgentToolCall],
-) -> String {
-    let text = calls
+) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
+    calls
         .iter()
         .map(|call| {
             let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
             let preview =
                 crate::tui::view_model::tool_name::tool_input_preview(&call.name, &call.input);
-            if preview.is_empty() {
-                format!("→ {name}")
+            let content = if preview.is_empty() {
+                name.to_string()
             } else {
-                format!("→ {name} {preview}")
-            }
+                format!("{name} {preview}")
+            };
+            crate::tui::model::conversation::agent_progress::AgentActivityLine::tool_call(content)
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format_agent_progress_text(&text)
+        .collect()
 }
 
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {

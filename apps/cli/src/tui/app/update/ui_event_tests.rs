@@ -431,18 +431,26 @@ fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echo
     );
 
     assert!(app.model.conversation.queued_submissions.is_empty());
-    assert!(!app
+    let user_echo_texts: Vec<_> = app
         .model
         .conversation
         .timeline
         .items()
         .iter()
-        .any(|item| matches!(
-            item,
-            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { .. }
-        )));
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text, ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        user_echo_texts,
+        vec!["/superpowers:brainstorming feature scope"]
+    );
     let notices = system_notice_texts(&app);
-    assert!(notices.iter().any(|text| text.contains("raw_input")));
+    assert!(!notices.iter().any(|text| text.contains("raw_input")));
+    assert!(!notices.iter().any(|text| text.contains("<skill-request>")));
     assert!(!notices.iter().any(|text| text.contains("guard failed")));
     assert!(app
         .model

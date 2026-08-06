@@ -163,7 +163,7 @@ RuntimeStreamEvent::SkillsUpdated
 
 启动快照必须在用户首次输入前安装，因此 `/archify` 等动态 Skill 不依赖首个 Runtime 刷新才能被识别。运行期事件携带相同 revision 下的 skills 与 slash_routes 全量集合，TUI 必须一次替换整个 `SkillCompletionCatalog`，**NEVER** 分别 merge 补全与路由。空快照会删除旧候选和旧路由；若旧命令随后被输入，应按未知命令处理。revision 相同的快照由 Runtime 抑制，TUI 不承担去重或部分更新协议。
 
-`SkillsUpdated` 只维护交付层发现视图，不产生用户回显、不进入 Session，也不触发 LLM。用户选中 Skill slash 后仍发送 canonical identity 与 raw reference arguments 的 `SkillRequest`；Runtime 通过既有 `UserMessagesAdopted` 回显模型可见请求，正文只能由 LLM 调用唯一 Skill Tool 后作为 ToolResult 返回。
+`AgentProgressKindView::Message` 与 `ToolCalls` 必须保持 typed activity kind 贯通 Runtime → SDK → TUI model。`ToolCalls` formatter 只生成工具名和参数正文，NEVER 添加 `→ `；TUI renderer 统一根据 typed kind 添加 `→ `，并由 activity group gutter 统一添加 `⎿ ` 与续行缩进。用户选中 Skill slash 后发送携带 `InputId`、canonical identity、raw reference arguments 与 `raw_input` 的 typed `SkillRequest`。Runtime 将它与普通 UserMessage 一起接纳为唯一 `AcceptedUserInput`，但派生两个职责明确的视图：模型侧使用内部 `<skill-request>` 与 `SkillRequestMetadata`，SDK/TUI 的 `UserMessagesAdopted` 只用 metadata `raw_input` 恰好回显一个普通 UserMessage。TUI **NEVER** 展示内部 `<skill-request>`、合成 `Skill ...` notice 或 metadata JSON；Skill 正文只能在 LLM 调用唯一 Skill Tool 后作为模型可见 ToolResult 交付，并继续服从 Tool 结果展示策略。
 
 ### 3.5 sanitize 策略
 

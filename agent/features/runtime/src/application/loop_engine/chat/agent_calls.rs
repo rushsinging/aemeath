@@ -442,11 +442,13 @@ fn child_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::ChildR
         }
         tools::AgentProgressKind::ToolResult {
             tool_call_id,
+            tool_name,
             output,
             content,
             is_error,
         } => vec![tools::ChildRunActivityKind::ToolResult {
             tool_call_id,
+            tool_name,
             output,
             content,
             is_error,
@@ -505,6 +507,47 @@ mod tests {
         assert!(matches!(
             &projected[0].kind,
             tools::ChildRunActivityKind::Thinking { text } if text == "reasoning"
+        ));
+    }
+
+    #[test]
+    fn child_run_tool_result_preserves_canonical_tool_name() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let mut publisher = ChildRunActivityPublisher::new(parent_context, parent_tool_id);
+        let started = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 0,
+            kind: tools::AgentProgressKind::Started {
+                role: Some("researcher".to_string()),
+                model: "model".to_string(),
+            },
+        };
+        assert!(publisher.publish(started).is_empty());
+
+        let projected = publisher.publish(tools::AgentProgressEvent {
+            source_context: None,
+            sequence: 1,
+            kind: tools::AgentProgressKind::ToolResult {
+                tool_call_id: "skill-call".to_string(),
+                tool_name: "Skill".to_string(),
+                output: "SKILL_BODY_SENTINEL".to_string(),
+                content: serde_json::json!({"name": "using-superpowers"}),
+                is_error: false,
+            },
+        });
+
+        assert!(matches!(
+            &projected[0].kind,
+            tools::ChildRunActivityKind::ToolResult {
+                tool_name,
+                output,
+                ..
+            } if tool_name == "Skill" && output == "SKILL_BODY_SENTINEL"
         ));
     }
 

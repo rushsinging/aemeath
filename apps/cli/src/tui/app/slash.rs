@@ -61,6 +61,12 @@ impl super::App {
                 let sdk::CommandRoute::SkillRequest(request) = route else {
                     unreachable!("matched SkillRequest route")
                 };
+                crate::tui::log_debug!(                    "skill_request boundary=tui_slash_to_runtime skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                    request.skill,
+                    args.len(),
+                    input.len(),
+                    input.chars().take(120).collect::<String>()
+                );
                 self.chat
                     .push_input_event(sdk::ChatInputEvent::SkillRequest(sdk::SkillRequest {
                         input_id: sdk::InputId::new_v7(),

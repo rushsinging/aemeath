@@ -406,24 +406,41 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesAdopted {
             items,
             queued,
-        } => ChatEvent::UserMessagesAdopted {
-            items: items
-                .into_iter()
-                .map(|(id, message)| {
-                    let mut value = crate::application::client::message_to_sdk(message);
-                    value.input_id = Some(id);
-                    value
+        } => {
+            let skill_items = items
+                .iter()
+                .filter(|(_, message)| {
+                    message.metadata.as_ref().is_some_and(|metadata| {
+                        matches!(metadata.source, share::message::MessageSource::SkillRequest)
+                    })
                 })
-                .collect(),
-            queued: queued
-                .into_iter()
-                .map(|(id, message)| {
-                    let mut value = crate::application::client::message_to_sdk(message);
-                    value.input_id = Some(id);
-                    value
-                })
-                .collect(),
-        },
+                .count();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "skill_request boundary=runtime_to_sdk_adopted items={} queued={} skill_items={}",
+                items.len(),
+                queued.len(),
+                skill_items
+            );
+            ChatEvent::UserMessagesAdopted {
+                items: items
+                    .into_iter()
+                    .map(|(id, message)| {
+                        let mut value = crate::application::client::message_to_sdk(message);
+                        value.input_id = Some(id);
+                        value
+                    })
+                    .collect(),
+                queued: queued
+                    .into_iter()
+                    .map(|(id, message)| {
+                        let mut value = crate::application::client::message_to_sdk(message);
+                        value.input_id = Some(id);
+                        value
+                    })
+                    .collect(),
+            }
+        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesQueued {
             queued,
         } => ChatEvent::UserMessagesQueued {
@@ -655,11 +672,13 @@ fn child_run_activity_to_sdk(event: tools::ChildRunActivityEvent) -> ChildRunAct
             }
             tools::ChildRunActivityKind::ToolResult {
                 tool_call_id,
+                tool_name,
                 output,
                 content,
                 is_error,
             } => ChildRunActivityKindView::ToolResult {
                 tool_call_id: sdk::ToolCallId::from_legacy_or_new(&tool_call_id),
+                tool_name,
                 output,
                 content,
                 is_error,
@@ -702,8 +721,11 @@ pub(crate) fn project_agent_progress_event(
         }
         tools::AgentProgressKind::Message { text }
         | tools::AgentProgressKind::Thinking { text } => AgentProgressKindView::Message { text },
-        tools::AgentProgressKind::ToolResult { output, .. } => {
-            AgentProgressKindView::Message { text: output }
+        tools::AgentProgressKind::ToolResult { tool_name, .. } => {
+            AgentProgressKindView::ToolOutput {
+                tool_name,
+                text: String::new(),
+            }
         }
         tools::AgentProgressKind::Terminal { outcome } => AgentProgressKindView::Message {
             text: format!("Sub-agent terminal: {outcome:?}"),

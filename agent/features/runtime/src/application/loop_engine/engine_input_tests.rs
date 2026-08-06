@@ -15,6 +15,7 @@ async fn engine_rejects_wrong_epoch() {
                     text: "test".to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 DrainEpoch(5), // Engine expects 0
             ),
@@ -56,6 +57,7 @@ async fn await_user_input_empty_preserves_run_epoch() {
                     text: "first".to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 DrainEpoch(0),
             ),
@@ -107,6 +109,7 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
                     text: "first".to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 DrainEpoch(0),
             ),
@@ -144,6 +147,7 @@ async fn await_user_input_empty_then_input_same_epoch_reenter() {
                 text: "user response".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(1),
         ),
@@ -187,6 +191,7 @@ async fn drain_input_epoch_mismatch_does_not_advance_run_epoch() {
                     text: "wrong-epoch-input".to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 DrainEpoch(5),
             ),
@@ -329,6 +334,7 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
                     text: "first".to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 DrainEpoch(0),
             ),
@@ -611,6 +617,7 @@ mod interaction_routing {
                 text: "user input".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));
@@ -858,6 +865,7 @@ mod interaction_routing {
                 text: "run ls".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));
@@ -969,6 +977,7 @@ mod interaction_routing {
                 text: "dangerous cmd".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));
@@ -1150,6 +1159,7 @@ mod interaction_routing {
                 text: "ask question".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));
@@ -1345,6 +1355,7 @@ mod interaction_routing {
                 text: "ask two".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));
@@ -1500,6 +1511,7 @@ mod interaction_routing {
                 text: "mixed".to_string(),
                 input_id: None,
                 images: Vec::new(),
+                accepted: None,
             }],
             DrainEpoch(0),
         ));

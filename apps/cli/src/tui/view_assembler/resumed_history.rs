@@ -1,6 +1,6 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 use crate::tui::model::conversation::resumed_history::{
-    ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep, TypedJsonHistorySource,
+    ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep,
 };
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
@@ -16,14 +16,27 @@ pub(crate) fn assemble_resumed_history_item(
 ) -> Option<BlockNode> {
     let step = display_history.step(item.step_index)?;
     match item.kind {
-        ResumedHistoryItemKind::UserMessage { message_index } => text_leaf(
-            item.id.clone(),
-            OutputBlockKind::UserMessage(TextBlockView {
-                key: item.id.clone(),
-                text: step.message(message_index)?.text_content(),
-                style: SemanticStyle::Normal,
-            }),
-        ),
+        ResumedHistoryItemKind::UserMessage { message_index } => {
+            let message = step.message(message_index)?;
+            let text = if message.source() == sdk::LocalResumeMessageSource::SkillRequest {
+                message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())?
+                    .raw_input
+                    .clone()
+            } else {
+                message.text_content()
+            };
+            text_leaf(
+                item.id.clone(),
+                OutputBlockKind::UserMessage(TextBlockView {
+                    key: item.id.clone(),
+                    text,
+                    style: SemanticStyle::Normal,
+                }),
+            )
+        }
         ResumedHistoryItemKind::AssistantText {
             message_index,
             block_index,
@@ -66,18 +79,6 @@ pub(crate) fn assemble_resumed_history_item(
                 title: title.clone(),
                 body: text.clone(),
                 kind: kind.clone(),
-            }),
-        ),
-        ResumedHistoryItemKind::TypedJson {
-            source: TypedJsonHistorySource::SkillRequest,
-            ref text,
-            ..
-        } => text_leaf(
-            item.id.clone(),
-            OutputBlockKind::SystemNotice(TextBlockView {
-                key: item.id.clone(),
-                text: text.clone(),
-                style: SemanticStyle::Muted,
             }),
         ),
         ResumedHistoryItemKind::StepPlaceholder => None,

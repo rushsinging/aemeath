@@ -151,7 +151,7 @@ fn loaded_hook_window_assembles_dedicated_notice_block() {
 }
 
 #[test]
-fn loaded_window_projects_skill_as_json_and_hook_as_notice_not_user_messages() {
+fn loaded_window_projects_skill_as_user_message_and_hook_as_notice() {
     let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
     let mut loaded = window("session", 7, 0);
     loaded.steps[0].messages = vec![
@@ -190,17 +190,27 @@ fn loaded_window_projects_skill_as_json_and_hook_as_notice_not_user_messages() {
             .iter()
             .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
             .count(),
-        1
+        2
     );
-    assert!(backing.items().iter().any(|item| {
-        matches!(
-            item.kind,
-            ResumedHistoryItemKind::TypedJson {
-                source: super::resumed_history::TypedJsonHistorySource::SkillRequest,
-                ..
-            }
-        )
-    }));
+    let skill_item = backing
+        .items()
+        .iter()
+        .find(|item| item.id.ends_with("-skill-request"))
+        .expect("Skill 用户消息");
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(backing.clone());
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        skill_item,
+    )
+    .expect("Skill 用户消息 block");
+    let OutputBlockKind::UserMessage(skill_message) = block.kind else {
+        panic!("expected Skill user message");
+    };
+    assert_eq!(
+        skill_message.text,
+        "/superpowers:brainstorming feature scope"
+    );
     assert!(backing
         .items()
         .iter()

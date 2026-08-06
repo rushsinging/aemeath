@@ -210,7 +210,7 @@ Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `Sess
 
 ### 4.3.1 Session ingress、Session mailbox 与 Run input buffer
 
-Session Runtime 对外只有一个 typed ingress。`ChatRequest` 只携带非可选 `ingress`；Composition 将它适配为 `ChatInputEventPort`，Session 级 `SessionInputMailbox` 是唯一允许读取该 source 的 Runtime owner。首条输入、后续输入、Skill 和控制命令均为同一 `ChatInputEvent` 协议，不存在 `user_input`、`initial_messages`、独立 seed 或额外 queue drain 旁路。
+Session Runtime 对外只有一个 typed ingress。`ChatRequest` 只携带非可选 `ingress`；Composition 将它适配为 `ChatInputEventPort`，Session 级 `SessionInputMailbox` 是唯一允许读取该 source 的 Runtime owner。首条输入、后续输入、Skill 和控制命令均为同一 `ChatInputEvent` 协议，不存在 `user_input`、`initial_messages` 或额外 queue drain 旁路。Session idle gate 接纳用户输入后必须立即收敛成唯一 `AcceptedUserInput`；新 Run 的首次 seed 只是在 Run buffer 中转移这份 canonical typed input，**NEVER** 再生成一份平行 event/message payload。
 
 ```rust
 struct ChatRequest {
@@ -232,19 +232,39 @@ struct SessionInputMailbox {
 struct RuntimeContext {
     input: RunInputBufferHandle,
 }
+
+enum AcceptedUserInput {
+    UserMessage {
+        input_id: InputId,
+        text: String,
+        images: Vec<ChatInputImage>,
+    },
+    SkillRequest {
+        input_id: InputId,
+        skill: String,
+        arguments: String,
+        raw_input: String,
+    },
+}
 ```
 
 入站所有权必须保持单向：
 
 1. `SessionInputMailbox` 先读取 deferred，再读取外部 source，因而跨 Run 保持 producer identity 与 FIFO；任何其他 Runtime 类型都不得直接 poll `ChatInputEventPort`。
-2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。
-3. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将已接纳的原始事件推入当前 Run buffer；首条与后续输入走同一 `push_or_reject` 路径，保留 `InputId`、文本和图片。
-4. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是退回 `SessionInputMailbox::defer`，供下一 Run 优先消费。
-5. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
+2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 转成 `AcceptedUserInput` 并激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。
+3. `AcceptedUserInput` 是接纳后的唯一真相。`UserMessage` 保留文本与图片；`SkillRequest` 保留 `skill`、`arguments`、`raw_input` 与 `InputId`。模型 `Message`、Context accepted input 和 `UserMessagesAdopted` 都从同一实例派生，**NEVER** 同时维护 `adopted_messages` / `adopted_events` 或任何同义双轨。
+4. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将 canonical `AcceptedUserInput` 移入当前 Run buffer；首条与后续输入走同一 typed admission 路径。Run buffer 内部可同时暂存 Session 控制事件，但用户输入不再退回 `ChatInputEvent` 后重新 materialize。
+5. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是转换回边界 `ChatInputEvent` 并退回 `SessionInputMailbox::defer`，供下一 Run 优先消费；该转换只发生在 ownership 退回边界，不参与模型消息构造。
+6. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
 
-`RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机：
+`RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机。它以 `BufferedRunInput::Accepted(AcceptedUserInput)` 保存用户输入，以独立 control 变体保存待退回 Session 的命令；drain 时 `LoopInput` 携带同一 `AcceptedUserInput`，避免 `ChatInputEvent → Message → ChatInputEvent → LoopInput → Message` 的有损往返：
 
 ```rust
+enum BufferedRunInput {
+    Accepted(AcceptedUserInput),
+    Control(ChatInputEvent),
+}
+
 enum BufferDrain {
     Ready { batch: Vec<LoopInput>, epoch: DrainEpoch },
     Empty { epoch: DrainEpoch },
@@ -254,7 +274,19 @@ enum BufferDrain {
 }
 ```
 
-FIFO、batch drain、epoch、seal 和 late-input defer 属于 `RunInputBuffer`；`Created → DrainingInput → ...` 属于 `Run`。Run buffer **MUST NOT** 定义 PreparingContext、ExecutingTools 或 Interaction 等业务状态。
+FIFO、batch drain、epoch、seal 和 late-input defer 属于 `RunInputBuffer`；`Created → DrainingInput → ...` 属于 `Run`。Run buffer **MUST NOT** 定义 PreparingContext、ExecutingTools 或 Interaction 等业务状态。`LoopInput` 对 Main 用户输入只包装 canonical `AcceptedUserInput`；无 `InputId` 的 fixed prompt / engine continuation 可保留普通内部消息，但不得伪装成 accepted user input。
+
+### 4.3.1.1 SkillRequest 的模型与交付双视图
+
+`UserMessage` 与 `SkillRequest` 共用 admission、FIFO、drain、freeze、Context append 和 adoption 生命周期，但不共享消息 materialization 规则：
+
+- `UserMessage` 的模型消息来自 `text + images`，交付层回显同一用户文本；
+- `SkillRequest` 的模型消息由 Runtime 从 typed identity/arguments 生成内部 `<skill-request>`，并携带 `MessageSource::SkillRequest + SkillRequestMetadata`；
+- TUI/SDK 用户回显只读取 metadata 中的 `raw_input`，恰好生成一个普通 UserMessage；
+- 内部 `<skill-request>`、Skill metadata JSON 与 Skill Tool 结果正文不得作为 slash 回显；
+- Runtime、SDK、TUI **NEVER** 从普通 Message prose、XML 字符串或 slash 文本猜测 `SkillRequest`，也不得以字符串替换修复 metadata 丢失。
+
+因此二者是一个 `AcceptedUserInput` 生命周期中的两个业务变体，而不是两条 adopted pipeline。
 
 Interaction reply/cancel 与普通输入完全正交：`SessionIngress` 只把 typed `InteractionCommand` 定向交给 `InteractionPort`。`Run` 持有唯一 `Option<PendingInteraction>`，因此单个 Run 同一时刻最多存在一个 active interaction continuation；`InteractionPort::register` 返回的唯一 oneshot receiver 仅等待该 request 的 reply/cancel。端口内部可按 request identity 保存多个 waiter，是为了隔离多个并发 Run，不表示单个 Run 可以同时等待多个 interaction。
 
@@ -290,7 +322,7 @@ reply/cancel 必须匹配 request identity；重复、陈旧或不匹配的命�
 
 - messages 与 committed boundary；
 - Step message ownership；
-- accepted/adopted inputs；
+- accepted inputs 及其 Step adoption receipt；
 - ContextRequest / ContextWindow；
 - turn count 与 invocation usage snapshot；
 - tool identity 与 continuation 工作数据；

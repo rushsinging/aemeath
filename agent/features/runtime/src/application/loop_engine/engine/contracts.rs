@@ -14,15 +14,123 @@ impl DrainEpoch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcceptedUserInput {
+    UserMessage {
+        input_id: sdk::InputId,
+        text: String,
+        images: Vec<sdk::ChatInputImage>,
+    },
+    SkillRequest(sdk::SkillRequest),
+}
+
+impl AcceptedUserInput {
+    pub fn from_event(event: sdk::ChatInputEvent) -> Result<Self, sdk::ChatInputEvent> {
+        match event {
+            sdk::ChatInputEvent::UserMessage { id, text, images } => Ok(Self::UserMessage {
+                input_id: id,
+                text,
+                images,
+            }),
+            sdk::ChatInputEvent::SkillRequest(request) => Ok(Self::SkillRequest(request)),
+            other => Err(other),
+        }
+    }
+
+    pub fn into_event(self) -> sdk::ChatInputEvent {
+        match self {
+            Self::UserMessage {
+                input_id,
+                text,
+                images,
+            } => sdk::ChatInputEvent::UserMessage {
+                id: input_id,
+                text,
+                images,
+            },
+            Self::SkillRequest(request) => sdk::ChatInputEvent::SkillRequest(request),
+        }
+    }
+
+    pub fn input_id(&self) -> &sdk::InputId {
+        match self {
+            Self::UserMessage { input_id, .. } => input_id,
+            Self::SkillRequest(request) => &request.input_id,
+        }
+    }
+
+    pub fn model_message(&self) -> share::message::Message {
+        match self {
+            Self::UserMessage { text, images, .. } if images.is_empty() => {
+                share::message::Message::user(text.clone())
+            }
+            Self::UserMessage { text, images, .. } => share::message::Message::user_with_images(
+                text.clone(),
+                images
+                    .iter()
+                    .cloned()
+                    .map(|image| (image.id, image.base64, image.media_type))
+                    .collect(),
+            ),
+            Self::SkillRequest(request) => share::message::Message::skill_request(
+                crate::application::loop_engine::input::format_skill_request(request, "en"),
+                share::message::SkillRequestMetadata {
+                    skill: request.skill.clone(),
+                    arguments: request.arguments.clone(),
+                    raw_input: request.raw_input.clone(),
+                },
+            ),
+        }
+    }
+
+    pub fn withdraw_text(&self) -> String {
+        match self {
+            Self::UserMessage { text, .. } => text.clone(),
+            Self::SkillRequest(request) => request.raw_input.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoopInput {
     pub text: String,
-    /// Per-run user message InputId (from `ChatInputEvent::UserMessage::id`).
-    /// `None` for engine-driven continuations (StopHookFeedback, ToolResults)
-    /// and fixed-sub-agent prompts (#1272 per-run drain identity).
     pub input_id: Option<sdk::InputId>,
-    /// Per-run user message images (from `ChatInputEvent::UserMessage::images`).
-    /// Empty for engine-driven continuations.
     pub images: Vec<sdk::ChatInputImage>,
+    pub accepted: Option<AcceptedUserInput>,
+}
+
+impl LoopInput {
+    pub fn accepted(input: AcceptedUserInput) -> Self {
+        let input_id = Some(input.input_id().clone());
+        let message = input.model_message();
+        Self {
+            text: message.text_content(),
+            input_id,
+            images: Vec::new(),
+            accepted: Some(input),
+        }
+    }
+
+    pub fn input_id(&self) -> Option<&sdk::InputId> {
+        self.input_id.as_ref()
+    }
+
+    pub fn message(&self) -> share::message::Message {
+        if let Some(input) = self.accepted.as_ref() {
+            return input.model_message();
+        }
+        if self.images.is_empty() {
+            share::message::Message::user(self.text.clone())
+        } else {
+            share::message::Message::user_with_images(
+                self.text.clone(),
+                self.images
+                    .iter()
+                    .cloned()
+                    .map(|image| (image.id, image.base64, image.media_type))
+                    .collect(),
+            )
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -337,18 +445,7 @@ pub trait InteractionMailboxPort:
 }
 
 pub(super) fn loop_input_message(input: &LoopInput) -> share::message::Message {
-    if input.images.is_empty() {
-        return share::message::Message::user(input.text.clone());
-    }
-    share::message::Message::user_with_images(
-        input.text.clone(),
-        input
-            .images
-            .iter()
-            .cloned()
-            .map(|image| (image.id, image.base64, image.media_type))
-            .collect(),
-    )
+    input.message()
 }
 
 pub(super) fn freeze_step<P>(
@@ -372,8 +469,7 @@ pub(super) fn freeze_step<P>(
             .iter()
             .filter_map(|input| {
                 input
-                    .input_id
-                    .as_ref()
+                    .input_id()
                     .map(|id| (id.clone(), loop_input_message(input)))
             })
             .collect(),

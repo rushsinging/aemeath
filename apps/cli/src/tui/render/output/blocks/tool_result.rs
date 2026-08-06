@@ -8,7 +8,9 @@ use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapM
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::ToolResultBlockView;
+use crate::tui::view_model::output::{
+    AgentActivityKindView, AgentActivityLineView, ToolResultBlockView,
+};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use serde_json::Value;
@@ -64,6 +66,10 @@ pub fn render_tool_result(
 
     let lines = match policy {
         ResultPolicy::Hidden => vec![],
+        ResultPolicy::Visible { .. } if view.activity_lines.is_some() => render_activity_lines(
+            view.activity_lines.as_deref().unwrap_or_default(),
+            ctx.text_width.into(),
+        ),
         ResultPolicy::Visible {
             max_lines,
             render_kind,
@@ -100,6 +106,24 @@ pub fn render_tool_result(
         block_id: block_id.to_string(),
         lines: Rc::new(lines),
     }
+}
+
+fn render_activity_lines(activities: &[AgentActivityLineView], width: usize) -> Vec<RenderedLine> {
+    let activity_style = Style::default().fg(theme::TEXT_DIM);
+    let marker_style = Style::default().fg(theme::TEXT_MUTED);
+    activities
+        .iter()
+        .flat_map(|activity| {
+            let mut spans = Vec::new();
+            if activity.kind == AgentActivityKindView::ToolCall {
+                spans.push(Span::styled("→ ", marker_style));
+            }
+            spans.push(Span::styled(activity.content.clone(), activity_style));
+            wrap_spans_with_prefix(spans, width, None, WrapMode::Word)
+                .into_iter()
+                .map(|line| line.with_style(activity_style))
+        })
+        .collect()
 }
 
 /// 渲染 Plain 工具结果：**纯文本原样**逐行，按 `max_lines` 截断。
@@ -205,7 +229,9 @@ fn format_result_lines_tail(
 mod tests {
     use super::*;
     use crate::tui::render::theme;
-    use crate::tui::view_model::output::ToolResultBlockView;
+    use crate::tui::view_model::output::{
+        AgentActivityKindView, AgentActivityLineView, ToolResultBlockView,
+    };
 
     use crate::tui::view_model::style::SemanticStyle;
 
@@ -215,6 +241,7 @@ mod tests {
             tool_title: tool_title.into(),
             args_preview: None,
             result_text: result_text.into(),
+            activity_lines: None,
             data: None,
             style: SemanticStyle::Success,
         }
@@ -230,9 +257,32 @@ mod tests {
             tool_title: tool_title.into(),
             args_preview: None,
             result_text: result_text.into(),
+            activity_lines: None,
             data: Some(data),
             style: SemanticStyle::Success,
         }
+    }
+
+    #[test]
+    fn test_render_tool_result_uses_typed_activity_kind_for_arrow() {
+        let mut view = result("Agent", "Read src/lib.rs\nRead as prose");
+        view.activity_lines = Some(vec![
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "Read src/lib.rs".into(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::Message,
+                content: "Read as prose".into(),
+            },
+        ]);
+
+        let block = render_tool_result("agent-streaming-result", &view, &RenderCtx::for_width(80));
+        let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
+
+        assert_eq!(rendered, vec!["→ Read src/lib.rs", "Read as prose"]);
+        assert!(rendered.iter().all(|line| !line.contains("→ →")));
+        assert!(rendered.iter().all(|line| !line.contains('⎿')));
     }
 
     #[test]

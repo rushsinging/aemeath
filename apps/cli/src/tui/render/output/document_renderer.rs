@@ -395,11 +395,7 @@ fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
         OutputBlockKind::ThinkingMessage(view) => {
             estimate_wrapped_text_lines(&view.text, text_width, false).max(1)
         }
-        OutputBlockKind::ToolCall(_) => {
-            // #1547：streaming preview 已升为独立 ToolResult 子块，ToolCall 自身
-            // 仅渲染 header + detail 行，不再估算 activity 行。
-            1usize
-        }
+        OutputBlockKind::ToolCall(_) => 1usize,
         OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
         OutputBlockKind::HookNotice(view) => 1usize.saturating_add(
             view.body

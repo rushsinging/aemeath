@@ -102,7 +102,7 @@ Loop Engine 直接编排 `Run + RunExecutionState + RuntimeContext`，不消费�
 
 Runtime-owned Port 只对应真实外部 seam：
 
-- `InputPort`：SessionIngress 分类后的 Run 输入接纳端口，只接收 `UserMessage`，负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation；
+- `InputPort`：Session ingress 分类后的 Run 输入接纳端口，只接收 canonical `AcceptedUserInput`（`UserMessage` / `SkillRequest`），负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation，也不并行维护 event/message 两种 adopted payload；
 - `EventSink`：接收领域事件；跨 SDK 边界的纯值转换由 `sdk_event_mapper` 完成；
 - `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
 - `InteractionPort`：一次 request/reply transport；reply/cancel 按 `run_id + request_id` 直接完成 pending interaction，**NEVER** 经普通输入队列排队；

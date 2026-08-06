@@ -326,6 +326,7 @@ fn test_sanitize_partial_json_truncates() {
 mod started_tests {
     use super::*;
     use crate::tui::app::event::UiTurnContext;
+    use crate::tui::model::conversation::agent_progress::AgentActivityKind;
     use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId as TuiToolCallId};
     use sdk::AgentProgressEventView;
     use sdk::AgentProgressKindView;
@@ -380,7 +381,7 @@ mod started_tests {
         let mapping = map_agent_event(&ev);
 
         match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress {
+            ConversationIntent::RecordAgentActivities(RecordAgentActivities {
                 chat_id,
                 run_id,
                 tool_id,
@@ -466,10 +467,14 @@ mod started_tests {
             crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
         });
         match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(message, "→ Read /repo/src/main.rs 10:12\n");
-                assert!(!message.contains("file_path"));
-                assert!(!message.contains('{'));
+            ConversationIntent::RecordAgentActivities(RecordAgentActivities {
+                activities, ..
+            }) => {
+                assert_eq!(activities.len(), 1);
+                assert_eq!(activities[0].kind, AgentActivityKind::ToolCall);
+                assert_eq!(activities[0].content, "Read /repo/src/main.rs 10:12");
+                assert!(!activities[0].content.contains("file_path"));
+                assert!(!activities[0].content.contains('{'));
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),
         }
@@ -504,10 +509,21 @@ mod started_tests {
             crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
         });
         match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
+            ConversationIntent::RecordAgentActivities(RecordAgentActivities {
+                activities, ..
+            }) => {
                 assert_eq!(
-                    message,
-                    "→ Find apps/**/*.rs\n→ Search /activity_lines/ in apps/cli/src\n"
+                    activities
+                        .iter()
+                        .map(|activity| (&activity.kind, activity.content.as_str()))
+                        .collect::<Vec<_>>(),
+                    vec![
+                        (&AgentActivityKind::ToolCall, "Find apps/**/*.rs"),
+                        (
+                            &AgentActivityKind::ToolCall,
+                            "Search /activity_lines/ in apps/cli/src"
+                        ),
+                    ]
                 );
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),
@@ -534,11 +550,13 @@ mod started_tests {
 
         let mapping = map_agent_event(&ev);
         match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert!(message.starts_with("→ UnknownTool "));
-                assert!(message.ends_with("\n"));
-                assert!(message.contains("..."));
-                assert!(message.len() < 140);
+            ConversationIntent::RecordAgentActivities(RecordAgentActivities {
+                activities, ..
+            }) => {
+                assert!(activities[0].content.starts_with("UnknownTool "));
+                assert!(!activities[0].content.starts_with("→ "));
+                assert!(activities[0].content.ends_with("..."));
+                assert!(activities[0].content.len() < 140);
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),
         }
@@ -559,8 +577,12 @@ mod started_tests {
         };
         let mapping = map_agent_event(&ev);
         match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(message, "working\n");
+            ConversationIntent::RecordAgentActivities(RecordAgentActivities {
+                activities, ..
+            }) => {
+                assert_eq!(activities.len(), 1);
+                assert_eq!(activities[0].content, "working");
+                assert_eq!(activities[0].kind, AgentActivityKind::Message);
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),
         }
