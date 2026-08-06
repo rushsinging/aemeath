@@ -220,7 +220,7 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: None,
-            activity_lines: Vec::new(),
+            streaming_preview: None,
             result_summary: None,
             result_payload: None,
             workspace_root: None,

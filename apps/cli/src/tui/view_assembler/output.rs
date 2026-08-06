@@ -108,6 +108,10 @@ impl OutputViewAssembler {
                     workspace_root,
                 )?;
                 let mut parent = leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
+                // #1547：有最终 result_summary 时装配权威最终 `<tool-id>-result`；
+                // 没有最终结果但有 streaming preview 时装配临时
+                // `<tool-id>-streaming-result`。二者都用 OutputBlockKind::ToolResult、
+                // depth=1，且不会同时存在。
                 if let Some(result_text) = tool.result_summary.clone() {
                     let result_id = format!("{}-result", reference.tool_call_id.as_ref());
                     let child = leaf(
@@ -121,6 +125,20 @@ impl OutputViewAssembler {
                                 .result_payload
                                 .as_ref()
                                 .map(|payload| payload.content.clone()),
+                            style: tool.style,
+                        }),
+                    );
+                    push_child_checked(&mut parent, child, 1);
+                } else if let Some(preview) = tool.streaming_preview.clone() {
+                    let result_id = format!("{}-streaming-result", reference.tool_call_id.as_ref());
+                    let child = leaf(
+                        result_id.clone(),
+                        OutputBlockKind::ToolResult(ToolResultBlockView {
+                            key: result_id,
+                            tool_title: tool.title.clone(),
+                            args_preview: tool.args_preview.clone(),
+                            result_text: preview,
+                            data: None,
                             style: tool.style,
                         }),
                     );

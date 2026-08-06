@@ -8,10 +8,11 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::rc::Rc;
 
-/// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
+/// 渲染工具调用块：仅 header（标题）+ args detail 行。
 ///
-/// 工具结果已升为独立子块（`ToolResult` 变体，见 `blocks/tool_result.rs`，#60），
-/// 由 assembler 作为本块的 depth-1 子节点附加，此处不再渲染结果。
+/// streaming preview 与最终结果均升为独立 ToolResult 子块（#1547），
+/// 由 assembler 作为 depth-1 子节点附加，marker/缩进/续行由 gutter 统一管理。
+/// 此处不再渲染任何 activity 内联行。
 pub fn render_tool_call(
     block_id: &str,
     view: &ToolCallBlockView,
@@ -44,19 +45,18 @@ pub fn render_tool_call(
             )
         });
     crate::tui::log_debug!(
-        "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
+        "render tool_call block_id={} title={} status={:?} args_len={} result_len={} detail_lines={} streaming_preview={}",
         block_id,
         view.title,
         view.semantic_status,
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
-                view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
-        view.activity_lines.len(),
+        view.streaming_preview.is_some(),
     );
-    // issue #361：header / detail / activity 三部分均消费 ctx.text_width 做 wrap（Word
-    // 模式），避免窄终端下行宽超出 output_document_width 被 ratatui 截断。marker 由 gutter
-    // 注入，header 只渲染去掉前导 ● 的标题文本。line base style（TEXT / TEXT_MUTED）让未
-    // 显式着色的 span 继承主题色，已有显式颜色的 span（如 display_name 的 ACCENT_BRIGHT）保留。
+    // header / detail 两部分消费 ctx.text_width 做 wrap（Word 模式），避免窄终端下行宽
+    // 超出 output_document_width 被 ratatui 截断。marker 由 gutter 注入，header 只渲染
+    // 去掉前导 ● 的标题文本。
     let header_style = Style::default().fg(theme::TEXT);
     let detail_style = Style::default().fg(theme::TEXT_MUTED);
     let width = ctx.text_width as usize;
@@ -78,34 +78,6 @@ pub fn render_tool_call(
             )
             .into_iter()
             .map(|line| line.with_style(detail_style)),
-        );
-    }
-    // 渲染 activity_lines：Bash/Agent 等长时间工具执行过程中显示当前进度，
-    // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
-    // 视觉对齐 ToolResult 子块：仅首行带 ⎿ marker（TEXT_MUTED，与 gutter 的
-    // ToolResult marker 色一致），后续行等宽空白；内容用 TEXT_DIM。
-    let marker_style = Style::default().fg(theme::TEXT_MUTED);
-    let activity_style = Style::default().fg(theme::TEXT_DIM);
-    let activity_indent = "  ".to_string();
-    let mut first_activity = true;
-    for activity in &view.activity_lines {
-        let mut spans = Vec::new();
-        if first_activity {
-            spans.push(Span::styled("⎿ ", marker_style));
-            first_activity = false;
-        } else {
-            spans.push(Span::styled(activity_indent.clone(), activity_style));
-        }
-        spans.push(Span::styled(activity.clone(), activity_style));
-        lines.extend(
-            wrap_spans_with_prefix(
-                spans,
-                width,
-                Some(Span::styled(activity_indent.clone(), activity_style)),
-                WrapMode::Word,
-            )
-            .into_iter()
-            .map(|line| line.with_style(activity_style)),
         );
     }
 
@@ -168,7 +140,7 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: Some("/foo/".into()),
-            activity_lines: Vec::new(),
+            streaming_preview: None,
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -320,46 +292,54 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_wraps_long_activity_summary_to_text_width() {
-        // Agent 等长任务的 activity 行在窄终端应 wrap 而非溢出。
+    fn test_tool_call_does_not_render_streaming_preview_inline() {
+        // #1547：streaming preview 由 gutter 管理的 ToolResult 子块渲染，
+        // ToolCall 自身只渲染 header/detail，不含预览内容或 ⎿ marker。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{"command":"ls"}"#.into());
-        view.activity_lines = vec![
+        view.streaming_preview = Some(
             "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为".into(),
-        ];
+        );
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(30));
 
         for (i, line) in block.lines.iter().enumerate() {
             assert!(
-                line.plain.width() <= 30,
-                "activity 行 #{i} 宽度 {} 超 30: {:?}",
-                line.plain.width(),
+                !line.plain.contains('⎿'),
+                "ToolCall 行 #{i} 不应内联渲染 ⎿ marker: {:?}",
+                line.plain
+            );
+            assert!(
+                !line.plain.contains("子任务正在执行"),
+                "ToolCall 行 #{i} 不应内联渲染 streaming_preview 内容: {:?}",
                 line.plain
             );
         }
     }
 
     #[test]
-    fn test_tool_call_renders_multiple_activity_lines() {
+    fn test_tool_call_does_not_render_inline_streaming_marker() {
+        // #1547：多行 streaming_preview 时，ToolCall 不应出现任何 ⎿ marker 或预览行。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
-        view.activity_lines = vec!["2".into(), "3".into(), "4".into(), "5".into(), "6".into()];
+        view.streaming_preview = Some("2\n3\n4\n5\n6".into());
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
-        // 首行带 ⎿ marker（对齐 ToolResult 子块），后续行等宽缩进对齐。
-        assert!(rendered.iter().any(|line| line.contains("2")));
-        assert!(rendered.iter().any(|line| line.contains("3")));
-        assert!(rendered.iter().any(|line| line.contains("4")));
-        assert!(rendered.iter().any(|line| line.contains("5")));
-        assert!(rendered.iter().any(|line| line.contains("6")));
-        // 仅首行带 ⎿ marker，其余 activity 行为空白缩进
+        // ToolCall 不应渲染 streaming_preview 行内容
+        assert!(
+            !rendered.iter().any(|line| line.contains("2")),
+            "ToolCall 不应渲染 streaming 预览内容，实际: {rendered:?}"
+        );
+        // 不应出现任何 ⎿ marker（marker 由 gutter 在 ToolResult 子块注入）
         let marker_count = rendered.iter().filter(|line| line.contains('⎿')).count();
-        assert_eq!(marker_count, 1, "仅首行应带 ⎿ marker，实际: {rendered:?}");
+        assert_eq!(
+            marker_count, 0,
+            "ToolCall 不应有 ⎿ marker，实际: {rendered:?}"
+        );
     }
 
     #[test]
