@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "index": "docs/design/02-modules/runtime/events/09-event-index.md",
+  "layers": {
+    "runtime_stream": {
+      "path": "agent/features/runtime/src/application/loop_engine/chat/events.rs",
+      "enum": "RuntimeStreamEvent",
+      "variants": [
+        "Text", "Thinking", "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult",
+        "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactDone",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
+        "CompactFinished", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
+        "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
+        "Cancelled", "LiveTps", "RunChanged", "AskUserBatch", "InteractionRequested",
+        "AgentProgress", "ToolProgress", "ChildRunActivity", "SkillsUpdated",
+        "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
+        "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+      ]
+    },
+    "sdk": {
+      "path": "packages/sdk/src/chat_event.rs",
+      "enum": "ChatEvent",
+      "variants": [
+        "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Token", "Thinking",
+        "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult", "SystemMessage",
+        "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactDone",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
+        "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
+        "DoneWithDurationMs", "RunStarted", "RunStepStarted", "RunStepCompleted",
+        "RunStepCancellationRequested", "RunStepFinalizationStarted", "RunStepCancelled",
+        "RunDrainingInput", "RunTerminationRequested", "RunTerminated", "RunCompleted",
+        "RunFailed", "RunStuckDetected", "RunTransitioned", "RunAwaitingUser", "RunResumed",
+        "Cancelled", "LiveTps", "RunChanged", "CurrentRunChanged", "InteractionRequested",
+        "AskUserBatch", "AgentProgress", "ToolProgress", "ChildRunActivity",
+        "WorkingDirectoryChanged", "ConfigChanged", "ConfigReloaded", "SessionReset",
+        "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
+        "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+      ]
+    },
+    "tui": {
+      "path": "apps/cli/src/tui/adapter/tui_runtime_event.rs",
+      "enum": "TuiRuntimeEvent",
+      "variants": [
+        "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Text", "Thinking",
+        "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult", "SystemMessage",
+        "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactDone",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
+        "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
+        "RunStep", "InteractionRequested", "AgentProgress", "ToolProgress", "ChildRunActivity",
+        "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
+        "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
+        "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "RuntimeStatusChanged", "TaskStateChanged", "CostUpdate", "ConfigChanged",
+        "ConfigReloaded"
+      ]
+    }
+  },
+  "current_cross_layer_facts": [
+    {
+      "runtime": "RuntimeStatusChanged",
+      "sdk": "RuntimeStatusChanged",
+      "tui": "RuntimeStatusChanged"
+    },
+    {
+      "runtime": "TaskStateChanged",
+      "sdk": "TaskStateChanged",
+      "tui": "TaskStateChanged"
+    }
+  ],
+  "legacy_broad_names": [
+    "SkillsUpdated", "MicrocompactDone", "Done", "DoneWithDuration", "DoneWithDurationMs",
+    "LiveTps", "RunChanged", "AskUserBatch", "AgentProgress", "ToolProgress",
+    "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
+    "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
+    "ReminderList", "SessionList", "ProjectInfo", "CostUpdate"
+  ],
+  "retired_symbols": [
+    "CompactProgress"
+  ],
+  "ack_terminal_patterns": [
+    "^(?:Cancel|Terminate|Reply|Reject|Accept).*(?:Completed|Cancelled|Terminated|Failed)$"
+  ],
+  "ack_terminal_compatibility_names": [],
+  "tui_container_only_variants": [
+    "Noop", "Error", "Run", "RunStep", "GraphPhaseChanged"
+  ]
+}

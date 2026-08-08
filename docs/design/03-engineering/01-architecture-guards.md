@@ -80,6 +80,7 @@
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
 | 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent` 与 SDK mapper `map_lifecycle_event`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；stop hook、Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
 | 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
+| 23g | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress`；不改 SDK wire 名称 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -626,7 +627,16 @@
 - **故意违规证据**：在临时副本分别加入 SDK `builtin_commands()`、no-TUI 独立 parser 与 Runtime `CommandRoute`，单 Guard 和总编排均须 exit 2；恢复后 clean pass。
 - **失败模式**：输出命中路径后以 exit 2 阻断。
 
-`check-runtime-capability-assembly-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。
+## 23g. check-runtime-event-naming.sh
+
+- **位置**：`.agents/hooks/check-runtime-event-naming.sh`；结构化 catalog/baseline 为 `.agents/runtime-event-naming-baseline.json`；正反例脚本为 `check-runtime-event-naming-tests.sh`。
+- **功能**：解析 `RuntimeStreamEvent`、SDK `ChatEvent` 与 `TuiRuntimeEvent` 的 enum 结构，要求当前 variant 集合与 baseline 精确一致；新增、删除或跨层改名必须同时评审结构化 catalog 与 `09-event-index.md`，避免仅靠 grep 或 Markdown 表格解析治理事件语言。
+- **兼容边界**：`legacy_broad_names` 显式冻结仍在生产使用的 compatibility names，不进行 SDK wire breaking rename；新增宽泛 `*Updated`、`*Info`、`*Data`、`*Notification`、`*ProgressUpdated` 仍会被拒绝。
+- **语义边界**：`current_cross_layer_facts` 锁定 Runtime → SDK → TUI 同名事实；`ack_terminal_patterns` 以结构化模式禁止命令 ACK 借用 Lifecycle terminal 名称，确有现存 wire 兼容名时只能进入显式 `ack_terminal_compatibility_names`；`retired_symbols` 禁止恢复 `CompactProgress`，Compact live display 只能来自 typed Activity stage/work。
+- **索引登记**：除 `Noop`、`Error`、`Run`、`RunStep`、`GraphPhaseChanged` 五个 TUI 内部容器 variant 外，baseline 内每个事件名必须出现在 Runtime 事件索引中。容器例外不授权新增事实名，也不计 compatibility debt。
+- **故意违规证据**：隔离副本依次注入宽泛 `RuntimeDataUpdated`、未登记事件、跨层 fact 漂移、Lifecycle terminal 风格 ACK 和 stringly `CompactProgress`；每类均必须由单 Guard 拒绝，恢复后 clean pass。
+
+`check-runtime-capability-assembly-tests.sh`、`check-runtime-event-naming-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。事件命名主体 Guard 同样进入 `fast`，其结构化负例脚本只进入 `full`。
 
 ## 24. check-config-reader-injection.sh
 
