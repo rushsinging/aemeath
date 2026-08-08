@@ -3,8 +3,6 @@ mod input_port;
 mod logging;
 
 use crate::tui::adapter::event_mapping::sdk_event_to_tui_event;
-#[cfg(test)]
-use crate::tui::adapter::event_mapping::SdkEventMapping;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use std::sync::Arc;
 
@@ -61,6 +59,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::adapter::event_mapping::SdkEventMapping;
     use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiSubRunActivityKind};
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
