@@ -157,13 +157,13 @@ fn load_named_guidance_with_lang(name: &str, language: &str) -> Option<LoadedGui
     let dir = guidance_dir()?;
     if !language.is_empty() {
         let lang_path = dir.join(language).join(format!("{name}.md"));
-        if let Some(guidance) = read_guidance_file(lang_path, false) {
+        if let Some(guidance) = read_external_guidance_file(lang_path) {
             return Some(guidance);
         }
     }
 
     let root_path = dir.join(format!("{name}.md"));
-    if let Some(guidance) = read_guidance_file(root_path, false) {
+    if let Some(guidance) = read_external_guidance_file(root_path) {
         return Some(guidance);
     }
 
@@ -180,13 +180,13 @@ fn load_prefix_matched_files_with_lang(model_id: &str, language: &str) -> Vec<Lo
     let mut candidates: BTreeMap<String, LoadedGuidance> =
         scan_prefix_candidates(&dir, &model_lower)
             .into_iter()
-            .filter_map(|(stem, path)| read_guidance_file(path, false).map(|item| (stem, item)))
+            .filter_map(|(stem, path)| read_external_guidance_file(path).map(|item| (stem, item)))
             .collect();
 
     if !language.is_empty() {
         let lang_dir = dir.join(language);
         for (stem, path) in scan_prefix_candidates(&lang_dir, &model_lower) {
-            if let Some(item) = read_guidance_file(path, false) {
+            if let Some(item) = read_external_guidance_file(path) {
                 candidates.insert(stem, item);
             }
         }
@@ -292,17 +292,17 @@ fn load_matching_config_guidance(
             if !loaded_paths.insert(identity) {
                 return None;
             }
-            read_guidance_file(expanded, true)
+            read_external_guidance_file(expanded)
         })
         .collect()
 }
 
-fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidance> {
+fn read_external_guidance_file(path: PathBuf) -> Option<LoadedGuidance> {
     let content = match std::fs::read_to_string(&path) {
         Ok(content) if !content.trim().is_empty() => content,
         Ok(_) => return None,
         Err(error) => {
-            if scan_security || path.exists() {
+            if path.exists() {
                 log::warn!(target: crate::LOG_TARGET,
                     "Failed to read guidance file {}: {}",
                     path.display(),
@@ -314,10 +314,6 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
     };
 
     log::debug!(target: crate::LOG_TARGET, "Loaded guidance from {}", path.display());
-    if !scan_security {
-        return Some(LoadedGuidance::file(path, content));
-    }
-
     let display_path = path.to_string_lossy();
     let warnings = crate::adapters::prompt::security::scan_content(&display_path, &content);
     for warning in &warnings {

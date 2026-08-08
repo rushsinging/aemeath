@@ -88,6 +88,8 @@ L4 验证用户可感知或业务可验收旅程。TUI 的 crossterm → update 
 
 L4 不替代 reducer、Buffer cell 和契约测试。跨层链路应在每个边界保留相邻测试，并由场景测试证明最终组合成立。
 
+对于 Provider-visible Context 链路，L0 **MUST** 以架构守卫禁止 Context window 生成后的 Runtime 文本装饰；L1 覆盖 reminder renderer、guidance 选择/扫描与 breakpoint 纯逻辑；L2 覆盖 Runtime typed intent → `ContextRequest` 及 Context window 组装；L3 覆盖 `ContextWindow → InvocationRequest` 机械映射、Provider wire 与 invocation-only 非持久化契约；L4 覆盖同 Session guidance source change、model switch、不同模型 Subagent 和 Task reminder 场景。Main/Sub 的每个相邻边界都必须有证据，**NEVER** 只测 intent 源头和最终 Provider payload。
+
 ### 2.6 L5 系统 smoke
 
 L5 只覆盖进程内 Harness 无法覆盖的职责：

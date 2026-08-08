@@ -56,6 +56,7 @@ fn frozen_request() -> ContextRequest {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("seed")],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,

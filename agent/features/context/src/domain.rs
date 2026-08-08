@@ -75,6 +75,63 @@ impl SessionRevision {
     }
 }
 
+/// 仅对单次 Provider invocation 可见的结构化提醒。
+///
+/// Runtime 负责产生 intent 与生命周期；Context 负责本地化渲染、排序和预算。
+/// 这些值 **NEVER** 写入 canonical Session。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvocationReminder {
+    TaskProgress(TaskProgressReminder),
+    GuidanceSourcesChanged,
+    ModelGuidanceMismatch {
+        session_model_id: String,
+        run_model_id: String,
+    },
+}
+
+impl InvocationReminder {
+    pub fn guidance_sources_changed() -> Self {
+        Self::GuidanceSourcesChanged
+    }
+
+    pub fn model_guidance_mismatch(
+        session_model_id: impl Into<String>,
+        run_model_id: impl Into<String>,
+    ) -> Self {
+        Self::ModelGuidanceMismatch {
+            session_model_id: session_model_id.into(),
+            run_model_id: run_model_id.into(),
+        }
+    }
+
+    pub fn task_progress(progress: TaskProgressReminder) -> Self {
+        Self::TaskProgress(progress)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressReminder {
+    pub total: usize,
+    pub completed: usize,
+    pub items: Vec<TaskProgressReminderItem>,
+    pub hidden_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressReminderItem {
+    pub sequence: u64,
+    pub subject: String,
+    pub status: TaskProgressStatus,
+    pub blocked_by_sequences: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskProgressStatus {
+    Completed,
+    InProgress,
+    Pending,
+}
+
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
 pub struct ContextRequest {
@@ -83,6 +140,7 @@ pub struct ContextRequest {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
+    pub invocation_reminders: Vec<InvocationReminder>,
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,

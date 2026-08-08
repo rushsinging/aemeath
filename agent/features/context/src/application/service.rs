@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
-    ContextRequest, ContextWindow, ManualCompactRequest, SessionId, SystemBlock,
-    ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
+    ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
+    SystemBlock, TaskProgressStatus, ToolReceiptMutation, ToolReceiptMutationError,
+    ToolReceiptMutationReceipt,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -56,9 +57,13 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
-        let messages = snapshot
+        let mut messages = snapshot
             .messages
             .with_pending(request.pending_messages.clone());
+        let reminder_messages = render_invocation_reminders(request);
+        if !reminder_messages.is_empty() {
+            messages = messages.with_pending(reminder_messages);
+        }
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
 
@@ -158,6 +163,97 @@ impl ContextApplicationService {
         crate::application::performance::record_build(build_started.elapsed());
         Ok(window)
     }
+}
+
+fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::Message> {
+    let mut rendered = Vec::new();
+    for reminder_kind in [0_u8, 1, 2] {
+        for reminder in &request.invocation_reminders {
+            let text = match (reminder_kind, reminder) {
+                (0, InvocationReminder::TaskProgress(progress)) => {
+                    let mut lines = vec![match request.language.as_str() {
+                        "zh" => format!("━━ 任务：{}/{} ━━", progress.completed, progress.total),
+                        _ => format!("━━ Tasks: {}/{} ━━", progress.completed, progress.total),
+                    }];
+                    for item in &progress.items {
+                        let status = match item.status {
+                            TaskProgressStatus::Completed => "✓",
+                            TaskProgressStatus::InProgress => "■",
+                            TaskProgressStatus::Pending => "□",
+                        };
+                        let blocked = if item.blocked_by_sequences.is_empty() {
+                            String::new()
+                        } else {
+                            let sequences = item
+                                .blocked_by_sequences
+                                .iter()
+                                .map(u64::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            match request.language.as_str() {
+                                "zh" => format!("（被 #{sequences} 阻塞）"),
+                                _ => format!(" (blocked by #{sequences})"),
+                            }
+                        };
+                        lines.push(format!(
+                            "{status} #{} {}{blocked}",
+                            item.sequence,
+                            escape_reminder_text(&item.subject)
+                        ));
+                    }
+                    if progress.hidden_count > 0 {
+                        lines.push(match request.language.as_str() {
+                            "zh" => format!("另有 {} 个任务未显示", progress.hidden_count),
+                            _ => format!("{} additional tasks are omitted", progress.hidden_count),
+                        });
+                    }
+                    let heading = match request.language.as_str() {
+                        "zh" => "当前任务进度：",
+                        _ => "Current task progress:",
+                    };
+                    Some(format!(
+                        "<system-reminder>{heading}\n{}\n</system-reminder>",
+                        lines.join("\n")
+                    ))
+                }
+                (1, InvocationReminder::GuidanceSourcesChanged) => {
+                    Some(match request.language.as_str() {
+                        "zh" => "<system-reminder>guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。</system-reminder>".to_string(),
+                        _ => "<system-reminder>Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.</system-reminder>".to_string(),
+                    })
+                }
+                (
+                    2,
+                    InvocationReminder::ModelGuidanceMismatch {
+                        session_model_id,
+                        run_model_id,
+                    },
+                ) => Some(match request.language.as_str() {
+                    "zh" => format!(
+                        "<system-reminder>Session 冻结模型 {} 与当前 Run 模型 {} 不同；继续使用 Session 冻结的系统提示。</system-reminder>",
+                        escape_reminder_text(session_model_id),
+                        escape_reminder_text(run_model_id)
+                    ),
+                    _ => format!(
+                        "<system-reminder>The Session-frozen model {} differs from the current Run model {}; continue using the Session-frozen system prompt.</system-reminder>",
+                        escape_reminder_text(session_model_id),
+                        escape_reminder_text(run_model_id)
+                    ),
+                }),
+                _ => None,
+            };
+            if let Some(text) = text {
+                rendered.push(share::message::Message::user(text));
+            }
+        }
+    }
+    rendered
+}
+
+fn escape_reminder_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]

@@ -339,6 +339,7 @@ async fn make_test_shell(
         String::new(),
         String::new(),
         String::new(),
+        "test-model".to_string(),
         skill_wiring.catalog(),
         initial_skill_snapshot,
         share::config::MemoryConfig::default(),
@@ -644,7 +645,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         crate::composition::wire_sdk_chat_ingress(),
         initial_provider,
         SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
-        PromptAssembly::new(Vec::new(), String::new(), String::new()),
+        PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
         SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new())),
         crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: Arc::new(NoopRunner),

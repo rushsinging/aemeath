@@ -41,6 +41,7 @@ pub(crate) struct ContextRequestData<'a> {
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
+    pub invocation_reminders: Vec<context::domain::InvocationReminder>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
@@ -48,6 +49,7 @@ pub(crate) struct RuntimeStepPersistence<'a, O> {
     context_request: ContextRequestData<'a>,
     input_prefix: Option<Message>,
     accepted_input: O,
+    reminder_intents_available: bool,
 }
 
 impl<'a, O> RuntimeStepPersistence<'a, O>
@@ -65,6 +67,7 @@ where
             context_request,
             input_prefix,
             accepted_input,
+            reminder_intents_available: true,
         }
     }
 
@@ -99,11 +102,15 @@ where
         _run_id: &sdk::RunId,
         step_id: &RunStepId,
     ) -> Option<ContextRequest> {
-        Some(ContextRequestCoordinator::new(self.source()).build_request(
+        let mut request = ContextRequestCoordinator::new(self.source()).build_request(
             &self.run_id,
             step_id,
             execution.step_outcome(),
-        ))
+        );
+        if self.reminder_intents_available {
+            request.invocation_reminders = self.context_request.invocation_reminders.clone();
+        }
+        Some(request)
     }
 
     async fn accept_step_input(
@@ -111,6 +118,7 @@ where
         execution: &mut RunExecutionState,
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
+        self.reminder_intents_available = false;
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .accept_step_input(execution, step_id, &mut self.accepted_input)
             .await

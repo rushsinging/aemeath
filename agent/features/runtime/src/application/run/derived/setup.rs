@@ -519,6 +519,21 @@ impl AgentRunner for CliAgentRunner {
                         context_size,
                         max_output_tokens: max_tokens as usize,
                         raw_tool_schemas: tool_schemas,
+                        invocation_reminders: {
+                            let mut reminders = crate::application::loop_engine::chat::task_snapshot::build_task_reminder_intent(
+                                runtime_context.task().as_ref(),
+                                share::config::TaskListConfig::default().max_lines,
+                            )
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                            if model_name != parent_frame.context.provider_ref().model.model {
+                                reminders.push(context::domain::InvocationReminder::model_guidance_mismatch(
+                                    parent_frame.context.provider_ref().model.model.clone(),
+                                    model_name.clone(),
+                                ));
+                            }
+                            reminders
+                        },
                     },
                     None,
                     crate::application::loop_engine::step_persistence::NoopAcceptedInputObserver,

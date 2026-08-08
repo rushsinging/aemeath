@@ -622,21 +622,17 @@ where
                 // returns Ready with user input.
 
                 let config_reader = wiring.config_reader();
-                let message_count_before_config_reload = messages.len();
-                let _refresh = handle_turn_boundary_config(
+                let turn_boundary_config = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
                     wiring.as_ref(),
                     step_count,
                     &sink,
-                    &mut messages,
                     &language,
                     &segment_id,
                 )
                 .await;
-                if messages.len() != message_count_before_config_reload {
-                    sink_handle.send_message_state_changed(messages.len()).await;
-                }
+                let _refresh = &turn_boundary_config.refresh;
                 let preparation = match prepare_main_run(
                     &shell,
                     &wiring,
@@ -729,6 +725,24 @@ where
                     sink: runtime_context.event_sink(),
                     input: runtime_context.input(),
                 };
+                let mut invocation_reminders = crate::application::loop_engine::chat::task_snapshot::build_task_reminder_intent(
+                    runtime_context.task().as_ref(),
+                    share::config::TaskListConfig::default().max_lines,
+                )
+                .into_iter()
+                .collect::<Vec<_>>();
+                if turn_boundary_config.guidance_sources_changed {
+                    invocation_reminders
+                        .push(context::domain::InvocationReminder::guidance_sources_changed());
+                }
+                if runtime_context.provider_ref().model.model != shell.prompt_model_id {
+                    invocation_reminders.push(
+                        context::domain::InvocationReminder::model_guidance_mismatch(
+                            shell.prompt_model_id.clone(),
+                            runtime_context.provider_ref().model.model.clone(),
+                        ),
+                    );
+                }
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequestData {
                         runtime_context: &runtime_context,
@@ -748,6 +762,7 @@ where
                             )
                             .map(|snapshot| snapshot.model_schemas())
                             .unwrap_or_default(),
+                        invocation_reminders,
                     };
                 let mut persistence =
                     crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
