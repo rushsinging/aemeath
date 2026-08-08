@@ -1,13 +1,30 @@
 use std::path::Path;
 
 use audit::{
-    file_usage_append_store, start_usage_worker, UsageSender, UsageWorkerConfig, UsageWorkerHandle,
+    file_usage_append_store, start_usage_worker, UsageEmitOutcome, UsageRecord, UsageSender,
+    UsageWorkerConfig, UsageWorkerHandle,
 };
 use share::config::domain::snapshot::ConfigSnapshot;
 use storage::SafeStorageRoot;
 
 pub fn usage_worker_config_from_snapshot(snapshot: &ConfigSnapshot) -> UsageWorkerConfig {
     snapshot.usage_worker_config().into()
+}
+
+pub struct AuditUsageSink {
+    sender: UsageSender,
+}
+
+impl AuditUsageSink {
+    pub fn new(sender: UsageSender) -> Self {
+        Self { sender }
+    }
+}
+
+impl runtime::UsageSink for AuditUsageSink {
+    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome {
+        self.sender.try_record(record)
+    }
 }
 
 pub struct AuditWorkerAssembly {
