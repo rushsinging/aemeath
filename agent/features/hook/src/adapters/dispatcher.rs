@@ -631,7 +631,7 @@ impl Dispatcher {
                 Err(ExecutionFault::Unsupported) => {
                     let execution = HookExecution {
                         status: HookExecutionStatus::ExecutionFailed {
-                            error: ExecutionFault::Unsupported.message().to_string(),
+                            error: ExecutionFault::Unsupported.message(),
                         },
                         attempts,
                         exit_code: None,
@@ -653,7 +653,7 @@ impl Dispatcher {
                 Err(fault) => {
                     let execution = HookExecution {
                         status: HookExecutionStatus::ExecutionFailed {
-                            error: fault.message().to_string(),
+                            error: fault.message(),
                         },
                         attempts,
                         exit_code: None,

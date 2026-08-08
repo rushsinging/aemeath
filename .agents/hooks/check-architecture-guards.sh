@@ -241,7 +241,11 @@ run_guard fast "$HOOKS_DIR/check-runtime-large-file-responsibilities.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-activity-observation.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-event-naming.sh"
 run_guard full bash "$HOOKS_DIR/check-runtime-event-naming-tests.sh"
-run_guard full bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh"
+if [ "$mode" = "--fast" ]; then
+  run_guard fast bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh" --fast-only
+else
+  run_guard full bash "$HOOKS_DIR/check-runtime-capability-assembly-tests.sh"
+fi
 run_guard full bash "$HOOKS_DIR/check-runtime-large-file-responsibilities-tests.sh"
 run_guard fast "$HOOKS_DIR/check-composition-construction-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-command-catalog-boundary.sh"
