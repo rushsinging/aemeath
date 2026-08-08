@@ -1,7 +1,9 @@
 use super::{extract_invocation_context, invocation_mapping_log_summary};
 use crate::ports::{
-    CompactionDecision, ContextWindow, DecisionReason, SessionRevision, TokenBudget, Urgency,
+    CompactionDecision, ContextWindow, DecisionReason, SessionRevision, SystemBlock, TokenBudget,
+    Urgency,
 };
+use provider::RequestSystemBlock;
 use share::message::{Message, MessageMetadata, MessageSource, Role};
 
 fn window(messages: Vec<Message>) -> ContextWindow {
@@ -72,4 +74,24 @@ fn invocation_context_preserves_non_user_message_sources() {
     let context = extract_invocation_context(&window(vec![stop_hook]));
 
     assert_eq!(context.messages_for_api[0].text_content(), "hook");
+}
+
+#[test]
+fn continuation_checkpoint_system_block_is_consumed_verbatim_once() {
+    let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue";
+    let mut context_window = window(vec![]);
+    context_window.system_blocks = vec![SystemBlock {
+        kind: "active_summary".to_string(),
+        content: checkpoint.to_string(),
+        cacheable: true,
+        cache_break: true,
+    }];
+
+    let invocation = extract_invocation_context(&context_window);
+
+    assert_eq!(invocation.system_blocks.len(), 1);
+    assert_eq!(
+        invocation.system_blocks[0],
+        RequestSystemBlock::Cacheable(checkpoint.to_string())
+    );
 }

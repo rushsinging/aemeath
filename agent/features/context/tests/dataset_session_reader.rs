@@ -222,8 +222,9 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
         ),
     ]
     .into();
+    let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue\n\n## Current Task State\n■ current task";
     session.compact = Some(context::domain::session::ActiveCompactMarker {
-        summary: "compacted summary".to_string(),
+        summary: checkpoint.to_string(),
         start_at: Some(context::domain::session::RunStepCursor {
             run_id: "run-2".to_string(),
             step_id: "step-2".to_string(),
@@ -242,6 +243,25 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
         .expect("load compacted generation");
     let loaded = prepared.active_session;
 
+    assert_eq!(
+        loaded
+            .compact
+            .as_ref()
+            .map(|marker| marker.summary.as_str()),
+        Some(checkpoint)
+    );
+    assert_eq!(
+        loaded.compact.as_ref().map(|marker| marker.source_revision),
+        Some(6)
+    );
+    assert_eq!(
+        loaded
+            .compact
+            .as_ref()
+            .and_then(|marker| marker.start_at.as_ref())
+            .map(|cursor| cursor.step_id.as_str()),
+        Some("step-2")
+    );
     assert_eq!(loaded.run_slices.len(), 1);
     assert_eq!(loaded.run_slices[0].steps.len(), 1);
     assert_eq!(loaded.run_slices[0].steps[0].step_id, "step-2");

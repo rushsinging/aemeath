@@ -18,6 +18,8 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message};
 
+const CHECKPOINT: &str = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue";
+
 struct FakeSession;
 
 #[async_trait]
@@ -26,7 +28,7 @@ impl SessionRepository for FakeSession {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(2),
             messages: vec![Message::user("history")].into(),
-            active_summary: Some("summary".into()),
+            active_summary: Some(CHECKPOINT.into()),
         })
     }
 
@@ -206,6 +208,14 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
         .map(|block| block.kind.as_str())
         .collect();
     assert_eq!(cache_breaks, vec!["active_summary"]);
+    let summaries = window
+        .system_blocks
+        .iter()
+        .filter(|block| block.kind == "active_summary")
+        .collect::<Vec<_>>();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].content, CHECKPOINT);
+    assert!(summaries[0].cacheable);
     assert!(matches!(
         &window.messages[1].content[0],
         ContentBlock::Text { text } if text == "pending"
