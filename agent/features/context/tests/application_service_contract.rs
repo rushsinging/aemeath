@@ -22,12 +22,36 @@ const CHECKPOINT: &str = "## Immutable Constraints\n- review only\n\n## Current 
 
 struct FakeSession;
 
+fn bounded_tool_result_message() -> Message {
+    let preview = "<persisted-output>bounded preview</persisted-output>";
+    Message {
+        role: share::message::Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "tool".to_string(),
+            content: serde_json::json!({
+                "text": preview,
+                "truncated": true,
+                "original_chars": 50_001,
+                "original_bytes": 50_001,
+                "omitted_chars": 47_501,
+                "blob": {
+                    "status": "persisted",
+                    "locator": "tool-result://session/tool"
+                }
+            }),
+            is_error: false,
+            text: Some(preview.to_string()),
+        }],
+        metadata: None,
+    }
+}
+
 #[async_trait]
 impl SessionRepository for FakeSession {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(2),
-            messages: vec![Message::user("history")].into(),
+            messages: vec![Message::user("history"), bounded_tool_result_message()].into(),
             active_summary: Some(CHECKPOINT.into()),
         })
     }
@@ -143,6 +167,28 @@ fn service() -> ContextApplicationService {
 }
 
 #[tokio::test]
+async fn repeated_windows_preserve_bounded_tool_result_bytes_across_steps() {
+    let service = service();
+    let first = service.build_window(&request()).await.unwrap();
+    let mut next_request = request();
+    next_request.request_id = ContextRequestId::new("request-next");
+    next_request.step_id = RunStepId::new("step-next");
+    next_request.pending_messages = vec![Message::user("next pending")];
+    let second = service.build_window(&next_request).await.unwrap();
+
+    let first_tool_result = serde_json::to_vec(&first.messages[1]).unwrap();
+    let second_tool_result = serde_json::to_vec(&second.messages[1]).unwrap();
+    assert_eq!(first_tool_result, second_tool_result);
+    assert_eq!(
+        serde_json::to_vec(&first.messages[1].to_llm_view()).unwrap(),
+        serde_json::to_vec(&second.messages[1].to_llm_view()).unwrap()
+    );
+    assert!(!String::from_utf8(first_tool_result)
+        .unwrap()
+        .contains("FULL_PAYLOAD_SENTINEL"));
+}
+
+#[tokio::test]
 async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_context() {
     let memory: Arc<RwLock<Arc<dyn MemoryPort>>> = Arc::new(RwLock::new(Arc::new(NoOpMemory)));
     let source = CommittedMemoryRetrieveAdapter::new(Arc::clone(&memory));
@@ -174,15 +220,16 @@ async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_contex
 async fn build_window_keeps_committed_history_shared_and_pending_owned() {
     let window = service().build_window(&request()).await.unwrap();
 
-    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages.len(), 3);
     assert_eq!(window.messages[0].text_content(), "history");
-    assert_eq!(window.messages[1].text_content(), "pending");
+    assert!(window.messages[1].has_tool_results());
+    assert_eq!(window.messages[2].text_content(), "pending");
 }
 
 #[tokio::test]
 async fn build_window_assembles_history_pending_and_fixed_extension_order() {
     let window = service().build_window(&request()).await.unwrap();
-    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages.len(), 3);
     let kinds: Vec<_> = window
         .system_blocks
         .iter()
@@ -217,7 +264,7 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
     assert_eq!(summaries[0].content, CHECKPOINT);
     assert!(summaries[0].cacheable);
     assert!(matches!(
-        &window.messages[1].content[0],
+        &window.messages[2].content[0],
         ContentBlock::Text { text } if text == "pending"
     ));
     assert!(window.token_estimation.message_tokens > 0);
@@ -287,7 +334,7 @@ async fn build_window_renders_invocation_reminders_once_in_stable_order() {
 async fn build_window_without_invocation_reminders_keeps_messages_unchanged() {
     let window = service().build_window(&request()).await.unwrap();
 
-    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages.len(), 3);
     assert!(window
         .messages
         .iter()
