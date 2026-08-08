@@ -538,12 +538,13 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 - 下一轮进入 `PreparingContext` 时比对：相同则跳过 L2/L3 的重复扫描
 - fingerprint 命中只复用 L2-L4 投影，**NEVER** 跳过 Prompt / Skill / Memory 物化或复用整个 ContextWindow
 ## 10. 常量统一来源
-全部常量只由 [03-token-budget.md](03-token-budget.md) 定义的 `TokenBudgetConfig` 或本 Run 已解析 capability 提供：
-| 常量 | 默认值 / 来源 | 唯一所有者 |
+全部预算输入只由 [03-token-budget.md](03-token-budget.md) 定义的 Context-owned 纯函数或本 Run 已解析 capability 提供：
+| 输入 / 策略 | 默认值 / 来源 | 唯一所有者 |
 |---|---|---|
-| `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Invocation / ContextRequest |
+| `context_size` | 本 Run 的 model capability / ConfigSnapshot | Run/Invocation binding |
+| `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Run/Invocation binding |
 | `reserved_context` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
-| `estimation_safety_factor` | 1.33 | `TokenBudgetConfig.estimation_safety_factor` |
+| threshold safety ratio | 0.8 | `token_budget::autocompact_threshold` |
 ## 11. 与 #547 的映射
 | #547 子 issue | 策略 | 目标契约位置 |
 |---|---|---|
