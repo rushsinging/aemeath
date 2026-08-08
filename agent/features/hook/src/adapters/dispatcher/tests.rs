@@ -460,9 +460,9 @@ async fn unsupported_platform_failure_is_not_retried() {
 async fn assert_fault_retries_three_times(kind: ExecutionFault) {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
-        ScriptStep::fault(kind),
-        ScriptStep::fault(kind),
-        ScriptStep::fault(kind),
+        ScriptStep::fault(kind.clone()),
+        ScriptStep::fault(kind.clone()),
+        ScriptStep::fault(kind.clone()),
     ]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 

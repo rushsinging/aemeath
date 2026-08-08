@@ -11,6 +11,38 @@ use serde_json::json;
 use tempfile::tempdir;
 
 #[tokio::test]
+async fn abort_reader_tasks_waits_until_pipe_futures_are_dropped() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    struct DropMarker(Arc<AtomicBool>);
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let stdout_dropped = Arc::new(AtomicBool::new(false));
+    let stderr_dropped = Arc::new(AtomicBool::new(false));
+    let stdout_marker = DropMarker(stdout_dropped.clone());
+    let stderr_marker = DropMarker(stderr_dropped.clone());
+    let stdout_handle = tokio::spawn(async move {
+        let _marker = stdout_marker;
+        std::future::pending::<Vec<u8>>().await
+    });
+    let stderr_handle = tokio::spawn(async move {
+        let _marker = stderr_marker;
+        std::future::pending::<Vec<u8>>().await
+    });
+    tokio::task::yield_now().await;
+
+    abort_reader_tasks(stdout_handle, stderr_handle).await;
+
+    assert!(stdout_dropped.load(Ordering::SeqCst));
+    assert!(stderr_dropped.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
 async fn bash_allow_all_bypasses_shell_injection_guard() {
     let workspace = tempdir().unwrap();
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(

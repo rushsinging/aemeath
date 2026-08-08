@@ -22,6 +22,15 @@ use tokio::process::Command;
 use project::WorkspaceControl;
 use std::sync::Arc;
 
+type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
+
+async fn abort_reader_tasks(stdout_handle: ReaderTask, stderr_handle: ReaderTask) {
+    stdout_handle.abort();
+    stderr_handle.abort();
+    let _ = stdout_handle.await;
+    let _ = stderr_handle.await;
+}
+
 pub struct BashTool {
     pub control: Arc<dyn WorkspaceControl>,
 }
@@ -152,8 +161,7 @@ impl TypedTool for BashTool {
                     path_base,
                     start.elapsed().as_millis()
                 );
-                stdout_handle.abort();
-                stderr_handle.abort();
+                abort_reader_tasks(stdout_handle, stderr_handle).await;
                 return TypedToolResult::error("Command cancelled by user");
             }
             result = tokio::time::timeout(
@@ -168,10 +176,9 @@ impl TypedTool for BashTool {
                     Err(_) => {
                         terminate_process_tree(&mut child).await;
                         let _ = child.wait().await;
-                        stdout_handle.abort();
-                        stderr_handle.abort();
-                        // Return early — no point awaiting aborted
-                        // handles.
+                        abort_reader_tasks(stdout_handle, stderr_handle).await;
+                        // Reader tasks are awaited by abort_reader_tasks so their pipe futures
+                        // are dropped before this invocation returns.
                         return TypedToolResult::error(format!("command timed out after {timeout_ms}ms"));
                     }
                 }
