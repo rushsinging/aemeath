@@ -55,6 +55,24 @@ fn provider_total_above_threshold_triggers_compaction() {
 }
 
 #[test]
+fn custom_output_limit_changes_actual_usage_threshold() {
+    let mut smaller_output_budget = request(Some(730));
+    smaller_output_budget.max_output_tokens = 10;
+    let smaller_output_decision =
+        context_decision::calculate(&smaller_output_budget, &Vec::new().into(), &[]);
+
+    let mut larger_output_budget = request(Some(730));
+    larger_output_budget.max_output_tokens = 200;
+    let larger_output_decision =
+        context_decision::calculate(&larger_output_budget, &Vec::new().into(), &[]);
+
+    assert!(!smaller_output_decision.needed);
+    assert!(larger_output_decision.needed);
+    assert_eq!(smaller_output_decision.threshold, 776);
+    assert_eq!(larger_output_decision.threshold, 624);
+}
+
+#[test]
 fn missing_provider_total_falls_back_to_complete_candidate_estimate() {
     let decision = context_decision::calculate(
         &request(None),
