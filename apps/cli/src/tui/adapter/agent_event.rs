@@ -576,6 +576,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 parent_run_id: event.identity.parent_run_id.as_str().to_string(),
                 spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
                 sequence: event.sequence,
+                sequence_index: event.sequence_index,
                 kind: event.kind.clone(),
             }),
         ),

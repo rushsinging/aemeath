@@ -36,7 +36,7 @@ Runtime ChatStream → sdk::ChatEvent
 
 | 层 | 位置 | 职责 | 输入 → 输出 |
 |---|---|---|---|
-| 第一层 | `event_mapping.rs` | **结构转换**——SDK 类型 → TUI-owned runtime DTO，消除 SDK 类型依赖 | `sdk::ChatEvent` → `TuiRuntimeEvent` / `SdkEventMapping::Nop` |
+| 第一层 | `event_mapping.rs` | **结构转换与兼容展开**——SDK 类型 → TUI-owned runtime DTO，消除 SDK 类型依赖；一个 legacy batch 可展开为有序 canonical facts | `sdk::ChatEvent` → `SdkEventMapping::Runtime` / `RuntimeBatch` |
 | 第二层 | `agent_event.rs` | **语义翻译**——Runtime event → Intent 拆分，防腐层核心 | `TuiRuntimeEvent` → `AgentEventMapping` |
 | 本地 Effect 入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译；禁止承载 SDK compatibility event | `UiEvent` → `AgentEventMapping` |
 
@@ -497,7 +497,7 @@ TUI OutputTimeline
 | `SubRunActivity::ToolOutput` / `ToolResult` | `RecordSubRunActivity` | 保留结构化输出与结果内容，展示层按工具策略 sanitize |
 | `SubRunActivity::Terminal` | `RecordSubRunActivity` | 保留 typed terminal outcome |
 
-SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
+SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；legacy `ToolCalls` 中每个结构化 call 必须按原顺序展开为一个 `SubRunActivity::ToolCall`，共享原始 sequence，并以 `sequence_index` 保存 batch 内顺序，NEVER 截断首项或伪造后续 Runtime sequence。空 batch 映射为空 `RuntimeBatch`，不制造 `Noop` fact。`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
 
 ### 6.3 sub-agent config 继承链路
 

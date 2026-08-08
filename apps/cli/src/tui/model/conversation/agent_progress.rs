@@ -5,6 +5,7 @@ pub struct SubRunActivityEntry {
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: String,
     pub sequence: u64,
+    pub sequence_index: u32,
     pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 

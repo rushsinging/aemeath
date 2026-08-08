@@ -3,6 +3,54 @@ use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiSubRunActivityKind};
 
 #[test]
+fn legacy_tool_calls_normalize_every_structured_call_in_order() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
+        source_context: sdk::ChatEventContext::new(
+            sdk::ChatId::from_legacy_or_new("agent-sub-a"),
+            sdk::ChatRunId::from_legacy_or_new("run-sub-a"),
+        ),
+        attachment_context: sdk::ChatEventContext::new(
+            sdk::ChatId::from_legacy_or_new("parent-chat"),
+            sdk::ChatRunId::from_legacy_or_new("run-main"),
+        ),
+        tool_id: sdk::ToolCallId::from_legacy_or_new("tool-agent-a"),
+        event: sdk::AgentProgressEventView {
+            sequence: 7,
+            kind: sdk::AgentProgressKindView::ToolCalls {
+                calls: vec![
+                    sdk::AgentToolCallProgressView {
+                        id: sdk::ToolCallId::from_legacy_or_new("read-call"),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({"file_path":"src/lib.rs"}),
+                    },
+                    sdk::AgentToolCallProgressView {
+                        id: sdk::ToolCallId::from_legacy_or_new("grep-call"),
+                        name: "Grep".to_string(),
+                        input: serde_json::json!({"pattern":"SubRun"}),
+                    },
+                ],
+            },
+        },
+    });
+
+    let SdkEventMapping::RuntimeBatch(events) = mapped else {
+        panic!("expected one canonical fact per legacy tool call");
+    };
+    assert_eq!(events.len(), 2);
+    for (event, (expected_sequence_index, expected_name)) in
+        events.into_iter().zip([(0, "Read"), (1, "Grep")])
+    {
+        assert!(matches!(
+            event,
+            TuiRuntimeEvent::SubRunActivity(activity)
+                if activity.sequence == 7
+                    && activity.sequence_index == expected_sequence_index
+                    && matches!(activity.kind, TuiSubRunActivityKind::ToolCall { ref name, .. } if name == expected_name)
+        ));
+    }
+}
+
+#[test]
 fn current_and_legacy_sub_run_started_inputs_normalize_to_canonical_tui_fact() {
     let identity = sdk::SubRunIdentityView {
         agent_id: sdk::AgentId::from_legacy_or_new("agent-sub-a"),

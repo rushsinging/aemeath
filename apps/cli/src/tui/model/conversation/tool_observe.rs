@@ -48,6 +48,7 @@ impl ConversationModel {
             entry.agent_id == activity.agent_id
                 && entry.run_id == activity.sub_run_id
                 && entry.sequence == activity.sequence
+                && entry.sequence_index == activity.sequence_index
         }) {
             return Vec::new();
         }
@@ -57,15 +58,16 @@ impl ConversationModel {
             .filter(|entry| {
                 entry.agent_id == activity.agent_id && entry.run_id == activity.sub_run_id
             })
-            .map(|entry| entry.sequence)
+            .map(|entry| (entry.sequence, entry.sequence_index))
             .max()
         {
-            if activity.sequence <= latest_sequence {
+            if (activity.sequence, activity.sequence_index) <= latest_sequence {
                 crate::tui::log_debug!(
-                    "sub_run_activity_out_of_order agent_id={} sub_run_id={} sequence={} latest_sequence={}",
+                    "sub_run_activity_out_of_order agent_id={} sub_run_id={} sequence={} sequence_index={} latest_sequence={:?}",
                     activity.agent_id,
                     activity.sub_run_id,
                     activity.sequence,
+                    activity.sequence_index,
                     latest_sequence,
                 );
                 return Vec::new();
@@ -122,6 +124,7 @@ impl ConversationModel {
             parent_run_id: activity.parent_run_id,
             spawned_by_tool_call_id: activity.spawned_by_tool_call_id.to_string(),
             sequence: activity.sequence,
+            sequence_index: activity.sequence_index,
             kind: activity.kind,
         });
 

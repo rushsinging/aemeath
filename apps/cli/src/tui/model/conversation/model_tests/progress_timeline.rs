@@ -23,6 +23,7 @@ fn sub_run_hidden_tool_result_is_not_attached_to_parent_activity() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: parent_tool_id.clone(),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::ToolCall {
             id: "skill-call".to_string(),
             name: "Skill".to_string(),
@@ -35,6 +36,7 @@ fn sub_run_hidden_tool_result_is_not_attached_to_parent_activity() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: parent_tool_id.clone(),
         sequence: 2,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::ToolResult {
             tool_call_id: "skill-call".to_string(),
             tool_name: "Skill".to_string(),
@@ -85,6 +87,7 @@ fn sub_run_visible_tool_result_remains_attached() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: parent_tool_id.clone(),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::ToolResult {
             tool_call_id: "grep-call".to_string(),
             tool_name: "Grep".to_string(),
@@ -130,6 +133,7 @@ fn sub_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: first_tool_id.clone(),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Text {
             text: "first child text".to_string(),
         },
@@ -142,6 +146,7 @@ fn sub_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: second_tool_id.clone(),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Thinking {
             text: "second child thinking".to_string(),
         },
@@ -152,6 +157,7 @@ fn sub_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: first_tool_id.clone(),
         sequence: 2,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::ToolOutput {
             tool_name: "grep".to_string(),
             text: "grep output".to_string(),
@@ -198,6 +204,7 @@ fn sub_run_activity_rejects_unknown_parent_and_out_of_order_sequence() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: tool_id.clone(),
         sequence: 2,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Terminal {
             outcome: TuiSubRunTerminalOutcome::Completed,
         },
@@ -208,6 +215,7 @@ fn sub_run_activity_rejects_unknown_parent_and_out_of_order_sequence() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: tool_id.clone(),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Text {
             text: "late text".to_string(),
         },
@@ -218,6 +226,7 @@ fn sub_run_activity_rejects_unknown_parent_and_out_of_order_sequence() {
         parent_run_id: run_id.to_string(),
         spawned_by_tool_call_id: super::ids::ToolCallId::new("missing-agent-tool"),
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Text {
             text: "must not attach".to_string(),
         },

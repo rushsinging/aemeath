@@ -100,6 +100,7 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
     harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
         identity: sub_run_identity,
         sequence: 1,
+        sequence_index: 0,
         kind: TuiSubRunActivityKind::Text {
             text: marker.to_string(),
         },
@@ -185,6 +186,7 @@ fn sub_run_skill_result_is_hidden_while_visible_tool_result_renders() {
         harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
             identity: identity.clone(),
             sequence: sequence as u64 + 1,
+            sequence_index: 0,
             kind,
         }));
     }
@@ -251,6 +253,7 @@ fn main_with_concurrent_sub_runs_preserves_existing_agent_activity_display() {
                 spawned_by_tool_call_id: tool_id.to_string(),
             },
             sequence,
+            sequence_index: 0,
             kind,
         }));
     }

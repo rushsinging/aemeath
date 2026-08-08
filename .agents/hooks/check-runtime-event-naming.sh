@@ -142,6 +142,14 @@ for retired_symbol, source_path in retired_tui_paths.items():
             f"retired TUI compatibility path {retired_symbol} must not return; normalize SDK compatibility at sdk_event_to_tui_event"
         )
 
+legacy_acl_source = root / "apps/cli/src/tui/adapter/event_mapping.rs"
+if legacy_acl_source.is_file():
+    legacy_acl_text = legacy_acl_source.read_text()
+    if "calls.into_iter().next()" in legacy_acl_text:
+        violations.append(
+            "legacy AgentProgress ToolCalls must expand every structured call; first-item truncation is forbidden"
+        )
+
 ack_terminal_compatibility = set(baseline["ack_terminal_compatibility_names"])
 ack_terminal_patterns = [re.compile(pattern) for pattern in baseline["ack_terminal_patterns"]]
 for event_name in sorted(all_actual):

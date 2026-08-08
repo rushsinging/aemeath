@@ -522,6 +522,7 @@ pub(crate) struct TuiSubRunStarted {
 pub(crate) struct TuiSubRunActivity {
     pub(crate) identity: TuiSubRunIdentity,
     pub(crate) sequence: u64,
+    pub(crate) sequence_index: u32,
     pub(crate) kind: TuiSubRunActivityKind,
 }
 

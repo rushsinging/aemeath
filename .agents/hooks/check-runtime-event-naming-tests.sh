@@ -232,6 +232,21 @@ expect_failure "retired SDK to UiEvent mapper restored"
 cp "$ROOT/apps/cli/src/tui/effect/session/processing.rs" \
   "$TMP/apps/cli/src/tui/effect/session/processing.rs"
 
+python3 - "$TMP/apps/cli/src/tui/adapter/event_mapping.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "calls\n                .into_iter()\n                .enumerate()",
+    "calls.into_iter().next();\n            calls\n                .into_iter()\n                .enumerate()",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy AgentProgress ToolCalls truncates after first item"
+cp "$ROOT/apps/cli/src/tui/adapter/event_mapping.rs" \
+  "$TMP/apps/cli/src/tui/adapter/event_mapping.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

@@ -7,12 +7,38 @@ use super::runtime_view::{
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 
+#[allow(clippy::large_enum_variant)] // Single facts stay allocation-free; only legacy batch expansion allocates.
 pub(crate) enum SdkEventMapping {
     Runtime(TuiRuntimeEvent),
+    RuntimeBatch(Vec<TuiRuntimeEvent>),
+}
+
+impl SdkEventMapping {
+    pub(crate) fn into_runtime_events(self) -> Vec<TuiRuntimeEvent> {
+        match self {
+            Self::Runtime(event) => vec![event],
+            Self::RuntimeBatch(events) => events,
+        }
+    }
 }
 
 pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
     use sdk::ChatEvent;
+
+    if let ChatEvent::AgentProgress {
+        source_context,
+        attachment_context,
+        tool_id,
+        event,
+    } = event
+    {
+        return legacy_agent_progress(
+            turn_context(source_context),
+            turn_context(attachment_context),
+            tool_id.as_str(),
+            event,
+        );
+    }
 
     let runtime = match event {
         ChatEvent::ActivityChanged { kind, activity } => TuiRuntimeEvent::ActivityChanged {
@@ -366,17 +392,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::RunChanged(turn) | ChatEvent::CurrentRunChanged(turn) => {
             TuiRuntimeEvent::RunChanged(turn)
         }
-        ChatEvent::AgentProgress {
-            source_context,
-            attachment_context,
-            tool_id,
-            event,
-        } => legacy_agent_progress(
-            turn_context(source_context),
-            turn_context(attachment_context),
-            tool_id.as_str(),
-            event,
-        ),
+        ChatEvent::AgentProgress { .. } => {
+            unreachable!("AgentProgress is normalized before the canonical event match")
+        }
         ChatEvent::ToolOutputDelta {
             context,
             tool_id,
@@ -1064,6 +1082,7 @@ fn sub_run_activity(value: sdk::SubRunActivityEventView) -> TuiSubRunActivity {
     TuiSubRunActivity {
         identity: sub_run_identity(value.identity),
         sequence: value.sequence,
+        sequence_index: 0,
         kind: match value.kind {
             sdk::SubRunActivityKindView::Text { text } => TuiSubRunActivityKind::Text { text },
             sdk::SubRunActivityKindView::Thinking { text } => {
@@ -1114,7 +1133,7 @@ fn legacy_agent_progress(
     attachment_context: TuiRunContext,
     tool_id: &str,
     event: sdk::AgentProgressEventView,
-) -> TuiRuntimeEvent {
+) -> SdkEventMapping {
     let identity = TuiSubRunIdentity {
         agent_id: source_context.chat_id.clone(),
         run_id: UiRunId::from(source_context.run_id.as_str()),
@@ -1125,41 +1144,46 @@ fn legacy_agent_progress(
     let sequence = u64::try_from(event.sequence).unwrap_or(u64::MAX);
     match event.kind {
         sdk::AgentProgressKindView::Started { role, model } => {
-            TuiRuntimeEvent::SubRunStarted(TuiSubRunStarted {
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunStarted(TuiSubRunStarted {
                 identity,
                 sequence,
                 role,
                 model,
-            })
+            }))
         }
         sdk::AgentProgressKindView::Message { text } => {
-            TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
                 identity,
                 sequence,
+                sequence_index: 0,
                 kind: TuiSubRunActivityKind::Text { text },
-            })
+            }))
         }
-        sdk::AgentProgressKindView::ToolCalls { calls } => {
-            let first_call = calls.into_iter().next();
-            match first_call {
-                Some(call) => TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
-                    identity,
-                    sequence,
-                    kind: TuiSubRunActivityKind::ToolCall {
-                        id: call.id.as_str().to_string(),
-                        name: call.name,
-                        input: call.input,
-                    },
-                }),
-                None => TuiRuntimeEvent::Noop,
-            }
-        }
+        sdk::AgentProgressKindView::ToolCalls { calls } => SdkEventMapping::RuntimeBatch(
+            calls
+                .into_iter()
+                .enumerate()
+                .map(|(index, call)| {
+                    TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+                        identity: identity.clone(),
+                        sequence,
+                        sequence_index: u32::try_from(index).unwrap_or(u32::MAX),
+                        kind: TuiSubRunActivityKind::ToolCall {
+                            id: call.id.as_str().to_string(),
+                            name: call.name,
+                            input: call.input,
+                        },
+                    })
+                })
+                .collect(),
+        ),
         sdk::AgentProgressKindView::ToolOutput { tool_name, text } => {
-            TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
                 identity,
                 sequence,
+                sequence_index: 0,
                 kind: TuiSubRunActivityKind::ToolOutput { tool_name, text },
-            })
+            }))
         }
     }
 }

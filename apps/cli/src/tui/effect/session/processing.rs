@@ -2,7 +2,9 @@ mod handle;
 mod input_port;
 mod logging;
 
-use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
+use crate::tui::adapter::event_mapping::sdk_event_to_tui_event;
+#[cfg(test)]
+use crate::tui::adapter::event_mapping::SdkEventMapping;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use std::sync::Arc;
 
@@ -40,12 +42,15 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             };
             while let Some(event) = stream.recv().await {
                 log_sdk_event(&event, "sdk->tui.recv");
-                let SdkEventMapping::Runtime(runtime_event) = sdk_event_to_tui_event(event);
-                log_tui_runtime_delivery(&runtime_event, "forwarding");
-                if ctx.runtime_tx.send(runtime_event).await.is_err() {
-                    crate::tui::log_warn!(
-                        "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
-                    );
+                let runtime_events = sdk_event_to_tui_event(event).into_runtime_events();
+                for runtime_event in runtime_events {
+                    log_tui_runtime_delivery(&runtime_event, "forwarding");
+                    if ctx.runtime_tx.send(runtime_event).await.is_err() {
+                        crate::tui::log_warn!(
+                            "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
+                        );
+                        break;
+                    }
                 }
             }
         },
