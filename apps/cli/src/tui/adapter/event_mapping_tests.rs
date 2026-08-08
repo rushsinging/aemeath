@@ -6,6 +6,49 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn tool_call_delta_and_state_keep_distinct_tui_fact_names() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-split"),
+        sdk::ChatRunId::new("run-tool-split"),
+    );
+    let id = sdk::ToolCallId::new("tool-split");
+
+    let delta = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallArgumentsDelta {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        delta: "{\"file_".to_owned(),
+    });
+    let state = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStateChanged {
+        context,
+        id,
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        arguments: Some(serde_json::json!({"file_path": "src/lib.rs"})),
+        status: sdk::ToolCallStatusView::Ready,
+    });
+
+    assert!(matches!(
+        delta,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallArgumentsDelta {
+            delta,
+            ..
+        }) if delta == "{\"file_"
+    ));
+    assert!(matches!(
+        state,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStateChanged {
+            arguments: Some(arguments),
+            status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
+            ..
+        }) if arguments["file_path"] == "src/lib.rs"
+    ));
+}
+
+#[test]
 fn session_message_state_maps_count_and_revision_without_messages() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
         message_count: 7,

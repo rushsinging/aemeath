@@ -105,6 +105,18 @@ for fact in baseline["current_cross_layer_facts"]:
                 f"Current cross-layer fact drift: {layer_name} must retain {event_name}"
             )
 
+compatibility_variants = set(baseline["sdk_compatibility_variants"])
+sdk_actual = actual_by_layer.get("sdk", set())
+runtime_actual = actual_by_layer.get("runtime_stream", set())
+tui_actual = actual_by_layer.get("tui", set())
+for event_name in sorted(compatibility_variants):
+    if event_name not in sdk_actual:
+        violations.append(f"stale SDK compatibility variant: {event_name}")
+    if event_name in runtime_actual or event_name in tui_actual:
+        violations.append(
+            f"SDK compatibility variant must not remain a Runtime producer or TUI fact: {event_name}"
+        )
+
 all_actual = set().union(*actual_by_layer.values()) if actual_by_layer else set()
 legacy_broad_names = set(baseline["legacy_broad_names"])
 broad_name = re.compile(r"(?:Updated|Info|Data|Notification|ProgressUpdated)$")

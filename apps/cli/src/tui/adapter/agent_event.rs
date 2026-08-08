@@ -421,19 +421,33 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             name: name.clone(),
             index: *index,
         })),
-        TuiRuntimeEvent::ToolCallUpdate {
+        TuiRuntimeEvent::ToolCallArgumentsDelta {
             context,
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
+            delta,
+        } => conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+            id: ToolCallId::new(id),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+            arguments: Some(sanitize_tool_arguments_delta(name, delta)),
+            status: ToolCallStatus::PendingArgs,
+        })),
+        TuiRuntimeEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
             arguments,
             status,
         } => {
-            let args = arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(ToString::to_string));
+            let args = arguments.as_ref().map(ToString::to_string);
             conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),

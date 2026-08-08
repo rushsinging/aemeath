@@ -562,13 +562,12 @@ fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
         name: "Read".into(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
         name: "Read".into(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({"file_path":"Cargo.toml"})),
         status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
     });

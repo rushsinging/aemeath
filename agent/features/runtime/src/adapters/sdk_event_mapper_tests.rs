@@ -464,6 +464,46 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
 }
 
 #[test]
+fn tool_call_argument_delta_and_state_fact_map_to_distinct_sdk_events() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-tool-split"),
+        sdk::ids::ChatRunId::new("run-tool-split"),
+    );
+    let id = sdk::ids::ToolCallId::new("tool-split");
+
+    let delta = map_stream_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        delta: "{\"file_".to_owned(),
+    });
+    let state = map_stream_event(RuntimeStreamEvent::ToolCallStateChanged {
+        context,
+        id,
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        arguments: Some(serde_json::json!({"file_path": "src/lib.rs"})),
+        status: crate::application::loop_engine::chat::RuntimeToolCallStatus::Ready,
+    });
+
+    assert!(matches!(
+        delta,
+        sdk::ChatEvent::ToolCallArgumentsDelta { delta, .. } if delta == "{\"file_"
+    ));
+    assert!(matches!(
+        state,
+        sdk::ChatEvent::ToolCallStateChanged {
+            arguments: Some(arguments),
+            status: sdk::ToolCallStatusView::Ready,
+            ..
+        } if arguments["file_path"] == "src/lib.rs"
+    ));
+}
+
+#[test]
 fn tool_call_projection_preserves_canonical_name() {
     let event = RuntimeStreamEvent::ToolCallStart {
         context: RuntimeRunContext::new(

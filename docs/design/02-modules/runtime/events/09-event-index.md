@@ -60,7 +60,9 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `Thinking` | `Thinking` | `ThinkingText` | block | delta | 否 | Target Rename：`ThinkingDelta` |
 | `BlockComplete` | 同名 | `CompleteBlock` | block | completion fact | 否 | Current |
 | `ToolCallStart` | 同名 | 建立 Tool block | tool call | start fact | 否 | Target Rename：`ToolCallStarted` |
-| `ToolCallUpdate` | 同名 | 更新 args/state | tool call | mixed delta/state | 否 | Target Split |
+| `ToolCallArgumentsDelta` | 同名 | 同名 → 更新参数预览 | tool call + stream order | delta | 否 | Current |
+| `ToolCallStateChanged` | 同名 | 同名 → 更新完整 args/state | tool call | full-state fact | 否 | Current |
+| — | `ToolCallUpdate` | compatibility dual-read → 上述两类 TUI fact | tool call | mixed legacy payload | 否 | Compatibility；Runtime producer removed |
 | `ToolResult` | 同名 | 更新 Tool result | tool call | result fact | 否 | Current |
 | `ToolProgress` | 同名 | streaming output | tool call | delta | 否 | Target Rename：`ToolOutputDelta` |
 | `AgentProgress` | 同名 | agent progress projection | child/source | mixed observation | 否 | Compatibility / Target Split |
@@ -139,7 +141,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `Token` | Subject/Delta 缺失 | `AssistantTextDelta` | Public SDK wire |
 | `Thinking` | Delta 缺失 | `ThinkingDelta` | 跨层 wire |
 | `ToolCallStart` | 非事实后缀 | `ToolCallStarted` | 跨层 wire |
-| `ToolCallUpdate` | args delta 与 state fact 混合 | 拆为 typed delta/state facts | 语义冲突 |
+| `ToolCallUpdate` | args delta 与 state fact 淡化 | 已拆为 `ToolCallArgumentsDelta` / `ToolCallStateChanged`；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal split complete |
 | `ToolProgress` | Subject/Delta 不清 | `ToolOutputDelta` | 跨层 wire |
 | `Done` / `DoneWithDurationMs` | 宽泛且重复 | 明确 Chat processing subject 后合并 | 语义冲突 |
 | `MicrocompactDone` | 禁用 `Done` | `MicrocompactCompleted` | 跨层 wire |

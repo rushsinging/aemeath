@@ -115,6 +115,8 @@ terminal
 | `TaskStateChanged` | `TaskStateChanged` | `TaskStateChanged` | `ReplaceTaskState` |
 | `ActivityChanged` | `ActivityChanged` | `ActivityChanged` | `ObserveActivityChange` |
 | `RunStepCancelled` | `RunStepCancelled` | `RunStep::Cancelled` | `PresentCancelledStep` |
+| `ToolCallArgumentsDelta` | `ToolCallArgumentsDelta` | `ToolCallArgumentsDelta` | `AppendToolCallArguments` |
+| `ToolCallStateChanged` | `ToolCallStateChanged` | `ToolCallStateChanged` | `ReplaceToolCallState` |
 
 允许：
 

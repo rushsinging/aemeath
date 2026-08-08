@@ -6,7 +6,8 @@
       "path": "agent/features/runtime/src/application/loop_engine/chat/events.rs",
       "enum": "RuntimeStreamEvent",
       "variants": [
-        "Text", "Thinking", "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult",
+        "Text", "Thinking", "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta",
+        "ToolCallStateChanged", "ToolResult",
         "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
@@ -24,7 +25,8 @@
       "enum": "ChatEvent",
       "variants": [
         "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Token", "Thinking",
-        "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult", "SystemMessage",
+        "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
+        "ToolCallUpdate", "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
@@ -46,7 +48,8 @@
       "enum": "TuiRuntimeEvent",
       "variants": [
         "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Text", "Thinking",
-        "BlockComplete", "ToolCallStart", "ToolCallUpdate", "ToolResult", "SystemMessage",
+        "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
+        "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
@@ -70,7 +73,20 @@
       "runtime": "TaskStateChanged",
       "sdk": "TaskStateChanged",
       "tui": "TaskStateChanged"
+    },
+    {
+      "runtime": "ToolCallArgumentsDelta",
+      "sdk": "ToolCallArgumentsDelta",
+      "tui": "ToolCallArgumentsDelta"
+    },
+    {
+      "runtime": "ToolCallStateChanged",
+      "sdk": "ToolCallStateChanged",
+      "tui": "ToolCallStateChanged"
     }
+  ],
+  "sdk_compatibility_variants": [
+    "ToolCallUpdate"
   ],
   "legacy_broad_names": [
     "SkillsUpdated", "MicrocompactDone", "Done", "DoneWithDuration", "DoneWithDurationMs",

@@ -71,13 +71,12 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         name: "Agent".to_string(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: parent_context.clone(),
         id: tool_id.clone(),
         provider_id: Some("provider-agent-tool".to_string()),
         name: "Agent".to_string(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({"role":"coder","prompt":"write hello.rs"})),
         status: TuiToolCallStatus::Ready,
     });
@@ -310,13 +309,12 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
             name: name.to_string(),
             index,
         });
-        harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
             context: context.clone(),
             id: tool_id,
             provider_id: Some(format!("provider-{index}")),
             name: name.to_string(),
             index,
-            arguments_delta: None,
             arguments: Some(serde_json::json!({"command":"sleep 60"})),
             status: TuiToolCallStatus::Running,
         });

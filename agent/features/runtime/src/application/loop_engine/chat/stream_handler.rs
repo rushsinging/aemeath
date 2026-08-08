@@ -1,5 +1,5 @@
 use crate::application::loop_engine::chat::events::{
-    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::RawUsageSnapshot;
@@ -356,15 +356,13 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
-            .try_send_event(RuntimeStreamEvent::ToolCallUpdate {
+            .try_send_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
                 context: self.context.clone(),
                 id,
                 provider_id: provider_id.map(str::to_string),
                 name: name.to_string(),
                 index,
-                arguments_delta: Some(partial_args.to_string()),
-                arguments: None,
-                status: RuntimeToolCallStatus::PendingArgs,
+                delta: partial_args.to_string(),
             });
     }
 

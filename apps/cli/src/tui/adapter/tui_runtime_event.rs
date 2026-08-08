@@ -592,13 +592,20 @@ pub(crate) enum TuiRuntimeEvent {
         name: String,
         index: usize,
     },
-    ToolCallUpdate {
+    ToolCallArgumentsDelta {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        arguments_delta: Option<String>,
+        delta: String,
+    },
+    ToolCallStateChanged {
+        context: TuiRunContext,
+        id: String,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
         arguments: Option<serde_json::Value>,
         status: TuiToolCallStatus,
     },

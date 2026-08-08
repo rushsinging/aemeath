@@ -497,7 +497,26 @@ pub enum ChatEvent {
         name: String,
         index: usize,
     },
-    /// 工具调用属性/状态更新。
+    /// 工具参数流增量。与状态事实分离，按 Provider stream order 拼接。
+    ToolCallArgumentsDelta {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        delta: String,
+    },
+    /// 工具调用完整状态事实。arguments 是当前已验证的完整参数快照。
+    ToolCallStateChanged {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        arguments: Option<serde_json::Value>,
+        status: ToolCallStatusView,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallUpdate {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,

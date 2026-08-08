@@ -717,7 +717,12 @@ impl RecordingSink {
             RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
             RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
-            RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
+            RuntimeStreamEvent::ToolCallArgumentsDelta { .. } => {
+                "ToolCallArgumentsDelta".to_string()
+            }
+            RuntimeStreamEvent::ToolCallStateChanged { .. } => {
+                "ToolCallStateChanged".to_string()
+            }
             RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
             RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
             RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),

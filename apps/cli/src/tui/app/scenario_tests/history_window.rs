@@ -45,13 +45,12 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
         name: "Edit".into(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),
         name: "Edit".into(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({
             "file_path": format!("src/edit-{index}.rs"),
             "old_string": old,

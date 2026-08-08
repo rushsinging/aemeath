@@ -254,13 +254,12 @@ where
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
         let call_id = call.call.id.clone();
         let _ = sink
-            .send_event(RuntimeStreamEvent::ToolCallUpdate {
+            .send_event(RuntimeStreamEvent::ToolCallStateChanged {
                 context: context.clone(),
                 id: call_id.clone(),
                 provider_id: Some(call.call.provider_id.clone()),
                 name: call.call.name.clone(),
                 index: call.call.index,
-                arguments_delta: None,
                 arguments: None,
                 status: RuntimeToolCallStatus::Ready,
             })
@@ -348,13 +347,12 @@ pub(crate) async fn send_tool_call_status<S>(
     S: ChatEventSink,
 {
     let _ = sink
-        .send_event(RuntimeStreamEvent::ToolCallUpdate {
+        .send_event(RuntimeStreamEvent::ToolCallStateChanged {
             context: context.clone(),
             id: call.id.clone(),
             provider_id: Some(call.provider_id.clone()),
             name: call.name.clone(),
             index: call.index,
-            arguments_delta: None,
             arguments: Some(call.input.clone()),
             status,
         })
@@ -453,7 +451,7 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter_map(|event| match event {
-                    RuntimeStreamEvent::ToolCallUpdate { id, status, .. } => {
+                    RuntimeStreamEvent::ToolCallStateChanged { id, status, .. } => {
                         Some((id.to_string(), format!("{status:?}")))
                     }
                     RuntimeStreamEvent::ToolResult { id, .. } => {

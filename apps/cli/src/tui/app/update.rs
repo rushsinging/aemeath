@@ -585,16 +585,8 @@ impl App {
                 !text.is_empty()
             }
             TuiRuntimeEvent::ToolCallStart { .. } => true,
-            TuiRuntimeEvent::ToolCallUpdate {
-                arguments_delta,
-                arguments,
-                ..
-            } => {
-                arguments_delta
-                    .as_ref()
-                    .is_some_and(|value| !value.is_empty())
-                    || arguments.is_some()
-            }
+            TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
+            TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),
             _ => false,
         };
         if valid_model_activity {
