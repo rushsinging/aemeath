@@ -64,13 +64,18 @@ fn wire_runtime_tool_assembly(
     })
 }
 
+pub(crate) struct SessionRuntimeAssembly {
+    pub client: AgentClientImpl,
+    pub audit: Option<crate::audit::SessionAudit>,
+}
+
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
     agents_dir: &std::path::Path,
-) -> Result<AgentClientImpl, sdk::SdkError> {
+) -> Result<SessionRuntimeAssembly, sdk::SdkError> {
     let identity = workspace.read().project_identity();
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
@@ -219,17 +224,19 @@ pub(crate) async fn from_args_with_gateways(
         agents_dir,
     )?;
 
-    let usage_sink: Arc<dyn runtime::UsageSink> =
-        match crate::audit::wire_audit_worker(agents_dir, &snapshot) {
-            Ok(assembly) => Arc::new(crate::audit::AuditUsageSink::new(assembly.sender)),
-            Err(error) => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "Audit Usage worker 初始化失败，已降级为 unavailable sink：{error}"
-                );
-                Arc::new(runtime::UnavailableUsageSink)
-            }
-        };
+    let (usage_sink, session_audit): (
+        Arc<dyn runtime::UsageSink>,
+        Option<crate::audit::SessionAudit>,
+    ) = match crate::audit::wire_session_audit(agents_dir, &snapshot) {
+        Ok(session_audit) => (session_audit.usage_sink(), Some(session_audit)),
+        Err(error) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "Audit Usage worker 初始化失败，已降级为 unavailable sink：{error}"
+            );
+            (Arc::new(runtime::UnavailableUsageSink), None)
+        }
+    };
 
     // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
     // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
@@ -344,7 +351,11 @@ pub(crate) async fn from_args_with_gateways(
         skills,
         agent_runner,
     );
-    runtime::from_args_with_workspace(args, dependencies).await
+    let client = runtime::from_args_with_workspace(args, dependencies).await?;
+    Ok(SessionRuntimeAssembly {
+        client,
+        audit: session_audit,
+    })
 }
 
 #[cfg(test)]

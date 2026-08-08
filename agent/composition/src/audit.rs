@@ -32,6 +32,33 @@ pub struct AuditWorkerAssembly {
     pub handle: UsageWorkerHandle,
 }
 
+pub struct SessionAudit {
+    sink: std::sync::Arc<dyn runtime::UsageSink>,
+    handle: UsageWorkerHandle,
+}
+
+impl SessionAudit {
+    pub fn usage_sink(&self) -> std::sync::Arc<dyn runtime::UsageSink> {
+        std::sync::Arc::clone(&self.sink)
+    }
+
+    pub async fn shutdown(&self) -> audit::UsageShutdownOutcome {
+        self.handle.shutdown().await
+    }
+}
+
+pub fn wire_session_audit(
+    agents_dir: &Path,
+    snapshot: &ConfigSnapshot,
+) -> Result<SessionAudit, String> {
+    let assembly = wire_audit_worker(agents_dir, snapshot)?;
+    let sink = std::sync::Arc::new(AuditUsageSink::new(assembly.sender));
+    Ok(SessionAudit {
+        sink,
+        handle: assembly.handle,
+    })
+}
+
 pub fn wire_audit_worker(
     agents_dir: &Path,
     snapshot: &ConfigSnapshot,

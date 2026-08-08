@@ -14,6 +14,7 @@ pub type DisplayHistoryQueryHandle = Arc<dyn sdk::DisplayHistoryQuery>;
 
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
+    pub session_audit: Option<crate::audit::SessionAudit>,
     pub display_history_query: DisplayHistoryQueryHandle,
     pub session_id: String,
     pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
@@ -198,7 +199,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    Ok(agent_client_from_runtime(runtime_client))
+    Ok(agent_client_from_runtime(runtime_client.client))
 }
 
 #[cfg(test)]
@@ -239,7 +240,7 @@ async fn build_agent_client_with_gateways(
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, agents_dir)
             .await?;
-    Ok(agent_client_from_runtime(runtime_client))
+    Ok(agent_client_from_runtime(runtime_client.client))
 }
 
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
@@ -297,19 +298,21 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    let launch = runtime_client.startup_snapshot();
-    let startup_resume = runtime_client.startup_resume();
-    let allow_all = runtime_client.allow_all();
-    let context_size = runtime_client.context_size();
-    let thinking = runtime_client.requested_reasoning() != provider::ReasoningLevel::Off;
+    let launch = runtime_client.client.startup_snapshot();
+    let startup_resume = runtime_client.client.startup_resume();
+    let allow_all = runtime_client.client.allow_all();
+    let context_size = runtime_client.client.context_size();
+    let thinking = runtime_client.client.requested_reasoning() != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.clone());
-    let client = agent_client_from_runtime(runtime_client);
+    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
+    let client = agent_client_from_runtime(runtime_client.client);
+    let session_audit = runtime_client.audit;
     let cwd = launch.cwd.clone();
 
     Ok(AgentClientBootstrap {
         client,
+        session_audit,
         display_history_query,
         session_id: launch.session_id,
         startup_resume,

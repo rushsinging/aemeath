@@ -353,6 +353,7 @@ name = "cli"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "audit",
  "base64",
  "clap",
  "composition",
@@ -375,6 +376,7 @@ dependencies = [
  "sdk",
  "serde",
  "serde_json",
+ "share",
  "similar",
  "syntect",
  "tempfile",
