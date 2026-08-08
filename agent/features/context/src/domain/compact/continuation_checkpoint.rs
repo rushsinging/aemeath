@@ -155,6 +155,68 @@ impl ContinuationCheckpoint {
         &self.resume_cursor
     }
 
+    pub fn normalize_to_budget(mut self, budget: usize) -> Result<Self, CheckpointError> {
+        self.move_dynamic_facts_to_revalidation();
+        self.remove_duplicate_lines();
+        self.compact_archived_milestones();
+
+        if estimate_checkpoint_tokens(&self) <= budget {
+            return Ok(self);
+        }
+
+        for section_index in [7usize, 2, 3, 4] {
+            while !self.sections[section_index].is_empty()
+                && estimate_checkpoint_tokens(&self) > budget
+            {
+                self.sections[section_index].pop();
+            }
+        }
+
+        let estimated_tokens = estimate_checkpoint_tokens(&self);
+        if estimated_tokens > budget {
+            return Err(CheckpointError::ProtectedSectionsExceedBudget {
+                estimated_tokens,
+                budget,
+            });
+        }
+        Ok(self)
+    }
+
+    fn move_dynamic_facts_to_revalidation(&mut self) {
+        let mut stable_facts = Vec::new();
+        let mut revalidation = Vec::new();
+        for line in self.sections[2].drain(..) {
+            if is_dynamic_current_state(&line) {
+                let content = line.trim_start().strip_prefix("- ").unwrap_or(&line);
+                revalidation.push(format!("- Revalidate: {content}"));
+            } else {
+                stable_facts.push(line);
+            }
+        }
+        self.sections[2] = stable_facts;
+        self.sections[6].extend(revalidation);
+    }
+
+    fn remove_duplicate_lines(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        for section in &mut self.sections {
+            section.retain(|line| {
+                let normalized = line.trim();
+                normalized.is_empty() || seen.insert(normalized.to_string())
+            });
+        }
+    }
+
+    fn compact_archived_milestones(&mut self) {
+        self.sections[7].retain(|line| {
+            let trimmed = line.trim();
+            trimmed.is_empty()
+                || trimmed.contains('`')
+                || trimmed.contains("PR #")
+                || trimmed.contains("Issue #")
+        });
+    }
+
     pub fn render(&self) -> String {
         SECTION_HEADINGS
             .iter()
@@ -166,6 +228,22 @@ impl ContinuationCheckpoint {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+}
+
+fn estimate_checkpoint_tokens(checkpoint: &ContinuationCheckpoint) -> usize {
+    crate::domain::token_budget::estimate_tokens(&checkpoint.render())
+}
+
+fn is_dynamic_current_state(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    (lower.contains("pr #")
+        && (lower.contains(" is open")
+            || lower.contains(" is closed")
+            || lower.contains("mergeable")))
+        || lower.contains("ci is ")
+        || lower.contains("worktree is ")
+        || lower.contains("origin branch matches")
+        || lower.contains("remote branch")
 }
 
 fn trim_blank_lines(lines: &mut Vec<String>) {
@@ -198,6 +276,10 @@ pub enum CheckpointError {
     InvalidStatus {
         value: String,
     },
+    ProtectedSectionsExceedBudget {
+        estimated_tokens: usize,
+        budget: usize,
+    },
     ContentBeforeFirstSection,
 }
 
@@ -218,6 +300,13 @@ impl fmt::Display for CheckpointError {
             Self::InvalidStatus { value } => write!(
                 formatter,
                 "Continuation Status 非法：{value}；只允许 Continue、Waiting for User 或 Completed"
+            ),
+            Self::ProtectedSectionsExceedBudget {
+                estimated_tokens,
+                budget,
+            } => write!(
+                formatter,
+                "checkpoint 保护分区超过预算：估算 {estimated_tokens} tokens，预算 {budget} tokens"
             ),
             Self::ContentBeforeFirstSection => {
                 write!(formatter, "首个 checkpoint 分区前存在非法内容")

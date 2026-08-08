@@ -130,6 +130,110 @@ fn rejects_unknown_continuation_status() {
 }
 
 #[test]
+fn budget_normalization_preserves_continuation_critical_sections_by_semantics() {
+    let archive_noise = (0..100)
+        .map(|index| {
+            format!(
+                "- ARCHIVE-NOISE-{index:03} {}",
+                "historical detail ".repeat(20)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let source = COMPLETE_CHECKPOINT.replace(
+        "- ToolCall split completed in `5e42c9aa`.",
+        &format!("- ToolCall split completed in `5e42c9aa`.\n{archive_noise}"),
+    );
+
+    let normalized = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(1_000)
+        .unwrap();
+    let rendered = normalized.render();
+
+    assert!(rendered.contains("NEVER merge PR #1541"));
+    assert!(rendered.contains("Continue the content-stream migration"));
+    assert!(rendered.contains("Next action: inspect all legacy Token/Thinking consumers"));
+    assert!(rendered.contains("Recheck worktree status"));
+    assert!(rendered.contains("Continue —"));
+    assert!(rendered.contains("`5e42c9aa`"));
+    assert!(!rendered.contains("ARCHIVE-NOISE-099"));
+    assert!(crate::domain::token_budget::estimate_tokens(&rendered) <= 1_000);
+}
+
+#[test]
+fn normalization_keeps_duplicate_fact_only_in_authoritative_section() {
+    let repeated = "- Commit `5e42c9aa` passed Runtime and CLI tests.";
+    let source = COMPLETE_CHECKPOINT
+        .replace(
+            "- Runtime and SDK are migrated; TUI remains.",
+            &format!("{repeated}\n- Runtime and SDK are migrated; TUI remains."),
+        )
+        .replace("- ToolCall split completed in `5e42c9aa`.", repeated);
+
+    let normalized = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap()
+        .render();
+
+    assert_eq!(normalized.matches(repeated).count(), 1);
+    assert!(normalized.contains("## Committed Facts\n- Commit `5e42c9aa`"));
+}
+
+#[test]
+fn normalization_moves_dynamic_current_state_to_required_revalidation() {
+    let source = COMPLETE_CHECKPOINT.replace(
+        "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+        "- Commit `5e42c9aa` passed Runtime and CLI tests.\n- PR #1541 is OPEN and CI is green.\n- Worktree is clean and origin branch matches HEAD.",
+    );
+
+    let normalized = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap()
+        .render();
+    let committed = normalized
+        .split("## Committed Facts\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Uncommitted Working Set")
+        .next()
+        .unwrap();
+    let revalidation = normalized
+        .split("## Required Revalidation\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Archived Milestones")
+        .next()
+        .unwrap();
+
+    assert!(!committed.contains("PR #1541 is OPEN"));
+    assert!(!committed.contains("Worktree is clean"));
+    assert!(committed.contains("Commit `5e42c9aa` passed"));
+    assert!(revalidation.contains("Revalidate: PR #1541 is OPEN and CI is green."));
+    assert!(revalidation.contains("Revalidate: Worktree is clean"));
+}
+
+#[test]
+fn normalization_fails_when_protected_sections_exceed_budget() {
+    let source = COMPLETE_CHECKPOINT.replace(
+        "- NEVER merge PR #1541.",
+        &format!("- NEVER merge PR #1541. {}", "protected ".repeat(10_000)),
+    );
+
+    let error = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(100)
+        .expect_err("protected sections must not be truncated");
+
+    assert!(matches!(
+        error,
+        CheckpointError::ProtectedSectionsExceedBudget { budget: 100, .. }
+    ));
+}
+
+#[test]
 fn rejects_sections_in_wrong_order() {
     let source = COMPLETE_CHECKPOINT
         .replace("## Current Objective", "## TEMP")
