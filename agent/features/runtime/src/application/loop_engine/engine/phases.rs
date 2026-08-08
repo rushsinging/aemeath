@@ -206,13 +206,14 @@ pub(super) async fn run_model_invocation_phase<P>(
     run: &Run,
     execution: &mut RunExecutionState,
     step_id: &sdk::RunStepId,
+    invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
     model: &mut P,
 ) -> ModelInvocationOutcome
 where
     P: ModelInvocationPort + ?Sized,
 {
-    let invocation = model.invoke_model(execution, step_id, cancel);
+    let invocation = model.invoke_model(execution, run.id(), step_id, invocation_id, cancel);
     let result = if let Some(remaining) = run.remaining_time(Instant::now()) {
         if remaining.is_zero() {
             return ModelInvocationOutcome::TimedOut;
