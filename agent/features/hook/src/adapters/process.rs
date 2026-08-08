@@ -11,6 +11,7 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use crate::ports::CancellationSignal;
 
 pub(crate) const DEFAULT_OUTPUT_LIMIT: usize = 8 * 1024;
+#[cfg(any(not(unix), test))]
 pub(crate) const UNSUPPORTED_PLATFORM_MESSAGE: &str = "当前平台不支持 Hook 命令执行";
 const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 

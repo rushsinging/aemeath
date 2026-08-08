@@ -378,7 +378,7 @@ P4 与 P5 的交接边界：`SessionIngress` 当前完成入口分类和 interac
   - 删除 Main 直接 `dispatch_hook` 的旁路，BoundaryOnly 过滤在 Hook adapter 入口强制执行。
   - 完成门禁：三分支、boundary filter、UI/progress projection 测试逐层通过；生产 Stop Hook dispatch 只有一条路径。
   - 完成记录：`application/hook/stop_coordination.rs::orchestrate_stop_hook` 统一拥有 Stop invocation、Hook dispatch、typed directive 投影、Block feedback materialization 与标准 `Message::stop_hook_feedback` 构造；Engine 统一写入 execution 消息并推进 Stop block 计数。Main adapter 仅提供 Hook/context capability、Running/结果 UI 投影及 continuation relay，Sub adapter 仅提供 Hook/context capability，不再各自执行或解释 Stop Hook。
-  - BoundaryOnly：新增 `BoundaryHookPort`，在 Hook adapter 入口只转发 Session/SubRun start-stop 生命周期 invocation，内部 Stop/Tool/Compact 等 invocation 统一返回 Proceed；Factory 不再把 BoundaryOnly 错配为 EmptyHookPort。Runtime Capability Assembly guard 与守卫文档已同步目标契约。
+  - BoundaryOnly：新增 `BoundaryHookPort`，在 Hook adapter 入口按 `HookPointMetadata.class` 转发 Boundary invocation（包括普通 Loop Stop 与 Session/SubRun lifecycle），Tool/Notification invocation 返回 Proceed；Factory 为每个 Sub Run 从 frozen snapshot 构造独立 Dispatcher 后再施加 capability adapter，不复用 parent HookPort。
   - 验证结果：Stop coordinator 6 tests、Loop Engine 59 tests、Main loop runner 44 tests、Sub runner 51 tests、RuntimeContextFactory 33 tests 全部通过；`cargo clippy -p runtime --all-targets -- -D warnings`、`cargo fmt --all -- --check`、`git diff --check` 通过；完整 architecture guards 通过；生产搜索确认 `HookInvocation::Stop` 仅存在于统一 coordinator，Main/Sub 无 `evaluate_stop_hook` 或 Stop direct dispatch。
 
 - [x] **P6.8 删除 Sub 的直接 LLM completion 旁路**

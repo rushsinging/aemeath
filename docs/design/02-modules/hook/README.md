@@ -26,6 +26,18 @@ trait HookPort: Send + Sync {
         invocation: HookInvocation,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome;
+
+    async fn dispatch_at(
+        &self,
+        invocation: HookInvocation,
+        context: HookDispatchContext,
+        cancellation: &dyn CancellationSignal,
+    ) -> HookOutcome;
+}
+
+struct HookDispatchContext {
+    cwd: PathBuf,
+    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 enum HookInvocation {
@@ -41,7 +53,7 @@ enum HookInvocation {
     PostCompact(PostCompactInput),
     PostToolBatch(PostToolBatchInput),
     SubRunStart(SubRunInput),
-    SubRunStop(SubRunInput),
+    SubRunStop(SubRunStopInput),
     TaskCreated(TaskInput),
     TaskCompleted(TaskInput),
     PermissionRequest(PermissionInput),
@@ -58,7 +70,9 @@ enum HookInvocation {
 }
 ```
 
-使用 enum 绑定 HookPoint 与 payload，禁止 `point + 无约束 JSON` 形成非法组合。对外统一语言使用 `SubRun`；adapter 可兼容 Claude Code 的 `SubagentStart/Stop` 名称。
+使用 enum 绑定 HookPoint 与 payload，禁止 `point + 无约束 JSON` 形成非法组合。对外统一语言使用 `SubRun`；adapter 可兼容 Claude Code 的 `SubagentStart/Stop` 名称。`SubRunStop` 使用独立 `SubRunStopInput`，在启动参数之外携带 `result`、`run_steps` 与 `is_error`。
+
+`dispatch_at` 是生产入口：Runtime 每次调用提供当前 workspace cwd，并可附带 typed subscription execution observer；Hook adapter 独占按 invocation 环境构造。`dispatch` 的默认上下文入口只服务不依赖 workspace 的 fake/contract，生产 Dispatcher **MUST** 覆写 `dispatch_at`，不得缓存旧 cwd。
 
 ## 3. HookPoint 元数据
 
@@ -104,6 +118,24 @@ enum HookClass {
 | SessionEnd / SubRunStop / TaskCreated / TaskCompleted / Notification / InstructionsLoaded | ❌ | ❌ | 由 point metadata 固定声明 |
 | StopFailure / PermissionDenied / ConfigChange / CwdChanged / FileChanged / TeammateIdle | ❌ | ❌ | ❌ |
 
+### 3.1 Published Language 与生产可达性
+
+26 个 HookPoint 都是稳定 typed PL，且 Config 兼容层可解析同名事件；这只表示配置与协议可以稳定表达，**不等于生产触发、directive 消费或用户展示已经接线**。当前能力状态如下：
+
+| HookPoint | Config / PL | 生产 emit | directive / context / input 消费 | message 消费 | 当前状态 |
+|---|---:|---:|---|---|---|
+| PreToolUse | ✅ | ✅ | Block、UpdatedInput、Context；updated input 重新经过 schema/Policy | 仅 Activity 生命周期 | 已接线 |
+| Stop | ✅ | ✅，Main/Sub 共享 Loop | Continue/Block、feedback、per-Run frozen Stop policy | Stop notice + feedback | 已接线 |
+| SubRunStart / SubRunStop | ✅ | ✅ | 非阻塞 point，无控制流 directive | SystemMessage → Sub progress | 已接线 |
+| PostToolUse / PostToolUseFailure / PostToolBatch | ✅ | ✅ | 当前 fire-and-forget，不消费 context | 仅 Activity 生命周期 | 部分接线 |
+| TaskCreated / TaskCompleted / PermissionDenied / InstructionsLoaded | ✅ | ✅ | 当前 fire-and-forget | 仅 Activity 生命周期 | 部分接线 |
+| StopFailure | ✅ | ✅，由 Stop 重试耗尽在 Hook BC 内 best-effort 触发 | 观察事件，不改变既定 Stop Block | 仅 Activity 生命周期 | 已接线观察 |
+| UserPromptSubmit / PreCompact / PostCompact / SessionStart / SessionEnd / Notification | ✅ | ❌ | ❌ | ❌ | Future，当前配置不会触发 |
+| PermissionRequest | ✅ | ❌ | ❌ | ❌ | Future；授权决策流未产生该事件时不得伪造 |
+| Elicitation / ElicitationResult / UserPromptExpansion / ConfigChange / CwdChanged / FileChanged / TeammateIdle | ✅ | ❌ | ❌ | ❌ | Future，等待对应生产触发能力 |
+
+`failure_policy` 也是 Hook-owned PL 与 Dispatcher 行为，但当前兼容 `HookEntry` 仅发布 matcher/command/timeout，用户配置尚不能设置该字段；§4 的 failure policy 规则描述领域与 Dispatcher 契约，不构成当前 Config surface 支持声明。Future 接线时 **MUST** 在触发层、Runtime 消费层、SDK/TUI 消费层逐层补测试，**NEVER** 以 PL 变体或 Config 可解析冒充生产可达。
+
 Hook adapter 必须依据该矩阵校验 HookDirective：
 
 - can_block=false 收到 Block → 协议错误，进入 ExecutionFailed；
@@ -131,7 +163,9 @@ enum HookFailurePolicy {
 }
 ```
 
+- `HookSubscription` 是 Hook BC 的稳定领域语言；当前 Config adapter 从 `HookEntry` 映射 point、matcher、command、timeout 与声明顺序，`enabled` 固定为 true；
 - 配置按 `order` 与声明顺序稳定执行；
+- `failure_policy` 的领域/Dispatcher 契约已实现，但当前用户 `HookEntry` 尚未发布该字段；
 - 只有 metadata 允许时才能配置 failure_policy=Block；
 - 普通 Hook 未配置时默认 Continue；
 - Stop Hook 执行失败的系统语义固定为 Block；用户不能改成 Continue；
@@ -144,6 +178,43 @@ enum HookFailurePolicy {
 struct HookOutcome {
     executions: Vec<HookExecution>,
     directive: HookDirective,
+    messages: Vec<HookDisplayMessage>,
+    block_detail: Option<HookBlockDetail>,
+}
+
+enum HookExecutionStatus {
+    Success,
+    Blocked,
+    Cancelled,
+    ExecutionFailed { error: String },
+}
+
+enum HookReason {
+    ExitCode { code: i32, stderr: String },
+    JsonBlock { reason: String },
+    JsonContinueFalse { stop_reason: Option<String> },
+    StopHookExecutionFailed { error: String },
+    PolicyBlock { error: String },
+}
+
+enum HookDisplayMessageKind {
+    AdditionalContext,
+    SystemMessage,
+}
+
+struct HookDisplayMessage {
+    point: HookPoint,
+    source: String,
+    execution_ordinal: u32,
+    attempt: u8,
+    kind: HookDisplayMessageKind,
+    text: String,
+}
+
+struct HookBlockDetail {
+    command: String,
+    execution_ordinal: u32,
+    execution: HookExecution,
 }
 
 enum HookDirective {
@@ -164,6 +235,8 @@ struct HookExecution {
 }
 ```
 
+`HookOutcome.directive` 是调用方控制流真相；`messages` 按每条 subscription 的成功 execution 保留 `additionalContext` / `systemMessage` 的来源、序号和 attempt；`block_detail` 只在最终 Block 时标识实际阻断 command 与 execution。Runtime 必须通过 typed ACL 搬运这些字段，具体触发点是否消费 directive/message 以 §3.1 的生产状态矩阵为准。
+
 协议：
 
 | 结果 | 语义 |
@@ -173,6 +246,9 @@ struct HookExecution {
 | 任意非零退出码（exit 1/2/...） | 主动 Block |
 | spawn / wait / IO / timeout | ExecutionFailed |
 | exit 0 + 非法 JSON | ExecutionFailed |
+| non-Unix 平台能力缺失 | `ProcessFailureKind::Unsupported → ExecutionFault::Unsupported → HookExecutionStatus::ExecutionFailed`，单次终止且不重试 |
+
+`classify_directive(point, exit_code, stdout, stderr)` 返回 typed `Result<HookDirective, ClassifyError>`；`ClassifyError` 区分 `InvalidJson`、`MissingExitCode` 与携带 `ProtocolViolation` 的能力矩阵违规。业务 Block 通过 `HookReason` 表达，协议/执行失败通过 `HookExecutionStatus::ExecutionFailed` 表达，二者 **NEVER** 压成同一字符串分支。
 
 > **设计决策**：任意非零退出码 = Block，而非要求用户用 exit 2 表示 block。原因：
 > 1. **Unix 惯例**：非零退出码 = 失败/阻止，用户写 hook 脚本时自然用 `exit 1` 表示拒绝
@@ -184,8 +260,11 @@ struct HookExecution {
 ## 6. 单 Hook 执行重试
 
 ```text
-hook.max_attempts = 3
+hooks.max_attempts = 3
+hooks.max_stop_hook_blocks = 15
 ```
+
+两个默认值均由 committed `ConfigSnapshot` 产生 typed policy。Dispatcher 构造时冻结 `HookExecutionPolicy`；每个 Main/Sub Run 从 `RunConfigSnapshot` 冻结 `StopHookPolicy`。运行期间不重新读取 live Config，两个限制也不进入用户 `HookSubscription`。
 
 - 最大尝试次数为 3（含第一次）；
 - 重试执行故障，不重试业务 Block；
@@ -214,7 +293,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - Continue → Completed；
 - Block → feedback 注入同一 Run，回到 PreparingContext；
 - Runtime 维护每个 Run 的 stop_block_count；
-- 超过 15 次 → RunFailed(StopHookRetryExhausted)。
+- 超过当前 Run 冻结的 Stop block 上限 → `RunFailed { error }`，错误文本保留实际阻断次数。
 
 ## 8. 安全与资源
 
@@ -272,12 +351,16 @@ src/
 │   ├── invocation.rs       #   HookInvocation 枚举 + 各 point typed payload
 │   ├── outcome.rs          #   HookOutcome / HookDirective / HookExecution
 │   ├── metadata.rs         #   HookPointMetadata / HookClass / 能力矩阵
-│   └── protocol.rs         #   exit/stdout → directive 的纯分类规则
-├── ports.rs               # HookPort trait 签名，仅依赖 domain
+│   ├── protocol.rs         #   exit/stdout → directive 的纯分类规则
+│   └── subscription.rs     #   HookSubscription / matcher / failure policy
+├── ports.rs               # HookPort、HookDispatchContext、observer 与 CancellationSignal
 ├── adapters.rs            # 技术实现入口
 └── adapters/
-    ├── config.rs           # HooksConfig → HookSubscription 与生产 Dispatcher 构造
-    ├── dispatcher.rs       # 匹配、重试、聚合与按 invocation 环境构造
+    ├── config.rs           # HooksConfig/ConfigSnapshot → HookSubscription/Dispatcher
+    ├── dispatcher.rs       # 匹配、重试、聚合与 StopFailure 编排
+    ├── dispatcher/
+    │   ├── executor.rs     # 单次执行端口、ProcessDriver adapter 与 typed fault
+    │   └── helpers.rs      # 聚合与执行记录辅助
     ├── environment.rs      # 固定基础环境白名单捕获
     └── process.rs          # env_clear、受管进程组、有界并发 IO、TERM/KILL/wait
 ```
@@ -296,7 +379,8 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-08 | 对齐当前实现：补全 `dispatch_at`/observer/Outcome Published Language，区分 26-point PL 与 production reachability，明确 frozen policies、non-Unix Unsupported 及 Future Config/触发边界；Sub Run Stop 改由 Boundary metadata 决定 | Hook 实现与 Design 对齐 |
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
 | 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
 | 2026-07-18 | 修正 Target 层级方向：HookPort 使用的稳定 PL 归 `domain`，进程与兼容 wire detail 归 `adapters`，避免 `ports → adapters` 反向依赖 | [#987](https://github.com/rushsinging/aemeath/issues/987) |
-| 2026-07-18 | 落地 Unix 受管 ProcessDriver：独立进程组、完整 deadline、有界并发 IO 与 `TERM → KILL → wait` 回收；retry 仍由 #924 承接 | [#923](https://github.com/rushsinging/aemeath/issues/923) |
+| 2026-07-18 | 落地 Unix 受管 ProcessDriver：独立进程组、完整 deadline、有界并发 IO 与 `TERM → KILL → wait` 回收；retry 仍由后续 Dispatcher 能力承接 | Hook 受管进程交付 |

@@ -539,7 +539,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
 
 #[tokio::test]
 async fn test_stop_hook_block_limit_stops_loop() {
-    // #1248 Task 6：Stop hook 连续阻断超过 16 次由 Run 状态机触发 RetryExhausted → Failed
+    // 默认 frozen policy 允许 15 次 Stop block，第 16 次由 Run 状态机触发 RetryExhausted → Failed
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
@@ -561,7 +561,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         drop(input_tx);
     });
 
-    // #1248 Task 6: Need 16+ unique responses — Run counts blocks, not StuckGuard.
+    // 默认 policy 的首个超限 Block 需要第 16 个响应；额外响应保证测试 driver 可收口。
     let responses: Vec<String> = (1..=18).map(|i| format!("r{i}")).collect();
     let response_refs: Vec<&str> = responses.iter().map(|s| s.as_str()).collect();
     let shell = test_shell_with_hooks(always_blocking_hook_port());

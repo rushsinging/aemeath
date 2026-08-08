@@ -838,6 +838,7 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
 fn configured_stop_hook_block_limit_controls_retry_exhaustion() {
     let mut run = Run::new_with_stop_hook_block_limit(RunSpec::main(), None, 2);
 
+    assert_eq!(run.stop_hook_block_count(), 0);
     assert_eq!(
         run.record_stop_hook_block(),
         StopHookBlockResult::Blocked { count: 1 }
@@ -849,6 +850,11 @@ fn configured_stop_hook_block_limit_controls_retry_exhaustion() {
     assert_eq!(
         run.record_stop_hook_block(),
         StopHookBlockResult::RetryExhausted { count: 3 }
+    );
+    assert_eq!(run.stop_hook_block_count(), 3);
+    assert_eq!(
+        run.record_stop_hook_block(),
+        StopHookBlockResult::RetryExhausted { count: 4 }
     );
 }
 

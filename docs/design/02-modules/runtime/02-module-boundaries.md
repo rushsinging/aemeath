@@ -141,8 +141,10 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 
 | | 拥有 |
 |---|---|
-| **Hook BC** | subscription 匹配、稳定顺序、脚本执行/回收、3 次执行故障重试、输出解析与类型化 directive |
-| **Runtime** | 触发时机（UserPromptSubmit/Stop/PreToolCall/PostToolCall/SubRunStart-Stop/Notification）+ directive 响应编排；Stop 阻断累计 15 次后第 16 次 RunFailed |
+| **Hook BC** | subscription 匹配、稳定顺序、脚本执行/回收、按 frozen `HookExecutionPolicy` 对 ExecutionFailed 重试、输出解析与类型化 directive |
+| **Runtime** | 已接线触发点与 directive 响应编排；每个 Main/Sub Run 使用 frozen `StopHookPolicy`，首个超过 block allowance 的 Stop Block 进入 RunFailed |
+
+生产触发点、outcome/message consumer 与 Future point 的唯一矩阵见 [Hook README §3.1](../hook/README.md#31-published-language-与生产可达性)；不得把 26 点 PL 或 Config surface 当作全部 production-reachable。
 
 触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubRunStart/Stop）。
 

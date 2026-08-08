@@ -150,7 +150,7 @@ Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Too
 2. **Stop Hook dispatch**：
    - `Continue`：进入 `FinalizingStep`，以 `FinalizeCause::Completed` cancellation-shielded 提交当前 Step，随后 Run Completed；
    - `Block` 且未超过上限：当前 Step 同样进入 `FinalizingStep` 并提交；Runtime 将 Hook 的结构化 reason 转为 system-generated feedback，随后重新进入 `DrainingInput`；
-   - `Block` 且超过上限：当前 Step 仍先经 `FinalizingStep` 提交，再进入 `Failed(StopHookRetryExhausted)`；
+   - `Block` 且超过当前 Run 冻结的上限：当前 Step 仍先经 `FinalizingStep` 提交，再进入 `Failed`，错误文本保留实际阻断次数；
 3. Block 后的下一次 `drain_or_seal` 必须构造一个稳定 batch：**已提交的 assistant / Tool 历史**在 Context backing 中；新 batch 以 Stop feedback 为系统前缀，再追加该次 drain 收到的普通用户追问（FIFO）。三者在同一次下一 Step Context Window 中可见；
 4. Stop feedback 仅是 Runtime 生成的系统输入，不是 Hook BC 对 Session 的直接写入；Hook BC 只返回结构化 directive / reason；
 5. `CancelRunStep` 或 `TerminateRun` 一旦获胜，优先于尚未绑定的 Stop continuation：不得发起下一次模型调用。CancelRunStep 由 StepFinalizer 收口当前事实后进入 Drain；TerminateRun seal admission、丢弃未绑定 InputQueue 内容并 flush 已提交 Session；
@@ -485,8 +485,8 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 | 条件 | 结果 |
 |---|---|
 | 无 tool_calls / stop_reason=EndTurn，ContinueAfterResponse → DrainingInput → EmptyAndSealed | Completed |
-| Stop Hook Block（累计≤15） | 当前 Step 提交 → InternalContinuation(StopHookFeedback) + 同次 drain 用户追问 → PreparingContext，同一 Run 继续 |
-| Stop Hook Block 累计>15 | 当前 Step 提交 → Failed(StopHookRetryExhausted) |
+| Stop Hook Block（累计≤当前 Run 冻结上限） | 当前 Step 提交 → InternalContinuation(StopHookFeedback) + 同次 drain 用户追问 → PreparingContext，同一 Run 继续 |
+| Stop Hook Block 累计>当前 Run 冻结上限 | 当前 Step 提交 → Failed，错误文本保留实际阻断次数 |
 | timeout>0 且墙钟超时 | Failed |
 | StuckGuard HardPause | interaction capability 可用 → AwaitingInteraction；Unavailable → Failed |
 | CancelRunStep 且 Drain 无新输入、admission 保持 Open | StepFinalizer → DrainingInput → AwaitingInput |
@@ -538,9 +538,9 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 - Hook BC 对单条 Stop command 的执行故障最多尝试 3 次；主动 Block 不重试。
 - 三次执行都失败时，Hook 返回 `Block(StopHookExecutionFailed)`。
 - Runtime 对同一个 Run 维护 `stop_block_count`，主动 Block 与执行失败 Block 都计数。
-- `stop_block_count≤15` 时，将反馈作为 system-generated input 加入下一步并回 PreparingContext。
-- 第 16 次阻断进入状态 `Failed(StopHookRetryExhausted)`，并发布 `RunFailed { error: StopHookRetryExhausted }`；不得强制 Completed。
-- 两个上限分别归 Hook 和 Runtime，静态默认值均由 ConfigSnapshot 提供。
+- `stop_block_count` 不超过当前 Run 冻结的 `StopHookPolicy` 上限时，将反馈作为 system-generated input 加入下一步并回 PreparingContext。
+- 首个超限阻断进入 `Failed` 并发布 `RunFailed { error }`；错误文本保留实际阻断次数，且不得强制 Completed。
+- 两个上限分别归 Hook 和 Runtime，静态默认值均由 ConfigSnapshot 提供；Dispatcher 与每个 Run 分别冻结 typed policy。
 
 详见 [../hook/01-run-loop-integration.md](../hook/01-run-loop-integration.md)。
 

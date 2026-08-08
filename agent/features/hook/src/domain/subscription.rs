@@ -13,7 +13,8 @@ use crate::domain::invocation::HookPoint;
 /// Hook 用户配置订阅。
 ///
 /// 配置按 `order` + 声明顺序稳定执行；只有 metadata 允许时才能配置
-/// `failure_policy=Block`（校验在 Config 阶段，由 #925/#926 承接）。
+/// `failure_policy=Block`（由 Hook 领域与 Dispatcher 测试覆盖；当前用户 HookEntry
+/// 尚未发布该字段，未来 Config surface 接线时必须复用本校验）。
 #[derive(Debug, Clone)]
 pub struct HookSubscription {
     /// 触发点。

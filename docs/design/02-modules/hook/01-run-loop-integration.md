@@ -40,11 +40,11 @@ Finishing
   └─ HookPort.dispatch(Stop) → Block
          ├─ stop_block_count += 1
          ├─ 当前 assistant / Tool Step → FinalizingStep → append_and_persist
-         ├─ 未超过 15：追加 system-generated feedback
+         ├─ 未超过当前 Run 冻结上限：追加 system-generated feedback
          │              + 同次 drain 的普通用户追问（FIFO）
          │              → PreparingContext，同一个 Run 继续
-         └─ 超过 15：状态 Failed(StopHookRetryExhausted)
-                      发布 RunFailed { error: StopHookRetryExhausted }
+         └─ 超过当前 Run 冻结的上限：状态 Failed（错误文本保留实际阻断次数）
+                      发布 RunFailed { error }
 ```
 
 Stop Hook 执行失败时，Hook BC 先尝试最多 3 次；全部失败后合成 `Block(StopHookExecutionFailed)`，再进入同一 Runtime 分支。
@@ -54,9 +54,9 @@ Stop Hook 执行失败时，Hook BC 先尝试最多 3 次；全部失败后合�
 | 当前态 | 条件 | 下一态 | 所有者 |
 |---|---|---|---|
 | Finishing | Stop directive=Continue | FinalizingStep → Completed | Runtime |
-| Finishing | Stop directive=Block 且 count≤15 | FinalizingStep → PreparingContext | Runtime |
-| Finishing | Stop ExecutionFailed 重试耗尽且 count≤15 | FinalizingStep → PreparingContext | Runtime |
-| Finishing | Stop block count>15 | FinalizingStep → Failed(StopHookRetryExhausted) | Runtime |
+| Finishing | Stop directive=Block 且 count≤冻结上限 | FinalizingStep → PreparingContext | Runtime |
+| Finishing | Stop ExecutionFailed 重试耗尽且 count≤冻结上限 | FinalizingStep → PreparingContext | Runtime |
+| Finishing | Stop block count>冻结上限 | FinalizingStep → Failed | Runtime |
 
 ### Hook 内部重试表
 
@@ -78,7 +78,7 @@ Hook 执行重试不是 Run 状态迁移；Run 只观察最终 HookOutcome。
 - 普通 model/tool step 不清零；
 - Stop Continue 后 Run 结束；
 - 不持久化，崩溃后新 Run 从头开始。
-- #1248 Task 6：`Run::record_stop_hook_block()` 返回 typed `StopHookBlockResult`：1-15 次 `Blocked { count }`，第 16 次 `RetryExhausted { count }` → 状态 `Failed(StopHookRetryExhausted)`。共享 Loop Engine 调用此方法，旧 `StuckGuard` 中的计数逻辑已退役。
+- `Run::record_stop_hook_block()` 使用每个 Run 冻结的 `StopHookPolicy` 返回 typed `StopHookBlockResult`：上限内为 `Blocked { count }`，首个超限及后续调用为 `RetryExhausted { count }`，共享 Loop 随后将 Run 转为 Failed；旧 `StuckGuard` 中的计数逻辑已退役。
 - RuntimeContextFactory 按 `HookBindingMode`（Full / BoundaryOnly）验证并装配 hooks 端口；BoundaryOnly 需 parent。
 
 `max_stop_hook_blocks=15` 的默认值由 ConfigSnapshot 提供，Runtime 应用；用户 HookSubscription 不能覆盖该上限。
@@ -100,11 +100,11 @@ Feedback 经 Runtime 的系统输入 lane 在当前 Step 提交后进入下一�
 
 > 状态：#926 已完成 legacy 发送点与 façade 退役；发现来源：[#1106](https://github.com/rushsinging/aemeath/issues/1106)
 >
-> Hook 输出展示链已完成：`HookOutcome.messages → RuntimeStreamEvent::HookMessage → ChatEvent::HookMessage → TUI HookMessage → AppendHookNotice` 覆盖 Main/Sub、工具后置和批处理调用点；TUI 以状态色标题、主文本正文、弱化归因详情展示非空 message，保留 point/source/ordinal/attempt/kind。`HookRunner`、`HookUi`、`emit_json_hook_context` 与通用 `SystemMessage` 兼容链已删除。Runtime 每次 invocation 只传当前 workspace cwd；Hook adapter 使用固定基础环境白名单、按当前 invocation 生成兼容变量，并在 ProcessDriver 创建子进程时清空父环境。Stop 的 15 次上限、`StopHookRetryExhausted` typed 终态及 out-of-band 控制仍由 Runtime 拥有；Hook retry / Stop 上限 ConfigSnapshot 注入由对应配置能力承接。
+> Hook 输出展示链已完成：`HookOutcome.messages → RuntimeStreamEvent::HookMessage → ChatEvent::HookMessage → TUI HookMessage → AppendHookNotice` 覆盖 Main/Sub、工具后置和批处理调用点；TUI 以状态色标题、主文本正文、弱化归因详情展示非空 message，保留 point/source/ordinal/attempt/kind。`HookRunner`、`HookUi`、`emit_json_hook_context` 与通用 `SystemMessage` 兼容链已删除。Runtime 每次 invocation 只传当前 workspace cwd；Hook adapter 使用固定基础环境白名单、按当前 invocation 生成兼容变量，并在 ProcessDriver 创建子进程时清空父环境。Stop block counter、typed `StopHookBlockResult::RetryExhausted` 与 out-of-band 控制由 Runtime 拥有；Hook execution retry policy 来自 Dispatcher 捕获的 committed `ConfigSnapshot`，Stop 上限由每个 Main/Sub Run 的 `RunConfigSnapshot` 冻结。
 
 Hook BC 在 `HookOutcome.messages` 中逐条保留 JSON `additional_context` / `system_message`，字段包含 HookPoint、稳定非秘密来源、execution ordinal、attempt、message kind 与原始文本。Runtime adapter 将其投影为独立 `RuntimeStreamEvent::HookMessage`，SDK 继续结构化透传为 `ChatEvent::HookMessage`；该链路 **NEVER** 复用通用 `SystemMessage`。
 
-迁移期 legacy `HookRunner` 的 `emit_json_hook_context`、PostToolBatch、PreCompact / PostCompact 发送点仍保留到 #926 原子切换，避免在 #925 同时重写旧 Loop 驱动。目标契约如下：
+当前生产链已经完成 legacy façade 与发送点退役；目标契约如下：
 
 1. **MUST** Hook 面向展示层的输出使用**独立事件类型**，携带来源归因（hook 名、触发的 HookEvent），**NEVER** 复用 `RuntimeStreamEvent::SystemMessage`
 2. **MUST** 归因字段结构化透传至 TUI，**NEVER** 中途压扁成字符串（对齐 `specs/3.3-tui-cli.md` 对 `AgentProgressEvent` 的同类约定）
@@ -115,13 +115,13 @@ Hook BC 在 `HookOutcome.messages` 中逐条保留 JSON `additional_context` / `
 
 ### Main Run
 
-超过 15 次后进入 `Failed(StopHookRetryExhausted)`；外层 Session Run 序列仍可等待用户新输入并创建新 Run。
+超过当前 Run 冻结的 Stop block 上限后进入 `Failed`，错误文本保留实际阻断次数；外层 Session Run 序列仍可等待用户新输入并创建新 Run。
 
 ### Sub Run
 
-超过 15 次后进入 `Failed(StopHookRetryExhausted)`；终态事件 `RunFailed { error: StopHookRetryExhausted }` 回传父 Run。Sub 不绕过 Stop，也不自动降级成 Completed。
+超过当前 Sub Run 冻结的上限后进入 `Failed`，终态 `RunFailed { error }` 回传父 Run。Sub 不绕过 Stop，也不自动降级成 Completed。
 
-Main/Sub 使用同一 Loop Engine 和计数规则，不因交付层是否存在而分叉。
+Main/Sub 使用同一 Loop Engine 和 Stop 计数规则。Sub 的 `HookBindingMode::BoundaryOnly` 由 `HookPointMetadata.class` 过滤：所有 `HookClass::Boundary` point（包含 Stop 与 SubRun 生命周期）转发到 Sub Run 自己从 committed `RunConfigSnapshot` 构造的 Dispatcher；Tool/Notification class 返回 Proceed。过滤规则 **NEVER** 复制 HookPoint 变体 allow-list，避免 metadata 与装配漂移。
 
 ## 7. 与 StuckGuard 的关系
 
@@ -130,7 +130,7 @@ Stop block count 是确定性的协议上限，不并入通用 StuckGuard 计分
 - StuckGuard 检测重复文本、工具循环与 wall-clock；
 - stop_block_count 检测 Stop 协议无法收敛；
 - 两者可产生不同 RunFailed reason；
-- stall 导致尝试结束时仍必须经过 Stop Hook，但不能绕过 15 次上限。
+- stall 导致尝试结束时仍必须经过 Stop Hook，但不能绕过当前 Run 冻结的上限。
 
 ## 8. 目标约束
 
@@ -142,16 +142,16 @@ Stop block count 是确定性的协议上限，不并入通用 StuckGuard 计分
 
 ## 9. 验收场景
 
-- [ ] Stop 第 1 次主动 Block：当前 assistant Step 已持久化，feedback 与同次 drain 的用户追问按系统前缀/FIFO 进入下一步，RunId 不变。
-- [ ] Stop block 后 CancelRunStep / TerminateRun 获胜时，不发起 continuation invocation，按统一 StepFinalizer 收口。
-- [ ] Stop 执行故障前两次失败、第 3 次 Continue，Run Completed。
-- [ ] Stop 执行连续 3 次失败，合成 Block 并继续 Run。
-- [ ] 第 15 次 Block 仍继续；第 16 次进入 `Failed(StopHookRetryExhausted)`。
-- [ ] 终态事件为 `RunFailed { error: StopHookRetryExhausted }`，且不发送 RunCompleted。
-- [ ] Main 失败后可由新用户输入创建新 Run。
-- [ ] Sub 失败终态回传父 Run。
-- [ ] cancellation 能终止 Hook 子进程及重试等待。
-- [ ] 普通 Hook 执行失败重试耗尽后：未配置 failure_policy → Continue；配置 failure_policy=Block → Block。
+- [x] Stop 第 1 次主动 Block：当前 assistant Step 已持久化，feedback 与同次 drain 的用户追问按系统前缀/FIFO 进入下一步，RunId 不变。
+- [x] Stop block 后 CancelRunStep / TerminateRun 获胜时，不发起 continuation invocation，按统一 StepFinalizer 收口。
+- [x] Stop 执行故障前两次失败、第 3 次 Continue，Run Completed。
+- [x] Stop 执行连续 3 次失败，合成 Block 并继续 Run。
+- [x] 默认配置下第 15 次 Block 仍继续；第 16 次进入 `Failed`，错误文本保留阻断次数；显式上限遵循相同首个超限边界。
+- [x] 超限后只发送 `RunFailed { error }`，且不发送 RunCompleted。
+- [x] Main 失败后可由新用户输入创建新 Run。
+- [x] Sub 通过 Boundary metadata 转发 Stop，失败终态回传父 Run。
+- [x] cancellation 能终止 Hook 子进程及重试等待。
+- [x] 普通 Hook 执行失败重试耗尽后：未配置 failure_policy → Continue；领域/Dispatcher 的 failure_policy=Block → Block；用户 Config surface 仍为 Future。
 
 ## 修改历史
 

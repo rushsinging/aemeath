@@ -344,8 +344,10 @@ if EMPTY_HOOK.is_file():
     prod = production_text(EMPTY_HOOK)
     if "struct BoundaryHookPort" not in prod:
         violations.append("9. BoundaryHookPort implementation is missing")
-    if not all(point in prod for point in ["SessionStart", "SessionEnd", "SubRunStart", "SubRunStop"]):
-        violations.append("9. BoundaryHookPort must allow only Run/SubRun lifecycle boundaries")
+    if "point.metadata().class == HookClass::Boundary" not in prod:
+        violations.append("9. BoundaryHookPort must derive filtering from HookPointMetadata.class")
+    if re.search(r'matches!\s*\(\s*point\s*,\s*HookPoint::', prod):
+        violations.append("9. BoundaryHookPort must not duplicate a HookPoint variant allow-list")
     if "HookOutcome::proceed()" not in prod:
         violations.append("9. BoundaryHookPort must return proceed for filtered invocations")
 else:

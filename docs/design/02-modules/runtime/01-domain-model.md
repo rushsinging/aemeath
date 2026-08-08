@@ -207,7 +207,7 @@ enum InteractionContinuation {
     ContinueAfterHardPause,
 }
 
-/// #1248 Task 6: Stop Hook typed outcome — Run 拥有计数，第 16 次进入 Failed。
+/// Stop Hook typed outcome：Run 拥有计数并使用创建时冻结的 StopHookPolicy；首个超限 Block 进入 Failed。
 enum StopHookBlockResult {
     Blocked { count: usize },       // 1-15: 继续 Run，注入 feedback
     RetryExhausted { count: usize }, // ≥16: typed Failed，不伪造 Completed

@@ -32,6 +32,8 @@ pub struct Run {
     /// does not reset the epoch.  Each successful drain increments it.
     next_drain_epoch: u64,
     /// Stop hook block count owned by this Run.
+    /// Incremented each time the Stop hook blocks completion; the frozen
+    /// per-Run policy decides when the first excess block is exhausted.
     stop_hook_block_count: usize,
     /// Frozen per-Run Stop hook exhaustion policy.
     stop_hook_policy: share::config::domain::snapshot::StopHookPolicy,
@@ -551,12 +553,13 @@ impl Run {
         self.next_drain_epoch += 1;
     }
 
-    /// #1248 Task 6: Current stop hook block count for this Run.
+    /// Current stop hook block count for this Run.
     pub fn stop_hook_block_count(&self) -> usize {
         self.stop_hook_block_count
     }
 
     /// Record a Stop hook block using this Run's frozen policy.
+    /// The first block beyond `max_blocks` returns `RetryExhausted`.
     pub fn record_stop_hook_block(&mut self) -> StopHookBlockResult {
         self.stop_hook_block_count = self.stop_hook_block_count.saturating_add(1);
         let count = self.stop_hook_block_count;
