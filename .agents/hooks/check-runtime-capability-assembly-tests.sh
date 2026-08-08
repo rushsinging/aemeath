@@ -160,6 +160,13 @@ PY
 expect_failure unapproved-root-export "Runtime crate root exposes unapproved façade symbol: RunInstance"
 
 cp "$BASELINE/lib.rs" "$TMP/repo/agent/features/runtime/src/lib.rs"
+grep -Fq 'UsageSink' "$LIB" || {
+  echo "[runtime-capability-assembly] approved UsageSink façade is missing from runtime crate root" >&2
+  exit 1
+}
+run_guard >/dev/null
+
+cp "$BASELINE/lib.rs" "$TMP/repo/agent/features/runtime/src/lib.rs"
 CREATION="$TMP/repo/agent/features/runtime/src/application/run/creation.rs"
 python3 - "$CREATION" <<'PY'
 from pathlib import Path
