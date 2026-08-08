@@ -271,6 +271,7 @@ mod tests {
             run_id: RunId::new("run"),
             step_id: sdk::RunStepId::new("step"),
             pending_messages: vec![Message::user("pending")],
+            invocation_reminders: vec![],
             system_prompt: SystemPromptSpec::new("system"),
             model_id: "fake/model".into(),
             effective_reasoning: ReasoningLevel::Off,

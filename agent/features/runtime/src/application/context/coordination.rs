@@ -65,7 +65,25 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequest,
     ) -> Result<ContextWindow, ContextPortError> {
-        self.port.build_window(request).await
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "context_request_forwarded request_id={} reminders={} run_id={} step_id={}",
+            request.request_id.as_str(),
+            request.invocation_reminders.len(),
+            request.run_id,
+            request.step_id.as_str(),
+        );
+        let window = self.port.build_window(request).await?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "context_window_received request_id={} revision={} messages={} system_blocks={} tool_schemas={}",
+            request.request_id.as_str(),
+            window.backing_revision.get(),
+            window.messages.len(),
+            window.system_blocks.len(),
+            window.tool_schemas.len(),
+        );
+        Ok(window)
     }
 
     pub(crate) async fn needs_compaction(

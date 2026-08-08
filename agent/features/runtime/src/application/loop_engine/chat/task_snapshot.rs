@@ -121,21 +121,77 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
     }
 }
 
-/// #1492：run 首步注入用——渲染 Task 进度为 `<system-reminder>` 文本，
-/// 复用 `task_status_lines`（计数 + 分组排序 + max_lines 截断）。
-///
-/// 只出现在 invocation-only 的请求侧 messages；**NEVER** 写入 canonical
-/// message、SDK/TUI 事件或持久化 JSON（spec 3.4.5 的显式例外）。
-pub(crate) fn build_task_reminder(access: &dyn TaskAccess, max_lines: usize) -> Option<String> {
-    let active = current_batch_tasks(access)?;
-    let lines = task_status_lines(&active, max_lines);
-    if lines.is_empty() {
+/// 将当前 Task 状态冻结为 Context-owned invocation reminder intent。
+pub(crate) fn build_task_reminder_intent(
+    access: &dyn TaskAccess,
+    max_items: usize,
+) -> Option<context::domain::InvocationReminder> {
+    let tasks = current_batch_tasks(access)?;
+    if max_items == 0 {
         return None;
     }
-    Some(format!(
-        "<system-reminder>当前任务进度：\n{}\n</system-reminder>",
-        lines.join("\n")
-    ))
+    let total = tasks.len();
+    let completed = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Completed)
+        .count();
+    let mut completed_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Completed)
+        .collect();
+    let mut in_progress_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::InProgress)
+        .collect();
+    let mut pending_tasks: Vec<&Task> = tasks
+        .iter()
+        .filter(|task| task.status() == TaskStatus::Pending)
+        .collect();
+    completed_tasks.sort_by_key(|task| task.updated_at());
+    in_progress_tasks.sort_by_key(|task| task.updated_at());
+    pending_tasks.sort_by_key(|task| task.id());
+    let visible = if total <= max_items {
+        ordered_tasks(completed_tasks, in_progress_tasks, pending_tasks)
+    } else {
+        select_task_window(completed_tasks, in_progress_tasks, pending_tasks, max_items)
+    };
+    let sequence_by_id: HashMap<TaskId, u64> =
+        tasks.iter().map(|task| (task.id(), task.seq())).collect();
+    let items = visible
+        .into_iter()
+        .map(|task| context::domain::TaskProgressReminderItem {
+            sequence: task.seq(),
+            subject: task.subject().to_owned(),
+            status: match task.status() {
+                TaskStatus::Completed => context::domain::TaskProgressStatus::Completed,
+                TaskStatus::InProgress => context::domain::TaskProgressStatus::InProgress,
+                TaskStatus::Pending => context::domain::TaskProgressStatus::Pending,
+                TaskStatus::Deleted => unreachable!("current batch excludes deleted tasks"),
+            },
+            blocked_by_sequences: task
+                .blocked_by()
+                .iter()
+                .filter_map(|task_id| sequence_by_id.get(task_id).copied())
+                .collect(),
+        })
+        .collect();
+    let reminder =
+        context::domain::InvocationReminder::task_progress(context::domain::TaskProgressReminder {
+            total,
+            completed,
+            items,
+            hidden_count: total.saturating_sub(max_items),
+        });
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "invocation_reminder_created kind={} total={} completed={} visible={} hidden={}",
+        reminder.kind(),
+        total,
+        completed,
+        max_items.min(total),
+        total.saturating_sub(max_items),
+    );
+    Some(reminder)
 }
 
 /// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。
@@ -207,6 +263,7 @@ fn format_compact_task_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> 
     )
 }
 
+#[cfg(test)]
 fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
     if tasks.is_empty() || max_lines == 0 {
         return Vec::new();
@@ -294,6 +351,7 @@ fn select_task_window<'a>(
     visible
 }
 
+#[cfg(test)]
 fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> String {
     let icon = match task.status() {
         TaskStatus::Completed => "✓",

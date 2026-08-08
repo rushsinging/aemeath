@@ -157,6 +157,7 @@ pub struct SessionRuntime {
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
+    pub prompt_model_id: String,
 
     // ── Skills ──
     pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
@@ -222,6 +223,7 @@ impl SessionRuntime {
         system_prompt_text: String,
         initial_git_context: String,
         user_context: String,
+        prompt_model_id: String,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         initial_skill_snapshot: tools::SkillCatalogSnapshot,
         memory_config: MemoryConfig,
@@ -262,6 +264,7 @@ impl SessionRuntime {
             system_prompt_text,
             initial_git_context,
             user_context,
+            prompt_model_id,
             skill_catalog,
             initial_skill_snapshot,
             memory_config,

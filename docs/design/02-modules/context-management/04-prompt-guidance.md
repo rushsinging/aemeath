@@ -81,13 +81,13 @@ struct GuidanceDocument {
 }
 ```
 
-`ContextPort::build_window` **MUST** 等待 base system prompt、model guidance、user guidance 完成，并同步取得所属 Run Step 冻结的 Skill metadata snapshot，才能产生窗口；任一必需供应失败都返回 typed error，**NEVER** 静默使用部分 prompt。Context 只读取 descriptor，不调用 `SkillLoadPort`，因此 Skill 正文不会在 build_window 阶段进入系统提示。文件 adapter **MAY** 按 mtime 缓存 guidance，但对 PromptPipeline 只暴露内容与单调 `revision`；这使同一管线无需同步 / 异步两套实现。Memory 与 active summary 不是 Prompt 素材：它们由 `build_window` 在 PromptPipeline 返回后编排。Task 进度不属于 Context：Task BC 随 status mutation 返回原子快照，Tools Adapter 把它渲染为 tool result；Runtime/Context 不另查 Task，也不装饰 Provider 消息。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
+`ContextPort::build_window` **MUST** 消费 Session bootstrap 已物化并冻结的 base system prompt、model guidance 与 user guidance，并同步取得所属 Run Step 冻结的 Skill metadata snapshot，才能产生窗口；Main Run、model switch 与 Subagent **NEVER** 因 Run 创建重新读取或重建 Session Prompt assets。模型或 guidance 来源变化由 Runtime 生成 typed invocation reminder intent，Context 负责本地化渲染、排序、预算与 Provider-visible 注入。Context 只读取 descriptor，不调用 `SkillLoadPort`，因此 Skill 正文不会在 build_window 阶段进入系统提示。文件 adapter **MAY** 按 mtime 缓存 guidance，但缓存不得改变 Session 内已冻结内容。Memory、active summary 与 invocation-only reminders 由 `build_window` 在 PromptPipeline 返回后统一编排；Task BC 只提供结构化状态，Runtime 不渲染 Provider 文案。Git 首次快照由 Runtime session bootstrap 以普通系统生成消息投递，不通过 PromptPipeline。
 
 ## 3. 系统提示组装管线
 
 ### 3.1 组装顺序
 
-PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler 将 memory / summary 放在其后，并在最后一个实际块设置唯一 cache breakpoint。日期、工作区变更与 commit guidance **NEVER** 注入 LLM；Git 上下文只在 session 启动时采集一次，作为普通用户消息进入首个 Run，后续状态由 LLM 按需通过工具获取。唯一最终顺序如下：
+PromptPipeline 只输出 Session-frozen stable system prefix；Context Window assembler 将 memory / summary 放在其后，将 invocation-only reminders 放入 ordinary messages，并在最后一个实际 cacheable block 设置唯一 **Context system-prefix** breakpoint。日期、工作区变更与 commit guidance **NEVER** 注入 LLM；Git 上下文只在 session 启动时采集一次，作为普通用户消息进入首个 Run，后续状态由 LLM 按需通过工具获取。Context 产出的 `ContextWindow` 是 Main/Sub Provider-visible 内容的唯一事实；Runtime 只做机械 `InvocationRequest` 映射。唯一最终顺序如下：
 
 ```
 ┌─ cacheable_prefix ──────────────────────────────┐
@@ -102,8 +102,9 @@ PromptPipeline 只输出稳定的 cacheable prefix；Context Window assembler �
 └─────────────────────────────────────────────────┘
   ↓ cache_control 断点（仅 Anthropic wire adapter 消费）
 ┌─ ordinary_messages ─────────────────────────────┐
-│ 9. initial_git_context（仅 session 首个 Run）   │
-│10. tool results（含按事件返回的 Task 进度）       │
+│ 9. invocation_reminders（typed，非 canonical） │
+│10. initial_git_context（仅 session 首个 Run）  │
+│11. canonical / pending / tool result messages  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -146,7 +147,7 @@ mark_cache_breakpoint(&mut blocks);       // 唯一 breakpoint
 
 - Provider ACL 只为 Anthropic Messages API 将该逻辑 breakpoint 映射为 `cache_control`；OpenAI Chat Completions、Responses、OpenAI-compatible 与 Ollama **NEVER** 接收该私有字段。
 - 这些非 Anthropic adapter 将稳定 prefix 按各自 `system` / `instructions` 格式编码，可利用供应商自身可能提供的隐式缓存，但不假设或伪造统一缓存字段。
-- cacheable_prefix 内容不变时命中缓存；prefix 某部分变化（如用户编辑 AGENTS.md）时，整段 miss 一次，之后恢复命中。
+- Context 的 stable system prefix 内容在 Session 内保持字节级不变；用户编辑 guidance 或切换 model 时 **NEVER** 在当前 Session 重建 prefix，而由 invocation-only reminder 表达变化。新 Session 才重新物化并产生新的 cache key。
 - Git 首次快照不参与 system prompt；日期、工作区变更和 commit guidance 不进入 LLM 上下文。模型需要实时状态时必须主动调用相应工具。
 
 ## 4. Guidance 解析
@@ -180,7 +181,7 @@ let model_guidance = self.guidance
     .await?;
 ```
 
-`GuidanceSourcePort` 的契约保证返回顺序、必选文件缺失语义与 stable source id；具体 file adapter 才负责 `read_dir`、前缀匹配、lang 分段解析、mtime 缓存与异步文件读取。PromptPipeline 只验证快照、扫描内容并渲染，**NEVER** 重复 adapter 的发现算法。
+`GuidanceSourcePort` 的契约保证返回顺序、必选文件缺失语义与 stable source id；具体 file adapter 才负责 `read_dir`、前缀匹配、lang 分段解析、mtime 缓存与异步文件读取。所有外部 model guidance 文件（`_default.md`、语言目录、model-prefix、`_reasoning.md` 与 config path）**MUST** 经过同一安全扫描入口；builtin fallback 保持独立身份。PromptPipeline 只验证冻结快照并渲染，**NEVER** 重复 adapter 的发现算法。
 
 ### 4.3 组装格式——带路径信息
 
@@ -256,6 +257,10 @@ fn find_matching_config_guidance(model_id: &str, config: &ConfigSnapshot) -> Vec
 ```
 
 config-map 中的 guidance 条目同样按前缀长度升序追加到文件 guidance 之后。
+
+### 4.6 User guidance 每层选择与去重
+
+User guidance 的每个逻辑层（全局、各级项目目录）最多贡献一个文件：优先选择 `AGENTS.md`，仅在首选不存在或不可读取时 fallback `CLAUDE.md`。选择后的来源按全局 → 项目远祖先 → 近祖先 → cwd 排序，并只按 canonical source identity 去重；不同 canonical 文件即使内容相同也必须保留各自来源。每个最终来源均执行安全扫描、InstructionsLoaded hook 与 XML source path escaping。
 
 ## 5. Skill 元数据目录
 

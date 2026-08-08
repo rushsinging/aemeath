@@ -94,7 +94,7 @@ impl tools::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssembly {
-    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new())
+    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model")
 }
 
 fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBootstrapAssembly {

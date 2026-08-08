@@ -271,6 +271,7 @@ pub(crate) async fn from_args_with_gateways(
         vec![provider::RequestSystemBlock::Cacheable(static_prompt)],
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
+        initial_provider.binding().model.model.clone(),
     );
 
     let available_tools = tool_assembly

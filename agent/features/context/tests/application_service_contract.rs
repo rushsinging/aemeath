@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use context::adapters::CommittedMemoryRetrieveAdapter;
 use context::application::ContextApplicationService;
 use context::domain::{
-    ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language, RunStepId, SessionId,
-    SessionRevision, SystemBlock, SystemPromptSpec,
+    ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, InvocationReminder, Language,
+    RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
 };
 use context::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -117,6 +117,7 @@ fn request() -> ContextRequest {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -220,6 +221,67 @@ async fn build_window_omits_date_and_dynamic_system_context() {
         block.kind.as_str(),
         "current_date" | "dynamic_system_context"
     )));
+}
+
+#[tokio::test]
+async fn build_window_renders_invocation_reminders_once_in_stable_order() {
+    let mut request = request();
+    request.invocation_reminders = vec![
+        InvocationReminder::model_guidance_mismatch("session/model", "run/model"),
+        InvocationReminder::guidance_sources_changed(),
+        InvocationReminder::task_progress(context::domain::TaskProgressReminder {
+            total: 2,
+            completed: 0,
+            items: vec![
+                context::domain::TaskProgressReminderItem {
+                    sequence: 1,
+                    subject: "task one".into(),
+                    status: context::domain::TaskProgressStatus::InProgress,
+                    blocked_by_sequences: vec![],
+                },
+                context::domain::TaskProgressReminderItem {
+                    sequence: 2,
+                    subject: "task two".into(),
+                    status: context::domain::TaskProgressStatus::Pending,
+                    blocked_by_sequences: vec![1],
+                },
+            ],
+            hidden_count: 0,
+        }),
+    ];
+
+    let window = service().build_window(&request).await.unwrap();
+    let rendered: Vec<_> = window
+        .messages
+        .iter()
+        .map(Message::text_content)
+        .filter(|text| text.contains("<system-reminder>"))
+        .collect();
+
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].contains("当前任务进度"));
+    assert!(rendered[1].contains("guidance 来源已变更"));
+    assert!(rendered[2].contains("Session 冻结模型 session/model"));
+    assert!(window.token_estimation.message_tokens > 0);
+    assert_eq!(
+        window
+            .system_blocks
+            .iter()
+            .filter(|block| block.cache_break)
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn build_window_without_invocation_reminders_keeps_messages_unchanged() {
+    let window = service().build_window(&request()).await.unwrap();
+
+    assert_eq!(window.messages.len(), 2);
+    assert!(window
+        .messages
+        .iter()
+        .all(|message| !message.text_content().contains("<system-reminder>")));
 }
 
 #[tokio::test]

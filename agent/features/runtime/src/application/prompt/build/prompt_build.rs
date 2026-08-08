@@ -171,7 +171,6 @@ pub async fn build_system_prompt_parts(
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
-    // 从最远祖先到 cwd，每层 AGENTS.md 在 CLAUDE.md 前，保证具体规则最后注入。
     let mut dirs = paths::project_instruction_dirs(cwd, depth);
     dirs.reverse();
     dirs.into_iter()
@@ -185,28 +184,37 @@ struct UserGuidanceFile {
     content: String,
 }
 
-async fn read_user_guidance_files(
-    paths: &[PathBuf],
+async fn read_preferred_user_guidance_layers(
+    candidate_paths: &[PathBuf],
     hook_port: &Arc<dyn HookPort>,
     workspace_root: &Path,
 ) -> Vec<UserGuidanceFile> {
     let mut files = Vec::new();
-    for path in paths {
-        if let Ok(content) = tokio::fs::read_to_string(path).await {
-            hook_port
-                .dispatch_at(
-                    HookInvocation::InstructionsLoaded(hook::InstructionsInput {
-                        file_path: path.to_string_lossy().to_string(),
-                        instruction_type: "agents_md".to_string(),
-                    }),
-                    HookDispatchContext::new(workspace_root),
-                    &tokio_util::sync::CancellationToken::new(),
-                )
-                .await;
-            files.push(UserGuidanceFile {
-                path: path.clone(),
-                content,
-            });
+    for candidates in candidate_paths.chunks(2) {
+        for path in candidates {
+            match tokio::fs::read_to_string(path).await {
+                Ok(content) => {
+                    hook_port
+                        .dispatch_at(
+                            HookInvocation::InstructionsLoaded(hook::InstructionsInput {
+                                file_path: path.to_string_lossy().to_string(),
+                                instruction_type: "agents_md".to_string(),
+                            }),
+                            HookDispatchContext::new(workspace_root),
+                            &tokio_util::sync::CancellationToken::new(),
+                        )
+                        .await;
+                    files.push(UserGuidanceFile {
+                        path: path.clone(),
+                        content,
+                    });
+                    break;
+                }
+                Err(error) if path.exists() => {
+                    log::warn!(target: crate::LOG_TARGET, "Failed to read user guidance {}: {}", path.display(), error);
+                }
+                Err(_) => {}
+            }
         }
     }
     files
@@ -240,18 +248,16 @@ async fn load_agents_md_from_paths(
     hook_port: &Arc<dyn HookPort>,
     workspace_root: &Path,
 ) -> String {
-    let mut files = read_user_guidance_files(global_paths, hook_port, workspace_root).await;
-    files.extend(read_user_guidance_files(project_paths, hook_port, workspace_root).await);
+    let mut files =
+        read_preferred_user_guidance_layers(global_paths, hook_port, workspace_root).await;
+    files.extend(
+        read_preferred_user_guidance_layers(project_paths, hook_port, workspace_root).await,
+    );
 
-    // 去重：CLAUDE.md 常是 AGENTS.md 的软链，worktree 路径也会导致同一文件被遍历多次。
-    // 先按 canonicalize 后的真实路径去重，再按内容去重（兜底不同路径但内容完全相同的情况）。
     let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    let mut seen_contents: std::collections::HashSet<String> = std::collections::HashSet::new();
     files.retain(|file| {
         let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
-        let path_ok = seen_paths.insert(canonical);
-        let content_ok = seen_contents.insert(file.content.clone());
-        path_ok && content_ok
+        seen_paths.insert(canonical)
     });
 
     scan_user_guidance(render_user_guidance(&files))

@@ -41,6 +41,7 @@ fn base_request() -> ContextRequest {
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,

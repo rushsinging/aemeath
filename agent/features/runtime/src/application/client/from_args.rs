@@ -100,6 +100,7 @@ pub struct PromptAssembly {
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
+    pub model_id: String,
 }
 
 impl PromptAssembly {
@@ -107,6 +108,7 @@ impl PromptAssembly {
         system_blocks: Vec<crate::ports::RequestSystemBlock>,
         initial_git_context: String,
         user_context: String,
+        model_id: impl Into<String>,
     ) -> Self {
         let system_prompt_text = system_blocks
             .iter()
@@ -118,6 +120,7 @@ impl PromptAssembly {
             system_prompt_text,
             initial_git_context,
             user_context,
+            model_id: model_id.into(),
         }
     }
 }
@@ -459,6 +462,7 @@ pub async fn from_args_with_workspace(
         system_prompt_text,
         initial_git_context,
         user_context,
+        model_id,
     } = prompt;
 
     // 19. Concurrency
@@ -498,6 +502,7 @@ pub async fn from_args_with_workspace(
         system_prompt_text,
         initial_git_context,
         user_context,
+        model_id,
         skill_catalog,
         initial_skill_snapshot,
         memory_config,

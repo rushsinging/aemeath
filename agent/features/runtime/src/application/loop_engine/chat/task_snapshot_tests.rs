@@ -123,7 +123,7 @@ fn task_status_lines_returns_empty_when_line_limit_is_zero() {
 }
 
 #[test]
-fn task_reminder_renders_count_and_active_list() {
+fn task_reminder_intent_preserves_count_and_active_list() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
@@ -132,27 +132,40 @@ fn task_reminder_renders_count_and_active_list() {
         .transition(completed.id(), TaskStatus::Completed, 4)
         .unwrap();
 
-    let reminder = build_task_reminder(access, 7).expect("reminder rendered");
+    let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
+    let context::domain::InvocationReminder::TaskProgress(progress) = reminder else {
+        panic!("expected task progress reminder");
+    };
 
-    assert!(reminder.starts_with("<system-reminder>"));
-    assert!(reminder.contains("━━ Tasks: 1/2 ━━"));
-    assert!(reminder.contains("✓ #1 done"));
-    assert!(reminder.contains("□ #2 todo"));
-    assert!(reminder.ends_with("</system-reminder>"));
+    assert_eq!(progress.completed, 1);
+    assert_eq!(progress.total, 2);
+    assert_eq!(progress.items.len(), 2);
+    assert_eq!(progress.items[0].sequence, 1);
+    assert_eq!(progress.items[0].subject, "done");
+    assert_eq!(
+        progress.items[0].status,
+        context::domain::TaskProgressStatus::Completed
+    );
+    assert_eq!(progress.items[1].sequence, 2);
+    assert_eq!(progress.items[1].subject, "todo");
+    assert_eq!(
+        progress.items[1].status,
+        context::domain::TaskProgressStatus::Pending
+    );
 }
 
 #[test]
-fn task_reminder_none_without_tasks() {
+fn task_reminder_intent_none_without_tasks() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
-    assert!(build_task_reminder(access, 7).is_none());
+    assert!(build_task_reminder_intent(access, 7).is_none());
 }
 
 #[test]
-fn task_reminder_none_without_active_batch() {
+fn task_reminder_intent_none_without_active_batch() {
     let store = task::TaskStore::new();
     let access: &dyn TaskAccess = &store;
-    assert!(build_task_reminder(access, 7).is_none());
+    assert!(build_task_reminder_intent(access, 7).is_none());
 }
 
 /// #1537：build_task_snapshot_text 返回纯文本（无标签包装），供 compact 拼接。

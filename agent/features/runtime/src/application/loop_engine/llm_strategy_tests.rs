@@ -1,4 +1,4 @@
-use super::extract_invocation_context;
+use super::{extract_invocation_context, invocation_mapping_log_summary};
 use crate::ports::{
     CompactionDecision, ContextWindow, DecisionReason, SessionRevision, TokenBudget, Urgency,
 };
@@ -38,6 +38,21 @@ fn invocation_context_preserves_messages_without_task_reminder_decoration() {
         .messages_for_api
         .iter()
         .any(|message| message.text_content().contains("<task-reminder>")));
+}
+
+#[test]
+fn invocation_mapping_log_summary_reports_mechanical_field_counts() {
+    let context = extract_invocation_context(&window(vec![
+        Message::user("original"),
+        Message::system_generated_user("<system-reminder>body</system-reminder>"),
+    ]));
+
+    let summary = invocation_mapping_log_summary(&context);
+
+    assert_eq!(summary.messages, 2);
+    assert_eq!(summary.system_blocks, 0);
+    assert_eq!(summary.tool_schemas, 0);
+    assert_eq!(summary.reminder_messages, 1);
 }
 
 #[test]
