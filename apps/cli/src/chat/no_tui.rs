@@ -183,6 +183,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }
+        | sdk::ChatEvent::MicrocompactCompleted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
         | sdk::ChatEvent::SessionMessageStateChanged { .. }
         | sdk::ChatEvent::HookNotice { .. }

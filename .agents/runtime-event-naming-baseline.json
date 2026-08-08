@@ -8,7 +8,7 @@
       "variants": [
         "AssistantTextDelta", "ThinkingDelta", "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta",
         "ToolCallStateChanged", "ToolResult",
-        "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactDone",
+        "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactCompleted",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
         "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
@@ -28,7 +28,7 @@
         "Token", "Thinking",
         "BlockComplete", "ToolCallStarted", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolCallUpdate", "ToolResult", "SystemMessage",
-        "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactDone",
+        "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactCompleted", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
         "DoneWithDurationMs", "RunStarted", "RunStepStarted", "RunStepCompleted",
@@ -51,7 +51,7 @@
         "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "AssistantTextDelta", "ThinkingDelta",
         "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolResult", "SystemMessage",
-        "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactDone",
+        "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactCompleted",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
         "RunStep", "InteractionRequested", "AgentProgress", "ToolOutputDelta", "ChildRunActivity",
@@ -91,6 +91,11 @@
       "tui": "ToolCallStarted"
     },
     {
+      "runtime": "MicrocompactCompleted",
+      "sdk": "MicrocompactCompleted",
+      "tui": "MicrocompactCompleted"
+    },
+    {
       "runtime": "ToolOutputDelta",
       "sdk": "ToolOutputDelta",
       "tui": "ToolOutputDelta"
@@ -107,10 +112,10 @@
     }
   ],
   "sdk_compatibility_variants": [
-    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress"
+    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress", "MicrocompactDone"
   ],
   "legacy_broad_names": [
-    "SkillsUpdated", "MicrocompactDone", "Done", "DoneWithDuration", "DoneWithDurationMs",
+    "SkillsUpdated", "Done", "DoneWithDuration", "DoneWithDurationMs",
     "LiveTps", "RunChanged", "AskUserBatch", "AgentProgress",
     "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
     "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",

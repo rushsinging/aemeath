@@ -197,10 +197,14 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::TurnStarted { messages } => TuiRuntimeEvent::TurnStarted {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::MicrocompactDone {
+        ChatEvent::MicrocompactCompleted {
             messages,
             cleared_count,
-        } => TuiRuntimeEvent::MicrocompactDone {
+        }
+        | ChatEvent::MicrocompactDone {
+            messages,
+            cleared_count,
+        } => TuiRuntimeEvent::MicrocompactCompleted {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },

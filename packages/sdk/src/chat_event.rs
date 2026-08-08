@@ -575,7 +575,12 @@ pub enum ChatEvent {
     TurnStarted {
         messages: Vec<ChatMessage>,
     },
-    /// Microcompact 清理了陈旧 tool result，run 仍在进行。TUI 只同步消息，不动 spinner。
+    /// Microcompact 已完成并清理陈旧 tool result；run 仍在进行。
+    MicrocompactCompleted {
+        messages: Vec<ChatMessage>,
+        cleared_count: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     MicrocompactDone {
         messages: Vec<ChatMessage>,
         cleared_count: usize,

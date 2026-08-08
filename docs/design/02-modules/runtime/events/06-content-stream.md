@@ -47,7 +47,8 @@
 | Runtime | SDK | TUI | Delivery | 状态 |
 |---|---|---|---|---|
 | `TurnStarted` | 同名 | 同名 | message count / legacy turn boundary | Compatibility |
-| `MicrocompactDone` | 同名 | 同名 | message count | Target Rename：`MicrocompactCompleted` |
+| `MicrocompactCompleted` | 同名 | 同名 | message count | Current |
+| — | `MicrocompactDone` | dual-read 后转为 `MicrocompactCompleted` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `SessionMessageStateChanged` | 同名 | 同名 | revisioned light state | Current |
 | `UserMessagesAdopted` | 同名 | 同名 | accepted inputs full batch | Current |
 | `UserMessagesQueued` | 同名 | 同名 | queued submissions full replacement | Target Rename：`QueuedUserMessagesChanged` 候选 |

@@ -146,7 +146,7 @@ enum AgentIntent {
 | Input | `ClipboardImage` | `InputIntent::AttachClipboardImage`；只携 TUI-owned image DTO |
 | App 级 Skill Catalog | `SkillsUpdated { revision, skills, slash_routes }` | 在 `update_agent_event` 的 App 级边界完整消费，原子替换 `SkillCompletionCatalog` 并立即重算 suggestions；它不进入 Conversation timeline，也不经 `AgentEventMapper` 生成业务 Intent |
 | Diagnostic | `SessionResumeFailed` / `UpdateAvailable` / `CommandResultText` | 显示可定位 notice 或命令结果；需要改变 Session 的事件同时生成 Session Intent |
-| Session | `TurnStarted` / `MicrocompactDone` / `StopHookBlocked` / `PostToolExecutionSync` / `CompactRollback` / `CompactFinished` | `MessagesSynced` 与 session dirty/save 投影 |
+| Session | `TurnStarted` / `MicrocompactCompleted` / `StopHookBlocked` / `PostToolExecutionSync` / `CompactRollback` / `CompactFinished` | `MessagesSynced` 与 session dirty/save 投影；SDK `MicrocompactDone` 只在第一层 compatibility dual-read 后归一化 |
 | Session + Conversation | `SessionResumed` | **MUST** 同时产生 `SessionIntent::SetCurrentSession` 与 `ConversationIntent::ResumeConversation`；每个恢复 Step 保留 `run_id`、`step_id` 与 `finalize_cause`。`UserCancelledStep` / `RunTerminated` 显式投影终态提示，NEVER 把取消历史伪装为 `Completed`，也 NEVER 由 helper 绕过 reducer 改写模型 |
 | Session | `SessionReset` / `UserMessagesWithdrawn` / `SessionResumeFailed` / `TaskStatusChanged` / `SessionSaved` / `CurrentTurnChanged` / `CommandResultText` | 更新 session id、resume/save/task/current-turn 投影；失败 / 文本事件按上表同时进入 Diagnostic |
 | Config | `ModelSwitched` / `ContextEstimated` | 更新 provider/model/context-capacity 投影 |

@@ -630,7 +630,7 @@ pub(crate) enum TuiRuntimeEvent {
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },

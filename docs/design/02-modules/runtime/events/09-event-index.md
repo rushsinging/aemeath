@@ -81,7 +81,8 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | Runtime | SDK | TUI / Consumer | Identity | Delivery | Authority | 状态 / Target |
 |---|---|---|---|---|---|---|
 | `TurnStarted` | 同名 | message-state sync | session/run | transition | 否 | Compatibility |
-| `MicrocompactDone` | 同名 | message-state sync | session | completion fact | 否 | Target Rename：`MicrocompactCompleted` |
+| `MicrocompactCompleted` | 同名 | 同名 → message-state sync | session | completion fact | 否 | Current |
+| — | `MicrocompactDone` | compatibility dual-read → `MicrocompactCompleted` | session | legacy completion fact | 否 | Compatibility；Runtime producer removed |
 | `SessionMessageStateChanged` | 同名 | revisioned light state | session + revision | state change | 否 | Current |
 | `UserMessagesAdopted` | 同名 | adopt echo + queue sync | session/input ids | full batch fact | 否 | Current |
 | `UserMessagesQueued` | 同名 | replace queued submissions | session/input ids | full-state | 否 | Target Rename |
@@ -148,7 +149,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ToolCallUpdate` | args delta 与 state fact 淡化 | 已拆为 `ToolCallArgumentsDelta` / `ToolCallStateChanged`；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal split complete |
 | `ToolProgress` | Subject/Delta 不清 | 已由 `ToolOutputDelta { delta }` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `Done` / `DoneWithDurationMs` | 宽泛且重复 | 明确 Chat processing subject 后合并 | 语义冲突 |
-| `MicrocompactDone` | 禁用 `Done` | `MicrocompactCompleted` | 跨层 wire |
+| `MicrocompactDone` | 禁用 `Done` | 已由 `MicrocompactCompleted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `CompactFinished` | Subject/Fact 不统一 | `CompactOperationCompleted` | 跨层 wire |
 | `CompactRollback` | 缺 operation subject/过去式 | `CompactOperationRolledBack` | 跨层 wire |
 | `TasksSnapshot` | 与 `TaskStateChanged` 双路径 | 退役旧 text projection | Dead compatibility |

@@ -362,10 +362,10 @@ pub(crate) fn map_stream_event(
                     .collect(),
             }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::MicrocompactDone {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::MicrocompactCompleted {
             messages,
             cleared_count,
-        } => ChatEvent::MicrocompactDone {
+        } => ChatEvent::MicrocompactCompleted {
             messages: messages
                 .into_iter()
                 .map(crate::application::client::message_to_sdk)

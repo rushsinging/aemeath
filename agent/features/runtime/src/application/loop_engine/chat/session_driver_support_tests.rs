@@ -661,7 +661,7 @@ impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
             RuntimeStreamEvent::TurnStarted { messages }
-            | RuntimeStreamEvent::MicrocompactDone { messages, .. }
+            | RuntimeStreamEvent::MicrocompactCompleted { messages, .. }
             | RuntimeStreamEvent::CompactFinished { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
@@ -669,7 +669,7 @@ impl RecordingSink {
                         self.llm_message_counts.lock().unwrap().push(messages.len());
                         "TurnStarted"
                     }
-                    RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
+                    RuntimeStreamEvent::MicrocompactCompleted { .. } => "MicrocompactCompleted",
                     RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
                     _ => "Sync",
                 };

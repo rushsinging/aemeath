@@ -172,6 +172,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             elapsed_secs
         ),
         sdk::ChatEvent::TurnStarted { messages }
+        | sdk::ChatEvent::MicrocompactCompleted { messages, .. }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
         | sdk::ChatEvent::CompactRollback { messages }
         | sdk::ChatEvent::CompactFinished { messages, .. } => {

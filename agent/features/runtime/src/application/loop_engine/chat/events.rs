@@ -106,7 +106,7 @@ pub enum RuntimeStreamEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<Message>,
         cleared_count: usize,
     },

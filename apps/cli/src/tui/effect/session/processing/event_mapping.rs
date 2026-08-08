@@ -107,7 +107,11 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::TurnStarted { messages } => UiEvent::TurnStarted {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::MicrocompactDone {
+        sdk::ChatEvent::MicrocompactCompleted {
+            messages,
+            cleared_count,
+        }
+        | sdk::ChatEvent::MicrocompactDone {
             messages,
             cleared_count,
         } => UiEvent::MicrocompactDone {

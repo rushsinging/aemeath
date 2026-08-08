@@ -284,6 +284,22 @@ fn tool_output_delta_preserves_context_tool_id_and_delta() {
 }
 
 #[test]
+fn microcompact_completed_preserves_messages_and_cleared_count() {
+    let event = map_stream_event(RuntimeStreamEvent::MicrocompactCompleted {
+        messages: vec![share::message::Message::user("before compact")],
+        cleared_count: 3,
+    });
+
+    assert!(matches!(
+        event,
+        sdk::ChatEvent::MicrocompactCompleted {
+            messages,
+            cleared_count: 3,
+        } if messages.len() == 1
+    ));
+}
+
+#[test]
 fn session_resume_mapping_preserves_body_free_history_index() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: Vec::new(),

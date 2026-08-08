@@ -173,6 +173,35 @@ fn tool_output_delta_normalizes_new_and_legacy_sdk_inputs() {
 }
 
 #[test]
+fn microcompact_completed_normalizes_new_and_legacy_sdk_inputs() {
+    let messages = vec![sdk::ChatMessage::user_text("after compact")];
+
+    let completed = sdk_event_to_tui_event(sdk::ChatEvent::MicrocompactCompleted {
+        messages: messages.clone(),
+        cleared_count: 2,
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::MicrocompactDone {
+        messages,
+        cleared_count: 2,
+    });
+
+    assert!(matches!(
+        completed,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::MicrocompactCompleted {
+            cleared_count: 2,
+            ..
+        })
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::MicrocompactCompleted {
+            cleared_count: 2,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn session_message_state_maps_count_and_revision_without_messages() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
         message_count: 7,

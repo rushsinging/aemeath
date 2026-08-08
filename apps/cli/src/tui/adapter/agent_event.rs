@@ -540,7 +540,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }))
         }
         TuiRuntimeEvent::TurnStarted { messages }
-        | TuiRuntimeEvent::MicrocompactDone { messages, .. }
+        | TuiRuntimeEvent::MicrocompactCompleted { messages, .. }
         | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
