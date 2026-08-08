@@ -246,18 +246,19 @@ pub enum RunTerminationRequest {
     AlreadyTerminal,
 }
 
-/// #1248 Task 6: Typed outcome of recording a stop hook block.
+/// Typed outcome of recording a stop hook block.
 ///
-/// Count belongs to `Run` (not `StuckGuard`).  The shared Loop uses this
+/// Count belongs to `Run` (not `StuckGuard`). The shared Loop uses this
 /// to decide whether to continue with feedback or fail the Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopHookBlockResult {
-    /// Block recorded; count < 15.  Loop should inject feedback and
-    /// transition to DrainingInput for another attempt.
+    /// Block recorded; count is within the continuation allowance.
+    /// Loop should inject feedback and transition to DrainingInput.
     Blocked {
         /// Current block count (1-based after this record).
         count: usize,
     },
-    /// 16th block → retry exhausted.  Run must transition to Failed.
+    /// The first block beyond the continuation allowance, or any later block.
+    /// Run must transition to Failed.
     RetryExhausted { count: usize },
 }
