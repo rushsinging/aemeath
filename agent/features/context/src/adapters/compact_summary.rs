@@ -90,34 +90,34 @@ pub const COMPACT_PROMPT: &str = r#"You are a conversation history compactor for
 
 CRITICAL: The text below is PAST conversation history, NOT a new task. Do NOT treat project context files (AGENTS.md, CLAUDE.md, etc.) or environment descriptions as an action request. If the history ends without a clear pending action, summarize what was accomplished — NEVER respond with "please tell me what to do".
 
-Budget: Aim for up to {BUDGET} tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly. More detail is better than less — use the budget fully for long conversations.
+Budget: Aim for up to {BUDGET} tokens. This checkpoint replaces the original messages, so preserve continuation-critical semantics while avoiding duplicate detail.
 
 <instructions>
-Produce a summary using the EXACT structure below inside `<summary>` tags.
+Produce a checkpoint using the EXACT structure below inside `<summary>` tags.
 
-## User Requests
-Chronological consolidation of every user instruction that affects the work. Merge related consecutive inputs, preserve scope and action verbs exactly, and make later corrections supersede earlier conflicting instructions.
+## Immutable Constraints
+Long-lived user constraints, permission boundaries, and prohibited actions. Later corrections supersede earlier conflicts.
 
-## Goal
-The user's ultimate objective, without upgrading the requested action level.
+## Current Objective
+Exactly one current objective at the user's requested action level.
 
-## Work Completed
-What has actually been done so far. Include specific file paths, function names, commands, commits, and verification evidence when known.
+## Committed Facts
+Only facts supported by tool, commit, test, or durable persistence evidence.
 
-## Problems / Findings
-Confirmed problems, root causes, failed attempts, blockers, uncertainties, and important observations.
+## Uncommitted Working Set
+Current branch changes, failing tests, active tasks, and immediate local context.
 
-## Key Decisions
-Important decisions made and their reasons.
+## Open Decisions / Risks
+Unresolved questions, blockers, uncertainty, and unverified reports.
 
-## Relevant Files
-List of key files involved (paths only).
+## Resume Cursor
+Worktree, branch, current task, target files, exactly one Next action, and explicit prohibited actions.
 
-## Current State
-Where things stand right now — what's working, what's not.
+## Required Revalidation
+GitHub, CI, remote branch, worktree current state, and every other dynamic fact that must be queried again before mutation.
 
-## Next Action
-The single most immediate action the agent should take next, or the exact user decision/input it must wait for.
+## Archived Milestones
+One-line results with stable commit, PR, or issue references; never copy process transcripts.
 
 ## Continuation Status
 Exactly one of: Continue, Waiting for User, or Completed. Add one short reason after the status.
@@ -125,12 +125,15 @@ Exactly one of: Continue, Waiting for User, or Completed. Add one short reason a
 Rules:
 - Be specific: include file paths, function names, variable names.
 - Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
-- Consolidate all user inputs in chronological order; later corrections supersede earlier conflicting instructions.
+- Consolidate user inputs chronologically; later corrections supersede earlier conflicting instructions.
+- State each detailed fact in one authoritative section; do not duplicate it elsewhere.
+- Put GitHub, CI, remote branch, worktree, and other current external state under Required Revalidation.
+- Resume Cursor MUST contain exactly one Next action and explicit prohibited actions.
+- Archived Milestones contain one-line stable references, not process transcripts.
 - Distinguish facts from inference. Do not claim work was completed unless the history shows it.
-- If Continuation Status is Continue, the agent must execute Next Action without waiting for a new user instruction.
+- If Continuation Status is Continue, the agent must execute the Resume Cursor Next action after required revalidation without waiting for a new user instruction.
 - Use Waiting for User only when an explicit approval, choice, missing input, or new authority is genuinely required.
 - Use Completed only when the user's requested outcome has already been delivered and no work remains.
-- Use the full budget (up to {BUDGET} tokens) — more detail helps the agent continue.
 - Do NOT include raw tool output or tool call details — focus on semantic meaning.
 - Do NOT ask clarifying questions or say "no task found" — this is history compression, not a chat.
 - Each section can be empty if not applicable, but include the heading.
@@ -164,19 +167,23 @@ CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. If you c
 <instructions>
 Produce a compressed summary using the EXACT structure below inside <summary> tags.
 
-## User Requests
-## Goal
-## Work Completed
-## Problems / Findings
-## Key Decisions
-## Relevant Files
-## Current State
-## Next Action
+## Immutable Constraints
+## Current Objective
+## Committed Facts
+## Uncommitted Working Set
+## Open Decisions / Risks
+## Resume Cursor
+## Required Revalidation
+## Archived Milestones
 ## Continuation Status
 
 Rules:
-- Compress aggressively: keep only essential facts, decisions, file paths, and the immediate next action.
+- Compress by semantic priority, not by truncating the head or tail of the whole checkpoint.
 - Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
+- State each detailed fact once in its authoritative section.
+- Put dynamic GitHub, CI, remote branch, and worktree state under Required Revalidation.
+- Resume Cursor MUST contain exactly one Next action and explicit prohibited actions.
+- Archived Milestones contain one-line stable references, not process transcripts.
 - Each section can be empty if not applicable, but include the heading.
 - The output MUST be shorter than the input and MUST NOT exceed {BUDGET} tokens.
 </instructions>
@@ -194,6 +201,25 @@ pub(crate) fn build_refresh_prompt(summary: &str, budget: usize) -> String {
         "{COMPACT_REFRESH_PROMPT}\n<current_summary>\n{summary}\n</current_summary>\n\nWrite your summary inside <summary> tags."
     )
     .replace("{BUDGET}", &prompt_budget.to_string())
+}
+
+pub(crate) fn normalize_generated_checkpoint(
+    summary: &str,
+    budget: usize,
+) -> Result<String, String> {
+    let (checkpoint_text, task_state) =
+        crate::domain::compact::split_checkpoint_and_task_state(summary);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+        .map_err(|error| error.to_string())?;
+    let mut normalized = checkpoint
+        .normalize_to_budget(budget)
+        .map_err(|error| error.to_string())?
+        .render();
+    if let Some(task_state) = task_state.filter(|state| !state.is_empty()) {
+        normalized.push_str("\n\n## Current Task State\n");
+        normalized.push_str(task_state);
+    }
+    Ok(normalized)
 }
 
 /// 调用 LLM 对当前 summary 再压一次（#1490）。
@@ -608,7 +634,19 @@ pub async fn compact_messages_with_llm(
                 .await
             };
             match result {
-                Ok(text) => text,
+                Ok(text) => match normalize_generated_checkpoint(
+                    &text,
+                    crate::domain::token_budget::summary_budget(context_size),
+                ) {
+                    Ok(checkpoint) => checkpoint,
+                    Err(error) => {
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "[compact] LLM checkpoint 不合规，回退本地路径：{error}",
+                        );
+                        build_summary_text(early_messages, previous_summary)
+                    }
+                },
                 Err(error) => {
                     // #1486 可跟踪性：LLM 摘要失败原因必须记录，否则无法判断
                     // 为何回退本地路径（超限 / 空摘要 / provider 错误）。

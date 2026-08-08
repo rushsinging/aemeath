@@ -234,6 +234,28 @@ fn normalization_fails_when_protected_sections_exceed_budget() {
 }
 
 #[test]
+fn legacy_summary_becomes_conservative_checkpoint() {
+    let checkpoint = ContinuationCheckpoint::from_legacy_summary(
+        "## User Requests\n- 只分析，不实现\n\n## Next Action\n- 检查当前分支\n\n## Continuation Status\nContinue — work remains.",
+    );
+    let rendered = checkpoint.render();
+
+    assert!(rendered.contains("## Current Objective\n- 只分析，不实现"));
+    assert!(rendered.contains("- Next action: 检查当前分支"));
+    assert!(rendered.contains("unverified legacy summary"));
+    assert_eq!(checkpoint.status(), ContinuationStatus::Continue);
+}
+
+#[test]
+fn task_state_companion_is_split_from_checkpoint() {
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+    let (checkpoint, task_state) = split_checkpoint_and_task_state(&source);
+
+    assert_eq!(checkpoint, COMPLETE_CHECKPOINT);
+    assert_eq!(task_state, Some("■ #1 running"));
+}
+
+#[test]
 fn rejects_sections_in_wrong_order() {
     let source = COMPLETE_CHECKPOINT
         .replace("## Current Objective", "## TEMP")

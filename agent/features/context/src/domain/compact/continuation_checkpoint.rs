@@ -60,6 +60,45 @@ pub struct ContinuationCheckpoint {
 }
 
 impl ContinuationCheckpoint {
+    pub fn from_legacy_summary(source: &str) -> Self {
+        let legacy_sections = parse_legacy_sections(source);
+        let current_objective = legacy_sections
+            .get("User Requests")
+            .or_else(|| legacy_sections.get("Goal"))
+            .cloned()
+            .unwrap_or_else(|| vec!["- Unknown legacy objective.".to_string()]);
+        let legacy_next_action = legacy_sections
+            .get("Next Action")
+            .and_then(|lines| lines.iter().find(|line| !line.trim().is_empty()))
+            .map(|line| line.trim_start_matches("- ").to_string())
+            .unwrap_or_else(|| "Wait for a new user instruction.".to_string());
+        let legacy_status = legacy_sections
+            .get("Continuation Status")
+            .and_then(|lines| lines.iter().find(|line| !line.trim().is_empty()))
+            .and_then(|line| ContinuationStatus::parse(line).ok())
+            .unwrap_or(ContinuationStatus::WaitingForUser);
+        let status_text = match legacy_status {
+            ContinuationStatus::Continue => "Continue — migrated from legacy summary.",
+            ContinuationStatus::WaitingForUser => {
+                "Waiting for User — migrated from legacy summary."
+            }
+            ContinuationStatus::Completed => "Completed — migrated from legacy summary.",
+        };
+        let source = format!(
+            "## Immutable Constraints\n- Preserve the action level of the legacy user request.\n\n\
+             ## Current Objective\n{}\n\n\
+             ## Committed Facts\n- None established from the legacy summary.\n\n\
+             ## Uncommitted Working Set\n- None established from the legacy summary.\n\n\
+             ## Open Decisions / Risks\n- unverified legacy summary: facts and completion claims require confirmation.\n\n\
+             ## Resume Cursor\n- Next action: {legacy_next_action}\n- Prohibited: do not widen the legacy action level.\n\n\
+             ## Required Revalidation\n- Revalidate all dynamic Git, GitHub, CI, and worktree state from the legacy summary.\n\n\
+             ## Archived Milestones\n- No stable milestone references recovered.\n\n\
+             ## Continuation Status\n{status_text}",
+            current_objective.join("\n")
+        );
+        Self::parse(&source).expect("constructed legacy checkpoint must be valid")
+    }
+
     pub fn parse(source: &str) -> Result<Self, CheckpointError> {
         let mut sections: [Vec<String>; 9] = std::array::from_fn(|_| Vec::new());
         let mut seen = [false; 9];
@@ -228,6 +267,35 @@ impl ContinuationCheckpoint {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+}
+
+pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
+    const TASK_HEADING: &str = "\n\n## Current Task State\n";
+    source
+        .rsplit_once(TASK_HEADING)
+        .map_or((source, None), |(checkpoint, task_state)| {
+            (checkpoint, Some(task_state.trim()))
+        })
+}
+
+fn parse_legacy_sections(source: &str) -> std::collections::HashMap<&str, Vec<String>> {
+    let mut sections = std::collections::HashMap::new();
+    let mut current_heading = None;
+    for line in source.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            current_heading = Some(heading);
+            sections.entry(heading).or_insert_with(Vec::new);
+        } else if let Some(heading) = current_heading {
+            sections
+                .entry(heading)
+                .or_insert_with(Vec::new)
+                .push(line.to_string());
+        }
+    }
+    for lines in sections.values_mut() {
+        trim_blank_lines(lines);
+    }
+    sections
 }
 
 fn estimate_checkpoint_tokens(checkpoint: &ContinuationCheckpoint) -> usize {
