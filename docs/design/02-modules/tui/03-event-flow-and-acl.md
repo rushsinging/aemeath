@@ -4,7 +4,7 @@
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#943 / #944 / #947 / [#972](https://github.com/rushsinging/aemeath/issues/972) / [#1438](https://github.com/rushsinging/aemeath/issues/1438)
 > 本文定义 TUI 事件流的唯一链路、AgentEventMapper 防腐层（ACL）、SDK DTO 边界、四类 Interaction reply 资源协议、agent_id 与 sub-agent 事件路由（#612）、转换集中化策略与架构门禁。
 >
-> Runtime 事件事实、SDK Published Language 及逐事件跨层矩阵的权威目录见 [Runtime · 事件管线与 Published Language](../runtime/08-event-pipeline-and-published-language.md)。本文只拥有 SDK 进入 TUI 后的 ACL、Model 与展示规则，NEVER 在此重新定义 Runtime terminal 语义。
+> Runtime 事件事实、命名与逐事件跨层矩阵的权威入口见 [Runtime · 事件管线与 Published Language](../runtime/08-event-pipeline-and-published-language.md)；统一命名规则见 [Runtime 事件命名规范](../runtime/events/01-naming-conventions.md)，全量名称映射见 [Runtime 事件索引](../runtime/events/09-event-index.md)。本文只拥有 SDK 进入 TUI 后的 ACL、Model 与展示规则，NEVER 在此重新定义 Runtime terminal 或为同一事实另造词汇。
 
 > **解耦铁律**（[01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)）：
 > - **R4**：TUI 只经 `AgentClient`，**NEVER** import 核心内部类型
@@ -41,6 +41,8 @@ Runtime ChatStream → sdk::ChatEvent
 | 本地兼容入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译 | `UiEvent` → `AgentEventMapping` |
 
 > **设计原则**：两层分离是因为结构转换（类型映射）和语义翻译（Intent 拆分）是不同关注点。第一层是机械式 1:1 映射，第二层涉及业务逻辑（sanitize、progress 格式化、hook notice 派生等）。
+
+> **跨层命名原则**：第一层 MUST 保持 Runtime/SDK 事实的 Subject + Fact，只允许增加 `Tui` / `Ui` 所有权前缀或按容器上下文嵌套 variant；第二层 Intent 才使用 `Replace*`、`Observe*`、`Append*`、`Present*` 等 consumer action。禁止把 `RuntimeStatusChanged` 改写成 `ContextUsageEvent`，或把 command ACK 改写成 Lifecycle terminal。
 
 ## 2. 事件流完整链路
 
@@ -134,7 +136,7 @@ enum AgentIntent {
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
-| Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` / `CompactProgress` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；turn-level `Cancelled` **NEVER** 代替 Run 终态 |
+| Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
 | Conversation | `RunTransitioned { run_id, parent_run_id, status: RunStatusView }` | 第一层穷举转换为 TUI-owned `TuiRunStatus`，第二层产生 `ObserveRunStatus` Intent；禁止字符串降级。Main 由 `parent_run_id == None` 判断，Sub 不驱动主活动展示 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
@@ -217,11 +219,13 @@ SDK ActivityChanged / ActivitySnapshot
 - LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
 - Activity 事实镜像与 timeline 是互补投影；Activity 不写 Session、不拥有 Interaction reply、不驱动 Runtime command。
 
-### 3.8 Runtime Status full-state ACL
+### 3.8 Runtime Status 与 Task full-state ACL
 
-SDK `RuntimeStatusChanged` MUST 在第一层 ACL 无损转换为 TUI-owned typed DTO，第二层只产生 `ReplaceRuntimeStatus`。Model MUST 按同一 session 的 `revision` 单调性以及同 revision 的 `heartbeat_sequence` 原子替换；stale 或 duplicate 状态不得回写。Status assembler 的 context percentage 与 context size MUST 只读该 snapshot，NEVER 使用 `last_input_tokens / context_size` 重建 Context 决策。
+SDK `RuntimeStatusChanged` MUST 在第一层 ACL 无损转换为同名 TUI-owned typed event，第二层只产生 `ReplaceRuntimeStatus`。SDK `TaskStateChanged` 同样保持事实名并产生 `ReplaceTaskState`。事实名与 consumer action 的差异是职责差异，不是业务改名。
 
-Compact 展示 MUST 只消费 Activity 中 typed stage/work；旧 stringly `CompactProgress` 事件与本地镜像状态 NEVER 恢复。terminal Activity NEVER 继续进入 LiveStatus 选择。
+Model MUST 按同一 session/family 的 `revision` 单调性以及同 revision 的 `heartbeat_sequence` 原子替换；stale 或 duplicate 状态不得回写，跨 family revision 不得比较。Status assembler 的 context percentage 与 context size MUST 只读 Runtime Status snapshot，NEVER 使用 `last_input_tokens / context_size` 重建 Context 决策。Task full-state NEVER 从 Tool 名、success text 或 Tool Result materialization 推断。
+
+Compact 展示 MUST 只消费 Activity 中 typed stage/work；旧 stringly `CompactProgress` 事件与本地镜像状态 NEVER 恢复。terminal Activity NEVER 继续进入 LiveStatus 选择。详细契约见 [Published State](../runtime/events/05-published-state.md) 与 [Activity](../runtime/events/04-activity.md)。
 
 
 ### 4.1 类型所有权
