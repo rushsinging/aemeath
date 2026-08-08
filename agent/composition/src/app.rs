@@ -34,6 +34,16 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
     Arc::new(client)
 }
 
+fn agent_client_with_audit_lifecycle(
+    assembly: crate::runtime::RuntimeClientAssembly,
+) -> AgentClientHandle {
+    let client = agent_client_from_runtime(assembly.client);
+    match assembly.audit_worker {
+        Some(handle) => Arc::new(crate::audit::AuditLifecycleClient::new(client, handle)),
+        None => client,
+    }
+}
+
 pub struct FeatureGateways {
     pub provider: Arc<dyn ProviderFactory>,
     pub policy: Arc<dyn policy::PolicyPort>,
@@ -198,7 +208,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    Ok(agent_client_from_runtime(runtime_client))
+    Ok(agent_client_with_audit_lifecycle(runtime_client))
 }
 
 #[cfg(test)]
@@ -239,7 +249,7 @@ async fn build_agent_client_with_gateways(
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, agents_dir)
             .await?;
-    Ok(agent_client_from_runtime(runtime_client))
+    Ok(agent_client_with_audit_lifecycle(runtime_client))
 }
 
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
@@ -297,15 +307,15 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    let launch = runtime_client.startup_snapshot();
-    let startup_resume = runtime_client.startup_resume();
-    let allow_all = runtime_client.allow_all();
-    let context_size = runtime_client.context_size();
-    let thinking = runtime_client.requested_reasoning() != provider::ReasoningLevel::Off;
+    let launch = runtime_client.client.startup_snapshot();
+    let startup_resume = runtime_client.client.startup_resume();
+    let allow_all = runtime_client.client.allow_all();
+    let context_size = runtime_client.client.context_size();
+    let thinking = runtime_client.client.requested_reasoning() != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.clone());
-    let client = agent_client_from_runtime(runtime_client);
+    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
+    let client = agent_client_with_audit_lifecycle(runtime_client);
     let cwd = launch.cwd.clone();
 
     Ok(AgentClientBootstrap {
@@ -420,7 +430,8 @@ mod tests {
 
         let result = build_agent_client_with_gateways(args, gateways, &agents_dir).await;
 
-        result.expect("build client with injected gateways");
+        let client = result.expect("build client with injected gateways");
+        assert_eq!(client.shutdown().await, sdk::ClientShutdownOutcome::Drained);
         assert_eq!(provider.build_calls.load(Ordering::SeqCst), 1);
     }
 

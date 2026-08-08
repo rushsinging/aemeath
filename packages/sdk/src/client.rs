@@ -12,6 +12,13 @@ use crate::{
 #[path = "client_tests.rs"]
 mod tests;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientShutdownOutcome {
+    Drained,
+    TimedOut { unconfirmed: u64 },
+    NotConfigured,
+}
+
 /// Agent Runtime 的统一客户端 trait。
 ///
 /// #567 后 trait 只有 `chat()`——所有交互通过事件流：
@@ -59,6 +66,13 @@ pub trait AgentClient: Send + Sync + 'static {
         Err(super::SdkError::Internal(
             "config update is unavailable for this client".to_string(),
         ))
+    }
+
+    /// 显式收敛由该客户端拥有的 Session 级异步资源。
+    ///
+    /// 默认客户端没有需收敛的资源；实现必须保证重复调用返回同一终态。
+    async fn shutdown(&self) -> ClientShutdownOutcome {
+        ClientShutdownOutcome::NotConfigured
     }
 
     /// 发起一次 Chat，返回事件流。

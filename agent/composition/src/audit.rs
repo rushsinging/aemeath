@@ -1,4 +1,7 @@
 use std::path::Path;
+use std::sync::Arc;
+
+use async_trait::async_trait;
 
 use audit::{
     file_usage_append_store, start_usage_worker, UsageEmitOutcome, UsageRecord, UsageSender,
@@ -32,6 +35,68 @@ pub struct AuditWorkerAssembly {
     pub handle: UsageWorkerHandle,
 }
 
+#[derive(Clone)]
+pub struct AuditLifecycleClient {
+    client: Arc<dyn sdk::AgentClient>,
+    handle: Arc<UsageWorkerHandle>,
+}
+
+impl AuditLifecycleClient {
+    pub fn new(client: Arc<dyn sdk::AgentClient>, handle: UsageWorkerHandle) -> Self {
+        Self {
+            client,
+            handle: Arc::new(handle),
+        }
+    }
+}
+
+#[async_trait]
+impl sdk::AgentClient for AuditLifecycleClient {
+    fn cancel_current_run(&self, deadline: sdk::ControlDeadline) -> sdk::CancelCurrentRunOutcome {
+        self.client.cancel_current_run(deadline)
+    }
+
+    fn reply_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reply: sdk::InteractionReply,
+    ) -> sdk::InteractionCommandOutcome {
+        self.client.reply_interaction(request_id, reply)
+    }
+
+    fn cancel_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reason: sdk::InteractionCancelReason,
+    ) -> sdk::InteractionCommandOutcome {
+        self.client.cancel_interaction(request_id, reason)
+    }
+
+    async fn config_view(&self) -> Result<sdk::ConfigView, sdk::SdkError> {
+        self.client.config_view().await
+    }
+
+    async fn update_config(
+        &self,
+        update: sdk::ConfigUpdate,
+    ) -> Result<sdk::ConfigUpdateResult, sdk::SdkError> {
+        self.client.update_config(update).await
+    }
+
+    async fn shutdown(&self) -> sdk::ClientShutdownOutcome {
+        match self.handle.shutdown().await {
+            audit::UsageShutdownOutcome::Drained => sdk::ClientShutdownOutcome::Drained,
+            audit::UsageShutdownOutcome::TimedOut { unconfirmed } => {
+                sdk::ClientShutdownOutcome::TimedOut { unconfirmed }
+            }
+        }
+    }
+
+    async fn chat(&self, input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+        self.client.chat(input).await
+    }
+}
+
 pub fn wire_audit_worker(
     agents_dir: &Path,
     snapshot: &ConfigSnapshot,
@@ -42,3 +107,7 @@ pub fn wire_audit_worker(
     let (sender, handle) = start_usage_worker(store, usage_worker_config_from_snapshot(snapshot));
     Ok(AuditWorkerAssembly { sender, handle })
 }
+
+#[cfg(test)]
+#[path = "audit_tests.rs"]
+mod tests;
