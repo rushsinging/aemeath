@@ -150,6 +150,14 @@ if legacy_acl_source.is_file():
             "legacy AgentProgress ToolCalls must expand every structured call; first-item truncation is forbidden"
         )
 
+sub_run_model_source = root / "apps/cli/src/tui/model/conversation/tool_observe.rs"
+if sub_run_model_source.is_file():
+    sub_run_model_text = sub_run_model_source.read_text()
+    if "format_subagent_tool_header(name, input, None)" in sub_run_model_text:
+        violations.append(
+            "Sub Run ToolCall presentation must retain structured name/input until View Assembler supplies workspace_root"
+        )
+
 ack_terminal_compatibility = set(baseline["ack_terminal_compatibility_names"])
 ack_terminal_patterns = [re.compile(pattern) for pattern in baseline["ack_terminal_patterns"]]
 for event_name in sorted(all_actual):

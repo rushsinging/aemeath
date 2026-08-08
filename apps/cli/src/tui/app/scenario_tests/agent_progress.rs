@@ -280,7 +280,7 @@ fn main_with_concurrent_sub_runs_preserves_existing_agent_activity_display() {
         first
             .activities
             .iter()
-            .map(|activity| activity.content.as_str())
+            .map(|activity| activity.text().expect("text activity"))
             .collect::<Vec<_>>(),
         vec!["alpha text", "alpha output"]
     );
@@ -288,7 +288,7 @@ fn main_with_concurrent_sub_runs_preserves_existing_agent_activity_display() {
         second
             .activities
             .iter()
-            .map(|activity| activity.content.as_str())
+            .map(|activity| activity.text().expect("text activity"))
             .collect::<Vec<_>>(),
         vec!["beta thinking"]
     );

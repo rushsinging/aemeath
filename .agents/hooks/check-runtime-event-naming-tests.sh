@@ -247,6 +247,21 @@ expect_failure "legacy AgentProgress ToolCalls truncates after first item"
 cp "$ROOT/apps/cli/src/tui/adapter/event_mapping.rs" \
   "$TMP/apps/cli/src/tui/adapter/event_mapping.rs"
 
+python3 - "$TMP/apps/cli/src/tui/model/conversation/tool_observe.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "Some(AgentActivityLine::tool_call(name.clone(), input.clone()))",
+    "Some(AgentActivityLine::message(format_subagent_tool_header(name, input, None)))",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "Sub Run ToolCall flattened before workspace-aware view assembly"
+cp "$ROOT/apps/cli/src/tui/model/conversation/tool_observe.rs" \
+  "$TMP/apps/cli/src/tui/model/conversation/tool_observe.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

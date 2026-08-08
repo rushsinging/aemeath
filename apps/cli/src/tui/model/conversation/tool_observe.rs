@@ -5,9 +5,7 @@ use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
 use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
-use crate::tui::render::output::tool_display::{
-    format_subagent_tool_header, result_policy, ResultPolicy,
-};
+use crate::tui::render::output::tool_display::{result_policy, ResultPolicy};
 
 const STREAM_CAP: usize = 4 * 1024;
 
@@ -74,24 +72,24 @@ impl ConversationModel {
             }
         }
 
-        let visible_message = match &activity.kind {
+        let visible_activity = match &activity.kind {
             TuiSubRunActivityKind::Text { text } | TuiSubRunActivityKind::Thinking { text } => {
-                Some(text.clone())
+                Some(AgentActivityLine::message(text.clone()))
             }
             TuiSubRunActivityKind::ToolOutput { tool_name, text } => {
-                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| text.clone())
+                (!matches!(result_policy(tool_name), ResultPolicy::Hidden))
+                    .then(|| AgentActivityLine::message(text.clone()))
             }
             TuiSubRunActivityKind::ToolCall { name, input, .. } => {
-                Some(format_subagent_tool_header(name, input, None))
+                Some(AgentActivityLine::tool_call(name.clone(), input.clone()))
             }
             TuiSubRunActivityKind::ToolResult {
                 tool_name, output, ..
-            } => {
-                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| output.clone())
-            }
-            TuiSubRunActivityKind::Terminal { outcome } => {
-                Some(format!("Sub-agent terminal: {outcome:?}"))
-            }
+            } => (!matches!(result_policy(tool_name), ResultPolicy::Hidden))
+                .then(|| AgentActivityLine::message(output.clone())),
+            TuiSubRunActivityKind::Terminal { outcome } => Some(AgentActivityLine::message(
+                format!("Sub-agent terminal: {outcome:?}"),
+            )),
         };
 
         let parent_tool_context = self.chats.iter().find_map(|chat| {
@@ -128,12 +126,12 @@ impl ConversationModel {
             kind: activity.kind,
         });
 
-        let changes = visible_message.map_or_else(Vec::new, |message| {
+        let changes = visible_activity.map_or_else(Vec::new, |activity_line| {
             self.record_agent_progress(
                 chat_id,
                 run_id,
                 activity.spawned_by_tool_call_id,
-                vec![AgentActivityLine::message(message)],
+                vec![activity_line],
             )
         });
         if changes.is_empty() {
@@ -283,10 +281,14 @@ impl ConversationModel {
                 }
             }
         }
-        self.agent_progress
-            .extend(activities.iter().map(|activity| {
-                AgentProgressEntry::new(tool_id.to_string(), activity.content.clone())
-            }));
+        self.agent_progress.extend(activities.iter().filter_map(
+            |activity| match &activity.content {
+                super::agent_progress::AgentActivityContent::Text(content) => Some(
+                    AgentProgressEntry::new(tool_id.to_string(), content.clone()),
+                ),
+                super::agent_progress::AgentActivityContent::ToolCall { .. } => None,
+            },
+        ));
         vec![
             ConversationChange::AgentProgressRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),

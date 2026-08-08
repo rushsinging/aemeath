@@ -488,6 +488,57 @@ fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
 }
 
 #[test]
+fn sub_run_tool_call_uses_current_workspace_root_during_view_assembly() {
+    let mut conversation = ConversationModel::default();
+    let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-1");
+    let parent_tool_id = ToolCallId::new("tool-1");
+    conversation.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    conversation.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: parent_tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    conversation.apply(RecordSubRunActivity {
+        agent_id: "researcher".to_string(),
+        sub_run_id: "sub-run".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: parent_tool_id,
+        sequence: 1,
+        sequence_index: 0,
+        kind: TuiSubRunActivityKind::ToolCall {
+            id: "read-call".to_string(),
+            name: "Read".to_string(),
+            input: serde_json::json!({"file_path": "/repo/src/domain.rs"}),
+        },
+    });
+
+    let view = assemble_output_view(&conversation, Some(std::path::Path::new("/repo")));
+    let tool = view
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("parent Agent tool block");
+
+    assert_eq!(
+        tool.streaming_preview,
+        Some(vec![AgentActivityLineView {
+            kind: AgentActivityKindView::ToolCall,
+            content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/repo/src/domain.rs"}),
+            },
+        }])
+    );
+}
+
+#[test]
 fn test_output_assembler_shows_streaming_preview_while_tool_running() {
     // 运行中（未完成）的工具应将 activities 合并为 streaming_preview 文本。
     let mut conversation = ConversationModel::default();
@@ -533,7 +584,7 @@ fn test_output_assembler_shows_streaming_preview_while_tool_running() {
         tool.streaming_preview,
         Some(vec![AgentActivityLineView {
             kind: AgentActivityKindView::Message,
-            content: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+            content: "Agent turn 1/200, messages: 2, est_tokens: 500".into(),
         }])
     );
 }
@@ -570,7 +621,10 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
         activities: vec![
-            AgentActivityLine::tool_call("Read src/domain.rs"),
+            AgentActivityLine::tool_call(
+                "Read",
+                serde_json::json!({"file_path": "src/domain.rs"}),
+            ),
             AgentActivityLine::message("Read as ordinary prose"),
         ],
     });
@@ -604,7 +658,10 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
         Some(vec![
             AgentActivityLineView {
                 kind: AgentActivityKindView::ToolCall,
-                content: "Read src/domain.rs".into(),
+                content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "src/domain.rs"}),
+                },
             },
             AgentActivityLineView {
                 kind: AgentActivityKindView::Message,
@@ -612,10 +669,7 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
             },
         ])
     );
-    assert_eq!(
-        result_view.result_text,
-        "Read src/domain.rs\nRead as ordinary prose"
-    );
+    assert_eq!(result_view.result_text, "Read as ordinary prose");
 }
 
 #[test]

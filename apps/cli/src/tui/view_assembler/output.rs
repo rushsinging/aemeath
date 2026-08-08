@@ -122,6 +122,7 @@ impl OutputViewAssembler {
                             args_preview: tool.args_preview.clone(),
                             result_text,
                             activity_lines: None,
+                            workspace_root: None,
                             data: tool
                                 .result_payload
                                 .as_ref()
@@ -134,7 +135,10 @@ impl OutputViewAssembler {
                     let result_id = format!("{}-streaming-result", reference.tool_call_id.as_ref());
                     let result_text = activities
                         .iter()
-                        .map(|activity| activity.content.as_str())
+                        .filter_map(|activity| match &activity.content {
+                            crate::tui::view_model::output::AgentActivityContentView::Text(content) => Some(content.as_str()),
+                            crate::tui::view_model::output::AgentActivityContentView::ToolCall { .. } => None,
+                        })
                         .collect::<Vec<_>>()
                         .join("\n");
                     let child = leaf(
@@ -145,6 +149,7 @@ impl OutputViewAssembler {
                             args_preview: tool.args_preview.clone(),
                             result_text,
                             activity_lines: Some(activities),
+                            workspace_root: workspace_root.map(std::path::Path::to_path_buf),
                             data: None,
                             style: tool.style,
                         }),

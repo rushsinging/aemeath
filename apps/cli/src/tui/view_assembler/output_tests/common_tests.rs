@@ -1,4 +1,5 @@
 use crate::tui::model::conversation::ids::ToolCallId;
+use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
 use crate::tui::model::conversation::agent_progress::AgentActivityLine;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;

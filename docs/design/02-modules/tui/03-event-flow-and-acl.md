@@ -493,11 +493,13 @@ TUI OutputTimeline
 |---|---|---|
 | `SubRunStarted` | `UpdateAgentMeta` | 使用父 chat/run 与派生 ToolCall 定位，更新 role/model |
 | `SubRunActivity::Text` / `Thinking` | `RecordSubRunActivity` | 保留 Sub Run identity 与 sequence，形成实时文本/思考活动 |
-| `SubRunActivity::ToolCall` | `RecordSubRunActivity` | 使用结构化 tool id/name/input，不从字符串推断 |
+| `SubRunActivity::ToolCall` | `RecordSubRunActivity` | 使用结构化 tool id/name/input，不从字符串推断；ConversationModel 保留结构化 name/input，View Assembler 在当前 `workspace_root` 下调用 tool display formatter，路径展示随 worktree 切换重新装配 |
 | `SubRunActivity::ToolOutput` / `ToolResult` | `RecordSubRunActivity` | 保留结构化输出与结果内容，展示层按工具策略 sanitize |
 | `SubRunActivity::Terminal` | `RecordSubRunActivity` | 保留 typed terminal outcome |
 
 SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；legacy `ToolCalls` 中每个结构化 call 必须按原顺序展开为一个 `SubRunActivity::ToolCall`，共享原始 sequence，并以 `sequence_index` 保存 batch 内顺序，NEVER 截断首项或伪造后续 Runtime sequence。空 batch 映射为空 `RuntimeBatch`，不制造 `Noop` fact。`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
+
+Sub Run ToolCall 的 name/input 属于事实，`workspace_root` 属于 TUI presentation context：Model **MUST** 保存结构化 ToolCall activity，**NEVER** 在 reducer 中以 `None` 提前压扁为 header 字符串；View Assembler **MUST** 使用 `WorkspaceProvider` 的当前 `workspace_root` 调 `format_subagent_tool_header`。因此 worktree 变化触发的 output reassembly 可重新生成正确的相对路径，Runtime/SDK event、TUI canonical fact 与 Conversation intent 均 **NEVER** 携带该展示上下文副本。
 
 ### 6.3 sub-agent config 继承链路
 

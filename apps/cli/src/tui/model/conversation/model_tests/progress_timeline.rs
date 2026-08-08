@@ -3,6 +3,48 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn sub_run_tool_call_keeps_structured_input_for_workspace_aware_presentation() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("parent-chat");
+    let run_id = super::ids::ChatRunId::new("parent-run");
+    let parent_tool_id = super::ids::ToolCallId::new("agent-tool");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: parent_tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    let input = serde_json::json!({"file_path": "/repo/src/domain.rs"});
+
+    model.apply(RecordSubRunActivity {
+        agent_id: "researcher".to_string(),
+        sub_run_id: "sub-run".to_string(),
+        parent_run_id: run_id.to_string(),
+        spawned_by_tool_call_id: parent_tool_id.clone(),
+        sequence: 1,
+        sequence_index: 0,
+        kind: TuiSubRunActivityKind::ToolCall {
+            id: "read-call".to_string(),
+            name: "Read".to_string(),
+            input: input.clone(),
+        },
+    });
+
+    assert_eq!(
+        tool_call(&model, &chat_id, &run_id, &parent_tool_id)
+            .expect("parent Agent ToolCall")
+            .activities,
+        vec![super::agent_progress::AgentActivityLine::tool_call(
+            "Read",
+            input,
+        )]
+    );
+}
+
+#[test]
 fn sub_run_hidden_tool_result_is_not_attached_to_parent_activity() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("parent-chat");
@@ -52,12 +94,11 @@ fn sub_run_hidden_tool_result_is_not_attached_to_parent_activity() {
         matches!(entry.kind, TuiSubRunActivityKind::ToolResult { .. })
     }));
     assert_eq!(
-        parent_call
-            .activities
-            .iter()
-            .filter(|line| line.contains("Skill superpowers:using-superpowers"))
-            .count(),
-        1,
+        parent_call.activities,
+        vec![super::agent_progress::AgentActivityLine::tool_call(
+            "Skill",
+            serde_json::json!({"skill": "superpowers:using-superpowers"}),
+        )],
         "activities: {:?}",
         parent_call.activities
     );
@@ -169,7 +210,7 @@ fn sub_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
             .expect("first parent Agent ToolCall")
             .activities
             .iter()
-            .map(|activity| activity.content.as_str())
+            .map(|activity| activity.text().expect("text activity"))
             .collect::<Vec<_>>(),
             vec!["first child text", "grep output"]
     );
