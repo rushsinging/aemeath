@@ -19,6 +19,7 @@ use crate::ports::CancellationSignal;
 
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
+    UNSUPPORTED_PLATFORM_MESSAGE,
 };
 
 /// 单次命令执行的原始机械结果（已 drain + 截断）。
@@ -35,8 +36,9 @@ pub(crate) struct RawExecution {
 /// 单次执行的协议级故障（ExecutionFailed 可重试路径）。
 ///
 /// 与业务 Block（`HookReason`）严格区分：业务 Block 永不重试，
-/// 本枚举（除 `Cancelled`）按 Dispatcher 注入的 execution policy 重试。`Cancelled` 立即终止
-/// dispatch 且不重试，但仍记一次 ExecutionFailed 明细。
+/// 本枚举中的可恢复执行故障按 Dispatcher 注入的 execution policy 重试。
+/// `Unsupported` 是永久性平台能力缺失，`Cancelled` 是调用方终止；二者均立即结束，
+/// 不进入重试循环，但仍保留一次 typed execution 明细。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExecutionFault {
     /// `spawn` 失败（无法启动子进程）。
@@ -47,6 +49,9 @@ pub(crate) enum ExecutionFault {
     Wait,
     /// 执行超过 deadline（timeout）。
     Timeout,
+    /// 当前平台不支持可证明回收的 Hook 命令执行；永久失败，不重试。
+    #[cfg(any(not(unix), test))]
+    Unsupported,
     /// 取消：不重试，立即终止 dispatch。
     Cancelled,
 }
@@ -59,6 +64,8 @@ impl ExecutionFault {
             ExecutionFault::Io => "hook 进程管道读写失败",
             ExecutionFault::Wait => "等待 hook 子进程失败",
             ExecutionFault::Timeout => "hook 执行超时",
+            #[cfg(any(not(unix), test))]
+            ExecutionFault::Unsupported => UNSUPPORTED_PLATFORM_MESSAGE,
             ExecutionFault::Cancelled => "hook 执行被取消",
         }
     }
@@ -165,6 +172,6 @@ fn map_process_failure(failure: ProcessFailure) -> ExecutionFault {
         ProcessFailureKind::Timeout => ExecutionFault::Timeout,
         ProcessFailureKind::Cancelled => ExecutionFault::Cancelled,
         #[cfg(not(unix))]
-        ProcessFailureKind::Unsupported => ExecutionFault::Spawn,
+        ProcessFailureKind::Unsupported => ExecutionFault::Unsupported,
     }
 }

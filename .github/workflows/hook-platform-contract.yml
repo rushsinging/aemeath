@@ -1,0 +1,34 @@
+name: Hook platform contract
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  non-unix-unsupported:
+    name: Hook non-Unix unsupported contract
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: hook-non-unix-contract
+
+      - name: Check Hook crate on Windows
+        run: cargo check -p hook --all-targets
+
+      - name: Run non-Unix Hook contract tests
+        run: cargo test -p hook unsupported_platform --lib

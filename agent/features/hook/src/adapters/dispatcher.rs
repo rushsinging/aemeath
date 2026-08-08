@@ -627,6 +627,29 @@ impl Dispatcher {
                     );
                     return AttemptOutcome::Cancelled { executions };
                 }
+                #[cfg(any(not(unix), test))]
+                Err(ExecutionFault::Unsupported) => {
+                    let execution = HookExecution {
+                        status: HookExecutionStatus::ExecutionFailed {
+                            error: ExecutionFault::Unsupported.message().to_string(),
+                        },
+                        attempts,
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration,
+                    };
+                    executions.push(execution);
+                    Self::observe_subscription_execution(
+                        subscription_execution_observer,
+                        HookSubscriptionExecutionEvent::Finished {
+                            point: sub.point,
+                            script,
+                            terminal: HookSubscriptionExecutionTerminal::Failed,
+                        },
+                    );
+                    return AttemptOutcome::Exhausted { executions };
+                }
                 Err(fault) => {
                     let execution = HookExecution {
                         status: HookExecutionStatus::ExecutionFailed {

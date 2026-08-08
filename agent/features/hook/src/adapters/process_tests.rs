@@ -39,6 +39,21 @@ fn request(command: impl Into<String>) -> ProcessRequest {
     }
 }
 
+#[cfg(not(unix))]
+#[tokio::test]
+async fn unsupported_platform_returns_typed_failure_without_running_command() {
+    let failure = ProcessDriver
+        .execute(
+            request("this-command-must-not-run"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("non-Unix 平台必须显式拒绝 Hook 命令执行");
+
+    assert_eq!(failure.kind, ProcessFailureKind::Unsupported);
+    assert_eq!(failure.message, "当前平台不支持 Hook 命令执行");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn normal_exit_preserves_status_and_bounded_output() {
