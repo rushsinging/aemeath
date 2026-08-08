@@ -214,8 +214,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ActivitySnapshotReplaced { .. } => {
                 ModelChange::output_and_status_dirty()
             }
-            ConversationChange::CompactProgressChanged
-            | ConversationChange::QueuedSubmissionsSynced { .. }
+            ConversationChange::QueuedSubmissionsSynced { .. }
             | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatStarted { .. }

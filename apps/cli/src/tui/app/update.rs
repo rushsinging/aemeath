@@ -67,8 +67,8 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
         UiEvent::HookNotice(_) => "HookNotice",
         UiEvent::ApiError { .. } => "ApiError",
-        UiEvent::CompactRollback { .. } => "CompactRollback",
-        UiEvent::CompactFinished { .. } => "CompactFinished",
+        UiEvent::CompactOperationRolledBack { .. } => "CompactRollback",
+        UiEvent::CompactOperationCompleted { .. } => "CompactFinished",
         UiEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted",
         UiEvent::UserMessagesQueued { .. } => "UserMessagesQueued",
         UiEvent::Done { .. } => "Done",
@@ -88,7 +88,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SessionReset => "SessionReset",
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
         UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
-        UiEvent::CompactProgress { .. } => "CompactProgress",
         UiEvent::ModelSwitched { .. } => "ModelSwitched",
         UiEvent::ThinkingChanged { .. } => "ThinkingChanged",
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
@@ -336,7 +335,7 @@ impl App {
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
         let diagnostic_kind = match &event {
-            TuiRuntimeEvent::Text { .. } => Some("Text"),
+            TuiRuntimeEvent::AssistantTextDelta { .. } => Some("AssistantTextDelta"),
             TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
             TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
             TuiRuntimeEvent::HookNotice(_) => Some("HookNotice"),
@@ -446,12 +445,12 @@ impl App {
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
-            TuiRuntimeEvent::CompactFinished { .. } => {
+            TuiRuntimeEvent::CompactOperationCompleted { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));
             }
-            TuiRuntimeEvent::CompactRollback { .. } => {
+            TuiRuntimeEvent::CompactOperationRolledBack { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));
@@ -550,8 +549,20 @@ impl App {
                     self.show_ask_user_batch(req.request_id.clone(), slots);
                 }
             }
+            TuiRuntimeEvent::RunStep {
+                run_id,
+                parent_run_id: None,
+                step_id,
+                event: crate::tui::adapter::tui_runtime_event::TuiRunStepEvent::Started,
+            } => {
+                self.chat.active_run_step = Some((
+                    sdk::RunId::from_legacy_or_new(run_id.as_str()),
+                    sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
+                ));
+            }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
                 // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
+                self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }
@@ -570,20 +581,11 @@ impl App {
         let model_result = reduce_agent_event(&mut self.model, mapping);
         self.refresh_live_status_from_model();
         let valid_model_activity = match &event {
-            TuiRuntimeEvent::Text { text, .. } | TuiRuntimeEvent::Thinking { text, .. } => {
-                !text.is_empty()
-            }
-            TuiRuntimeEvent::ToolCallStart { .. } => true,
-            TuiRuntimeEvent::ToolCallUpdate {
-                arguments_delta,
-                arguments,
-                ..
-            } => {
-                arguments_delta
-                    .as_ref()
-                    .is_some_and(|value| !value.is_empty())
-                    || arguments.is_some()
-            }
+            TuiRuntimeEvent::AssistantTextDelta { delta, .. }
+            | TuiRuntimeEvent::ThinkingDelta { delta, .. } => !delta.is_empty(),
+            TuiRuntimeEvent::ToolCallStarted { .. } => true,
+            TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
+            TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),
             _ => false,
         };
         if valid_model_activity {

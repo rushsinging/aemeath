@@ -61,6 +61,16 @@ pub trait SessionRepository: Send + Sync {
             "此 SessionRepository 未实现 Tool receipt 持久化".to_string(),
         ))
     }
+    async fn step_receipts(
+        &self,
+        _session_id: &SessionId,
+        _run_id: &sdk::RunId,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        Err(ToolReceiptMutationError::Storage(
+            "此 SessionRepository 未实现 Step receipt 查询".to_string(),
+        ))
+    }
     async fn compare_and_record_skill_load(
         &self,
         _mutation: tools::SkillLoadMutation,

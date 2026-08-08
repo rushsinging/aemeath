@@ -2,7 +2,7 @@ use super::*;
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeRunContext, RuntimeStreamEvent,
 };
-use crate::domain::agent_run::{RunDomainEvent, RunId};
+use crate::domain::agent_run::{RunId, RuntimeLifecycleEvent};
 use sdk::ids::{ChatId, ChatRunId};
 use std::sync::{Arc, Mutex};
 
@@ -54,7 +54,7 @@ async fn completed_seal_after_cancelled_step_projects_only_cancelled_terminal() 
     };
 
     observer
-        .emit(vec![RunDomainEvent::Completed {
+        .emit(vec![RuntimeLifecycleEvent::Completed {
             run_id: RunId::new_v7(),
             parent_run_id: None,
             result: String::new(),

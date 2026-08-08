@@ -58,7 +58,7 @@ fn compact_progress_from_activity(
     run_id: &crate::tui::model::conversation::interaction::UiRunId,
 ) -> Option<crate::tui::view_model::live_status::CompactProgressView> {
     use crate::tui::adapter::tui_runtime_event::{
-        TuiActivityDetail, TuiActivityKind, TuiActivityState, TuiCompactStage,
+        TuiActivityDetail, TuiActivityKind, TuiActivityState, TuiCompactStage, TuiCompactWork,
     };
 
     let activity = conversation
@@ -74,26 +74,36 @@ fn compact_progress_from_activity(
                 )
         })
         .max_by_key(|activity| activity.revision)?;
-    let TuiActivityDetail::Compact {
-        stage,
-        current,
-        total,
-    } = activity.detail
-    else {
+    let TuiActivityDetail::Compact { stage, work } = activity.detail else {
         return None;
     };
     let (stage, ratio_millis) = match stage {
         TuiCompactStage::Preparing => ("preparing", 50),
-        TuiCompactStage::Summarizing => {
-            let ratio_millis = match (current, total) {
-                (Some(current), Some(total)) if total > 0 => {
-                    150u32.saturating_add(700u32.saturating_mul(current) / total)
+        TuiCompactStage::Generating => ("generating", 300),
+        TuiCompactStage::Mapping => {
+            let ratio_millis = match work {
+                TuiCompactWork::Determinate { completed, total } if total > 0 => {
+                    150u32.saturating_add(450u32.saturating_mul(completed) / total)
                 }
-                _ => 500,
+                _ => 350,
             };
-            ("summarizing", ratio_millis)
+            ("mapping", ratio_millis)
+        }
+        TuiCompactStage::Reducing => ("reducing", 700),
+        TuiCompactStage::Refreshing => {
+            let ratio_millis = match work {
+                TuiCompactWork::Determinate { completed, total } if total > 0 => {
+                    750u32.saturating_add(100u32.saturating_mul(completed) / total)
+                }
+                _ => 800,
+            };
+            ("refreshing", ratio_millis)
         }
         TuiCompactStage::Finalizing => ("finalizing", 900),
+    };
+    let (current, total) = match work {
+        TuiCompactWork::Indeterminate => (None, None),
+        TuiCompactWork::Determinate { completed, total } => (Some(completed), Some(total)),
     };
 
     Some(crate::tui::view_model::live_status::CompactProgressView {
@@ -121,7 +131,7 @@ mod tests {
     use super::*;
     use crate::tui::adapter::tui_runtime_event::{
         TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
-        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiCompactStage,
+        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiCompactStage, TuiCompactWork,
         TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
     };
     use crate::tui::model::conversation::intent::UpdateTaskLines;
@@ -254,9 +264,11 @@ mod tests {
         let conversation = conversation_with_activities(
             TuiActivityKind::Compaction,
             TuiActivityDetail::Compact {
-                stage: TuiCompactStage::Summarizing,
-                current: Some(2),
-                total: Some(4),
+                stage: TuiCompactStage::Mapping,
+                work: TuiCompactWork::Determinate {
+                    completed: 2,
+                    total: 4,
+                },
             },
         );
 
@@ -270,8 +282,8 @@ mod tests {
         assert_eq!(
             view.compact_progress,
             Some(crate::tui::view_model::live_status::CompactProgressView {
-                ratio_millis: 500,
-                stage: "summarizing".to_string(),
+                ratio_millis: 375,
+                stage: "mapping".to_string(),
                 current: Some(2),
                 total: Some(4),
             })

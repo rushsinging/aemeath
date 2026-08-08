@@ -10,7 +10,7 @@ pub struct RunTimingSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunDomainEvent {
+pub enum RuntimeLifecycleEvent {
     Transitioned {
         run_id: RunId,
         parent_run_id: Option<RunId>,
@@ -47,7 +47,7 @@ pub enum RunDomainEvent {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         step_id: RunStepId,
-        confirmed: bool,
+        terminal: sdk::RunStepCancellationTerminal,
     },
     DrainingInput {
         run_id: RunId,
@@ -94,7 +94,7 @@ pub enum RunDomainEvent {
     },
 }
 
-impl RunDomainEvent {
+impl RuntimeLifecycleEvent {
     pub fn parent_run_id(&self) -> Option<&RunId> {
         match self {
             Self::Transitioned { parent_run_id, .. }

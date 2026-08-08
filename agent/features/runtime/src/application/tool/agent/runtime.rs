@@ -15,6 +15,7 @@ pub struct ToolExecution {
     pub provider_id: String,
     pub tool_name: String,
     pub outcome: ToolOutcome,
+    pub typed_outcome: ToolExecutionOutcome,
 }
 
 impl ToolExecution {
@@ -23,7 +24,18 @@ impl ToolExecution {
             call_id: call.id.clone(),
             provider_id: call.provider_id.clone(),
             tool_name: call.name.clone(),
+            typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
+        }
+    }
+
+    pub fn new_typed(call: &ToolCall, typed_outcome: ToolExecutionOutcome) -> Self {
+        Self {
+            call_id: call.id.clone(),
+            provider_id: call.provider_id.clone(),
+            tool_name: call.name.clone(),
+            outcome: legacy_outcome(typed_outcome.clone()),
+            typed_outcome,
         }
     }
 
@@ -37,6 +49,7 @@ impl ToolExecution {
             call_id,
             provider_id,
             tool_name,
+            typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
         }
     }
@@ -54,6 +67,8 @@ pub struct Agent {
     pub(crate) session_id: context::domain::SessionId,
     pub(crate) tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
+    pub(crate) committed_side_effects:
+        crate::application::loop_engine::chat::committed_side_effect::CommittedSideEffectDispatcher,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -114,6 +129,7 @@ impl Agent {
             session_id: context::domain::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
+            committed_side_effects: Default::default(),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -224,9 +240,9 @@ impl Agent {
         ctx: &ToolExecutionContext,
         step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        ToolExecution::new(
+        ToolExecution::new_typed(
             call,
-            legacy_outcome(self.execute_one_outcome_with_ctx(call, ctx, step_id).await),
+            self.execute_one_outcome_with_ctx(call, ctx, step_id).await,
         )
     }
 
@@ -274,6 +290,14 @@ impl Agent {
 fn safe_input_preview(input: &serde_json::Value) -> String {
     let rendered = serde_json::to_string(input).unwrap_or_else(|_| "<unserializable>".to_string());
     rendered.chars().take(500).collect()
+}
+
+fn legacy_tool_execution_outcome(outcome: &ToolOutcome) -> ToolExecutionOutcome {
+    if outcome.is_error {
+        ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, outcome.text.clone())
+    } else {
+        ToolExecutionOutcome::success_text(outcome.text.clone())
+    }
 }
 
 pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {

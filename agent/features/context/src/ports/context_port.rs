@@ -47,6 +47,17 @@ pub trait ContextPort: Send + Sync {
         ))
     }
 
+    async fn step_receipts(
+        &self,
+        _session_id: &SessionId,
+        _run_id: &sdk::RunId,
+        _step_id: &sdk::RunStepId,
+    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+        Err(ToolReceiptMutationError::Storage(
+            "此 ContextPort 未实现 Step receipt 查询".to_string(),
+        ))
+    }
+
     async fn compare_and_record_skill_load(
         &self,
         _mutation: tools::SkillLoadMutation,

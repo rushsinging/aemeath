@@ -1,6 +1,6 @@
-use super::sdk_event_mapper::{map_stream_event, project_agent_progress_event};
+use super::sdk_event_mapper::{map_activity_event, map_stream_event, project_agent_progress_event};
 use crate::application::loop_engine::chat::{
-    RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
+    RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
 #[test]
 fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
@@ -86,17 +86,15 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
         timing: sdk::ActivityTimingView::default(),
     };
 
-    let changed = map_stream_event(RuntimeStreamEvent::ActivityChanged {
+    let changed = map_activity_event(RuntimeActivityEvent::Changed {
         kind: sdk::ActivityChangeKind::Updated,
-        activity: activity.clone(),
+        activity: Box::new(activity.clone()),
     });
-    let snapshot = map_stream_event(RuntimeStreamEvent::ActivitySnapshot(
-        sdk::ActivitySnapshotView {
-            run_id: activity.run_id.clone(),
-            revision: 3,
-            activities: vec![activity.clone()],
-        },
-    ));
+    let snapshot = map_activity_event(RuntimeActivityEvent::Snapshot(sdk::ActivitySnapshotView {
+        run_id: activity.run_id.clone(),
+        revision: 3,
+        activities: vec![activity.clone()],
+    }));
 
     assert!(matches!(
         changed,
@@ -257,34 +255,48 @@ fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
 }
 
 #[test]
-fn sdk_tool_progress_preserves_context_tool_id_and_text() {
+fn tool_output_delta_preserves_context_tool_id_and_delta() {
     let context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("chat-1"),
         sdk::ids::ChatRunId::new("run-1"),
     );
     let expected_context = context.clone();
     let tool_id = sdk::ids::ToolCallId::new("bash-tool");
-    let event = RuntimeStreamEvent::ToolProgress {
+    let event = RuntimeStreamEvent::ToolOutputDelta {
         context,
         tool_id: tool_id.clone(),
-        event: tools::ToolProgressEvent {
-            text: "checking PRs…\n".to_string(),
-        },
+        delta: "checking PRs…\n".to_string(),
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ToolProgress {
+        sdk::ChatEvent::ToolOutputDelta {
             context,
             tool_id: mapped_tool_id,
-            event,
+            delta,
         } => {
             assert_eq!(context.chat_id, expected_context.chat_id);
             assert_eq!(context.run_id, expected_context.run_id);
             assert_eq!(mapped_tool_id, tool_id);
-            assert_eq!(event.text, "checking PRs…\n");
+            assert_eq!(delta, "checking PRs…\n");
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn microcompact_completed_preserves_messages_and_cleared_count() {
+    let event = map_stream_event(RuntimeStreamEvent::MicrocompactCompleted {
+        messages: vec![share::message::Message::user("before compact")],
+        cleared_count: 3,
+    });
+
+    assert!(matches!(
+        event,
+        sdk::ChatEvent::MicrocompactCompleted {
+            messages,
+            cleared_count: 3,
+        } if messages.len() == 1
+    ));
 }
 
 #[test]
@@ -369,15 +381,23 @@ fn hook_notice_mapping_preserves_point_kind_and_all_fields_for_sdk() {
 }
 
 #[test]
-fn compact_finished_preserves_runtime_owned_notice() {
-    let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
+fn compact_operation_facts_preserve_messages_and_notice() {
+    let rolled_back = map_stream_event(RuntimeStreamEvent::CompactOperationRolledBack {
+        messages: vec![share::message::Message::user("rollback")],
+    });
+    let completed = map_stream_event(RuntimeStreamEvent::CompactOperationCompleted {
         messages: vec![share::message::Message::user("recent")],
         notice: "✓ 上下文压缩完成".to_string(),
     });
 
     assert!(matches!(
-        mapped,
-        sdk::ChatEvent::CompactFinished { messages, notice }
+        rolled_back,
+        sdk::ChatEvent::CompactOperationRolledBack { messages }
+            if messages.len() == 1 && messages[0].text_content() == "rollback"
+    ));
+    assert!(matches!(
+        completed,
+        sdk::ChatEvent::CompactOperationCompleted { messages, notice }
             if messages.len() == 1
                 && messages[0].text_content() == "recent"
                 && notice == "✓ 上下文压缩完成"
@@ -466,8 +486,74 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
 }
 
 #[test]
-fn tool_call_projection_preserves_canonical_name() {
-    let event = RuntimeStreamEvent::ToolCallStart {
+fn assistant_and_thinking_deltas_keep_explicit_subject_and_delivery_in_sdk() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-content-delta"),
+        sdk::ids::ChatRunId::new("run-content-delta"),
+    );
+
+    let assistant = map_stream_event(RuntimeStreamEvent::AssistantTextDelta {
+        context: context.clone(),
+        delta: "answer".to_owned(),
+    });
+    let thinking = map_stream_event(RuntimeStreamEvent::ThinkingDelta {
+        context,
+        delta: "reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        sdk::ChatEvent::AssistantTextDelta { delta, .. } if delta == "answer"
+    ));
+    assert!(matches!(
+        thinking,
+        sdk::ChatEvent::ThinkingDelta { delta, .. } if delta == "reasoning"
+    ));
+}
+
+#[test]
+fn tool_call_argument_delta_and_state_fact_map_to_distinct_sdk_events() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-tool-split"),
+        sdk::ids::ChatRunId::new("run-tool-split"),
+    );
+    let id = sdk::ids::ToolCallId::new("tool-split");
+
+    let delta = map_stream_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        delta: "{\"file_".to_owned(),
+    });
+    let state = map_stream_event(RuntimeStreamEvent::ToolCallStateChanged {
+        context,
+        id,
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        arguments: Some(serde_json::json!({"file_path": "src/lib.rs"})),
+        status: crate::application::loop_engine::chat::RuntimeToolCallStatus::Ready,
+    });
+
+    assert!(matches!(
+        delta,
+        sdk::ChatEvent::ToolCallArgumentsDelta { delta, .. } if delta == "{\"file_"
+    ));
+    assert!(matches!(
+        state,
+        sdk::ChatEvent::ToolCallStateChanged {
+            arguments: Some(arguments),
+            status: sdk::ToolCallStatusView::Ready,
+            ..
+        } if arguments["file_path"] == "src/lib.rs"
+    ));
+}
+
+#[test]
+fn tool_call_started_keeps_explicit_fact_name_and_canonical_tool_name() {
+    let event = RuntimeStreamEvent::ToolCallStarted {
         context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-1"),
             sdk::ids::ChatRunId::new("turn-1"),
@@ -479,7 +565,7 @@ fn tool_call_projection_preserves_canonical_name() {
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
+        sdk::ChatEvent::ToolCallStarted { name, .. } => assert_eq!(name, "Grep"),
         other => panic!("unexpected event: {other:?}"),
     }
 }

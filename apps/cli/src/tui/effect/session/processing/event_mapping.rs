@@ -7,6 +7,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::SessionReset
         }
         sdk::ChatEvent::SkillsUpdated { event } => UiEvent::SkillsUpdated(event),
+        sdk::ChatEvent::AssistantTextDelta { context, delta } => UiEvent::Text {
+            context: context.into(),
+            text: delta,
+        },
+        sdk::ChatEvent::ThinkingDelta { context, delta } => UiEvent::Thinking {
+            context: context.into(),
+            text: delta,
+        },
         sdk::ChatEvent::Token { context, text } => UiEvent::Text {
             context: context.into(),
             text,
@@ -19,7 +27,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             context: context.into(),
             text,
         },
-        sdk::ChatEvent::ToolCallStart {
+        sdk::ChatEvent::ToolCallStarted {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        }
+        | sdk::ChatEvent::ToolCallStart {
             context,
             id,
             provider_id,
@@ -92,7 +107,11 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::TurnStarted { messages } => UiEvent::TurnStarted {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::MicrocompactDone {
+        sdk::ChatEvent::MicrocompactCompleted {
+            messages,
+            cleared_count,
+        }
+        | sdk::ChatEvent::MicrocompactDone {
             messages,
             cleared_count,
         } => UiEvent::MicrocompactDone {
@@ -135,10 +154,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
         },
-        sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback {
+        sdk::ChatEvent::CompactOperationRolledBack { messages }
+        | sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactOperationRolledBack {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactFinished {
+        sdk::ChatEvent::CompactOperationCompleted { messages, notice }
+        | sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactOperationCompleted {
             messages: messages.into_iter().map(chat_message).collect(),
             notice,
         },
@@ -187,10 +208,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::CurrentRunChanged(run_step) | sdk::ChatEvent::RunChanged(run_step) => {
             UiEvent::CurrentRunChanged(run_step)
         }
-        // #944 5B: AskUserBatch legacy bridge removed.
-        sdk::ChatEvent::AskUserBatch { .. } => {
-            UiEvent::SystemMessage("AskUserBatch retired".to_string())
-        }
         sdk::ChatEvent::AgentProgress {
             source_context,
             attachment_context,
@@ -238,15 +255,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),
-        sdk::ChatEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => UiEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        },
         sdk::ChatEvent::ModelSwitched { result } => UiEvent::ModelSwitched { result },
         sdk::ChatEvent::ThinkingChanged { enabled } => UiEvent::ThinkingChanged { enabled },
         sdk::ChatEvent::ContextEstimated {
@@ -297,6 +305,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
         | sdk::ChatEvent::CostUpdate { .. }
+        | sdk::ChatEvent::ToolOutputDelta { .. }
         | sdk::ChatEvent::ToolProgress { .. } => UiEvent::SystemMessage(String::new()),
         sdk::ChatEvent::TaskStateChanged { state } => UiEvent::TaskStateChanged(*state),
     }

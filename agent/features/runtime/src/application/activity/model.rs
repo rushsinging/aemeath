@@ -105,8 +105,7 @@ pub(crate) enum ActivityDetail {
     },
     Compact {
         stage: sdk::CompactStageView,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: sdk::CompactWorkView,
     },
     Interaction {
         kind: sdk::InteractionKindView,
@@ -153,14 +152,9 @@ impl ActivityDetail {
                 script: script.clone(),
                 attempt: *attempt,
             },
-            Self::Compact {
-                stage,
-                current,
-                total,
-            } => ActivityDetailView::Compact {
+            Self::Compact { stage, work } => ActivityDetailView::Compact {
                 stage: *stage,
-                current: *current,
-                total: *total,
+                work: *work,
             },
             Self::Interaction { kind } => ActivityDetailView::Interaction { kind: *kind },
             Self::ChildRun { role, model } => ActivityDetailView::ChildRun {

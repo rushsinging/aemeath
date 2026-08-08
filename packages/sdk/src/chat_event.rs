@@ -27,7 +27,6 @@ mod skills_updated_tests {
 }
 
 use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
-use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
 use crate::chat_view::{AgentProgressEventView, ChildRunActivityEventView, WorkspaceContextView};
 use crate::ChatMessage;
@@ -474,12 +473,22 @@ pub enum ChatEvent {
     SkillsUpdated {
         event: crate::tui::SkillsUpdatedEvent,
     },
-    /// LLM 返回的文本 token。
+    /// Assistant 文本增量。生产 mapper 只发布该显式 Subject + Delivery 事件。
+    AssistantTextDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Thinking 文本增量。生产 mapper 只发布该显式 Delivery 事件。
+    ThinkingDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Token {
         context: ChatEventContext,
         text: String,
     },
-    /// LLM reasoning / thinking token。
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Thinking {
         context: ChatEventContext,
         text: String,
@@ -489,7 +498,15 @@ pub enum ChatEvent {
         context: ChatEventContext,
         text: String,
     },
-    /// 工具调用开始。
+    /// 工具调用已开始。生产 mapper 只发布该显式 fact。
+    ToolCallStarted {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallStart {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,
@@ -497,7 +514,26 @@ pub enum ChatEvent {
         name: String,
         index: usize,
     },
-    /// 工具调用属性/状态更新。
+    /// 工具参数流增量。与状态事实分离，按 Provider stream order 拼接。
+    ToolCallArgumentsDelta {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        delta: String,
+    },
+    /// 工具调用完整状态事实。arguments 是当前已验证的完整参数快照。
+    ToolCallStateChanged {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        arguments: Option<serde_json::Value>,
+        status: ToolCallStatusView,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallUpdate {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,
@@ -538,7 +574,12 @@ pub enum ChatEvent {
     TurnStarted {
         messages: Vec<ChatMessage>,
     },
-    /// Microcompact 清理了陈旧 tool result，run 仍在进行。TUI 只同步消息，不动 spinner。
+    /// Microcompact 已完成并清理陈旧 tool result；run 仍在进行。
+    MicrocompactCompleted {
+        messages: Vec<ChatMessage>,
+        cleared_count: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     MicrocompactDone {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
@@ -557,11 +598,20 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         error: String,
     },
-    /// Compact 失败后回滚消息。TUI 只同步消息。
+    /// Compact operation 失败并回滚消息。
+    CompactOperationRolledBack {
+        messages: Vec<ChatMessage>,
+    },
+    /// Compact operation 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
+    CompactOperationCompleted {
+        messages: Vec<ChatMessage>,
+        notice: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactRollback {
         messages: Vec<ChatMessage>,
     },
-    /// Compact 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactFinished {
         messages: Vec<ChatMessage>,
         notice: String,
@@ -618,7 +668,7 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
         step_id: crate::RunStepId,
-        confirmed: bool,
+        terminal: crate::RunStepCancellationTerminal,
     },
     RunDrainingInput {
         run_id: crate::RunId,
@@ -680,12 +730,6 @@ pub enum ChatEvent {
     InteractionRequested {
         request: crate::InteractionRequest,
     },
-    /// Legacy AskUser transport bridge. It remains reachable only until #878 switches production.
-    AskUserBatch {
-        items: Vec<AskUserQuestionItem>,
-        /// 回传回答或显式取消。
-        reply_tx: tokio::sync::oneshot::Sender<crate::AskUserReply>,
-    },
     /// Agent progress 事件，分别保留派生 Run 来源身份与父 ToolCall 挂载身份。
     AgentProgress {
         source_context: ChatEventContext,
@@ -693,7 +737,13 @@ pub enum ChatEvent {
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
     },
-    /// 工具 stdout 流式输出（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
+    ToolOutputDelta {
+        context: ChatEventContext,
+        tool_id: crate::ids::ToolCallId,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     ToolProgress {
         context: ChatEventContext,
         tool_id: crate::ids::ToolCallId,
@@ -722,12 +772,6 @@ pub enum ChatEvent {
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
-    /// Compact 进度通知。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     /// 模型切换完成通知（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {
         result: crate::ModelSwitchResult,
@@ -783,6 +827,9 @@ pub enum ChatEvent {
     },
     TaskStateChanged {
         state: Box<crate::TaskStateView>,
+    },
+    RuntimeStatusChanged {
+        status: Box<crate::RuntimeStatusView>,
     },
     /// #567：成本信息回传。
     CostUpdate {

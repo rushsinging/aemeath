@@ -170,6 +170,31 @@ impl SessionRepository for InMemorySessionRepository {
         Ok(advanced)
     }
 
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?;
+        let state = sessions
+            .get(session_id.as_str())
+            .ok_or_else(|| ToolReceiptMutationError::SessionNotFound(session_id.clone()))?;
+        let mut receipts = state
+            .tool_receipts
+            .values()
+            .filter(|receipt| {
+                receipt.identity.run_id == *run_id && receipt.identity.step_id == *step_id
+            })
+            .filter_map(ToolCallReceipt::to_step_receipt)
+            .collect::<Vec<_>>();
+        receipts.sort_by_key(crate::domain::StepReceipt::index);
+        Ok(receipts)
+    }
+
     async fn compare_and_record_skill_load(
         &self,
         mutation: tools::SkillLoadMutation,

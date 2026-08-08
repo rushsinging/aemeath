@@ -327,9 +327,11 @@ where
         }
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
+        | UiEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
         UiEvent::SessionMessageStateChanged {
             message_count,
             revision,
@@ -337,7 +339,7 @@ where
             message_count: *message_count,
             revision: *revision,
         }),
-        UiEvent::CompactFinished { messages, notice } => {
+        UiEvent::CompactOperationCompleted { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
                     text: notice.clone(),
@@ -387,18 +389,18 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }),
         ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Text { context, text } => {
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => {
             conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
-        TuiRuntimeEvent::Thinking { context, text } => {
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => {
             conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
         TuiRuntimeEvent::BlockComplete { context, .. } => {
@@ -407,7 +409,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             }))
         }
-        TuiRuntimeEvent::ToolCallStart {
+        TuiRuntimeEvent::ToolCallStarted {
             context,
             id,
             provider_id,
@@ -421,19 +423,33 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             name: name.clone(),
             index: *index,
         })),
-        TuiRuntimeEvent::ToolCallUpdate {
+        TuiRuntimeEvent::ToolCallArgumentsDelta {
             context,
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
+            delta,
+        } => conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+            id: ToolCallId::new(id),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+            arguments: Some(sanitize_tool_arguments_delta(name, delta)),
+            status: ToolCallStatus::PendingArgs,
+        })),
+        TuiRuntimeEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
             arguments,
             status,
         } => {
-            let args = arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(ToString::to_string));
+            let args = arguments.as_ref().map(ToString::to_string);
             conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
@@ -526,10 +542,12 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }))
         }
         TuiRuntimeEvent::TurnStarted { messages }
-        | TuiRuntimeEvent::MicrocompactDone { messages, .. }
-        | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
+        | TuiRuntimeEvent::MicrocompactCompleted { messages, .. }
+        | TuiRuntimeEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
         TuiRuntimeEvent::SessionMessageStateChanged {
             message_count,
             revision,
@@ -537,7 +555,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             message_count: *message_count,
             revision: *revision,
         }),
-        TuiRuntimeEvent::CompactFinished { messages, notice } => {
+        TuiRuntimeEvent::CompactOperationCompleted { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
                     text: notice.clone(),
@@ -602,7 +620,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 (node != "idle").then(|| node.clone()),
             )))
         }
-        TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
+        TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
+            ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
+        ),
         TuiRuntimeEvent::TaskStateChanged { state } => conversation(
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),
@@ -665,19 +685,19 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }),
             ),
             // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
-            // 顶层工具 stdout 走独立 ToolProgressEvent 通道（ToolProgress 分支）。
+            // 顶层工具 stdout 走独立 ToolOutputDelta fact。
             TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
         },
-        TuiRuntimeEvent::ToolProgress {
+        TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
+            delta,
         } => conversation(ConversationIntent::RecordToolStreamingOutput(
             RecordToolStreamingOutput {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 tool_id: ToolCallId::new(tool_id),
-                text: event.text.clone(),
+                text: delta.clone(),
             },
         )),
         TuiRuntimeEvent::ChildRunActivity(event) => conversation(
@@ -744,7 +764,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             step_id,
             event,
         } => match event {
-            TuiRunStepEvent::Cancelled { confirmed } if parent_run_id.is_none() => {
+            TuiRunStepEvent::Cancelled { terminal } if parent_run_id.is_none() => {
+                let confirmed = matches!(
+                    terminal,
+                    crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled
+                );
                 crate::tui::log_debug!(
                     "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
                     run_id,
@@ -752,9 +776,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     confirmed
                 );
                 conversation(ConversationIntent::PresentCancelledStep(
-                    PresentCancelledStep {
-                        confirmed: *confirmed,
-                    },
+                    PresentCancelledStep { confirmed },
                 ))
             }
             TuiRunStepEvent::Started

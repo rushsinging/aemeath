@@ -669,6 +669,25 @@ impl SessionRepository for CanonicalSessionRepository {
         });
     }
 
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ToolReceiptMutationError::SessionNotFound(
+                session_id.clone(),
+            ));
+        }
+        Ok(current.step_receipts(run_id.as_ref(), step_id.as_str()))
+    }
+
     async fn compare_and_record_skill_load(
         &self,
         mutation: tools::SkillLoadMutation,

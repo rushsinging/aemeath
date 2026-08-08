@@ -134,8 +134,17 @@ pub(crate) enum TuiHookPoint {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiCompactStage {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiCompactWork {
+    Indeterminate,
+    Determinate { completed: u32, total: u32 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -171,8 +180,7 @@ pub(crate) enum TuiActivityDetail {
     },
     Compact {
         stage: TuiCompactStage,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: TuiCompactWork,
     },
     Interaction {
         kind: TuiInteractionKind,
@@ -273,7 +281,15 @@ pub(crate) enum TuiRunStepEvent {
     Completed,
     CancellationRequested,
     FinalizationStarted,
-    Cancelled { confirmed: bool },
+    Cancelled {
+        terminal: TuiRunStepCancellationTerminal,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunStepCancellationTerminal {
+    Cancelled,
+    CancellationUnconfirmed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -509,11 +525,6 @@ pub(crate) enum TuiAgentProgressKind {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiToolProgressEvent {
-    pub(crate) text: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TuiAgentToolCall {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -557,32 +568,39 @@ pub(crate) enum TuiRuntimeEvent {
         skills: Vec<TuiSkillView>,
         slash_routes: Vec<TuiSkillSlashRoute>,
     },
-    Text {
+    AssistantTextDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
-    Thinking {
+    ThinkingDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
     BlockComplete {
         context: TuiRunContext,
         text: String,
     },
-    ToolCallStart {
+    ToolCallStarted {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
-    ToolCallUpdate {
+    ToolCallArgumentsDelta {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        arguments_delta: Option<String>,
+        delta: String,
+    },
+    ToolCallStateChanged {
+        context: TuiRunContext,
+        id: String,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
         arguments: Option<serde_json::Value>,
         status: TuiToolCallStatus,
     },
@@ -612,7 +630,7 @@ pub(crate) enum TuiRuntimeEvent {
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
@@ -625,10 +643,10 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
         notice: String,
     },
@@ -661,10 +679,10 @@ pub(crate) enum TuiRuntimeEvent {
         tool_id: String,
         event: TuiAgentProgress,
     },
-    ToolProgress {
+    ToolOutputDelta {
         context: TuiRunContext,
         tool_id: String,
-        event: TuiToolProgressEvent,
+        delta: String,
     },
     ChildRunActivity(TuiChildRunActivity),
     Cancelled {
@@ -682,11 +700,6 @@ pub(crate) enum TuiRuntimeEvent {
         node: String,
         effort: String,
         previous: String,
-    },
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
     },
     ThinkingChanged {
         enabled: bool,
@@ -733,6 +746,9 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ProjectInfo {
         project: TuiProjectInfo,
+    },
+    RuntimeStatusChanged {
+        status: Box<super::runtime_status::TuiRuntimeStatus>,
     },
     TaskStateChanged {
         state: Box<super::runtime_view::TuiTaskState>,

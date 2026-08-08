@@ -757,6 +757,7 @@ mod tests {
                     crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 tool_result_materializer:
                     crate::application::tool::test_support::test_tool_result_materializer(),
+                committed_side_effects: Default::default(),
                 runtime_cancellation: cancel.clone(),
             };
             let step_tool_context = ctx.with_cancellation(Arc::new(

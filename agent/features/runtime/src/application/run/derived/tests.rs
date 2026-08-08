@@ -54,6 +54,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             Arc::new(FakeRefl)
         },
         task: crate::application::run::test_task_access(),
+        published_state: crate::application::published_state::PublishedStateRegistry::default(),
         hooks: {
             struct FakeHook;
             #[async_trait]

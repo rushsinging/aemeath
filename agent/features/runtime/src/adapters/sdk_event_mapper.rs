@@ -1,23 +1,23 @@
 //! Runtime-owned mappers to the SDK Published Language.
 
 use crate::application::loop_engine::chat::RuntimeRunContext;
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use sdk::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
     ChatEventContext, ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
     ChildRunTerminalOutcomeView, RunStatusView, ToolCallStatusView, ToolResultImage,
 };
 
-pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
+pub fn map_lifecycle_event(event: RuntimeLifecycleEvent) -> ChatEvent {
     match event {
-        RunDomainEvent::Started {
+        RuntimeLifecycleEvent::Started {
             run_id,
             parent_run_id,
         } => ChatEvent::RunStarted {
             run_id,
             parent_run_id,
         },
-        RunDomainEvent::StepStarted {
+        RuntimeLifecycleEvent::StepStarted {
             run_id,
             parent_run_id,
             step_id,
@@ -26,7 +26,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             step_id,
         },
-        RunDomainEvent::StepCompleted {
+        RuntimeLifecycleEvent::StepCompleted {
             run_id,
             parent_run_id,
             step_id,
@@ -35,7 +35,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             step_id,
         },
-        RunDomainEvent::StepCancellationRequested {
+        RuntimeLifecycleEvent::StepCancellationRequested {
             run_id,
             parent_run_id,
             step_id,
@@ -44,7 +44,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             step_id,
         },
-        RunDomainEvent::StepFinalizationStarted {
+        RuntimeLifecycleEvent::StepFinalizationStarted {
             run_id,
             parent_run_id,
             step_id,
@@ -53,25 +53,25 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             step_id,
         },
-        RunDomainEvent::StepCancelled {
+        RuntimeLifecycleEvent::StepCancelled {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         } => ChatEvent::RunStepCancelled {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         },
-        RunDomainEvent::DrainingInput {
+        RuntimeLifecycleEvent::DrainingInput {
             run_id,
             parent_run_id,
         } => ChatEvent::RunDrainingInput {
             run_id,
             parent_run_id,
         },
-        RunDomainEvent::TerminationRequested {
+        RuntimeLifecycleEvent::TerminationRequested {
             run_id,
             parent_run_id,
             reason,
@@ -82,7 +82,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             reason,
             deadline,
         },
-        RunDomainEvent::Terminated {
+        RuntimeLifecycleEvent::Terminated {
             run_id,
             parent_run_id,
             reason,
@@ -91,7 +91,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             reason,
         },
-        RunDomainEvent::Completed {
+        RuntimeLifecycleEvent::Completed {
             run_id,
             parent_run_id,
             result,
@@ -101,7 +101,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             result,
         },
-        RunDomainEvent::Failed {
+        RuntimeLifecycleEvent::Failed {
             run_id,
             parent_run_id,
             error,
@@ -110,7 +110,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             error,
         },
-        RunDomainEvent::StuckDetected {
+        RuntimeLifecycleEvent::StuckDetected {
             run_id,
             parent_run_id,
             reason,
@@ -119,7 +119,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             parent_run_id,
             reason,
         },
-        RunDomainEvent::Transitioned {
+        RuntimeLifecycleEvent::Transitioned {
             run_id,
             parent_run_id,
             to,
@@ -135,7 +135,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
                 phase_elapsed_ms: timing.phase_elapsed_ms,
             },
         },
-        RunDomainEvent::AwaitingUser {
+        RuntimeLifecycleEvent::AwaitingUser {
             run_id,
             parent_run_id,
             ..
@@ -143,7 +143,7 @@ pub fn map_domain_event(event: RunDomainEvent) -> ChatEvent {
             run_id,
             parent_run_id,
         },
-        RunDomainEvent::Resumed {
+        RuntimeLifecycleEvent::Resumed {
             run_id,
             parent_run_id,
             ..
@@ -220,29 +220,40 @@ pub(crate) fn map_display_history_index(
     }
 }
 
+pub(crate) fn map_activity_event(
+    event: crate::application::loop_engine::chat::RuntimeActivityEvent,
+) -> ChatEvent {
+    match event {
+        crate::application::loop_engine::chat::RuntimeActivityEvent::Changed { kind, activity } => {
+            ChatEvent::ActivityChanged {
+                kind,
+                activity: *activity,
+            }
+        }
+        crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot) => {
+            ChatEvent::ActivitySnapshot(snapshot)
+        }
+    }
+}
+
 pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
     match event {
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ActivityChanged {
-            kind,
-            activity,
-        } => ChatEvent::ActivityChanged { kind, activity },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
-            ChatEvent::ActivitySnapshot(snapshot)
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::Text { context, text } => {
-            ChatEvent::Token {
-                context: turn_context_to_sdk(context),
-                text,
-            }
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::Thinking { context, text } => {
-            ChatEvent::Thinking {
-                context: turn_context_to_sdk(context),
-                text,
-            }
-        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::AssistantTextDelta {
+            context,
+            delta,
+        } => ChatEvent::AssistantTextDelta {
+            context: turn_context_to_sdk(context),
+            delta,
+        },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ThinkingDelta {
+            context,
+            delta,
+        } => ChatEvent::ThinkingDelta {
+            context: turn_context_to_sdk(context),
+            delta,
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::BlockComplete {
             context,
             text,
@@ -250,35 +261,48 @@ pub(crate) fn map_stream_event(
             context: turn_context_to_sdk(context),
             text,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallStart {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallStarted {
             context,
             id,
             provider_id,
             name,
             index,
-        } => ChatEvent::ToolCallStart {
+        } => ChatEvent::ToolCallStarted {
             context: turn_context_to_sdk(context),
             id,
             provider_id,
             name,
             index,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallUpdate {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallArgumentsDelta {
             context,
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
-            arguments,
-            status,
-        } => ChatEvent::ToolCallUpdate {
+            delta,
+        } => ChatEvent::ToolCallArgumentsDelta {
             context: turn_context_to_sdk(context),
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
+            delta,
+        },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            status,
+        } => ChatEvent::ToolCallStateChanged {
+            context: turn_context_to_sdk(context),
+            id,
+            provider_id,
+            name,
+            index,
             arguments,
             status: tool_call_status_to_sdk(status),
         },
@@ -338,10 +362,10 @@ pub(crate) fn map_stream_event(
                     .collect(),
             }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::MicrocompactDone {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::MicrocompactCompleted {
             messages,
             cleared_count,
-        } => ChatEvent::MicrocompactDone {
+        } => ChatEvent::MicrocompactCompleted {
             messages: messages
                 .into_iter()
                 .map(crate::application::client::message_to_sdk)
@@ -385,18 +409,18 @@ pub(crate) fn map_stream_event(
                 error,
             }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactRollback { messages } => {
-            ChatEvent::CompactRollback {
-                messages: messages
-                    .into_iter()
-                    .map(crate::application::client::message_to_sdk)
-                    .collect(),
-            }
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactFinished {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactOperationRolledBack {
+            messages,
+        } => ChatEvent::CompactOperationRolledBack {
+            messages: messages
+                .into_iter()
+                .map(crate::application::client::message_to_sdk)
+                .collect(),
+        },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactOperationCompleted {
             messages,
             notice,
-        } => ChatEvent::CompactFinished {
+        } => ChatEvent::CompactOperationCompleted {
             messages: messages
                 .into_iter()
                 .map(crate::application::client::message_to_sdk)
@@ -485,10 +509,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::RunChanged(run_step) => {
             ChatEvent::CurrentRunChanged(run_step)
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::AskUserBatch {
-            items,
-            reply_tx,
-        } => ChatEvent::AskUserBatch { items, reply_tx },
         crate::application::loop_engine::chat::RuntimeStreamEvent::InteractionRequested {
             request,
         } => ChatEvent::InteractionRequested { request },
@@ -503,14 +523,14 @@ pub(crate) fn map_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolProgress {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
-        } => ChatEvent::ToolProgress {
+            delta,
+        } => ChatEvent::ToolOutputDelta {
             context: turn_context_to_sdk(context),
             tool_id,
-            event: sdk::ToolProgressEventView { text: event.text },
+            delta,
         },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ChildRunActivity(event) => {
             ChatEvent::ChildRunActivity {
@@ -560,15 +580,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesWithdrawn {
             texts,
         } => ChatEvent::UserMessagesWithdrawn { texts },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => ChatEvent::CompactProgress {
-            stage: stage.as_str().to_string(),
-            current: current.map(|n| n as u32),
-            total: total.map(|n| n as u32),
-        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
@@ -638,6 +649,9 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::TaskStateChanged { state } => {
             ChatEvent::TaskStateChanged { state }
         }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::RuntimeStatusChanged {
+            status,
+        } => ChatEvent::RuntimeStatusChanged { status },
         crate::application::loop_engine::chat::RuntimeStreamEvent::CostUpdate { cost } => {
             ChatEvent::CostUpdate { cost }
         }
@@ -742,8 +756,8 @@ pub(crate) fn project_agent_progress_event(
 
 #[cfg(test)]
 mod run_status_mapping_tests {
-    use super::map_domain_event;
-    use crate::domain::agent_run::{RunDomainEvent, RunStatus, RunTransitionReason};
+    use super::map_lifecycle_event;
+    use crate::domain::agent_run::{RunStatus, RunTransitionReason, RuntimeLifecycleEvent};
     use sdk::{ChatEvent, RunStatusView};
 
     #[test]
@@ -772,7 +786,7 @@ mod run_status_mapping_tests {
         for (runtime_status, expected_status) in statuses {
             let run_id = sdk::RunId::new_v7();
             let parent_run_id = sdk::RunId::new_v7();
-            let event = RunDomainEvent::Transitioned {
+            let event = RuntimeLifecycleEvent::Transitioned {
                 run_id: run_id.clone(),
                 parent_run_id: Some(parent_run_id.clone()),
                 from: RunStatus::Created,
@@ -785,7 +799,7 @@ mod run_status_mapping_tests {
                 },
             };
 
-            match map_domain_event(event) {
+            match map_lifecycle_event(event) {
                 ChatEvent::RunTransitioned {
                     run_id: mapped_run_id,
                     parent_run_id: mapped_parent_run_id,

@@ -1,3 +1,4 @@
+use super::runtime_status::{TuiContextBudget, TuiContextDecisionSource, TuiRuntimeStatus};
 use super::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiHookNoticeKind, TuiMessageSource,
     TuiSkillRequestMetadata, TuiTaskBatch, TuiTaskBatchStatus, TuiTaskItem, TuiTaskItemStatus,
@@ -6,11 +7,8 @@ use super::runtime_view::{
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum SdkEventMapping {
     Runtime(TuiRuntimeEvent),
-    /// Events that have been fully retired and carry no TUI-relevant payload.
-    Nop,
 }
 
 pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
@@ -53,30 +51,77 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 )
                 .collect(),
         },
-        ChatEvent::Token { context, text } => TuiRuntimeEvent::Text {
+        ChatEvent::AssistantTextDelta { context, delta } => TuiRuntimeEvent::AssistantTextDelta {
             context: turn_context(context),
-            text,
+            delta,
         },
-        ChatEvent::Thinking { context, text } => TuiRuntimeEvent::Thinking {
+        ChatEvent::ThinkingDelta { context, delta } => TuiRuntimeEvent::ThinkingDelta {
             context: turn_context(context),
-            text,
+            delta,
+        },
+        ChatEvent::Token { context, text } => TuiRuntimeEvent::AssistantTextDelta {
+            context: turn_context(context),
+            delta: text,
+        },
+        ChatEvent::Thinking { context, text } => TuiRuntimeEvent::ThinkingDelta {
+            context: turn_context(context),
+            delta: text,
         },
         ChatEvent::BlockComplete { context, text } => TuiRuntimeEvent::BlockComplete {
             context: turn_context(context),
             text,
         },
-        ChatEvent::ToolCallStart {
+        ChatEvent::ToolCallStarted {
             context,
             id,
             provider_id,
             name,
             index,
-        } => TuiRuntimeEvent::ToolCallStart {
+        }
+        | ChatEvent::ToolCallStart {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        } => TuiRuntimeEvent::ToolCallStarted {
             context: turn_context(context),
             id: id.as_str().to_string(),
             provider_id,
             name,
             index,
+        },
+        ChatEvent::ToolCallArgumentsDelta {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            delta,
+        } => TuiRuntimeEvent::ToolCallArgumentsDelta {
+            context: turn_context(context),
+            id: id.as_str().to_string(),
+            provider_id,
+            name,
+            index,
+            delta,
+        },
+        ChatEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            status,
+        } => TuiRuntimeEvent::ToolCallStateChanged {
+            context: turn_context(context),
+            id: id.as_str().to_string(),
+            provider_id,
+            name,
+            index,
+            arguments,
+            status: tool_status(status),
         },
         ChatEvent::ToolCallUpdate {
             context,
@@ -87,15 +132,24 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             arguments_delta,
             arguments,
             status,
-        } => TuiRuntimeEvent::ToolCallUpdate {
-            context: turn_context(context),
-            id: id.as_str().to_string(),
-            provider_id,
-            name,
-            index,
-            arguments_delta,
-            arguments,
-            status: tool_status(status),
+        } => match arguments_delta {
+            Some(delta) => TuiRuntimeEvent::ToolCallArgumentsDelta {
+                context: turn_context(context),
+                id: id.as_str().to_string(),
+                provider_id,
+                name,
+                index,
+                delta,
+            },
+            None => TuiRuntimeEvent::ToolCallStateChanged {
+                context: turn_context(context),
+                id: id.as_str().to_string(),
+                provider_id,
+                name,
+                index,
+                arguments,
+                status: tool_status(status),
+            },
         },
         ChatEvent::ToolResult {
             context,
@@ -140,10 +194,14 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::TurnStarted { messages } => TuiRuntimeEvent::TurnStarted {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::MicrocompactDone {
+        ChatEvent::MicrocompactCompleted {
             messages,
             cleared_count,
-        } => TuiRuntimeEvent::MicrocompactDone {
+        }
+        | ChatEvent::MicrocompactDone {
+            messages,
+            cleared_count,
+        } => TuiRuntimeEvent::MicrocompactCompleted {
             messages: messages.into_iter().map(chat_message).collect(),
             cleared_count,
         },
@@ -159,13 +217,17 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
         },
-        ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactRollback {
+        ChatEvent::CompactOperationRolledBack { messages }
+        | ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactOperationRolledBack {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::CompactFinished { messages, notice } => TuiRuntimeEvent::CompactFinished {
-            messages: messages.into_iter().map(chat_message).collect(),
-            notice,
-        },
+        ChatEvent::CompactOperationCompleted { messages, notice }
+        | ChatEvent::CompactFinished { messages, notice } => {
+            TuiRuntimeEvent::CompactOperationCompleted {
+                messages: messages.into_iter().map(chat_message).collect(),
+                notice,
+            }
+        }
         ChatEvent::UserMessagesAdopted { items, queued } => TuiRuntimeEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
             queued: queued.into_iter().map(chat_message).collect(),
@@ -274,12 +336,21 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             run_id,
             parent_run_id,
             step_id,
-            confirmed,
+            terminal,
         } => run_step_event(
             run_id,
             parent_run_id,
             step_id,
-            TuiRunStepEvent::Cancelled { confirmed },
+            TuiRunStepEvent::Cancelled {
+                terminal: match terminal {
+                    sdk::RunStepCancellationTerminal::Cancelled => {
+                        TuiRunStepCancellationTerminal::Cancelled
+                    }
+                    sdk::RunStepCancellationTerminal::CancellationUnconfirmed => {
+                        TuiRunStepCancellationTerminal::CancellationUnconfirmed
+                    }
+                },
+            },
         ),
         ChatEvent::InteractionRequested { request } => {
             TuiRuntimeEvent::InteractionRequested(interaction_request(request))
@@ -295,8 +366,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::RunChanged(turn) | ChatEvent::CurrentRunChanged(turn) => {
             TuiRuntimeEvent::RunChanged(turn)
         }
-        // #944 5B: AskUserBatch legacy bridge removed.
-        ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
             source_context,
             attachment_context,
@@ -308,14 +377,23 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             tool_id: tool_id.as_str().to_string(),
             event: agent_progress(event),
         },
+        ChatEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => TuiRuntimeEvent::ToolOutputDelta {
+            context: turn_context(context),
+            tool_id: tool_id.as_str().to_string(),
+            delta,
+        },
         ChatEvent::ToolProgress {
             context,
             tool_id,
             event,
-        } => TuiRuntimeEvent::ToolProgress {
+        } => TuiRuntimeEvent::ToolOutputDelta {
             context: turn_context(context),
             tool_id: tool_id.as_str().to_string(),
-            event: super::tui_runtime_event::TuiToolProgressEvent { text: event.text },
+            delta: event.text,
         },
         ChatEvent::ChildRunActivity { event } => {
             TuiRuntimeEvent::ChildRunActivity(child_run_activity(event))
@@ -354,15 +432,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::Result(result) => TuiRuntimeEvent::CommandResultText {
             text: result.text,
             is_error: false,
-        },
-        ChatEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => TuiRuntimeEvent::CompactProgress {
-            stage,
-            current,
-            total,
         },
         ChatEvent::ModelSwitched { result } => TuiRuntimeEvent::ModelSwitched {
             display_name: result.display_name,
@@ -471,6 +540,30 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 workspace_root: project.workspace_root,
                 git_branch: project.git_branch,
             },
+        },
+        ChatEvent::RuntimeStatusChanged { status } => TuiRuntimeEvent::RuntimeStatusChanged {
+            status: Box::new(TuiRuntimeStatus {
+                session_id: status.session_id,
+                revision: status.revision,
+                heartbeat_sequence: status.heartbeat_sequence,
+                context_budget: TuiContextBudget {
+                    context_size: status.context_budget.context_size,
+                    effective_window: status.context_budget.effective_window,
+                    decision_token_count: status.context_budget.decision_token_count,
+                    threshold: status.context_budget.threshold,
+                    usage_permille: status.context_budget.usage_permille,
+                    compaction_needed: status.context_budget.compaction_needed,
+                    source: match status.context_budget.source {
+                        sdk::ContextDecisionSourceView::ActualProviderUsage => {
+                            TuiContextDecisionSource::ActualProviderUsage
+                        }
+                        sdk::ContextDecisionSourceView::HeuristicFallback => {
+                            TuiContextDecisionSource::HeuristicFallback
+                        }
+                        sdk::ContextDecisionSourceView::Manual => TuiContextDecisionSource::Manual,
+                    },
+                },
+            }),
         },
         ChatEvent::TaskStateChanged { state } => TuiRuntimeEvent::TaskStateChanged {
             state: Box::new(TuiTaskState {
@@ -686,18 +779,21 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             script,
             attempt,
         },
-        sdk::ActivityDetailView::Compact {
-            stage,
-            current,
-            total,
-        } => TuiActivityDetail::Compact {
+        sdk::ActivityDetailView::Compact { stage, work } => TuiActivityDetail::Compact {
             stage: match stage {
                 sdk::CompactStageView::Preparing => TuiCompactStage::Preparing,
-                sdk::CompactStageView::Summarizing => TuiCompactStage::Summarizing,
+                sdk::CompactStageView::Generating => TuiCompactStage::Generating,
+                sdk::CompactStageView::Mapping => TuiCompactStage::Mapping,
+                sdk::CompactStageView::Reducing => TuiCompactStage::Reducing,
+                sdk::CompactStageView::Refreshing => TuiCompactStage::Refreshing,
                 sdk::CompactStageView::Finalizing => TuiCompactStage::Finalizing,
             },
-            current,
-            total,
+            work: match work {
+                sdk::CompactWorkView::Indeterminate => TuiCompactWork::Indeterminate,
+                sdk::CompactWorkView::Determinate { completed, total } => {
+                    TuiCompactWork::Determinate { completed, total }
+                }
+            },
         },
         sdk::ActivityDetailView::Interaction { kind } => TuiActivityDetail::Interaction {
             kind: match kind {

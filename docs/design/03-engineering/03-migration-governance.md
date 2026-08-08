@@ -62,11 +62,18 @@ O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于�
 
 ## 2. Agent Runtime Current → Target
 
+### Issues #945 / #1502：控制—清理—权威终态
+
+| Current | Target | 责任与退出条件 |
+|---|---|---|
+| #945 / #1502 前，TUI Esc/Ctrl+C 仅调用无 identity 的 `CancelCurrentRun`；ACK 与 Runtime terminal 边界依赖局部约定；Step cancel 事件跨 SDK/TUI 退化为 `confirmed: bool`；finalized Step 未携带 durable cleanup receipts，普通/streaming 取消收敛规则不同 | TUI 缓存 active Main RunStep identity 并优先发出 typed `CancelRunStep`；SDK `CancelRunStepOutcome` 仅表达 command ACK。Runtime ordinary/streaming 使用同一 cancellation convergence，保留已完成结果、仅补 missing、维持 provider call 顺序，并把 typed tool outcome 保留到 receipt ledger。Step finalizer 查询 Context-owned durable receipts，按任一 `CancellationUnconfirmed` receipt 决定 typed terminal，并通过 domain → SDK `RunStepCancellationTerminal` → TUI ACL 无损传播 | 当前 L0-L4 证据覆盖 typed target、ACK 非终态、ordinary/streaming 共用收敛、receipt append、typed domain/SDK/TUI payload；架构测试阻止 `confirmed: bool` 与 ACK terminal source 复活。仍需持续审计 MCP remote confirmation 与真实进程 L5 cancellation smoke |
+
 ### Issue #1440：Tool 硬 deadline 与 durable receipt
 
 | Current | Target | 责任与退出条件 |
 |---|---|---|
 | #1440 前，Runtime、Bash、Agent/MCP 路径分别解释 timeout；同步 Glob/文件工作可能阻塞 Tokio worker；已接受 ToolCall 只在 finalized Step 后进入 Session，强制 abort 可能丢失 call identity | 当前已落地 Runtime `ToolExecutionSupervisor`：按 Scope、Run 与 descriptor 选择最早 absolute deadline，协调用户取消与 250ms grace，并把 cleanup 未确认诚实映射为 `CancellationUnconfirmed`；Tool phase 不再被外层 interrupt select 提前 drop，必须完成 terminal receipt durable mutation 后才能 finalize Step。Context Management 以同一 CanonicalSession/AtomicBlob 原子推进 durable `ToolCallReceipt` 的 `Pending → Running → terminal`；恢复对有对应孤立 `tool_use` 的历史 Pending/Running receipt 只读补齐 provider-safe `CancellationUnconfirmed` ToolResult，不回写 ledger或重放 future。Glob 已进入 blocking pool并轮询 cancellation；Bash/Agent 保留各自资源 cleanup/child Run 终止语义 | Issue #1440 当前证据：Main/Sub 普通 Tool、Agent Tool、AskUser 首次调用及 approval continuation 均经 supervisor；Session wire v4 与 v3 兼容 reader、receipt mutation、mixed-result finalization、Tool phase settle-before-finalize、历史 unfinished receipt 恢复投影、Glob cancellation、Bash process-tree timeout、生命周期日志及静态 guard 均有对应测试。仍属后续 Target：实现未确认调用的跨 Step 同名重入门禁；将 MCP remote cancellation confirmation 建模为独立协议 |
+
 
 实施证据记录在 `docs/superpowers/plans/2026-07-28-issue-1440-tool-hard-timeout-persistence.md`；完成前必须同步 #1440 checklist、测试命令与未完成项的可验证理由。
 

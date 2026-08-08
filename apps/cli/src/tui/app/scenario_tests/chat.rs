@@ -2,8 +2,9 @@ use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
-    TuiActivityTiming, TuiCompactStage, TuiHookPoint, TuiInteractionKind, TuiModelStreamState,
-    TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent, UiActivityId,
+    TuiActivityTiming, TuiCompactStage, TuiCompactWork, TuiHookPoint, TuiInteractionKind,
+    TuiModelStreamState, TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    UiActivityId,
 };
 use crate::tui::model::conversation::interaction::UiRunId;
 
@@ -190,9 +191,11 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
             kind: TuiActivityKind::Compaction,
             state: TuiActivityState::Running,
             detail: TuiActivityDetail::Compact {
-                stage: TuiCompactStage::Summarizing,
-                current: Some(37),
-                total: Some(100),
+                stage: TuiCompactStage::Mapping,
+                work: TuiCompactWork::Determinate {
+                    completed: 37,
+                    total: 100,
+                },
             },
             audience: TuiActivityAudience::Operational,
             total_elapsed_ms: 5_000,
@@ -353,7 +356,7 @@ fn live_and_resumed_compact_render_one_persistent_notice_without_chat_message() 
     let notice = "✓ 上下文压缩完成";
 
     let mut live = TuiScenarioHarness::new(100, 30);
-    live.runtime_event(TuiRuntimeEvent::CompactFinished {
+    live.runtime_event(TuiRuntimeEvent::CompactOperationCompleted {
         messages: vec![],
         notice: notice.into(),
     });
@@ -380,17 +383,17 @@ fn terminal_text_after_thinking_matches_resume_projection() {
 
     let mut live = TuiScenarioHarness::new(100, 30);
     live.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
-    live.runtime_event(TuiRuntimeEvent::Thinking {
+    live.runtime_event(TuiRuntimeEvent::ThinkingDelta {
         context: ctx(),
-        text: "Inspecting the repository".into(),
+        delta: "Inspecting the repository".into(),
     });
     live.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
         text: String::new(),
     });
-    live.runtime_event(TuiRuntimeEvent::Text {
+    live.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: ctx(),
-        text: terminal_text.into(),
+        delta: terminal_text.into(),
     });
     live.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
@@ -428,9 +431,9 @@ fn terminal_text_after_thinking_matches_resume_projection() {
 fn live_completed_turn_renders_terminal_notice() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: ctx(),
-        text: "The result is ready.".into(),
+        delta: "The result is ready.".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
@@ -515,18 +518,18 @@ fn authoritative_cancelled_terminal_never_renders_completed_verb() {
 fn streaming_has_representative_thinking_and_completed_snapshots() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
-    harness.runtime_event(TuiRuntimeEvent::Thinking {
+    harness.runtime_event(TuiRuntimeEvent::ThinkingDelta {
         context: ctx(),
-        text: "Inspecting the repository".into(),
+        delta: "Inspecting the repository".into(),
     });
     harness.render();
     let thinking_screen = harness.screen();
     assert!(thinking_screen.contains("Inspecting the repository"));
     assert!(!thinking_screen.contains("Thinking…"));
 
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: ctx(),
-        text: "The result is ready.".into(),
+        delta: "The result is ready.".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
@@ -552,20 +555,19 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
 fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let id = "read-1".to_string();
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
         name: "Read".into(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
         name: "Read".into(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({"file_path":"Cargo.toml"})),
         status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
     });
@@ -593,7 +595,7 @@ fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
 fn oversized_unknown_tool_result_renders_truncation_notice() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let id = "unknown-large-1".to_string();
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-unknown-large-1".into()),
@@ -650,9 +652,9 @@ fn empty_system_messages_from_runtime_do_not_accumulate_blank_lines() {
                     harness.runtime_event(TuiRuntimeEvent::SystemMessage((*payload).to_string()));
                 }
             }
-            harness.runtime_event(TuiRuntimeEvent::Text {
+            harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
                 context: ctx(),
-                text: anchor.to_string(),
+                delta: anchor.to_string(),
             });
             harness.runtime_event(TuiRuntimeEvent::BlockComplete {
                 context: ctx(),
@@ -695,9 +697,9 @@ fn empty_system_messages_from_runtime_do_not_accumulate_blank_lines() {
 fn chat_retry_after_partial_preserves_output_append_only() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: ctx(),
-        text: "partial before interruption".into(),
+        delta: "partial before interruption".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),
@@ -708,9 +710,9 @@ fn chat_retry_after_partial_preserves_output_append_only() {
         attempt: 2,
         delay_ms: 10_000,
     });
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: ctx(),
-        text: "replacement after retry".into(),
+        delta: "replacement after retry".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: ctx(),

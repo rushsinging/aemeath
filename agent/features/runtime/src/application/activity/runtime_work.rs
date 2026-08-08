@@ -57,8 +57,7 @@ impl ActivityCoordinator {
             kind: ActivityKind::Compaction,
             detail: ActivityDetail::Compact {
                 stage,
-                current: None,
-                total: None,
+                work: sdk::CompactWorkView::Indeterminate,
             },
             audience: ActivityAudienceView::User,
         })
@@ -68,16 +67,11 @@ impl ActivityCoordinator {
         &self,
         activity_id: ActivityId,
         stage: sdk::CompactStageView,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: sdk::CompactWorkView,
     ) -> Result<(), ActivityError> {
         self.update(UpdateActivity {
             activity_id,
-            detail: Some(ActivityDetail::Compact {
-                stage,
-                current,
-                total,
-            }),
+            detail: Some(ActivityDetail::Compact { stage, work }),
         })
     }
 
@@ -96,8 +90,7 @@ impl ActivityCoordinator {
             kind: ActivityKind::Compaction,
             detail: ActivityDetail::Compact {
                 stage,
-                current: None,
-                total: None,
+                work: sdk::CompactWorkView::Indeterminate,
             },
             audience: ActivityAudienceView::User,
         })

@@ -2,8 +2,8 @@ use super::*;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
-    ClearCompactRuntime, ConfirmInteraction, ConversationIntent, ShowInteraction, StartChat,
-    SyncQueuedSubmissions, UpdateInteractionDraft,
+    ConfirmInteraction, ConversationIntent, ShowInteraction, StartChat, SyncQueuedSubmissions,
+    UpdateInteractionDraft,
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionDraftAction, InteractionRequest, UiInteractionRequestId, UiRunId,
@@ -253,22 +253,6 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
     assert!(result.dirty.output);
 }
 
-#[test]
-fn clear_compact_runtime_intent_clears_progress_and_marks_output_dirty() {
-    let mut model = TuiModel::default();
-    model
-        .conversation
-        .runtime
-        .set_compact_progress("summarizing".to_string(), Some(1), Some(2));
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::ClearCompactRuntime(ClearCompactRuntime)),
-    );
-
-    assert!(model.conversation.runtime.compact_progress.is_none());
-    assert!(result.dirty.output);
-}
 #[test]
 fn session_intent_marks_status_dirty() {
     let mut model = TuiModel::default();

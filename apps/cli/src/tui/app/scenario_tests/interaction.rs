@@ -289,20 +289,19 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
         run_id: "ask-turn".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-call");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context,
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({ "question": "明天想吃什么？", "options": ["日料"] })),
         status: TuiToolCallStatus::Running,
     });
@@ -583,20 +582,19 @@ async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end
         run_id: "ask-turn-cancelled".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-cancelled");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context,
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),
         name: "AskUserQuestion".to_string(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({ "question": "确认取消？", "options": ["继续"] })),
         status: TuiToolCallStatus::Running,
     });

@@ -11,9 +11,9 @@ fn context() -> crate::tui::adapter::tui_runtime_event::TuiRunContext {
 fn runtime_batch_keeps_terminal_event_behind_stream_chunks() {
     let (tx, mut rx) = mpsc::channel(512);
     for index in 0..200 {
-        tx.try_send(TuiRuntimeEvent::Text {
+        tx.try_send(TuiRuntimeEvent::AssistantTextDelta {
             context: context(),
-            text: index.to_string(),
+            delta: index.to_string(),
         })
         .unwrap();
     }
@@ -35,9 +35,9 @@ fn runtime_batch_keeps_terminal_event_behind_stream_chunks() {
 fn runtime_batch_is_bounded_to_keep_terminal_input_responsive() {
     let (tx, mut rx) = mpsc::channel(512);
     for index in 0..300 {
-        tx.try_send(TuiRuntimeEvent::Text {
+        tx.try_send(TuiRuntimeEvent::AssistantTextDelta {
             context: context(),
-            text: index.to_string(),
+            delta: index.to_string(),
         })
         .unwrap();
     }
@@ -52,15 +52,15 @@ fn runtime_batch_is_bounded_to_keep_terminal_input_responsive() {
 #[test]
 fn runtime_batch_stops_at_session_reset_effect_barrier() {
     let (tx, mut rx) = mpsc::channel(8);
-    tx.try_send(TuiRuntimeEvent::Text {
+    tx.try_send(TuiRuntimeEvent::AssistantTextDelta {
         context: context(),
-        text: "before reset".to_string(),
+        delta: "before reset".to_string(),
     })
     .unwrap();
     tx.try_send(TuiRuntimeEvent::SessionReset).unwrap();
-    tx.try_send(TuiRuntimeEvent::Text {
+    tx.try_send(TuiRuntimeEvent::AssistantTextDelta {
         context: context(),
-        text: "after reset".to_string(),
+        delta: "after reset".to_string(),
     })
     .unwrap();
 
@@ -70,6 +70,6 @@ fn runtime_batch_stops_at_session_reset_effect_barrier() {
     assert_eq!(batch.len(), 2);
     assert!(matches!(batch.last(), Some(TuiRuntimeEvent::SessionReset)));
     assert!(
-        matches!(rx.try_recv(), Ok(TuiRuntimeEvent::Text { text, .. }) if text == "after reset")
+        matches!(rx.try_recv(), Ok(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "after reset")
     );
 }

@@ -572,6 +572,21 @@ impl ConversationUpdate for FinishProcessingJob {
     }
 }
 
+impl ConversationUpdate for ReplaceRuntimeStatus {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        let accepts = model.runtime.runtime_status.as_ref().is_none_or(|current| {
+            current.session_id != self.0.session_id
+                || self.0.revision > current.revision
+                || (self.0.revision == current.revision
+                    && self.0.heartbeat_sequence > current.heartbeat_sequence)
+        });
+        if accepts {
+            model.runtime.runtime_status = Some(self.0);
+        }
+        Vec::new()
+    }
+}
+
 impl ConversationUpdate for ReplaceTaskState {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         if model.runtime.task_status.replace(self.0) {
@@ -613,17 +628,6 @@ impl ConversationUpdate for SetGraphPhase {
             model.runtime.status_notice = RuntimeState::notice_from_phase(self.0.as_deref());
         }
         vec![ConversationChange::GraphPhaseChanged]
-    }
-}
-
-impl ConversationUpdate for SetCompactProgress {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model
-            .runtime
-            .set_compact_progress(self.stage, self.current, self.total);
-        // 进度条嵌入 spinner 行（output 区），单独归类为 output_dirty 而非 status_dirty；
-        // 见 `ConversationChange::CompactProgressChanged`（#540）。
-        vec![ConversationChange::CompactProgressChanged]
     }
 }
 
@@ -710,12 +714,12 @@ impl ConversationUpdate for ConversationIntent {
             Self::UpdateTaskStatus(s) => s.update(model),
             Self::StartProcessingJob(s) => s.update(model),
             Self::FinishProcessingJob(s) => s.update(model),
+            Self::ReplaceRuntimeStatus(status) => status.update(model),
             Self::ReplaceTaskState(state) => state.update(model),
             Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
             Self::SetGraphPhase(s) => s.update(model),
-            Self::SetCompactProgress(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }
@@ -728,6 +732,45 @@ mod tests {
     use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
     use crate::tui::model::output_timeline::OutputTimelineItem;
+
+    fn runtime_status(
+        revision: u64,
+        heartbeat_sequence: u64,
+    ) -> crate::tui::adapter::runtime_status::TuiRuntimeStatus {
+        crate::tui::adapter::runtime_status::TuiRuntimeStatus {
+            session_id: "session-1".to_string(),
+            revision,
+            heartbeat_sequence,
+            context_budget: crate::tui::adapter::runtime_status::TuiContextBudget {
+                context_size: 200_000,
+                effective_window: 180_000,
+                decision_token_count: revision,
+                threshold: 144_000,
+                usage_permille: revision as u32,
+                compaction_needed: false,
+                source: crate::tui::adapter::runtime_status::TuiContextDecisionSource::ActualProviderUsage,
+            },
+        }
+    }
+
+    #[test]
+    fn runtime_status_rejects_stale_revision_and_accepts_newer_heartbeat() {
+        let mut model = ConversationModel::default();
+        ReplaceRuntimeStatus(runtime_status(5, 0)).update(&mut model);
+        ReplaceRuntimeStatus(runtime_status(3, 0)).update(&mut model);
+        assert_eq!(model.runtime.runtime_status.as_ref().unwrap().revision, 5);
+
+        ReplaceRuntimeStatus(runtime_status(5, 1)).update(&mut model);
+        assert_eq!(
+            model
+                .runtime
+                .runtime_status
+                .as_ref()
+                .unwrap()
+                .heartbeat_sequence,
+            1
+        );
+    }
 
     fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
         TuiContentBlock::ToolUse {

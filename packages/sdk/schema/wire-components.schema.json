@@ -135,14 +135,6 @@
         },
         {
           "properties": {
-            "current": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
             "detail_type": {
               "const": "compact",
               "type": "string"
@@ -150,18 +142,14 @@
             "stage": {
               "$ref": "#/$defs/CompactStageView"
             },
-            "total": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": [
-                "integer",
-                "null"
-              ]
+            "work": {
+              "$ref": "#/$defs/CompactWorkView"
             }
           },
           "required": [
             "detail_type",
-            "stage"
+            "stage",
+            "work"
           ],
           "type": "object"
         },
@@ -745,10 +733,53 @@
     "CompactStageView": {
       "enum": [
         "preparing",
-        "summarizing",
+        "generating",
+        "mapping",
+        "reducing",
+        "refreshing",
         "finalizing"
       ],
       "type": "string"
+    },
+    "CompactWorkView": {
+      "oneOf": [
+        {
+          "properties": {
+            "work_type": {
+              "const": "indeterminate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "work_type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "work_type": {
+              "const": "determinate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "work_type",
+            "completed",
+            "total"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ConfigApplicationScopeView": {
       "enum": [

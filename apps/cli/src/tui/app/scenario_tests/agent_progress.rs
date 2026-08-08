@@ -64,20 +64,19 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
     let marker = "child-private-progress";
     let mut harness = TuiScenarioHarness::new(100, 30);
 
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: parent_context.clone(),
         id: tool_id.clone(),
         provider_id: Some("provider-agent-tool".to_string()),
         name: "Agent".to_string(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: parent_context.clone(),
         id: tool_id.clone(),
         provider_id: Some("provider-agent-tool".to_string()),
         name: "Agent".to_string(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({"role":"coder","prompt":"write hello.rs"})),
         status: TuiToolCallStatus::Ready,
     });
@@ -145,7 +144,7 @@ fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
         spawned_by_tool_call_id: "agent-tool".to_string(),
     };
     let mut harness = TuiScenarioHarness::new(120, 40);
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: parent_context,
         id: "agent-tool".to_string(),
         provider_id: Some("provider-agent-tool".to_string()),
@@ -211,7 +210,7 @@ fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
     };
     let mut harness = TuiScenarioHarness::new(120, 40);
     for (index, tool_id) in ["agent-a", "agent-b"].into_iter().enumerate() {
-        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
             context: parent_context.clone(),
             id: tool_id.to_string(),
             provider_id: Some(format!("provider-{tool_id}")),
@@ -303,20 +302,19 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
 
     for (index, name) in ["Bash", "Agent"].into_iter().enumerate() {
         let tool_id = format!("tool-{index}");
-        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
             context: context.clone(),
             id: tool_id.clone(),
             provider_id: Some(format!("provider-{index}")),
             name: name.to_string(),
             index,
         });
-        harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
             context: context.clone(),
             id: tool_id,
             provider_id: Some(format!("provider-{index}")),
             name: name.to_string(),
             index,
-            arguments_delta: None,
             arguments: Some(serde_json::json!({"command":"sleep 60"})),
             status: TuiToolCallStatus::Running,
         });
@@ -336,7 +334,10 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
         run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
         parent_run_id: None,
         step_id: crate::tui::model::conversation::interaction::UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
     harness.runtime_event(TuiRuntimeEvent::Cancelled {
         context: context.clone(),

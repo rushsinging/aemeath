@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "index": "docs/design/02-modules/runtime/events/09-event-index.md",
+  "layers": {
+    "runtime_stream": {
+      "path": "agent/features/runtime/src/application/loop_engine/chat/events.rs",
+      "enum": "RuntimeStreamEvent",
+      "variants": [
+        "AssistantTextDelta", "ThinkingDelta", "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta",
+        "ToolCallStateChanged", "ToolResult",
+        "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactCompleted",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
+        "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
+        "Cancelled", "LiveTps", "RunChanged", "InteractionRequested",
+        "AgentProgress", "ToolOutputDelta", "ChildRunActivity", "SkillsUpdated",
+        "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
+        "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+      ]
+    },
+    "sdk": {
+      "path": "packages/sdk/src/chat_event.rs",
+      "enum": "ChatEvent",
+      "variants": [
+        "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "AssistantTextDelta", "ThinkingDelta",
+        "Token", "Thinking",
+        "BlockComplete", "ToolCallStarted", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
+        "ToolCallUpdate", "ToolResult", "SystemMessage",
+        "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactCompleted", "MicrocompactDone",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "CompactRollback", "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
+        "DoneWithDurationMs", "RunStarted", "RunStepStarted", "RunStepCompleted",
+        "RunStepCancellationRequested", "RunStepFinalizationStarted", "RunStepCancelled",
+        "RunDrainingInput", "RunTerminationRequested", "RunTerminated", "RunCompleted",
+        "RunFailed", "RunStuckDetected", "RunTransitioned", "RunAwaitingUser", "RunResumed",
+        "Cancelled", "LiveTps", "RunChanged", "CurrentRunChanged", "InteractionRequested",
+        "AgentProgress", "ToolOutputDelta", "ToolProgress", "ChildRunActivity",
+        "WorkingDirectoryChanged", "ConfigChanged", "ConfigReloaded", "SessionReset",
+        "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
+        "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+      ]
+    },
+    "tui": {
+      "path": "apps/cli/src/tui/adapter/tui_runtime_event.rs",
+      "enum": "TuiRuntimeEvent",
+      "variants": [
+        "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "AssistantTextDelta", "ThinkingDelta",
+        "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta", "ToolCallStateChanged",
+        "ToolResult", "SystemMessage",
+        "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactCompleted",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
+        "RunStep", "InteractionRequested", "AgentProgress", "ToolOutputDelta", "ChildRunActivity",
+        "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
+        "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
+        "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
+        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "RuntimeStatusChanged", "TaskStateChanged", "CostUpdate", "ConfigChanged",
+        "ConfigReloaded"
+      ]
+    }
+  },
+  "current_cross_layer_facts": [
+    {
+      "runtime": "RuntimeStatusChanged",
+      "sdk": "RuntimeStatusChanged",
+      "tui": "RuntimeStatusChanged"
+    },
+    {
+      "runtime": "TaskStateChanged",
+      "sdk": "TaskStateChanged",
+      "tui": "TaskStateChanged"
+    },
+    {
+      "runtime": "AssistantTextDelta",
+      "sdk": "AssistantTextDelta",
+      "tui": "AssistantTextDelta"
+    },
+    {
+      "runtime": "ThinkingDelta",
+      "sdk": "ThinkingDelta",
+      "tui": "ThinkingDelta"
+    },
+    {
+      "runtime": "ToolCallStarted",
+      "sdk": "ToolCallStarted",
+      "tui": "ToolCallStarted"
+    },
+    {
+      "runtime": "CompactOperationRolledBack",
+      "sdk": "CompactOperationRolledBack",
+      "tui": "CompactOperationRolledBack"
+    },
+    {
+      "runtime": "CompactOperationCompleted",
+      "sdk": "CompactOperationCompleted",
+      "tui": "CompactOperationCompleted"
+    },
+    {
+      "runtime": "MicrocompactCompleted",
+      "sdk": "MicrocompactCompleted",
+      "tui": "MicrocompactCompleted"
+    },
+    {
+      "runtime": "ToolOutputDelta",
+      "sdk": "ToolOutputDelta",
+      "tui": "ToolOutputDelta"
+    },
+    {
+      "runtime": "ToolCallArgumentsDelta",
+      "sdk": "ToolCallArgumentsDelta",
+      "tui": "ToolCallArgumentsDelta"
+    },
+    {
+      "runtime": "ToolCallStateChanged",
+      "sdk": "ToolCallStateChanged",
+      "tui": "ToolCallStateChanged"
+    }
+  ],
+  "sdk_compatibility_variants": [
+    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress", "MicrocompactDone",
+    "CompactRollback", "CompactFinished"
+  ],
+  "legacy_broad_names": [
+    "SkillsUpdated", "Done", "DoneWithDuration", "DoneWithDurationMs",
+    "LiveTps", "RunChanged", "AgentProgress",
+    "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
+    "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
+    "ReminderList", "SessionList", "ProjectInfo", "CostUpdate"
+  ],
+  "retired_symbols": [
+    "CompactProgress", "TasksSnapshot", "AskUserBatch"
+  ],
+  "ack_terminal_patterns": [
+    "^(?:Cancel|Terminate|Reply|Reject|Accept).*(?:Completed|Cancelled|Terminated|Failed)$"
+  ],
+  "ack_terminal_compatibility_names": [],
+  "tui_container_only_variants": [
+    "Noop", "Error", "Run", "RunStep", "GraphPhaseChanged"
+  ]
+}

@@ -1,4 +1,8 @@
 use super::*;
+use crate::application::loop_engine::chat::committed_side_effect::{
+    CommittedSideEffectDispatcher, TaskCommittedSideEffectHandler,
+};
+use crate::application::loop_engine::chat::{ChatEventSinkHandle, EventFuture};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -229,19 +233,69 @@ fn completed_task_outcome(text: &str) -> tools::ToolOutcome {
         .with_task_change(tools::CommittedTaskChange::from_command_result(&result))
 }
 
+#[derive(Clone)]
+struct NoopTaskEventSink;
+
+impl ChatEventSink for NoopTaskEventSink {
+    fn send_event<'a>(&'a self, _event: RuntimeStreamEvent) -> EventFuture<'a> {
+        Box::pin(std::future::ready(()))
+    }
+
+    fn try_send_event(&self, _event: RuntimeStreamEvent) {}
+}
+
 async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
     let hook = Arc::new(RecordingTaskHook::default());
     let hook_port: Arc<dyn HookPort> = hook.clone();
-    run_task_hooks(
-        &hook_port,
-        &ActivityCoordinator::production_without_publisher(sdk::RunId::new_v7()),
-        &sdk::RunStepId::new_v7(),
-        &call("ordinary", 0),
-        &outcome,
-        &std::env::current_dir().unwrap(),
-        &tokio_util::sync::CancellationToken::new(),
-    )
-    .await;
+    let store = Arc::new(task::TaskStore::new());
+    let revision = outcome
+        .task_change
+        .as_ref()
+        .map(|change| change.revision().get());
+    let dispatcher =
+        CommittedSideEffectDispatcher::new(vec![Arc::new(TaskCommittedSideEffectHandler::new(
+            store.clone(),
+            ChatEventSinkHandle::new(NoopTaskEventSink),
+            "session-test".to_owned(),
+            hook_port,
+            Arc::new(ActivityCoordinator::production_without_publisher(
+                sdk::RunId::new_v7(),
+            )),
+            std::env::current_dir().unwrap(),
+        ))]);
+    let tool_call = call("ordinary", 0);
+    let execution = crate::application::tool::agent::ToolExecution::new(&tool_call, outcome);
+    if let Some(revision) = revision {
+        store
+            .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+            .unwrap();
+        if revision >= 2 {
+            store
+                .create_task(
+                    TaskCreateSpec::try_new(
+                        "subject".to_owned(),
+                        String::new(),
+                        None,
+                        TaskPriority::Normal,
+                    )
+                    .unwrap(),
+                    2,
+                )
+                .unwrap();
+        }
+        if revision >= 3 {
+            let task_id = store.list()[0].id();
+            store.transition(task_id, TaskStatus::Completed, 3).unwrap();
+        }
+    }
+    dispatcher
+        .observe(
+            &tool_call,
+            &execution,
+            &sdk::RunStepId::new_v7(),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
     let invocations = hook.invocations.lock().unwrap().clone();
     invocations
 }
