@@ -30,7 +30,7 @@
 | `RunStep` | Run 内一次可终结步骤 | `Turn` 作为同义 terminal subject |
 | `Activity` | Runtime observational fact | `RuntimeWork` 对外事件名 |
 | `RuntimeStatus` | Runtime 发布的状态 full-state family | `StatusInfo`、`RuntimeStateUpdate` |
-| `TaskState` | Task 完整状态 family | `TasksSnapshot` 作为同义 Current 名 |
+| `TaskState` | Task 完整状态 family | 已退役 `TasksSnapshot` 作为同义 Current 名 |
 | `CompactOperation` | 一次 Context compact operation | `CompactionProgress`、`SummarizationProgress` |
 | `ModelInvocation` | 一次 Provider 模型调用 | `LlmCall`、`ApiCall` |
 | `ToolCall` | 一次工具调用 identity | `ToolExecution` 作为同义 wire subject |

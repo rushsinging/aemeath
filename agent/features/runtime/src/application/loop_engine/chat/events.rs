@@ -167,12 +167,6 @@ pub enum RuntimeStreamEvent {
     },
     LiveTps(f64),
     RunChanged(usize),
-    AskUserBatch {
-        items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
-    },
-    /// #1246: typed interaction request (pure value, no sender).
-    /// Production path replaces `AskUserBatch`.
     InteractionRequested {
         request: sdk::InteractionRequest,
     },

@@ -271,9 +271,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::CurrentRunChanged(run_step) => {
             crate::tui::log_trace!("{} current_run_changed run_step={}", stage, run_step)
         }
-        sdk::ChatEvent::AskUserBatch { items, .. } => {
-            crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
-        }
         sdk::ChatEvent::AgentProgress {
             source_context,
             attachment_context,

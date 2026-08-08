@@ -129,7 +129,7 @@ for event_name in sorted(all_actual):
 for retired_symbol in baseline["retired_symbols"]:
     if retired_symbol in all_actual:
         violations.append(
-            f"retired event {retired_symbol} must not return; use typed Activity stage/work"
+            f"retired event {retired_symbol} must not return; use the canonical replacement recorded in the event index"
         )
 
 ack_terminal_compatibility = set(baseline["ack_terminal_compatibility_names"])

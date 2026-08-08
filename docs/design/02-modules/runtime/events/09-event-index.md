@@ -50,7 +50,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 |---|---|---|---|---|---|---|
 | `RuntimeStatusChanged` | 同名 | `ReplaceRuntimeStatus` | session + revision + heartbeat sequence | full-state | 状态交付；非 Lifecycle | Current |
 | `TaskStateChanged` | 同名 | `ReplaceTaskState` | session + Task revision | full-state | 状态交付；非 Lifecycle | Current |
-| `TasksSnapshot` | 同名 | `UpdateTaskLines` | session | text snapshot | 否 | Target Removal |
+| — | — | — | session | retired text snapshot | 否 | Removed；由 `TaskStateChanged` 替代，NEVER 恢复 |
 
 ## 5. Content Stream：模型、Tool 与 Provider
 
@@ -106,7 +106,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | Runtime / Command | SDK / Outcome | TUI / Consumer | Identity | Delivery | Authority | 状态 |
 |---|---|---|---|---|---|---|
 | `InteractionRequested` | 同名 | `ShowInteraction` | request + run | request fact | Interaction resource | Current |
-| `AskUserBatch` | 同名 | `Nop` | legacy sender | legacy transport | 否 | Target Removal |
+| — | — | — | legacy sender | retired transport | 否 | Removed；由 `InteractionRequested` 替代，NEVER 恢复 |
 | `ReplyInteraction` command | accepted/rejected/failed | resolve local resource | request | ACK | 非 Run terminal | Current；目标使用完整命名 |
 | `CancelInteraction` command | accepted/rejected/failed | cancel local resource | request | ACK | 非 Run terminal | Current；目标使用完整命名 |
 | `CancelCurrentRun` command | accepted/rejected/failed | cancelling presentation | run | ACK | 否 | Compatibility fallback |
@@ -154,7 +154,8 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `MicrocompactDone` | 禁用 `Done` | 已由 `MicrocompactCompleted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `CompactFinished` | Subject/Fact 不统一 | 已由 `CompactOperationCompleted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `CompactRollback` | 缺 operation subject/过去式 | 已由 `CompactOperationRolledBack` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
-| `TasksSnapshot` | 与 `TaskStateChanged` 双路径 | 退役旧 text projection | Dead compatibility |
+| `TasksSnapshot` | 与 `TaskStateChanged` 双路径 | 已从 Runtime/SDK/TUI transport 物理退役；由 revisioned `TaskStateChanged` 取代 | Removed；Guard 禁止恢复 |
+| `AskUserBatch` | sender 穿透 Published Language | 已从 Runtime/SDK/TUI transport 物理退役；由纯值 `InteractionRequested` 与 command reply 取代 | Removed；Guard 禁止恢复 |
 | `SkillsUpdated` | plural + Updated | `SkillCatalogChanged` | 跨层 wire |
 | `ModelList` | query response 与 event 混淆 | `ModelCatalogSnapshot/Changed` | 语义澄清 |
 | `ReminderList` | 同上 | `ReminderCatalogSnapshot/Changed` | 语义澄清 |

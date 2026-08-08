@@ -7,11 +7,8 @@ use super::runtime_view::{
 use super::tui_runtime_event::*;
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum SdkEventMapping {
     Runtime(TuiRuntimeEvent),
-    /// Events that have been fully retired and carry no TUI-relevant payload.
-    Nop,
 }
 
 pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
@@ -369,8 +366,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::RunChanged(turn) | ChatEvent::CurrentRunChanged(turn) => {
             TuiRuntimeEvent::RunChanged(turn)
         }
-        // #944 5B: AskUserBatch legacy bridge removed.
-        ChatEvent::AskUserBatch { .. } => return SdkEventMapping::Nop,
         ChatEvent::AgentProgress {
             source_context,
             attachment_context,

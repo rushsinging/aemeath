@@ -12,7 +12,7 @@
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
         "CompactOperationCompleted", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
         "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
-        "Cancelled", "LiveTps", "RunChanged", "AskUserBatch", "InteractionRequested",
+        "Cancelled", "LiveTps", "RunChanged", "InteractionRequested",
         "AgentProgress", "ToolOutputDelta", "ChildRunActivity", "SkillsUpdated",
         "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
@@ -36,7 +36,7 @@
         "RunDrainingInput", "RunTerminationRequested", "RunTerminated", "RunCompleted",
         "RunFailed", "RunStuckDetected", "RunTransitioned", "RunAwaitingUser", "RunResumed",
         "Cancelled", "LiveTps", "RunChanged", "CurrentRunChanged", "InteractionRequested",
-        "AskUserBatch", "AgentProgress", "ToolOutputDelta", "ToolProgress", "ChildRunActivity",
+        "AgentProgress", "ToolOutputDelta", "ToolProgress", "ChildRunActivity",
         "WorkingDirectoryChanged", "ConfigChanged", "ConfigReloaded", "SessionReset",
         "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
@@ -127,13 +127,13 @@
   ],
   "legacy_broad_names": [
     "SkillsUpdated", "Done", "DoneWithDuration", "DoneWithDurationMs",
-    "LiveTps", "RunChanged", "AskUserBatch", "AgentProgress",
+    "LiveTps", "RunChanged", "AgentProgress",
     "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
     "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
     "ReminderList", "SessionList", "ProjectInfo", "CostUpdate"
   ],
   "retired_symbols": [
-    "CompactProgress"
+    "CompactProgress", "TasksSnapshot", "AskUserBatch"
   ],
   "ack_terminal_patterns": [
     "^(?:Cancel|Terminate|Reply|Reject|Accept).*(?:Completed|Cancelled|Terminated|Failed)$"

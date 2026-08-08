@@ -509,10 +509,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::RunChanged(run_step) => {
             ChatEvent::CurrentRunChanged(run_step)
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::AskUserBatch {
-            items,
-            reply_tx,
-        } => ChatEvent::AskUserBatch { items, reply_tx },
         crate::application::loop_engine::chat::RuntimeStreamEvent::InteractionRequested {
             request,
         } => ChatEvent::InteractionRequested { request },

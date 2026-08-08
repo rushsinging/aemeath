@@ -18,7 +18,7 @@ Published State 解决“消费者如何获得当前完整状态”，不是另�
 |---|---|---|---|---|---|
 | Runtime Status | `RuntimeStatusChanged` | `RuntimeStatusView` | Context decision 与 Runtime presentation facts | `ReplaceRuntimeStatus` | Current |
 | Task State | `TaskStateChanged` | `TaskStateView` | typed committed Task change | `ReplaceTaskState` | Current |
-| Legacy Task display | `TasksSnapshot` | text lines | 旧展示投影 | `UpdateTaskLines` | Target Removal |
+| Retired Task display | — | — | 旧 text projection 已删除 | — | Removed；`TasksSnapshot` NEVER 恢复 |
 
 各 family 的 revision epoch 独立，禁止 Runtime Status revision 与 Task revision 相互比较。
 

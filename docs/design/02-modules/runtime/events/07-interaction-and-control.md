@@ -15,7 +15,7 @@
 | Runtime | SDK | TUI | Consumer | 状态 |
 |---|---|---|---|---|
 | `InteractionRequested` | 同名 | TUI-owned typed request | `ShowInteraction` | Current |
-| `AskUserBatch` | 同名 | `Nop` | legacy sender bridge 已退役 | Target Removal |
+| — | — | — | legacy sender bridge 已物理退役；`AskUserBatch` NEVER 恢复 | Removed |
 
 `InteractionRequested` payload MUST 穷举 UserQuestions、ToolApproval、PlanApproval、HardPause 等 body，并保留 Runtime 生成的 `request_id` 与 `run_id`。TUI NEVER 自生成协议 identity，也 NEVER 持有 sender/waiter。
 

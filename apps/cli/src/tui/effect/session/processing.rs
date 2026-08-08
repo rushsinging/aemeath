@@ -40,17 +40,12 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             };
             while let Some(event) = stream.recv().await {
                 log_sdk_event(&event, "sdk->tui.recv");
-                match sdk_event_to_tui_event(event) {
-                    SdkEventMapping::Runtime(runtime_event) => {
-                        log_tui_runtime_delivery(&runtime_event, "forwarding");
-                        if ctx.runtime_tx.send(runtime_event).await.is_err() {
-                            crate::tui::log_warn!(
-                                "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
-                            );
-                            return;
-                        }
-                    }
-                    SdkEventMapping::Nop => {}
+                let SdkEventMapping::Runtime(runtime_event) = sdk_event_to_tui_event(event);
+                log_tui_runtime_delivery(&runtime_event, "forwarding");
+                if ctx.runtime_tx.send(runtime_event).await.is_err() {
+                    crate::tui::log_warn!(
+                        "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
+                    );
                 }
             }
         },

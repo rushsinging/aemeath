@@ -27,7 +27,6 @@ mod skills_updated_tests {
 }
 
 use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
-use crate::chat::AskUserQuestionItem;
 use crate::chat_result::{ChatResult, ToolResultImage};
 use crate::chat_view::{AgentProgressEventView, ChildRunActivityEventView, WorkspaceContextView};
 use crate::ChatMessage;
@@ -730,12 +729,6 @@ pub enum ChatEvent {
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,
-    },
-    /// Legacy AskUser transport bridge. It remains reachable only until #878 switches production.
-    AskUserBatch {
-        items: Vec<AskUserQuestionItem>,
-        /// 回传回答或显式取消。
-        reply_tx: tokio::sync::oneshot::Sender<crate::AskUserReply>,
     },
     /// Agent progress 事件，分别保留派生 Run 来源身份与父 ToolCall 挂载身份。
     AgentProgress {
