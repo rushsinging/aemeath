@@ -60,7 +60,7 @@ pub enum RuntimeStreamEvent {
         context: RuntimeRunContext,
         text: String,
     },
-    ToolCallStart {
+    ToolCallStarted {
         context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,

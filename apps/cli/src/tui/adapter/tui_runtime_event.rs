@@ -585,7 +585,7 @@ pub(crate) enum TuiRuntimeEvent {
         context: TuiRunContext,
         text: String,
     },
-    ToolCallStart {
+    ToolCallStarted {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,

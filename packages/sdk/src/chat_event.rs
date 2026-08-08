@@ -499,7 +499,15 @@ pub enum ChatEvent {
         context: ChatEventContext,
         text: String,
     },
-    /// 工具调用开始。
+    /// 工具调用已开始。生产 mapper 只发布该显式 fact。
+    ToolCallStarted {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallStart {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,

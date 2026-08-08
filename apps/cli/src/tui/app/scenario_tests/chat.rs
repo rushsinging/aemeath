@@ -555,7 +555,7 @@ fn streaming_has_representative_thinking_and_completed_snapshots() {
 fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let id = "read-1".to_string();
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-read-1".into()),
@@ -595,7 +595,7 @@ fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
 fn oversized_unknown_tool_result_renders_truncation_notice() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let id = "unknown-large-1".to_string();
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: ctx(),
         id: id.clone(),
         provider_id: Some("provider-unknown-large-1".into()),

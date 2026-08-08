@@ -321,13 +321,14 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         );
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
-        self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
-            context: self.context.clone(),
-            id,
-            provider_id: provider_id.map(str::to_string),
-            name: name.to_string(),
-            index,
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::ToolCallStarted {
+                context: self.context.clone(),
+                id,
+                provider_id: provider_id.map(str::to_string),
+                name: name.to_string(),
+                index,
+            });
     }
     fn on_thinking(&mut self, text: &str) {
         self.mark_visible_event("thinking", || format!("bytes={}", text.len()));

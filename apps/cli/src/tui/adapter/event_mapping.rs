@@ -74,13 +74,20 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             context: turn_context(context),
             text,
         },
-        ChatEvent::ToolCallStart {
+        ChatEvent::ToolCallStarted {
             context,
             id,
             provider_id,
             name,
             index,
-        } => TuiRuntimeEvent::ToolCallStart {
+        }
+        | ChatEvent::ToolCallStart {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        } => TuiRuntimeEvent::ToolCallStarted {
             context: turn_context(context),
             id: id.as_str().to_string(),
             provider_id,

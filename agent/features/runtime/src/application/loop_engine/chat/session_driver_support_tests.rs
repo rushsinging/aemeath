@@ -716,7 +716,7 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::ThinkingDelta { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
-            RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
+            RuntimeStreamEvent::ToolCallStarted { .. } => "ToolCallStarted".to_string(),
             RuntimeStreamEvent::ToolCallArgumentsDelta { .. } => {
                 "ToolCallArgumentsDelta".to_string()
             }

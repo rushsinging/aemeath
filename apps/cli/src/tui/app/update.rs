@@ -583,7 +583,7 @@ impl App {
         let valid_model_activity = match &event {
             TuiRuntimeEvent::AssistantTextDelta { delta, .. }
             | TuiRuntimeEvent::ThinkingDelta { delta, .. } => !delta.is_empty(),
-            TuiRuntimeEvent::ToolCallStart { .. } => true,
+            TuiRuntimeEvent::ToolCallStarted { .. } => true,
             TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
             TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),
             _ => false,

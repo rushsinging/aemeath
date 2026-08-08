@@ -64,7 +64,7 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
     let marker = "child-private-progress";
     let mut harness = TuiScenarioHarness::new(100, 30);
 
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: parent_context.clone(),
         id: tool_id.clone(),
         provider_id: Some("provider-agent-tool".to_string()),
@@ -144,7 +144,7 @@ fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
         spawned_by_tool_call_id: "agent-tool".to_string(),
     };
     let mut harness = TuiScenarioHarness::new(120, 40);
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: parent_context,
         id: "agent-tool".to_string(),
         provider_id: Some("provider-agent-tool".to_string()),
@@ -210,7 +210,7 @@ fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
     };
     let mut harness = TuiScenarioHarness::new(120, 40);
     for (index, tool_id) in ["agent-a", "agent-b"].into_iter().enumerate() {
-        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
             context: parent_context.clone(),
             id: tool_id.to_string(),
             provider_id: Some(format!("provider-{tool_id}")),
@@ -302,7 +302,7 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
 
     for (index, name) in ["Bash", "Agent"].into_iter().enumerate() {
         let tool_id = format!("tool-{index}");
-        harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
             context: context.clone(),
             id: tool_id.clone(),
             provider_id: Some(format!("provider-{index}")),

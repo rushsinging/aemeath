@@ -407,7 +407,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             }))
         }
-        TuiRuntimeEvent::ToolCallStart {
+        TuiRuntimeEvent::ToolCallStarted {
             context,
             id,
             provider_id,

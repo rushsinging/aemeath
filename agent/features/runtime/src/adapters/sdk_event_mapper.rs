@@ -261,13 +261,13 @@ pub(crate) fn map_stream_event(
             context: turn_context_to_sdk(context),
             text,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallStart {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolCallStarted {
             context,
             id,
             provider_id,
             name,
             index,
-        } => ChatEvent::ToolCallStart {
+        } => ChatEvent::ToolCallStarted {
             context: turn_context_to_sdk(context),
             id,
             provider_id,

@@ -289,7 +289,7 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
         run_id: "ask-turn".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-call");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),
@@ -582,7 +582,7 @@ async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end
         run_id: "ask-turn-cancelled".to_string(),
     };
     let tool_call_id = crate::tui::model::conversation::ids::ToolCallId::new("ask-tool-cancelled");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: tool_call_id.as_str().to_string(),
         provider_id: Some(tool_call_id.as_str().to_string()),

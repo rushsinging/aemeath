@@ -38,7 +38,7 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
         .map(|line| format!("new-{index}-{line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),

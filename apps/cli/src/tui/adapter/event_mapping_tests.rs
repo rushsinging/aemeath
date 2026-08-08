@@ -62,6 +62,41 @@ fn legacy_content_variants_normalize_at_the_tui_boundary() {
 }
 
 #[test]
+fn tool_call_started_normalizes_new_and_legacy_sdk_inputs() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-started"),
+        sdk::ChatRunId::new("run-tool-started"),
+    );
+    let id = sdk::ToolCallId::new("tool-started");
+
+    let started = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStarted {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-started".to_owned()),
+        name: "Grep".to_owned(),
+        index: 3,
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStart {
+        context,
+        id,
+        provider_id: Some("provider-started".to_owned()),
+        name: "Grep".to_owned(),
+        index: 3,
+    });
+
+    assert!(matches!(
+        started,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStarted { name, index: 3, .. })
+            if name == "Grep"
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStarted { name, index: 3, .. })
+            if name == "Grep"
+    ));
+}
+
+#[test]
 fn tool_call_delta_and_state_keep_distinct_tui_fact_names() {
     let context = sdk::ChatEventContext::new(
         sdk::ChatId::new("chat-tool-split"),

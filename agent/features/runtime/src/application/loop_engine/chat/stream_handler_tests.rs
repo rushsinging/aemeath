@@ -63,7 +63,7 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         .unwrap()
         .iter()
         .filter_map(|event| match event {
-            RuntimeStreamEvent::ToolCallStart { id, .. } => Some(id.clone()),
+            RuntimeStreamEvent::ToolCallStarted { id, .. } => Some(id.clone()),
             _ => None,
         })
         .collect();

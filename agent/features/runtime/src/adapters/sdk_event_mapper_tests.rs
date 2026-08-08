@@ -530,8 +530,8 @@ fn tool_call_argument_delta_and_state_fact_map_to_distinct_sdk_events() {
 }
 
 #[test]
-fn tool_call_projection_preserves_canonical_name() {
-    let event = RuntimeStreamEvent::ToolCallStart {
+fn tool_call_started_keeps_explicit_fact_name_and_canonical_tool_name() {
+    let event = RuntimeStreamEvent::ToolCallStarted {
         context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-1"),
             sdk::ids::ChatRunId::new("turn-1"),
@@ -543,7 +543,7 @@ fn tool_call_projection_preserves_canonical_name() {
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
+        sdk::ChatEvent::ToolCallStarted { name, .. } => assert_eq!(name, "Grep"),
         other => panic!("unexpected event: {other:?}"),
     }
 }

@@ -20,7 +20,8 @@
 | — | `Token` | dual-read 后转为 `AssistantTextDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | — | `Thinking` | dual-read 后转为 `ThinkingDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `BlockComplete` | `BlockComplete` | 同名 | `CompleteBlock` | Current |
-| `ToolCallStart` | `ToolCallStart` | 同名 | 建立 Tool block | Target Rename：`ToolCallStarted` |
+| `ToolCallStarted` | 同名 | 同名 | 建立 Tool block | Current |
+| — | `ToolCallStart` | dual-read 后转为 `ToolCallStarted` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `ToolCallArgumentsDelta` | `ToolCallArgumentsDelta` | 同名 | 按 stream order 追加参数预览 | Current |
 | `ToolCallStateChanged` | `ToolCallStateChanged` | 同名 | 原子替换完整参数与状态 | Current |
 | — | `ToolCallUpdate` | dual-read 后转为上述两类 TUI fact | SDK public wire compatibility | Compatibility；Runtime producer removed |

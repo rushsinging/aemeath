@@ -37,7 +37,14 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             context.run_id,
             text.len()
         ),
-        sdk::ChatEvent::ToolCallStart {
+        sdk::ChatEvent::ToolCallStarted {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        }
+        | sdk::ChatEvent::ToolCallStart {
             context,
             id,
             provider_id,

@@ -27,7 +27,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             context: context.into(),
             text,
         },
-        sdk::ChatEvent::ToolCallStart {
+        sdk::ChatEvent::ToolCallStarted {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        }
+        | sdk::ChatEvent::ToolCallStart {
             context,
             id,
             provider_id,

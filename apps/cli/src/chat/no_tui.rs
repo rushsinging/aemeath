@@ -241,7 +241,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::Done { .. }
         | sdk::ChatEvent::DoneWithDurationMs { .. }
         | sdk::ChatEvent::Cancelled { .. } => {}
-        sdk::ChatEvent::ToolCallStart { name, .. } => {
+        sdk::ChatEvent::ToolCallStarted { name, .. }
+        | sdk::ChatEvent::ToolCallStart { name, .. } => {
             eprintln!("[tool:start] {name}");
         }
         sdk::ChatEvent::AskUserBatch { items, reply_tx } => {

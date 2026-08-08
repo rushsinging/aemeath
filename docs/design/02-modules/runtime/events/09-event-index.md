@@ -61,7 +61,8 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | — | `Token` | compatibility dual-read → `AssistantTextDelta` | block | legacy delta payload | 否 | Compatibility；Runtime producer removed |
 | — | `Thinking` | compatibility dual-read → `ThinkingDelta` | block | legacy delta payload | 否 | Compatibility；Runtime producer removed |
 | `BlockComplete` | 同名 | `CompleteBlock` | block | completion fact | 否 | Current |
-| `ToolCallStart` | 同名 | 建立 Tool block | tool call | start fact | 否 | Target Rename：`ToolCallStarted` |
+| `ToolCallStarted` | 同名 | 同名 → 建立 Tool block | tool call | start fact | 否 | Current |
+| — | `ToolCallStart` | compatibility dual-read → `ToolCallStarted` | tool call | legacy start fact | 否 | Compatibility；Runtime producer removed |
 | `ToolCallArgumentsDelta` | 同名 | 同名 → 更新参数预览 | tool call + stream order | delta | 否 | Current |
 | `ToolCallStateChanged` | 同名 | 同名 → 更新完整 args/state | tool call | full-state fact | 否 | Current |
 | — | `ToolCallUpdate` | compatibility dual-read → 上述两类 TUI fact | tool call | mixed legacy payload | 否 | Compatibility；Runtime producer removed |
@@ -142,7 +143,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 |---|---|---|---|
 | `Token` | Subject/Delta 缺失 | 已由 `AssistantTextDelta` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `Thinking` | Delta 缺失 | 已由 `ThinkingDelta` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
-| `ToolCallStart` | 非事实后缀 | `ToolCallStarted` | 跨层 wire |
+| `ToolCallStart` | 非事实后缀 | 已由 `ToolCallStarted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `ToolCallUpdate` | args delta 与 state fact 淡化 | 已拆为 `ToolCallArgumentsDelta` / `ToolCallStateChanged`；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal split complete |
 | `ToolProgress` | Subject/Delta 不清 | `ToolOutputDelta` | 跨层 wire |
 | `Done` / `DoneWithDurationMs` | 宽泛且重复 | 明确 Chat processing subject 后合并 | 语义冲突 |
