@@ -26,6 +26,7 @@
 8. **安全铁律**：派生 Run 能力 ≤ 父 Run（只削弱不越权）
 9. **防 stuck 内置**：StuckGuard 四层防线对所有 Run 统一保护
 10. **Session 回放边界**：Session committed content 是唯一可回放数据源；Runtime 内存态与未入 Session 的 InputBuffer 不可回放，Terminate 时可丢弃
+11. **唯一 accepted input**：Session gate 将 `UserMessage` / `SkillRequest` 收敛为 `AcceptedUserInput`；admission、buffer、drain、freeze、Context append 与 adoption 只沿这一条 typed 数据流推进，NEVER 并行维护 event/message adopted payload，也 NEVER 从模型正文反向解析输入类型
 ## 文档导航
 
 | 文档 | 内容 |

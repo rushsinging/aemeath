@@ -52,6 +52,7 @@ pub fn render_tool_call(
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
         view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
+        // streaming preview 已升为独立 ToolResult 子块，此处只记录是否存在预览。
         view.streaming_preview.is_some(),
     );
     // header / detail 两部分消费 ctx.text_width 做 wrap（Word 模式），避免窄终端下行宽
@@ -80,7 +81,7 @@ pub fn render_tool_call(
             .map(|line| line.with_style(detail_style)),
         );
     }
-
+    // streaming preview 已升为独立 ToolResult 子块；ToolCall 只渲染 header/detail。
     RenderedBlock {
         block_id: block_id.to_string(),
         lines: Rc::new(lines),
@@ -126,6 +127,7 @@ fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMetaView>) -> String {
 mod tests {
     use super::*;
     use crate::tui::view_model::output::ToolSemanticStatus;
+    use crate::tui::view_model::output::{AgentActivityKindView, AgentActivityLineView};
     use crate::tui::view_model::style::SemanticStyle;
     use unicode_width::UnicodeWidthStr;
 
@@ -298,9 +300,11 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{"command":"ls"}"#.into());
-        view.streaming_preview = Some(
-            "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为".into(),
-        );
+        view.streaming_preview = Some(vec![AgentActivityLineView {
+            kind: AgentActivityKindView::Message,
+            content: "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为"
+                .into(),
+        }]);
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(30));
 
@@ -320,26 +324,27 @@ mod tests {
 
     #[test]
     fn test_tool_call_does_not_render_inline_streaming_marker() {
-        // #1547：多行 streaming_preview 时，ToolCall 不应出现任何 ⎿ marker 或预览行。
+        // #1547：running activity 已升为独立 ToolResult 子块，ToolCall 仅保留 header/detail。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
-        view.streaming_preview = Some("2\n3\n4\n5\n6".into());
+        view.streaming_preview = Some(vec![
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "2".to_string(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::Message,
+                content: "still running".to_string(),
+            },
+        ]);
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
-        // ToolCall 不应渲染 streaming_preview 行内容
-        assert!(
-            !rendered.iter().any(|line| line.contains("2")),
-            "ToolCall 不应渲染 streaming 预览内容，实际: {rendered:?}"
-        );
-        // 不应出现任何 ⎿ marker（marker 由 gutter 在 ToolResult 子块注入）
-        let marker_count = rendered.iter().filter(|line| line.contains('⎿')).count();
-        assert_eq!(
-            marker_count, 0,
-            "ToolCall 不应有 ⎿ marker，实际: {rendered:?}"
-        );
+        assert!(rendered.iter().all(|line| !line.contains("→ 2")));
+        assert!(rendered.iter().all(|line| !line.contains("still running")));
+        assert!(rendered.iter().all(|line| !line.contains('⎿')));
     }
 
     #[test]
@@ -348,7 +353,6 @@ mod tests {
         let raw = r#"{"prompt":"do something","description":"task"}"#;
         assert_eq!(merge_agent_meta(raw, None), raw);
     }
-
     #[test]
     fn test_merge_agent_meta_fills_role_and_model() {
         // case 2（input 只有 role 无 model）：agent_meta 补上 runtime resolve 的 model

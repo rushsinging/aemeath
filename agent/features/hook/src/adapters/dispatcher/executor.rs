@@ -35,7 +35,7 @@ pub(crate) struct RawExecution {
 /// 单次执行的协议级故障（ExecutionFailed 可重试路径）。
 ///
 /// 与业务 Block（`HookReason`）严格区分：业务 Block 永不重试，
-/// 本枚举（除 `Cancelled`）触发最多 `MAX_ATTEMPTS` 次重试。`Cancelled` 立即终止
+/// 本枚举（除 `Cancelled`）按 Dispatcher 注入的 execution policy 重试。`Cancelled` 立即终止
 /// dispatch 且不重试，但仍记一次 ExecutionFailed 明细。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExecutionFault {

@@ -2,6 +2,7 @@
 //!
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
+use super::agent_progress::AgentActivityLine;
 use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::interaction::{
@@ -151,6 +152,14 @@ pub struct RecordAgentProgress {
     pub run_id: ChatRunId,
     pub tool_id: ToolCallId,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordAgentActivities {
+    pub chat_id: ChatId,
+    pub run_id: ChatRunId,
+    pub tool_id: ToolCallId,
+    pub activities: Vec<AgentActivityLine>,
 }
 
 /// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
@@ -410,6 +419,7 @@ pub enum ConversationIntent {
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordChildRunActivity(RecordChildRunActivity),
     RecordAgentProgress(RecordAgentProgress),
+    RecordAgentActivities(RecordAgentActivities),
     RecordToolStreamingOutput(RecordToolStreamingOutput),
     UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),

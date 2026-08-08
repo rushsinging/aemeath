@@ -85,7 +85,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | **Skill** | 由模型按名称调用、在调用时动态加载正文的特殊 Tool；具体 Skill 以廉价元数据被发现，但不各自注册 Tool schema。 |
 | **Skill Descriptor** | 可发现的 Skill 元数据：稳定 identity、描述、identity/slash aliases 与可选参数提示；**NEVER** 携带正文。 |
 | **Skill Catalog Snapshot** | 按稳定顺序发布的 Skill Descriptor 全量快照及确定性 revision；同一快照同时派生 slash route 与客户端补全。 |
-| **Skill Request** | 用户请求模型使用某个 Skill 的 typed 入站意图；携带 canonical identity 与原始参考参数，不构造 Tool Call。 |
+| **Skill Request** | 用户请求模型使用某个 Skill 的 typed 入站意图；携带 `InputId`、canonical identity、原始参考参数与 `raw_input`，不构造 Tool Call。Runtime 将它与普通 UserMessage 一起接纳为 `AcceptedUserInput`，但为模型生成内部 Skill 请求消息、为交付层保留 `raw_input`，二者不得互相替代或通过正文反向解析。 |
 | **Loaded Skill** | `SkillLoadPort` 在 Skill Tool 调用时按 identity 读取的单个 Skill 正文、来源与内容 revision。 |
 | **Slash Command** | 用户发起的 slash 输入；Skill 入口分类为 SkillRequest，普通 Command 按 SnapshotQuery / ApplicationControl 确定性路由。 |
 | **MCP Tool** | 经 MCP adapter 与 ACL 转换为统一 Tool 语义的外部工具；MCP 不是独立 BC。 |
@@ -120,6 +120,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | 术语 | 定义 | 所属 BC |
 |---|---|---|
 | **Message** | 领域对话消息（role + content + tool calls）。**与 provider 线格式经 ACL 隔离**。 | Agent Runtime / Context Management（Shared Kernel） |
+| **Accepted User Input** | Runtime 在 Session gate 接纳后、绑定 Run Step 前的唯一 typed 用户输入事实；穷举 `UserMessage { input_id, text, images }` 与 `SkillRequest { input_id, skill, arguments, raw_input }`。它统一 admission、FIFO、drain、freeze、持久化与 adoption 生命周期；**NEVER** 并行维护 message/event 两套 adopted 数据，也 **NEVER** 从模型正文重建 typed intent。 | Agent Runtime |
 | **Provider** | LLM 供应商适配器，内部 ACL 吸收各家差异。 | Provider |
 | **Policy Decision** | 工具执行前的权限判断结果。 | Policy |
 | **Audit Event** | 审计事件（执行 / 成本 / 用量）。 | Audit |

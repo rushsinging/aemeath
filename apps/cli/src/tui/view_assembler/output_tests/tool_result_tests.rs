@@ -531,7 +531,10 @@ fn test_output_assembler_shows_streaming_preview_while_tool_running() {
 
     assert_eq!(
         tool.streaming_preview,
-        Some("Agent turn 1/200, messages: 2, est_tokens: 500".to_string())
+        Some(vec![AgentActivityLineView {
+            kind: AgentActivityKindView::Message,
+            content: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+        }])
     );
 }
 
@@ -562,11 +565,14 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
         arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(RecordAgentProgress {
+    conversation.apply(RecordAgentActivities {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
-        message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+        activities: vec![
+            AgentActivityLine::tool_call("Read src/domain.rs"),
+            AgentActivityLine::message("Read as ordinary prose"),
+        ],
     });
 
     let vm = assemble_output_view(&conversation, None);
@@ -593,12 +599,22 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
     let OutputBlockKind::ToolResult(result_view) = &result.kind else {
         panic!("expected tool result");
     };
-    assert!(
-        result_view
-            .result_text
-            .contains("Agent turn 1/200, messages: 2, est_tokens: 500"),
-        "streaming 子节点应包含预览文本，实际: {}",
-        result_view.result_text
+    assert_eq!(
+        result_view.activity_lines,
+        Some(vec![
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "Read src/domain.rs".into(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::Message,
+                content: "Read as ordinary prose".into(),
+            },
+        ])
+    );
+    assert_eq!(
+        result_view.result_text,
+        "Read src/domain.rs\nRead as ordinary prose"
     );
 }
 

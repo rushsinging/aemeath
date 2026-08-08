@@ -85,13 +85,16 @@ mod tests {
         let mut config = Config::default();
         config.agents.roles = roles;
         config.language = language.to_string();
-        ConfigSnapshot::new(config)
+        share::config::domain::snapshot::ConfigSnapshot::new(config)
     }
 
     #[tokio::test]
     async fn build_static_prompt_does_not_embed_execution_discipline() {
         let hook_port: Arc<dyn HookPort> = Arc::new(
-            hook::build_dispatcher(&share::config::hooks::HooksConfig::default()).unwrap(),
+            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+                share::config::Config::default(),
+            ))
+            .unwrap(),
         );
         let prompt = build_static_prompt(
             std::path::Path::new("/tmp/project"),

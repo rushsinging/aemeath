@@ -23,6 +23,14 @@ impl ToolDisplay for SkillDisplay {
         Vec::new()
     }
 
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
+    }
+
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
@@ -55,6 +63,13 @@ mod tests {
                 details: DetailsPolicy::Hidden,
                 result: ResultPolicy::Hidden,
             }
+        );
+        assert_eq!(
+            display.header_for_subagent(
+                &serde_json::json!({"skill": "superpowers:using-superpowers"}),
+                None,
+            ),
+            "Skill superpowers:using-superpowers"
         );
         assert_eq!(
             display.format_header(&serde_json::json!({"content": "BODY_SENTINEL"}), None),

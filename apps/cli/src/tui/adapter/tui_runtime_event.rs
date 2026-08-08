@@ -476,6 +476,7 @@ pub(crate) enum TuiChildRunActivityKind {
     },
     ToolResult {
         tool_call_id: String,
+        tool_name: String,
         output: String,
         content: serde_json::Value,
         is_error: bool,

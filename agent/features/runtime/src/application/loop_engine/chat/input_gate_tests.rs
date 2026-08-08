@@ -68,15 +68,15 @@ async fn skill_request_adoption_preserves_typed_display_payload() {
     )
     .await;
 
-    assert_eq!(outcome.adopted_messages.len(), 1);
-    assert_eq!(outcome.adopted_messages[0].0, input_id);
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(outcome.accepted_inputs[0].input_id(), &input_id);
+    let accepted_message = outcome.accepted_inputs[0].model_message();
     assert_eq!(
-        outcome.adopted_messages[0].1.source(),
+        accepted_message.source(),
         share::message::MessageSource::SkillRequest
     );
     assert_eq!(
-        outcome.adopted_messages[0]
-            .1
+        accepted_message
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.skill_request.as_ref()),
@@ -204,8 +204,11 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
 
     assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
     assert_eq!(outcome.appended_user_messages, 1);
-    assert_eq!(outcome.adopted_messages.len(), 1);
-    assert_eq!(outcome.adopted_messages[0].1.text_content(), "继续");
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "继续"
+    );
     // #1272: apply_gate no longer emits Adopted or SessionMessageStateChanged.
     // Adopted is deferred to accept_step_input after durable Context accept.
     assert_eq!(sink.events.lock().unwrap().len(), 0);
@@ -242,8 +245,8 @@ async fn test_user_message_with_images_assembles_image_block() {
     .await;
 
     assert_eq!(outcome.appended_user_messages, 1);
-    assert_eq!(outcome.adopted_messages.len(), 1);
-    let last = &outcome.adopted_messages[0].1;
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    let last = outcome.accepted_inputs[0].model_message();
     // text_content 拼回完整文本（拆块后还原）
     assert_eq!(last.text_content(), text_with_marker);
     // 期望 content 是 [Text("看"), Image, Text("这张图")] 三块
@@ -303,8 +306,8 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
     )
     .await;
 
-    assert_eq!(outcome.adopted_messages.len(), 1);
-    let last = &outcome.adopted_messages[0].1;
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    let last = outcome.accepted_inputs[0].model_message();
     assert_eq!(last.text_content(), text);
     let placeholders: Vec<String> = last
         .content
@@ -342,7 +345,7 @@ async fn query_reflection_history_is_buffered_while_gate_is_busy() {
     .await;
 
     assert!(outcome.pending_command.is_none());
-    assert!(outcome.adopted_messages.is_empty());
+    assert!(outcome.accepted_inputs.is_empty());
     assert!(matches!(
         buffer.drain_all().as_slice(),
         [ChatInputEvent::QueryReflectionHistory { limit: 7 }]
@@ -370,8 +373,11 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
 
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert_eq!(outcome.appended_user_messages, 1);
-    assert_eq!(outcome.adopted_messages.len(), 1);
-    assert_eq!(outcome.adopted_messages[0].1.text_content(), "tool 后输入");
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "tool 后输入"
+    );
 }
 
 #[tokio::test]
@@ -399,9 +405,15 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
     assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
     assert_eq!(outcome.commands.len(), 1);
     assert_eq!(outcome.commands[0].raw, "/save");
-    assert_eq!(outcome.adopted_messages.len(), 2);
-    assert_eq!(outcome.adopted_messages[0].1.text_content(), "text1");
-    assert_eq!(outcome.adopted_messages[1].1.text_content(), "text2");
+    assert_eq!(outcome.accepted_inputs.len(), 2);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "text1"
+    );
+    assert_eq!(
+        outcome.accepted_inputs[1].model_message().text_content(),
+        "text2"
+    );
 }
 
 #[tokio::test]
@@ -429,7 +441,7 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
     assert_eq!(outcome.decision, GateDecision::AbortCurrentLoop);
     assert_eq!(outcome.dropped_events, 1);
     assert_eq!(outcome.commands[0].kind, ControlCommandKind::Abort);
-    assert!(outcome.adopted_messages.is_empty());
+    assert!(outcome.accepted_inputs.is_empty());
 }
 
 #[tokio::test]
@@ -453,13 +465,20 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
     .await;
 
     assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(outcome.adopted_messages.len(), 2);
+    assert_eq!(outcome.accepted_inputs.len(), 2);
     // #1272: apply_gate no longer emits UserMessagesAdopted.
-    // Adopted data is carried in outcome.adopted_messages for RunPort.
-    assert_eq!(outcome.adopted_messages[0].1.text_content(), "same");
-    assert_eq!(outcome.adopted_messages[1].1.text_content(), "same");
+    // Adopted data is carried in outcome.accepted_inputs for RunPort.
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "same"
+    );
+    assert_eq!(
+        outcome.accepted_inputs[1].model_message().text_content(),
+        "same"
+    );
     assert_ne!(
-        outcome.adopted_messages[0].0, outcome.adopted_messages[1].0,
+        outcome.accepted_inputs[0].input_id(),
+        outcome.accepted_inputs[1].input_id(),
         "每条提交一个独立 id"
     );
     // Verify no events were emitted through the sink.
@@ -487,7 +506,7 @@ async fn test_run_loop_gate_preserves_duplicate_typed_events() {
     .await;
 
     assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(outcome.adopted_messages.len(), 2);
+    assert_eq!(outcome.accepted_inputs.len(), 2);
 }
 
 /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
@@ -507,10 +526,10 @@ fn test_drain_all_returns_all_events_and_clears() {
     assert!(buffer.is_empty(), "drain_all 后 buffer 应为空");
 }
 
-/// #1272 回归：apply_gate adopted_events 携带原始 ChatInputEvent（含 InputId + images）。
-/// Gate 不再 emit UserMessagesAdopted，数据由 adopted_events 传入 Run 经 accept_step_input 后 emit。
+/// #1272 回归：apply_gate accepted_inputs 携带原始 ChatInputEvent（含 InputId + images）。
+/// Gate 不再 emit UserMessagesAdopted，数据由 accepted_inputs 传入 Run 经 accept_step_input 后 emit。
 #[tokio::test]
-async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
+async fn test_apply_gate_accepted_inputs_preserve_input_id_and_images() {
     let img = sdk::ChatInputImage {
         id: "[Image #1]".to_string(),
         base64: "Zm9vYmFy".to_string(),
@@ -536,11 +555,11 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
     assert_eq!(outcome.appended_user_messages, 1);
     // Gate 不再 emit 事件（Adopted deferred to accept_step_input）
     assert_eq!(sink.events.lock().unwrap().len(), 0);
-    // adopted_events 保留原始事件（含 InputId 和 images）
-    assert_eq!(outcome.adopted_events.len(), 1);
-    match &outcome.adopted_events[0] {
-        ChatInputEvent::UserMessage {
-            id: _id,
+    // accepted_inputs 唯一保留 InputId、images 与模型消息。
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    match &outcome.accepted_inputs[0] {
+        crate::application::loop_engine::AcceptedUserInput::UserMessage {
+            input_id,
             text,
             images,
         } => {
@@ -548,22 +567,15 @@ async fn test_apply_gate_adopted_events_preserve_input_id_and_images() {
             assert_eq!(images.len(), 1);
             assert_eq!(images[0].id, "[Image #1]");
             assert_eq!(images[0].base64, "Zm9vYmFy");
+            assert_eq!(outcome.accepted_inputs[0].input_id(), input_id);
         }
-        _ => panic!("expected UserMessage event"),
+        other => panic!("expected typed UserMessage input, got {other:?}"),
     }
-    // adopted_messages 保留派生 Message（含 image content block）
-    assert_eq!(outcome.adopted_messages.len(), 1);
+    // typed input 生成的模型消息包含 image content block。
     assert_eq!(
-        outcome.adopted_messages[0].1.text_content(),
+        outcome.accepted_inputs[0].model_message().text_content(),
         "看图[Image #1]"
     );
-    // #1272: InputId 应与消息对中的一致（通过 extract）
-    if let ChatInputEvent::UserMessage { id: ev_id, .. } = &outcome.adopted_events[0] {
-        assert_eq!(
-            *ev_id, outcome.adopted_messages[0].0,
-            "adopted_events 和 adopted_messages 中的 InputId 应一致"
-        );
-    }
 }
 
 /// #1272：apply_gate 不再 emit UserMessagesAdopted / SessionMessageStateChanged。
@@ -588,8 +600,7 @@ async fn test_apply_gate_no_premature_adopted_emission() {
     .await;
 
     assert_eq!(outcome.appended_user_messages, 2);
-    assert_eq!(outcome.adopted_messages.len(), 2);
-    assert_eq!(outcome.adopted_events.len(), 2);
+    assert_eq!(outcome.accepted_inputs.len(), 2);
     // 确认没有事件通过 sink 发出
     let events = sink.events.lock().unwrap();
     assert!(

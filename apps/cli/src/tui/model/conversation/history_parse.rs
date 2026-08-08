@@ -5,9 +5,6 @@ pub(crate) enum HistoryDisplayMessage {
     User {
         text: String,
     },
-    TypedJson {
-        text: String,
-    },
     HookNotice {
         title: String,
         text: String,
@@ -63,8 +60,9 @@ impl HistoryDisplayMessage {
                     return msg
                         .skill_request
                         .as_ref()
-                        .and_then(|payload| serde_json::to_string_pretty(payload).ok())
-                        .map(|text| Self::TypedJson { text })
+                        .map(|payload| Self::User {
+                            text: payload.raw_input.clone(),
+                        })
                         .ok_or(HistoryDisplayParseError::NonUserVisibleMessage);
                 }
                 crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {

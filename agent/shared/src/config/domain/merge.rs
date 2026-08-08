@@ -703,10 +703,14 @@ pub(crate) fn apply_storage_patch(
 
 pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfig {
     let mut events = base.events;
-    for (k, v) in overlay.events {
-        events.insert(k, v);
+    for (event, entries) in overlay.events {
+        events.insert(event, entries);
     }
-    HooksConfig { events }
+    HooksConfig {
+        max_attempts: overlay.max_attempts.or(base.max_attempts),
+        max_stop_hook_blocks: overlay.max_stop_hook_blocks.or(base.max_stop_hook_blocks),
+        events,
+    }
 }
 
 pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatch) -> MemoryConfig {
@@ -852,6 +856,38 @@ mod tests {
     use super::*;
     use crate::config::domain::snapshot::ConfigSnapshot;
     use crate::config::ui::MarkdownSpacingMode;
+
+    #[test]
+    fn hook_runtime_limit_patch_preserves_unspecified_lower_layer_values() {
+        let global: ConfigPatch = serde_json::from_str(
+            r#"{
+                "hooks": {
+                    "max_attempts": 2,
+                    "max_stop_hook_blocks": 4
+                }
+            }"#,
+        )
+        .unwrap();
+        let project: ConfigPatch = serde_json::from_str(
+            r#"{
+                "hooks": {
+                    "max_attempts": 5,
+                    "PreToolUse": []
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = apply_patch(apply_patch(Config::default(), global), project);
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(snapshot.hook_execution_policy().max_attempts(), 5);
+        assert_eq!(snapshot.stop_hook_policy().max_blocks(), 4);
+        assert!(snapshot
+            .hooks()
+            .events
+            .contains_key(&crate::config::hooks::HookEvent::PreToolUse));
+    }
 
     #[test]
     fn test_config_patch_snake_case_concurrency_reaches_snapshot() {

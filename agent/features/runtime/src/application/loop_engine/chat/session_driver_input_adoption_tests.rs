@@ -11,6 +11,7 @@ fn freeze_preserves_images_from_loop_input() {
         text: "看图[Image #1]".to_string(),
         input_id: Some(sdk::InputId::new_v7()),
         images: vec![img],
+        accepted: None,
     };
     let (frozen, _active) = fixture_bind_pending(Vec::new(), &[input]);
 
@@ -28,6 +29,37 @@ fn freeze_preserves_images_from_loop_input() {
     );
 }
 
+#[test]
+fn freeze_preserves_skill_request_metadata_from_typed_loop_input() {
+    let input_id = sdk::InputId::new_v7();
+    let request = sdk::SkillRequest {
+        input_id: input_id.clone(),
+        skill: "superpowers:brainstorming".to_string(),
+        arguments: "feature scope".to_string(),
+        raw_input: "/superpowers:brainstorming feature scope".to_string(),
+    };
+    let input = crate::application::loop_engine::LoopInput::accepted(
+        crate::application::loop_engine::AcceptedUserInput::SkillRequest(request.clone()),
+    );
+    let (frozen, _) = fixture_bind_pending(Vec::new(), &[input]);
+
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].source(), share::message::MessageSource::SkillRequest);
+    assert!(frozen[0].text_content().contains("<skill-request>"));
+    assert!(!frozen[0].text_content().contains(&request.raw_input));
+    assert_eq!(
+        frozen[0]
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.skill_request.as_ref()),
+        Some(&share::message::SkillRequestMetadata {
+            skill: request.skill,
+            arguments: request.arguments,
+            raw_input: request.raw_input,
+        })
+    );
+}
+
 /// freeze 时 LoopInput 无 images → 生成纯文本 Message（与旧行为一致）。
 #[test]
 fn freeze_text_only_when_no_images() {
@@ -35,6 +67,7 @@ fn freeze_text_only_when_no_images() {
         text: "hello".to_string(),
         input_id: Some(sdk::InputId::new_v7()),
         images: Vec::new(),
+        accepted: None,
     };
     let (frozen, _active) = fixture_bind_pending(Vec::new(), &[input]);
 
@@ -56,8 +89,10 @@ fn freeze_empty_inputs_uses_pending_with_images() {
         base64: "aW1n".to_string(),
         media_type: "image/png".to_string(),
     };
-    let pending_msg =
-        super::input_gate::user_message_with_images("看图[Image #1]".to_string(), vec![img]);
+    let pending_msg = share::message::Message::user_with_images(
+        "看图[Image #1]".to_string(),
+        vec![(img.id, img.base64, img.media_type)],
+    );
     let (frozen, _active) = fixture_bind_pending(vec![pending_msg], &[]);
 
     assert_eq!(frozen.len(), 1);
@@ -173,6 +208,7 @@ fn stale_pending_replays_initial_input_on_empty_continuation_step() {
         text: "initial".to_string(),
         input_id: Some(sdk::InputId::new_v7()),
         images: Vec::new(),
+        accepted: None,
     };
 
     // Pre-fix behavior: pending = messages.clone() (same content as buffer)

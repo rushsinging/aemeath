@@ -353,7 +353,12 @@ impl RunInstance {
         workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) -> Self {
         Self {
-            run: Run::with_id(run_id, spec, parent_run_id),
+            run: Run::with_id_and_stop_hook_policy(
+                run_id,
+                spec,
+                parent_run_id,
+                context.config().stop_hook_policy(),
+            ),
             execution: RunExecutionState::new(),
             session,
             context,

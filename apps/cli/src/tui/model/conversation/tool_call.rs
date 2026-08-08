@@ -1,3 +1,4 @@
+use super::agent_progress::AgentActivityLine;
 use super::ids::{ToolCallId, ToolStreamKey};
 use super::streaming_preview::ToolStreamingPreviewBuffer;
 use super::tool_result_payload::ToolResultPayload;
@@ -12,7 +13,7 @@ pub struct ToolCall {
     /// 工具执行结果（含 output/content/is_error/image_count 四字段）。
     /// None = 尚未收到结果；Some = 已完成（成功或失败）。
     pub result: Option<ToolResultPayload>,
-    pub activities: Vec<String>,
+    pub activities: Vec<AgentActivityLine>,
     pub streaming_preview: Option<ToolStreamingPreviewBuffer>,
     /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时由
     /// `AgentProgressKind::Started` 事件填充，用于 header 渲染

@@ -99,6 +99,72 @@ impl OpenAICompatibleProvider {
     }
 }
 
+fn push_responses_message(
+    input: &mut Vec<serde_json::Value>,
+    role: &str,
+    content: &mut Vec<serde_json::Value>,
+) {
+    if content.is_empty() {
+        return;
+    }
+    input.push(serde_json::json!({
+        "type": "message",
+        "role": role,
+        "content": std::mem::take(content),
+    }));
+}
+
+fn user_content_to_responses_input(
+    content_blocks: &[share::message::ContentBlock],
+) -> Vec<serde_json::Value> {
+    let mut input = Vec::new();
+    let mut message_content = Vec::new();
+
+    for block in content_blocks {
+        match block {
+            share::message::ContentBlock::Text { text } => {
+                message_content.push(serde_json::json!({
+                    "type": "input_text",
+                    "text": text,
+                }));
+            }
+            share::message::ContentBlock::Image { source, .. } => match source {
+                share::message::ImageSource::Base64 { media_type, data } => {
+                    message_content.push(serde_json::json!({
+                        "type": "input_image",
+                        "image_url": format!("data:{media_type};base64,{data}"),
+                    }));
+                }
+            },
+            share::message::ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                text,
+                ..
+            } => {
+                push_responses_message(&mut input, "user", &mut message_content);
+                let output = text.clone().unwrap_or_else(|| match content {
+                    serde_json::Value::String(output) => output.clone(),
+                    _ => content.to_string(),
+                });
+                input.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": tool_use_id,
+                    "output": output,
+                }));
+            }
+            share::message::ContentBlock::ToolUse { .. }
+            | share::message::ContentBlock::Thinking { .. } => {
+                // User-role ToolUse/Thinking 不属于合法 canonical 用户输入；保持既有忽略语义，
+                // 但显式列出变体，避免新增内容类型被通配分支静默吞掉。
+            }
+        }
+    }
+
+    push_responses_message(&mut input, "user", &mut message_content);
+    input
+}
+
 /// 将内部 Message 列表转为 Responses API input 格式。
 ///
 /// Responses API 的 input 是一个 flat 数组，每个 item 有 `role` + `content`。
@@ -109,35 +175,7 @@ fn messages_to_responses_input(messages: &[Message]) -> Vec<serde_json::Value> {
     for msg in messages {
         match msg.role {
             share::message::Role::User => {
-                // user message may contain text or tool results
-                for block in &msg.content {
-                    match block {
-                        share::message::ContentBlock::Text { text } => {
-                            input.push(serde_json::json!({
-                                "type": "message",
-                                "role": "user",
-                                "content": text,
-                            }));
-                        }
-                        share::message::ContentBlock::ToolResult {
-                            tool_use_id,
-                            content,
-                            text,
-                            ..
-                        } => {
-                            let output = text.clone().unwrap_or_else(|| match content {
-                                serde_json::Value::String(s) => s.clone(),
-                                _ => content.to_string(),
-                            });
-                            input.push(serde_json::json!({
-                                "type": "function_call_output",
-                                "call_id": tool_use_id,
-                                "output": output,
-                            }));
-                        }
-                        _ => {}
-                    }
-                }
+                input.extend(user_content_to_responses_input(&msg.content));
             }
             share::message::Role::Assistant => {
                 // 提取 text

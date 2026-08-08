@@ -1,14 +1,17 @@
-use super::agent_progress::AgentProgressEntry;
 use super::agent_progress::ChildRunActivityEntry;
+use super::agent_progress::{AgentActivityLine, AgentProgressEntry};
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
 use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
+use crate::tui::render::output::tool_display::{
+    format_subagent_tool_header, result_policy, ResultPolicy,
+};
 
 const STREAM_CAP: usize = 4 * 1024;
 
-fn push_streaming_preview_activity(call: &mut ToolCall, message: &str) {
+fn push_streaming_preview_activity(call: &mut ToolCall, activities: &[AgentActivityLine]) {
     let policy = match call.name.as_str() {
         "Bash" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
         "Agent" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
@@ -17,7 +20,9 @@ fn push_streaming_preview_activity(call: &mut ToolCall, message: &str) {
     let buffer = call
         .streaming_preview
         .get_or_insert_with(|| ToolStreamingPreviewBuffer::new(policy));
-    buffer.push_chunk(message);
+    for activity in activities {
+        buffer.push_activity(activity.clone());
+    }
     call.activities = buffer.display_lines();
 }
 
@@ -67,16 +72,23 @@ impl ConversationModel {
             }
         }
 
-        let message = match &activity.kind {
-            TuiChildRunActivityKind::Text { text }
-            | TuiChildRunActivityKind::Thinking { text }
-            | TuiChildRunActivityKind::ToolOutput { text, .. } => text.clone(),
-            TuiChildRunActivityKind::ToolCall { name, input, .. } => {
-                format!("→ {} {}", name, input)
+        let visible_message = match &activity.kind {
+            TuiChildRunActivityKind::Text { text } | TuiChildRunActivityKind::Thinking { text } => {
+                Some(text.clone())
             }
-            TuiChildRunActivityKind::ToolResult { output, .. } => output.clone(),
+            TuiChildRunActivityKind::ToolOutput { tool_name, text } => {
+                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| text.clone())
+            }
+            TuiChildRunActivityKind::ToolCall { name, input, .. } => {
+                Some(format_subagent_tool_header(name, input, None))
+            }
+            TuiChildRunActivityKind::ToolResult {
+                tool_name, output, ..
+            } => {
+                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| output.clone())
+            }
             TuiChildRunActivityKind::Terminal { outcome } => {
-                format!("Sub-agent terminal: {outcome:?}")
+                Some(format!("Sub-agent terminal: {outcome:?}"))
             }
         };
 
@@ -113,7 +125,19 @@ impl ConversationModel {
             kind: activity.kind,
         });
 
-        self.record_agent_progress(chat_id, run_id, activity.spawned_by_tool_call_id, message)
+        let changes = visible_message.map_or_else(Vec::new, |message| {
+            self.record_agent_progress(
+                chat_id,
+                run_id,
+                activity.spawned_by_tool_call_id,
+                vec![AgentActivityLine::message(message)],
+            )
+        });
+        if changes.is_empty() {
+            vec![ConversationChange::OutputDirty]
+        } else {
+            changes
+        }
     }
 
     pub(super) fn start_tool_call(
@@ -240,7 +264,7 @@ impl ConversationModel {
         chat_id: ChatId,
         run_id: ChatRunId,
         tool_id: ToolCallId,
-        message: String,
+        activities: Vec<AgentActivityLine>,
     ) -> Vec<ConversationChange> {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 View Assembler 投影为
         // streaming preview 子块），而不是作为独立根级 AgentProgress block 泄露到对话流中。
@@ -249,19 +273,17 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                // Agent 工具的 sub-agent progress 走 streaming preview（tail N 行）。
-                // Bash stdout 不再走此路径——改由 record_tool_streaming_output 处理。
                 if call.name == "Agent" {
-                    push_streaming_preview_activity(call, &message);
+                    push_streaming_preview_activity(call, &activities);
                 } else {
-                    call.activities.push(message.clone());
+                    call.activities.extend(activities.clone());
                 }
             }
         }
-        self.agent_progress.push(AgentProgressEntry::new(
-            tool_id.to_string(),
-            message.clone(),
-        ));
+        self.agent_progress
+            .extend(activities.iter().map(|activity| {
+                AgentProgressEntry::new(tool_id.to_string(), activity.content.clone())
+            }));
         vec![
             ConversationChange::AgentProgressRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),
@@ -287,7 +309,7 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                push_streaming_preview_activity(call, &text);
+                push_streaming_preview_activity(call, &[AgentActivityLine::message(text)]);
             }
         }
         vec![

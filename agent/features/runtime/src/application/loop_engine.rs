@@ -20,12 +20,13 @@ pub(crate) use engine::fail_run;
 #[cfg(test)]
 use engine::run_loop;
 pub use engine::{
-    execute_prepared_loop, ApprovalRequiredCall, CompactProgressView, CompactionPort, DrainEpoch,
-    DrainOutcome, EventSinkPort, InputPort, InteractionMailboxPort, InteractionWorkOutcome,
-    InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput, ModelInvocationPort,
-    ModelStep, PendingInteractionItem, PendingInteractionWork, PlanApprovalPort, RunControlPort,
-    RunLifecyclePort, StepCommit, StepPersistencePort, StepTokenUsage, StuckHandlingPort,
-    SuspendedQuestion, SuspendedToolCall, ToolGuardDecision, ToolOrchestrationPort, ToolStep,
+    execute_prepared_loop, AcceptedUserInput, ApprovalRequiredCall, CompactProgressView,
+    CompactionPort, DrainEpoch, DrainOutcome, EventSinkPort, InputPort, InteractionMailboxPort,
+    InteractionWorkOutcome, InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput,
+    ModelInvocationPort, ModelStep, PendingInteractionItem, PendingInteractionWork,
+    PlanApprovalPort, RunControlPort, RunLifecyclePort, StepCommit, StepPersistencePort,
+    StepTokenUsage, StuckHandlingPort, SuspendedQuestion, SuspendedToolCall, ToolGuardDecision,
+    ToolOrchestrationPort, ToolStep,
 };
 pub use run_loop::RunLoop;
 pub use stuck_guard::{StuckDecision, StuckGuard};

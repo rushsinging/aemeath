@@ -1,8 +1,10 @@
 use crate::tui::model::conversation::ids::ToolCallId;
+use crate::tui::model::conversation::agent_progress::AgentActivityLine;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::rendered::RenderCtx;
+use crate::tui::view_model::output::{AgentActivityKindView, AgentActivityLineView};
 use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
 
 

@@ -10,6 +10,7 @@ fn result(tool_title: &str, result_text: &str) -> ToolResultBlockView {
         tool_title: tool_title.into(),
         args_preview: None,
         result_text: result_text.into(),
+        activity_lines: None,
         style: SemanticStyle::Success,
     }
 }

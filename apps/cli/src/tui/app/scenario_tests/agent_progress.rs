@@ -8,6 +8,49 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 use super::super::testing::TuiScenarioHarness;
 
 #[test]
+fn adopted_skill_request_renders_raw_input_as_normal_user_message() {
+    let mut harness = TuiScenarioHarness::new(120, 40);
+    harness.runtime_event(TuiRuntimeEvent::UserMessagesAdopted {
+        items: vec![crate::tui::adapter::runtime_view::TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
+                "<skill-request>LLM_ONLY</skill-request>",
+            )],
+            input_id: Some("skill-input".to_string()),
+            source: crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest,
+            hook_notice: None,
+            skill_request: Some(crate::tui::adapter::runtime_view::TuiSkillRequestMetadata {
+                skill: "superpowers:brainstorming".to_string(),
+                arguments: "feature scope".to_string(),
+                raw_input: "/superpowers:brainstorming feature scope".to_string(),
+            }),
+        }],
+        queued: Vec::new(),
+    });
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(
+        screen.contains("/superpowers:brainstorming feature scope"),
+        "Skill 用户消息必须显示 raw_input：\n{screen}"
+    );
+    assert!(
+        screen.contains("> /superpowers:brainstorming feature scope"),
+        "Skill 用户消息必须使用正常 UserMessage gutter：\n{screen}"
+    );
+    for hidden in [
+        "<skill-request>",
+        "LLM_ONLY",
+        "Skill superpowers:brainstorming",
+    ] {
+        assert!(
+            !screen.contains(hidden),
+            "Skill 用户消息泄漏或错误显示 {hidden}：\n{screen}"
+        );
+    }
+}
+
+#[test]
 fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timeline() {
     let parent_context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
@@ -90,6 +133,77 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
 }
 
 #[test]
+fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
+    let parent_context = TuiRunContext {
+        chat_id: "parent-chat".to_string(),
+        run_id: "parent-run".to_string(),
+    };
+    let identity = TuiChildRunIdentity {
+        agent_id: "researcher".to_string(),
+        run_id: "child-run".into(),
+        parent_run_id: "parent-run".into(),
+        spawned_by_tool_call_id: "agent-tool".to_string(),
+    };
+    let mut harness = TuiScenarioHarness::new(120, 40);
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+        context: parent_context,
+        id: "agent-tool".to_string(),
+        provider_id: Some("provider-agent-tool".to_string()),
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    for (sequence, kind) in [
+        TuiChildRunActivityKind::ToolCall {
+            id: "skill-call".to_string(),
+            name: "Skill".to_string(),
+            input: serde_json::json!({"skill": "superpowers:using-superpowers"}),
+        },
+        TuiChildRunActivityKind::ToolResult {
+            tool_call_id: "skill-call".to_string(),
+            tool_name: "Skill".to_string(),
+            output: "SKILL_BODY_SENTINEL\n<skill-request>LLM_ONLY</skill-request>\n<system-reminder>LLM_ONLY</system-reminder>".to_string(),
+            content: serde_json::json!({"name": "superpowers:using-superpowers"}),
+            is_error: false,
+        },
+        TuiChildRunActivityKind::ToolCall {
+            id: "grep-call".to_string(),
+            name: "Grep".to_string(),
+            input: serde_json::json!({"pattern": "visible"}),
+        },
+        TuiChildRunActivityKind::ToolResult {
+            tool_call_id: "grep-call".to_string(),
+            tool_name: "Grep".to_string(),
+            output: "VISIBLE_GREP_RESULT".to_string(),
+            content: serde_json::json!({"text": "VISIBLE_GREP_RESULT"}),
+            is_error: false,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        harness.runtime_event(TuiRuntimeEvent::ChildRunActivity(TuiChildRunActivity {
+            identity: identity.clone(),
+            sequence: sequence as u64 + 1,
+            kind,
+        }));
+    }
+    harness.render();
+
+    let screen = harness.screen();
+    assert!(
+        screen.contains("Skill superpowers:using-superpowers"),
+        "screen:\n{screen}"
+    );
+    assert!(screen.contains("VISIBLE_GREP_RESULT"));
+    for hidden in ["SKILL_BODY_SENTINEL", "<skill-request>", "system-reminder"] {
+        assert!(
+            !screen.contains(hidden),
+            "screen leaked {hidden}:\n{screen}"
+        );
+    }
+}
+
+#[test]
 fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
     let parent_context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
@@ -157,13 +271,25 @@ fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
         .iter()
         .find(|call| call.id.as_ref().is_some_and(|id| id.as_ref() == "agent-b"))
         .expect("second Agent ToolCall");
-    assert_eq!(first.activities, vec!["alpha textalpha output"]);
-    assert_eq!(second.activities, vec!["beta thinking"]);
-    let screen = harness.screen();
-    assert!(
-        screen.contains("alpha textalpha output"),
-        "screen: {screen}"
+    assert_eq!(
+        first
+            .activities
+            .iter()
+            .map(|activity| activity.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha text", "alpha output"]
     );
+    assert_eq!(
+        second
+            .activities
+            .iter()
+            .map(|activity| activity.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta thinking"]
+    );
+    let screen = harness.screen();
+    assert!(screen.contains("alpha text"), "screen: {screen}");
+    assert!(screen.contains("alpha output"), "screen: {screen}");
     assert!(screen.contains("beta thinking"), "screen: {screen}");
 }
 

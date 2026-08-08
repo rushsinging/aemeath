@@ -261,7 +261,7 @@ where
             };
             let input_ids: Vec<_> = batch
                 .iter()
-                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .filter_map(|input| input.input_id().map(|id| id.as_str().to_string()))
                 .collect();
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -305,7 +305,7 @@ where
             };
             let input_ids: Vec<_> = batch
                 .iter()
-                .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                .filter_map(|input| input.input_id().map(|id| id.as_str().to_string()))
                 .collect();
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -350,7 +350,7 @@ where
             BufferDrain::Ready { batch, epoch } => {
                 let input_ids: Vec<_> = batch
                     .iter()
-                    .filter_map(|i| i.input_id.as_ref().map(|id| id.as_str().to_string()))
+                    .filter_map(|input| input.input_id().map(|id| id.as_str().to_string()))
                     .collect();
                 log::debug!(
                     target: crate::LOG_TARGET,
@@ -570,6 +570,7 @@ impl InputStrategy for FixedInputAdapter<'_> {
                     text: self.prompt.to_string(),
                     input_id: None,
                     images: Vec::new(),
+                    accepted: None,
                 }],
                 epoch,
             });

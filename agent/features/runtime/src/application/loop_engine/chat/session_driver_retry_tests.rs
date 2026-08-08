@@ -200,7 +200,10 @@ fn test_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }
 
 fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
@@ -220,7 +223,10 @@ fn blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookP
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }
 
 fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
@@ -240,5 +246,8 @@ fn delayed_blocking_then_success_hook_port(flag_path: &std::path::Path) -> Arc<d
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }, ..share::config::Config::default() })).unwrap())
 }

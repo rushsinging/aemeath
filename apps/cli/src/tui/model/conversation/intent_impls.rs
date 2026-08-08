@@ -50,9 +50,6 @@ impl ConversationUpdate for ResumeConversation {
                     Ok(HistoryDisplayMessage::HookNotice { title, text, kind }) => {
                         all_changes.extend(model.apply(AppendHookNotice { title, text, kind }));
                     }
-                    Ok(HistoryDisplayMessage::TypedJson { text }) => {
-                        all_changes.extend(model.apply(AppendSystemMessage { text }));
-                    }
                     Ok(HistoryDisplayMessage::ToolResults) => {}
                     Ok(HistoryDisplayMessage::Assistant { blocks }) => {
                         let tool_results = collect_following_tool_results(subsequent);
@@ -319,10 +316,22 @@ impl ConversationUpdate for RecordChildRunActivity {
 
 impl ConversationUpdate for RecordAgentProgress {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_progress(self.chat_id, self.run_id, self.tool_id, self.message)
+        model.record_agent_progress(
+            self.chat_id,
+            self.run_id,
+            self.tool_id,
+            vec![super::agent_progress::AgentActivityLine::message(
+                self.message,
+            )],
+        )
     }
 }
 
+impl ConversationUpdate for RecordAgentActivities {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_agent_progress(self.chat_id, self.run_id, self.tool_id, self.activities)
+    }
+}
 impl ConversationUpdate for RecordToolStreamingOutput {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
@@ -667,6 +676,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
             Self::RecordChildRunActivity(s) => s.update(model),
             Self::RecordAgentProgress(s) => s.update(model),
+            Self::RecordAgentActivities(s) => s.update(model),
             Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
