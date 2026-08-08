@@ -40,7 +40,7 @@ Finishing
   └─ HookPort.dispatch(Stop) → Block
          ├─ stop_block_count += 1
          ├─ 当前 assistant / Tool Step → FinalizingStep → append_and_persist
-         ├─ 未超过 15：追加 system-generated feedback
+         ├─ 未超过当前 Run 冻结上限：追加 system-generated feedback
          │              + 同次 drain 的普通用户追问（FIFO）
          │              → PreparingContext，同一个 Run 继续
          └─ 超过当前 Run 冻结的上限：状态 Failed（错误文本保留实际阻断次数）
@@ -121,7 +121,7 @@ Hook BC 在 `HookOutcome.messages` 中逐条保留 JSON `additional_context` / `
 
 超过当前 Sub Run 冻结的上限后进入 `Failed`，终态 `RunFailed { error }` 回传父 Run。Sub 不绕过 Stop，也不自动降级成 Completed。
 
-Main/Sub 使用同一 Loop Engine 和计数规则，不因交付层是否存在而分叉。
+Main/Sub 使用同一 Loop Engine 和 Stop 计数规则。Sub 的 `HookBindingMode::BoundaryOnly` 由 `HookPointMetadata.class` 过滤：所有 `HookClass::Boundary` point（包含 Stop 与 SubRun 生命周期）转发到 Sub Run 自己从 committed `RunConfigSnapshot` 构造的 Dispatcher；Tool/Notification class 返回 Proceed。过滤规则 **NEVER** 复制 HookPoint 变体 allow-list，避免 metadata 与装配漂移。
 
 ## 7. 与 StuckGuard 的关系
 
@@ -130,7 +130,7 @@ Stop block count 是确定性的协议上限，不并入通用 StuckGuard 计分
 - StuckGuard 检测重复文本、工具循环与 wall-clock；
 - stop_block_count 检测 Stop 协议无法收敛；
 - 两者可产生不同 RunFailed reason；
-- stall 导致尝试结束时仍必须经过 Stop Hook，但不能绕过 15 次上限。
+- stall 导致尝试结束时仍必须经过 Stop Hook，但不能绕过当前 Run 冻结的上限。
 
 ## 8. 目标约束
 
@@ -142,16 +142,16 @@ Stop block count 是确定性的协议上限，不并入通用 StuckGuard 计分
 
 ## 9. 验收场景
 
-- [ ] Stop 第 1 次主动 Block：当前 assistant Step 已持久化，feedback 与同次 drain 的用户追问按系统前缀/FIFO 进入下一步，RunId 不变。
-- [ ] Stop block 后 CancelRunStep / TerminateRun 获胜时，不发起 continuation invocation，按统一 StepFinalizer 收口。
-- [ ] Stop 执行故障前两次失败、第 3 次 Continue，Run Completed。
-- [ ] Stop 执行连续 3 次失败，合成 Block 并继续 Run。
-- [ ] 默认配置下第 15 次 Block 仍继续；第 16 次进入 `Failed`，错误文本保留阻断次数；显式上限遵循相同首个超限边界。
-- [ ] 超限后只发送 `RunFailed { error }`，且不发送 RunCompleted。
-- [ ] Main 失败后可由新用户输入创建新 Run。
-- [ ] Sub 失败终态回传父 Run。
-- [ ] cancellation 能终止 Hook 子进程及重试等待。
-- [ ] 普通 Hook 执行失败重试耗尽后：未配置 failure_policy → Continue；配置 failure_policy=Block → Block。
+- [x] Stop 第 1 次主动 Block：当前 assistant Step 已持久化，feedback 与同次 drain 的用户追问按系统前缀/FIFO 进入下一步，RunId 不变。
+- [x] Stop block 后 CancelRunStep / TerminateRun 获胜时，不发起 continuation invocation，按统一 StepFinalizer 收口。
+- [x] Stop 执行故障前两次失败、第 3 次 Continue，Run Completed。
+- [x] Stop 执行连续 3 次失败，合成 Block 并继续 Run。
+- [x] 默认配置下第 15 次 Block 仍继续；第 16 次进入 `Failed`，错误文本保留阻断次数；显式上限遵循相同首个超限边界。
+- [x] 超限后只发送 `RunFailed { error }`，且不发送 RunCompleted。
+- [x] Main 失败后可由新用户输入创建新 Run。
+- [x] Sub 通过 Boundary metadata 转发 Stop，失败终态回传父 Run。
+- [x] cancellation 能终止 Hook 子进程及重试等待。
+- [x] 普通 Hook 执行失败重试耗尽后：未配置 failure_policy → Continue；领域/Dispatcher 的 failure_policy=Block → Block；用户 Config surface 仍为 Future。
 
 ## 修改历史
 
