@@ -206,6 +206,18 @@ async fn invoke_model_impl(
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
     observer.on_window(execution).await;
     let invocation_context = extract_invocation_context(&window);
+    let mapping_summary =
+        crate::application::loop_engine::llm_strategy::invocation_mapping_log_summary(
+            &invocation_context,
+        );
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "context_window_mapped_to_invocation messages={} system_blocks={} tool_schemas={} reminder_messages={}",
+        mapping_summary.messages,
+        mapping_summary.system_blocks,
+        mapping_summary.tool_schemas,
+        mapping_summary.reminder_messages,
+    );
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),
@@ -242,6 +254,14 @@ async fn invoke_model_impl(
             request.system = system;
             request.tools = tools;
             request.cancellation = stream_cancel.clone();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "provider_invocation_request_ready model={} messages={} system_blocks={} tool_schemas={}",
+                request.model.model,
+                request.messages.len(),
+                request.system.len(),
+                request.tools.len(),
+            );
             let stream = provider
                 .invoke(request, &stream_cancel)
                 .await

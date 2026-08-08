@@ -527,10 +527,18 @@ impl AgentRunner for CliAgentRunner {
                             .into_iter()
                             .collect::<Vec<_>>();
                             if model_name != parent_frame.context.provider_ref().model.model {
-                                reminders.push(context::domain::InvocationReminder::model_guidance_mismatch(
+                                let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
                                     parent_frame.context.provider_ref().model.model.clone(),
                                     model_name.clone(),
-                                ));
+                                );
+                                log::debug!(
+                                    target: crate::LOG_TARGET,
+                                    "invocation_reminder_created kind={} session_model={} run_model={} scope=derived",
+                                    reminder.kind(),
+                                    parent_frame.context.provider_ref().model.model,
+                                    model_name,
+                                );
+                                reminders.push(reminder);
                             }
                             reminders
                         },

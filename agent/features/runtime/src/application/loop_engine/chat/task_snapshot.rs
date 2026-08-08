@@ -175,14 +175,23 @@ pub(crate) fn build_task_reminder_intent(
                 .collect(),
         })
         .collect();
-    Some(context::domain::InvocationReminder::task_progress(
-        context::domain::TaskProgressReminder {
+    let reminder =
+        context::domain::InvocationReminder::task_progress(context::domain::TaskProgressReminder {
             total,
             completed,
             items,
             hidden_count: total.saturating_sub(max_items),
-        },
-    ))
+        });
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "invocation_reminder_created kind={} total={} completed={} visible={} hidden={}",
+        reminder.kind(),
+        total,
+        completed,
+        max_items.min(total),
+        total.saturating_sub(max_items),
+    );
+    Some(reminder)
 }
 
 /// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。

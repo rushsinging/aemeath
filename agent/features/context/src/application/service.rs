@@ -60,9 +60,44 @@ impl ContextApplicationService {
         let mut messages = snapshot
             .messages
             .with_pending(request.pending_messages.clone());
-        let reminder_messages = render_invocation_reminders(request);
-        if !reminder_messages.is_empty() {
-            messages = messages.with_pending(reminder_messages);
+        let reminder_payloads = invocation_reminder_log_payloads(
+            request.language.as_str(),
+            &request.invocation_reminders,
+        );
+        if !reminder_payloads.is_empty() {
+            let kinds = reminder_payloads
+                .iter()
+                .map(|payload| payload.kind)
+                .collect::<Vec<_>>()
+                .join(",");
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "invocation_reminders_rendered count={} kinds={} request_id={}",
+                reminder_payloads.len(),
+                kinds,
+                request.request_id.as_str(),
+            );
+            for (placement, payload) in reminder_payloads.iter().enumerate() {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "invocation_reminder_placed kind={} placement={} preview={}",
+                    payload.kind,
+                    placement,
+                    payload.preview,
+                );
+                log::trace!(
+                    target: crate::LOG_TARGET,
+                    "invocation_reminder_body kind={} body={}",
+                    payload.kind,
+                    payload.body,
+                );
+            }
+            messages = messages.with_pending(
+                reminder_payloads
+                    .into_iter()
+                    .map(|payload| share::message::Message::user(payload.rendered_body))
+                    .collect(),
+            );
         }
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
@@ -165,13 +200,24 @@ impl ContextApplicationService {
     }
 }
 
-fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::Message> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReminderLogPayload {
+    pub kind: &'static str,
+    pub preview: String,
+    pub body: String,
+    pub(crate) rendered_body: String,
+}
+
+pub(crate) fn invocation_reminder_log_payloads(
+    language: &str,
+    reminders: &[InvocationReminder],
+) -> Vec<ReminderLogPayload> {
     let mut rendered = Vec::new();
     for reminder_kind in [0_u8, 1, 2] {
-        for reminder in &request.invocation_reminders {
+        for reminder in reminders {
             let text = match (reminder_kind, reminder) {
                 (0, InvocationReminder::TaskProgress(progress)) => {
-                    let mut lines = vec![match request.language.as_str() {
+                    let mut lines = vec![match language {
                         "zh" => format!("━━ 任务：{}/{} ━━", progress.completed, progress.total),
                         _ => format!("━━ Tasks: {}/{} ━━", progress.completed, progress.total),
                     }];
@@ -190,7 +236,7 @@ fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::
                                 .map(u64::to_string)
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            match request.language.as_str() {
+                            match language {
                                 "zh" => format!("（被 #{sequences} 阻塞）"),
                                 _ => format!(" (blocked by #{sequences})"),
                             }
@@ -202,12 +248,12 @@ fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::
                         ));
                     }
                     if progress.hidden_count > 0 {
-                        lines.push(match request.language.as_str() {
+                        lines.push(match language {
                             "zh" => format!("另有 {} 个任务未显示", progress.hidden_count),
                             _ => format!("{} additional tasks are omitted", progress.hidden_count),
                         });
                     }
-                    let heading = match request.language.as_str() {
+                    let heading = match language {
                         "zh" => "当前任务进度：",
                         _ => "Current task progress:",
                     };
@@ -217,7 +263,7 @@ fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::
                     ))
                 }
                 (1, InvocationReminder::GuidanceSourcesChanged) => {
-                    Some(match request.language.as_str() {
+                    Some(match language {
                         "zh" => "<system-reminder>guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。</system-reminder>".to_string(),
                         _ => "<system-reminder>Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.</system-reminder>".to_string(),
                     })
@@ -228,7 +274,7 @@ fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::
                         session_model_id,
                         run_model_id,
                     },
-                ) => Some(match request.language.as_str() {
+                ) => Some(match language {
                     "zh" => format!(
                         "<system-reminder>Session 冻结模型 {} 与当前 Run 模型 {} 不同；继续使用 Session 冻结的系统提示。</system-reminder>",
                         escape_reminder_text(session_model_id),
@@ -243,11 +289,61 @@ fn render_invocation_reminders(request: &ContextRequest) -> Vec<share::message::
                 _ => None,
             };
             if let Some(text) = text {
-                rendered.push(share::message::Message::user(text));
+                let body = redact_reminder_log_text(&text);
+                rendered.push(ReminderLogPayload {
+                    kind: reminder.kind(),
+                    preview: reminder_log_preview(&body),
+                    body,
+                    rendered_body: text,
+                });
             }
         }
     }
     rendered
+}
+
+fn reminder_log_preview(body: &str) -> String {
+    let mut preview = body.chars().take(200).collect::<String>();
+    if body.chars().count() > 200 {
+        preview.push('…');
+    }
+    preview
+}
+
+fn redact_reminder_log_text(text: &str) -> String {
+    let words = text.split_whitespace().collect::<Vec<_>>();
+    let mut redacted = Vec::with_capacity(words.len());
+    let mut redact_next = false;
+    for word in words {
+        let normalized = word
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '-')
+            .to_ascii_lowercase();
+        if redact_next {
+            if normalized == "bearer" {
+                redacted.push(word);
+                continue;
+            }
+            redacted.push("[REDACTED]");
+            redact_next = false;
+            continue;
+        }
+        if looks_like_secret(&normalized) {
+            redacted.push("[REDACTED]");
+            continue;
+        }
+        redacted.push(word);
+        redact_next = matches!(
+            normalized.as_str(),
+            "authorization" | "api_key" | "api-key" | "token" | "secret"
+        );
+    }
+    redacted.join(" ")
+}
+
+fn looks_like_secret(normalized: &str) -> bool {
+    normalized.starts_with("sk-")
+        || normalized.starts_with("ghp_")
+        || normalized.starts_with("github_pat_")
 }
 
 fn escape_reminder_text(text: &str) -> String {

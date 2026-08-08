@@ -9,10 +9,13 @@ use share::config::Config;
 use share::message::{ContentBlock, Message};
 
 use super::performance::{capture, percentiles_ns};
-use super::service::ContextApplicationService;
+use super::service::{
+    invocation_reminder_log_payloads, ContextApplicationService, ReminderLogPayload,
+};
 use crate::domain::{
-    ContextAppend, ContextMessages, ContextRequest, ContextRequestId, Language, RunStepId,
-    SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
+    ContextAppend, ContextMessages, ContextRequest, ContextRequestId, InvocationReminder, Language,
+    RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskProgressReminder,
+    TaskProgressReminderItem, TaskProgressStatus,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -164,6 +167,48 @@ fn tool_result_message(bytes: usize) -> (Message, usize) {
         },
         serialized_bytes,
     )
+}
+
+#[test]
+fn invocation_reminder_log_payloads_include_summary_preview_and_redacted_body() {
+    let secret = "sk-ant-api03-secret-value";
+    let reminders = vec![
+        InvocationReminder::model_guidance_mismatch("session/model", "run/model"),
+        InvocationReminder::guidance_sources_changed(),
+        InvocationReminder::task_progress(TaskProgressReminder {
+            total: 1,
+            completed: 0,
+            items: vec![TaskProgressReminderItem {
+                sequence: 7,
+                subject: format!("diagnose Authorization: Bearer {secret}"),
+                status: TaskProgressStatus::InProgress,
+                blocked_by_sequences: vec![],
+            }],
+            hidden_count: 0,
+        }),
+    ];
+
+    let payloads = invocation_reminder_log_payloads("zh", &reminders);
+
+    assert_eq!(payloads.len(), 3);
+    assert!(matches!(
+        &payloads[0],
+        ReminderLogPayload {
+            kind,
+            preview: _,
+            body: _,
+            rendered_body: _,
+        } if *kind == "task_progress"
+    ));
+    assert!(payloads[0].preview.chars().count() <= 200);
+    assert!(payloads[0]
+        .body
+        .contains("diagnose Authorization: Bearer [REDACTED]"));
+    assert!(!payloads[0].body.contains(secret));
+    assert_eq!(payloads[1].kind, "guidance_sources_changed");
+    assert_eq!(payloads[2].kind, "model_guidance_mismatch");
+    assert!(payloads[2].body.contains("session/model"));
+    assert!(payloads[2].body.contains("run/model"));
 }
 
 #[tokio::test]

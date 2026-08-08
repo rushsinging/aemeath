@@ -109,6 +109,30 @@ where
         );
         if self.reminder_intents_available {
             request.invocation_reminders = self.context_request.invocation_reminders.clone();
+            if !request.invocation_reminders.is_empty() {
+                let kinds = request
+                    .invocation_reminders
+                    .iter()
+                    .map(context::domain::InvocationReminder::kind)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "invocation_reminders_attached count={} kinds={} run_id={} step_id={}",
+                    request.invocation_reminders.len(),
+                    kinds,
+                    self.run_id,
+                    step_id.as_str(),
+                );
+            }
+        } else if !self.context_request.invocation_reminders.is_empty() {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "invocation_reminders_skipped reason=already_consumed count={} run_id={} step_id={}",
+                self.context_request.invocation_reminders.len(),
+                self.run_id,
+                step_id.as_str(),
+            );
         }
         Some(request)
     }

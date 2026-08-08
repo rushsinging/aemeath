@@ -107,6 +107,14 @@ impl InvocationReminder {
     pub fn task_progress(progress: TaskProgressReminder) -> Self {
         Self::TaskProgress(progress)
     }
+
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::TaskProgress(_) => "task_progress",
+            Self::GuidanceSourcesChanged => "guidance_sources_changed",
+            Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

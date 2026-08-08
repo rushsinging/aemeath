@@ -1,5 +1,9 @@
 //! Shared helpers for model invocation orchestration.
 
+#[cfg(test)]
+#[path = "llm_strategy_tests.rs"]
+mod tests;
+
 use provider::RequestSystemBlock;
 use share::message::Message;
 
@@ -13,6 +17,29 @@ pub(crate) struct InvocationContext {
     pub messages_for_api: Vec<Message>,
     pub tool_schemas: Vec<serde_json::Value>,
     pub system_blocks: Vec<RequestSystemBlock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InvocationMappingLogSummary {
+    pub messages: usize,
+    pub system_blocks: usize,
+    pub tool_schemas: usize,
+    pub reminder_messages: usize,
+}
+
+pub(crate) fn invocation_mapping_log_summary(
+    invocation_context: &InvocationContext,
+) -> InvocationMappingLogSummary {
+    InvocationMappingLogSummary {
+        messages: invocation_context.messages_for_api.len(),
+        system_blocks: invocation_context.system_blocks.len(),
+        tool_schemas: invocation_context.tool_schemas.len(),
+        reminder_messages: invocation_context
+            .messages_for_api
+            .iter()
+            .filter(|message| message.text_content().contains("<system-reminder>"))
+            .count(),
+    }
 }
 
 /// Map a [`ContextWindow`] into the three invocation primitives:

@@ -732,16 +732,28 @@ where
                 .into_iter()
                 .collect::<Vec<_>>();
                 if turn_boundary_config.guidance_sources_changed {
-                    invocation_reminders
-                        .push(context::domain::InvocationReminder::guidance_sources_changed());
+                    let reminder =
+                        context::domain::InvocationReminder::guidance_sources_changed();
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "invocation_reminder_created kind={} trigger=guidance_sources_changed",
+                        reminder.kind(),
+                    );
+                    invocation_reminders.push(reminder);
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    invocation_reminders.push(
-                        context::domain::InvocationReminder::model_guidance_mismatch(
-                            shell.prompt_model_id.clone(),
-                            runtime_context.provider_ref().model.model.clone(),
-                        ),
+                    let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
+                        shell.prompt_model_id.clone(),
+                        runtime_context.provider_ref().model.model.clone(),
                     );
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "invocation_reminder_created kind={} session_model={} run_model={}",
+                        reminder.kind(),
+                        shell.prompt_model_id,
+                        runtime_context.provider_ref().model.model,
+                    );
+                    invocation_reminders.push(reminder);
                 }
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequestData {
