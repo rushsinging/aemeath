@@ -276,14 +276,13 @@ fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
         1
     );
     assert_eq!(text.matches("<conversation_history>").count(), 1);
-    assert!(text.contains("<previous_summary>"));
-    assert!(text.contains("earlier user request and completed work"));
+    assert!(text.contains("<previous_checkpoint>"));
+    assert!(text.contains("unverified legacy summary"));
     assert!(text.contains("继续检查 compact"));
 }
 
-/// #1486：LLM 压缩请求的 previous_summary 必须截断（保留尾部），
-/// 否则上次 summary 巨大时压缩请求本身超 provider 输入限制，
-/// LLM 压缩必然失败、永远 fallback。
+/// LLM 压缩请求的 previous checkpoint 必须按语义预算有界化，
+/// 避免上次 summary 巨大时压缩请求超 provider 输入限制，同时不依赖尾部位置保真。
 #[test]
 fn compact_request_caps_oversized_previous_summary() {
     let huge_previous = "x".repeat(900_000);
@@ -301,9 +300,11 @@ fn compact_request_caps_oversized_previous_summary() {
         text.len()
     );
     assert!(
-        text.contains("<previous_summary_tail>"),
-        "应使用截断标记: {text}"
+        text.contains("<previous_checkpoint>"),
+        "应使用 checkpoint 标记: {text}"
     );
+    assert!(!text.contains("<previous_summary_tail>"));
+    assert!(!text.contains("older head truncated"));
 }
 
 #[test]
@@ -322,13 +323,13 @@ fn fallback_summary_latest_user_request_continues_without_claiming_completion() 
         None,
     );
 
-    assert!(summary.contains("## User Requests"));
+    assert!(summary.contains("## Current Objective"));
     assert!(summary.contains("只分析，不实现"));
-    assert!(summary.contains("## Work Completed"));
+    assert!(summary.contains("## Committed Facts"));
     assert!(summary.contains("Unverified assistant report"));
     assert!(!summary.contains("- 已完成"));
-    assert!(summary.contains("## Problems / Findings"));
-    assert!(summary.contains("## Next Action"));
+    assert!(summary.contains("## Open Decisions / Risks"));
+    assert!(summary.contains("## Resume Cursor"));
     assert!(summary.contains("## Continuation Status"));
     assert!(summary.contains("Continue"));
 }
@@ -453,26 +454,18 @@ async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
     );
 }
 
-/// 超大 previous_summary 只保留关键尾部，长度有界（#1486）。
+/// fallback 对 oversized previous checkpoint 按语义收敛，不依赖尾部截断。
 #[test]
-fn fallback_keeps_previous_summary_tail_when_oversized() {
-    // 构造一个头部是噪声、尾部是关键信息的 previous_summary
-    let head = "HEAD-NOISE-".repeat(50_000);
-    let tail = "## Next Action\n- Continue the merge.\n\n## Continuation Status\nContinue";
-    let previous = format!("{head}{tail}");
+fn fallback_normalizes_oversized_previous_checkpoint() {
+    let previous = oversized_valid_checkpoint(800_000);
 
     let summary = crate::adapters::compact_summary::build_summary_text(&[], Some(&previous));
 
-    assert!(
-        summary.contains("Continue the merge."),
-        "尾部关键信息必须保留: {summary}"
-    );
+    assert!(summary.contains("NEVER widen the requested action level"));
+    assert!(!summary.contains("archive-noise archive-noise archive-noise"));
     let cap = crate::adapters::compact_summary::FALLBACK_PREVIOUS_SUMMARY_CAP;
-    assert!(
-        summary.len() <= cap + 2_000,
-        "previous_summary 超大时 summary 必须保持有界: {} chars (cap={cap})",
-        summary.len()
-    );
+    assert!(summary.len() <= cap + 2_000);
+    crate::domain::compact::ContinuationCheckpoint::parse(&summary).unwrap();
 }
 
 /// map-reduce 分块摘要必须并发执行（3-5 并发，视块数而定），
@@ -694,8 +687,8 @@ async fn compact_falls_back_when_generator_errors() {
     .await
     .expect("compact should still run with fallback");
 
-    // Fallback summary 使用本地压缩模板（#1486：文案如实描述本地路径）。
-    assert!(result.summary.contains("## User Requests"));
+    // Fallback summary 使用本地 checkpoint 模板。
+    assert!(result.summary.contains("## Current Objective"));
     assert!(result.summary.contains("Local text-compaction path"));
     assert!(!result.summary.contains("Semantic LLM compaction failed"));
 }
