@@ -1,0 +1,233 @@
+use std::fmt;
+
+const SECTION_HEADINGS: [&str; 9] = [
+    "Immutable Constraints",
+    "Current Objective",
+    "Committed Facts",
+    "Uncommitted Working Set",
+    "Open Decisions / Risks",
+    "Resume Cursor",
+    "Required Revalidation",
+    "Archived Milestones",
+    "Continuation Status",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContinuationStatus {
+    Continue,
+    WaitingForUser,
+    Completed,
+}
+
+impl ContinuationStatus {
+    fn parse(line: &str) -> Result<Self, CheckpointError> {
+        let trimmed = line.trim();
+        if trimmed == "Continue" || trimmed.starts_with("Continue —") {
+            return Ok(Self::Continue);
+        }
+        if trimmed == "Waiting for User" || trimmed.starts_with("Waiting for User —") {
+            return Ok(Self::WaitingForUser);
+        }
+        if trimmed == "Completed" || trimmed.starts_with("Completed —") {
+            return Ok(Self::Completed);
+        }
+        Err(CheckpointError::InvalidStatus {
+            value: line.to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeCursor {
+    next_action: String,
+}
+
+impl ResumeCursor {
+    pub fn next_action(&self) -> &str {
+        &self.next_action
+    }
+
+    pub fn next_action_count(&self) -> usize {
+        usize::from(!self.next_action.is_empty())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinuationCheckpoint {
+    sections: [Vec<String>; 9],
+    resume_cursor: ResumeCursor,
+    status: ContinuationStatus,
+}
+
+impl ContinuationCheckpoint {
+    pub fn parse(source: &str) -> Result<Self, CheckpointError> {
+        let mut sections: [Vec<String>; 9] = std::array::from_fn(|_| Vec::new());
+        let mut seen = [false; 9];
+        let mut encountered_sections = Vec::with_capacity(9);
+        let mut current_section = None;
+
+        for line in source.lines() {
+            if let Some(heading) = line.strip_prefix("## ") {
+                let Some(index) = SECTION_HEADINGS
+                    .iter()
+                    .position(|candidate| candidate == &heading)
+                else {
+                    return Err(CheckpointError::UnknownSection {
+                        section: heading.to_string(),
+                    });
+                };
+                if seen[index] {
+                    return Err(CheckpointError::DuplicateSection {
+                        section: SECTION_HEADINGS[index],
+                    });
+                }
+                seen[index] = true;
+                encountered_sections.push(index);
+                current_section = Some(index);
+                continue;
+            }
+
+            if let Some(index) = current_section {
+                sections[index].push(line.to_string());
+            } else if !line.trim().is_empty() {
+                return Err(CheckpointError::ContentBeforeFirstSection);
+            }
+        }
+
+        if let Some(index) = seen.iter().position(|present| !present) {
+            return Err(CheckpointError::MissingSection {
+                section: SECTION_HEADINGS[index],
+            });
+        }
+        if let Some((position, actual)) = encountered_sections
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(position, actual)| position != actual)
+        {
+            return Err(CheckpointError::InvalidSectionOrder {
+                expected: SECTION_HEADINGS[position],
+                actual: SECTION_HEADINGS[actual],
+            });
+        }
+
+        for section in &mut sections {
+            trim_blank_lines(section);
+        }
+
+        let next_actions = sections[5]
+            .iter()
+            .filter_map(|line| {
+                line.trim_start()
+                    .strip_prefix("- Next action:")
+                    .map(str::trim)
+            })
+            .collect::<Vec<_>>();
+        if next_actions.len() != 1 || next_actions[0].is_empty() {
+            return Err(CheckpointError::InvalidResumeCursor {
+                next_action_count: next_actions.len(),
+            });
+        }
+        let resume_cursor = ResumeCursor {
+            next_action: next_actions[0].to_string(),
+        };
+
+        let status_line = sections[8]
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .ok_or_else(|| CheckpointError::InvalidStatus {
+                value: String::new(),
+            })?;
+        let status = ContinuationStatus::parse(status_line)?;
+
+        Ok(Self {
+            sections,
+            resume_cursor,
+            status,
+        })
+    }
+
+    pub fn status(&self) -> ContinuationStatus {
+        self.status
+    }
+
+    pub fn resume_cursor(&self) -> &ResumeCursor {
+        &self.resume_cursor
+    }
+
+    pub fn render(&self) -> String {
+        SECTION_HEADINGS
+            .iter()
+            .enumerate()
+            .map(|(index, heading)| {
+                let content = self.sections[index].join("\n");
+                format!("## {heading}\n{content}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
+fn trim_blank_lines(lines: &mut Vec<String>) {
+    while lines.first().is_some_and(|line| line.trim().is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckpointError {
+    MissingSection {
+        section: &'static str,
+    },
+    DuplicateSection {
+        section: &'static str,
+    },
+    InvalidSectionOrder {
+        expected: &'static str,
+        actual: &'static str,
+    },
+    UnknownSection {
+        section: String,
+    },
+    InvalidResumeCursor {
+        next_action_count: usize,
+    },
+    InvalidStatus {
+        value: String,
+    },
+    ContentBeforeFirstSection,
+}
+
+impl fmt::Display for CheckpointError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSection { section } => write!(formatter, "缺少必需分区：{section}"),
+            Self::DuplicateSection { section } => write!(formatter, "存在重复分区：{section}"),
+            Self::InvalidSectionOrder { expected, actual } => write!(
+                formatter,
+                "checkpoint 分区顺序错误：期望 {expected}，实际 {actual}"
+            ),
+            Self::UnknownSection { section } => write!(formatter, "存在未知分区：{section}"),
+            Self::InvalidResumeCursor { next_action_count } => write!(
+                formatter,
+                "Resume Cursor 必须包含唯一 Next action，实际 {next_action_count} 个"
+            ),
+            Self::InvalidStatus { value } => write!(
+                formatter,
+                "Continuation Status 非法：{value}；只允许 Continue、Waiting for User 或 Completed"
+            ),
+            Self::ContentBeforeFirstSection => {
+                write!(formatter, "首个 checkpoint 分区前存在非法内容")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CheckpointError {}
+
+#[cfg(test)]
+#[path = "continuation_checkpoint_tests.rs"]
+mod continuation_checkpoint_tests;
