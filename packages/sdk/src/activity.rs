@@ -123,7 +123,7 @@ pub enum ActivitySourceView {
     HookDispatch(ActivityId),
     Compaction(ActivityId),
     Interaction(InteractionRequestId),
-    ChildRun(RunId),
+    SubRun(RunId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -149,7 +149,7 @@ pub enum ActivityKindView {
     HookDispatch,
     Compaction,
     Interaction,
-    ChildRun,
+    SubRun,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -276,7 +276,7 @@ pub enum ActivityDetailView {
     Interaction {
         kind: InteractionKindView,
     },
-    ChildRun {
+    SubRun {
         role: String,
         model: String,
     },

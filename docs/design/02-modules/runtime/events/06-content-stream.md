@@ -28,8 +28,9 @@
 | `ToolResult` | `ToolResult` | 同名 | 关联 ToolCall，sanitize 展示 | Current；需保持 committed/result 边界 |
 | `ToolOutputDelta` | 同名 | 同名 | streaming stdout | Current |
 | — | `ToolProgress` | dual-read 后转为 `ToolOutputDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
-| `AgentProgress` | `AgentProgress` | 同名 | child/agent progress projection | Compatibility；需按 detail 复核 |
-| `ChildRunActivity` | 同名 | 同名 | 挂到父 ToolCall | Current |
+| — | `AgentProgress` | 第一 ACL 边界归一化 | compatibility mixed input；Runtime producer removed |
+| `SubRunStarted` | 同名 | 同名 | Sub Run identity + role/model fact；Current |
+| `SubRunActivity` | 同名 | 同名 | 挂到父 ToolCall；Current |
 
 `AssistantTextDelta` 明确 Assistant Subject 与 Delta delivery，`ThinkingDelta` 明确 reasoning delta。SDK 旧 `Token` / `Thinking` 仅保留为 public wire compatibility input；Runtime production mapper 不再发布它们，TUI/CLI 在第一边界立即归一化为 typed fact。typed delta payload 统一使用 `delta` 字段。
 

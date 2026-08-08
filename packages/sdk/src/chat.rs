@@ -15,9 +15,9 @@ pub use crate::chat_event::{
 };
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView,
-    ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
-    ChildRunTerminalOutcomeView, OptionItem, ToolProgressEventView, WorkspaceContextView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, OptionItem,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolProgressEventView, WorkspaceContextView,
     WorkspaceStackEntryView,
 };
 

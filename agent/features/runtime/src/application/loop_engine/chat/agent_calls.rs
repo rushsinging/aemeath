@@ -300,8 +300,8 @@ where
     let child_parent_tool_id = call_id.clone();
     let progress_log_context = logging::capture();
     let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
-        let mut child_activity_publisher =
-            ChildRunActivityPublisher::new(child_parent_context, child_parent_tool_id);
+        let mut sub_run_fact_publisher =
+            SubRunFactPublisher::new(child_parent_context, child_parent_tool_id);
         while let Some(event) = prog_rx.recv().await {
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -314,29 +314,17 @@ where
                 progress_context.chat_id,
                 progress_context.run_id,
             );
-            for activity in child_activity_publisher.publish(event.clone()) {
-                let _ = ui_sink
-                    .send_event(RuntimeStreamEvent::ChildRunActivity(activity))
-                    .await;
+            for fact in sub_run_fact_publisher.publish(event) {
+                let runtime_event = match fact {
+                    SubRunPublishedFact::Started(started) => {
+                        RuntimeStreamEvent::SubRunStarted(started)
+                    }
+                    SubRunPublishedFact::Activity(activity) => {
+                        RuntimeStreamEvent::SubRunActivity(activity)
+                    }
+                };
+                let _ = ui_sink.send_event(runtime_event).await;
             }
-            let source_context = event
-                .source_context
-                .as_ref()
-                .map(|source| {
-                    RuntimeRunContext::new(
-                        sdk::ChatId::from_legacy_or_new(&source.chat_id),
-                        sdk::ChatRunId::from_legacy_or_new(&source.run_id),
-                    )
-                })
-                .unwrap_or_else(|| progress_context.clone());
-            let _ = ui_sink
-                .send_event(RuntimeStreamEvent::AgentProgress {
-                    source_context,
-                    attachment_context: progress_context.clone(),
-                    tool_id: call_id.clone(),
-                    event,
-                })
-                .await;
         }
     });
 
@@ -375,14 +363,19 @@ where
     vec![execution]
 }
 
-struct ChildRunActivityPublisher {
-    identity: Option<tools::ChildRunIdentity>,
+enum SubRunPublishedFact {
+    Started(tools::SubRunStartedEvent),
+    Activity(tools::SubRunActivityEvent),
+}
+
+struct SubRunFactPublisher {
+    identity: Option<tools::SubRunIdentity>,
     parent_context: RuntimeRunContext,
     parent_tool_call_id: sdk::ToolCallId,
     sequence: u64,
 }
 
-impl ChildRunActivityPublisher {
+impl SubRunFactPublisher {
     fn new(parent_context: RuntimeRunContext, parent_tool_call_id: sdk::ToolCallId) -> Self {
         Self {
             identity: None,
@@ -392,12 +385,13 @@ impl ChildRunActivityPublisher {
         }
     }
 
-    fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<tools::ChildRunActivityEvent> {
+    fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<SubRunPublishedFact> {
         if self.identity.is_none() {
             if let Some(source) = event.source_context.as_ref() {
-                self.identity = Some(tools::ChildRunIdentity {
+                self.identity = Some(tools::SubRunIdentity {
                     agent_id: source.chat_id.clone(),
                     run_id: source.run_id.clone(),
+                    parent_chat_id: self.parent_context.chat_id.to_string(),
                     parent_run_id: self.parent_context.run_id.to_string(),
                     spawned_by_tool_call_id: self.parent_tool_call_id.to_string(),
                 });
@@ -406,39 +400,50 @@ impl ChildRunActivityPublisher {
         let Some(identity) = self.identity.clone() else {
             return Vec::new();
         };
-        child_run_activity_kinds(event.kind)
-            .into_iter()
-            .map(|kind| {
+        match event.kind {
+            tools::AgentProgressKind::Started { role, model } => {
                 self.sequence = self.sequence.saturating_add(1);
-                tools::ChildRunActivityEvent {
-                    identity: identity.clone(),
+                vec![SubRunPublishedFact::Started(tools::SubRunStartedEvent {
+                    identity,
                     sequence: self.sequence,
-                    kind,
-                }
-            })
-            .collect()
+                    role,
+                    model,
+                })]
+            }
+            kind => sub_run_activity_kinds(kind)
+                .into_iter()
+                .map(|kind| {
+                    self.sequence = self.sequence.saturating_add(1);
+                    SubRunPublishedFact::Activity(tools::SubRunActivityEvent {
+                        identity: identity.clone(),
+                        sequence: self.sequence,
+                        kind,
+                    })
+                })
+                .collect(),
+        }
     }
 }
 
-fn child_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::ChildRunActivityKind> {
+fn sub_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::SubRunActivityKind> {
     match kind {
         tools::AgentProgressKind::Started { .. } => Vec::new(),
         tools::AgentProgressKind::Message { text } => {
-            vec![tools::ChildRunActivityKind::Text { text }]
+            vec![tools::SubRunActivityKind::Text { text }]
         }
         tools::AgentProgressKind::Thinking { text } => {
-            vec![tools::ChildRunActivityKind::Thinking { text }]
+            vec![tools::SubRunActivityKind::Thinking { text }]
         }
         tools::AgentProgressKind::ToolCalls { calls } => calls
             .into_iter()
-            .map(|call| tools::ChildRunActivityKind::ToolCall {
+            .map(|call| tools::SubRunActivityKind::ToolCall {
                 id: call.id,
                 name: call.name,
                 input: call.input,
             })
             .collect(),
         tools::AgentProgressKind::ToolOutput { tool_name, text } => {
-            vec![tools::ChildRunActivityKind::ToolOutput { tool_name, text }]
+            vec![tools::SubRunActivityKind::ToolOutput { tool_name, text }]
         }
         tools::AgentProgressKind::ToolResult {
             tool_call_id,
@@ -446,7 +451,7 @@ fn child_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::ChildR
             output,
             content,
             is_error,
-        } => vec![tools::ChildRunActivityKind::ToolResult {
+        } => vec![tools::SubRunActivityKind::ToolResult {
             tool_call_id,
             tool_name,
             output,
@@ -454,7 +459,7 @@ fn child_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::ChildR
             is_error,
         }],
         tools::AgentProgressKind::Terminal { outcome } => {
-            vec![tools::ChildRunActivityKind::Terminal { outcome }]
+            vec![tools::SubRunActivityKind::Terminal { outcome }]
         }
     }
 }
@@ -473,7 +478,7 @@ mod tests {
     use tools::{TypedTool, TypedToolResult};
 
     #[test]
-    fn child_run_activity_projection_preserves_parent_tool_identity_and_kinds() {
+    fn sub_run_activity_projection_preserves_parent_tool_identity_and_kinds() {
         let parent_context =
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
@@ -489,33 +494,40 @@ mod tests {
         };
 
         let mut publisher =
-            ChildRunActivityPublisher::new(parent_context.clone(), parent_tool_id.clone());
+            SubRunFactPublisher::new(parent_context.clone(), parent_tool_id.clone());
         let projected = publisher.publish(event);
 
         assert_eq!(projected.len(), 1);
-        assert_eq!(projected[0].identity.agent_id, "researcher");
-        assert_eq!(projected[0].identity.run_id, "child-run");
+        let SubRunPublishedFact::Activity(activity) = &projected[0] else {
+            panic!("expected sub run activity");
+        };
+        assert_eq!(activity.identity.agent_id, "researcher");
+        assert_eq!(activity.identity.run_id, "child-run");
         assert_eq!(
-            projected[0].identity.parent_run_id,
+            activity.identity.parent_chat_id,
+            parent_context.chat_id.to_string()
+        );
+        assert_eq!(
+            activity.identity.parent_run_id,
             parent_context.run_id.to_string()
         );
         assert_eq!(
-            projected[0].identity.spawned_by_tool_call_id,
+            activity.identity.spawned_by_tool_call_id,
             parent_tool_id.to_string()
         );
-        assert_eq!(projected[0].sequence, 1);
+        assert_eq!(activity.sequence, 1);
         assert!(matches!(
-            &projected[0].kind,
-            tools::ChildRunActivityKind::Thinking { text } if text == "reasoning"
+            &activity.kind,
+            tools::SubRunActivityKind::Thinking { text } if text == "reasoning"
         ));
     }
 
     #[test]
-    fn child_run_tool_result_preserves_canonical_tool_name() {
+    fn sub_run_tool_result_preserves_canonical_tool_name() {
         let parent_context =
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
-        let mut publisher = ChildRunActivityPublisher::new(parent_context, parent_tool_id);
+        let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
         let started = tools::AgentProgressEvent {
             source_context: Some(tools::AgentProgressSourceContext::new(
                 "researcher",
@@ -527,7 +539,10 @@ mod tests {
                 model: "model".to_string(),
             },
         };
-        assert!(publisher.publish(started).is_empty());
+        let SubRunPublishedFact::Started(started) = &publisher.publish(started)[0] else {
+            panic!("expected sub run started");
+        };
+        assert_eq!(started.sequence, 1);
 
         let projected = publisher.publish(tools::AgentProgressEvent {
             source_context: None,
@@ -541,9 +556,12 @@ mod tests {
             },
         });
 
+        let SubRunPublishedFact::Activity(activity) = &projected[0] else {
+            panic!("expected sub run activity");
+        };
         assert!(matches!(
-            &projected[0].kind,
-            tools::ChildRunActivityKind::ToolResult {
+            &activity.kind,
+            tools::SubRunActivityKind::ToolResult {
                 tool_name,
                 output,
                 ..
@@ -552,11 +570,11 @@ mod tests {
     }
 
     #[test]
-    fn child_run_activity_projection_sequences_tool_output_without_source_context() {
+    fn sub_run_activity_projection_sequences_tool_output_without_source_context() {
         let parent_context =
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
-        let mut publisher = ChildRunActivityPublisher::new(parent_context, parent_tool_id);
+        let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
         let started = tools::AgentProgressEvent {
             source_context: Some(tools::AgentProgressSourceContext::new(
                 "researcher",
@@ -568,7 +586,10 @@ mod tests {
                 model: "model".to_string(),
             },
         };
-        assert!(publisher.publish(started).is_empty());
+        let SubRunPublishedFact::Started(started) = &publisher.publish(started)[0] else {
+            panic!("expected sub run started");
+        };
+        assert_eq!(started.sequence, 1);
 
         let output = publisher.publish(tools::AgentProgressEvent {
             source_context: None,
@@ -580,11 +601,14 @@ mod tests {
         });
 
         assert_eq!(output.len(), 1);
-        assert_eq!(output[0].identity.run_id, "child-run");
-        assert_eq!(output[0].sequence, 1);
+        let SubRunPublishedFact::Activity(output) = &output[0] else {
+            panic!("expected sub run activity");
+        };
+        assert_eq!(output.identity.run_id, "child-run");
+        assert_eq!(output.sequence, 2);
         assert!(matches!(
-            &output[0].kind,
-            tools::ChildRunActivityKind::ToolOutput { tool_name, text }
+            &output.kind,
+            tools::SubRunActivityKind::ToolOutput { tool_name, text }
                 if tool_name == "Bash" && text == "hello"
         ));
     }

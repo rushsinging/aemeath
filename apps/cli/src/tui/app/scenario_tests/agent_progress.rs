@@ -1,6 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgress, TuiAgentProgressKind, TuiChildRunActivity, TuiChildRunActivityKind,
-    TuiChildRunIdentity, TuiRunContext, TuiRunStepEvent, TuiRuntimeEvent, TuiToolCallStatus,
+    TuiRunContext, TuiRunStepEvent, TuiRuntimeEvent, TuiSubRunActivity, TuiSubRunActivityKind,
+    TuiSubRunIdentity, TuiSubRunStarted, TuiToolCallStatus,
 };
 
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -80,29 +80,30 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         arguments: Some(serde_json::json!({"role":"coder","prompt":"write hello.rs"})),
         status: TuiToolCallStatus::Ready,
     });
-    harness.runtime_event(TuiRuntimeEvent::AgentProgress {
-        source_context: child_context.clone(),
-        attachment_context: parent_context.clone(),
-        tool_id: tool_id.clone(),
-        event: TuiAgentProgress {
-            sequence: 0,
-            kind: TuiAgentProgressKind::Started {
-                role: Some("coder".to_string()),
-                model: "MiniMax/MiniMax-M3".to_string(),
-            },
+    let sub_run_identity = TuiSubRunIdentity {
+        agent_id: child_context.chat_id.clone(),
+        run_id: crate::tui::model::conversation::interaction::UiRunId::from(
+            child_context.run_id.as_str(),
+        ),
+        parent_chat_id: parent_context.chat_id.clone(),
+        parent_run_id: crate::tui::model::conversation::interaction::UiRunId::from(
+            parent_context.run_id.as_str(),
+        ),
+        spawned_by_tool_call_id: tool_id.clone(),
+    };
+    harness.runtime_event(TuiRuntimeEvent::SubRunStarted(TuiSubRunStarted {
+        identity: sub_run_identity.clone(),
+        sequence: 0,
+        role: Some("coder".to_string()),
+        model: "MiniMax/MiniMax-M3".to_string(),
+    }));
+    harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+        identity: sub_run_identity,
+        sequence: 1,
+        kind: TuiSubRunActivityKind::Text {
+            text: marker.to_string(),
         },
-    });
-    harness.runtime_event(TuiRuntimeEvent::AgentProgress {
-        source_context: child_context,
-        attachment_context: parent_context,
-        tool_id,
-        event: TuiAgentProgress {
-            sequence: 1,
-            kind: TuiAgentProgressKind::Message {
-                text: marker.to_string(),
-            },
-        },
-    });
+    }));
     harness.render();
 
     let agent_call = harness
@@ -132,14 +133,15 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
 }
 
 #[test]
-fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
+fn sub_run_skill_result_is_hidden_while_visible_tool_result_renders() {
     let parent_context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
         run_id: "parent-run".to_string(),
     };
-    let identity = TuiChildRunIdentity {
+    let identity = TuiSubRunIdentity {
         agent_id: "researcher".to_string(),
         run_id: "child-run".into(),
+        parent_chat_id: "parent-chat".to_string(),
         parent_run_id: "parent-run".into(),
         spawned_by_tool_call_id: "agent-tool".to_string(),
     };
@@ -152,24 +154,24 @@ fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
         index: 0,
     });
     for (sequence, kind) in [
-        TuiChildRunActivityKind::ToolCall {
+        TuiSubRunActivityKind::ToolCall {
             id: "skill-call".to_string(),
             name: "Skill".to_string(),
             input: serde_json::json!({"skill": "superpowers:using-superpowers"}),
         },
-        TuiChildRunActivityKind::ToolResult {
+        TuiSubRunActivityKind::ToolResult {
             tool_call_id: "skill-call".to_string(),
             tool_name: "Skill".to_string(),
             output: "SKILL_BODY_SENTINEL\n<skill-request>LLM_ONLY</skill-request>\n<system-reminder>LLM_ONLY</system-reminder>".to_string(),
             content: serde_json::json!({"name": "superpowers:using-superpowers"}),
             is_error: false,
         },
-        TuiChildRunActivityKind::ToolCall {
+        TuiSubRunActivityKind::ToolCall {
             id: "grep-call".to_string(),
             name: "Grep".to_string(),
             input: serde_json::json!({"pattern": "visible"}),
         },
-        TuiChildRunActivityKind::ToolResult {
+        TuiSubRunActivityKind::ToolResult {
             tool_call_id: "grep-call".to_string(),
             tool_name: "Grep".to_string(),
             output: "VISIBLE_GREP_RESULT".to_string(),
@@ -180,7 +182,7 @@ fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
     .into_iter()
     .enumerate()
     {
-        harness.runtime_event(TuiRuntimeEvent::ChildRunActivity(TuiChildRunActivity {
+        harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
             identity: identity.clone(),
             sequence: sequence as u64 + 1,
             kind,
@@ -203,7 +205,7 @@ fn child_run_skill_result_is_hidden_while_visible_tool_result_renders() {
 }
 
 #[test]
-fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
+fn main_with_concurrent_sub_runs_preserves_existing_agent_activity_display() {
     let parent_context = TuiRunContext {
         chat_id: "parent-chat".to_string(),
         run_id: "parent-run".to_string(),
@@ -219,29 +221,30 @@ fn main_with_concurrent_child_runs_preserves_existing_agent_activity_display() {
         });
     }
 
-    for (agent_id, child_run_id, tool_id, text, sequence) in [
+    for (agent_id, sub_run_id, tool_id, text, sequence) in [
         ("researcher", "child-a", "agent-a", "alpha text", 1),
         ("reviewer", "child-b", "agent-b", "beta thinking", 1),
         ("researcher", "child-a", "agent-a", "alpha output", 2),
     ] {
         let kind = if text.contains("thinking") {
-            TuiChildRunActivityKind::Thinking {
+            TuiSubRunActivityKind::Thinking {
                 text: text.to_string(),
             }
         } else if text.contains("output") {
-            TuiChildRunActivityKind::ToolOutput {
+            TuiSubRunActivityKind::ToolOutput {
                 tool_name: "Bash".to_string(),
                 text: text.to_string(),
             }
         } else {
-            TuiChildRunActivityKind::Text {
+            TuiSubRunActivityKind::Text {
                 text: text.to_string(),
             }
         };
-        harness.runtime_event(TuiRuntimeEvent::ChildRunActivity(TuiChildRunActivity {
-            identity: TuiChildRunIdentity {
+        harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+            identity: TuiSubRunIdentity {
                 agent_id: agent_id.to_string(),
-                run_id: crate::tui::model::conversation::interaction::UiRunId::from(child_run_id),
+                run_id: crate::tui::model::conversation::interaction::UiRunId::from(sub_run_id),
+                parent_chat_id: "parent-chat".to_string(),
                 parent_run_id: crate::tui::model::conversation::interaction::UiRunId::from(
                     "parent-run",
                 ),

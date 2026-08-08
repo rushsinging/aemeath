@@ -53,12 +53,12 @@ pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
     ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest, ChatResult,
-    ChatStream, ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
-    ChildRunTerminalOutcomeView, OptionItem, ReflectionApplyStatusView,
-    ReflectionErrorCategoryView, ReflectionHistoryView, ReflectionStatusView,
-    ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep, ResumedStepFinalizeCause,
-    RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView, ToolProgressEventView,
-    ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
+    ChatStream, OptionItem, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{

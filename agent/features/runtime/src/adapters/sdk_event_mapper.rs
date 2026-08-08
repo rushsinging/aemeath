@@ -3,9 +3,9 @@
 use crate::application::loop_engine::chat::RuntimeRunContext;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
 use sdk::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
-    ChatEventContext, ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
-    ChildRunTerminalOutcomeView, RunStatusView, ToolCallStatusView, ToolResultImage,
+    ChatEvent, ChatEventContext, RunStatusView, SubRunActivityEventView, SubRunActivityKindView,
+    SubRunIdentityView, SubRunStartedEventView, SubRunTerminalOutcomeView, ToolCallStatusView,
+    ToolResultImage,
 };
 
 pub fn map_lifecycle_event(event: RuntimeLifecycleEvent) -> ChatEvent {
@@ -512,17 +512,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::InteractionRequested {
             request,
         } => ChatEvent::InteractionRequested { request },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::AgentProgress {
-            source_context,
-            attachment_context,
-            tool_id,
-            event,
-        } => ChatEvent::AgentProgress {
-            source_context: turn_context_to_sdk(source_context),
-            attachment_context: turn_context_to_sdk(attachment_context),
-            tool_id,
-            event: project_agent_progress_event(event),
-        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ToolOutputDelta {
             context,
             tool_id,
@@ -532,9 +521,19 @@ pub(crate) fn map_stream_event(
             tool_id,
             delta,
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ChildRunActivity(event) => {
-            ChatEvent::ChildRunActivity {
-                event: child_run_activity_to_sdk(event),
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SubRunStarted(event) => {
+            ChatEvent::SubRunStarted {
+                event: SubRunStartedEventView {
+                    identity: sub_run_identity_to_sdk(event.identity),
+                    sequence: event.sequence,
+                    role: event.role,
+                    model: event.model,
+                },
+            }
+        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::SubRunActivity(event) => {
+            ChatEvent::SubRunActivity {
+                event: sub_run_activity_to_sdk(event),
             }
         }
         crate::application::loop_engine::chat::RuntimeStreamEvent::SkillsUpdated { snapshot } => {
@@ -658,99 +657,60 @@ pub(crate) fn map_stream_event(
     }
 }
 
-fn child_run_activity_to_sdk(event: tools::ChildRunActivityEvent) -> ChildRunActivityEventView {
-    ChildRunActivityEventView {
-        identity: ChildRunIdentityView {
-            agent_id: sdk::AgentId::from_legacy_or_new(&event.identity.agent_id),
-            run_id: sdk::RunId::from_legacy_or_new(&event.identity.run_id),
-            parent_run_id: sdk::RunId::from_legacy_or_new(&event.identity.parent_run_id),
-            spawned_by_tool_call_id: sdk::ToolCallId::from_legacy_or_new(
-                &event.identity.spawned_by_tool_call_id,
-            ),
-        },
+fn sub_run_identity_to_sdk(identity: tools::SubRunIdentity) -> SubRunIdentityView {
+    SubRunIdentityView {
+        agent_id: sdk::AgentId::from_legacy_or_new(&identity.agent_id),
+        run_id: sdk::RunId::from_legacy_or_new(&identity.run_id),
+        parent_chat_id: sdk::ChatId::from_legacy_or_new(&identity.parent_chat_id),
+        parent_run_id: sdk::RunId::from_legacy_or_new(&identity.parent_run_id),
+        spawned_by_tool_call_id: sdk::ToolCallId::from_legacy_or_new(
+            &identity.spawned_by_tool_call_id,
+        ),
+    }
+}
+
+fn sub_run_activity_to_sdk(event: tools::SubRunActivityEvent) -> SubRunActivityEventView {
+    SubRunActivityEventView {
+        identity: sub_run_identity_to_sdk(event.identity),
         sequence: event.sequence,
         kind: match event.kind {
-            tools::ChildRunActivityKind::Text { text } => ChildRunActivityKindView::Text { text },
-            tools::ChildRunActivityKind::Thinking { text } => {
-                ChildRunActivityKindView::Thinking { text }
+            tools::SubRunActivityKind::Text { text } => SubRunActivityKindView::Text { text },
+            tools::SubRunActivityKind::Thinking { text } => {
+                SubRunActivityKindView::Thinking { text }
             }
-            tools::ChildRunActivityKind::ToolCall { id, name, input } => {
-                ChildRunActivityKindView::ToolCall {
+            tools::SubRunActivityKind::ToolCall { id, name, input } => {
+                SubRunActivityKindView::ToolCall {
                     id: sdk::ToolCallId::from_legacy_or_new(&id),
                     name,
                     input,
                 }
             }
-            tools::ChildRunActivityKind::ToolOutput { tool_name, text } => {
-                ChildRunActivityKindView::ToolOutput { tool_name, text }
+            tools::SubRunActivityKind::ToolOutput { tool_name, text } => {
+                SubRunActivityKindView::ToolOutput { tool_name, text }
             }
-            tools::ChildRunActivityKind::ToolResult {
+            tools::SubRunActivityKind::ToolResult {
                 tool_call_id,
                 tool_name,
                 output,
                 content,
                 is_error,
-            } => ChildRunActivityKindView::ToolResult {
+            } => SubRunActivityKindView::ToolResult {
                 tool_call_id: sdk::ToolCallId::from_legacy_or_new(&tool_call_id),
                 tool_name,
                 output,
                 content,
                 is_error,
             },
-            tools::ChildRunActivityKind::Terminal { outcome } => {
-                ChildRunActivityKindView::Terminal {
-                    outcome: match outcome {
-                        tools::ChildRunTerminalOutcome::Completed => {
-                            ChildRunTerminalOutcomeView::Completed
-                        }
-                        tools::ChildRunTerminalOutcome::Failed { error } => {
-                            ChildRunTerminalOutcomeView::Failed { error }
-                        }
-                        tools::ChildRunTerminalOutcome::Cancelled => {
-                            ChildRunTerminalOutcomeView::Cancelled
-                        }
-                    },
-                }
-            }
+            tools::SubRunActivityKind::Terminal { outcome } => SubRunActivityKindView::Terminal {
+                outcome: match outcome {
+                    tools::SubRunTerminalOutcome::Completed => SubRunTerminalOutcomeView::Completed,
+                    tools::SubRunTerminalOutcome::Failed { error } => {
+                        SubRunTerminalOutcomeView::Failed { error }
+                    }
+                    tools::SubRunTerminalOutcome::Cancelled => SubRunTerminalOutcomeView::Cancelled,
+                },
+            },
         },
-    }
-}
-
-pub(crate) fn project_agent_progress_event(
-    event: tools::AgentProgressEvent,
-) -> AgentProgressEventView {
-    let kind = match event.kind {
-        tools::AgentProgressKind::ToolCalls { calls } => AgentProgressKindView::ToolCalls {
-            calls: calls
-                .into_iter()
-                .map(|call| AgentToolCallProgressView {
-                    id: sdk::ToolCallId::from_legacy_or_new(&call.id),
-                    name: call.name,
-                    input: call.input,
-                })
-                .collect(),
-        },
-        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
-            AgentProgressKindView::ToolOutput { tool_name, text }
-        }
-        tools::AgentProgressKind::Message { text }
-        | tools::AgentProgressKind::Thinking { text } => AgentProgressKindView::Message { text },
-        tools::AgentProgressKind::ToolResult { tool_name, .. } => {
-            AgentProgressKindView::ToolOutput {
-                tool_name,
-                text: String::new(),
-            }
-        }
-        tools::AgentProgressKind::Terminal { outcome } => AgentProgressKindView::Message {
-            text: format!("Sub-agent terminal: {outcome:?}"),
-        },
-        tools::AgentProgressKind::Started { role, model } => {
-            AgentProgressKindView::Started { role, model }
-        }
-    };
-    AgentProgressEventView {
-        sequence: event.sequence,
-        kind,
     }
 }
 

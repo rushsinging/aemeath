@@ -68,7 +68,7 @@ fn activity_published_language_serializes_every_closed_variant() {
         serde_json::to_value(ActivityKindView::HookDispatch).unwrap(),
         serde_json::to_value(ActivityKindView::Compaction).unwrap(),
         serde_json::to_value(ActivityKindView::Interaction).unwrap(),
-        serde_json::to_value(ActivityKindView::ChildRun).unwrap(),
+        serde_json::to_value(ActivityKindView::SubRun).unwrap(),
         serde_json::to_value(ActivityStateView::Waiting).unwrap(),
         serde_json::to_value(ActivityStateView::Succeeded).unwrap(),
         serde_json::to_value(ActivityStateView::Failed).unwrap(),
@@ -108,7 +108,7 @@ fn activity_published_language_serializes_every_closed_variant() {
             kind: InteractionKindView::ToolApproval,
         })
         .unwrap(),
-        serde_json::to_value(ActivityDetailView::ChildRun {
+        serde_json::to_value(ActivityDetailView::SubRun {
             role: "reviewer".to_string(),
             model: "claude-sonnet-4-5".to_string(),
         })

@@ -730,9 +730,9 @@ impl RecordingSink {
             RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
             RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
             RuntimeStreamEvent::InteractionRequested { .. } => "InteractionRequested".to_string(),
-            RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
             RuntimeStreamEvent::ToolOutputDelta { .. } => "ToolOutputDelta".to_string(),
-            RuntimeStreamEvent::ChildRunActivity(_) => "ChildRunActivity".to_string(),
+            RuntimeStreamEvent::SubRunStarted(_) => "SubRunStarted".to_string(),
+            RuntimeStreamEvent::SubRunActivity(_) => "SubRunActivity".to_string(),
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
             }

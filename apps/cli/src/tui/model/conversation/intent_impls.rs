@@ -308,9 +308,9 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
     }
 }
 
-impl ConversationUpdate for RecordChildRunActivity {
+impl ConversationUpdate for RecordSubRunActivity {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_child_run_activity(self)
+        model.record_sub_run_activity(self)
     }
 }
 
@@ -678,7 +678,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
-            Self::RecordChildRunActivity(s) => s.update(model),
+            Self::RecordSubRunActivity(s) => s.update(model),
             Self::RecordAgentProgress(s) => s.update(model),
             Self::RecordAgentActivities(s) => s.update(model),
             Self::RecordToolStreamingOutput(s) => s.update(model),

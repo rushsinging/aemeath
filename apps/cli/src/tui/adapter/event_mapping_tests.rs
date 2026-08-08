@@ -382,8 +382,8 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
     let expected_hook_dispatch_id = hook_dispatch_id.as_str().to_string();
     let compaction_id = sdk::ActivityId::new("compaction");
     let expected_compaction_id = compaction_id.as_str().to_string();
-    let child_run_id = sdk::RunId::new("child-run");
-    let expected_child_run_id = child_run_id.as_str().to_string();
+    let sub_run_id = sdk::RunId::new("child-run");
+    let expected_sub_run_id = sub_run_id.as_str().to_string();
     let activities = vec![
         fixture(
             0,
@@ -441,10 +441,10 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
         ),
         fixture(
             5,
-            sdk::ActivitySourceView::ChildRun(child_run_id),
-            sdk::ActivityKindView::ChildRun,
+            sdk::ActivitySourceView::SubRun(sub_run_id),
+            sdk::ActivityKindView::SubRun,
             sdk::ActivityStateView::Waiting,
-            sdk::ActivityDetailView::ChildRun {
+            sdk::ActivityDetailView::SubRun {
                 role: "reviewer".to_string(),
                 model: "claude-opus".to_string(),
             },
@@ -491,8 +491,8 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, ref script, attempt: 4 } if script == "check-stop-failure.sh")
                 && matches!(snapshot.activities[4].source, TuiActivitySource::Interaction(ref id) if id == &expected_interaction_id)
                 && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
-                && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
-                && matches!(snapshot.activities[5].detail, TuiActivityDetail::ChildRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
+                && matches!(snapshot.activities[5].source, TuiActivitySource::SubRun(ref id) if id.as_str() == expected_sub_run_id)
+                && matches!(snapshot.activities[5].detail, TuiActivityDetail::SubRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
                 && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
                 && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, work: TuiCompactWork::Determinate { completed: 2, total: 3 } })
     ));

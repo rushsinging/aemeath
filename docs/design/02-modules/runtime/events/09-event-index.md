@@ -69,8 +69,9 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ToolResult` | 同名 | 更新 Tool result | tool call | result fact | 否 | Current |
 | `ToolOutputDelta` | 同名 | 同名 → streaming output | tool call | delta | 否 | Current |
 | — | `ToolProgress` | compatibility dual-read → `ToolOutputDelta` | tool call | legacy event wrapper | 否 | Compatibility；Runtime producer removed |
-| `AgentProgress` | 同名 | agent progress projection | child/source | mixed observation | 否 | Compatibility / Target Split |
-| `ChildRunActivity` | 同名 | parent ToolCall attachment | parent + child + sequence | observation | 否 | Current |
+| — | `AgentProgress` | 第一 ACL 边界归一化为 `SubRunStarted` / `SubRunActivity` | sub/source + parent attachment | compatibility mixed input | 否 | Compatibility；Runtime producer removed |
+| `SubRunStarted` | 同名 | `UpdateAgentMeta` | sub + parent + tool + sequence | fact | 否 | Current |
+| `SubRunActivity` | 同名 | parent ToolCall attachment | sub + parent + tool + sequence | structured observation | 否 | Current |
 | `ModelInvocationRetrying` | 同名 | retry notice | invocation + attempt | transition | 否 | Current |
 | `Usage` | 同名 | usage reducer | invocation/run | 未明确 delta/cumulative | 否 | Target Clarify |
 | `LiveTps` | 同名 | throughput presentation | invocation/run | observation | 否 | Target Rename |

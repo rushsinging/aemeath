@@ -1,4 +1,4 @@
-use super::sdk_event_mapper::{map_activity_event, map_stream_event, project_agent_progress_event};
+use super::sdk_event_mapper::{map_activity_event, map_stream_event};
 use crate::application::loop_engine::chat::{
     RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
@@ -111,22 +111,23 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
 }
 
 #[test]
-fn sdk_event_mapper_child_run_activity_preserves_identity() {
-    let event = RuntimeStreamEvent::ChildRunActivity(tools::ChildRunActivityEvent {
-        identity: tools::ChildRunIdentity {
+fn sdk_event_mapper_sub_run_activity_preserves_identity() {
+    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
+        identity: tools::SubRunIdentity {
             agent_id: "agent-child-a".to_string(),
             run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
             parent_run_id: "run-main".to_string(),
             spawned_by_tool_call_id: "tool-agent-a".to_string(),
         },
         sequence: 3,
-        kind: tools::ChildRunActivityKind::Text {
+        kind: tools::SubRunActivityKind::Text {
             text: "检查配置".to_string(),
         },
     });
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ChildRunActivity { event } => {
+        sdk::ChatEvent::SubRunActivity { event } => {
             assert_eq!(
                 event.identity.agent_id,
                 sdk::AgentId::from_legacy_or_new("agent-child-a")
@@ -145,24 +146,25 @@ fn sdk_event_mapper_child_run_activity_preserves_identity() {
             );
             assert!(matches!(
                 event.kind,
-                sdk::ChildRunActivityKindView::Text { ref text } if text == "检查配置"
+                sdk::SubRunActivityKindView::Text { ref text } if text == "检查配置"
             ));
         }
-        other => panic!("expected ChildRunActivity, got {other:?}"),
+        other => panic!("expected SubRunActivity, got {other:?}"),
     }
 }
 
 #[test]
-fn sdk_child_run_tool_result_preserves_tool_name() {
-    let event = RuntimeStreamEvent::ChildRunActivity(tools::ChildRunActivityEvent {
-        identity: tools::ChildRunIdentity {
+fn sdk_sub_run_tool_result_preserves_tool_name() {
+    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
+        identity: tools::SubRunIdentity {
             agent_id: "agent-child-a".to_string(),
             run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
             parent_run_id: "run-main".to_string(),
             spawned_by_tool_call_id: "tool-agent-a".to_string(),
         },
         sequence: 4,
-        kind: tools::ChildRunActivityKind::ToolResult {
+        kind: tools::SubRunActivityKind::ToolResult {
             tool_call_id: "skill-call".to_string(),
             tool_name: "Skill".to_string(),
             output: "SKILL_BODY_SENTINEL".to_string(),
@@ -171,12 +173,12 @@ fn sdk_child_run_tool_result_preserves_tool_name() {
         },
     });
 
-    let sdk::ChatEvent::ChildRunActivity { event } = map_stream_event(event) else {
-        panic!("expected ChildRunActivity");
+    let sdk::ChatEvent::SubRunActivity { event } = map_stream_event(event) else {
+        panic!("expected SubRunActivity");
     };
     assert!(matches!(
         event.kind,
-        sdk::ChildRunActivityKindView::ToolResult {
+        sdk::SubRunActivityKindView::ToolResult {
             ref tool_name,
             ref output,
             ..
@@ -185,73 +187,35 @@ fn sdk_child_run_tool_result_preserves_tool_name() {
 }
 
 #[test]
-fn legacy_agent_progress_drops_tool_result_body() {
-    let projected = project_agent_progress_event(tools::AgentProgressEvent {
-        source_context: Some(tools::AgentProgressSourceContext::new(
-            "agent-child-a",
-            "run-child-a",
-        )),
-        sequence: 5,
-        kind: tools::AgentProgressKind::ToolResult {
-            tool_call_id: "skill-call".to_string(),
-            tool_name: "Skill".to_string(),
-            output: "SKILL_BODY_SENTINEL".to_string(),
-            content: serde_json::json!({"name": "using-superpowers"}),
-            is_error: false,
+fn sub_run_started_preserves_identity_role_model_and_sequence() {
+    let expected_agent_id = sdk::AgentId::from_legacy_or_new("agent-sub-a");
+    let expected_parent_chat_id = sdk::ChatId::from_legacy_or_new("parent-chat");
+    let expected_tool_call_id = sdk::ToolCallId::from_legacy_or_new("tool-agent-a");
+    let event = RuntimeStreamEvent::SubRunStarted(tools::SubRunStartedEvent {
+        identity: tools::SubRunIdentity {
+            agent_id: "agent-sub-a".to_string(),
+            run_id: "run-sub-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
         },
+        sequence: 1,
+        role: Some("researcher".to_string()),
+        model: "claude-sonnet".to_string(),
     });
 
-    assert!(matches!(
-        projected.kind,
-        sdk::AgentProgressKindView::ToolOutput {
-            ref tool_name,
-            ref text,
-        } if tool_name == "Skill" && text.is_empty()
-    ));
-}
-
-#[test]
-fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
-    let source_context = RuntimeRunContext::new(
-        sdk::ids::ChatId::new("child-chat"),
-        sdk::ids::ChatRunId::new("child-turn"),
-    );
-    let attachment_context = RuntimeRunContext::new(
-        sdk::ids::ChatId::new("parent-chat"),
-        sdk::ids::ChatRunId::new("parent-turn"),
-    );
-    let expected_source = source_context.clone();
-    let expected_attachment = attachment_context.clone();
-    let tool_id = sdk::ids::ToolCallId::new("agent-tool");
-    let event = RuntimeStreamEvent::AgentProgress {
-        source_context,
-        attachment_context,
-        tool_id: tool_id.clone(),
-        event: tools::AgentProgressEvent {
-            source_context: None,
-            sequence: 7,
-            kind: tools::AgentProgressKind::Message {
-                text: "working".to_string(),
-            },
-        },
+    let sdk::ChatEvent::SubRunStarted { event } = map_stream_event(event) else {
+        panic!("expected SubRunStarted");
     };
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::AgentProgress {
-            source_context,
-            attachment_context,
-            tool_id: mapped_tool_id,
-            event,
-        } => {
-            assert_eq!(source_context.chat_id, expected_source.chat_id);
-            assert_eq!(source_context.run_id, expected_source.run_id);
-            assert_eq!(attachment_context.chat_id, expected_attachment.chat_id);
-            assert_eq!(attachment_context.run_id, expected_attachment.run_id);
-            assert_eq!(mapped_tool_id, tool_id);
-            assert_eq!(event.sequence, 7);
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
+    assert_eq!(event.identity.agent_id, expected_agent_id);
+    assert_eq!(event.identity.parent_chat_id, expected_parent_chat_id);
+    assert_eq!(
+        event.identity.spawned_by_tool_call_id,
+        expected_tool_call_id
+    );
+    assert_eq!(event.sequence, 1);
+    assert_eq!(event.role.as_deref(), Some("researcher"));
+    assert_eq!(event.model, "claude-sonnet");
 }
 
 #[test]

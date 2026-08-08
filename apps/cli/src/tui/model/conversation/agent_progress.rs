@@ -1,11 +1,11 @@
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChildRunActivityEntry {
+pub struct SubRunActivityEntry {
     pub agent_id: String,
     pub run_id: String,
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: String,
     pub sequence: u64,
-    pub kind: crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

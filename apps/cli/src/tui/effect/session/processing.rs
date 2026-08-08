@@ -56,7 +56,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::tui_runtime_event::TuiRunContext;
+    use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiSubRunActivityKind};
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_agent_progress_identity() {
+    fn legacy_sdk_agent_progress_normalizes_to_sub_run_activity() {
         let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
         let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
             source_context: sdk::ChatEventContext::new(
@@ -145,16 +145,16 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::AgentProgress {
-                source_context,
-                attachment_context,
-                tool_id,
-                ..
-            }) if source_context.chat_id == sdk::ids::ChatId::new("child-chat").as_str()
-                && source_context.run_id == sdk::ids::ChatRunId::new("child-run_step").as_str()
-                && attachment_context.chat_id == sdk::ids::ChatId::new("parent-chat").as_str()
-                && attachment_context.run_id == sdk::ids::ChatRunId::new("parent-run_step").as_str()
-                && tool_id == expected_tool_id.as_str()
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunActivity(activity))
+                if activity.identity.agent_id == sdk::ids::ChatId::new("child-chat").as_str()
+                    && activity.identity.run_id.as_str()
+                        == sdk::ids::ChatRunId::new("child-run_step").as_str()
+                    && activity.identity.parent_chat_id
+                        == sdk::ids::ChatId::new("parent-chat").as_str()
+                    && activity.identity.parent_run_id.as_str()
+                        == sdk::ids::ChatRunId::new("parent-run_step").as_str()
+                    && activity.identity.spawned_by_tool_call_id == expected_tool_id.as_str()
+                    && matches!(activity.kind, TuiSubRunActivityKind::Text { ref text } if text == "working")
         ));
     }
 

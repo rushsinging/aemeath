@@ -137,13 +137,13 @@ pub struct ClearQueuedSubmissionById {
 pub struct ClearAllQueuedSubmissions;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RecordChildRunActivity {
+pub struct RecordSubRunActivity {
     pub agent_id: String,
-    pub child_run_id: String,
+    pub sub_run_id: String,
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: ToolCallId,
     pub sequence: u64,
-    pub kind: crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -413,7 +413,7 @@ pub enum ConversationIntent {
     QueueSubmission(QueueSubmission),
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
-    RecordChildRunActivity(RecordChildRunActivity),
+    RecordSubRunActivity(RecordSubRunActivity),
     RecordAgentProgress(RecordAgentProgress),
     RecordAgentActivities(RecordAgentActivities),
     RecordToolStreamingOutput(RecordToolStreamingOutput),

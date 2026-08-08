@@ -172,7 +172,7 @@
         {
           "properties": {
             "detail_type": {
-              "const": "child_run",
+              "const": "sub_run",
               "type": "string"
             },
             "model": {
@@ -289,7 +289,7 @@
         {
           "properties": {
             "kind": {
-              "const": "child_run",
+              "const": "sub_run",
               "type": "string"
             }
           },
@@ -438,7 +438,7 @@
         {
           "properties": {
             "kind": {
-              "const": "child_run",
+              "const": "sub_run",
               "type": "string"
             },
             "value": {

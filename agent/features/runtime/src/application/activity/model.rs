@@ -12,7 +12,7 @@ pub(crate) enum ActivitySource {
     HookDispatch(ActivityId),
     Compaction(ActivityId),
     Interaction(sdk::InteractionRequestId),
-    ChildRun(RunId),
+    SubRun(RunId),
 }
 
 impl ActivitySource {
@@ -25,7 +25,7 @@ impl ActivitySource {
             Self::HookDispatch(id) => ActivitySourceView::HookDispatch(id.clone()),
             Self::Compaction(id) => ActivitySourceView::Compaction(id.clone()),
             Self::Interaction(id) => ActivitySourceView::Interaction(id.clone()),
-            Self::ChildRun(id) => ActivitySourceView::ChildRun(id.clone()),
+            Self::SubRun(id) => ActivitySourceView::SubRun(id.clone()),
         }
     }
 }
@@ -66,7 +66,7 @@ pub(crate) enum ActivityKind {
     HookDispatch,
     Compaction,
     Interaction,
-    ChildRun,
+    SubRun,
 }
 
 impl ActivityKind {
@@ -79,7 +79,7 @@ impl ActivityKind {
             Self::HookDispatch => ActivityKindView::HookDispatch,
             Self::Compaction => ActivityKindView::Compaction,
             Self::Interaction => ActivityKindView::Interaction,
-            Self::ChildRun => ActivityKindView::ChildRun,
+            Self::SubRun => ActivityKindView::SubRun,
         }
     }
 }
@@ -110,7 +110,7 @@ pub(crate) enum ActivityDetail {
     Interaction {
         kind: sdk::InteractionKindView,
     },
-    ChildRun {
+    SubRun {
         role: String,
         model: String,
     },
@@ -157,7 +157,7 @@ impl ActivityDetail {
                 work: *work,
             },
             Self::Interaction { kind } => ActivityDetailView::Interaction { kind: *kind },
-            Self::ChildRun { role, model } => ActivityDetailView::ChildRun {
+            Self::SubRun { role, model } => ActivityDetailView::SubRun {
                 role: role.clone(),
                 model: model.clone(),
             },

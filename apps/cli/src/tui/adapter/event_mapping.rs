@@ -371,12 +371,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             attachment_context,
             tool_id,
             event,
-        } => TuiRuntimeEvent::AgentProgress {
-            source_context: turn_context(source_context),
-            attachment_context: turn_context(attachment_context),
-            tool_id: tool_id.as_str().to_string(),
-            event: agent_progress(event),
-        },
+        } => legacy_agent_progress(
+            turn_context(source_context),
+            turn_context(attachment_context),
+            tool_id.as_str(),
+            event,
+        ),
         ChatEvent::ToolOutputDelta {
             context,
             tool_id,
@@ -395,8 +395,11 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             tool_id: tool_id.as_str().to_string(),
             delta: event.text,
         },
-        ChatEvent::ChildRunActivity { event } => {
-            TuiRuntimeEvent::ChildRunActivity(child_run_activity(event))
+        ChatEvent::SubRunStarted { event } => {
+            TuiRuntimeEvent::SubRunStarted(sub_run_started(event))
+        }
+        ChatEvent::SubRunActivity { event } => {
+            TuiRuntimeEvent::SubRunActivity(sub_run_activity(event))
         }
         ChatEvent::WorkingDirectoryChanged {
             path_base,
@@ -683,8 +686,8 @@ fn activity_source(value: sdk::ActivitySourceView) -> TuiActivitySource {
         sdk::ActivitySourceView::Interaction(id) => {
             TuiActivitySource::Interaction(id.as_str().to_string())
         }
-        sdk::ActivitySourceView::ChildRun(id) => {
-            TuiActivitySource::ChildRun(UiRunId::from(id.as_str()))
+        sdk::ActivitySourceView::SubRun(id) => {
+            TuiActivitySource::SubRun(UiRunId::from(id.as_str()))
         }
     }
 }
@@ -698,7 +701,7 @@ fn activity_kind(value: sdk::ActivityKindView) -> TuiActivityKind {
         sdk::ActivityKindView::HookDispatch => TuiActivityKind::HookDispatch,
         sdk::ActivityKindView::Compaction => TuiActivityKind::Compaction,
         sdk::ActivityKindView::Interaction => TuiActivityKind::Interaction,
-        sdk::ActivityKindView::ChildRun => TuiActivityKind::ChildRun,
+        sdk::ActivityKindView::SubRun => TuiActivityKind::SubRun,
     }
 }
 
@@ -803,8 +806,8 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
                 sdk::InteractionKindView::StuckDiagnostic => TuiInteractionKind::StuckDiagnostic,
             },
         },
-        sdk::ActivityDetailView::ChildRun { role, model } => {
-            TuiActivityDetail::ChildRun { role, model }
+        sdk::ActivityDetailView::SubRun { role, model } => {
+            TuiActivityDetail::SubRun { role, model }
         }
     }
 }
@@ -1038,86 +1041,129 @@ fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
     }
 }
 
-fn child_run_activity(value: sdk::ChildRunActivityEventView) -> TuiChildRunActivity {
-    TuiChildRunActivity {
-        identity: TuiChildRunIdentity {
-            agent_id: value.identity.agent_id.as_str().to_string(),
-            run_id: UiRunId::from(value.identity.run_id.as_str()),
-            parent_run_id: UiRunId::from(value.identity.parent_run_id.as_str()),
-            spawned_by_tool_call_id: value.identity.spawned_by_tool_call_id.as_str().to_string(),
-        },
+fn sub_run_identity(value: sdk::SubRunIdentityView) -> TuiSubRunIdentity {
+    TuiSubRunIdentity {
+        agent_id: value.agent_id.as_str().to_string(),
+        run_id: UiRunId::from(value.run_id.as_str()),
+        parent_chat_id: value.parent_chat_id.as_str().to_string(),
+        parent_run_id: UiRunId::from(value.parent_run_id.as_str()),
+        spawned_by_tool_call_id: value.spawned_by_tool_call_id.as_str().to_string(),
+    }
+}
+
+fn sub_run_started(value: sdk::SubRunStartedEventView) -> TuiSubRunStarted {
+    TuiSubRunStarted {
+        identity: sub_run_identity(value.identity),
+        sequence: value.sequence,
+        role: value.role,
+        model: value.model,
+    }
+}
+
+fn sub_run_activity(value: sdk::SubRunActivityEventView) -> TuiSubRunActivity {
+    TuiSubRunActivity {
+        identity: sub_run_identity(value.identity),
         sequence: value.sequence,
         kind: match value.kind {
-            sdk::ChildRunActivityKindView::Text { text } => TuiChildRunActivityKind::Text { text },
-            sdk::ChildRunActivityKindView::Thinking { text } => {
-                TuiChildRunActivityKind::Thinking { text }
+            sdk::SubRunActivityKindView::Text { text } => TuiSubRunActivityKind::Text { text },
+            sdk::SubRunActivityKindView::Thinking { text } => {
+                TuiSubRunActivityKind::Thinking { text }
             }
-            sdk::ChildRunActivityKindView::ToolCall { id, name, input } => {
-                TuiChildRunActivityKind::ToolCall {
+            sdk::SubRunActivityKindView::ToolCall { id, name, input } => {
+                TuiSubRunActivityKind::ToolCall {
                     id: id.as_str().to_string(),
                     name,
                     input,
                 }
             }
-            sdk::ChildRunActivityKindView::ToolOutput { tool_name, text } => {
-                TuiChildRunActivityKind::ToolOutput { tool_name, text }
+            sdk::SubRunActivityKindView::ToolOutput { tool_name, text } => {
+                TuiSubRunActivityKind::ToolOutput { tool_name, text }
             }
-            sdk::ChildRunActivityKindView::ToolResult {
+            sdk::SubRunActivityKindView::ToolResult {
                 tool_call_id,
                 tool_name,
                 output,
                 content,
                 is_error,
-            } => TuiChildRunActivityKind::ToolResult {
+            } => TuiSubRunActivityKind::ToolResult {
                 tool_call_id: tool_call_id.as_str().to_string(),
                 tool_name,
                 output,
                 content,
                 is_error,
             },
-            sdk::ChildRunActivityKindView::Terminal { outcome } => {
-                TuiChildRunActivityKind::Terminal {
-                    outcome: match outcome {
-                        sdk::ChildRunTerminalOutcomeView::Completed => {
-                            TuiChildRunTerminalOutcome::Completed
-                        }
-                        sdk::ChildRunTerminalOutcomeView::Failed { error } => {
-                            TuiChildRunTerminalOutcome::Failed { error }
-                        }
-                        sdk::ChildRunTerminalOutcomeView::Cancelled => {
-                            TuiChildRunTerminalOutcome::Cancelled
-                        }
-                    },
-                }
-            }
+            sdk::SubRunActivityKindView::Terminal { outcome } => TuiSubRunActivityKind::Terminal {
+                outcome: match outcome {
+                    sdk::SubRunTerminalOutcomeView::Completed => {
+                        TuiSubRunTerminalOutcome::Completed
+                    }
+                    sdk::SubRunTerminalOutcomeView::Failed { error } => {
+                        TuiSubRunTerminalOutcome::Failed { error }
+                    }
+                    sdk::SubRunTerminalOutcomeView::Cancelled => {
+                        TuiSubRunTerminalOutcome::Cancelled
+                    }
+                },
+            },
         },
     }
 }
 
-fn agent_progress(value: sdk::AgentProgressEventView) -> TuiAgentProgress {
-    TuiAgentProgress {
-        sequence: value.sequence,
-        kind: match value.kind {
-            sdk::AgentProgressKindView::Started { role, model } => {
-                TuiAgentProgressKind::Started { role, model }
-            }
-            sdk::AgentProgressKindView::Message { text } => TuiAgentProgressKind::Message { text },
-            sdk::AgentProgressKindView::ToolCalls { calls } => TuiAgentProgressKind::ToolCalls {
-                calls: calls
-                    .into_iter()
-                    .map(|call| TuiAgentToolCall {
+fn legacy_agent_progress(
+    source_context: TuiRunContext,
+    attachment_context: TuiRunContext,
+    tool_id: &str,
+    event: sdk::AgentProgressEventView,
+) -> TuiRuntimeEvent {
+    let identity = TuiSubRunIdentity {
+        agent_id: source_context.chat_id.clone(),
+        run_id: UiRunId::from(source_context.run_id.as_str()),
+        parent_chat_id: attachment_context.chat_id,
+        parent_run_id: UiRunId::from(attachment_context.run_id.as_str()),
+        spawned_by_tool_call_id: tool_id.to_string(),
+    };
+    let sequence = u64::try_from(event.sequence).unwrap_or(u64::MAX);
+    match event.kind {
+        sdk::AgentProgressKindView::Started { role, model } => {
+            TuiRuntimeEvent::SubRunStarted(TuiSubRunStarted {
+                identity,
+                sequence,
+                role,
+                model,
+            })
+        }
+        sdk::AgentProgressKindView::Message { text } => {
+            TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+                identity,
+                sequence,
+                kind: TuiSubRunActivityKind::Text { text },
+            })
+        }
+        sdk::AgentProgressKindView::ToolCalls { calls } => {
+            let first_call = calls.into_iter().next();
+            match first_call {
+                Some(call) => TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+                    identity,
+                    sequence,
+                    kind: TuiSubRunActivityKind::ToolCall {
                         id: call.id.as_str().to_string(),
                         name: call.name,
                         input: call.input,
-                    })
-                    .collect(),
-            },
-            sdk::AgentProgressKindView::ToolOutput { tool_name, text } => {
-                TuiAgentProgressKind::ToolOutput { tool_name, text }
+                    },
+                }),
+                None => TuiRuntimeEvent::Noop,
             }
-        },
+        }
+        sdk::AgentProgressKindView::ToolOutput { tool_name, text } => {
+            TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
+                identity,
+                sequence,
+                kind: TuiSubRunActivityKind::ToolOutput { tool_name, text },
+            })
+        }
     }
 }
+
 fn config_field(value: sdk::ConfigField) -> TuiConfigField {
     match value {
         sdk::ConfigField::Model => TuiConfigField::Model,

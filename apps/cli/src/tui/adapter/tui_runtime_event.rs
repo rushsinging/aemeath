@@ -43,7 +43,7 @@ pub(crate) enum TuiActivitySource {
     HookDispatch(UiActivityId),
     Compaction(UiActivityId),
     Interaction(String),
-    ChildRun(UiRunId),
+    SubRun(UiRunId),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,7 +67,7 @@ pub(crate) enum TuiActivityKind {
     HookDispatch,
     Compaction,
     Interaction,
-    ChildRun,
+    SubRun,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,7 +185,7 @@ pub(crate) enum TuiActivityDetail {
     Interaction {
         kind: TuiInteractionKind,
     },
-    ChildRun {
+    SubRun {
         role: String,
         model: String,
     },
@@ -466,15 +466,16 @@ pub(crate) struct TuiConfigView {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiChildRunIdentity {
+pub(crate) struct TuiSubRunIdentity {
     pub(crate) agent_id: String,
     pub(crate) run_id: UiRunId,
+    pub(crate) parent_chat_id: String,
     pub(crate) parent_run_id: UiRunId,
     pub(crate) spawned_by_tool_call_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TuiChildRunActivityKind {
+pub(crate) enum TuiSubRunActivityKind {
     Text {
         text: String,
     },
@@ -498,43 +499,30 @@ pub(crate) enum TuiChildRunActivityKind {
         is_error: bool,
     },
     Terminal {
-        outcome: TuiChildRunTerminalOutcome,
+        outcome: TuiSubRunTerminalOutcome,
     },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum TuiChildRunTerminalOutcome {
+pub(crate) enum TuiSubRunTerminalOutcome {
     Completed,
     Failed { error: String },
     Cancelled,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiChildRunActivity {
-    pub(crate) identity: TuiChildRunIdentity,
+pub(crate) struct TuiSubRunStarted {
+    pub(crate) identity: TuiSubRunIdentity,
     pub(crate) sequence: u64,
-    pub(crate) kind: TuiChildRunActivityKind,
+    pub(crate) role: Option<String>,
+    pub(crate) model: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TuiAgentProgressKind {
-    Started { role: Option<String>, model: String },
-    Message { text: String },
-    ToolCalls { calls: Vec<TuiAgentToolCall> },
-    ToolOutput { tool_name: String, text: String },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiAgentToolCall {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) input: serde_json::Value,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiAgentProgress {
-    pub(crate) sequence: usize,
-    pub(crate) kind: TuiAgentProgressKind,
+pub(crate) struct TuiSubRunActivity {
+    pub(crate) identity: TuiSubRunIdentity,
+    pub(crate) sequence: u64,
+    pub(crate) kind: TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -673,18 +661,13 @@ pub(crate) enum TuiRuntimeEvent {
         event: TuiRunStepEvent,
     },
     InteractionRequested(TuiInteractionRequest),
-    AgentProgress {
-        source_context: TuiRunContext,
-        attachment_context: TuiRunContext,
-        tool_id: String,
-        event: TuiAgentProgress,
-    },
     ToolOutputDelta {
         context: TuiRunContext,
         tool_id: String,
         delta: String,
     },
-    ChildRunActivity(TuiChildRunActivity),
+    SubRunStarted(TuiSubRunStarted),
+    SubRunActivity(TuiSubRunActivity),
     Cancelled {
         context: TuiRunContext,
         duration_ms: u64,

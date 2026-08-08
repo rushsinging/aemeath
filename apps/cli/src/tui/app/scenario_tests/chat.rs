@@ -248,10 +248,10 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
             id: "child",
             revision: 8,
             parent_activity_id: Some("root"),
-            source: TuiActivitySource::ChildRun(UiRunId::from("sub-run")),
-            kind: TuiActivityKind::ChildRun,
+            source: TuiActivitySource::SubRun(UiRunId::from("sub-run")),
+            kind: TuiActivityKind::SubRun,
             state: TuiActivityState::Running,
-            detail: TuiActivityDetail::ChildRun {
+            detail: TuiActivityDetail::SubRun {
                 role: "explore".into(),
                 model: "sub-model".into(),
             },

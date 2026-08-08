@@ -1,6 +1,4 @@
 pub mod agent_event;
-#[cfg(test)]
-mod child_run_activity_mapping_tests;
 pub mod event_mapping;
 #[cfg(test)]
 pub mod input_widget;
@@ -16,4 +14,6 @@ pub mod runtime_status;
 pub mod runtime_view;
 #[cfg(test)]
 pub mod status_widget;
+#[cfg(test)]
+mod sub_run_activity_mapping_tests;
 pub mod tui_runtime_event;

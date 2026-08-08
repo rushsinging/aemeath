@@ -173,6 +173,36 @@ expect_failure "retired TasksSnapshot and AskUserBatch transports restored"
 cp "$ROOT/agent/features/runtime/src/application/loop_engine/chat/events.rs" \
   "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs"
 
+python3 - "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "\n}\n\npub trait ChatEventSink",
+    "\n    AgentProgress { sequence: usize },\n}\n\npub trait ChatEventSink",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy SDK AgentProgress restored as Runtime producer"
+cp "$ROOT/agent/features/runtime/src/application/loop_engine/chat/events.rs" \
+  "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs"
+
+python3 - "$TMP/apps/cli/src/tui/adapter/tui_runtime_event.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "    Noop,",
+    "    Noop,\n    AgentProgress { sequence: usize },",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy SDK AgentProgress restored as TUI internal fact"
+cp "$ROOT/apps/cli/src/tui/adapter/tui_runtime_event.rs" \
+  "$TMP/apps/cli/src/tui/adapter/tui_runtime_event.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

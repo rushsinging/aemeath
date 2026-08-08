@@ -1,4 +1,4 @@
-use super::agent_progress::ChildRunActivityEntry;
+use super::agent_progress::SubRunActivityEntry;
 use super::agent_progress::{AgentActivityLine, AgentProgressEntry};
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
@@ -38,33 +38,33 @@ pub(super) struct ToolCallUpdateObservation {
 }
 
 impl ConversationModel {
-    pub(super) fn record_child_run_activity(
+    pub(super) fn record_sub_run_activity(
         &mut self,
-        activity: crate::tui::model::conversation::intent::RecordChildRunActivity,
+        activity: crate::tui::model::conversation::intent::RecordSubRunActivity,
     ) -> Vec<ConversationChange> {
-        use crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind;
+        use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
 
-        if self.child_run_activities.iter().any(|entry| {
+        if self.sub_run_activities.iter().any(|entry| {
             entry.agent_id == activity.agent_id
-                && entry.run_id == activity.child_run_id
+                && entry.run_id == activity.sub_run_id
                 && entry.sequence == activity.sequence
         }) {
             return Vec::new();
         }
         if let Some(latest_sequence) = self
-            .child_run_activities
+            .sub_run_activities
             .iter()
             .filter(|entry| {
-                entry.agent_id == activity.agent_id && entry.run_id == activity.child_run_id
+                entry.agent_id == activity.agent_id && entry.run_id == activity.sub_run_id
             })
             .map(|entry| entry.sequence)
             .max()
         {
             if activity.sequence <= latest_sequence {
                 crate::tui::log_debug!(
-                    "child_run_activity_out_of_order agent_id={} child_run_id={} sequence={} latest_sequence={}",
+                    "sub_run_activity_out_of_order agent_id={} sub_run_id={} sequence={} latest_sequence={}",
                     activity.agent_id,
-                    activity.child_run_id,
+                    activity.sub_run_id,
                     activity.sequence,
                     latest_sequence,
                 );
@@ -73,21 +73,21 @@ impl ConversationModel {
         }
 
         let visible_message = match &activity.kind {
-            TuiChildRunActivityKind::Text { text } | TuiChildRunActivityKind::Thinking { text } => {
+            TuiSubRunActivityKind::Text { text } | TuiSubRunActivityKind::Thinking { text } => {
                 Some(text.clone())
             }
-            TuiChildRunActivityKind::ToolOutput { tool_name, text } => {
+            TuiSubRunActivityKind::ToolOutput { tool_name, text } => {
                 (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| text.clone())
             }
-            TuiChildRunActivityKind::ToolCall { name, input, .. } => {
+            TuiSubRunActivityKind::ToolCall { name, input, .. } => {
                 Some(format_subagent_tool_header(name, input, None))
             }
-            TuiChildRunActivityKind::ToolResult {
+            TuiSubRunActivityKind::ToolResult {
                 tool_name, output, ..
             } => {
                 (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| output.clone())
             }
-            TuiChildRunActivityKind::Terminal { outcome } => {
+            TuiSubRunActivityKind::Terminal { outcome } => {
                 Some(format!("Sub-agent terminal: {outcome:?}"))
             }
         };
@@ -106,9 +106,9 @@ impl ConversationModel {
         });
         let Some((chat_id, run_id)) = parent_tool_context else {
             crate::tui::log_debug!(
-                "child_run_activity_unknown_parent agent_id={} child_run_id={} parent_run_id={} spawned_by_tool_call_id={} sequence={}",
+                "sub_run_activity_unknown_parent agent_id={} sub_run_id={} parent_run_id={} spawned_by_tool_call_id={} sequence={}",
                 activity.agent_id,
-                activity.child_run_id,
+                activity.sub_run_id,
                 activity.parent_run_id,
                 activity.spawned_by_tool_call_id,
                 activity.sequence,
@@ -116,9 +116,9 @@ impl ConversationModel {
             return Vec::new();
         };
 
-        self.child_run_activities.push(ChildRunActivityEntry {
+        self.sub_run_activities.push(SubRunActivityEntry {
             agent_id: activity.agent_id,
-            run_id: activity.child_run_id,
+            run_id: activity.sub_run_id,
             parent_run_id: activity.parent_run_id,
             spawned_by_tool_call_id: activity.spawned_by_tool_call_id.to_string(),
             sequence: activity.sequence,

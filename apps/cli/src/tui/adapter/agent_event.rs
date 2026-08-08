@@ -1,6 +1,4 @@
-use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiRuntimeEvent, TuiToolCallStatus,
-};
+use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
@@ -641,53 +639,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             },
         )),
         TuiRuntimeEvent::RunChanged(_) => AgentEventMapping::default(),
-        TuiRuntimeEvent::AgentProgress {
-            attachment_context,
-            tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            TuiAgentProgressKind::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            TuiAgentProgressKind::Message { text } => conversation(
-                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    activities: format_agent_progress_text(text),
-                }),
-            ),
-            TuiAgentProgressKind::ToolCalls { calls } => conversation(
-                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    activities: format_agent_progress_calls(calls),
-                }),
-            ),
-            // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
-            // 顶层工具 stdout 走独立 ToolOutputDelta fact。
-            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
-        },
         TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
@@ -700,10 +651,23 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 text: delta.clone(),
             },
         )),
-        TuiRuntimeEvent::ChildRunActivity(event) => conversation(
-            ConversationIntent::RecordChildRunActivity(RecordChildRunActivity {
+        TuiRuntimeEvent::SubRunStarted(event) => {
+            conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                    &event.identity.parent_chat_id,
+                ),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                    event.identity.parent_run_id.as_str(),
+                ),
+                tool_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                role: event.role.clone(),
+                model: event.model.clone(),
+            }))
+        }
+        TuiRuntimeEvent::SubRunActivity(event) => conversation(
+            ConversationIntent::RecordSubRunActivity(RecordSubRunActivity {
                 agent_id: event.identity.agent_id.clone(),
-                child_run_id: event.identity.run_id.as_str().to_string(),
+                sub_run_id: event.identity.run_id.as_str().to_string(),
                 parent_run_id: event.identity.parent_run_id.as_str().to_string(),
                 spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
                 sequence: event.sequence,
@@ -849,34 +813,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ..AgentEventMapping::default()
         },
     }
-}
-
-fn format_agent_progress_text(
-    text: &str,
-) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
-    text.lines()
-        .filter(|line| !line.is_empty())
-        .map(crate::tui::model::conversation::agent_progress::AgentActivityLine::message)
-        .collect()
-}
-
-fn format_agent_progress_calls(
-    calls: &[crate::tui::adapter::tui_runtime_event::TuiAgentToolCall],
-) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
-    calls
-        .iter()
-        .map(|call| {
-            let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
-            let preview =
-                crate::tui::view_model::tool_name::tool_input_preview(&call.name, &call.input);
-            let content = if preview.is_empty() {
-                name.to_string()
-            } else {
-                format!("{name} {preview}")
-            };
-            crate::tui::model::conversation::agent_progress::AgentActivityLine::tool_call(content)
-        })
-        .collect()
 }
 
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {

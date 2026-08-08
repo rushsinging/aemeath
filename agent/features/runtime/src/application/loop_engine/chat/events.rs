@@ -3,7 +3,7 @@ use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
-use tools::{AgentProgressEvent, ImageData};
+use tools::ImageData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunContext {
@@ -170,19 +170,14 @@ pub enum RuntimeStreamEvent {
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    AgentProgress {
-        source_context: RuntimeRunContext,
-        attachment_context: RuntimeRunContext,
-        tool_id: ToolCallId,
-        event: AgentProgressEvent,
-    },
-    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
     ToolOutputDelta {
         context: RuntimeRunContext,
         tool_id: ToolCallId,
         delta: String,
     },
-    ChildRunActivity(tools::ChildRunActivityEvent),
+    SubRunStarted(tools::SubRunStartedEvent),
+    SubRunActivity(tools::SubRunActivityEvent),
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,
     },
