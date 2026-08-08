@@ -68,6 +68,7 @@ pub fn render_tool_result(
         ResultPolicy::Hidden => vec![],
         ResultPolicy::Visible { .. } if view.activity_lines.is_some() => render_activity_lines(
             view.activity_lines.as_deref().unwrap_or_default(),
+            view.workspace_root.as_deref(),
             ctx.text_width.into(),
         ),
         ResultPolicy::Visible {
@@ -108,7 +109,11 @@ pub fn render_tool_result(
     }
 }
 
-fn render_activity_lines(activities: &[AgentActivityLineView], width: usize) -> Vec<RenderedLine> {
+fn render_activity_lines(
+    activities: &[AgentActivityLineView],
+    workspace_root: Option<&std::path::Path>,
+    width: usize,
+) -> Vec<RenderedLine> {
     let activity_style = Style::default().fg(theme::TEXT_DIM);
     let marker_style = Style::default().fg(theme::TEXT_MUTED);
     activities
@@ -118,7 +123,20 @@ fn render_activity_lines(activities: &[AgentActivityLineView], width: usize) -> 
             if activity.kind == AgentActivityKindView::ToolCall {
                 spans.push(Span::styled("→ ", marker_style));
             }
-            spans.push(Span::styled(activity.content.clone(), activity_style));
+            let content = match &activity.content {
+                crate::tui::view_model::output::AgentActivityContentView::Text(content) => {
+                    content.clone()
+                }
+                crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                    name,
+                    input,
+                } => crate::tui::render::output::tool_display::format_subagent_tool_header(
+                    name,
+                    input,
+                    workspace_root,
+                ),
+            };
+            spans.push(Span::styled(content, activity_style));
             wrap_spans_with_prefix(spans, width, None, WrapMode::Word)
                 .into_iter()
                 .map(|line| line.with_style(activity_style))
@@ -242,6 +260,7 @@ mod tests {
             args_preview: None,
             result_text: result_text.into(),
             activity_lines: None,
+            workspace_root: None,
             data: None,
             style: SemanticStyle::Success,
         }
@@ -258,6 +277,7 @@ mod tests {
             args_preview: None,
             result_text: result_text.into(),
             activity_lines: None,
+            workspace_root: None,
             data: Some(data),
             style: SemanticStyle::Success,
         }
@@ -269,7 +289,10 @@ mod tests {
         view.activity_lines = Some(vec![
             AgentActivityLineView {
                 kind: AgentActivityKindView::ToolCall,
-                content: "Read src/lib.rs".into(),
+                content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path": "src/lib.rs"}),
+                },
             },
             AgentActivityLineView {
                 kind: AgentActivityKindView::Message,
@@ -283,6 +306,24 @@ mod tests {
         assert_eq!(rendered, vec!["→ Read src/lib.rs", "Read as prose"]);
         assert!(rendered.iter().all(|line| !line.contains("→ →")));
         assert!(rendered.iter().all(|line| !line.contains('⎿')));
+    }
+
+    #[test]
+    fn sub_run_tool_call_header_uses_workspace_root_at_render_boundary() {
+        let mut view = result("Agent", "Read /repo/src/lib.rs");
+        view.workspace_root = Some(std::path::PathBuf::from("/repo"));
+        view.activity_lines = Some(vec![AgentActivityLineView {
+            kind: AgentActivityKindView::ToolCall,
+            content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/repo/src/lib.rs"}),
+            },
+        }]);
+
+        let block = render_tool_result("agent-streaming-result", &view, &RenderCtx::for_width(80));
+
+        assert_eq!(block.lines[0].plain, "→ Read src/lib.rs");
+        assert!(!block.lines[0].plain.contains("/repo/"));
     }
 
     #[test]

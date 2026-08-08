@@ -1,14 +1,14 @@
 use super::coordinator::{ActivityError, ActivityTerminal, StartActivity};
 use super::model::{ActivityDetail, ActivityKind, ActivitySource, RunPhaseKind};
 use super::ActivityCoordinator;
-use crate::domain::agent_run::{RunDomainEvent, RunStatus};
+use crate::domain::agent_run::{RunStatus, RuntimeLifecycleEvent};
 use sdk::{ActivityAudienceView, ActivityId, RunId};
 
 impl ActivityCoordinator {
     /// 消费同一原子发布批次中的 Run 领域事件，更新根 Activity 与 Run phase Activity。
     pub(crate) fn observe_run_events(
         &self,
-        events: &[RunDomainEvent],
+        events: &[RuntimeLifecycleEvent],
     ) -> Result<(), ActivityError> {
         for event in events {
             self.observe_run_event(event)?;
@@ -16,14 +16,16 @@ impl ActivityCoordinator {
         Ok(())
     }
 
-    fn observe_run_event(&self, event: &RunDomainEvent) -> Result<(), ActivityError> {
+    fn observe_run_event(&self, event: &RuntimeLifecycleEvent) -> Result<(), ActivityError> {
         validate_event_run(self.run_id(), event)?;
         match event {
-            RunDomainEvent::Started { .. } => self.ensure_run_root(),
-            RunDomainEvent::Transitioned { from, to, .. } => {
+            RuntimeLifecycleEvent::Started { .. } => self.ensure_run_root(),
+            RuntimeLifecycleEvent::Transitioned { from, to, .. } => {
                 self.observe_run_transition(*from, *to)
             }
-            RunDomainEvent::DrainingInput { .. } => self.start_phase(RunPhaseKind::DrainingInput),
+            RuntimeLifecycleEvent::DrainingInput { .. } => {
+                self.start_phase(RunPhaseKind::DrainingInput)
+            }
             _ => Ok(()),
         }
     }
@@ -97,23 +99,23 @@ impl ActivityCoordinator {
     }
 }
 
-fn validate_event_run(run_id: &RunId, event: &RunDomainEvent) -> Result<(), ActivityError> {
+fn validate_event_run(run_id: &RunId, event: &RuntimeLifecycleEvent) -> Result<(), ActivityError> {
     let event_run_id = match event {
-        RunDomainEvent::Transitioned { run_id, .. }
-        | RunDomainEvent::Started { run_id, .. }
-        | RunDomainEvent::StepStarted { run_id, .. }
-        | RunDomainEvent::StepCompleted { run_id, .. }
-        | RunDomainEvent::StepCancellationRequested { run_id, .. }
-        | RunDomainEvent::StepFinalizationStarted { run_id, .. }
-        | RunDomainEvent::StepCancelled { run_id, .. }
-        | RunDomainEvent::DrainingInput { run_id, .. }
-        | RunDomainEvent::TerminationRequested { run_id, .. }
-        | RunDomainEvent::Terminated { run_id, .. }
-        | RunDomainEvent::AwaitingUser { run_id, .. }
-        | RunDomainEvent::Resumed { run_id, .. }
-        | RunDomainEvent::StuckDetected { run_id, .. }
-        | RunDomainEvent::Completed { run_id, .. }
-        | RunDomainEvent::Failed { run_id, .. } => run_id,
+        RuntimeLifecycleEvent::Transitioned { run_id, .. }
+        | RuntimeLifecycleEvent::Started { run_id, .. }
+        | RuntimeLifecycleEvent::StepStarted { run_id, .. }
+        | RuntimeLifecycleEvent::StepCompleted { run_id, .. }
+        | RuntimeLifecycleEvent::StepCancellationRequested { run_id, .. }
+        | RuntimeLifecycleEvent::StepFinalizationStarted { run_id, .. }
+        | RuntimeLifecycleEvent::StepCancelled { run_id, .. }
+        | RuntimeLifecycleEvent::DrainingInput { run_id, .. }
+        | RuntimeLifecycleEvent::TerminationRequested { run_id, .. }
+        | RuntimeLifecycleEvent::Terminated { run_id, .. }
+        | RuntimeLifecycleEvent::AwaitingUser { run_id, .. }
+        | RuntimeLifecycleEvent::Resumed { run_id, .. }
+        | RuntimeLifecycleEvent::StuckDetected { run_id, .. }
+        | RuntimeLifecycleEvent::Completed { run_id, .. }
+        | RuntimeLifecycleEvent::Failed { run_id, .. } => run_id,
     };
     if event_run_id != run_id {
         return Err(ActivityError::RunMismatch);
@@ -170,13 +172,16 @@ fn phase_source_id(run_id: &RunId, phase: RunPhaseKind) -> sdk::RunStepId {
 }
 
 #[cfg(test)]
-pub(super) fn terminal_events_for_test(run_id: RunId, status: RunStatus) -> Vec<RunDomainEvent> {
+pub(super) fn terminal_events_for_test(
+    run_id: RunId,
+    status: RunStatus,
+) -> Vec<RuntimeLifecycleEvent> {
     vec![
-        RunDomainEvent::Started {
+        RuntimeLifecycleEvent::Started {
             run_id: run_id.clone(),
             parent_run_id: None,
         },
-        RunDomainEvent::Transitioned {
+        RuntimeLifecycleEvent::Transitioned {
             run_id,
             parent_run_id: None,
             from: RunStatus::DrainingInput,

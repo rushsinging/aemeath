@@ -116,6 +116,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         args_preview: None,
         result_text: "```\ncode\n```".into(),
         activity_lines: None,
+        workspace_root: None,
         data: None,
         style: SemanticStyle::Success,
     });
@@ -542,6 +543,7 @@ fn static_edit_root(id: &str, lines: usize) -> BlockNode {
         args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
         result_text: result_text.clone(),
         activity_lines: None,
+        workspace_root: None,
         data: Some(serde_json::json!({
             "old": old,
             "new": new_lines.join("\n"),
@@ -640,6 +642,7 @@ fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
         args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
         result_text: result_text.clone(),
         activity_lines: None,
+        workspace_root: None,
         data: Some(serde_json::json!({ "old": old, "new": new, "start_line": 1 })),
         style: SemanticStyle::Success,
     });
@@ -809,6 +812,7 @@ fn test_streaming_and_final_tool_result_have_consistent_gutter() {
             args_preview: None,
             result_text: result_text.into(),
             activity_lines: None,
+            workspace_root: None,
             data: None,
             style: SemanticStyle::Running,
         });

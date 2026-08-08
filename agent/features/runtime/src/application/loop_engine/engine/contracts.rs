@@ -397,7 +397,7 @@ pub trait EventSinkPort: Send {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError>;
 }
 
@@ -487,6 +487,7 @@ pub struct StepCommit {
     pub cause: crate::ports::FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<share::message::Message>,
+    pub receipts: Vec<crate::ports::StepReceipt>,
 }
 
 pub(super) fn prepare_step_commit(
@@ -509,6 +510,7 @@ pub(super) fn prepare_step_commit(
             .step_elapsed()
             .map(|duration| duration.as_millis().try_into().unwrap_or(u64::MAX)),
         messages: execution.step_outcome(),
+        receipts: Vec::new(),
     }
 }
 
@@ -548,6 +550,12 @@ pub trait StepPersistencePort: Send {
     ) -> Result<(), LoopEngineError> {
         Ok(())
     }
+    async fn load_step_receipts(
+        &mut self,
+        _request: &crate::ports::ContextRequest,
+    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        Ok(Vec::new())
+    }
     async fn persist_step_commit(&mut self, _commit: &StepCommit) -> Result<(), LoopEngineError> {
         Ok(())
     }
@@ -558,15 +566,15 @@ pub trait StepPersistencePort: Send {
 /// Loop Engine 提供实现（转发到 Activity 观测），Runtime 透传给 Context。
 /// 闭包形式可自动实现（F: Fn + Send + Sync）。
 pub trait CompactProgressView: Send + Sync {
-    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>);
+    fn emit(&self, stage: sdk::CompactStageView, work: sdk::CompactWorkView);
 }
 
 impl<F> CompactProgressView for F
 where
-    F: Fn(sdk::CompactStageView, Option<u32>, Option<u32>) + Send + Sync,
+    F: Fn(sdk::CompactStageView, sdk::CompactWorkView) + Send + Sync,
 {
-    fn emit(&self, stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>) {
-        self(stage, current, total)
+    fn emit(&self, stage: sdk::CompactStageView, work: sdk::CompactWorkView) {
+        self(stage, work)
     }
 }
 

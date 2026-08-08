@@ -86,11 +86,19 @@ impl ContextCoordinator {
         Ok(window)
     }
 
+    pub(crate) async fn compaction_decision(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<context::domain::CompactionDecision, ContextPortError> {
+        self.port.needs_compaction(request).await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn needs_compaction(
         &self,
         request: &ContextRequest,
     ) -> Result<bool, ContextPortError> {
-        Ok(self.port.needs_compaction(request).await?.needed)
+        Ok(self.compaction_decision(request).await?.needed)
     }
 
     pub(crate) async fn compact(
@@ -153,6 +161,15 @@ impl ContextCoordinator {
         mutation: ToolReceiptMutation,
     ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
         self.port.advance_tool_receipt(mutation).await
+    }
+
+    pub(crate) async fn step_receipts(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+        self.port
+            .step_receipts(&request.session_id, &request.run_id, &request.step_id)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]

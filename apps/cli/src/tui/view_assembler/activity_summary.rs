@@ -133,7 +133,7 @@ fn phase_label(activity: &TuiActivityObservation) -> Option<String> {
         }
         TuiActivityDetail::Compact { .. } => "Compacting…",
         TuiActivityDetail::Interaction { .. } => "Waiting for input…",
-        TuiActivityDetail::ChildRun { .. } => "Running agent…",
+        TuiActivityDetail::SubRun { .. } => "Running agent…",
         TuiActivityDetail::Run { .. } => return None,
     };
     Some(label.to_string())
@@ -192,7 +192,7 @@ fn stable_detail(activity: Option<&TuiActivityObservation>) -> Option<String> {
                     .or_else(|| Some(name.clone()))
             }
         }
-        TuiActivityDetail::ChildRun { role, .. } => Some(format!("Running {role}")),
+        TuiActivityDetail::SubRun { role, .. } => Some(format!("Running {role}")),
         _ => None,
     }
 }

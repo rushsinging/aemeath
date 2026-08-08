@@ -1,6 +1,5 @@
 #![allow(unused_imports)]
 
-pub mod compact_progress;
 pub mod processing_job;
 pub mod session_change;
 pub mod session_intent;

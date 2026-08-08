@@ -2,7 +2,7 @@ mod handle;
 mod input_port;
 mod logging;
 
-use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
+use crate::tui::adapter::event_mapping::sdk_event_to_tui_event;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use std::sync::Arc;
 
@@ -40,17 +40,15 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             };
             while let Some(event) = stream.recv().await {
                 log_sdk_event(&event, "sdk->tui.recv");
-                match sdk_event_to_tui_event(event) {
-                    SdkEventMapping::Runtime(runtime_event) => {
-                        log_tui_runtime_delivery(&runtime_event, "forwarding");
-                        if ctx.runtime_tx.send(runtime_event).await.is_err() {
-                            crate::tui::log_warn!(
-                                "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
-                            );
-                            return;
-                        }
+                let runtime_events = sdk_event_to_tui_event(event).into_runtime_events();
+                for runtime_event in runtime_events {
+                    log_tui_runtime_delivery(&runtime_event, "forwarding");
+                    if ctx.runtime_tx.send(runtime_event).await.is_err() {
+                        crate::tui::log_warn!(
+                            "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
+                        );
+                        break;
                     }
-                    SdkEventMapping::Nop => {}
                 }
             }
         },
@@ -61,7 +59,8 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::tui_runtime_event::TuiRunContext;
+    use crate::tui::adapter::event_mapping::SdkEventMapping;
+    use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiSubRunActivityKind};
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -123,12 +122,12 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::Text { text, .. }) if text == "hello"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "hello"
         ));
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_agent_progress_identity() {
+    fn legacy_sdk_agent_progress_normalizes_to_sub_run_activity() {
         let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
         let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
             source_context: sdk::ChatEventContext::new(
@@ -150,21 +149,21 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::AgentProgress {
-                source_context,
-                attachment_context,
-                tool_id,
-                ..
-            }) if source_context.chat_id == sdk::ids::ChatId::new("child-chat").as_str()
-                && source_context.run_id == sdk::ids::ChatRunId::new("child-run_step").as_str()
-                && attachment_context.chat_id == sdk::ids::ChatId::new("parent-chat").as_str()
-                && attachment_context.run_id == sdk::ids::ChatRunId::new("parent-run_step").as_str()
-                && tool_id == expected_tool_id.as_str()
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunActivity(activity))
+                if activity.identity.agent_id == sdk::ids::ChatId::new("child-chat").as_str()
+                    && activity.identity.run_id.as_str()
+                        == sdk::ids::ChatRunId::new("child-run_step").as_str()
+                    && activity.identity.parent_chat_id
+                        == sdk::ids::ChatId::new("parent-chat").as_str()
+                    && activity.identity.parent_run_id.as_str()
+                        == sdk::ids::ChatRunId::new("parent-run_step").as_str()
+                    && activity.identity.spawned_by_tool_call_id == expected_tool_id.as_str()
+                    && matches!(activity.kind, TuiSubRunActivityKind::Text { ref text } if text == "working")
         ));
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_tool_progress_identity() {
+    fn sdk_event_to_tui_runtime_event_normalizes_legacy_tool_progress_identity() {
         let expected_chat = sdk::ids::ChatId::new("chat-1");
         let expected_run = sdk::ids::ChatRunId::new("run-1");
         let expected_tool_id = sdk::ids::ToolCallId::new("bash-1");
@@ -178,14 +177,14 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolProgress {
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta {
                 context,
                 tool_id,
-                event,
+                delta,
             }) if context.chat_id == expected_chat.as_str()
                 && context.run_id == expected_run.as_str()
                 && tool_id == expected_tool_id.as_str()
-                && event.text == "stdout line\n"
+                && delta == "stdout line\n"
         ));
     }
 
@@ -198,7 +197,7 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages, notice })
+            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { messages, notice })
                 if messages[0].text_content() == "hello" && notice == "✓ 上下文压缩完成"
         ));
     }

@@ -63,7 +63,7 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         .unwrap()
         .iter()
         .filter_map(|event| match event {
-            RuntimeStreamEvent::ToolCallStart { id, .. } => Some(id.clone()),
+            RuntimeStreamEvent::ToolCallStarted { id, .. } => Some(id.clone()),
             _ => None,
         })
         .collect();
@@ -149,11 +149,11 @@ fn reducer_projects_block_transitions_without_callback_contract() {
 
     let events = sink.0.lock().unwrap();
     assert!(events.iter().any(
-        |event| matches!(event, RuntimeStreamEvent::Thinking { text, .. } if text == "thought")
+        |event| matches!(event, RuntimeStreamEvent::ThinkingDelta { delta, .. } if delta == "thought")
     ));
     assert!(events
         .iter()
-        .any(|event| matches!(event, RuntimeStreamEvent::Text { text, .. } if text == "answer")));
+        .any(|event| matches!(event, RuntimeStreamEvent::AssistantTextDelta { delta, .. } if delta == "answer")));
     assert!(events
         .iter()
         .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));

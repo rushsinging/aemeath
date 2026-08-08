@@ -9,7 +9,7 @@ use crate::application::loop_engine::{
     StuckHandlingPort, ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 
 struct StopHookActivityObserver<'a> {
     inner: &'a mut dyn StopHookObserver,
@@ -233,8 +233,11 @@ impl<'a> RunLoop<'a> {
         activity_id: sdk::ActivityId,
         stage: sdk::CompactStageView,
     ) -> Result<(), ActivityError> {
-        self.activities()?
-            .update_compaction(activity_id, stage, None, None)
+        self.activities()?.update_compaction(
+            activity_id,
+            stage,
+            sdk::CompactWorkView::Indeterminate,
+        )
     }
 
     /// #1500：构造 compact 进度视图回调——把 Context 压缩管线进度
@@ -245,9 +248,9 @@ impl<'a> RunLoop<'a> {
         activity_id: sdk::ActivityId,
     ) -> std::sync::Arc<dyn CompactProgressView> {
         let activities = self.activities.clone();
-        std::sync::Arc::new(move |stage, current, total| {
+        std::sync::Arc::new(move |stage, work| {
             if let Some(coordinator) = activities.as_ref() {
-                let _ = coordinator.update_compaction(activity_id.clone(), stage, current, total);
+                let _ = coordinator.update_compaction(activity_id.clone(), stage, work);
             }
         })
     }
@@ -302,7 +305,7 @@ impl<'a> RunLoop<'a> {
     pub(super) async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
         if let Some(activities) = self.activities.as_ref() {
             activities

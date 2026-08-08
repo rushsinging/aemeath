@@ -2,6 +2,20 @@ use crate::tui::app::event::UiEvent;
 
 pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
     match event {
+        sdk::ChatEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "{} assistant_text_delta chat_id={} run_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            delta.len()
+        ),
+        sdk::ChatEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "{} thinking_delta chat_id={} run_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            delta.len()
+        ),
         sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(
             "{} token chat_id={} run_id={} text_len={}",
             stage,
@@ -23,7 +37,14 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             context.run_id,
             text.len()
         ),
-        sdk::ChatEvent::ToolCallStart {
+        sdk::ChatEvent::ToolCallStarted {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        }
+        | sdk::ChatEvent::ToolCallStart {
             context,
             id,
             provider_id,
@@ -38,6 +59,44 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             provider_id,
             name,
             index
+        ),
+        sdk::ChatEvent::ToolCallArgumentsDelta {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            delta,
+        } => crate::tui::log_trace!(
+            "{} tool_call_arguments_delta chat_id={} run_id={} id={} provider_id={:?} name={} index={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            id,
+            provider_id,
+            name,
+            index,
+            delta.len(),
+        ),
+        sdk::ChatEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            status,
+        } => crate::tui::log_trace!(
+            "{} tool_call_state_changed chat_id={} run_id={} id={} provider_id={:?} name={} index={} status={:?} args_present={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            id,
+            provider_id,
+            name,
+            index,
+            status,
+            arguments.is_some(),
         ),
         sdk::ChatEvent::ToolCallUpdate {
             context,
@@ -113,7 +172,10 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             elapsed_secs
         ),
         sdk::ChatEvent::TurnStarted { messages }
+        | sdk::ChatEvent::MicrocompactCompleted { messages, .. }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
+        | sdk::ChatEvent::CompactOperationRolledBack { messages }
+        | sdk::ChatEvent::CompactOperationCompleted { messages, .. }
         | sdk::ChatEvent::CompactRollback { messages }
         | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
@@ -186,7 +248,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         }
         sdk::ChatEvent::RunStepCancellationRequested { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_cancellation_requested run_id={} step_id={}", stage, run_id, step_id),
         sdk::ChatEvent::RunStepFinalizationStarted { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_finalization_started run_id={} step_id={}", stage, run_id, step_id),
-        sdk::ChatEvent::RunStepCancelled { run_id, step_id, confirmed, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} confirmed={}", stage, run_id, step_id, confirmed),
+        sdk::ChatEvent::RunStepCancelled { run_id, step_id, terminal, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} terminal={:?}", stage, run_id, step_id, terminal),
         sdk::ChatEvent::RunDrainingInput { run_id, .. } => crate::tui::log_trace!("{} run_draining_input run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminationRequested { run_id, .. } => crate::tui::log_trace!("{} run_termination_requested run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminated { run_id, .. } => crate::tui::log_trace!("{} run_terminated run_id={}", stage, run_id),
@@ -209,9 +271,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::CurrentRunChanged(run_step) => {
             crate::tui::log_trace!("{} current_run_changed run_step={}", stage, run_step)
         }
-        sdk::ChatEvent::AskUserBatch { items, .. } => {
-            crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
-        }
         sdk::ChatEvent::AgentProgress {
             source_context,
             attachment_context,
@@ -228,6 +287,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.sequence,
             event
         ),
+        sdk::ChatEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => crate::tui::log_trace!(
+            "{} tool_output_delta chat_id={} run_id={} tool_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            delta.len(),
+        ),
         sdk::ChatEvent::ToolProgress {
             context,
             tool_id,
@@ -240,8 +311,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             tool_id,
             event.text.len(),
         ),
-        sdk::ChatEvent::ChildRunActivity { event } => crate::tui::log_trace!(
-            "{} child_run_activity agent_id={} run_id={} parent_run_id={} tool_id={} seq={}",
+        sdk::ChatEvent::SubRunStarted { event } => crate::tui::log_trace!(
+            "{} sub_run_started agent_id={} run_id={} parent_run_id={} tool_id={} seq={} model={}",
+            stage,
+            event.identity.agent_id,
+            event.identity.run_id,
+            event.identity.parent_run_id,
+            event.identity.spawned_by_tool_call_id,
+            event.sequence,
+            event.model,
+        ),
+        sdk::ChatEvent::SubRunActivity { event } => crate::tui::log_trace!(
+            "{} sub_run_activity agent_id={} run_id={} parent_run_id={} tool_id={} seq={}",
             stage,
             event.identity.agent_id,
             event.identity.run_id,
@@ -285,16 +366,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             "{} user_messages_withdrawn count={}",
             stage,
             texts.len()
-        ),
-        sdk::ChatEvent::CompactProgress {
-            stage: _,
-            current,
-            total,
-        } => crate::tui::log_trace!(
-            "{} compact_progress current={:?} total={:?}",
-            stage,
-            current,
-            total,
         ),
         sdk::ChatEvent::ModelSwitched { result } => crate::tui::log_trace!(
             "{} model_switched display={} context_window={} reasoning={:?}",
@@ -367,7 +438,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
-         | sdk::ChatEvent::CostUpdate { .. }
+         | sdk::ChatEvent::RuntimeStatusChanged { .. }
+        | sdk::ChatEvent::CostUpdate { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }
 }
 
@@ -444,11 +516,18 @@ pub(crate) fn log_tui_runtime_delivery(
     use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 
     match event {
-        TuiRuntimeEvent::Text { context, text } => crate::tui::log_trace!(
-            "event_delivery boundary=sdk_to_tui kind=Text chat_id={} run_id={} size={} outcome={}",
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=AssistantTextDelta chat_id={} run_id={} size={} outcome={}",
             context.chat_id,
             context.run_id,
-            text.len(),
+            delta.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=ThinkingDelta chat_id={} run_id={} size={} outcome={}",
+            context.chat_id,
+            context.run_id,
+            delta.len(),
             outcome
         ),
         TuiRuntimeEvent::BlockComplete { context, text } => crate::tui::log_debug!(
@@ -470,16 +549,16 @@ pub(crate) fn log_tui_runtime_delivery(
             context.run_id,
             outcome
         ),
-        TuiRuntimeEvent::ToolProgress {
+        TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
+            delta,
         } => crate::tui::log_debug!(
-            "event_delivery boundary=sdk_to_tui kind=ToolProgress chat_id={} run_id={} tool_id={} text_len={} outcome={}",
+            "event_delivery boundary=sdk_to_tui kind=ToolOutputDelta chat_id={} run_id={} tool_id={} delta_len={} outcome={}",
             context.chat_id,
             context.run_id,
             tool_id,
-            event.text.len(),
+            delta.len(),
             outcome
         ),
         _ => {}

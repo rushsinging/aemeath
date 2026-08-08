@@ -1,11 +1,12 @@
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChildRunActivityEntry {
+pub struct SubRunActivityEntry {
     pub agent_id: String,
     pub run_id: String,
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: String,
     pub sequence: u64,
-    pub kind: crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind,
+    pub sequence_index: u32,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -14,29 +15,53 @@ pub enum AgentActivityKind {
     ToolCall,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentActivityContent {
+    Text(String),
+    ToolCall {
+        name: String,
+        input: serde_json::Value,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentActivityLine {
     pub kind: AgentActivityKind,
-    pub content: String,
+    pub content: AgentActivityContent,
 }
 
 impl AgentActivityLine {
     pub fn message(content: impl Into<String>) -> Self {
         Self {
             kind: AgentActivityKind::Message,
-            content: content.into(),
+            content: AgentActivityContent::Text(content.into()),
         }
     }
 
-    pub fn tool_call(content: impl Into<String>) -> Self {
+    pub fn tool_call(name: impl Into<String>, input: serde_json::Value) -> Self {
         Self {
             kind: AgentActivityKind::ToolCall,
-            content: content.into(),
+            content: AgentActivityContent::ToolCall {
+                name: name.into(),
+                input,
+            },
         }
     }
 
     pub fn contains(&self, pattern: &str) -> bool {
-        self.content.contains(pattern)
+        match &self.content {
+            AgentActivityContent::Text(content) => content.contains(pattern),
+            AgentActivityContent::ToolCall { name, input } => {
+                name.contains(pattern) || input.to_string().contains(pattern)
+            }
+        }
+    }
+
+    pub fn text(&self) -> Option<&str> {
+        match &self.content {
+            AgentActivityContent::Text(content) => Some(content),
+            AgentActivityContent::ToolCall { .. } => None,
+        }
     }
 }
 
@@ -54,13 +79,13 @@ impl From<String> for AgentActivityLine {
 
 impl PartialEq<&str> for AgentActivityLine {
     fn eq(&self, other: &&str) -> bool {
-        self.content == *other
+        matches!(&self.content, AgentActivityContent::Text(content) if content == *other)
     }
 }
 
 impl PartialEq<String> for AgentActivityLine {
     fn eq(&self, other: &String) -> bool {
-        self.content == *other
+        matches!(&self.content, AgentActivityContent::Text(content) if content == other)
     }
 }
 

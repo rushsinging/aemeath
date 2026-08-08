@@ -27,6 +27,8 @@ aemeath 是**人在环的交互式 CLI**，不是无人值守 workflow。崩溃�
 
 **关键**：落盘的是**对话历史数据**以及已接受 ToolCall 的 durable receipt 事实（由 Context Management 拥有），**不是** Run 的执行状态机。Receipt 只用于保留调用 identity 与已知状态；不恢复 future、不自动重放。恢复把 terminal receipt 投影进 finalized outcome；对于 Pending/Running receipt，只有同时存在对应孤立 `tool_use` 时才补充 `is_error=true` 的 provider-safe `CancellationUnconfirmed` ToolResult，且只修改本次读取投影，不回写 ledger。没有对应消息的 receipt 仍仅供诊断。这与“单状态机内存态”完全自洽——持久化的是数据事实，不是状态机。
 
+CancelRunStep finalization 在 Context append 前查询所属 `(session_id, run_id, step_id)` 的 durable receipts，并将它们原样写入 finalized Step。Step terminal 只由 receipts 收敛：全部 cleanup confirmed 或 not-applicable 时为 `Cancelled`，任一 terminal receipt 为 `CancellationUnconfirmed` 时为 `CancellationUnconfirmed`。该 terminal 通过 Runtime domain event、SDK `RunStepCancellationTerminal` 与 TUI ACL 无损传播；command ACK 不参与收敛。Live 与 Resume 因此读取同一 finalized Step 与 receipt 事实，而不是各自重算 bool。
+
 ## 3. 崩溃恢复流程
 
 ```

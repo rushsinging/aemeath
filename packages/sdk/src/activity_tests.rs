@@ -1,8 +1,8 @@
 use crate::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    ChatEvent, CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView,
-    RunPhaseKindView, RunPurposeView,
+    ChatEvent, CompactStageView, CompactWorkView, HookPointView, InteractionKindView,
+    ModelStreamStateView, RunPhaseKindView, RunPurposeView,
 };
 
 fn activity_fixture() -> ActivityView {
@@ -68,7 +68,7 @@ fn activity_published_language_serializes_every_closed_variant() {
         serde_json::to_value(ActivityKindView::HookDispatch).unwrap(),
         serde_json::to_value(ActivityKindView::Compaction).unwrap(),
         serde_json::to_value(ActivityKindView::Interaction).unwrap(),
-        serde_json::to_value(ActivityKindView::ChildRun).unwrap(),
+        serde_json::to_value(ActivityKindView::SubRun).unwrap(),
         serde_json::to_value(ActivityStateView::Waiting).unwrap(),
         serde_json::to_value(ActivityStateView::Succeeded).unwrap(),
         serde_json::to_value(ActivityStateView::Failed).unwrap(),
@@ -97,16 +97,18 @@ fn activity_published_language_serializes_every_closed_variant() {
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Compact {
-            stage: CompactStageView::Summarizing,
-            current: Some(2),
-            total: Some(4),
+            stage: CompactStageView::Mapping,
+            work: CompactWorkView::Determinate {
+                completed: 2,
+                total: 4,
+            },
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Interaction {
             kind: InteractionKindView::ToolApproval,
         })
         .unwrap(),
-        serde_json::to_value(ActivityDetailView::ChildRun {
+        serde_json::to_value(ActivityDetailView::SubRun {
             role: "reviewer".to_string(),
             model: "claude-sonnet-4-5".to_string(),
         })

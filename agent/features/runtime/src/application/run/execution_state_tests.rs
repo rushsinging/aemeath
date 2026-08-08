@@ -46,6 +46,8 @@ fn context_window(revision: u64) -> ContextWindow {
             urgency: Urgency::None,
             decision_token_count: 0,
             threshold: 0,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
     }

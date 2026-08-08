@@ -649,6 +649,22 @@
       "status": "active"
     },
     {
+      "id": "policy.runtime.event-naming",
+      "guard": "check-runtime-event-naming.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": ".agents/runtime-event-naming-baseline.json"
+      },
+      "classification": "target_capability_policy",
+      "owner": "runtime",
+      "reason": "Runtime, SDK and TUI event variants are explicitly cataloged, indexed and checked for cross-layer fact-name stability without breaking compatibility wire names",
+      "tracking_issue": 945,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent structured event catalog and naming policy",
+      "status": "active"
+    },
+    {
       "id": "policy.runtime.capability-assembly",
       "guard": "check-runtime-capability-assembly.sh",
       "module": "runtime",

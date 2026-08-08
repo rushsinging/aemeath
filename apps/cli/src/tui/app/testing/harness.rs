@@ -61,13 +61,9 @@ impl TuiScenarioHarness {
     pub fn sdk_runtime_batch(&mut self, events: impl IntoIterator<Item = sdk::ChatEvent>) {
         let events = events
             .into_iter()
-            .filter_map(|event| {
-                match crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event) {
-                    crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) => {
-                        Some(event)
-                    }
-                    crate::tui::adapter::event_mapping::SdkEventMapping::Nop => None,
-                }
+            .flat_map(|event| {
+                crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event)
+                    .into_runtime_events()
             })
             .collect();
         self.messages.push_back(TuiMsg::RuntimeBatch(events));

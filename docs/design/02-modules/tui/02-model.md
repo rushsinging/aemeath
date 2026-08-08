@@ -150,6 +150,8 @@ enum TuiRunStatus {
 
 `RunStarted`、`RunAwaitingUser`、`RunResumed`、控制 ACK 和 terminal 事件在兼容期仍可承担身份、交互或用户终态职责，但 spinner / 活动展示的生命周期只能由 typed `RunStatusView` 更新的 snapshot 决定。
 
+控制链使用 typed target identity：TUI 在 `RunStepStarted` 时缓存当前 Main `(run_id, step_id)`，Esc / Ctrl+C 优先发出 `CancelRunStep`；仅在 identity 尚不可用的兼容窗口回退到 `CancelCurrentRun`。`CancelRunStepOutcome` 仅是 command ACK：`Accepted / AlreadyCancelling` 可更新 cancelling 提示，但不得停止 processing、追加 terminal notice 或生成取消内容。Step 取消终态只消费 Runtime 发布的 `RunStepCancellationTerminal::{Cancelled, CancellationUnconfirmed}`；Live 与 Resume 均以 Context finalized Step 中同一 typed receipt 事实为输入。
+
 ### 3.3 RunStep 投影与 RunStepStatus 状态机
 
 ```rust
@@ -304,16 +306,16 @@ Run 生命周期事实只存在于 `RunStateSnapshot`；本节保留 usage、pro
 struct RunRuntimeState {
     usage: UsageSummary,
     live_tps: Option<f64>,
+    runtime_status: Option<TuiRuntimeStatus>,
     task_status: TaskStatusSnapshot,
     processing_jobs: Vec<ProcessingJob>,
     status_notice: StatusNotice,
     graph_phase: Option<String>,
     transient_notice_expiry: Option<Instant>,
-    compact_progress: Option<CompactProgressModel>,
 }
 ```
 
-`RunRuntimeState` **NEVER** 保存 `chat_active`、业务 `SpinnerPhase`、running tool counter 或任何能独立启动/停止活动展示的字段。Tool 名称从当前 RunStep 的 tool calls 只读派生；Hook 与 compact progress 仅作为与 typed status 相符时的 detail，缺失或迟到只影响文案精度，不影响生命周期。
+`RunRuntimeState` **NEVER** 保存 `chat_active`、业务 `SpinnerPhase`、running tool counter 或 Compact progress 本地镜像。Tool 名称与 Compact operation progress 从当前 Run 的 typed Activity facts 只读派生；`runtime_status` 按 `(session_id, revision, heartbeat_sequence)` 原子替换。缺失或迟到的 observation 只影响文案精度，不影响生命周期。
 
 ### 3.6.7 Activity 事实镜像
 
@@ -415,16 +417,11 @@ enum ProcessingStatus { Running, Finished, Failed }
 | `start_processing_job(id, chat_id)` | 添加 Running job |
 | `finish_processing_job(id, success)` | 标记 Finished / Failed |
 
-#### 3.6.4 CompactProgressModel
+#### 3.6.4 Runtime Status full-state
 
-```rust
-struct CompactProgressModel { stage: String, current: Option<u32>, total: Option<u32> }
-```
+`TuiRuntimeStatus` 是 Runtime Published State 的 TUI-owned 完整镜像。`ReplaceRuntimeStatus` 只接受同一 Session 更高 business revision，或同 revision 更高 heartbeat sequence；stale 与 duplicate 状态幂等丢弃。Context percentage、threshold 与 decision source 只读该 snapshot，NEVER 从 `UsageSummary.last_input_tokens` 与本地 context size 重建。
 
-| 方法 | 说明 |
-|---|---|
-| `set_compact_progress(stage, current, total)` | 设置进度 + 调用 `start_compact()` 激活 spinner |
-| `clear_compact_runtime()` | 清空 compact_progress + running_tool_count 归零（不改 Run 投影；phase / run_active 继续纯派生） |
+Compact operation progress 不存入 `RunRuntimeState`，而是由 Activity fact mirror 中最新的非 terminal typed `CompactOperation { stage, work }` 派生。旧 stringly `CompactProgressModel`、`set_compact_progress` 与并行清理路径已退役，NEVER 恢复。
 
 #### 3.6.5 StatusNotice
 
@@ -568,7 +565,7 @@ ConversationChange 覆盖：
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
 - Agent 进度：`AgentProgressRecorded` / `AgentMetaUpdated`
 - Interaction：`InteractionShown` / `InteractionUpdated` / `InteractionReplyRequested` / `InteractionCancelRequested` / `InteractionStateChanged` / `InteractionProtocolConflict`
-- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `CompactProgressChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `RuntimeStatusReplaced` / `ActivityObservationChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
 - 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`
 
 > `InteractionReplyRejected`（outcome=`InvalidReply`）与 `InteractionCancelRejected`（outcome=`CancelRejected`）都经 `InteractionStateChanged` Change 回退 phase 并保留 draft，**NEVER** 折叠进 `InteractionReplyFailed`；完整 outcome → Intent → Change 映射见 [03-event-flow-and-acl.md §4.6](03-event-flow-and-acl.md#46-interaction-command-outcome-类型化投影)。
@@ -888,7 +885,7 @@ enum ConfigChange {
 
 ```text
 SDK ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }
-  → sdk_event_to_ui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
+  → sdk_event_to_tui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
   → UiEvent::WorkingDirectoryChanged(WorkspaceSnapshot)
   → AgentEventMapper（TUI ACL 第二层）
   → WorkspaceIntent::ApplySnapshot(snapshot)

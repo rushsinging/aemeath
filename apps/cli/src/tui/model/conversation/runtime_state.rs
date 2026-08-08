@@ -3,7 +3,6 @@
 //! 与 `ConversationAggregate`（核心域：对话内容）分离。
 //! 对话域产出的 `ConversationChange` 经映射层翻译为 `RuntimeState` 方法调用。
 
-use super::compact_progress::CompactProgressModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
@@ -17,12 +16,12 @@ use std::time::Instant;
 pub struct RuntimeState {
     pub usage: UsageSummary,
     pub live_tps: Option<f64>,
+    pub runtime_status: Option<crate::tui::adapter::runtime_status::TuiRuntimeStatus>,
     pub task_status: TaskStatusSnapshot,
     pub processing_jobs: Vec<ProcessingJob>,
     pub status_notice: StatusNotice,
     pub graph_phase: Option<String>,
     pub transient_notice_expiry: Option<Instant>,
-    pub compact_progress: Option<CompactProgressModel>,
 }
 
 // ── 只读访问器（供 view assembler 读取） ──
@@ -45,9 +44,6 @@ impl RuntimeState {
     }
     pub fn graph_phase(&self) -> Option<&str> {
         self.graph_phase.as_deref()
-    }
-    pub fn compact_progress(&self) -> Option<&CompactProgressModel> {
-        self.compact_progress.as_ref()
     }
 }
 
@@ -156,22 +152,7 @@ impl RuntimeState {
         }
     }
 
-    pub fn clear_compact_runtime(&mut self) {
-        self.compact_progress = None;
-    }
-
-    pub fn set_compact_progress(
-        &mut self,
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    ) {
-        self.compact_progress = Some(CompactProgressModel {
-            stage,
-            current,
-            total,
-        });
-    }
+    pub fn clear_compact_runtime(&mut self) {}
 }
 
 #[cfg(test)]

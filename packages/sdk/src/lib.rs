@@ -40,24 +40,25 @@ pub mod wire;
 
 pub mod ids;
 pub mod interaction;
+mod runtime_status;
 
 pub use activity::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
-    RunPurposeView,
+    CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
+    RunPhaseKindView, RunPurposeView,
 };
 pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserAnswer,
-    AskUserQuestionItem, AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent,
-    ChatInputImage, ChatRequest, ChatResult, ChatStream, ChildRunActivityEventView,
-    ChildRunActivityKindView, ChildRunIdentityView, ChildRunTerminalOutcomeView, OptionItem,
-    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
-    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView,
-    ToolProgressEventView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
+    ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest, ChatResult,
+    ChatStream, OptionItem, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{
@@ -85,9 +86,10 @@ pub use interaction::{
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
-    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
-    TerminateRunOutcome,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunStepCancellationTerminal,
+    RunTerminationReason, TerminateRunOutcome,
 };
+pub use runtime_status::{ContextBudgetView, ContextDecisionSourceView, RuntimeStatusView};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
     SessionSnapshot, SessionSummary, SkillRequestMetadataView,

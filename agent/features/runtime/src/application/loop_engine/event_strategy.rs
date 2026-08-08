@@ -1,6 +1,6 @@
 //! Run 领域事件的窄输出 observer。
 //!
-//! 共享 Engine 只发出 [`RunDomainEvent`]。外层根据真实输出目标选择 observer：
+//! 共享 Engine 只发出 [`RuntimeLifecycleEvent`]。外层根据真实输出目标选择 observer：
 //! chat stream observer 负责 TUI/SDK 事件与独立 Run 收尾展示；progress observer
 //! 负责派生 Run 的进度与 terminal capture。名称表达输出职责，不表达 Main/Sub 角色。
 
@@ -14,41 +14,43 @@ use crate::application::loop_engine::run_finalization::{
     RunFinalizationCoordinator, RunFinalizationStatus,
 };
 use crate::application::loop_engine::LoopEngineError;
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use tools::AgentRunTerminal;
 
 /// Extract terminal state from a domain event. Shared between Main and Sub.
 ///
 /// Returns `Some(AgentRunTerminal)` for terminal events (Completed, Failed,
 /// Terminated) and `None` for all other events.
-pub(crate) fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
+pub(crate) fn terminal_from_domain_event(
+    event: &RuntimeLifecycleEvent,
+) -> Option<AgentRunTerminal> {
     match event {
-        RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
+        RuntimeLifecycleEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
             result: result.clone(),
         }),
-        RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
+        RuntimeLifecycleEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
             error: error.clone(),
         }),
-        RunDomainEvent::Terminated { .. } => Some(AgentRunTerminal::Cancelled),
-        RunDomainEvent::Transitioned { .. }
-        | RunDomainEvent::Started { .. }
-        | RunDomainEvent::StepStarted { .. }
-        | RunDomainEvent::StepCompleted { .. }
-        | RunDomainEvent::StepCancellationRequested { .. }
-        | RunDomainEvent::StepFinalizationStarted { .. }
-        | RunDomainEvent::StepCancelled { .. }
-        | RunDomainEvent::DrainingInput { .. }
-        | RunDomainEvent::TerminationRequested { .. }
-        | RunDomainEvent::AwaitingUser { .. }
-        | RunDomainEvent::Resumed { .. }
-        | RunDomainEvent::StuckDetected { .. } => None,
+        RuntimeLifecycleEvent::Terminated { .. } => Some(AgentRunTerminal::Cancelled),
+        RuntimeLifecycleEvent::Transitioned { .. }
+        | RuntimeLifecycleEvent::Started { .. }
+        | RuntimeLifecycleEvent::StepStarted { .. }
+        | RuntimeLifecycleEvent::StepCompleted { .. }
+        | RuntimeLifecycleEvent::StepCancellationRequested { .. }
+        | RuntimeLifecycleEvent::StepFinalizationStarted { .. }
+        | RuntimeLifecycleEvent::StepCancelled { .. }
+        | RuntimeLifecycleEvent::DrainingInput { .. }
+        | RuntimeLifecycleEvent::TerminationRequested { .. }
+        | RuntimeLifecycleEvent::AwaitingUser { .. }
+        | RuntimeLifecycleEvent::Resumed { .. }
+        | RuntimeLifecycleEvent::StuckDetected { .. } => None,
     }
 }
 
 /// Common interface for domain event observers.
 #[async_trait]
 pub(crate) trait RunEventObserver {
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
+    async fn emit(&mut self, events: Vec<RuntimeLifecycleEvent>) -> Result<(), LoopEngineError>;
 }
 
 /// Publishes Run domain events to the chat stream and finalizes terminal UI state.
@@ -99,10 +101,10 @@ impl ChatStreamEventObserver<'_> {
 
 #[async_trait]
 impl RunEventObserver for ChatStreamEventObserver<'_> {
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+    async fn emit(&mut self, events: Vec<RuntimeLifecycleEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             match event {
-                RunDomainEvent::Completed {
+                RuntimeLifecycleEvent::Completed {
                     user_cancelled_step,
                     ..
                 } => {
@@ -112,7 +114,7 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
                         self.project_done(RunFinalizationStatus::Completed).await;
                     }
                 }
-                RunDomainEvent::Failed { error, .. } => {
+                RuntimeLifecycleEvent::Failed { error, .. } => {
                     self.sink
                         .send_event(RuntimeStreamEvent::ApiError {
                             messages: self.messages_snapshot.clone(),
@@ -122,10 +124,10 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
                     self.project_done(RunFinalizationStatus::ApiError(error))
                         .await;
                 }
-                RunDomainEvent::Terminated { .. } => {
+                RuntimeLifecycleEvent::Terminated { .. } => {
                     self.send_cancelled().await;
                 }
-                RunDomainEvent::Started {
+                RuntimeLifecycleEvent::Started {
                     run_id,
                     parent_run_id,
                 } => {
@@ -136,24 +138,24 @@ impl RunEventObserver for ChatStreamEventObserver<'_> {
                         })
                         .await;
                 }
-                RunDomainEvent::StuckDetected { reason, .. } => {
+                RuntimeLifecycleEvent::StuckDetected { reason, .. } => {
                     self.sink
                         .send_event(RuntimeStreamEvent::SystemMessage(format!(
                             "[StuckGuard: {reason}]"
                         )))
                         .await;
                 }
-                RunDomainEvent::Transitioned { .. }
-                | RunDomainEvent::AwaitingUser { .. }
-                | RunDomainEvent::Resumed { .. }
-                | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. }
-                | RunDomainEvent::StepCancellationRequested { .. }
-                | RunDomainEvent::StepFinalizationStarted { .. }
-                | RunDomainEvent::StepCancelled { .. }
-                | RunDomainEvent::DrainingInput { .. }
-                | RunDomainEvent::TerminationRequested { .. } => {
-                    self.sink.send_domain_event(event).await;
+                RuntimeLifecycleEvent::Transitioned { .. }
+                | RuntimeLifecycleEvent::AwaitingUser { .. }
+                | RuntimeLifecycleEvent::Resumed { .. }
+                | RuntimeLifecycleEvent::StepStarted { .. }
+                | RuntimeLifecycleEvent::StepCompleted { .. }
+                | RuntimeLifecycleEvent::StepCancellationRequested { .. }
+                | RuntimeLifecycleEvent::StepFinalizationStarted { .. }
+                | RuntimeLifecycleEvent::StepCancelled { .. }
+                | RuntimeLifecycleEvent::DrainingInput { .. }
+                | RuntimeLifecycleEvent::TerminationRequested { .. } => {
+                    self.sink.send_lifecycle_event(event).await;
                 }
             }
         }
@@ -170,7 +172,7 @@ pub(crate) struct ProgressTerminalObserver<'a> {
 
 #[async_trait]
 impl RunEventObserver for ProgressTerminalObserver<'_> {
-    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+    async fn emit(&mut self, events: Vec<RuntimeLifecycleEvent>) -> Result<(), LoopEngineError> {
         for event in events {
             if let Some(terminal) = terminal_from_domain_event(&event) {
                 match &terminal {

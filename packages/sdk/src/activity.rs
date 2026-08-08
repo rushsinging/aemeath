@@ -123,7 +123,7 @@ pub enum ActivitySourceView {
     HookDispatch(ActivityId),
     Compaction(ActivityId),
     Interaction(InteractionRequestId),
-    ChildRun(RunId),
+    SubRun(RunId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -149,7 +149,7 @@ pub enum ActivityKindView {
     HookDispatch,
     Compaction,
     Interaction,
-    ChildRun,
+    SubRun,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -222,8 +222,18 @@ pub enum HookPointView {
 #[serde(rename_all = "snake_case")]
 pub enum CompactStageView {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "work_type")]
+pub enum CompactWorkView {
+    Indeterminate,
+    Determinate { completed: u32, total: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -261,13 +271,12 @@ pub enum ActivityDetailView {
     },
     Compact {
         stage: CompactStageView,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: CompactWorkView,
     },
     Interaction {
         kind: InteractionKindView,
     },
-    ChildRun {
+    SubRun {
         role: String,
         model: String,
     },

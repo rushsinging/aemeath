@@ -137,13 +137,14 @@ pub struct ClearQueuedSubmissionById {
 pub struct ClearAllQueuedSubmissions;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RecordChildRunActivity {
+pub struct RecordSubRunActivity {
     pub agent_id: String,
-    pub child_run_id: String,
+    pub sub_run_id: String,
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: ToolCallId,
     pub sequence: u64,
-    pub kind: crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind,
+    pub sequence_index: u32,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -163,7 +164,7 @@ pub struct RecordAgentActivities {
 }
 
 /// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
-/// 由 `ToolProgressEvent` 触发，直接写入 `ToolCall.streaming_preview`，
+/// 由 TUI ACL 消费 `ToolOutputDelta` 后触发，直接写入 `ToolCall.streaming_preview`，
 /// 供 TUI 实时 tail 显示。与 `RecordAgentProgress` 语义独立。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordToolStreamingOutput {
@@ -352,6 +353,9 @@ pub struct FinishProcessingJob {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceRuntimeStatus(pub crate::tui::adapter::runtime_status::TuiRuntimeStatus);
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -368,13 +372,6 @@ pub struct SetTransientStatusNotice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetGraphPhase(pub Option<String>);
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SetCompactProgress {
-    pub stage: String,
-    pub current: Option<u32>,
-    pub total: Option<u32>,
-}
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
@@ -417,7 +414,7 @@ pub enum ConversationIntent {
     QueueSubmission(QueueSubmission),
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
-    RecordChildRunActivity(RecordChildRunActivity),
+    RecordSubRunActivity(RecordSubRunActivity),
     RecordAgentProgress(RecordAgentProgress),
     RecordAgentActivities(RecordAgentActivities),
     RecordToolStreamingOutput(RecordToolStreamingOutput),
@@ -454,12 +451,12 @@ pub enum ConversationIntent {
     UpdateTaskStatus(UpdateTaskStatus),
     StartProcessingJob(StartProcessingJob),
     FinishProcessingJob(FinishProcessingJob),
+    ReplaceRuntimeStatus(ReplaceRuntimeStatus),
     ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
     SetGraphPhase(SetGraphPhase),
-    SetCompactProgress(SetCompactProgress),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

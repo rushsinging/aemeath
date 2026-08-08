@@ -635,32 +635,46 @@ impl ChatEventSink for RecordingSink {
     fn try_send_event(&self, event: RuntimeStreamEvent) {
         self.record(event);
     }
+
+    fn send_activity_event(
+        &self,
+        event: crate::application::loop_engine::chat::RuntimeActivityEvent,
+    ) {
+        let name = match event {
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
+                kind,
+                activity,
+            } if activity.kind == sdk::ActivityKindView::HookDispatch => {
+                format!("HookActivityChanged:{kind:?}:{}", activity.id)
+            }
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
+                kind,
+                activity,
+            } => format!("ActivityChanged:{kind:?}:{}", activity.id),
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot) => {
+                format!("ActivitySnapshot:{}", snapshot.revision)
+            }
+        };
+        self.events.lock().unwrap().push(name);
+    }
 }
 
 impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
         let name = match &event {
-            RuntimeStreamEvent::ActivityChanged { kind, activity } => {
-                if activity.kind == sdk::ActivityKindView::HookDispatch {
-                    format!("HookActivityChanged:{kind:?}:{}", activity.id)
-                } else {
-                    format!("ActivityChanged:{kind:?}:{}", activity.id)
-                }
-            }
-            RuntimeStreamEvent::ActivitySnapshot(snapshot) => {
-                format!("ActivitySnapshot:{}", snapshot.revision)
-            }
             RuntimeStreamEvent::TurnStarted { messages }
-            | RuntimeStreamEvent::MicrocompactDone { messages, .. }
-            | RuntimeStreamEvent::CompactFinished { messages, .. } => {
+            | RuntimeStreamEvent::MicrocompactCompleted { messages, .. }
+            | RuntimeStreamEvent::CompactOperationCompleted { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
                     RuntimeStreamEvent::TurnStarted { .. } => {
                         self.llm_message_counts.lock().unwrap().push(messages.len());
                         "TurnStarted"
                     }
-                    RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
-                    RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
+                    RuntimeStreamEvent::MicrocompactCompleted { .. } => "MicrocompactCompleted",
+                    RuntimeStreamEvent::CompactOperationCompleted { .. } => {
+                        "CompactOperationCompleted"
+                    },
                     _ => "Sync",
                 };
                 format!(
@@ -672,14 +686,14 @@ impl RecordingSink {
                         .unwrap_or_default()
                 )
             }
-            RuntimeStreamEvent::CompactRollback { messages } => {
+            RuntimeStreamEvent::CompactOperationRolledBack { messages } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 self.compact_rollback_snapshots
                     .lock()
                     .unwrap()
                     .push(messages.clone());
                 format!(
-                    "CompactRollback:{}",
+                    "CompactOperationRolledBack:{}",
                     messages
                         .last()
                         .map(|message| message.text_content())
@@ -696,7 +710,7 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::RunChanged(turn) => format!("RunChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
-            RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
+            RuntimeStreamEvent::AssistantTextDelta { delta, .. } => format!("Text:{delta}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
             RuntimeStreamEvent::HookNotice(notice) => format!("HookNotice:{}", notice.reason),
@@ -704,17 +718,21 @@ impl RecordingSink {
                 self.done_durations.lock().unwrap().push(*duration);
                 "Cancelled".to_string()
             }
-            RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
+            RuntimeStreamEvent::ThinkingDelta { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
-            RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
-            RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
+            RuntimeStreamEvent::ToolCallStarted { .. } => "ToolCallStarted".to_string(),
+            RuntimeStreamEvent::ToolCallArgumentsDelta { .. } => {
+                "ToolCallArgumentsDelta".to_string()
+            }
+            RuntimeStreamEvent::ToolCallStateChanged { .. } => {
+                "ToolCallStateChanged".to_string()
+            }
             RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
             RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
-            RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),
             RuntimeStreamEvent::InteractionRequested { .. } => "InteractionRequested".to_string(),
-            RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
-            RuntimeStreamEvent::ToolProgress { .. } => "ToolProgress".to_string(),
-            RuntimeStreamEvent::ChildRunActivity(_) => "ChildRunActivity".to_string(),
+            RuntimeStreamEvent::ToolOutputDelta { .. } => "ToolOutputDelta".to_string(),
+            RuntimeStreamEvent::SubRunStarted(_) => "SubRunStarted".to_string(),
+            RuntimeStreamEvent::SubRunActivity(_) => "SubRunActivity".to_string(),
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
             }
@@ -736,7 +754,6 @@ impl RecordingSink {
             } => format!("SessionMessageStateChanged:{message_count}:{revision}"),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
-            RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
             RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),

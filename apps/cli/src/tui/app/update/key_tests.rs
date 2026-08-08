@@ -62,6 +62,56 @@ fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
 }
 
 #[test]
+fn esc_and_ctrl_c_target_the_active_run_step_identity() {
+    let active_run_id = sdk::RunId::from_legacy_or_new("run-1");
+    let active_step_id = sdk::RunStepId::from_legacy_or_new("step-1");
+    let expected = Effect::CancelRunStep {
+        run_id: active_run_id.clone(),
+        step_id: active_step_id.clone(),
+    };
+
+    let mut esc_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    esc_app.chat.start_processing();
+    esc_app.chat.active_run_step = Some((active_run_id, active_step_id));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+
+    let result = esc_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![expected]);
+    assert!(esc_app.chat.is_processing);
+}
+
+#[test]
+fn cancel_command_ack_does_not_publish_or_apply_terminal() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    let timeline_before_ack = app.model.conversation.timeline.items().len();
+    app.chat.start_cancelling();
+
+    assert!(app.chat.is_processing, "ACK 不能结束 processing");
+    assert!(
+        app.chat.is_cancelling,
+        "accepted ACK 只进入 cancelling 展示态"
+    );
+    assert_eq!(
+        app.model.conversation.timeline.items().len(),
+        timeline_before_ack,
+        "ACK 不能伪造 Runtime terminal"
+    );
+}
+
+#[test]
 fn test_ctrlc_action_input_nonempty_clears() {
     assert_eq!(
         ctrlc_action(false, None, false, false),

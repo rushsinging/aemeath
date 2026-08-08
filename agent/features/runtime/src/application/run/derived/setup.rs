@@ -443,6 +443,18 @@ impl AgentRunner for CliAgentRunner {
                     .expect("DerivedRun must retain workspace")
                     .persist(),
                 tool_result_materializer: self.tool_result_materializer.clone(),
+                committed_side_effects:
+                    crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                        derived.instance.context(),
+                        derived.session_id.clone(),
+                        derived
+                            .instance
+                            .workspace()
+                            .expect("DerivedRun must retain workspace")
+                            .views()
+                            .read()
+                            .current_workspace_root(),
+                    ),
                 runtime_cancellation: runtime_token.clone(),
             };
 

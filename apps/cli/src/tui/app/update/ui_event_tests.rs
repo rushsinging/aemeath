@@ -467,44 +467,6 @@ fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echo
     assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
 
-/// Compact 完成只清理 compact detail；Run 生命周期继续由 typed status 所有。
-#[test]
-fn test_messages_sync_clears_compact_runtime_state() {
-    use crate::tui::model::conversation::intent::SetCompactProgress;
-
-    let mut app = test_app();
-    let (ui_tx, _ui_rx) = mpsc::channel(1);
-    let spawn_refs = make_spawn_refs();
-
-    app.model.conversation.apply(SetCompactProgress {
-        stage: "finalizing".into(),
-        current: Some(8),
-        total: Some(10),
-    });
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_some(),
-        "precondition: compact_progress 已设置"
-    );
-
-    app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished {
-            messages: vec![],
-            notice: "✓ 上下文压缩完成".to_string(),
-        }),
-        &ui_tx,
-        &spawn_refs,
-    );
-
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_none(),
-        "MessagesSync 后 compact_progress 必须清空（进度条才会消失）"
-    );
-    assert!(
-        app.view_state.dirty.output,
-        "MessagesSync 必须 mark_output_dirty 触发进度条消失渲染"
-    );
-}
-
 /// #749：ApiError 退化为纯展示 —— 追加一次错误 notice，NOT 自行清 processing
 /// （收口统一交给随后的 DoneWithDuration）。
 #[test]
@@ -691,13 +653,13 @@ fn runtime_batch_applies_all_events_before_the_next_render() {
 
     let result = app.update(
         TuiMsg::RuntimeBatch(vec![
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "first ".to_string(),
+                delta: "first ".to_string(),
             },
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "second".to_string(),
+                delta: "second".to_string(),
             },
             TuiRuntimeEvent::BlockComplete {
                 context,
