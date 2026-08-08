@@ -10,12 +10,10 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use std::path::Path;
 
 pub type AgentClientHandle = Arc<dyn AgentClient>;
-pub type ClientLifecycleHandle = Arc<dyn sdk::ClientLifecycle>;
 pub type DisplayHistoryQueryHandle = Arc<dyn sdk::DisplayHistoryQuery>;
 
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
-    pub lifecycle: ClientLifecycleHandle,
     pub display_history_query: DisplayHistoryQueryHandle,
     pub session_id: String,
     pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
@@ -34,22 +32,6 @@ pub struct AgentClientBootstrap {
 
 pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
     Arc::new(client)
-}
-
-struct ClientHandles {
-    client: AgentClientHandle,
-    lifecycle: ClientLifecycleHandle,
-}
-
-fn client_handles_with_audit_lifecycle(
-    assembly: crate::runtime::RuntimeClientAssembly,
-) -> ClientHandles {
-    let client = agent_client_from_runtime(assembly.client);
-    let lifecycle: ClientLifecycleHandle = match assembly.audit_worker {
-        Some(handle) => Arc::new(crate::audit::AuditClientLifecycle::new(handle)),
-        None => Arc::new(()),
-    };
-    ClientHandles { client, lifecycle }
 }
 
 pub struct FeatureGateways {
@@ -216,7 +198,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    Ok(client_handles_with_audit_lifecycle(runtime_client).client)
+    Ok(agent_client_from_runtime(runtime_client))
 }
 
 #[cfg(test)]
@@ -257,7 +239,7 @@ async fn build_agent_client_with_gateways(
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, agents_dir)
             .await?;
-    Ok(client_handles_with_audit_lifecycle(runtime_client).client)
+    Ok(agent_client_from_runtime(runtime_client))
 }
 
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
@@ -315,20 +297,19 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let runtime_client =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await?;
-    let launch = runtime_client.client.startup_snapshot();
-    let startup_resume = runtime_client.client.startup_resume();
-    let allow_all = runtime_client.client.allow_all();
-    let context_size = runtime_client.client.context_size();
-    let thinking = runtime_client.client.requested_reasoning() != provider::ReasoningLevel::Off;
+    let launch = runtime_client.startup_snapshot();
+    let startup_resume = runtime_client.startup_resume();
+    let allow_all = runtime_client.allow_all();
+    let context_size = runtime_client.context_size();
+    let thinking = runtime_client.requested_reasoning() != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
-    let handles = client_handles_with_audit_lifecycle(runtime_client);
+    let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.clone());
+    let client = agent_client_from_runtime(runtime_client);
     let cwd = launch.cwd.clone();
 
     Ok(AgentClientBootstrap {
-        client: handles.client,
-        lifecycle: handles.lifecycle,
+        client,
         display_history_query,
         session_id: launch.session_id,
         startup_resume,

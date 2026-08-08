@@ -1,4 +1,4 @@
-use super::{AgentClient, ClientLifecycle, ClientShutdownOutcome, RunControlClient};
+use super::{AgentClient, RunControlClient};
 
 fn assert_agent_client_commands<T: AgentClient + ?Sized>(client: &T) {
     let deadline = crate::ControlDeadline::from_unix_millis(1_725_000_000_123);
@@ -15,32 +15,6 @@ fn assert_run_control_commands<T: RunControlClient + ?Sized>(client: &T) {
     let deadline = crate::ControlDeadline::from_unix_millis(1_725_000_000_123);
     let _ = client.cancel_run_step(&run_id, Some(&step_id), deadline);
     let _ = client.terminate_run(&run_id, crate::RunTerminationReason::UserExit, deadline);
-}
-
-#[tokio::test]
-async fn client_lifecycle_default_requires_no_runtime_client_migration() {
-    let lifecycle: &dyn ClientLifecycle = &();
-
-    assert_eq!(
-        lifecycle.shutdown().await,
-        ClientShutdownOutcome::NotConfigured
-    );
-}
-
-#[test]
-fn client_shutdown_outcome_expresses_all_lifecycle_terminals() {
-    assert_eq!(
-        ClientShutdownOutcome::Drained,
-        ClientShutdownOutcome::Drained
-    );
-    assert_eq!(
-        ClientShutdownOutcome::TimedOut { unconfirmed: 3 },
-        ClientShutdownOutcome::TimedOut { unconfirmed: 3 }
-    );
-    assert_eq!(
-        ClientShutdownOutcome::NotConfigured,
-        ClientShutdownOutcome::NotConfigured
-    );
 }
 
 #[test]

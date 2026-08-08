@@ -68,25 +68,6 @@ pub trait AgentClient: Send + Sync + 'static {
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, super::SdkError>;
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClientShutdownOutcome {
-    Drained,
-    TimedOut { unconfirmed: u64 },
-    NotConfigured,
-}
-
-#[async_trait]
-pub trait ClientLifecycle: Send + Sync + 'static {
-    async fn shutdown(&self) -> ClientShutdownOutcome;
-}
-
-#[async_trait]
-impl ClientLifecycle for () {
-    async fn shutdown(&self) -> ClientShutdownOutcome {
-        ClientShutdownOutcome::NotConfigured
-    }
-}
-
 #[async_trait]
 pub trait DisplayHistoryQuery: Send + Sync + 'static {
     async fn load_display_history_window(

@@ -1,7 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
-
-use async_trait::async_trait;
 
 use audit::{
     file_usage_append_store, start_usage_worker, UsageEmitOutcome, UsageRecord, UsageSender,
@@ -35,31 +32,6 @@ pub struct AuditWorkerAssembly {
     pub handle: UsageWorkerHandle,
 }
 
-#[derive(Clone)]
-pub struct AuditClientLifecycle {
-    handle: Arc<UsageWorkerHandle>,
-}
-
-impl AuditClientLifecycle {
-    pub fn new(handle: UsageWorkerHandle) -> Self {
-        Self {
-            handle: Arc::new(handle),
-        }
-    }
-}
-
-#[async_trait]
-impl sdk::ClientLifecycle for AuditClientLifecycle {
-    async fn shutdown(&self) -> sdk::ClientShutdownOutcome {
-        match self.handle.shutdown().await {
-            audit::UsageShutdownOutcome::Drained => sdk::ClientShutdownOutcome::Drained,
-            audit::UsageShutdownOutcome::TimedOut { unconfirmed } => {
-                sdk::ClientShutdownOutcome::TimedOut { unconfirmed }
-            }
-        }
-    }
-}
-
 pub fn wire_audit_worker(
     agents_dir: &Path,
     snapshot: &ConfigSnapshot,
@@ -70,7 +42,3 @@ pub fn wire_audit_worker(
     let (sender, handle) = start_usage_worker(store, usage_worker_config_from_snapshot(snapshot));
     Ok(AuditWorkerAssembly { sender, handle })
 }
-
-#[cfg(test)]
-#[path = "audit_tests.rs"]
-mod tests;
