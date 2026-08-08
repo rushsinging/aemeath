@@ -695,6 +695,38 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retain while these files contain only offset/byte-safe slices; prefer line-level allow for new short statements",
       "status": "active"
+    },
+    {
+      "id": "context.compact-continuation-checkpoint",
+      "guard": "check-compact-continuation-checkpoint.sh",
+      "module": "context",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "classification": "target_capability_policy",
+      "owner": "context",
+      "reason": "Context exclusively owns compact continuation checkpoint normalization and canonical submission while Runtime only consumes ContextWindow",
+      "tracking_issue": 1558,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent guard preserving semantic previous-checkpoint handling and the single Context owner",
+      "status": "active"
+    },
+    {
+      "id": "scope.runtime.compact-continuation-tests",
+      "guard": "check-compact-continuation-checkpoint.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "pattern",
+        "value": "*_tests.rs"
+      },
+      "classification": "scope_exclusion",
+      "owner": "runtime",
+      "reason": "Continuation ownership guard excludes test fixtures that contain checkpoint headings and field probes",
+      "tracking_issue": 1558,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "permanent while tests lock verbatim Runtime consumption",
+      "status": "active"
     }
   ]
 }

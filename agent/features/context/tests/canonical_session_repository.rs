@@ -1421,7 +1421,14 @@ async fn second_compact_advances_single_marker() {
     let session = holder.read().unwrap();
     let marker = session.compact.as_ref().unwrap();
     assert_ne!(marker.start_at.as_ref(), Some(&first));
-    assert!(marker.summary.contains("Previous compact summary"));
+    assert!(
+        context::domain::compact::ContinuationCheckpoint::parse(&marker.summary).is_ok(),
+        "second compact marker must contain a valid continuation checkpoint: {}",
+        marker.summary
+    );
+    assert!(marker
+        .summary
+        .contains("Preserve the user's requested action level"));
     assert!(session
         .structured_messages()
         .iter()
@@ -1518,10 +1525,27 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
-    let repository_under_test =
-        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
+    let repository_under_test = base_repository.with_generator(Arc::new(FixedGenerator(
+        "## Immutable Constraints\n- review only\n\n## Current Objective\n- LLM 生成的语义摘要\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue",
+    )));
 
-    compact(&repository_under_test, session_id.clone(), 0).await;
+    let mut generated_request = compact_request(session_id.clone());
+    generated_request.context_size = 100_000;
+    let outcome = repository_under_test
+        .commit_compaction(&CompactRequest {
+            run_id: generated_request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: generated_request,
+            trigger: CompactTrigger::Automatic,
+            progress: None,
+            task_context: None,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Committed(_)
+    ));
 
     let commits = writer.saved.lock().unwrap();
     let saved = &commits.last().expect("compact commit must exist").plan;
@@ -1537,13 +1561,14 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
         state
             .compact_summary()
             .is_some_and(|summary| summary.contains("LLM 生成的语义摘要")),
-        "summary 应来自 LLM 生成器"
+        "summary 应来自 LLM 生成器: {:?}",
+        state.compact_summary()
     );
     assert!(
         state
             .compact_summary()
-            .is_none_or(|summary| !summary.contains("## User Requests")),
-        "不应使用本地 fallback 模板"
+            .is_some_and(|summary| summary.contains("## Immutable Constraints")),
+        "LLM summary 应满足 checkpoint schema"
     );
 }
 
@@ -1570,7 +1595,7 @@ async fn commit_compaction_appends_task_context_to_summary() {
     assert!(matches!(
         outcome,
         context::domain::CompactOutcome::Committed(ref result)
-            if result.summary.contains("## Current Task State")
+            if result.summary.matches("## Current Task State").count() == 1
             && result.summary.contains("■ #1 实现压缩拼接")
     ));
 }

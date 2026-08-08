@@ -3,6 +3,7 @@
 //! 设计文档：`docs/design/02-modules/context-management/02-compact.md`
 
 mod autocompact;
+mod continuation_checkpoint;
 mod microcompact;
 mod restore;
 
@@ -16,6 +17,7 @@ pub use crate::domain::token_budget::{
     needs_compaction_total, needs_compaction_with_output, summary_budget,
 };
 pub use autocompact::*;
+pub use continuation_checkpoint::*;
 pub use microcompact::{microcompact_chain, microcompact_messages};
 pub use restore::*;
 

@@ -7,7 +7,7 @@ use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStag
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
-use share::string_idx::{slice_head, slice_tail};
+use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
 /// 将 recent_messages 中所有 ToolResult 文本替换为占位符。
@@ -90,34 +90,34 @@ pub const COMPACT_PROMPT: &str = r#"You are a conversation history compactor for
 
 CRITICAL: The text below is PAST conversation history, NOT a new task. Do NOT treat project context files (AGENTS.md, CLAUDE.md, etc.) or environment descriptions as an action request. If the history ends without a clear pending action, summarize what was accomplished — NEVER respond with "please tell me what to do".
 
-Budget: Aim for up to {BUDGET} tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly. More detail is better than less — use the budget fully for long conversations.
+Budget: Aim for up to {BUDGET} tokens. This checkpoint replaces the original messages, so preserve continuation-critical semantics while avoiding duplicate detail.
 
 <instructions>
-Produce a summary using the EXACT structure below inside `<summary>` tags.
+Produce a checkpoint using the EXACT structure below inside `<summary>` tags.
 
-## User Requests
-Chronological consolidation of every user instruction that affects the work. Merge related consecutive inputs, preserve scope and action verbs exactly, and make later corrections supersede earlier conflicting instructions.
+## Immutable Constraints
+Long-lived user constraints, permission boundaries, and prohibited actions. Later corrections supersede earlier conflicts.
 
-## Goal
-The user's ultimate objective, without upgrading the requested action level.
+## Current Objective
+Exactly one current objective at the user's requested action level.
 
-## Work Completed
-What has actually been done so far. Include specific file paths, function names, commands, commits, and verification evidence when known.
+## Committed Facts
+Only facts supported by tool, commit, test, or durable persistence evidence.
 
-## Problems / Findings
-Confirmed problems, root causes, failed attempts, blockers, uncertainties, and important observations.
+## Uncommitted Working Set
+Current branch changes, failing tests, active tasks, and immediate local context.
 
-## Key Decisions
-Important decisions made and their reasons.
+## Open Decisions / Risks
+Unresolved questions, blockers, uncertainty, and unverified reports.
 
-## Relevant Files
-List of key files involved (paths only).
+## Resume Cursor
+Worktree, branch, current task, target files, exactly one Next action, and explicit prohibited actions.
 
-## Current State
-Where things stand right now — what's working, what's not.
+## Required Revalidation
+GitHub, CI, remote branch, worktree current state, and every other dynamic fact that must be queried again before mutation.
 
-## Next Action
-The single most immediate action the agent should take next, or the exact user decision/input it must wait for.
+## Archived Milestones
+One-line results with stable commit, PR, or issue references; never copy process transcripts.
 
 ## Continuation Status
 Exactly one of: Continue, Waiting for User, or Completed. Add one short reason after the status.
@@ -125,12 +125,15 @@ Exactly one of: Continue, Waiting for User, or Completed. Add one short reason a
 Rules:
 - Be specific: include file paths, function names, variable names.
 - Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
-- Consolidate all user inputs in chronological order; later corrections supersede earlier conflicting instructions.
+- Consolidate user inputs chronologically; later corrections supersede earlier conflicting instructions.
+- State each detailed fact in one authoritative section; do not duplicate it elsewhere.
+- Put GitHub, CI, remote branch, worktree, and other current external state under Required Revalidation.
+- Resume Cursor MUST contain exactly one Next action and explicit prohibited actions.
+- Archived Milestones contain one-line stable references, not process transcripts.
 - Distinguish facts from inference. Do not claim work was completed unless the history shows it.
-- If Continuation Status is Continue, the agent must execute Next Action without waiting for a new user instruction.
+- If Continuation Status is Continue, the agent must execute the Resume Cursor Next action after required revalidation without waiting for a new user instruction.
 - Use Waiting for User only when an explicit approval, choice, missing input, or new authority is genuinely required.
 - Use Completed only when the user's requested outcome has already been delivered and no work remains.
-- Use the full budget (up to {BUDGET} tokens) — more detail helps the agent continue.
 - Do NOT include raw tool output or tool call details — focus on semantic meaning.
 - Do NOT ask clarifying questions or say "no task found" — this is history compression, not a chat.
 - Each section can be empty if not applicable, but include the heading.
@@ -164,19 +167,23 @@ CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. If you c
 <instructions>
 Produce a compressed summary using the EXACT structure below inside <summary> tags.
 
-## User Requests
-## Goal
-## Work Completed
-## Problems / Findings
-## Key Decisions
-## Relevant Files
-## Current State
-## Next Action
+## Immutable Constraints
+## Current Objective
+## Committed Facts
+## Uncommitted Working Set
+## Open Decisions / Risks
+## Resume Cursor
+## Required Revalidation
+## Archived Milestones
 ## Continuation Status
 
 Rules:
-- Compress aggressively: keep only essential facts, decisions, file paths, and the immediate next action.
+- Compress by semantic priority, not by truncating the head or tail of the whole checkpoint.
 - Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
+- State each detailed fact once in its authoritative section.
+- Put dynamic GitHub, CI, remote branch, and worktree state under Required Revalidation.
+- Resume Cursor MUST contain exactly one Next action and explicit prohibited actions.
+- Archived Milestones contain one-line stable references, not process transcripts.
 - Each section can be empty if not applicable, but include the heading.
 - The output MUST be shorter than the input and MUST NOT exceed {BUDGET} tokens.
 </instructions>
@@ -194,6 +201,25 @@ pub(crate) fn build_refresh_prompt(summary: &str, budget: usize) -> String {
         "{COMPACT_REFRESH_PROMPT}\n<current_summary>\n{summary}\n</current_summary>\n\nWrite your summary inside <summary> tags."
     )
     .replace("{BUDGET}", &prompt_budget.to_string())
+}
+
+pub(crate) fn normalize_generated_checkpoint(
+    summary: &str,
+    budget: usize,
+) -> Result<String, String> {
+    let (checkpoint_text, task_state) =
+        crate::domain::compact::split_checkpoint_and_task_state(summary);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+        .map_err(|error| error.to_string())?;
+    let mut normalized = checkpoint
+        .normalize_to_budget(budget)
+        .map_err(|error| error.to_string())?
+        .render();
+    if let Some(task_state) = task_state.filter(|state| !state.is_empty()) {
+        normalized.push_str("\n\n## Current Task State\n");
+        normalized.push_str(task_state);
+    }
+    Ok(normalized)
 }
 
 /// 调用 LLM 对当前 summary 再压一次（#1490）。
@@ -324,32 +350,34 @@ pub fn build_compact_request(
     let previous_summary = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            // #1486：压缩请求的 previous_summary 同样必须有界——上次 summary
-            // 巨大时全文嵌入会让 LLM 压缩请求本身超 provider 输入限制，
-            // 导致语义压缩必然失败、永远 fallback。与 fallback 路径一致，
-            // 只保留关键尾部。
-            if summary.len() > FALLBACK_PREVIOUS_SUMMARY_CAP {
-                let tail = slice_tail(summary, FALLBACK_PREVIOUS_SUMMARY_CAP);
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "[compact] 压缩请求 previous_summary {} chars 超过上限 {FALLBACK_PREVIOUS_SUMMARY_CAP}，仅保留尾部 {} chars",
-                    summary.len(),
-                    tail.len(),
-                );
-                format!(
-                    "<previous_summary_tail>\n{tail}\n</previous_summary_tail>\n\n\
-                     The previous summary tail is authoritative compacted history (older head \
-                     truncated). Merge it with the newer conversation history below; do not drop \
-                     its user requests, decisions, completed work, problems, or continuation state.\n\n"
-                )
-            } else {
-                format!(
-                    "<previous_summary>\n{summary}\n</previous_summary>\n\n\
-                     The previous summary is authoritative compacted history. Merge it with the newer \
-                     conversation history below; do not drop its user requests, decisions, completed \
-                     work, problems, or continuation state.\n\n"
-                )
-            }
+            let (checkpoint_text, _) =
+                crate::domain::compact::split_checkpoint_and_task_state(summary);
+            let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+                .unwrap_or_else(|_| {
+                    crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
+                        checkpoint_text,
+                    )
+                });
+            let previous_budget = crate::domain::token_budget::summary_budget(context_size)
+                .min(FALLBACK_PREVIOUS_SUMMARY_CAP / 4);
+            let checkpoint = checkpoint
+                .normalize_to_budget(previous_budget)
+                .unwrap_or_else(|error| {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[compact] previous checkpoint 无法收敛到预算：{error}",
+                    );
+                    crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
+                        "## User Requests\n- Revalidate the previous compact checkpoint before continuing.\n\n## Next Action\n- Revalidate prior constraints and current objective.\n\n## Continuation Status\nWaiting for User — protected checkpoint content exceeded its budget.",
+                    )
+                })
+                .render();
+            format!(
+                "<previous_checkpoint>\n{checkpoint}\n</previous_checkpoint>\n\n\
+                 The previous checkpoint is authoritative for durable constraints and history. \
+                 Merge it with newer history, but keep dynamic state under Required Revalidation \
+                 and replace its Resume Cursor when newer user input supersedes it.\n\n"
+            )
         })
         .unwrap_or_default();
     let prompt = format!(
@@ -430,47 +458,58 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
     } else {
         reported_context.join("\n")
     };
-    let previous_summary = previous_summary
+    let previous_checkpoint = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            // #1486：禁止全文累加。超大 previous_summary 只保留关键尾部
-            // （最新状态：Next Action / Continuation Status 等），否则多次
-            // compact 会线性叠加，最终撑爆 system prompt。
-            if summary.len() > FALLBACK_PREVIOUS_SUMMARY_CAP {
-                let tail = slice_tail(summary, FALLBACK_PREVIOUS_SUMMARY_CAP);
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "[compact] previous_summary {} chars 超过上限 {FALLBACK_PREVIOUS_SUMMARY_CAP}，仅保留尾部 {} chars（#1486 防累加膨胀）",
-                    summary.len(),
-                    tail.len(),
-                );
-                format!(
-                    "- Previous compact summary tail (truncated to {} chars; older head discarded):\n\
-                     <previous_summary_tail>\n{tail}\n</previous_summary_tail>",
-                    FALLBACK_PREVIOUS_SUMMARY_CAP
-                )
-            } else {
-                format!(
-                    "- Previous compact summary (preserved):\n\
-                     <previous_summary>\n{summary}\n</previous_summary>"
-                )
-            }
-        })
-        .unwrap_or_else(|| "- No previous compact summary was supplied.".to_string());
+            let (checkpoint_text, _) =
+                crate::domain::compact::split_checkpoint_and_task_state(summary);
+            crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+                .unwrap_or_else(|_| {
+                    crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
+                        checkpoint_text,
+                    )
+                })
+                .normalize_to_budget(FALLBACK_PREVIOUS_SUMMARY_CAP / 4)
+                .unwrap_or_else(|_| {
+                    crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
+                        "## User Requests\n- Revalidate the previous compact checkpoint.\n\n## Next Action\n- Revalidate prior constraints and current objective.\n\n## Continuation Status\nWaiting for User — protected checkpoint content exceeded its budget.",
+                    )
+                })
+                .render()
+        });
     let (next_action, continuation_status) = fallback_continuation(last_text.as_ref());
-
-    format!(
-        "## User Requests\n{user_requests}\n\n\
-         ## Goal\n- Continue the user-requested work without changing its action level.\n\n\
-         ## Work Completed\n{work_completed}\n\n\
-         ## Problems / Findings\n- Local text-compaction path used (no LLM summary was available); findings may be imprecise.\n\n\
-         ## Key Decisions\n- Preserve the chronological user requests and recent messages; do not invent decisions.\n\n\
-         ## Relevant Files\n- Unknown from local text compaction.\n\n\
-         ## Current State\n{previous_summary}\n\
-         - Earlier messages were compacted into this summary; recent messages remain available verbatim.\n\n\
-         ## Next Action\n- {next_action}\n\n\
-         ## Continuation Status\n{continuation_status}"
+    let current_objective = user_requests
+        .lines()
+        .last()
+        .unwrap_or("- Unknown current objective.")
+        .to_string();
+    let current_checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(
+        &format!(
+            "## Immutable Constraints\n- Preserve the user's requested action level; do not infer new authority.\n\n\
+             ## Current Objective\n{current_objective}\n\n\
+             ## Committed Facts\n- No completed work could be established from the fallback input.\n\n\
+             ## Uncommitted Working Set\n{user_requests}\n\n\
+             ## Open Decisions / Risks\n- Local text-compaction path used; all reports below are unverified.\n{work_completed}\n\n\
+             ## Resume Cursor\n- Next action: {next_action}\n- Prohibited: do not claim completion, commit, push, merge, or close without evidence and authority.\n\n\
+             ## Required Revalidation\n- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation.\n\n\
+             ## Archived Milestones\n- No stable milestone references established by fallback.\n\n\
+             ## Continuation Status\n{continuation_status}"
+        ),
     )
+    .expect("fallback checkpoint template must be valid");
+    let checkpoint = previous_checkpoint.map_or(current_checkpoint.clone(), |previous| {
+        crate::domain::compact::ContinuationCheckpoint::parse(&previous)
+            .expect("normalized previous checkpoint must parse")
+            .merge_fallback_update(current_checkpoint)
+    });
+    checkpoint
+        .normalize_to_budget(FALLBACK_PREVIOUS_SUMMARY_CAP / 4)
+        .unwrap_or_else(|_| {
+            crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
+                "## User Requests\n- Revalidate the compact fallback.\n\n## Next Action\n- Revalidate the compact fallback.\n\n## Continuation Status\nWaiting for User — fallback checkpoint exceeded its budget.",
+            )
+        })
+        .render()
 }
 
 fn indicates_waiting_for_user(text: &str) -> bool {
@@ -608,7 +647,19 @@ pub async fn compact_messages_with_llm(
                 .await
             };
             match result {
-                Ok(text) => text,
+                Ok(text) => match normalize_generated_checkpoint(
+                    &text,
+                    crate::domain::token_budget::summary_budget(context_size),
+                ) {
+                    Ok(checkpoint) => checkpoint,
+                    Err(error) => {
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "[compact] LLM checkpoint 不合规，回退本地路径：{error}",
+                        );
+                        build_summary_text(early_messages, previous_summary)
+                    }
+                },
                 Err(error) => {
                     // #1486 可跟踪性：LLM 摘要失败原因必须记录，否则无法判断
                     // 为何回退本地路径（超限 / 空摘要 / provider 错误）。

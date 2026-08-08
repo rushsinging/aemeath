@@ -446,11 +446,12 @@ impl CanonicalSessionRepository {
     /// 只在 summary 定稿后追加，保证 compact 后 Agent 仍能看到任务进度。
     /// `task_context` 为 `None` 或空时原样返回 summary。
     fn append_task_context(summary: &str, task_context: &Option<String>) -> String {
+        let (checkpoint, _) = crate::domain::compact::split_checkpoint_and_task_state(summary);
         match task_context {
             Some(context) if !context.trim().is_empty() => {
-                format!("{summary}\n\n## Current Task State\n{context}")
+                format!("{checkpoint}\n\n## Current Task State\n{context}")
             }
-            _ => summary.to_string(),
+            _ => checkpoint.to_string(),
         }
     }
 

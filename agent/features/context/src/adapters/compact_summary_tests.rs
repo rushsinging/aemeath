@@ -1,6 +1,44 @@
 use super::*;
 use std::sync::Arc;
 
+const VALID_CHECKPOINT: &str = r#"## Immutable Constraints
+- NEVER widen the requested action level.
+
+## Current Objective
+- Continue the compact checkpoint work.
+
+## Committed Facts
+- Existing compact tests passed before this change.
+
+## Uncommitted Working Set
+- Checkpoint normalization is in progress.
+
+## Open Decisions / Risks
+- Provider output may violate the schema.
+
+## Resume Cursor
+- Next action: validate the generated checkpoint.
+- Prohibited: do not merge without user approval.
+
+## Required Revalidation
+- Recheck worktree and CI state before delivery.
+
+## Archived Milestones
+- Previous summary contract completed in `#671`.
+
+## Continuation Status
+Continue — checkpoint normalization remains."#;
+
+fn oversized_valid_checkpoint(noise_len: usize) -> String {
+    VALID_CHECKPOINT.replace(
+        "- Previous summary contract completed in `#671`.",
+        &format!(
+            "- Previous summary contract completed in `#671`.\n- {}",
+            "archive-noise ".repeat(noise_len / 14)
+        ),
+    )
+}
+
 /// #1486：分块目标按上下文总长度比例切（context_size / 8），
 /// 带上下限保护，不固定 30k。
 #[test]
@@ -45,11 +83,8 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
             _cancel: &CancellationToken,
         ) -> Result<String, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let text = request
-                .first()
-                .map(|msg| msg.text_content())
-                .unwrap_or_default();
-            Ok(format!("<summary>chunk of {} chars</summary>", text.len()))
+            let _ = request;
+            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }
 
@@ -162,14 +197,47 @@ fn test_messages_selected_for_precompact_memory_returns_empty_for_small_history(
 }
 
 #[test]
-fn compact_prompt_preserves_user_requests_and_continuation_state() {
-    assert!(COMPACT_PROMPT.contains("## User Requests"));
-    assert!(COMPACT_PROMPT.contains("## Work Completed"));
-    assert!(COMPACT_PROMPT.contains("## Problems / Findings"));
-    assert!(COMPACT_PROMPT.contains("## Next Action"));
-    assert!(COMPACT_PROMPT.contains("## Continuation Status"));
-    assert!(COMPACT_PROMPT.contains("later corrections supersede"));
-    assert!(COMPACT_PROMPT.contains("NEVER upgrade"));
+fn compact_prompts_require_the_checkpoint_contract() {
+    for prompt in [COMPACT_PROMPT, COMPACT_REFRESH_PROMPT] {
+        for heading in [
+            "## Immutable Constraints",
+            "## Current Objective",
+            "## Committed Facts",
+            "## Uncommitted Working Set",
+            "## Open Decisions / Risks",
+            "## Resume Cursor",
+            "## Required Revalidation",
+            "## Archived Milestones",
+            "## Continuation Status",
+        ] {
+            assert!(prompt.contains(heading), "missing {heading}");
+        }
+        assert!(prompt.contains("Required Revalidation"));
+        assert!(prompt.contains("exactly one Next action"));
+        assert!(!prompt.contains("More detail is better"));
+        assert!(!prompt.contains("use the budget fully"));
+    }
+}
+
+#[test]
+fn generated_checkpoint_is_normalized_before_commit() {
+    let normalized = normalize_generated_checkpoint(VALID_CHECKPOINT, 10_000).unwrap();
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&normalized).unwrap();
+    assert_eq!(checkpoint.render(), normalized);
+}
+
+#[test]
+fn generated_checkpoint_preserves_task_state_companion() {
+    let source = format!("{VALID_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+    let normalized = normalize_generated_checkpoint(&source, 10_000).unwrap();
+    assert!(normalized.ends_with("## Current Task State\n■ #1 running"));
+}
+
+#[test]
+fn generated_checkpoint_rejects_invalid_schema() {
+    let error = normalize_generated_checkpoint("## User Requests\n- legacy", 10_000)
+        .expect_err("invalid generated schema must fail");
+    assert!(error.contains("缺少必需分区") || error.contains("未知分区"));
 }
 
 #[test]
@@ -208,14 +276,13 @@ fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
         1
     );
     assert_eq!(text.matches("<conversation_history>").count(), 1);
-    assert!(text.contains("<previous_summary>"));
-    assert!(text.contains("earlier user request and completed work"));
+    assert!(text.contains("<previous_checkpoint>"));
+    assert!(text.contains("unverified legacy summary"));
     assert!(text.contains("继续检查 compact"));
 }
 
-/// #1486：LLM 压缩请求的 previous_summary 必须截断（保留尾部），
-/// 否则上次 summary 巨大时压缩请求本身超 provider 输入限制，
-/// LLM 压缩必然失败、永远 fallback。
+/// LLM 压缩请求的 previous checkpoint 必须按语义预算有界化，
+/// 避免上次 summary 巨大时压缩请求超 provider 输入限制，同时不依赖尾部位置保真。
 #[test]
 fn compact_request_caps_oversized_previous_summary() {
     let huge_previous = "x".repeat(900_000);
@@ -233,9 +300,11 @@ fn compact_request_caps_oversized_previous_summary() {
         text.len()
     );
     assert!(
-        text.contains("<previous_summary_tail>"),
-        "应使用截断标记: {text}"
+        text.contains("<previous_checkpoint>"),
+        "应使用 checkpoint 标记: {text}"
     );
+    assert!(!text.contains("<previous_summary_tail>"));
+    assert!(!text.contains("older head truncated"));
 }
 
 #[test]
@@ -254,13 +323,13 @@ fn fallback_summary_latest_user_request_continues_without_claiming_completion() 
         None,
     );
 
-    assert!(summary.contains("## User Requests"));
+    assert!(summary.contains("## Current Objective"));
     assert!(summary.contains("只分析，不实现"));
-    assert!(summary.contains("## Work Completed"));
+    assert!(summary.contains("## Committed Facts"));
     assert!(summary.contains("Unverified assistant report"));
     assert!(!summary.contains("- 已完成"));
-    assert!(summary.contains("## Problems / Findings"));
-    assert!(summary.contains("## Next Action"));
+    assert!(summary.contains("## Open Decisions / Risks"));
+    assert!(summary.contains("## Resume Cursor"));
     assert!(summary.contains("## Continuation Status"));
     assert!(summary.contains("Continue"));
 }
@@ -347,10 +416,12 @@ async fn second_compact_fallback_preserves_previous_summary() {
     .expect("second compact should run");
 
     assert!(
-        result
-            .summary
-            .contains("first compact summary with original user request"),
-        "second compact must retain the previous active summary"
+        result.summary.contains("unverified legacy summary")
+            && result
+                .summary
+                .contains("first compact summary with original user request"),
+        "second compact must conservatively retain legacy previous summary: {}",
+        result.summary
     );
 }
 
@@ -385,26 +456,18 @@ async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
     );
 }
 
-/// 超大 previous_summary 只保留关键尾部，长度有界（#1486）。
+/// fallback 对 oversized previous checkpoint 按语义收敛，不依赖尾部截断。
 #[test]
-fn fallback_keeps_previous_summary_tail_when_oversized() {
-    // 构造一个头部是噪声、尾部是关键信息的 previous_summary
-    let head = "HEAD-NOISE-".repeat(50_000);
-    let tail = "## Next Action\n- Continue the merge.\n\n## Continuation Status\nContinue";
-    let previous = format!("{head}{tail}");
+fn fallback_normalizes_oversized_previous_checkpoint() {
+    let previous = oversized_valid_checkpoint(800_000);
 
     let summary = crate::adapters::compact_summary::build_summary_text(&[], Some(&previous));
 
-    assert!(
-        summary.contains("Continue the merge."),
-        "尾部关键信息必须保留: {summary}"
-    );
+    assert!(summary.contains("NEVER widen the requested action level"));
+    assert!(!summary.contains("archive-noise archive-noise archive-noise"));
     let cap = crate::adapters::compact_summary::FALLBACK_PREVIOUS_SUMMARY_CAP;
-    assert!(
-        summary.len() <= cap + 2_000,
-        "previous_summary 超大时 summary 必须保持有界: {} chars (cap={cap})",
-        summary.len()
-    );
+    assert!(summary.len() <= cap + 2_000);
+    crate::domain::compact::ContinuationCheckpoint::parse(&summary).unwrap();
 }
 
 /// map-reduce 分块摘要必须并发执行（3-5 并发，视块数而定），
@@ -451,10 +514,8 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             self.current.fetch_sub(1, Ordering::SeqCst);
-            Ok(format!(
-                "<summary>chunk summary: {}</summary>",
-                &text[..text.floor_char_boundary(30)]
-            ))
+            let _ = text;
+            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }
 
@@ -484,11 +545,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         "map 阶段并发不得超过 5，实际 {}",
         generator.max_concurrent.load(Ordering::SeqCst)
     );
-    assert!(
-        result.summary.contains("chunk summary"),
-        "reduce 合并结果应来自子摘要: {}",
-        result.summary
-    );
+    assert_eq!(result.summary, VALID_CHECKPOINT);
 }
 
 /// 汇总后的最终摘要若超过预算，必须再压一次（收敛迭代，#1486）。
@@ -533,9 +590,12 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
             if text.contains("sub-summaries") {
                 self.seen_reduce.store(true, Ordering::SeqCst);
                 // reduce：返回超长摘要（模拟 LLM 不听预算）
-                Ok(format!("<summary>{}</summary>", "y".repeat(80_000)))
+                Ok(format!(
+                    "<summary>{}</summary>",
+                    oversized_valid_checkpoint(80_000)
+                ))
             } else {
-                Ok("<summary>收敛后的最终摘要</summary>".to_string())
+                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
             }
         }
     }
@@ -550,7 +610,7 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
             .await
             .expect("compact should run");
 
-    assert_eq!(result.summary, "收敛后的最终摘要");
+    assert_eq!(result.summary, VALID_CHECKPOINT);
     assert!(
         generator.seen_reduce.load(Ordering::SeqCst),
         "reduce 阶段必须发生"
@@ -586,7 +646,7 @@ async fn compact_with_generator_uses_llm_summary() {
     let cancel = CancellationToken::new();
 
     let generator = MockGenerator {
-        text: "LLM summary of early conversation".to_string(),
+        text: VALID_CHECKPOINT.to_string(),
     };
 
     let result =
@@ -595,8 +655,8 @@ async fn compact_with_generator_uses_llm_summary() {
             .expect("compact should run");
 
     // The summary should come from the generator, not the fallback text.
-    assert_eq!(result.summary, "LLM summary of early conversation");
-    assert!(!result.summary.contains("deterministic fallback"));
+    assert_eq!(result.summary, VALID_CHECKPOINT);
+    assert!(!result.summary.contains("Local text-compaction path"));
 }
 
 #[tokio::test]
@@ -629,8 +689,8 @@ async fn compact_falls_back_when_generator_errors() {
     .await
     .expect("compact should still run with fallback");
 
-    // Fallback summary 使用本地压缩模板（#1486：文案如实描述本地路径）。
-    assert!(result.summary.contains("## User Requests"));
+    // Fallback summary 使用本地 checkpoint 模板。
+    assert!(result.summary.contains("## Current Objective"));
     assert!(result.summary.contains("Local text-compaction path"));
     assert!(!result.summary.contains("Semantic LLM compaction failed"));
 }
@@ -702,7 +762,10 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                 .unwrap_or_default();
             if text.contains("sub-summaries") {
                 self.reduce_seen.store(true, Ordering::SeqCst);
-                Ok(format!("<summary>{}</summary>", "y".repeat(40_000)))
+                Ok(format!(
+                    "<summary>{}</summary>",
+                    oversized_valid_checkpoint(40_000)
+                ))
             } else if text.contains("compress an existing conversation summary") {
                 // refresh：返回与输入等长的摘要（模拟 LLM 不缩小）
                 let input = text
@@ -711,7 +774,7 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                     .unwrap_or("");
                 Ok(format!("<summary>{input}</summary>"))
             } else {
-                Ok("<summary>chunk</summary>".to_string())
+                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
             }
         }
     }
@@ -765,7 +828,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
             _request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, String> {
-            Ok("<summary>ok</summary>".to_string())
+            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }
 
@@ -788,7 +851,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     )
     .await
     .expect("compact should run");
-    assert!(result.summary.contains("ok"));
+    assert_eq!(result.summary, VALID_CHECKPOINT);
 
     let seen = seen.lock().unwrap();
     assert_eq!(
@@ -838,7 +901,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
             _request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, String> {
-            Ok("<summary>ok</summary>".to_string())
+            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }
 
@@ -861,7 +924,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     )
     .await
     .expect("compact should run");
-    assert!(result.summary.contains("ok"));
+    assert_eq!(result.summary, VALID_CHECKPOINT);
 
     let seen = seen.lock().unwrap();
     assert_eq!(

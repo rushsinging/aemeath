@@ -418,9 +418,11 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 - `early` **MUST** 覆盖所有将从 active messages 移除、且未进入 recent tail 的消息；**NEVER** 存在既不保留、也不进入 summary 的 head gap。
 - Summary **MUST** 按时间顺序汇总影响当前工作的全部用户输入；相邻输入 **MAY** 合并表达，但后续修正 **MUST** 覆盖更早的冲突要求。
 - Summary **MUST** 精确保留用户要求的动作层级，**NEVER** 把 inspect / diagnose / explain / review / design 升级为 implement / edit / commit / push / merge。
-- Summary **MUST** 分开记录 `User Requests`、`Work Completed`、`Problems / Findings`、`Current State` 与单一 `Next Action`，并区分已确认事实、推断与未知项。
-- Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型直接执行 `Next Action`，不等待新用户输入；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
-- 连续 compact 时，上一轮 active summary **MUST** 作为 authoritative previous summary 显式进入下一轮 compact 输入；Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 summary 前丢弃旧 summary。
+- Summary **MUST** 使用固定顺序的九分区 continuation checkpoint：`Immutable Constraints`、`Current Objective`、`Committed Facts`、`Uncommitted Working Set`、`Open Decisions / Risks`、`Resume Cursor`、`Required Revalidation`、`Archived Milestones`、`Continuation Status`。`Resume Cursor` **MUST** 恰好包含一个 `Next action`。
+- Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型在一次简短动态状态重验证后直接执行 `Next action`；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
+- `Committed Facts` **MUST** 只承载由 tool result、commit、测试或持久化状态支持的事实。assistant 文本和 ToolUse 本身 **NEVER** 直接成为 committed fact，只能进入风险区或带 `unverified` 标记的 working set。PR、CI、worktree、remote branch 等动态当前态 **MUST** 进入 `Required Revalidation`。
+- 连续 compact 时，上一轮 active checkpoint **MUST** 作为 authoritative previous checkpoint 显式进入下一轮 compact 输入；Context **MUST** 按语义分区预算收敛，**NEVER** 对整份 previous checkpoint 做 authoritative head/tail 截断。Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 checkpoint 前丢弃旧 checkpoint。
+- `Current Task State` 是九分区之外的 typed companion：它 **MUST** 在 checkpoint 定稿后由 Context canonical commit 路径追加；连续 compact **MUST** 丢弃旧 companion，只追加当前请求的 `task_context`，且 **NEVER** 将 companion 送入 LLM、混入 checkpoint 或在 Runtime 建立第二 owner。
 - 单次 LLM compact 请求 **MUST** 只有一份带真实 history 的 compact prompt；**NEVER** 在尾部追加一条没有 history 的重复指令。
 - 本地 fallback **MUST** 把 assistant 文本和 ToolUse 标为未验证报告 / 已观察调用，**NEVER** 直接据此声称工作完成；只有最新 unresolved user request 可输出 `Continue`，assistant 的等待、普通报告或完成报告都保守输出 `Waiting for User`。`Completed` 只允许语义摘要在确认交付事实后输出。
 - Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
