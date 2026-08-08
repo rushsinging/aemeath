@@ -125,7 +125,7 @@ enum CompactOutcome {
 }
 enum CompactSkipReason {
     ResumeProtection,               // resume 第一轮保护
-    HookBlocked,                    // PreCompact hook 阻止
+    HookBlocked,                    // Future：PreCompact Hook 接线后的跳过原因
     CircuitBreakerOpen,             // 连续失败次数达上限
 }
 struct AppendReceipt {
@@ -347,7 +347,7 @@ fn generate_collapse_summary(messages: &[Message]) -> CollapseSummary {
 按优先级检查，任一失败即跳过：
 1. **计算 decision token count**：若存在与当前 session/model/compact generation 可比的 `last_api_total_tokens`，直接采用该标准化 total；否则使用本轮完整 candidate 的启发式估算
 2. **Token 阈值**：`decision_token_count > threshold`
-3. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
+3. **PreCompact Hook（Future）**：当前生产 compact 管线尚未 emit `HookInvocation::PreCompact`，因此本项不参与 Current decision；接线后 `Block` 才能跳过 compact
 4. **可压缩历史存在**：至少一个 finalized RunStep 可进入 summary 或 recent tail
 `last_api_total_tokens` 是上一次 Provider 响应经 Provider ACL 标准化后的单次
 context usage，不是 Session 累计成本。Anthropic 必须包含 cache read / cache
@@ -461,10 +461,12 @@ prompt、memory 和 tool schemas。选择单位是完整 finalized RunStep：
 - 不保留独立“前两条 head”；更早的目标、决策和初始输入统一由 summary 保存；
 - 单个 Step 已超过预算时，该 Step 进入 early summary；L1 budget reduction 必须限制新 ToolResult，map-reduce 负责处理超大 early 输入；
 - compact 提交与 Provider 出站前，才把 tail 按 Run / Step 顺序扁平化为 messages。
-### 8.5 Pre/PostCompact Hook
-- **PreCompact**：compact 前触发。可注入 `additional_context`（追加到摘要请求）或 `system_message`（发给 UI）。可 block 阻止 compact。
-- **PostCompact**：compact 后触发。可注入 `additional_context`（作为 compact 后的补充上下文）。
-- **PreCompact Reflection**：compact 前抢救关键信息到 Memory（见 [05-memory-injection.md](05-memory-injection.md) §9）
+### 8.5 Pre/PostCompact Hook（Future production wiring）
+- Hook Published Language 与 Config surface 已包含 `PreCompact` / `PostCompact`，但当前 Runtime compact 管线**尚未**构造或派发对应 `HookInvocation`；用户配置当前不会触发。
+- Target `PreCompact`：compact 前触发，可用 `additional_context` 扩展摘要请求、用 `system_message` 通知 UI，并可 Block 阻止 compact。
+- Target `PostCompact`：compact 成功提交后触发，可用 `additional_context` 作为 compact 后补充上下文。
+- Future 接线必须覆盖 auto/manual compact、Block 后状态保持、context/message 消费、取消与 Resume 相邻边界；在这些证据完成前 **NEVER** 把 PL/Config 存在性描述为生产支持。
+- **PreCompact Reflection** 是 Memory/Runtime 的独立现有机制，不等于 Hook `PreCompact`，其当前行为见 [05-memory-injection.md](05-memory-injection.md) §9。
 ### 8.6 Circuit Breaker
 ```rust
 struct AutoCompactState {
@@ -525,7 +527,7 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 ## 9. 幂等性设计（#550）
 ### 9.1 Fingerprint 契约
 字段、构造与缓存范围的唯一真相见 [Token Budget](03-token-budget.md) §5。本文只定义 Compact 对该契约的使用规则，**NEVER** 复制类型字段。
-- **fingerprint 不变**时跳过 PreCompact hook 和 microcompact 扫描
+- **fingerprint 不变**时当前只跳过重复 microcompact 扫描；Future PreCompact Hook 接线后，还必须定义 hook 是否按 attempt/fingerprint 去重，接线前不得宣称已跳过该 Hook
 - `compaction_decision` 计算对相同 backing revision + request 是确定性函数
 - `compact` 的效果对相同 ChatChain + 相同 ContextRequest 是确定性的
 ### 9.2 生命周期

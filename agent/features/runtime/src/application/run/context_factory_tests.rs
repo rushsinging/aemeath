@@ -22,8 +22,9 @@ async fn dispatch_stop_hook(context: &crate::application::run::context::RuntimeC
 
     let outcome = context
         .hooks()
-        .dispatch(
+        .dispatch_at(
             HookInvocation::Stop(StopInput { run_steps: 1 }),
+            hook::HookDispatchContext::new(std::path::PathBuf::from("/tmp/sub-stop-workspace")),
             &CancellationToken::new(),
         )
         .await;
@@ -153,6 +154,10 @@ async fn sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen() {
         .expect("create sub run");
 
     assert!(dispatch_sub_run_stop_hook(sub.context()).await);
+    assert!(
+        dispatch_stop_hook(sub.context()).await,
+        "sub run must execute its frozen Stop hook through BoundaryOnly binding"
+    );
     assert!(!dispatch_stop_hook(parent.context()).await);
 }
 

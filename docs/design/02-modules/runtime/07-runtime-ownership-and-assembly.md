@@ -540,10 +540,10 @@ Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理�
 `HookBindingMode` 必须在装配期产生真实 capability adapter：
 
 - `Full`：允许 RunSpec 声明范围内的全部 Hook invocation；
-- `BoundaryOnly`：历史枚举名仅表达 Sub 的最低能力档；实际装配独立 `EmptyHookPort`，任何 invocation 都直接 `proceed`，不执行或转发到底层 Hook；
+- `BoundaryOnly`：Sub 的最低 Hook capability；装配包装本 Run frozen Dispatcher 的 `BoundaryHookPort`，按 Hook-owned `HookPointMetadata.class` 转发所有 Boundary point（含 Stop 与 SubRun lifecycle），过滤 Tool/Notification point；
 - 若未来存在 `Disabled`：绑定 typed no-op/disabled adapter，而不是 `Option`。
 
-Sub Hook capability 不能通过 parent 存在性校验后复用完整 HookPort，也不能保留 start/stop 特例。Factory 必须装配独立 `EmptyHookPort`；它对 `dispatch` 与 `dispatch_at` 都无条件返回 `HookOutcome::proceed()`，且不持有底层 HookPort。Hook BC 继续拥有 Main Run 的 subscription、脚本执行、重试和 typed directive；Sub 生命周期若需观测，应使用 Runtime event/parent result 通道，而不是 Hook。
+Sub Hook capability 不能复用父 `HookPort`，也不能复制 HookPoint allow-list。Factory 必须先从 Sub Run 的 frozen `RunConfigSnapshot` 构造独立 Dispatcher，再由 `BoundaryHookPort` 施加 metadata-governed capability ceiling；`dispatch` 与 `dispatch_at` 保持相同过滤语义。Hook BC 继续拥有 subscription、脚本执行、重试和 typed directive，Runtime shared Loop 继续拥有 Stop 控制流。
 
 ### 5.5 Factory Port 所有权
 
@@ -743,7 +743,7 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 | `MainInputStrategy` / `SubInputStrategy` | 删除；factory 绑定统一 `InputPort` adapter |
 | `MainEventStrategy` / `SubEventStrategy` | 删除；factory 绑定统一 `EventSink` adapter |
 | 直接复用父 `InteractionPort` | 改为 child-scoped `ParentMediatedInteractionPort` |
-| Sub Hook 复用或过滤完整 HookPort | 为 Sub 装配无底层委托的 `EmptyHookPort` |
+| Sub Hook 复用父 HookPort 或复制 point allow-list | 从 Sub frozen snapshot 构造独立 Dispatcher，并以 `BoundaryHookPort` 按 metadata 过滤 |
 | `ChatLoopContext` | 拆为 session command driver、`RunCreationRequest` 与 `RunExecutionState` |
 | `ParentRunContextSource` | 以 parent capability registry/frame 的真实语义归入 `SessionState` |
 | `DerivedSubRun` | 删除；所有来源统一返回 `RunInstance` |
@@ -777,7 +777,7 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 - Engine、Launcher 及任一阶段对象均不要求同一类型实现整组 Runtime 能力；不存在 trait alias、supertrait、fat struct、参数袋或展开参数列表形式的能力全集。
 - Chat/Derived 来源目录只拥有 source、observer、topology/request 与 terminal mapping，不拥有模型、工具、Context、Interaction、Persistence、Hook 或 Finalization 主流程。
 - `ParentMediated` 使用 child-scoped adapter，具备 request ownership、并发隔离和精确 teardown。
-- Sub Hook 使用独立 `EmptyHookPort`，禁止执行或转发任何 Hook invocation。
+- Sub Hook 使用包装本 Run frozen Dispatcher 的 `BoundaryHookPort`，按 Hook metadata 转发 Boundary（含 Stop），禁止执行 Tool/Notification Hook 或复用父实例。
 - `Run` 与 `RunExecutionState` 无重复状态所有权。
 - Workspace、Prompt、Skills、Config 均按本文生命周期边界流动。
 - 每层装配、状态转换、能力不扩权、父子并发隔离和端到端场景都有相邻契约测试。

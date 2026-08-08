@@ -1,7 +1,8 @@
 //! HookPort — Hook BC 出站端口。
 //!
 //! 对应设计：`docs/design/02-modules/hook/README.md` §2。
-//! 一个类型化端口——Sub Run 使用 `BoundaryOnly`（仅 start/stop），过滤由 point metadata 完成。
+//! 一个类型化端口——Main 使用 Full；Sub Run 使用 `BoundaryOnly`，过滤由
+//! Hook-owned `HookPointMetadata.class` 完成并保留 Stop 与生命周期 Boundary。
 
 use std::path::{Path, PathBuf};
 

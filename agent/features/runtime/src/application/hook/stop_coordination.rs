@@ -40,7 +40,7 @@ pub enum StopHookDecision {
     /// Stop Hook 执行已被当前 Step 取消，不应向 LLM 注入取消反馈。
     Cancelled,
     /// Stop hook 阻断。携带完整的 typed reason、block detail、feedback 材料。
-    /// 第 1-15 次 Block 走 continue-with-feedback；第 16 次 Block 触发 Run Failed。
+    /// Block allowance 来自本 Run 冻结的 StopHookPolicy；限额内 continue-with-feedback，首个超限 Block 触发 Run Failed。
     Block(Box<StopHookBlock>),
 }
 

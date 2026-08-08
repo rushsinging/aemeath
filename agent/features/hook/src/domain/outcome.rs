@@ -173,7 +173,7 @@ pub struct HookBlockDetail {
 
 /// Hook dispatch 的最终结果。
 ///
-/// Runtime 拥有 directive 响应编排（如 Stop 阻断累计 15 次后第 16 次 RunFailed）。
+/// Runtime 拥有 directive 响应编排（Stop 使用每个 Run 冻结的 block allowance，首个超限 Block 进入 RunFailed）。
 #[derive(Debug, Clone)]
 pub struct HookOutcome {
     /// 所有执行明细（含重试）。

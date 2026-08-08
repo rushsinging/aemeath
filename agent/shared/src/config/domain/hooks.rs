@@ -1,8 +1,10 @@
 //! Hook 配置定义
 //!
-//! 参考 Claude Code hook 系统，支持在 aemeath 生命周期的关键事件点执行用户自定义 shell 命令。
+//! 参考 Claude Code hook 系统，定义 Aemeath 可解析的 Hook 配置 surface。
+//! HookEvent / HookInvocation 的稳定 PL 存在不等于生产触发已接线；实际 emit 与消费状态
+//! 以 `docs/design/02-modules/hook/README.md` 的 production reachability 矩阵为准。
 //!
-//! ## 事件类型（25 个）
+//! ## 事件类型（26 个）
 //! - `PreToolUse` — 工具执行前（可阻止/修改输入）
 //! - `PostToolUse` — 工具执行后（可注入上下文）
 //! - `PostToolUseFailure` — 工具执行失败后（可注入修复指导）
@@ -12,6 +14,7 @@
 //! - `SessionStart` — 会话开始（注入上下文）
 //! - `SessionEnd` — 会话结束（发送消息/清理）
 //! - `PreCompact` — 上下文压缩前（可阻止）
+//! - `PostCompact` — 上下文压缩后（可注入上下文）
 //! - `PostToolBatch` — 批量工具后汇总
 //! - `SubagentStart` / `SubagentStop` — Sub-agent 生命周期
 //! - `TaskCreated` / `TaskCompleted` — 任务生命周期
