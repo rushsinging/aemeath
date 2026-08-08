@@ -724,3 +724,7 @@
 | 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #1385 退役 `migration.runtime.shared-adapter-bridge`：删除 `agent/features/runtime/src/adapters/runtime.rs`（仅剩 4 行注释、零 `share::adapter` 引用）、移除 `adapters.rs` mod 声明、清退 `check-forbidden-imports.sh` 例外集合/stale 自检/`is_runtime_adapter_migration_path` 函数与 `guard-registry` stable-id 引用、从 registry 删除对应 entry；迁移债务预算 repository 5→4、Runtime 4→3；§8 白名单表移除，白名单预算归零 | [#1385](https://github.com/rushsinging/aemeath/issues/1385) |
+
+### Compact continuation checkpoint ownership
+
+`context.compact-continuation-checkpoint` 由 Context 拥有。Context 可在领域 normalizer 内按分区和行执行预算收敛，但不得通过 head/tail slicing 将 previous checkpoint 的任一端当作 authoritative continuation。Runtime 只能逐字消费 `ContextWindow`，不得持有 `active_summary`/continuation backing，也不得拼装 checkpoint 标题。Guard 提供 `--self-test`，以机械截断、Runtime 第二 owner、Runtime 标题拼装为负例，以 Context normalizer 与 Runtime `ContextWindow` 消费为正例；它与 shared-run-loop 的 owner 边界互补。
