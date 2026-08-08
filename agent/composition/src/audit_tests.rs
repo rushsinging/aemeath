@@ -1,20 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use runtime::UsageSink;
+use sdk::ClientLifecycle;
 
 use super::*;
-
-#[derive(Clone)]
-struct NoChatClient;
-
-#[async_trait]
-impl sdk::AgentClient for NoChatClient {
-    async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
-        Err(sdk::SdkError::Internal("测试不发起 chat".to_string()))
-    }
-}
 
 #[tokio::test]
 async fn audit_lifecycle_client_clones_share_one_idempotent_shutdown() {
@@ -26,11 +16,11 @@ async fn audit_lifecycle_client_clones_share_one_idempotent_shutdown() {
         audit::UsageWorkerConfig::new(4, Duration::from_secs(1)),
     );
     let sink = AuditUsageSink::new(sender);
-    let client = AuditLifecycleClient::new(Arc::new(NoChatClient), handle);
+    let client = AuditClientLifecycle::new(handle);
     let clone = client.clone();
 
-    let first = sdk::AgentClient::shutdown(&client).await;
-    let second = sdk::AgentClient::shutdown(&clone).await;
+    let first = client.shutdown().await;
+    let second = clone.shutdown().await;
 
     assert_eq!(first, sdk::ClientShutdownOutcome::Drained);
     assert_eq!(second, first);

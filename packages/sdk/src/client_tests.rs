@@ -1,14 +1,4 @@
-use super::{AgentClient, ClientShutdownOutcome, RunControlClient};
-use async_trait::async_trait;
-
-struct DefaultShutdownClient;
-
-#[async_trait]
-impl AgentClient for DefaultShutdownClient {
-    async fn chat(&self, _input: crate::ChatRequest) -> Result<crate::ChatStream, crate::SdkError> {
-        Err(crate::SdkError::Internal("测试不发起 chat".to_string()))
-    }
-}
+use super::{AgentClient, ClientLifecycle, ClientShutdownOutcome, RunControlClient};
 
 fn assert_agent_client_commands<T: AgentClient + ?Sized>(client: &T) {
     let deadline = crate::ControlDeadline::from_unix_millis(1_725_000_000_123);
@@ -28,11 +18,11 @@ fn assert_run_control_commands<T: RunControlClient + ?Sized>(client: &T) {
 }
 
 #[tokio::test]
-async fn agent_client_default_shutdown_requires_no_fake_migration() {
-    let client: &dyn AgentClient = &DefaultShutdownClient;
+async fn client_lifecycle_default_requires_no_runtime_client_migration() {
+    let lifecycle: &dyn ClientLifecycle = &();
 
     assert_eq!(
-        client.shutdown().await,
+        lifecycle.shutdown().await,
         ClientShutdownOutcome::NotConfigured
     );
 }

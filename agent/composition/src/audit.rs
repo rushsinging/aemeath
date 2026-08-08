@@ -36,53 +36,20 @@ pub struct AuditWorkerAssembly {
 }
 
 #[derive(Clone)]
-pub struct AuditLifecycleClient {
-    client: Arc<dyn sdk::AgentClient>,
+pub struct AuditClientLifecycle {
     handle: Arc<UsageWorkerHandle>,
 }
 
-impl AuditLifecycleClient {
-    pub fn new(client: Arc<dyn sdk::AgentClient>, handle: UsageWorkerHandle) -> Self {
+impl AuditClientLifecycle {
+    pub fn new(handle: UsageWorkerHandle) -> Self {
         Self {
-            client,
             handle: Arc::new(handle),
         }
     }
 }
 
 #[async_trait]
-impl sdk::AgentClient for AuditLifecycleClient {
-    fn cancel_current_run(&self, deadline: sdk::ControlDeadline) -> sdk::CancelCurrentRunOutcome {
-        self.client.cancel_current_run(deadline)
-    }
-
-    fn reply_interaction(
-        &self,
-        request_id: &sdk::InteractionRequestId,
-        reply: sdk::InteractionReply,
-    ) -> sdk::InteractionCommandOutcome {
-        self.client.reply_interaction(request_id, reply)
-    }
-
-    fn cancel_interaction(
-        &self,
-        request_id: &sdk::InteractionRequestId,
-        reason: sdk::InteractionCancelReason,
-    ) -> sdk::InteractionCommandOutcome {
-        self.client.cancel_interaction(request_id, reason)
-    }
-
-    async fn config_view(&self) -> Result<sdk::ConfigView, sdk::SdkError> {
-        self.client.config_view().await
-    }
-
-    async fn update_config(
-        &self,
-        update: sdk::ConfigUpdate,
-    ) -> Result<sdk::ConfigUpdateResult, sdk::SdkError> {
-        self.client.update_config(update).await
-    }
-
+impl sdk::ClientLifecycle for AuditClientLifecycle {
     async fn shutdown(&self) -> sdk::ClientShutdownOutcome {
         match self.handle.shutdown().await {
             audit::UsageShutdownOutcome::Drained => sdk::ClientShutdownOutcome::Drained,
@@ -90,10 +57,6 @@ impl sdk::AgentClient for AuditLifecycleClient {
                 sdk::ClientShutdownOutcome::TimedOut { unconfirmed }
             }
         }
-    }
-
-    async fn chat(&self, input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
-        self.client.chat(input).await
     }
 }
 

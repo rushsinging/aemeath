@@ -25,14 +25,15 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
 
 async fn run_frontend_with_shutdown<F, Fut, Error>(
     client: std::sync::Arc<dyn sdk::AgentClient>,
+    lifecycle: std::sync::Arc<dyn sdk::ClientLifecycle>,
     frontend: F,
 ) -> Result<(), Error>
 where
     F: FnOnce(std::sync::Arc<dyn sdk::AgentClient>) -> Fut,
     Fut: std::future::Future<Output = Result<(), Error>>,
 {
-    let result = frontend(client.clone()).await;
-    let _ = client.shutdown().await;
+    let result = frontend(client).await;
+    let _ = lifecycle.shutdown().await;
     result
 }
 
@@ -71,9 +72,10 @@ pub(crate) async fn run_chat(args: Args) {
                 crate::tui::log_info!("quiet chat started: session={session_id}");
             }
             let client = bootstrap.client.clone();
+            let lifecycle = bootstrap.lifecycle.clone();
             let command_router = bootstrap.command_router.clone();
             let quiet_session_id = session_id.clone();
-            run_frontend_with_shutdown(client, move |client| async move {
+            run_frontend_with_shutdown(client, lifecycle, move |client| async move {
                 crate::chat::no_tui::run_no_tui_chat(
                     client,
                     quiet_session_id,
@@ -141,7 +143,8 @@ pub(crate) async fn run_chat(args: Args) {
             );
         }
         let client = bootstrap.client.clone();
-        run_frontend_with_shutdown(client, move |client| async move { app.run(client).await })
+        let lifecycle = bootstrap.lifecycle.clone();
+        run_frontend_with_shutdown(client, lifecycle, move |client| async move { app.run(client).await })
             .await
             .unwrap_or_else(|error| {
                 crate::tui::log_error!("TUI error: {error}");
@@ -158,44 +161,53 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    struct ShutdownCountingClient {
-        shutdown_calls: AtomicUsize,
-    }
+    struct NoChatClient;
 
     #[async_trait]
-    impl sdk::AgentClient for ShutdownCountingClient {
-        async fn shutdown(&self) -> sdk::ClientShutdownOutcome {
-            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
-            sdk::ClientShutdownOutcome::Drained
-        }
-
+    impl sdk::AgentClient for NoChatClient {
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             Err(sdk::SdkError::Internal("测试不发起 chat".to_string()))
         }
     }
 
+    struct ShutdownCountingLifecycle {
+        shutdown_calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl sdk::ClientLifecycle for ShutdownCountingLifecycle {
+        async fn shutdown(&self) -> sdk::ClientShutdownOutcome {
+            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
+            sdk::ClientShutdownOutcome::Drained
+        }
+    }
+
     #[tokio::test]
     async fn frontend_shutdown_runs_after_success() {
-        let client = std::sync::Arc::new(ShutdownCountingClient {
+        let client: std::sync::Arc<dyn sdk::AgentClient> = std::sync::Arc::new(NoChatClient);
+        let lifecycle = std::sync::Arc::new(ShutdownCountingLifecycle {
             shutdown_calls: AtomicUsize::new(0),
         });
-        let erased: std::sync::Arc<dyn sdk::AgentClient> = client.clone();
+        let erased_lifecycle: std::sync::Arc<dyn sdk::ClientLifecycle> = lifecycle.clone();
 
-        let result =
-            run_frontend_with_shutdown(erased, |_| async { Ok::<(), sdk::SdkError>(()) }).await;
+        let result = run_frontend_with_shutdown(client, erased_lifecycle, |_| async {
+            Ok::<(), sdk::SdkError>(())
+        })
+        .await;
 
         assert!(result.is_ok());
-        assert_eq!(client.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(lifecycle.shutdown_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn frontend_shutdown_runs_after_error_without_overwriting_it() {
-        let client = std::sync::Arc::new(ShutdownCountingClient {
+        let client: std::sync::Arc<dyn sdk::AgentClient> = std::sync::Arc::new(NoChatClient);
+        let lifecycle = std::sync::Arc::new(ShutdownCountingLifecycle {
             shutdown_calls: AtomicUsize::new(0),
         });
-        let erased: std::sync::Arc<dyn sdk::AgentClient> = client.clone();
+        let erased_lifecycle: std::sync::Arc<dyn sdk::ClientLifecycle> = lifecycle.clone();
 
-        let result = run_frontend_with_shutdown(erased, |_| async {
+        let result = run_frontend_with_shutdown(client, erased_lifecycle, |_| async {
             Err(sdk::SdkError::Internal("frontend failed".to_string()))
         })
         .await;
@@ -203,7 +215,7 @@ mod tests {
         assert!(
             matches!(result, Err(sdk::SdkError::Internal(message)) if message == "frontend failed")
         );
-        assert_eq!(client.shutdown_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(lifecycle.shutdown_calls.load(Ordering::SeqCst), 1);
     }
     #[test]
     fn test_should_emit_cli_frontend_started_log() {
