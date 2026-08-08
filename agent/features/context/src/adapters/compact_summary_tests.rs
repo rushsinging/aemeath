@@ -416,10 +416,12 @@ async fn second_compact_fallback_preserves_previous_summary() {
     .expect("second compact should run");
 
     assert!(
-        result
-            .summary
-            .contains("first compact summary with original user request"),
-        "second compact must retain the previous active summary"
+        result.summary.contains("unverified legacy summary")
+            && result
+                .summary
+                .contains("first compact summary with original user request"),
+        "second compact must conservatively retain legacy previous summary: {}",
+        result.summary
     );
 }
 

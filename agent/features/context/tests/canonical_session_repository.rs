@@ -1570,7 +1570,7 @@ async fn commit_compaction_appends_task_context_to_summary() {
     assert!(matches!(
         outcome,
         context::domain::CompactOutcome::Committed(ref result)
-            if result.summary.contains("## Current Task State")
+            if result.summary.matches("## Current Task State").count() == 1
             && result.summary.contains("■ #1 实现压缩拼接")
     ));
 }

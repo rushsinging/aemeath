@@ -84,17 +84,21 @@ impl ContinuationCheckpoint {
             }
             ContinuationStatus::Completed => "Completed — migrated from legacy summary.",
         };
+        let legacy_working_set = if source.trim().is_empty() {
+            "- None established from the legacy summary.".to_string()
+        } else {
+            format!("- unverified legacy summary: {}", source.replace('\n', " "))
+        };
         let source = format!(
             "## Immutable Constraints\n- Preserve the action level of the legacy user request.\n\n\
              ## Current Objective\n{}\n\n\
              ## Committed Facts\n- None established from the legacy summary.\n\n\
-             ## Uncommitted Working Set\n- None established from the legacy summary.\n\n\
+             ## Uncommitted Working Set\n{legacy_working_set}\n\n\
              ## Open Decisions / Risks\n- unverified legacy summary: facts and completion claims require confirmation.\n\n\
              ## Resume Cursor\n- Next action: {legacy_next_action}\n- Prohibited: do not widen the legacy action level.\n\n\
              ## Required Revalidation\n- Revalidate all dynamic Git, GitHub, CI, and worktree state from the legacy summary.\n\n\
              ## Archived Milestones\n- No stable milestone references recovered.\n\n\
-             ## Continuation Status\n{status_text}",
-            current_objective.join("\n")
+             ## Continuation Status\n{status_text}",            current_objective.join("\n")
         );
         Self::parse(&source).expect("constructed legacy checkpoint must be valid")
     }
@@ -192,6 +196,20 @@ impl ContinuationCheckpoint {
 
     pub fn resume_cursor(&self) -> &ResumeCursor {
         &self.resume_cursor
+    }
+
+    pub fn merge_fallback_update(mut self, current: Self) -> Self {
+        for section_index in [0usize, 2, 3, 4, 6, 7] {
+            self.sections[section_index].extend(current.sections[section_index].clone());
+        }
+        self.sections[1] = current.sections[1].clone();
+        self.sections[5] = current.sections[5].clone();
+        self.sections[8] = current.sections[8].clone();
+        self.resume_cursor = current.resume_cursor;
+        self.status = current.status;
+        self.remove_duplicate_lines();
+        self.compact_archived_milestones();
+        self
     }
 
     pub fn normalize_to_budget(mut self, budget: usize) -> Result<Self, CheckpointError> {

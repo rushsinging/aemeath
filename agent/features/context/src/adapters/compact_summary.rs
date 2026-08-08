@@ -483,26 +483,26 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
         .last()
         .unwrap_or("- Unknown current objective.")
         .to_string();
-    let current_checkpoint = format!(
-        "## Immutable Constraints\n- Preserve the user's requested action level; do not infer new authority.\n\n\
-         ## Current Objective\n{current_objective}\n\n\
-         ## Committed Facts\n- No completed work could be established from the fallback input.\n\n\
-         ## Uncommitted Working Set\n{user_requests}\n\n\
-         ## Open Decisions / Risks\n- Local text-compaction path used; all reports below are unverified.\n{work_completed}\n\n\
-         ## Resume Cursor\n- Next action: {next_action}\n- Prohibited: do not claim completion, commit, push, merge, or close without evidence and authority.\n\n\
-         ## Required Revalidation\n- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation.\n\n\
-         ## Archived Milestones\n- No stable milestone references established by fallback.\n\n\
-         ## Continuation Status\n{continuation_status}"
-    );
-    let checkpoint_source = previous_checkpoint
-        .as_deref()
-        .map_or(current_checkpoint.clone(), |previous| {
-            merge_fallback_checkpoint(previous, &current_checkpoint)
-        });
-    crate::domain::compact::ContinuationCheckpoint::parse(&checkpoint_source)
-        .unwrap_or_else(|_| {
-            crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(&checkpoint_source)
-        })
+    let current_checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(
+        &format!(
+            "## Immutable Constraints\n- Preserve the user's requested action level; do not infer new authority.\n\n\
+             ## Current Objective\n{current_objective}\n\n\
+             ## Committed Facts\n- No completed work could be established from the fallback input.\n\n\
+             ## Uncommitted Working Set\n{user_requests}\n\n\
+             ## Open Decisions / Risks\n- Local text-compaction path used; all reports below are unverified.\n{work_completed}\n\n\
+             ## Resume Cursor\n- Next action: {next_action}\n- Prohibited: do not claim completion, commit, push, merge, or close without evidence and authority.\n\n\
+             ## Required Revalidation\n- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation.\n\n\
+             ## Archived Milestones\n- No stable milestone references established by fallback.\n\n\
+             ## Continuation Status\n{continuation_status}"
+        ),
+    )
+    .expect("fallback checkpoint template must be valid");
+    let checkpoint = previous_checkpoint.map_or(current_checkpoint.clone(), |previous| {
+        crate::domain::compact::ContinuationCheckpoint::parse(&previous)
+            .expect("normalized previous checkpoint must parse")
+            .merge_fallback_update(current_checkpoint)
+    });
+    checkpoint
         .normalize_to_budget(FALLBACK_PREVIOUS_SUMMARY_CAP / 4)
         .unwrap_or_else(|_| {
             crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
@@ -510,18 +510,6 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
             )
         })
         .render()
-}
-
-fn merge_fallback_checkpoint(previous: &str, current: &str) -> String {
-    let previous_constraints = previous
-        .split("## Immutable Constraints\n")
-        .nth(1)
-        .and_then(|tail| tail.split("\n\n## Current Objective").next())
-        .unwrap_or_default();
-    current.replace(
-        "## Immutable Constraints\n",
-        &format!("## Immutable Constraints\n{previous_constraints}\n"),
-    )
 }
 
 fn indicates_waiting_for_user(text: &str) -> bool {
