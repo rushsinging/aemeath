@@ -1,6 +1,4 @@
-use super::sdk_event_mapper::{
-    map_activity_event, map_stream_event, project_agent_progress_event,
-};
+use super::sdk_event_mapper::{map_activity_event, map_stream_event, project_agent_progress_event};
 use crate::application::loop_engine::chat::{
     RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
