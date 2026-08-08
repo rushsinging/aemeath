@@ -214,7 +214,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - Continue → Completed；
 - Block → feedback 注入同一 Run，回到 PreparingContext；
 - Runtime 维护每个 Run 的 stop_block_count；
-- 超过 15 次 → RunFailed(StopHookRetryExhausted)。
+- 超过当前 Run 冻结的 Stop block 上限 → `RunFailed { error }`，错误文本保留实际阻断次数。
 
 ## 8. 安全与资源
 

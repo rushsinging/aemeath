@@ -17,9 +17,10 @@ use async_trait::async_trait;
 use crate::domain::subscription::HookCommand;
 use crate::ports::CancellationSignal;
 
+#[cfg(any(not(unix), test))]
+use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
-    UNSUPPORTED_PLATFORM_MESSAGE,
 };
 
 /// 单次命令执行的原始机械结果（已 drain + 截断）。
