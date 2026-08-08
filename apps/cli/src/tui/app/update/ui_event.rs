@@ -29,7 +29,6 @@ impl App {
             | UiEvent::ToolResult { .. }
             | UiEvent::Usage { .. }
             | UiEvent::LiveTps(_)
-            | UiEvent::AgentProgress { .. }
             | UiEvent::UserMessagesAdopted { .. }
             | UiEvent::UserMessagesQueued { .. }
             | UiEvent::TurnStarted { .. }

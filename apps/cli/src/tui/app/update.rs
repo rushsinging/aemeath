@@ -12,7 +12,7 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
+use crate::tui::adapter::agent_event::{map_agent_event_for_ui, map_runtime_event};
 use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRuntimeEvent};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -20,7 +20,6 @@ use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::rendered::RenderedLineAnchor;
-use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::intent::AgentIntent;
 use crate::tui::update::msg::TuiMsg;
@@ -79,7 +78,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",
-        UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
         UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
         UiEvent::TaskStateChanged(_) => "TaskStateChanged",
@@ -641,14 +639,7 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let workspace_root = self
-            .model
-            .workspace_provider
-            .workspace_root()
-            .map(std::path::Path::new);
-        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
-            format_subagent_tool_header(name, input, workspace_root)
-        });
+        let mapping = map_agent_event_for_ui(&ev);
         crate::tui::log_trace!(
             "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={}",
             ui_event_name(&ev),

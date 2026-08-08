@@ -885,7 +885,7 @@ enum ConfigChange {
 
 ```text
 SDK ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }
-  → sdk_event_to_ui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
+  → sdk_event_to_tui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
   → UiEvent::WorkingDirectoryChanged(WorkspaceSnapshot)
   → AgentEventMapper（TUI ACL 第二层）
   → WorkspaceIntent::ApplySnapshot(snapshot)

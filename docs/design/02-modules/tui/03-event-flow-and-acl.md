@@ -11,7 +11,7 @@
 > - **R7**：领域事件与 TUI Model **NEVER** 跨界直用，**MUST** 经防腐层转换
 > - **§5**：Server 化时传输层 NEVER 进核心，`AgentClient` 保持传输透明
 >
-> UiEvent **NEVER** 持有 `sdk::*` 类型，SDK 类型在第一层 `sdk_event_to_ui_event` 中**彻底**转换为 TUI 自有类型。
+> SDK Runtime stream 只允许经过第一层 `sdk_event_to_tui_event` 转换为 `TuiRuntimeEvent`；`UiEvent` 仅承载 TUI 本地 effect 回灌，NEVER 复制 SDK compatibility event。
 
 ## 1. 定位
 
@@ -30,7 +30,7 @@ Runtime ChatStream → sdk::ChatEvent
   → ViewModelDirty → ViewAssembler → Render
 ```
 
-`UiEvent → TuiMsg::Ui → map_agent_event` 仍承载 TUI 本地事件和兼容入口，但不是 SDK Runtime stream 的生产主链。两条入口在同一 `AgentEventMapping → root_reducer` 边界汇合。
+`UiEvent → TuiMsg::Ui → map_agent_event_for_ui` 仅承载 TUI 本地 effect 回灌，不是 SDK compatibility 入口。SDK compatibility variant 必须在第一层归一化；两条入口只在 `AgentEventMapping → root_reducer` 边界汇合。
 
 **两层转换的职责边界**：
 
@@ -38,7 +38,7 @@ Runtime ChatStream → sdk::ChatEvent
 |---|---|---|---|
 | 第一层 | `event_mapping.rs` | **结构转换**——SDK 类型 → TUI-owned runtime DTO，消除 SDK 类型依赖 | `sdk::ChatEvent` → `TuiRuntimeEvent` / `SdkEventMapping::Nop` |
 | 第二层 | `agent_event.rs` | **语义翻译**——Runtime event → Intent 拆分，防腐层核心 | `TuiRuntimeEvent` → `AgentEventMapping` |
-| 本地兼容入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译 | `UiEvent` → `AgentEventMapping` |
+| 本地 Effect 入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译；禁止承载 SDK compatibility event | `UiEvent` → `AgentEventMapping` |
 
 > **设计原则**：两层分离是因为结构转换（类型映射）和语义翻译（Intent 拆分）是不同关注点。第一层是机械式 1:1 映射，第二层涉及业务逻辑（sanitize、progress 格式化、hook notice 派生等）。
 
@@ -74,7 +74,7 @@ Runtime ChatStream → sdk::ChatEvent
 └──────────────────────────────────────────────────────────────┘
 ```
 
-TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event`，在 `AgentEventMapping` 处与 Runtime 主链汇合。
+TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event_for_ui`，在 `AgentEventMapping` 处与 Runtime 主链汇合；已退役的 `processing/event_mapping.rs` 与 `UiEvent::AgentProgress` 不得恢复。
 
 ### 2.2 涉及文件
 
@@ -84,9 +84,8 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event`
 | `apps/cli/.../effect/session/processing.rs` | `spawn_processing`：持 `AgentClient` → `ChatStream`；把纯值 SDK event 转换并转发 `TuiRuntimeEvent` |
 | `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_tui_event`：第一层结构转换；只产 `TuiRuntimeEvent` 或明确 `Nop` |
 | `apps/cli/.../adapter/tui_runtime_event.rs` | TUI-owned Runtime DTO 定义；SDK 类型不得越过此边界 |
-| `apps/cli/.../app/event.rs` | TUI 本地/兼容 `UiEvent` 定义，不是 SDK Runtime stream 的生产主载体 |
-| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event` / `map_agent_event`：第二层 ACL；只产 Intent |
-| `apps/cli/.../adapter/agent_event/progress.rs` | sub-agent progress 格式化 |
+| `apps/cli/.../app/event.rs` | TUI 本地 effect 回灌 `UiEvent` 定义；NEVER 承载 SDK Runtime stream 或 compatibility variant |
+| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event` / `map_agent_event_for_ui`：第二层 ACL 与本地 effect 翻译；只产 Intent |
 | `apps/cli/.../adapter/agent_event/sanitize.rs` | tool 输出/参数截断 |
 | `apps/cli/.../adapter/hook_notice.rs` | Hook 事件 → TUI notice |
 
@@ -94,9 +93,9 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event`
 
 ### 3.1 ACL 职责
 
-`map_agent_event` 是防腐层核心，职责：
+`map_runtime_event` 是 Runtime 事件防腐层核心；`map_agent_event_for_ui` 只处理本地 effect 回灌。职责：
 
-1. **Intent 拆分**：一个 UiEvent 可能产生多个 Intent（跨 Context），如 `Error` 同时产生 ConversationIntent + DiagnosticIntent；ACL **NEVER** 直接产生 Effect
+1. **Intent 拆分**：一个输入事件可能产生多个 Intent（跨 Context），如 `Error` 同时产生 ConversationIntent + DiagnosticIntent；ACL **NEVER** 直接产生 Effect
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
 3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
@@ -122,7 +121,7 @@ enum AgentIntent {
 
 **设计规则**：
 
-1. **MUST** 一个 UiEvent 映射到一个 `AgentEventMapping`——不允许部分拆分
+1. **MUST** 一个输入事件映射到一个 `AgentEventMapping`——不允许部分拆分
 2. **MUST** 每个 intent 以 `AgentIntent` variant 保留所属 Context，root reducer 只把它分发给对应 Model
 3. **MUST** `AgentEventMapping` 是值类型（`#[derive(Debug, Default, PartialEq)]`），便于测试断言
 4. **MUST** ACL 函数是纯函数——输入 `&UiEvent`，输出只含 Intent 的 `AgentEventMapping`，**NEVER** 产生 Effect、执行 I/O 或决定副作用
@@ -243,7 +242,7 @@ Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位 heartbeat。Ma
 
 ### 4.2 TUI 自有 DTO 完全隔离
 
-**设计原则**：TUI 定义自己的 DTO 类型，`sdk_event_to_ui_event` 在第一层转换时**彻底**消除所有 `sdk::*` 类型。UiEvent 是纯 TUI 类型，model/、update/、view_model/ 永远看不到 SDK 类型。
+**设计原则**：TUI 定义自己的 DTO 类型，`sdk_event_to_tui_event` 在第一层转换时**彻底**消除所有 `sdk::*` 类型。UiEvent 是纯 TUI 类型，model/、update/、view_model/ 永远看不到 SDK 类型。
 
 ```rust
 // app/event.rs — TUI 自有类型，NEVER import sdk::*
@@ -254,20 +253,6 @@ enum ToolCallStatus {
     PendingArgs, Ready, Running,
     Success, Error { message: String },
     Cancelled, Orphaned,
-}
-
-/// TUI 自有的 Agent 进度事件（不依赖 sdk::AgentProgressEventView）
-struct AgentProgressEvent {
-    kind: AgentProgressKind,
-}
-enum AgentProgressKind {
-    Started { role: String, model: String },
-    ToolOutput { tool_name: String, output: String },
-    Text { text: String },
-    ToolCallStart { name: String },
-    ToolCallEnd { name: String, success: bool },
-    Finished { summary: String },
-    Error { message: String },
 }
 
 /// TUI 自有的 Hook 事件（不依赖 sdk::HookEventView）
@@ -335,11 +320,6 @@ enum UiEvent {
         arguments: Option<Value>,
         // ...
     },
-    AgentProgress {
-        context: UiTurnContext,
-        tool_id: ToolCallId,
-        event: AgentProgressEvent,   // TUI 自有
-    },
     HookEvent(HookEvent),            // TUI 自有
     InteractionRequested {
         request_id: UiInteractionRequestId,
@@ -354,7 +334,7 @@ enum UiEvent {
 ```
 
 1. **MUST** 在 `app/event.rs` 中定义所有 TUI 自有 DTO 类型
-2. **MUST** `sdk_event_to_ui_event` 中完成所有 `sdk::*` → TUI 类型的转换——这是唯一的转换点
+2. **MUST** `sdk_event_to_tui_event` 将 SDK Runtime stream 转换为 `TuiRuntimeEvent`——这是唯一 compatibility 归一化点；`UiEvent` 不参与 SDK stream
 3. **MUST** `UiEvent` 定义中 **NEVER** 出现 `sdk::` 前缀
 4. **MUST** `UiEvent` 定义中 **NEVER** 出现 channel、sender、registry handle、AgentClient 或 Project 类型
 5. **MUST** 架构守卫 #6 验证：`app/event.rs`、`model/`、`update/`、`view_model/`、`view_assembler/`、`render/` 目录 **NEVER** import `sdk::*` 类型
@@ -507,30 +487,17 @@ TUI OutputTimeline
 | sub-agent result | 完整回传父 LLM + TUI 展示摘要 | 父 LLM 需完整 result，TUI 只需摘要 |
 | config 继承 | sub-agent 启动时快照父 agent config | 运行中不受父 agent 切换影响 |
 
-### 6.2 AgentProgressEvent 路由规则
+### 6.2 Sub Run fact 路由规则
 
-```rust
-// SDK 侧
-enum AgentProgressKindView {
-    Started { role: String, model: String },
-    ToolOutput { tool_name: String, output: String },
-    Text { text: String },
-    ToolCallStart { name: String },
-    ToolCallEnd { name: String, success: bool },
-    Finished { summary: String },
-    Error { message: String },
-}
-```
-
-| AgentProgressKind | TUI 映射 | 展示 |
+| Canonical fact | TUI 映射 | 展示 |
 |---|---|---|
-| `Started` | `UpdateAgentMeta` | sub-agent 元信息（role + model） |
-| `ToolOutput` | `RecordAgentProgress` | sanitize 后的 sub-agent tool 输出摘要；**NEVER** 空 mapping |
-| `Text` | `RecordAgentProgress` | sub-agent 实时文本流 |
-| `ToolCallStart` | `RecordAgentProgress` | sub-agent 内部 tool call 开始 |
-| `ToolCallEnd` | `RecordAgentProgress` | sub-agent 内部 tool call 结束 |
-| `Finished` | `RecordAgentProgress` | 完成摘要 |
-| `Error` | `RecordAgentProgress` + Diagnostic | 错误展示 |
+| `SubRunStarted` | `UpdateAgentMeta` | 使用父 chat/run 与派生 ToolCall 定位，更新 role/model |
+| `SubRunActivity::Text` / `Thinking` | `RecordSubRunActivity` | 保留 Sub Run identity 与 sequence，形成实时文本/思考活动 |
+| `SubRunActivity::ToolCall` | `RecordSubRunActivity` | 使用结构化 tool id/name/input，不从字符串推断 |
+| `SubRunActivity::ToolOutput` / `ToolResult` | `RecordSubRunActivity` | 保留结构化输出与结果内容，展示层按工具策略 sanitize |
+| `SubRunActivity::Terminal` | `RecordSubRunActivity` | 保留 typed terminal outcome |
+
+SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
 
 ### 6.3 sub-agent config 继承链路
 
@@ -561,7 +528,7 @@ enum AgentProgressKindView {
 |---|---|---|---|---|
 | 第一层 | `adapter/event_mapping.rs` | `sdk::ChatEvent` → `TuiRuntimeEvent` / `Nop` | 结构转换、SDK 类型消除 | **NEVER** 产生 Intent / Effect 或执行 I/O |
 | 第二层 | `adapter/agent_event.rs` | `&TuiRuntimeEvent` → `AgentEventMapping` | Intent 拆分、sanitize、格式化 | **NEVER** 接触 SDK 类型或产生 Effect |
-| 本地入口 | `app/event.rs` + `adapter/agent_event.rs` | `&UiEvent` → `AgentEventMapping` | TUI 本地/兼容事件语义翻译 | **NEVER** 绕过同一 reducer |
+| 本地入口 | `app/event.rs` + `adapter/agent_event.rs` | `&UiEvent` → `AgentEventMapping` | TUI 本地 effect 回灌语义翻译 | **NEVER** 承载 SDK compatibility event 或绕过同一 reducer |
 
 ### 7.2 集中化规则
 
@@ -591,10 +558,10 @@ TuiMsg::Runtime(event) / RuntimeBatch(events)
   → reduce_agent_event(&mut model, mapping)
   → Coordinator::effects_for(Change)
 
-// 本地事件兼容入口
+// 本地 effect 回灌入口
 TuiMsg::Ui(event)
   → App::update_agent_event
-  → map_agent_event_with_tool_header(&event, ...)
+  → map_agent_event_for_ui(&event)
   → 同一 reduce_agent_event 边界
 
 // effect runner — 唯一副作用执行点

@@ -132,6 +132,16 @@ for retired_symbol in baseline["retired_symbols"]:
             f"retired event {retired_symbol} must not return; use the canonical replacement recorded in the event index"
         )
 
+retired_tui_paths = {
+    "AgentProgress": root / "apps/cli/src/tui/app/event.rs",
+    "sdk_event_to_ui_event": root / "apps/cli/src/tui/effect/session/processing.rs",
+}
+for retired_symbol, source_path in retired_tui_paths.items():
+    if source_path.is_file() and retired_symbol in source_path.read_text():
+        violations.append(
+            f"retired TUI compatibility path {retired_symbol} must not return; normalize SDK compatibility at sdk_event_to_tui_event"
+        )
+
 ack_terminal_compatibility = set(baseline["ack_terminal_compatibility_names"])
 ack_terminal_patterns = [re.compile(pattern) for pattern in baseline["ack_terminal_patterns"]]
 for event_name in sorted(all_actual):

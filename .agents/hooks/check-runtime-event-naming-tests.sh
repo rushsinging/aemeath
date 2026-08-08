@@ -203,6 +203,35 @@ expect_failure "legacy SDK AgentProgress restored as TUI internal fact"
 cp "$ROOT/apps/cli/src/tui/adapter/tui_runtime_event.rs" \
   "$TMP/apps/cli/src/tui/adapter/tui_runtime_event.rs"
 
+python3 - "$TMP/apps/cli/src/tui/app/event.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "    CurrentRunChanged(usize),",
+    "    AgentProgress { sequence: usize },\n    CurrentRunChanged(usize),",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy SDK AgentProgress restored as UiEvent compatibility path"
+cp "$ROOT/apps/cli/src/tui/app/event.rs" "$TMP/apps/cli/src/tui/app/event.rs"
+
+python3 - "$TMP/apps/cli/src/tui/effect/session/processing.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "pub(crate) fn spawn_processing",
+    "fn sdk_event_to_ui_event() {}\n\npub(crate) fn spawn_processing",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "retired SDK to UiEvent mapper restored"
+cp "$ROOT/apps/cli/src/tui/effect/session/processing.rs" \
+  "$TMP/apps/cli/src/tui/effect/session/processing.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

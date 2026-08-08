@@ -431,21 +431,17 @@ fn test_phase_four_workspace_provider_owns_workspace_fields() {
 fn test_phase_four_workspace_metadata_git_is_executor_only() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let app = fs::read_to_string(root.join("app.rs")).expect("read app");
-    let mapping = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read event mapping");
     let event = fs::read_to_string(root.join("app/event.rs")).expect("read app event");
     let provider = fs::read_to_string(root.join("model/workspace_provider.rs"))
         .expect("read workspace provider");
     let executor = fs::read_to_string(root.join("effect/executor.rs")).expect("read executor");
 
-    for source in [&app, &mapping] {
-        assert!(
-            !source.contains("Command::new(\"git\")")
-                && !source.contains("git_branch_for")
-                && !source.contains("worktree_kind_for"),
-            "SDK event and app paths must not synchronously resolve Git metadata"
-        );
-    }
+    assert!(
+        !app.contains("Command::new(\"git\")")
+            && !app.contains("git_branch_for")
+            && !app.contains("worktree_kind_for"),
+        "SDK event and app paths must not synchronously resolve Git metadata"
+    );
     let snapshot_event = event
         .split("pub struct StatusContextUpdate")
         .nth(1)

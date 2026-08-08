@@ -9,7 +9,6 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 
-mod progress;
 mod sanitize;
 
 #[cfg(test)]
@@ -18,11 +17,18 @@ mod runtime_tests;
 #[cfg(test)]
 mod tests;
 
-use progress::format_agent_progress;
 use sanitize::{
     json_value_kind, sanitize_tool_arguments_delta, sanitize_tool_output,
     sanitize_tool_result_content,
 };
+
+fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
+    match status {
+        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
+        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
+        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
+    }
+}
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
@@ -34,53 +40,11 @@ pub struct AgentEventMapping {
 }
 
 #[cfg(test)]
-fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String {
-    let raw = match input {
-        serde_json::Value::String(s) => s.clone(),
-        value => value.to_string(),
-    };
-    if raw.is_empty() {
-        crate::tui::view_model::tool_name::tool_display_name(name).to_string()
-    } else {
-        format!(
-            "{} {}",
-            crate::tui::view_model::tool_name::tool_display_name(name),
-            truncate_agent_progress_json(&raw)
-        )
-    }
-}
-
-#[cfg(test)]
-fn truncate_agent_progress_json(raw: &str) -> String {
-    const MAX_CHARS: usize = 100;
-    if raw.chars().count() <= MAX_CHARS {
-        return raw.to_string();
-    }
-    let mut output: String = raw.chars().take(MAX_CHARS.saturating_sub(3)).collect();
-    output.push_str("...");
-    output
-}
-
-fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
-    match status {
-        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
-        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
-        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
-    }
-}
-
-#[cfg(test)]
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
-    map_agent_event_with_tool_header(event, default_subagent_tool_header)
+    map_agent_event_for_ui(event)
 }
 
-pub fn map_agent_event_with_tool_header<F>(
-    event: &UiEvent,
-    mut format_subagent_tool_header: F,
-) -> AgentEventMapping
-where
-    F: FnMut(&str, &serde_json::Value) -> String,
-{
+pub fn map_agent_event_for_ui(event: &UiEvent) -> AgentEventMapping {
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
@@ -198,65 +162,6 @@ where
                 image_count: images.len(),
             }))
         }
-        UiEvent::AgentProgress {
-            attachment_context,
-            tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            sdk::AgentProgressKindView::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: attachment_context.chat_id.clone(),
-                    run_id: attachment_context.run_id.clone(),
-                    tool_id: ToolCallId::new(tool_id.as_str()),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
-            _ => {
-                let activities = format_agent_progress(event, &mut format_subagent_tool_header);
-                let kind_name = match &event.kind {
-                    sdk::AgentProgressKindView::Started { .. } => "Started",
-                    sdk::AgentProgressKindView::Message { .. } => "Message",
-                    sdk::AgentProgressKindView::ToolCalls { .. } => "ToolCalls",
-                    sdk::AgentProgressKindView::ToolOutput { .. } => "ToolOutput",
-                };
-                let source_preview = match &event.kind {
-                    sdk::AgentProgressKindView::Message { text } => {
-                        text.chars().take(200).collect::<String>()
-                    }
-                    sdk::AgentProgressKindView::ToolCalls { calls } => calls
-                        .iter()
-                        .map(|call| format!("{}:{}", call.id, call.name))
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    sdk::AgentProgressKindView::Started { role, model } => {
-                        format!("role={role:?} model={model}")
-                    }
-                    sdk::AgentProgressKindView::ToolOutput { tool_name, text } => format!(
-                        "tool_name={tool_name} text_len={} text_preview={:?}",
-                        text.len(),
-                        text.chars().take(120).collect::<String>()
-                    ),
-                };
-                crate::tui::log_debug!(
-                    "agent_progress_format kind={} seq={} source_preview={:?} activity_count={}",
-                    kind_name,
-                    event.sequence,
-                    source_preview,
-                    activities.len(),
-                );
-                conversation(ConversationIntent::RecordAgentActivities(
-                    RecordAgentActivities {
-                        chat_id: attachment_context.chat_id.clone(),
-                        run_id: attachment_context.run_id.clone(),
-                        tool_id: ToolCallId::new(tool_id.as_str()),
-                        activities,
-                    },
-                ))
-            }
-        },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
         | UiEvent::Cancelled { context, .. } => {

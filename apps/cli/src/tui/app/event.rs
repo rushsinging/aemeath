@@ -159,13 +159,6 @@ pub enum AppEvent {
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    /// Sub-agent progress update (streams per-run output to TUI)
-    AgentProgress {
-        source_context: UiTurnContext,
-        attachment_context: UiTurnContext,
-        tool_id: sdk::ids::ToolCallId,
-        event: sdk::AgentProgressEventView,
-    },
     /// 当前 run 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentRunChanged(usize),
     /// Current tool path base/working root changed.

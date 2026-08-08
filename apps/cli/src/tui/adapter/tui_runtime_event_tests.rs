@@ -74,6 +74,26 @@ fn event_mapping_is_the_only_sdk_chat_event_match_point() {
 }
 
 #[test]
+fn legacy_agent_progress_exists_only_at_the_first_sdk_acl() {
+    let app_event_source = include_str!("../app/event.rs");
+    let second_layer_source = include_str!("agent_event.rs");
+    let processing_source = include_str!("../effect/session/processing.rs");
+
+    assert!(
+        !app_event_source.contains("AgentProgress"),
+        "UiEvent must not recreate the SDK compatibility event"
+    );
+    assert!(
+        !second_layer_source.contains("AgentProgress"),
+        "the TUI second-layer mapper must consume only canonical Sub Run facts"
+    );
+    assert!(
+        !processing_source.contains("sdk_event_to_ui_event"),
+        "session processing must use the sole sdk_event_to_tui_event ACL"
+    );
+}
+
+#[test]
 fn second_layer_mapper_has_no_sdk_dependencies() {
     let source = include_str!("agent_event.rs");
     // The second-layer mapper must consume TuiRuntimeEvent / Tui DTO only.
