@@ -11,6 +11,16 @@ use crate::application::run::creation::{RunCreationRequest, SessionState};
 use crate::application::run::factory::RunFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::RunSpec;
+use crate::ports::UsageSink;
+use audit::{UsageEmitOutcome, UsageRecord};
+
+struct RecordingUsageSink;
+
+impl UsageSink for RecordingUsageSink {
+    fn try_record(&self, _record: UsageRecord) -> UsageEmitOutcome {
+        UsageEmitOutcome::Accepted
+    }
+}
 
 fn main_spec() -> RunSpec {
     RunSpec::main()
@@ -222,6 +232,56 @@ fn session_run_factory_preserves_committed_capability_bindings() {
         event_sink.events().as_slice(),
         [RuntimeStreamEvent::SystemMessage(message)] if message == "session-route-marker"
     ));
+}
+
+#[test]
+fn session_and_sub_runs_share_the_factory_usage_sink() {
+    use crate::application::run::run_factory_support::derived_run::ParentRunFixture;
+
+    let usage_sink: Arc<dyn UsageSink> = Arc::new(RecordingUsageSink);
+    let mut config = share::config::Config::default();
+    config.agents.roles.insert(
+        "coder".to_string(),
+        share::config::AgentRoleConfig {
+            model: "test-provider/test-model".to_string(),
+            ..Default::default()
+        },
+    );
+    config.models.default = "test-provider/test-model".to_string();
+    config.models.providers.insert(
+        "test-provider".to_string(),
+        share::config::models::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                context_window: 128_000,
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    let fixture = SessionRunFixture::builder()
+        .with_usage_sink(usage_sink.clone())
+        .with_config(share::config::domain::snapshot::ConfigSnapshot::new(config))
+        .build();
+    let parent = fixture.create(main_spec()).expect("create parent run");
+    let sub_spec = main_spec()
+        .derive_sub("coder", std::time::Duration::from_secs(30))
+        .expect("derive sub spec");
+    let sub = ParentRunFixture::new(fixture.context_factory())
+        .create(
+            sub_spec,
+            fixture.session_snapshot(),
+            parent.run().id().clone(),
+            main_spec(),
+            Arc::new(parent.context().clone()),
+            crate::application::run::workspace_test_support::test_runtime_workspace_access(),
+        )
+        .expect("create sub run");
+
+    assert!(Arc::ptr_eq(&parent.context().usage_sink(), &usage_sink));
+    assert!(Arc::ptr_eq(&sub.context().usage_sink(), &usage_sink));
 }
 
 #[test]

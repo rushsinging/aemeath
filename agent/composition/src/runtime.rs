@@ -228,8 +228,8 @@ pub(crate) async fn from_args_with_gateways(
         reflection_history.clone(),
         task_wiring.access(),
         hook_runner.clone(),
+        Arc::new(runtime::UnavailableUsageSink),
     ));
-
     context::guidance::init_guidance_dir();
     let cwd = args
         .cwd

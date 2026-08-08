@@ -267,6 +267,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         history.clone(),
         access.clone(),
         hook_runner.clone(),
+        Arc::new(runtime::UnavailableUsageSink),
     ));
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(

@@ -80,6 +80,7 @@ fn observer_with_task_store(
                 ),
                 store,
                 Arc::new(crate::application::run::run_factory_support::doubles::FakeHookPort),
+                Arc::new(crate::ports::UnavailableUsageSink),
             ),
         ))
         .with_session_id("session-live")

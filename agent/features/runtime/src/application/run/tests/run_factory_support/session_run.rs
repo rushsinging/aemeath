@@ -144,6 +144,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     session_id: String,
     workspace_root: PathBuf,
     usage: crate::application::run::context::RunUsageTracker,
+    usage_sink: Arc<dyn crate::ports::UsageSink>,
 }
 
 impl SessionRunFixtureBuilder {
@@ -172,6 +173,7 @@ impl SessionRunFixtureBuilder {
                 uuid::Uuid::now_v7()
             )),
             usage: crate::application::run::context::RunUsageTracker::new(),
+            usage_sink: Arc::new(crate::ports::UnavailableUsageSink),
         }
     }
 
@@ -229,6 +231,11 @@ impl SessionRunFixtureBuilder {
 
     pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::PolicyPort>) -> Self {
         self.policy = policy;
+        self
+    }
+
+    pub(crate) fn with_usage_sink(mut self, usage_sink: Arc<dyn crate::ports::UsageSink>) -> Self {
+        self.usage_sink = usage_sink;
         self
     }
 
@@ -329,6 +336,7 @@ impl SessionRunFixtureBuilder {
                 Arc::new(FakeReflectionHistory),
                 task_store,
                 self.hooks.clone(),
+                self.usage_sink.clone(),
             ))
         });
         SessionRunFixture {
