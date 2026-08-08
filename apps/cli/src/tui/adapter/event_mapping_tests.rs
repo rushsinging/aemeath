@@ -140,6 +140,39 @@ fn tool_call_delta_and_state_keep_distinct_tui_fact_names() {
 }
 
 #[test]
+fn tool_output_delta_normalizes_new_and_legacy_sdk_inputs() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-output"),
+        sdk::ChatRunId::new("run-tool-output"),
+    );
+    let tool_id = sdk::ToolCallId::new("tool-output");
+
+    let delta = sdk_event_to_tui_event(sdk::ChatEvent::ToolOutputDelta {
+        context: context.clone(),
+        tool_id: tool_id.clone(),
+        delta: "new output".to_owned(),
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::ToolProgress {
+        context,
+        tool_id,
+        event: sdk::ToolProgressEventView {
+            text: "legacy output".to_owned(),
+        },
+    });
+
+    assert!(matches!(
+        delta,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta { delta, .. })
+            if delta == "new output"
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta { delta, .. })
+            if delta == "legacy output"
+    ));
+}
+
+#[test]
 fn session_message_state_maps_count_and_revision_without_messages() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
         message_count: 7,

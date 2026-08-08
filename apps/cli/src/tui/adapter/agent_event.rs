@@ -681,19 +681,19 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 }),
             ),
             // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
-            // 顶层工具 stdout 走独立 ToolProgressEvent 通道（ToolProgress 分支）。
+            // 顶层工具 stdout 走独立 ToolOutputDelta fact。
             TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
         },
-        TuiRuntimeEvent::ToolProgress {
+        TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
+            delta,
         } => conversation(ConversationIntent::RecordToolStreamingOutput(
             RecordToolStreamingOutput {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 tool_id: ToolCallId::new(tool_id),
-                text: event.text.clone(),
+                text: delta.clone(),
             },
         )),
         TuiRuntimeEvent::ChildRunActivity(event) => conversation(

@@ -13,7 +13,7 @@
         "CompactFinished", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
         "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
         "Cancelled", "LiveTps", "RunChanged", "AskUserBatch", "InteractionRequested",
-        "AgentProgress", "ToolProgress", "ChildRunActivity", "SkillsUpdated",
+        "AgentProgress", "ToolOutputDelta", "ChildRunActivity", "SkillsUpdated",
         "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
         "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
@@ -36,7 +36,7 @@
         "RunDrainingInput", "RunTerminationRequested", "RunTerminated", "RunCompleted",
         "RunFailed", "RunStuckDetected", "RunTransitioned", "RunAwaitingUser", "RunResumed",
         "Cancelled", "LiveTps", "RunChanged", "CurrentRunChanged", "InteractionRequested",
-        "AskUserBatch", "AgentProgress", "ToolProgress", "ChildRunActivity",
+        "AskUserBatch", "AgentProgress", "ToolOutputDelta", "ToolProgress", "ChildRunActivity",
         "WorkingDirectoryChanged", "ConfigChanged", "ConfigReloaded", "SessionReset",
         "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
@@ -54,7 +54,7 @@
         "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
         "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
-        "RunStep", "InteractionRequested", "AgentProgress", "ToolProgress", "ChildRunActivity",
+        "RunStep", "InteractionRequested", "AgentProgress", "ToolOutputDelta", "ChildRunActivity",
         "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
         "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
         "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
@@ -91,6 +91,11 @@
       "tui": "ToolCallStarted"
     },
     {
+      "runtime": "ToolOutputDelta",
+      "sdk": "ToolOutputDelta",
+      "tui": "ToolOutputDelta"
+    },
+    {
       "runtime": "ToolCallArgumentsDelta",
       "sdk": "ToolCallArgumentsDelta",
       "tui": "ToolCallArgumentsDelta"
@@ -102,11 +107,11 @@
     }
   ],
   "sdk_compatibility_variants": [
-    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate"
+    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress"
   ],
   "legacy_broad_names": [
     "SkillsUpdated", "MicrocompactDone", "Done", "DoneWithDuration", "DoneWithDurationMs",
-    "LiveTps", "RunChanged", "AskUserBatch", "AgentProgress", "ToolProgress",
+    "LiveTps", "RunChanged", "AskUserBatch", "AgentProgress",
     "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
     "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
     "ReminderList", "SessionList", "ProjectInfo", "CostUpdate"

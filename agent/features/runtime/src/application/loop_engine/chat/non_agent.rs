@@ -434,10 +434,10 @@ where
         let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
             while let Some(event) = prog_rx.recv().await {
                 let _ = stream_sink
-                    .send_event(RuntimeStreamEvent::ToolProgress {
+                    .send_event(RuntimeStreamEvent::ToolOutputDelta {
                         context: stream_context.clone(),
                         tool_id: call_id.clone(),
-                        event,
+                        delta: event.text,
                     })
                     .await;
             }

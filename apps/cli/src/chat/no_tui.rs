@@ -265,6 +265,9 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");
         }
+        sdk::ChatEvent::ToolOutputDelta { delta, .. } => {
+            eprintln!("[tool] {delta}");
+        }
         sdk::ChatEvent::ToolProgress { event, .. } => {
             eprintln!("[tool] {}", event.text);
         }

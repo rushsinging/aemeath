@@ -287,6 +287,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             event.sequence,
             event
         ),
+        sdk::ChatEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => crate::tui::log_trace!(
+            "{} tool_output_delta chat_id={} run_id={} tool_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            delta.len(),
+        ),
         sdk::ChatEvent::ToolProgress {
             context,
             tool_id,
@@ -527,16 +539,16 @@ pub(crate) fn log_tui_runtime_delivery(
             context.run_id,
             outcome
         ),
-        TuiRuntimeEvent::ToolProgress {
+        TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
+            delta,
         } => crate::tui::log_debug!(
-            "event_delivery boundary=sdk_to_tui kind=ToolProgress chat_id={} run_id={} tool_id={} text_len={} outcome={}",
+            "event_delivery boundary=sdk_to_tui kind=ToolOutputDelta chat_id={} run_id={} tool_id={} delta_len={} outcome={}",
             context.chat_id,
             context.run_id,
             tool_id,
-            event.text.len(),
+            delta.len(),
             outcome
         ),
         _ => {}

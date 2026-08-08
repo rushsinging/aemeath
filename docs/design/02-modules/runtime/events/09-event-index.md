@@ -67,7 +67,8 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ToolCallStateChanged` | 同名 | 同名 → 更新完整 args/state | tool call | full-state fact | 否 | Current |
 | — | `ToolCallUpdate` | compatibility dual-read → 上述两类 TUI fact | tool call | mixed legacy payload | 否 | Compatibility；Runtime producer removed |
 | `ToolResult` | 同名 | 更新 Tool result | tool call | result fact | 否 | Current |
-| `ToolProgress` | 同名 | streaming output | tool call | delta | 否 | Target Rename：`ToolOutputDelta` |
+| `ToolOutputDelta` | 同名 | 同名 → streaming output | tool call | delta | 否 | Current |
+| — | `ToolProgress` | compatibility dual-read → `ToolOutputDelta` | tool call | legacy event wrapper | 否 | Compatibility；Runtime producer removed |
 | `AgentProgress` | 同名 | agent progress projection | child/source | mixed observation | 否 | Compatibility / Target Split |
 | `ChildRunActivity` | 同名 | parent ToolCall attachment | parent + child + sequence | observation | 否 | Current |
 | `ModelInvocationRetrying` | 同名 | retry notice | invocation + attempt | transition | 否 | Current |
@@ -145,7 +146,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `Thinking` | Delta 缺失 | 已由 `ThinkingDelta` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `ToolCallStart` | 非事实后缀 | 已由 `ToolCallStarted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `ToolCallUpdate` | args delta 与 state fact 淡化 | 已拆为 `ToolCallArgumentsDelta` / `ToolCallStateChanged`；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal split complete |
-| `ToolProgress` | Subject/Delta 不清 | `ToolOutputDelta` | 跨层 wire |
+| `ToolProgress` | Subject/Delta 不清 | 已由 `ToolOutputDelta { delta }` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `Done` / `DoneWithDurationMs` | 宽泛且重复 | 明确 Chat processing subject 后合并 | 语义冲突 |
 | `MicrocompactDone` | 禁用 `Done` | `MicrocompactCompleted` | 跨层 wire |
 | `CompactFinished` | Subject/Fact 不统一 | `CompactOperationCompleted` | 跨层 wire |

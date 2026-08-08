@@ -26,7 +26,8 @@
 | `ToolCallStateChanged` | `ToolCallStateChanged` | 同名 | 原子替换完整参数与状态 | Current |
 | — | `ToolCallUpdate` | dual-read 后转为上述两类 TUI fact | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `ToolResult` | `ToolResult` | 同名 | 关联 ToolCall，sanitize 展示 | Current；需保持 committed/result 边界 |
-| `ToolProgress` | `ToolProgress` | 同名 | streaming stdout | Target Rename：`ToolOutputDelta` |
+| `ToolOutputDelta` | 同名 | 同名 | streaming stdout | Current |
+| — | `ToolProgress` | dual-read 后转为 `ToolOutputDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `AgentProgress` | `AgentProgress` | 同名 | child/agent progress projection | Compatibility；需按 detail 复核 |
 | `ChildRunActivity` | 同名 | 同名 | 挂到父 ToolCall | Current |
 

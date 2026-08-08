@@ -631,10 +631,10 @@
 
 - **位置**：`.agents/hooks/check-runtime-event-naming.sh`；结构化 catalog/baseline 为 `.agents/runtime-event-naming-baseline.json`；正反例脚本为 `check-runtime-event-naming-tests.sh`。
 - **功能**：解析 `RuntimeStreamEvent`、SDK `ChatEvent` 与 `TuiRuntimeEvent` 的 enum 结构，要求当前 variant 集合与 baseline 精确一致；新增、删除或跨层改名必须同时评审结构化 catalog 与 `09-event-index.md`，避免仅靠 grep 或 Markdown 表格解析治理事件语言。
-- **兼容边界**：`legacy_broad_names` 显式冻结仍在生产使用的 compatibility names，不进行 SDK wire breaking rename；`sdk_compatibility_variants` 允许旧 SDK variant 继续 dual-read，但 Guard 要求其不得恢复为 Runtime producer 或 TUI fact。当前明确登记 `Token`、legacy `Thinking`、`ToolCallStart` 与 `ToolCallUpdate`，分别由 TUI/CLI 第一边界归一化为 typed content delta 或 tool call facts；新增宽泛 `*Updated`、`*Info`、`*Data`、`*Notification`、`*ProgressUpdated` 仍会被拒绝。
+- **兼容边界**：`legacy_broad_names` 显式冻结仍在生产使用的 compatibility names，不进行 SDK wire breaking rename；`sdk_compatibility_variants` 允许旧 SDK variant 继续 dual-read，但 Guard 要求其不得恢复为 Runtime producer 或 TUI fact。当前明确登记 `Token`、legacy `Thinking`、`ToolCallStart`、`ToolCallUpdate` 与 `ToolProgress`，分别由 TUI/CLI 第一边界归一化为 typed content/tool deltas 或 tool call facts；新增宽泛 `*Updated`、`*Info`、`*Data`、`*Notification`、`*ProgressUpdated` 仍会被拒绝。
 - **语义边界**：`current_cross_layer_facts` 锁定 Runtime → SDK → TUI 同名事实；`ack_terminal_patterns` 以结构化模式禁止命令 ACK 借用 Lifecycle terminal 名称，确有现存 wire 兼容名时只能进入显式 `ack_terminal_compatibility_names`；`retired_symbols` 禁止恢复 `CompactProgress`，Compact live display 只能来自 typed Activity stage/work。
 - **索引登记**：除 `Noop`、`Error`、`Run`、`RunStep`、`GraphPhaseChanged` 五个 TUI 内部容器 variant 外，baseline 内每个事件名必须出现在 Runtime 事件索引中。容器例外不授权新增事实名，也不计 compatibility debt。
-- **故意违规证据**：隔离副本依次注入宽泛 `RuntimeDataUpdated`、未登记事件、跨层 fact 漂移、SDK-only compatibility event（`ToolCallUpdate`、`ToolCallStart` 或 legacy `Text`/`Thinking`）恢复为 Runtime producer、Lifecycle terminal 风格 ACK 和 stringly `CompactProgress`；每类均必须由单 Guard 拒绝，恢复后 clean pass。
+- **故意违规证据**：隔离副本依次注入宽泛 `RuntimeDataUpdated`、未登记事件、跨层 fact 漂移、SDK-only compatibility event（`ToolCallUpdate`、`ToolCallStart`、`ToolProgress` 或 legacy `Text`/`Thinking`）恢复为 Runtime producer、Lifecycle terminal 风格 ACK 和 stringly `CompactProgress`；每类均必须由单 Guard 拒绝，恢复后 clean pass。
 
 `check-runtime-capability-assembly-tests.sh`、`check-runtime-event-naming-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。事件命名主体 Guard 同样进入 `fast`，其结构化负例脚本只进入 `full`。
 

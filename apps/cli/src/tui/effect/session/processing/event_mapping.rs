@@ -303,6 +303,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
         | sdk::ChatEvent::CostUpdate { .. }
+        | sdk::ChatEvent::ToolOutputDelta { .. }
         | sdk::ChatEvent::ToolProgress { .. } => UiEvent::SystemMessage(String::new()),
         sdk::ChatEvent::TaskStateChanged { state } => UiEvent::TaskStateChanged(*state),
     }

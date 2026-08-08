@@ -730,7 +730,13 @@ pub enum ChatEvent {
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
     },
-    /// 工具 stdout 流式输出（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
+    ToolOutputDelta {
+        context: ChatEventContext,
+        tool_id: crate::ids::ToolCallId,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     ToolProgress {
         context: ChatEventContext,
         tool_id: crate::ids::ToolCallId,

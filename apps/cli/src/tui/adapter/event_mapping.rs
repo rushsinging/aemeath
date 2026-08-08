@@ -374,14 +374,23 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             tool_id: tool_id.as_str().to_string(),
             event: agent_progress(event),
         },
+        ChatEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => TuiRuntimeEvent::ToolOutputDelta {
+            context: turn_context(context),
+            tool_id: tool_id.as_str().to_string(),
+            delta,
+        },
         ChatEvent::ToolProgress {
             context,
             tool_id,
             event,
-        } => TuiRuntimeEvent::ToolProgress {
+        } => TuiRuntimeEvent::ToolOutputDelta {
             context: turn_context(context),
             tool_id: tool_id.as_str().to_string(),
-            event: super::tui_runtime_event::TuiToolProgressEvent { text: event.text },
+            delta: event.text,
         },
         ChatEvent::ChildRunActivity { event } => {
             TuiRuntimeEvent::ChildRunActivity(child_run_activity(event))

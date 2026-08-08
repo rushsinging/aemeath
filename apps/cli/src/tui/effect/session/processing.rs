@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_tool_progress_identity() {
+    fn sdk_event_to_tui_runtime_event_normalizes_legacy_tool_progress_identity() {
         let expected_chat = sdk::ids::ChatId::new("chat-1");
         let expected_run = sdk::ids::ChatRunId::new("run-1");
         let expected_tool_id = sdk::ids::ToolCallId::new("bash-1");
@@ -178,14 +178,14 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolProgress {
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta {
                 context,
                 tool_id,
-                event,
+                delta,
             }) if context.chat_id == expected_chat.as_str()
                 && context.run_id == expected_run.as_str()
                 && tool_id == expected_tool_id.as_str()
-                && event.text == "stdout line\n"
+                && delta == "stdout line\n"
         ));
     }
 

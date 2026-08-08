@@ -527,14 +527,14 @@ pub(crate) fn map_stream_event(
             tool_id,
             event: project_agent_progress_event(event),
         },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolProgress {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
-        } => ChatEvent::ToolProgress {
+            delta,
+        } => ChatEvent::ToolOutputDelta {
             context: turn_context_to_sdk(context),
             tool_id,
-            event: sdk::ToolProgressEventView { text: event.text },
+            delta,
         },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ChildRunActivity(event) => {
             ChatEvent::ChildRunActivity {
