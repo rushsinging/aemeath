@@ -54,13 +54,21 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 )
                 .collect(),
         },
-        ChatEvent::Token { context, text } => TuiRuntimeEvent::Text {
+        ChatEvent::AssistantTextDelta { context, delta } => TuiRuntimeEvent::AssistantTextDelta {
             context: turn_context(context),
-            text,
+            delta,
         },
-        ChatEvent::Thinking { context, text } => TuiRuntimeEvent::Thinking {
+        ChatEvent::ThinkingDelta { context, delta } => TuiRuntimeEvent::ThinkingDelta {
             context: turn_context(context),
-            text,
+            delta,
+        },
+        ChatEvent::Token { context, text } => TuiRuntimeEvent::AssistantTextDelta {
+            context: turn_context(context),
+            delta: text,
+        },
+        ChatEvent::Thinking { context, text } => TuiRuntimeEvent::ThinkingDelta {
+            context: turn_context(context),
+            delta: text,
         },
         ChatEvent::BlockComplete { context, text } => TuiRuntimeEvent::BlockComplete {
             context: turn_context(context),

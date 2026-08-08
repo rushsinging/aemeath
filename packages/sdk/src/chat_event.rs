@@ -474,12 +474,22 @@ pub enum ChatEvent {
     SkillsUpdated {
         event: crate::tui::SkillsUpdatedEvent,
     },
-    /// LLM 返回的文本 token。
+    /// Assistant 文本增量。生产 mapper 只发布该显式 Subject + Delivery 事件。
+    AssistantTextDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Thinking 文本增量。生产 mapper 只发布该显式 Delivery 事件。
+    ThinkingDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Token {
         context: ChatEventContext,
         text: String,
     },
-    /// LLM reasoning / thinking token。
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Thinking {
         context: ChatEventContext,
         text: String,

@@ -6,6 +6,62 @@ use crate::tui::adapter::tui_runtime_event::{
 };
 
 #[test]
+fn assistant_and_thinking_deltas_keep_explicit_tui_fact_names() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-content-delta"),
+        sdk::ChatRunId::new("run-content-delta"),
+    );
+
+    let assistant = sdk_event_to_tui_event(sdk::ChatEvent::AssistantTextDelta {
+        context: context.clone(),
+        delta: "answer".to_owned(),
+    });
+    let thinking = sdk_event_to_tui_event(sdk::ChatEvent::ThinkingDelta {
+        context,
+        delta: "reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. })
+            if delta == "answer"
+    ));
+    assert!(matches!(
+        thinking,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ThinkingDelta { delta, .. })
+            if delta == "reasoning"
+    ));
+}
+
+#[test]
+fn legacy_content_variants_normalize_at_the_tui_boundary() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-legacy-content"),
+        sdk::ChatRunId::new("run-legacy-content"),
+    );
+
+    let assistant = sdk_event_to_tui_event(sdk::ChatEvent::Token {
+        context: context.clone(),
+        text: "legacy answer".to_owned(),
+    });
+    let thinking = sdk_event_to_tui_event(sdk::ChatEvent::Thinking {
+        context,
+        text: "legacy reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. })
+            if delta == "legacy answer"
+    ));
+    assert!(matches!(
+        thinking,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ThinkingDelta { delta, .. })
+            if delta == "legacy reasoning"
+    ));
+}
+
+#[test]
 fn tool_call_delta_and_state_keep_distinct_tui_fact_names() {
     let context = sdk::ChatEventContext::new(
         sdk::ChatId::new("chat-tool-split"),

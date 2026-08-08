@@ -706,7 +706,7 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::RunChanged(turn) => format!("RunChanged:{turn}"),
             RuntimeStreamEvent::Usage { .. } => "Usage".to_string(),
-            RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
+            RuntimeStreamEvent::AssistantTextDelta { delta, .. } => format!("Text:{delta}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
             RuntimeStreamEvent::HookNotice(notice) => format!("HookNotice:{}", notice.reason),
@@ -714,7 +714,7 @@ impl RecordingSink {
                 self.done_durations.lock().unwrap().push(*duration);
                 "Cancelled".to_string()
             }
-            RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
+            RuntimeStreamEvent::ThinkingDelta { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
             RuntimeStreamEvent::ToolCallStart { .. } => "ToolCallStart".to_string(),
             RuntimeStreamEvent::ToolCallArgumentsDelta { .. } => {

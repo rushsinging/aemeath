@@ -6,7 +6,7 @@
       "path": "agent/features/runtime/src/application/loop_engine/chat/events.rs",
       "enum": "RuntimeStreamEvent",
       "variants": [
-        "Text", "Thinking", "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta",
+        "AssistantTextDelta", "ThinkingDelta", "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta",
         "ToolCallStateChanged", "ToolResult",
         "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactDone",
         "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
@@ -24,7 +24,8 @@
       "path": "packages/sdk/src/chat_event.rs",
       "enum": "ChatEvent",
       "variants": [
-        "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Token", "Thinking",
+        "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "AssistantTextDelta", "ThinkingDelta",
+        "Token", "Thinking",
         "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolCallUpdate", "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactDone",
@@ -47,7 +48,7 @@
       "path": "apps/cli/src/tui/adapter/tui_runtime_event.rs",
       "enum": "TuiRuntimeEvent",
       "variants": [
-        "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "Text", "Thinking",
+        "Noop", "ActivityChanged", "ActivitySnapshot", "SkillsUpdated", "AssistantTextDelta", "ThinkingDelta",
         "BlockComplete", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactDone",
@@ -75,6 +76,16 @@
       "tui": "TaskStateChanged"
     },
     {
+      "runtime": "AssistantTextDelta",
+      "sdk": "AssistantTextDelta",
+      "tui": "AssistantTextDelta"
+    },
+    {
+      "runtime": "ThinkingDelta",
+      "sdk": "ThinkingDelta",
+      "tui": "ThinkingDelta"
+    },
+    {
       "runtime": "ToolCallArgumentsDelta",
       "sdk": "ToolCallArgumentsDelta",
       "tui": "ToolCallArgumentsDelta"
@@ -86,7 +97,7 @@
     }
   ],
   "sdk_compatibility_variants": [
-    "ToolCallUpdate"
+    "Token", "Thinking", "ToolCallUpdate"
   ],
   "legacy_broad_names": [
     "SkillsUpdated", "MicrocompactDone", "Done", "DoneWithDuration", "DoneWithDurationMs",

@@ -335,7 +335,7 @@ impl App {
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
         let diagnostic_kind = match &event {
-            TuiRuntimeEvent::Text { .. } => Some("Text"),
+            TuiRuntimeEvent::AssistantTextDelta { .. } => Some("AssistantTextDelta"),
             TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
             TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
             TuiRuntimeEvent::HookNotice(_) => Some("HookNotice"),
@@ -581,9 +581,8 @@ impl App {
         let model_result = reduce_agent_event(&mut self.model, mapping);
         self.refresh_live_status_from_model();
         let valid_model_activity = match &event {
-            TuiRuntimeEvent::Text { text, .. } | TuiRuntimeEvent::Thinking { text, .. } => {
-                !text.is_empty()
-            }
+            TuiRuntimeEvent::AssistantTextDelta { delta, .. }
+            | TuiRuntimeEvent::ThinkingDelta { delta, .. } => !delta.is_empty(),
             TuiRuntimeEvent::ToolCallStart { .. } => true,
             TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
             TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),

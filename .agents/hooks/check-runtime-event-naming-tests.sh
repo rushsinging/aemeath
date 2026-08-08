@@ -83,6 +83,21 @@ expect_failure "SDK compatibility event restored as Runtime producer"
 cp "$ROOT/agent/features/runtime/src/application/loop_engine/chat/events.rs" \
   "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs"
 
+python3 - "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "\n}\n\npub trait ChatEventSink",
+    "\n    Text { context: RuntimeRunContext, text: String },\n    Thinking { context: RuntimeRunContext, text: String },\n}\n\npub trait ChatEventSink",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy SDK text compatibility events restored as Runtime producers"
+cp "$ROOT/agent/features/runtime/src/application/loop_engine/chat/events.rs" \
+  "$TMP/agent/features/runtime/src/application/loop_engine/chat/events.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

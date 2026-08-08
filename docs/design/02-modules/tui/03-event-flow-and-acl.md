@@ -100,7 +100,7 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event`
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
 3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
-5. **模型活动信号**：非空 Text / Thinking、ToolCallStart、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；ACL 不创建或清理 placeholder
+5. **模型活动信号**：非空 `AssistantTextDelta` / `ThinkingDelta`、ToolCallStart、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；SDK 旧 `Token` / `Thinking` 只在第一层兼容读取并立即归一化为 typed delta fact；ACL 不创建或清理 placeholder
 6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）
 
 ### 3.2 AgentEventMapping 结构
@@ -136,7 +136,7 @@ enum AgentIntent {
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
-| Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；SDK `ToolCallUpdate` 只作为 public compatibility dual-read，在第一层 ACL 立即拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
+| Conversation | `AssistantTextDelta` / `ThinkingDelta` / `BlockComplete` / `ToolCallStart` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；SDK `Token` / legacy `Thinking` 只作为 public compatibility dual-read，在第一层 ACL 立即转为 `AssistantTextDelta` / `ThinkingDelta`；SDK `ToolCallUpdate` 同样只在第一层拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
 | Conversation | `RunTransitioned { run_id, parent_run_id, status: RunStatusView }` | 第一层穷举转换为 TUI-owned `TuiRunStatus`，第二层产生 `ObserveRunStatus` Intent；禁止字符串降级。Main 由 `parent_run_id == None` 判断，Sub 不驱动主活动展示 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |

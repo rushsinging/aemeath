@@ -48,13 +48,13 @@ pub enum RuntimeActivityEvent {
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
-    Text {
+    AssistantTextDelta {
         context: RuntimeRunContext,
-        text: String,
+        delta: String,
     },
-    Thinking {
+    ThinkingDelta {
         context: RuntimeRunContext,
-        text: String,
+        delta: String,
     },
     BlockComplete {
         context: RuntimeRunContext,

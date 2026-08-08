@@ -240,18 +240,20 @@ pub(crate) fn map_stream_event(
     event: crate::application::loop_engine::chat::RuntimeStreamEvent,
 ) -> ChatEvent {
     match event {
-        crate::application::loop_engine::chat::RuntimeStreamEvent::Text { context, text } => {
-            ChatEvent::Token {
-                context: turn_context_to_sdk(context),
-                text,
-            }
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::Thinking { context, text } => {
-            ChatEvent::Thinking {
-                context: turn_context_to_sdk(context),
-                text,
-            }
-        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::AssistantTextDelta {
+            context,
+            delta,
+        } => ChatEvent::AssistantTextDelta {
+            context: turn_context_to_sdk(context),
+            delta,
+        },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ThinkingDelta {
+            context,
+            delta,
+        } => ChatEvent::ThinkingDelta {
+            context: turn_context_to_sdk(context),
+            delta,
+        },
         crate::application::loop_engine::chat::RuntimeStreamEvent::BlockComplete {
             context,
             text,

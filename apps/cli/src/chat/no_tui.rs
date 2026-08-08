@@ -175,9 +175,11 @@ async fn run_single_turn(
 
 fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
     match event {
+        sdk::ChatEvent::AssistantTextDelta { delta, .. } => print_stdout(&delta)?,
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::SkillsUpdated { .. }
+        | sdk::ChatEvent::ThinkingDelta { .. }
         | sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }

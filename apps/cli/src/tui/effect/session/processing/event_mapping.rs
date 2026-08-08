@@ -7,6 +7,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::SessionReset
         }
         sdk::ChatEvent::SkillsUpdated { event } => UiEvent::SkillsUpdated(event),
+        sdk::ChatEvent::AssistantTextDelta { context, delta } => UiEvent::Text {
+            context: context.into(),
+            text: delta,
+        },
+        sdk::ChatEvent::ThinkingDelta { context, delta } => UiEvent::Thinking {
+            context: context.into(),
+            text: delta,
+        },
         sdk::ChatEvent::Token { context, text } => UiEvent::Text {
             context: context.into(),
             text,

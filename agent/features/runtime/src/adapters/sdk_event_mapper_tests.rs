@@ -464,6 +464,32 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
 }
 
 #[test]
+fn assistant_and_thinking_deltas_keep_explicit_subject_and_delivery_in_sdk() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-content-delta"),
+        sdk::ids::ChatRunId::new("run-content-delta"),
+    );
+
+    let assistant = map_stream_event(RuntimeStreamEvent::AssistantTextDelta {
+        context: context.clone(),
+        delta: "answer".to_owned(),
+    });
+    let thinking = map_stream_event(RuntimeStreamEvent::ThinkingDelta {
+        context,
+        delta: "reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        sdk::ChatEvent::AssistantTextDelta { delta, .. } if delta == "answer"
+    ));
+    assert!(matches!(
+        thinking,
+        sdk::ChatEvent::ThinkingDelta { delta, .. } if delta == "reasoning"
+    ));
+}
+
+#[test]
 fn tool_call_argument_delta_and_state_fact_map_to_distinct_sdk_events() {
     let context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("chat-tool-split"),

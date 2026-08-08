@@ -18,9 +18,9 @@ fn seed_history(harness: &mut TuiScenarioHarness, count: usize) {
     for index in 0..count {
         let context = context(index);
         let text = format!("HISTORY-{index:04}");
-        harness.runtime_event(TuiRuntimeEvent::Text {
+        harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
             context: context.clone(),
-            text: text.clone(),
+            delta: text.clone(),
         });
         harness.runtime_event(TuiRuntimeEvent::BlockComplete { context, text });
     }
@@ -734,9 +734,9 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
     assert!(harness.screen().contains("RESUME-ADOPTED-NEW-USER"));
 
     let context = context(9_999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+        delta: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,
@@ -805,9 +805,9 @@ fn streaming_output_does_not_move_scrolled_viewport() {
     let before_offset = harness.app.view_state.output.scroll_offset;
 
     let context = context(9999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "STREAMING-NEW-CONTENT".into(),
+        delta: "STREAMING-NEW-CONTENT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,

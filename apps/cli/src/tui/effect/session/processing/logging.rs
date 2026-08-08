@@ -2,6 +2,20 @@ use crate::tui::app::event::UiEvent;
 
 pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
     match event {
+        sdk::ChatEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "{} assistant_text_delta chat_id={} run_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            delta.len()
+        ),
+        sdk::ChatEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "{} thinking_delta chat_id={} run_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            delta.len()
+        ),
         sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(
             "{} token chat_id={} run_id={} text_len={}",
             stage,
@@ -473,11 +487,18 @@ pub(crate) fn log_tui_runtime_delivery(
     use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 
     match event {
-        TuiRuntimeEvent::Text { context, text } => crate::tui::log_trace!(
-            "event_delivery boundary=sdk_to_tui kind=Text chat_id={} run_id={} size={} outcome={}",
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=AssistantTextDelta chat_id={} run_id={} size={} outcome={}",
             context.chat_id,
             context.run_id,
-            text.len(),
+            delta.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=ThinkingDelta chat_id={} run_id={} size={} outcome={}",
+            context.chat_id,
+            context.run_id,
+            delta.len(),
             outcome
         ),
         TuiRuntimeEvent::BlockComplete { context, text } => crate::tui::log_debug!(

@@ -284,10 +284,11 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     fn on_text(&mut self, text: &str) {
         self.mark_visible_event("text", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Text);
-        self.sink.try_send_event(RuntimeStreamEvent::Text {
-            context: self.context.clone(),
-            text: text.to_string(),
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::AssistantTextDelta {
+                context: self.context.clone(),
+                delta: text.to_string(),
+            });
         let now = std::time::Instant::now();
         if self.first_text_time.is_none() {
             self.first_text_time = Some(now);
@@ -331,9 +332,9 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     fn on_thinking(&mut self, text: &str) {
         self.mark_visible_event("thinking", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Thinking);
-        self.sink.try_send_event(RuntimeStreamEvent::Thinking {
+        self.sink.try_send_event(RuntimeStreamEvent::ThinkingDelta {
             context: self.context.clone(),
-            text: text.to_string(),
+            delta: text.to_string(),
         });
     }
 
@@ -434,7 +435,7 @@ mod invocation_reducer_tests {
         assert_eq!(response.usage.input_tokens, Some(2));
         assert!(matches!(
             events.lock().unwrap().first(),
-            Some(RuntimeStreamEvent::Text { text, .. }) if text == "hi"
+            Some(RuntimeStreamEvent::AssistantTextDelta { delta, .. }) if delta == "hi"
         ));
     }
 

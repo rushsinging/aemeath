@@ -653,13 +653,13 @@ fn runtime_batch_applies_all_events_before_the_next_render() {
 
     let result = app.update(
         TuiMsg::RuntimeBatch(vec![
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "first ".to_string(),
+                delta: "first ".to_string(),
             },
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "second".to_string(),
+                delta: "second".to_string(),
             },
             TuiRuntimeEvent::BlockComplete {
                 context,

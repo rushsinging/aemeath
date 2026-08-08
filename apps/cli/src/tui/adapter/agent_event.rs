@@ -387,18 +387,18 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }),
         ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Text { context, text } => {
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => {
             conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
-        TuiRuntimeEvent::Thinking { context, text } => {
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => {
             conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
         TuiRuntimeEvent::BlockComplete { context, .. } => {

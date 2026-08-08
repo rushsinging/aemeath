@@ -123,7 +123,7 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::Text { text, .. }) if text == "hello"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "hello"
         ));
     }
 

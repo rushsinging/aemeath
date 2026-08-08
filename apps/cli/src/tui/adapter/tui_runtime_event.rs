@@ -573,13 +573,13 @@ pub(crate) enum TuiRuntimeEvent {
         skills: Vec<TuiSkillView>,
         slash_routes: Vec<TuiSkillSlashRoute>,
     },
-    Text {
+    AssistantTextDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
-    Thinking {
+    ThinkingDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
     BlockComplete {
         context: TuiRunContext,

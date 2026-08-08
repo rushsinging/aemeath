@@ -15,8 +15,10 @@
 
 | Runtime | SDK | TUI | Consumer | 状态 |
 |---|---|---|---|---|
-| `Text` | `Token` | `Text` | `AssistantText` | Target Rename：`AssistantTextDelta` |
-| `Thinking` | `Thinking` | `Thinking` | `ThinkingText` | Target Rename：`ThinkingDelta` |
+| `AssistantTextDelta` | 同名 | 同名 | `AssistantText` | Current |
+| `ThinkingDelta` | 同名 | 同名 | `ThinkingText` | Current |
+| — | `Token` | dual-read 后转为 `AssistantTextDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
+| — | `Thinking` | dual-read 后转为 `ThinkingDelta` | SDK public wire compatibility | Compatibility；Runtime producer removed |
 | `BlockComplete` | `BlockComplete` | 同名 | `CompleteBlock` | Current |
 | `ToolCallStart` | `ToolCallStart` | 同名 | 建立 Tool block | Target Rename：`ToolCallStarted` |
 | `ToolCallArgumentsDelta` | `ToolCallArgumentsDelta` | 同名 | 按 stream order 追加参数预览 | Current |
@@ -27,7 +29,7 @@
 | `AgentProgress` | `AgentProgress` | 同名 | child/agent progress projection | Compatibility；需按 detail 复核 |
 | `ChildRunActivity` | 同名 | 同名 | 挂到父 ToolCall | Current |
 
-`Token` 未表达 Assistant Subject 与 Delta 语义；后续 public wire 迁移必须按兼容策略进行，不在文档阶段机械重命名。
+`AssistantTextDelta` 明确 Assistant Subject 与 Delta delivery，`ThinkingDelta` 明确 reasoning delta。SDK 旧 `Token` / `Thinking` 仅保留为 public wire compatibility input；Runtime production mapper 不再发布它们，TUI/CLI 在第一边界立即归一化为 typed fact。typed delta payload 统一使用 `delta` 字段。
 
 ## 3. Provider observation
 
