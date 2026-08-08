@@ -202,6 +202,45 @@ fn microcompact_completed_normalizes_new_and_legacy_sdk_inputs() {
 }
 
 #[test]
+fn compact_operation_facts_normalize_new_and_legacy_sdk_inputs() {
+    let messages = vec![sdk::ChatMessage::user_text("compact")];
+
+    let rolled_back = sdk_event_to_tui_event(sdk::ChatEvent::CompactOperationRolledBack {
+        messages: messages.clone(),
+    });
+    let legacy_rollback = sdk_event_to_tui_event(sdk::ChatEvent::CompactRollback {
+        messages: messages.clone(),
+    });
+    let completed = sdk_event_to_tui_event(sdk::ChatEvent::CompactOperationCompleted {
+        messages: messages.clone(),
+        notice: "complete".to_owned(),
+    });
+    let legacy_finished = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
+        messages,
+        notice: "legacy complete".to_owned(),
+    });
+
+    assert!(matches!(
+        rolled_back,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationRolledBack { .. })
+    ));
+    assert!(matches!(
+        legacy_rollback,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationRolledBack { .. })
+    ));
+    assert!(matches!(
+        completed,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { notice, .. })
+            if notice == "complete"
+    ));
+    assert!(matches!(
+        legacy_finished,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { notice, .. })
+            if notice == "legacy complete"
+    ));
+}
+
+#[test]
 fn session_message_state_maps_count_and_revision_without_messages() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::SessionMessageStateChanged {
         message_count: 7,

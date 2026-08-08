@@ -9,8 +9,8 @@
         "AssistantTextDelta", "ThinkingDelta", "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta",
         "ToolCallStateChanged", "ToolResult",
         "SystemMessage", "ModelInvocationRetrying", "Usage", "MicrocompactCompleted",
-        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
-        "CompactFinished", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "TurnStarted", "UserMessagesAdopted", "UserMessagesQueued",
         "SessionReset", "UserMessagesWithdrawn", "Done", "DoneWithDuration", "RunStarted",
         "Cancelled", "LiveTps", "RunChanged", "AskUserBatch", "InteractionRequested",
         "AgentProgress", "ToolOutputDelta", "ChildRunActivity", "SkillsUpdated",
@@ -29,8 +29,8 @@
         "BlockComplete", "ToolCallStarted", "ToolCallStart", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolCallUpdate", "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "TurnStarted", "MicrocompactCompleted", "MicrocompactDone",
-        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
-        "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "CompactRollback", "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done",
         "DoneWithDurationMs", "RunStarted", "RunStepStarted", "RunStepCompleted",
         "RunStepCancellationRequested", "RunStepFinalizationStarted", "RunStepCancelled",
         "RunDrainingInput", "RunTerminationRequested", "RunTerminated", "RunCompleted",
@@ -52,8 +52,8 @@
         "BlockComplete", "ToolCallStarted", "ToolCallArgumentsDelta", "ToolCallStateChanged",
         "ToolResult", "SystemMessage",
         "ModelInvocationRetrying", "Usage", "Error", "TurnStarted", "MicrocompactCompleted",
-        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactRollback",
-        "CompactFinished", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
+        "SessionMessageStateChanged", "HookNotice", "ApiError", "CompactOperationRolledBack",
+        "CompactOperationCompleted", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
         "RunStep", "InteractionRequested", "AgentProgress", "ToolOutputDelta", "ChildRunActivity",
         "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
         "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
@@ -91,6 +91,16 @@
       "tui": "ToolCallStarted"
     },
     {
+      "runtime": "CompactOperationRolledBack",
+      "sdk": "CompactOperationRolledBack",
+      "tui": "CompactOperationRolledBack"
+    },
+    {
+      "runtime": "CompactOperationCompleted",
+      "sdk": "CompactOperationCompleted",
+      "tui": "CompactOperationCompleted"
+    },
+    {
       "runtime": "MicrocompactCompleted",
       "sdk": "MicrocompactCompleted",
       "tui": "MicrocompactCompleted"
@@ -112,7 +122,8 @@
     }
   ],
   "sdk_compatibility_variants": [
-    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress", "MicrocompactDone"
+    "Token", "Thinking", "ToolCallStart", "ToolCallUpdate", "ToolProgress", "MicrocompactDone",
+    "CompactRollback", "CompactFinished"
   ],
   "legacy_broad_names": [
     "SkillsUpdated", "Done", "DoneWithDuration", "DoneWithDurationMs",

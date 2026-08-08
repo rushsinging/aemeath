@@ -120,10 +120,10 @@ pub enum RuntimeStreamEvent {
         messages: Vec<Message>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<Message>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<Message>,
         notice: String,
     },

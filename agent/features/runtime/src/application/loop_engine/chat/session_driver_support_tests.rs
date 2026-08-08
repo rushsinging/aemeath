@@ -662,7 +662,7 @@ impl RecordingSink {
         let name = match &event {
             RuntimeStreamEvent::TurnStarted { messages }
             | RuntimeStreamEvent::MicrocompactCompleted { messages, .. }
-            | RuntimeStreamEvent::CompactFinished { messages, .. } => {
+            | RuntimeStreamEvent::CompactOperationCompleted { messages, .. } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 let tag = match &event {
                     RuntimeStreamEvent::TurnStarted { .. } => {
@@ -670,7 +670,9 @@ impl RecordingSink {
                         "TurnStarted"
                     }
                     RuntimeStreamEvent::MicrocompactCompleted { .. } => "MicrocompactCompleted",
-                    RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
+                    RuntimeStreamEvent::CompactOperationCompleted { .. } => {
+                        "CompactOperationCompleted"
+                    },
                     _ => "Sync",
                 };
                 format!(
@@ -682,14 +684,14 @@ impl RecordingSink {
                         .unwrap_or_default()
                 )
             }
-            RuntimeStreamEvent::CompactRollback { messages } => {
+            RuntimeStreamEvent::CompactOperationRolledBack { messages } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
                 self.compact_rollback_snapshots
                     .lock()
                     .unwrap()
                     .push(messages.clone());
                 format!(
-                    "CompactRollback:{}",
+                    "CompactOperationRolledBack:{}",
                     messages
                         .last()
                         .map(|message| message.text_content())

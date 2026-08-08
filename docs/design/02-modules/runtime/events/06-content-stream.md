@@ -76,8 +76,10 @@
 
 | Runtime | SDK | TUI | 状态 |
 |---|---|---|---|
-| `CompactRollback` | 同名 | 同名 | Target Rename：`CompactOperationRolledBack` |
-| `CompactFinished` | 同名 | 同名 | Target Rename：`CompactOperationCompleted`；当前含 message sync/presentation |
+| `CompactOperationRolledBack` | 同名 | 同名 | Current |
+| `CompactOperationCompleted` | 同名 | 同名 | Current；含 message sync/presentation |
+| — | `CompactRollback` | dual-read 后转为 `CompactOperationRolledBack` | Compatibility；Runtime producer removed |
+| — | `CompactFinished` | dual-read 后转为 `CompactOperationCompleted` | Compatibility；Runtime producer removed |
 | `SessionResumed` | 同名 | 同名 | Current |
 | `SessionResumeFailed` | 同名 | 同名 | Current |
 | `SessionReset` | 同名 | 同名 | Current |

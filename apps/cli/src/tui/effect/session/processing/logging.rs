@@ -174,6 +174,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::TurnStarted { messages }
         | sdk::ChatEvent::MicrocompactCompleted { messages, .. }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
+        | sdk::ChatEvent::CompactOperationRolledBack { messages }
+        | sdk::ChatEvent::CompactOperationCompleted { messages, .. }
         | sdk::ChatEvent::CompactRollback { messages }
         | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())

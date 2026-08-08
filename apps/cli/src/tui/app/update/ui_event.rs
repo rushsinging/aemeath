@@ -36,8 +36,8 @@ impl App {
             | UiEvent::MicrocompactDone { .. }
             | UiEvent::SessionMessageStateChanged { .. }
             | UiEvent::HookNotice(_)
-            | UiEvent::CompactRollback { .. }
-            | UiEvent::CompactFinished { .. }
+            | UiEvent::CompactOperationRolledBack { .. }
+            | UiEvent::CompactOperationCompleted { .. }
             | UiEvent::GraphPhaseChanged { .. }
             | UiEvent::UserMessagesWithdrawn(_)
             | UiEvent::SessionReset

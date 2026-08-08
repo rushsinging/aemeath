@@ -599,11 +599,20 @@ pub enum ChatEvent {
         messages: Vec<ChatMessage>,
         error: String,
     },
-    /// Compact 失败后回滚消息。TUI 只同步消息。
+    /// Compact operation 失败并回滚消息。
+    CompactOperationRolledBack {
+        messages: Vec<ChatMessage>,
+    },
+    /// Compact operation 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
+    CompactOperationCompleted {
+        messages: Vec<ChatMessage>,
+        notice: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactRollback {
         messages: Vec<ChatMessage>,
     },
-    /// Compact 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactFinished {
         messages: Vec<ChatMessage>,
         notice: String,

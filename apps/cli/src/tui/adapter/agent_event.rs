@@ -327,9 +327,11 @@ where
         }
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
+        | UiEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
         UiEvent::SessionMessageStateChanged {
             message_count,
             revision,
@@ -337,7 +339,7 @@ where
             message_count: *message_count,
             revision: *revision,
         }),
-        UiEvent::CompactFinished { messages, notice } => {
+        UiEvent::CompactOperationCompleted { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
                     text: notice.clone(),
@@ -541,9 +543,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         }
         TuiRuntimeEvent::TurnStarted { messages }
         | TuiRuntimeEvent::MicrocompactCompleted { messages, .. }
-        | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
+        | TuiRuntimeEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
         TuiRuntimeEvent::SessionMessageStateChanged {
             message_count,
             revision,
@@ -551,7 +555,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             message_count: *message_count,
             revision: *revision,
         }),
-        TuiRuntimeEvent::CompactFinished { messages, notice } => {
+        TuiRuntimeEvent::CompactOperationCompleted { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
                     text: notice.clone(),

@@ -409,18 +409,18 @@ pub(crate) fn map_stream_event(
                 error,
             }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactRollback { messages } => {
-            ChatEvent::CompactRollback {
-                messages: messages
-                    .into_iter()
-                    .map(crate::application::client::message_to_sdk)
-                    .collect(),
-            }
-        }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactFinished {
+        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactOperationRolledBack {
+            messages,
+        } => ChatEvent::CompactOperationRolledBack {
+            messages: messages
+                .into_iter()
+                .map(crate::application::client::message_to_sdk)
+                .collect(),
+        },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::CompactOperationCompleted {
             messages,
             notice,
-        } => ChatEvent::CompactFinished {
+        } => ChatEvent::CompactOperationCompleted {
             messages: messages
                 .into_iter()
                 .map(crate::application::client::message_to_sdk)

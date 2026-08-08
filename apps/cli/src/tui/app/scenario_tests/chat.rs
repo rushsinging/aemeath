@@ -356,7 +356,7 @@ fn live_and_resumed_compact_render_one_persistent_notice_without_chat_message() 
     let notice = "✓ 上下文压缩完成";
 
     let mut live = TuiScenarioHarness::new(100, 30);
-    live.runtime_event(TuiRuntimeEvent::CompactFinished {
+    live.runtime_event(TuiRuntimeEvent::CompactOperationCompleted {
         messages: vec![],
         notice: notice.into(),
     });

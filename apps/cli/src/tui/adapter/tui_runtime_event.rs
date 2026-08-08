@@ -643,10 +643,10 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
         notice: String,
     },

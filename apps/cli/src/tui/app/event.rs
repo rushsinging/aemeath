@@ -113,12 +113,12 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    /// Compact 失败回滚，TUI 只同步消息。
-    CompactRollback {
+    /// Compact operation 失败回滚，TUI 只同步消息。
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    /// Compact 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
-    CompactFinished {
+    /// Compact operation 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
         notice: String,
     },

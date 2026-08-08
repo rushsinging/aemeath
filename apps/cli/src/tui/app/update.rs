@@ -67,8 +67,8 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
         UiEvent::HookNotice(_) => "HookNotice",
         UiEvent::ApiError { .. } => "ApiError",
-        UiEvent::CompactRollback { .. } => "CompactRollback",
-        UiEvent::CompactFinished { .. } => "CompactFinished",
+        UiEvent::CompactOperationRolledBack { .. } => "CompactRollback",
+        UiEvent::CompactOperationCompleted { .. } => "CompactFinished",
         UiEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted",
         UiEvent::UserMessagesQueued { .. } => "UserMessagesQueued",
         UiEvent::Done { .. } => "Done",
@@ -445,12 +445,12 @@ impl App {
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
-            TuiRuntimeEvent::CompactFinished { .. } => {
+            TuiRuntimeEvent::CompactOperationCompleted { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));
             }
-            TuiRuntimeEvent::CompactRollback { .. } => {
+            TuiRuntimeEvent::CompactOperationRolledBack { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));

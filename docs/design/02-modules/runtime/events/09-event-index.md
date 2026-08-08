@@ -92,8 +92,10 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `Done` | `Done` | `CompleteChat` | chat processing | terminal | processing only | Compatibility |
 | `DoneWithDuration` | `DoneWithDurationMs` | `CompleteChat` | chat processing | terminal | processing only | Target Consolidation |
 | `Cancelled` | `Cancelled` | cancelled presentation | chat processing | terminal | processing only | Compatibility |
-| `CompactRollback` | 同名 | sync messages/clear presentation | session/operation | fact | 否 | Target Rename |
-| `CompactFinished` | 同名 | sync messages/notice | session/operation | completion fact | 否 | Target Rename |
+| `CompactOperationRolledBack` | 同名 | 同名 → sync messages/clear presentation | session/operation | rollback fact | 否 | Current |
+| `CompactOperationCompleted` | 同名 | 同名 → sync messages/notice | session/operation | completion fact | 否 | Current |
+| — | `CompactRollback` | compatibility dual-read → `CompactOperationRolledBack` | session/operation | legacy rollback fact | 否 | Compatibility；Runtime producer removed |
+| — | `CompactFinished` | compatibility dual-read → `CompactOperationCompleted` | session/operation | legacy completion fact | 否 | Compatibility；Runtime producer removed |
 | `SessionResumed` | 同名 | restore conversation | session | snapshot/replay | 否 | Current |
 | `SessionResumeFailed` | 同名 | diagnostic + empty recovery | session | failure fact | 否 | Current |
 | `SessionReset` | 同名 | reset epoch | session | reset | 否 | Current |
@@ -150,8 +152,8 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ToolProgress` | Subject/Delta 不清 | 已由 `ToolOutputDelta { delta }` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `Done` / `DoneWithDurationMs` | 宽泛且重复 | 明确 Chat processing subject 后合并 | 语义冲突 |
 | `MicrocompactDone` | 禁用 `Done` | 已由 `MicrocompactCompleted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
-| `CompactFinished` | Subject/Fact 不统一 | `CompactOperationCompleted` | 跨层 wire |
-| `CompactRollback` | 缺 operation subject/过去式 | `CompactOperationRolledBack` | 跨层 wire |
+| `CompactFinished` | Subject/Fact 不统一 | 已由 `CompactOperationCompleted` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
+| `CompactRollback` | 缺 operation subject/过去式 | 已由 `CompactOperationRolledBack` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `TasksSnapshot` | 与 `TaskStateChanged` 双路径 | 退役旧 text projection | Dead compatibility |
 | `SkillsUpdated` | plural + Updated | `SkillCatalogChanged` | 跨层 wire |
 | `ModelList` | query response 与 event 混淆 | `ModelCatalogSnapshot/Changed` | 语义澄清 |

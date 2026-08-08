@@ -154,10 +154,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
         },
-        sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback {
+        sdk::ChatEvent::CompactOperationRolledBack { messages }
+        | sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactOperationRolledBack {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactFinished {
+        sdk::ChatEvent::CompactOperationCompleted { messages, notice }
+        | sdk::ChatEvent::CompactFinished { messages, notice } => UiEvent::CompactOperationCompleted {
             messages: messages.into_iter().map(chat_message).collect(),
             notice,
         },

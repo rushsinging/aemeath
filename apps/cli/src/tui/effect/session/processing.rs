@@ -198,7 +198,7 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages, notice })
+            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { messages, notice })
                 if messages[0].text_content() == "hello" && notice == "✓ 上下文压缩完成"
         ));
     }

@@ -143,7 +143,7 @@ fn runtime_interaction_maps_to_sender_free_show_interaction() {
 
 #[test]
 fn compact_finished_syncs_messages_and_appends_runtime_notice_once() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactFinished {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactOperationCompleted {
         messages: Vec::new(),
         notice: "✓ 上下文压缩完成".to_string(),
     });

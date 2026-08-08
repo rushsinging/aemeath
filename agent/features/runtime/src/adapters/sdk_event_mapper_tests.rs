@@ -381,15 +381,23 @@ fn hook_notice_mapping_preserves_point_kind_and_all_fields_for_sdk() {
 }
 
 #[test]
-fn compact_finished_preserves_runtime_owned_notice() {
-    let mapped = map_stream_event(RuntimeStreamEvent::CompactFinished {
+fn compact_operation_facts_preserve_messages_and_notice() {
+    let rolled_back = map_stream_event(RuntimeStreamEvent::CompactOperationRolledBack {
+        messages: vec![share::message::Message::user("rollback")],
+    });
+    let completed = map_stream_event(RuntimeStreamEvent::CompactOperationCompleted {
         messages: vec![share::message::Message::user("recent")],
         notice: "✓ 上下文压缩完成".to_string(),
     });
 
     assert!(matches!(
-        mapped,
-        sdk::ChatEvent::CompactFinished { messages, notice }
+        rolled_back,
+        sdk::ChatEvent::CompactOperationRolledBack { messages }
+            if messages.len() == 1 && messages[0].text_content() == "rollback"
+    ));
+    assert!(matches!(
+        completed,
+        sdk::ChatEvent::CompactOperationCompleted { messages, notice }
             if messages.len() == 1
                 && messages[0].text_content() == "recent"
                 && notice == "✓ 上下文压缩完成"

@@ -257,7 +257,7 @@ where
                                 }
                             }
                             messages = result.recent_messages.clone();
-                            sink.send_event(RuntimeStreamEvent::CompactFinished {
+                            sink.send_event(RuntimeStreamEvent::CompactOperationCompleted {
                                 messages: result.recent_messages,
                                 notice: "✓ 上下文压缩完成".to_string(),
                             }).await;

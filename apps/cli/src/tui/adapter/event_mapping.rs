@@ -220,13 +220,17 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             messages: messages.into_iter().map(chat_message).collect(),
             error,
         },
-        ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactRollback {
+        ChatEvent::CompactOperationRolledBack { messages }
+        | ChatEvent::CompactRollback { messages } => TuiRuntimeEvent::CompactOperationRolledBack {
             messages: messages.into_iter().map(chat_message).collect(),
         },
-        ChatEvent::CompactFinished { messages, notice } => TuiRuntimeEvent::CompactFinished {
-            messages: messages.into_iter().map(chat_message).collect(),
-            notice,
-        },
+        ChatEvent::CompactOperationCompleted { messages, notice }
+        | ChatEvent::CompactFinished { messages, notice } => {
+            TuiRuntimeEvent::CompactOperationCompleted {
+                messages: messages.into_iter().map(chat_message).collect(),
+                notice,
+            }
+        }
         ChatEvent::UserMessagesAdopted { items, queued } => TuiRuntimeEvent::UserMessagesAdopted {
             items: items.into_iter().map(chat_message).collect(),
             queued: queued.into_iter().map(chat_message).collect(),
