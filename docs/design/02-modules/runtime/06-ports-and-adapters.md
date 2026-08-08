@@ -435,17 +435,18 @@ fn parent_mediated_interaction_is_child_scoped() {
 }
 
 #[test]
-fn sub_hook_is_empty() {
+fn sub_hook_is_boundary_only() {
     let hooks = prepare_sub_run().context.hooks();
-    assert_proceed_without_dispatch(hooks, any_hook_invocation());
+    assert_dispatches_boundary_points(hooks, [stop_invocation(), sub_run_stop_invocation()]);
+    assert_proceed_without_dispatch(hooks, tool_hook_invocation());
 }
 ```
 
-测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、Sub Hook 绑定独立空实现；不能只用最终 Loop 测试替代这些相邻契约。
+测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、Sub Hook 绑定独立 BoundaryOnly adapter；不能只用最终 Loop 测试替代这些相邻契约。
 
 Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的 `SessionSnapshot`；若为派生 Run，只提供受限 `ParentRunCapabilities`。Factory 实现可借助 composition-private wiring 获得 lease、派生 workspace、打开 Context/Memory、构造 Provider/Tool/Hook adapter，但返回给 Runtime 的只有冻结能力。lease 必须由返回 capability 的生命周期守卫持有，调用方不能单独缓存或释放。
 
-`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建不持底层 HookPort 的 `EmptyHookPort`，所有 invocation 都无副作用返回。两者都必须在 factory 内完成，不能先返回完整父 Port 再要求调用方自律过滤。
+`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建包装 run-scoped Dispatcher 的 `BoundaryHookPort`。该 adapter 以 Hook-owned `HookPointMetadata.class` 为唯一过滤真相：Boundary point（含 Stop 与 SubRun 生命周期）必须转发，Tool/Notification point 无副作用返回 Proceed。两者都必须在 factory 内完成，不能先返回完整 Port 再要求调用方自律过滤，也不能复制 HookPoint allow-list。
 
 `reasoning` 装配 **MUST** 只构造 Workflow-owned requested-level 状态：Adaptive 使用五节点固定默认 effort，Fixed 使用 RunSpec 声明值，Inherit 冻结父 requested value，NoOp 绑定无副作用实现。它 **NEVER** 接收具体 Provider client；每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。
 

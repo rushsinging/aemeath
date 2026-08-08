@@ -294,7 +294,7 @@ async fn build_window(
 
 ### 5.4 Hook 去重
 
-- PreCompact hook **MUST** 只在 `compaction_decision.needed == true` 时触发
+- Target：Future PreCompact Hook 接线后 **MUST** 只在 `compaction_decision.needed == true` 时触发；当前 production 尚不 emit PreCompact
 - microcompact 只在 `fingerprint.pending_messages_hash` 变化时执行
 
 ### 5.5 Compact 提交幂等性

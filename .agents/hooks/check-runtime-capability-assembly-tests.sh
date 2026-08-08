@@ -206,4 +206,23 @@ expect_failure fat-test-double "Runtime type RenamedFatFake implements multiple 
 cp "$BASELINE/loop_engine_tests.rs" "$TMP/repo/agent/features/runtime/src/application/loop_engine/tests.rs"
 run_guard >/dev/null
 
+BOUNDARY_HOOK="$TMP/repo/agent/features/runtime/src/application/hook/empty.rs"
+cp "$BOUNDARY_HOOK" "$BASELINE/empty.rs"
+python3 - "$BOUNDARY_HOOK" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+source = source.replace(
+    "point.metadata().class == HookClass::Boundary",
+    "matches!(point, HookPoint::SessionStart | HookPoint::SessionEnd | HookPoint::SubRunStart | HookPoint::SubRunStop)",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure boundary-hook-variant-allow-list "BoundaryHookPort must derive filtering from HookPointMetadata.class"
+
+cp "$BASELINE/empty.rs" "$BOUNDARY_HOOK"
+run_guard >/dev/null
+
 echo "Runtime Capability Assembly terminal boundary probes passed."
