@@ -22,6 +22,7 @@ pub mod provider_factory;
 pub mod provider_port;
 pub mod session_query;
 pub mod tool_result_blob;
+pub mod usage_sink;
 
 pub use context_port::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
@@ -47,3 +48,4 @@ pub use provider_port::{
 pub use provider_port::{InvocationStream, ModelCapability, ProviderError, ReasoningCapability};
 pub use session_query::SessionQueryPort;
 pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
+pub use usage_sink::{UnavailableUsageSink, UsageSink};
