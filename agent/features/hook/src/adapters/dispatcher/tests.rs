@@ -434,7 +434,29 @@ async fn configured_execution_attempt_limit_controls_failure_retries() {
     assert_eq!(outcome.executions.len(), 2);
 }
 
-/// 参数化：每种协议级故障连续发生时，最多执行默认策略的 3 次尝试。
+#[tokio::test]
+async fn unsupported_platform_failure_is_not_retried() {
+    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Unsupported),
+        ScriptStep::fault(ExecutionFault::Unsupported),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(scripted.call_count(), 1);
+    assert_eq!(outcome.executions.len(), 1);
+    assert!(matches!(
+        outcome.executions[0].status,
+        HookExecutionStatus::ExecutionFailed { ref error }
+            if error == "当前平台不支持 Hook 命令执行"
+    ));
+}
+
+/// 参数化：每种可恢复协议级故障连续发生时，最多执行默认策略的 3 次尝试。
 async fn assert_fault_retries_three_times(kind: ExecutionFault) {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([

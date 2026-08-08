@@ -764,10 +764,22 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 - [../02-modules/tui/05-e2e-scenario-testing.md](../02-modules/tui/05-e2e-scenario-testing.md)：TUI 进程内 E2E 场景测试
 - [../../superpowers/specs/2026-05-27-tui-model-view-architecture.md](../../superpowers/specs/2026-05-27-tui-model-view-architecture.md)：TUI Model/View 历史设计依据
 
+## 12. Hook 平台支持证据矩阵
+
+| 平台 / 风险 | 支持等级 | 测试层 | 持续证据 | 结论边界 |
+|---|---|---:|---|---|
+| Linux/macOS Hook command execution | 支持 | L3/L5 | `agent/features/hook/src/adapters/process_tests.rs` 的真实 shell、环境隔离、有界 drain、timeout/cancel、后台进程组与 TERM→KILL→wait 测试；`cargo test -p hook` | 证明 Unix 受管进程组执行与回收，不外推到 non-Unix。 |
+| Windows/non-Unix ProcessDriver fallback | 显式不支持 | L1/L3 | `unsupported_platform_returns_typed_failure_without_running_command`；`.github/workflows/hook-platform-contract.yml` 的 Windows `cargo check -p hook --all-targets` 与 non-Unix contract test | 只证明命令启动前返回 typed `Unsupported`，不代表 Windows 支持 Hook command。 |
+| Unsupported 跨 ProcessDriver→Executor→Dispatcher | 显式不支持 | L2/L3 | `unsupported_platform_failure_is_not_retried`；断言单次 `ExecutionFailed`、可诊断错误与无重试 | 平台能力缺失是永久失败，不消耗 execution retry policy。 |
+| Windows 进程树回收 / release artifact | 未实现、out of scope | L5 | 显式不适用 | 在具备 Job Object 或等价可证明回收方案前，禁止降级为仅杀直接 child，也禁止宣称支持。 |
+
+平台 job 不可调度或 GitHub Actions 不可用时，`#1543` 必须记录明确外部阻断；Unix/all-targets 本机结果不能替代 Windows job 的首次真实执行。
+
 ## 13. 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-07 | #1543 明确 Windows/non-Unix 暂不支持 Hook command execution，登记 Windows compile/typed unsupported/no-retry 契约与 Unix 真实进程组回收证据边界 | [#1543](https://github.com/rushsinging/aemeath/issues/1543) |
 | 2026-07-28 | #1438 将 Tool/Skill/Command 证据矩阵更新为 metadata/load、Context metadata directory、SkillRequest/SkillsUpdated 字段完整性、启动快照路由、revision 去重、删除撤销与调用后正文隐藏交付 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) / [#1446](https://github.com/rushsinging/aemeath/pull/1446) |
 | 2026-07-21 | #1060 最终复采并验收：#1299 已由 #1308 合入、#1298 已由 #1303 合入；L0 守卫、workspace tests、默认慢速矩阵（含 PTY）与 coverage 全部通过，#851 / #1060 已满足测试审查完成定义，等待用户确认关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1299](https://github.com/rushsinging/aemeath/issues/1299)、[#1308](https://github.com/rushsinging/aemeath/pull/1308)、[#1303](https://github.com/rushsinging/aemeath/pull/1303) |
 | 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
