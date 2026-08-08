@@ -38,3 +38,18 @@ fn replacement_is_session_scoped_and_revision_ordered() {
     assert!(snapshot.replace(state("session-b", 1, "other")));
     assert_eq!(snapshot.lines[1], "□ #1 other");
 }
+
+#[test]
+fn duplicate_revision_replay_is_idempotent() {
+    let mut snapshot = TaskStatusSnapshot::default();
+    let replayed = state("session-a", 42, "same");
+
+    assert!(snapshot.replace(replayed.clone()));
+    let first = snapshot.clone();
+    assert!(snapshot.replace(replayed));
+
+    assert_eq!(snapshot.session_id, first.session_id);
+    assert_eq!(snapshot.revision, first.revision);
+    assert_eq!(snapshot.state, first.state);
+    assert_eq!(snapshot.lines, first.lines);
+}

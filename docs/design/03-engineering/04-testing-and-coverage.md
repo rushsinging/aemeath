@@ -696,9 +696,9 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 最终结论：Storage 机制测试的 L0～L4 缺口已按最低充分层闭合，L5 不适用；公开面/list 契约漂移由 #1263 继续阻断 #1057，因此 #1057 与父项 #848 暂不满足关闭条件。
 
-#### 11.10 #1058 Task Management L0–L5 覆盖证据
+#### 11.10 #849 Task Management L0–L5 覆盖证据
 
-#849 创建时的直接执行叶子 #996、#885–#891 均已关闭；本审查只核验其组合后的 Task BC，不承载新的业务设计。审查基线为 Task-owned `domain + adapters`、`TaskAccess` / `TaskPersist` 两个窄 OHS，以及 Context Session 内嵌快照。
+#849 创建时的直接执行叶子 #996、#885–#891 与测试审查子项 #1058 均已关闭；本节核验其组合后的 Task BC 与已合入的结构化 Task-state 消费链路，不引入新的业务设计。审查基线为 Task-owned `domain + adapters`、`TaskAccess` / `TaskPersist` 两个窄 OHS、Context Session 内嵌快照，以及 Runtime → SDK → TUI 的完整结构化状态契约。
 
 | 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
 |---|---|---|---|
@@ -708,11 +708,15 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | Tool wire → Task ACL：非零 ID、已删除任务隐藏、创建/更新/停止/列表的意图命令 | L2/L3 | `agent/features/tools/src/adapters/task_{create,get,list,stop,update}_tests.rs`；`agent/features/tools/src/domain/types/task_{get,list}_tests.rs` | 已覆盖：#1058 将 Tool 输入统一委托 Task-owned non-zero parser，拒绝 `0`；TaskGet 不发布 tombstone；TaskView wire 仍锁定既有 batch 数字兼容格式且不含 owner。 |
 | Runtime Task state ACL 与 reminder 观察 | L1 | `agent/features/runtime/src/application/loop_engine/chat/{task_snapshot_tests.rs,task_reminder_tests.rs}` | 已覆盖：结构化字段、session/revision、状态排序、依赖 sequence、截断/hidden count、无 current Batch 清空语义与 reminder 文本均有确定性断言。 |
 | Context Session 的 captured empty/missing/non-empty Task snapshot、Task prepare 失败的联合恢复原子性 | L3/L4 | `agent/features/context/tests/main_session_wiring.rs` | 已覆盖：新增 captured non-empty snapshot → TaskAccess 可观察恢复；self dependency prepare 失败时 canonical session、memory 和 Task state 均保持旧值。 |
-| TaskCommandResult 到 Runtime/SDK/TUI 的唯一变化投影 | L2–L4 | `agent/features/tools/src/domain/{task_change,tool}_tests.rs`；`agent/features/runtime/src/application/loop_engine/chat/{events,task_snapshot}_tests.rs`；`packages/sdk/src/task_tests.rs`；`apps/cli/src/tui/model/conversation/task_status.rs` | 已覆盖：真实 commit 生成内部 typed change，failed/no-op 不生成；Runtime 不再依据工具名或结果文本触发 refresh/Hook；SDK 发布带 session/revision 的完整结构化状态；TUI 拒绝同 Session stale revision、幂等替换并在 Session 切换时开启新 epoch。 |
+| TaskCommandResult 到 Runtime round-level publication / Hook 的 typed committed-change 门禁 | L2/L3 | `agent/features/tools/src/domain/{task_change,tool}_tests.rs`；`agent/features/runtime/src/application/loop_engine/chat/{non_agent,main_run_port_task_state}_tests.rs` | 已覆盖：真实 commit 生成内部 typed change；failed/no-op 或无 metadata 不触发 Task state / Hook；与 Task 无关的工具名和包含 `Status: Completed` 的 Tool Result 文本不能伪造 Task hook。当前契约以 Tool round 为发布粒度：一轮只要至少一个真实 Task commit，materialization 后读取一次权威状态并发布一个最终、完整 `TaskStateChanged`；无真实 commit 的轮次不发布。 |
+| Runtime → SDK → TUI 相邻结构化映射与 session/revision replacement | L2–L4 | `agent/features/runtime/src/adapters/sdk_event_mapper_task_state_tests.rs`；`packages/sdk/src/task_tests.rs`；`apps/cli/src/tui/adapter/event_mapping_tests.rs`；`apps/cli/src/tui/model/conversation/task_status_tests.rs` | 已覆盖：完整字段跨映射保持不丢失；TUI 本地渲染；同 Session 新 revision 替换、stale 拒绝、同 payload duplicate replay 幂等；新 Session 即使 revision 数值更低也开启新 epoch。 |
+| Live / successful Session Resume 的同契约发布 | L4 | `agent/features/runtime/src/application/loop_engine/chat/{main_run_port_task_state,resume_task_state}_tests.rs` | 已覆盖：Live mutation round 发布最终完整状态；成功 Resume 先发布 `SessionResumed`，再发布恢复后同一 session/revision 语义的完整 `TaskStateChanged`；新 Session 无 current Batch 时发布空状态，允许 TUI 清除旧展示。 |
 | L0：生产可达性、公开面、Task persistence authority、layout/dependency 守卫 | L0 | `cargo run -p xtask -- production-reachability .`；`cargo clippy --workspace --all-targets --all-features -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full` | 已覆盖：Task target layout 与 Access/Persist capability policy 无新增 migration exception。 |
 | 真进程、PTY、网络、平台、安装或发布资产 | L5 | 不适用说明 | Task BC 是进程内同步聚合、codec 和窄端口；真实外部边界不属于该能力，L1–L4 可完整覆盖，不新增 smoke。 |
 
-确定性与组织：Task codec/aggregate 测试只用固定 timestamp/ID；Context 场景使用独立临时目录与 gate；本次新增 Tool/Runtime 测试均按同级 `*_tests.rs` 外置，未新增 `mod.rs`、`include!`、万能 fixture 或生产 test-only API。`TaskId::new(0)` 保留给 Snapshot validator 构造非法持久化 fixture；外部 Tool wire 只可经 `TaskId::parse_tool_input` 取得非零 ID。
+确定性与组织：Task codec/aggregate 测试只用固定 timestamp/ID；Context/Resume 场景使用隔离 backing 与 gate；新增 Tool/Runtime/TUI 测试均按 owning module 的同级 `*_tests.rs` 外置，未新增 `mod.rs`、万能 fixture 或生产 test-only API。既有 session-driver 测试采用聚合测试模块，新增 Resume 场景作为该模块的独立子模块接入，不再拼接测试源码。`TaskId::new(0)` 保留给 Snapshot validator 构造非法持久化 fixture；外部 Tool wire 只可经 `TaskId::parse_tool_input` 取得非零 ID。
+
+范围边界：本次验收只承诺 **round-level authoritative publication**，不承诺同一 Tool round 内每个 commit 的连续可见性。per-tool committed-result observation seam 与 per-commit publication（方案 B）不在 #849 本次执行范围；因此本矩阵不会用 `1..N` 中间状态事件作为当前通过条件，也不会为此改写 Tool Result batching/order。
 
 覆盖率信号（2026-07-20，`./scripts/coverage.sh`）：Task regions **95.69%**、functions **93.85%**、lines **96.85%**。百分比只作风险信号；关键状态机、契约与跨 BC 恢复行为以本矩阵为验收依据。慢速矩阵的 PTY smoke 首次因未构建 CLI binary 失败，按 worktree-local Cargo build-dir 显式设置 `AEMEATH_PTY_BIN` 后通过；该 PTY 责任与 Task BC 无关，不影响 L5 不适用判断。
 
@@ -778,5 +782,6 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | 2026-07-17 | 登记 #983 AtomicDataset 的 L0–L5 覆盖：纯规则、adapter 协作、公共 port contract、Prepared/roll-forward/corruption fault matrix 与真实进程 abort/OS lock；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-19 | 完成 #1062 Policy 测试审查：登记 Standard/AllowAll Config 映射、五维授权上下文、Runtime 单次评估与 fuse、Main/Sub 同实例注入、CLI ACL、L4 授权旅程及 L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062)、[#1221](https://github.com/rushsinging/aemeath/issues/1221) |
 | 2026-07-20 | 完成 #1057 Storage 根因级测试审查：补齐 SafeStorageRoot、Session 相邻映射、owning-layer 与锁确定性；记录 Storage 覆盖率和 workspace Runtime 卡住事实；公开面/list 契约漂移由 #1263 承接 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
-| 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；TaskEvent→Runtime/SDK/TUI 唯一投影缺口由 #879 原生依赖承接 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849)、[#879](https://github.com/rushsinging/aemeath/issues/879) |
+| 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；后续结构化 Task-state 投影已合入，当前 #849 收口证据见 §11.10 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849) |
+| 2026-08-05 | 补齐 #849 结构化 Task-state 的相邻边界与组合证据：typed committed-change Hook 门禁、round-level 最终权威发布、Runtime→SDK 完整映射、Live/Resume 同契约、TUI session/revision 幂等；明确 per-commit 连续可见性不在本次范围 | [#849](https://github.com/rushsinging/aemeath/issues/849) |
 | 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：按八个稳定行为单元建立 L0～L5 矩阵，优先修复 owning-layer、日志测试设施、墙钟锁断言与 SafeStorageRoot 契约根因，再复核 Blob/Dataset、消费方边界、公开面和 Guard | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |
