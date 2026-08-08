@@ -229,7 +229,7 @@ async fn build_window_keeps_committed_history_shared_and_pending_owned() {
 #[tokio::test]
 async fn build_window_assembles_history_pending_and_fixed_extension_order() {
     let window = service().build_window(&request()).await.unwrap();
-    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages.len(), 3);
     let kinds: Vec<_> = window
         .system_blocks
         .iter()
@@ -264,7 +264,7 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
     assert_eq!(summaries[0].content, CHECKPOINT);
     assert!(summaries[0].cacheable);
     assert!(matches!(
-        &window.messages[1].content[0],
+        &window.messages[2].content[0],
         ContentBlock::Text { text } if text == "pending"
     ));
     assert!(window.token_estimation.message_tokens > 0);
@@ -334,7 +334,7 @@ async fn build_window_renders_invocation_reminders_once_in_stable_order() {
 async fn build_window_without_invocation_reminders_keeps_messages_unchanged() {
     let window = service().build_window(&request()).await.unwrap();
 
-    assert_eq!(window.messages.len(), 2);
+    assert_eq!(window.messages.len(), 3);
     assert!(window
         .messages
         .iter()
