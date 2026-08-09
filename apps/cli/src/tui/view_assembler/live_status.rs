@@ -28,17 +28,20 @@ impl LiveStatusAssembler {
         let compact_progress = activity_summary
             .as_ref()
             .and_then(|summary| compact_progress_from_activity(conversation, &summary.run_id));
-        let spinner = activity_summary.map(|summary| SpinnerLineView {
-            frame: activity.frame.max(anim.frame),
-            verb: if activity.verb.is_empty() {
-                anim.verb.clone()
-            } else {
-                activity.verb.clone()
-            },
-            elapsed_secs: activity.total_elapsed_secs(now),
-            phase_elapsed_secs: activity.phase_elapsed_secs(now),
-            phase_text: Some(summary.phase_text),
-            detail_text: summary.detail,
+        let spinner = activity_summary.map(|summary| {
+            let primary = summary.primary;
+            SpinnerLineView {
+                frame: activity.frame.max(anim.frame),
+                verb: if activity.verb.is_empty() {
+                    anim.verb.clone()
+                } else {
+                    activity.verb.clone()
+                },
+                elapsed_secs: activity.total_elapsed_secs(now),
+                phase_elapsed_secs: primary.as_ref().map(|_| activity.phase_elapsed_secs(now)),
+                phase_text: primary.as_ref().map(|primary| primary.phase_text.clone()),
+                detail_text: primary.and_then(|primary| primary.detail),
+            }
         });
         let queued_lines = queued_texts
             .iter()
@@ -215,17 +218,10 @@ mod tests {
         )
     }
 
-    fn activity_state() -> RunActivityState {
+    fn activity_state_for(model: &ConversationModel) -> RunActivityState {
         let mut state = RunActivityState::default();
-        state.sync_main_run(
-            Some(&UiRunId::from("main-1")),
-            false,
-            2,
-            12_345,
-            2,
-            6_789,
-            Instant::now(),
-        );
+        let summary = ActivitySummaryAssembler::assemble(model.activity_observations());
+        state.sync_activity_summary(summary.as_ref(), Instant::now());
         state
     }
 
@@ -269,8 +265,8 @@ mod tests {
         let view = LiveStatusAssembler::assemble(&model, &activity, &anim, &[]);
         let spinner = view.spinner.expect("activity spinner");
         assert!(spinner.elapsed_secs >= 12);
-        assert!(spinner.elapsed_secs > spinner.phase_elapsed_secs);
-        assert!(spinner.phase_elapsed_secs <= 1);
+        assert!(spinner.elapsed_secs > spinner.phase_elapsed_secs.unwrap());
+        assert!(spinner.phase_elapsed_secs.unwrap() <= 1);
     }
 
     #[test]
@@ -284,7 +280,7 @@ mod tests {
                 stream: TuiModelStreamState::Streaming,
             },
         );
-        let view = LiveStatusAssembler::assemble(&model, &activity_state(), &anim, &[]);
+        let view = LiveStatusAssembler::assemble(&model, &activity_state_for(&model), &anim, &[]);
         assert_eq!(
             view.spinner
                 .as_ref()
@@ -293,7 +289,7 @@ mod tests {
         );
         let spinner = view.spinner.expect("activity spinner");
         assert_eq!(spinner.elapsed_secs, 12);
-        assert_eq!(spinner.phase_elapsed_secs, 6);
+        assert_eq!(spinner.phase_elapsed_secs, Some(6));
 
         let empty = LiveStatusAssembler::assemble(
             &ConversationModel::default(),
@@ -319,7 +315,7 @@ mod tests {
 
         let view = LiveStatusAssembler::assemble(
             &conversation,
-            &activity_state(),
+            &activity_state_for(&conversation),
             &SpinnerAnim::default(),
             &[],
         );
@@ -357,7 +353,7 @@ mod tests {
             );
             let view = LiveStatusAssembler::assemble(
                 &model,
-                &activity_state(),
+                &activity_state_for(&model),
                 &SpinnerAnim::default(),
                 &[],
             );
@@ -403,9 +399,14 @@ mod tests {
 
         let short = conversation_with_observations(2, vec![root.clone(), tool(2, 499, 1)]);
         assert_eq!(
-            LiveStatusAssembler::assemble(&short, &activity_state(), &SpinnerAnim::default(), &[],)
-                .spinner
-                .and_then(|spinner| spinner.detail_text),
+            LiveStatusAssembler::assemble(
+                &short,
+                &activity_state_for(&short),
+                &SpinnerAnim::default(),
+                &[],
+            )
+            .spinner
+            .and_then(|spinner| spinner.detail_text),
             None
         );
 
@@ -413,7 +414,7 @@ mod tests {
         assert_eq!(
             LiveStatusAssembler::assemble(
                 &single,
-                &activity_state(),
+                &activity_state_for(&single),
                 &SpinnerAnim::default(),
                 &[],
             )
@@ -426,7 +427,7 @@ mod tests {
         assert_eq!(
             LiveStatusAssembler::assemble(
                 &parallel,
-                &activity_state(),
+                &activity_state_for(&parallel),
                 &SpinnerAnim::default(),
                 &[],
             )
@@ -470,14 +471,16 @@ mod tests {
             ],
         );
 
-        assert!(LiveStatusAssembler::assemble(
+        let spinner = LiveStatusAssembler::assemble(
             &model,
-            &activity_state(),
+            &activity_state_for(&model),
             &SpinnerAnim::default(),
             &[],
         )
         .spinner
-        .is_none());
+        .expect("live root keeps outer spinner without a visible primary");
+        assert!(spinner.phase_text.is_none());
+        assert!(spinner.phase_elapsed_secs.is_none());
     }
 
     #[test]

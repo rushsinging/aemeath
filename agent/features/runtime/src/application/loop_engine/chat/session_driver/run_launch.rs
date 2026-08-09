@@ -701,6 +701,7 @@ where
                     let heartbeat_cancel = heartbeat_cancel.clone();
                     let registry = runtime_context.published_state();
                     let sink = runtime_context.event_sink();
+                    let activities = runtime_context.activities().clone();
                     tokio::spawn(async move {
                         let mut interval =
                             tokio::time::interval(std::time::Duration::from_secs(1));
@@ -710,9 +711,12 @@ where
                                 _ = heartbeat_cancel.cancelled() => break,
                                 _ = interval.tick() => {
                                     if let Some(status) = registry.heartbeat() {
+                                        activities.publish_heartbeat();
                                         sink.try_send_event(RuntimeStreamEvent::RuntimeStatusChanged {
                                             status: Box::new(status),
                                         });
+                                    } else {
+                                        activities.publish_heartbeat();
                                     }
                                 }
                             }

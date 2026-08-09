@@ -8,7 +8,7 @@ fn line_text(elapsed_secs: u64, phase_elapsed_secs: u64) -> String {
         frame: 0,
         verb: "Thinking".to_string(),
         elapsed_secs,
-        phase_elapsed_secs,
+        phase_elapsed_secs: Some(phase_elapsed_secs),
         phase_text: Some("Running tool".to_string()),
         detail_text: None,
     };
@@ -27,7 +27,7 @@ fn line_text_with_detail(detail_text: Option<&str>) -> String {
         frame: 0,
         verb: "Thinking".to_string(),
         elapsed_secs: 12,
-        phase_elapsed_secs: 6,
+        phase_elapsed_secs: Some(6),
         phase_text: Some("Running tool".to_string()),
         detail_text: detail_text.map(str::to_string),
     };

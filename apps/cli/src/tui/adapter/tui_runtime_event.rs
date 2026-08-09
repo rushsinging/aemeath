@@ -219,6 +219,7 @@ pub(crate) struct TuiActivityObservation {
 pub(crate) struct TuiActivitySnapshot {
     pub(crate) run_id: UiRunId,
     pub(crate) revision: u64,
+    pub(crate) heartbeat_sequence: u64,
     pub(crate) activities: Vec<TuiActivityObservation>,
 }
 

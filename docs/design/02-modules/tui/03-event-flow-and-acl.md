@@ -211,9 +211,8 @@ SDK ActivityChanged / ActivitySnapshot
   → LiveStatusViewModel
 ```
 
-- Activity 增量按 `run_id + revision` 接纳；重复 revision 幂等。
-- revision gap 保留旧的可信事实并标记镜像待修复，**NEVER** 伪造中间状态或继续展示不可信摘要。
-- Snapshot 只替换同一 Run 的 Activity 集合，成功修复后恢复摘要展示。
+- Activity Snapshot 按 `run_id + business revision + heartbeat sequence` 原子替换；更低 business revision 丢弃，同 revision 只接受更高 heartbeat。Runtime production 只发布 logical-commit Snapshot，SDK `ActivityChanged` 仅作为 first ACL compatibility ingress。
+- Snapshot 中 primary 可以暂时缺失；live Main root 仍保留 outer Spinner，只有 inner elapsed/phase text 隐藏。root terminal 后才清理整个 Spinner。
 - `audience` 是 Runtime 发布的展示边界；TUI 只向用户显示 User 事实，Operational / Diagnostic detail 不得自动进入主状态行。
 - LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
 - Activity Summary 必须分别传递 Main Run root total timing 的 revision/baseline 与当前 primary Activity state timing 的 revision/baseline；TUI 的 outer/inner 本地插值互不 rebase，且不构成第二套生命周期或计时权威。

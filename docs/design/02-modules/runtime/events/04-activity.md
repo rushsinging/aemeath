@@ -7,8 +7,8 @@
 | Owner | `ActivityCoordinator` |
 | Authority | observational only；NEVER 决定 Lifecycle 或 processing terminal |
 | Identity | `run_id`、`activity_id` |
-| Ordering | per-Run revision；delta + snapshot repair |
-| Delivery | `Changed` delta、`Snapshot` full collection |
+| Ordering | per-Run business revision + heartbeat sequence |
+| Delivery | logical-commit `Snapshot` full-state + fixed heartbeat resend |
 | Runtime 容器 | `RuntimeActivityEvent` |
 | SDK mapper | `map_activity_event` |
 
@@ -18,19 +18,20 @@ Activity 回答“Runtime 当前在做什么”，不回答“Run 是否已经�
 
 | Runtime | SDK | TUI event | Consumer | 状态 |
 |---|---|---|---|---|
-| `RuntimeActivityEvent::Changed` | `ActivityChanged` | `ActivityChanged` | `ObserveActivityChange` | Current |
-| `RuntimeActivityEvent::Snapshot` | `ActivitySnapshot` | `ActivitySnapshot` | `ReplaceActivitySnapshot` | Current |
+| `RuntimeActivityEvent::Snapshot` | `ActivitySnapshot` | `ActivitySnapshot` | `ReplaceActivitySnapshot` | Current canonical |
+| 无 production producer | `ActivityChanged` | `ActivityChanged` | `ObserveActivityChange` | SDK / first TUI ACL compatibility |
 
-跨层 MUST 保持 `ActivityChanged` / `ActivitySnapshot` 名称；TUI-owned payload 可增加 `Tui` 前缀。
+Runtime production MUST 只发布 `ActivitySnapshot`。`ActivityChanged` 仅保留 public compatibility ingress，NEVER 作为 canonical graph 拼装来源。
 
 ## 3. Revision contract
 
-1. `Changed` 是 revisioned delta，不是 full-state；
-2. duplicate revision 幂等；
-3. lower revision stale event 丢弃；
-4. revision gap 时保留最后可信事实，标记待修复并隐藏不可信摘要；
-5. `Snapshot` 原子替换同一 Run 的 Activity 集合并修复 revision；
-6. Snapshot 不跨 Run merge。
+1. Snapshot `revision` 是 Activity graph business revision，只在 logical commit 后递增；
+2. Snapshot `heartbeat_sequence` 在同 business revision 下递增并刷新权威 timing sample；
+3. logical transition MUST 原子完成旧 primary terminal 与新 primary start 后只发布一个 Snapshot；
+4. 更低 revision 丢弃；同 revision 仅接受更高 heartbeat sequence；
+5. Snapshot 原子替换同一 Run 的 Activity 集合，NEVER 跨 Run merge；
+6. Snapshot 内全部 timing MUST 使用同一 Runtime 单调时钟采样点；
+7. SDK `ActivityChanged` compatibility 输入不得恢复 production delta/gap 拼装。
 
 ## 4. Activity detail
 

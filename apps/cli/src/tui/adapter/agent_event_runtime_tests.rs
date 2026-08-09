@@ -49,6 +49,7 @@ fn activity_events_map_to_dedicated_conversation_intents() {
     let snapshot = map_runtime_event(&TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
         run_id: UiRunId::from("run-1"),
         revision: 3,
+        heartbeat_sequence: 0,
         activities: vec![activity("run-1", "activity-1", 3)],
     }));
     assert!(matches!(

@@ -133,6 +133,42 @@ fn phase_transition_keeps_root_total_and_resets_new_phase_elapsed() {
 }
 
 #[test]
+fn phase_transition_publishes_one_committed_snapshot_with_new_primary() {
+    let mut run = Run::with_id(
+        RunId::new("run-atomic-phase"),
+        crate::domain::agent_run::RunSpec::main(),
+        None,
+    );
+    let clock = FixedActivityClock::new();
+    let publisher = super::coordinator_tests::RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        run.id().clone(),
+        Arc::new(clock),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher.clone()),
+    );
+    observe_draining(&coordinator, &mut run);
+    let before = publisher.snapshot_count();
+
+    run.transition(RunTransition::DrainInputs)
+        .expect("prepare context");
+    coordinator
+        .observe_run_events(&run.drain_events())
+        .expect("observe preparing context");
+
+    assert_eq!(publisher.snapshot_count(), before + 1);
+    let snapshot = publisher.last_snapshot().expect("committed snapshot");
+    assert!(snapshot.activities.iter().any(|activity| {
+        activity.kind == ActivityKindView::RunPhase(RunPhaseKindView::PreparingContext)
+            && activity.state == ActivityStateView::Running
+    }));
+    assert!(!snapshot.activities.iter().any(|activity| {
+        activity.kind == ActivityKindView::RunPhase(RunPhaseKindView::DrainingInput)
+            && activity.state == ActivityStateView::Running
+    }));
+}
+
+#[test]
 fn transition_finishes_old_phase_before_starting_new_phase() {
     let mut run = Run::with_id(
         RunId::new("run-phase"),

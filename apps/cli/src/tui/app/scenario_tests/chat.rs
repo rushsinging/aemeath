@@ -267,6 +267,7 @@ fn activity_pipeline_renders_one_low_noise_main_summary_until_terminal() {
     harness.runtime_event(TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
         run_id: UiRunId::from("main-activity-run"),
         revision: 9,
+        heartbeat_sequence: 0,
         activities: vec![root_activity(9, TuiActivityState::Succeeded)],
     }));
     let terminal_screen = activity_screen(&mut harness);
@@ -327,6 +328,7 @@ fn activity_revision_gap_hides_summary_until_snapshot_repairs_mirror() {
     harness.runtime_event(TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
         run_id: UiRunId::from("main-activity-run"),
         revision: 4,
+        heartbeat_sequence: 0,
         activities: vec![
             root_activity(1, TuiActivityState::Running),
             activity(ActivityFixture {

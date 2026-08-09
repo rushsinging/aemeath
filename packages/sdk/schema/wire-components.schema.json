@@ -308,6 +308,12 @@
           },
           "type": "array"
         },
+        "heartbeat_sequence": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "revision": {
           "format": "uint64",
           "minimum": 0,

@@ -821,16 +821,16 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
     assert!(
         sink.events()
             .iter()
-            .any(|event| event.starts_with("ActivityChanged:Started:")),
-        "manual compact must publish a Runtime-owned Activity"
+            .any(|event| event.starts_with("ActivitySnapshot:")),
+        "manual compact must publish a Runtime-owned Activity Snapshot"
     );
-    assert_eq!(
+    assert!(
         sink.events()
             .iter()
-            .filter(|event| event.starts_with("ActivityChanged:Finished:"))
-            .count(),
-        1,
-        "manual compact Activity must publish exactly one terminal event"
+            .filter(|event| event.starts_with("ActivitySnapshot:"))
+            .count()
+            >= 2,
+        "manual compact Activity must publish live and terminal snapshots"
     );
     assert_eq!(
         sink.events()

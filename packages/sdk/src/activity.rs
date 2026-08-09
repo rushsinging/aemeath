@@ -310,5 +310,7 @@ pub struct ActivityView {
 pub struct ActivitySnapshotView {
     pub run_id: RunId,
     pub revision: u64,
+    #[serde(default)]
+    pub heartbeat_sequence: u64,
     pub activities: Vec<ActivityView>,
 }

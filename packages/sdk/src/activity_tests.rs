@@ -44,15 +44,29 @@ fn activity_view_round_trip_preserves_identity_revision_and_timing() {
 }
 
 #[test]
+fn activity_snapshot_defaults_legacy_missing_heartbeat_sequence() {
+    let decoded: ActivitySnapshotView = serde_json::from_value(serde_json::json!({
+        "run_id": "019629b7-e290-718d-a600-75299b783309",
+        "revision": 9,
+        "activities": []
+    }))
+    .expect("decode legacy activity snapshot");
+
+    assert_eq!(decoded.heartbeat_sequence, 0);
+}
+
+#[test]
 fn activity_snapshot_carries_complete_views_at_one_run_revision() {
     let snapshot = ActivitySnapshotView {
         run_id: crate::RunId::new("run-1"),
         revision: 9,
+        heartbeat_sequence: 3,
         activities: vec![activity_fixture()],
     };
 
     assert_eq!(snapshot.activities[0].run_id, snapshot.run_id);
     assert_eq!(snapshot.revision, 9);
+    assert_eq!(snapshot.heartbeat_sequence, 3);
 }
 
 #[test]
@@ -127,6 +141,7 @@ fn activity_events_keep_change_kind_and_complete_snapshot() {
     let snapshot = ChatEvent::ActivitySnapshot(ActivitySnapshotView {
         run_id: crate::RunId::new("run-1"),
         revision: 9,
+        heartbeat_sequence: 0,
         activities: vec![activity_fixture()],
     });
 

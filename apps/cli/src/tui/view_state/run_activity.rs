@@ -30,15 +30,16 @@ impl RunActivityState {
             self.sync_main_run(None, false, 0, 0, 0, 0, now);
             return;
         };
+        let primary = summary.primary.as_ref();
         self.sync_main_run_with_activity_ids(
             Some(&summary.run_id),
-            summary.invoking_model,
+            primary.is_some_and(|primary| primary.invoking_model),
             Some(&summary.root_activity_id),
             summary.root_timing_revision,
             summary.total_elapsed_ms,
-            Some(&summary.primary_activity_id),
-            summary.phase_timing_revision,
-            summary.phase_elapsed_ms,
+            primary.map(|primary| primary.activity_id.as_str()),
+            primary.map_or(0, |primary| primary.timing_revision),
+            primary.map_or(0, |primary| primary.elapsed_ms),
             now,
         );
     }
@@ -56,10 +57,10 @@ impl RunActivityState {
         self.sync_main_run_with_activity_ids(
             run_id,
             invoking_model,
-            None,
+            Some("__compat_root__"),
             root_timing_revision,
             total_elapsed_ms,
-            None,
+            run_id.map(|_| "__compat_primary__"),
             phase_timing_revision,
             phase_elapsed_ms,
             now,
@@ -97,13 +98,19 @@ impl RunActivityState {
             self.total_elapsed_ms = total_elapsed_ms;
             self.total_timing_observed_at = Some(now);
         }
-        let phase_timing_changed =
-            run_id.is_some() && self.phase_timing_revision != Some(phase_timing_revision);
+        let phase_timing_changed = run_id.is_some()
+            && primary_activity_id.is_some()
+            && self.phase_timing_revision != Some(phase_timing_revision);
         if phase_timing_changed {
             self.primary_activity_id = primary_activity_id.map(str::to_string);
             self.phase_timing_revision = Some(phase_timing_revision);
             self.phase_elapsed_ms = phase_elapsed_ms;
             self.phase_timing_observed_at = Some(now);
+        } else if run_id.is_some() && primary_activity_id.is_none() {
+            self.primary_activity_id = None;
+            self.phase_timing_revision = None;
+            self.phase_elapsed_ms = 0;
+            self.phase_timing_observed_at = None;
         }
         if run_id.is_none() {
             self.root_timing_revision = None;

@@ -39,10 +39,6 @@ pub struct RuntimeResumedSessionStep {
 
 #[derive(Debug)]
 pub enum RuntimeActivityEvent {
-    Changed {
-        kind: sdk::ActivityChangeKind,
-        activity: Box<sdk::ActivityView>,
-    },
     Snapshot(sdk::ActivitySnapshotView),
 }
 

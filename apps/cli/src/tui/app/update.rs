@@ -940,11 +940,9 @@ impl App {
                     summary.root_activity_id.as_str(),
                     summary.root_timing_revision,
                 ));
+            let primary = summary.primary.as_ref();
             let primary_changed = state.phase_timing_identity()
-                != Some((
-                    summary.primary_activity_id.as_str(),
-                    summary.phase_timing_revision,
-                ));
+                != primary.map(|primary| (primary.activity_id.as_str(), primary.timing_revision));
             if root_changed || primary_changed {
                 crate::tui::log_debug!(
                     "[ACTIVITY_TIMING] summary_selected run_id={} root_activity_id={} root_revision={} total_elapsed_ms={} primary_activity_id={} phase_revision={} phase_elapsed_ms={} root_changed={} phase_changed={}",
@@ -952,9 +950,9 @@ impl App {
                     summary.root_activity_id,
                     summary.root_timing_revision,
                     summary.total_elapsed_ms,
-                    summary.primary_activity_id,
-                    summary.phase_timing_revision,
-                    summary.phase_elapsed_ms,
+                    primary.map_or("-", |primary| primary.activity_id.as_str()),
+                    primary.map_or(0, |primary| primary.timing_revision),
+                    primary.map_or(0, |primary| primary.elapsed_ms),
                     root_changed,
                     primary_changed,
                 );

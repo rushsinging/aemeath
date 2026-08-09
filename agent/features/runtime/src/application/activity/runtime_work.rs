@@ -79,20 +79,22 @@ impl ActivityCoordinator {
         &self,
         stage: sdk::CompactStageView,
     ) -> Result<ActivityId, ActivityError> {
-        self.ensure_run_observation_started()?;
-        let parent_activity_id = self
-            .live_run_root_id()
-            .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-activity")))?;
-        self.start(StartActivity {
-            run_step_id: None,
-            parent_activity_id: Some(parent_activity_id),
-            source: ActivitySource::Compaction(ActivityId::new_v7()),
-            kind: ActivityKind::Compaction,
-            detail: ActivityDetail::Compact {
-                stage,
-                work: sdk::CompactWorkView::Indeterminate,
-            },
-            audience: ActivityAudienceView::User,
+        self.transaction(|| {
+            self.ensure_run_observation_started()?;
+            let parent_activity_id = self
+                .live_run_root_id()
+                .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-activity")))?;
+            self.start(StartActivity {
+                run_step_id: None,
+                parent_activity_id: Some(parent_activity_id),
+                source: ActivitySource::Compaction(ActivityId::new_v7()),
+                kind: ActivityKind::Compaction,
+                detail: ActivityDetail::Compact {
+                    stage,
+                    work: sdk::CompactWorkView::Indeterminate,
+                },
+                audience: ActivityAudienceView::User,
+            })
         })
     }
 

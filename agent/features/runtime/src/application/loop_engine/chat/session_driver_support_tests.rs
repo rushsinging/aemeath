@@ -641,18 +641,31 @@ impl ChatEventSink for RecordingSink {
         event: crate::application::loop_engine::chat::RuntimeActivityEvent,
     ) {
         let name = match event {
-            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
-                kind,
-                activity,
-            } if activity.kind == sdk::ActivityKindView::HookDispatch => {
-                format!("HookActivityChanged:{kind:?}:{}", activity.id)
-            }
-            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
-                kind,
-                activity,
-            } => format!("ActivityChanged:{kind:?}:{}", activity.id),
             crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot) => {
-                format!("ActivitySnapshot:{}", snapshot.revision)
+                let live_hook = snapshot.activities.iter().find(|activity| {
+                    activity.kind == sdk::ActivityKindView::HookDispatch
+                        && matches!(
+                            activity.state,
+                            sdk::ActivityStateView::Running | sdk::ActivityStateView::Waiting
+                        )
+                });
+                let terminal_hook = snapshot.activities.iter().find(|activity| {
+                    activity.kind == sdk::ActivityKindView::HookDispatch
+                        && !matches!(
+                            activity.state,
+                            sdk::ActivityStateView::Running | sdk::ActivityStateView::Waiting
+                        )
+                });
+                if let Some(activity) = live_hook {
+                    format!("HookActivitySnapshot:Live:{}", activity.id)
+                } else if let Some(activity) = terminal_hook {
+                    format!("HookActivitySnapshot:Terminal:{}", activity.id)
+                } else {
+                    format!(
+                        "ActivitySnapshot:{}:{}",
+                        snapshot.revision, snapshot.heartbeat_sequence
+                    )
+                }
             }
         };
         self.events.lock().unwrap().push(name);

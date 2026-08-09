@@ -3,9 +3,7 @@ use super::coordinator::{
     ActivityTerminal, StartActivity, UpdateActivity,
 };
 use super::model::{ActivityDetail, ActivityKind, ActivitySource, RunPhaseKind};
-use sdk::{
-    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, RunId,
-};
+use sdk::{ActivityAudienceView, ActivityId, ActivitySnapshotView, RunId};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -293,19 +291,28 @@ fn snapshot_is_parent_before_child_and_then_start_order() {
 }
 
 #[derive(Clone, Default)]
-struct RecordingActivityPublisher {
-    changes: Arc<Mutex<Vec<(ActivityChangeKind, ActivityView)>>>,
+pub(super) struct RecordingActivityPublisher {
     snapshots: Arc<Mutex<Vec<ActivitySnapshotView>>>,
 }
 
-impl ActivityChangePublisher for RecordingActivityPublisher {
-    fn publish_change(&self, kind: ActivityChangeKind, activity: ActivityView) {
-        self.changes
+impl RecordingActivityPublisher {
+    pub(super) fn snapshot_count(&self) -> usize {
+        self.snapshots
             .lock()
-            .expect("activity changes lock")
-            .push((kind, activity));
+            .expect("activity snapshots lock")
+            .len()
     }
 
+    pub(super) fn last_snapshot(&self) -> Option<ActivitySnapshotView> {
+        self.snapshots
+            .lock()
+            .expect("activity snapshots lock")
+            .last()
+            .cloned()
+    }
+}
+
+impl ActivityChangePublisher for RecordingActivityPublisher {
     fn publish_snapshot(&self, snapshot: ActivitySnapshotView) {
         self.snapshots
             .lock()
@@ -315,11 +322,87 @@ impl ActivityChangePublisher for RecordingActivityPublisher {
 }
 
 #[test]
+fn heartbeat_snapshot_keeps_business_revision_and_refreshes_root_total() {
+    let clock = FixedActivityClock::new();
+    let publisher = RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        RunId::new("run-heartbeat"),
+        Arc::new(clock.clone()),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher),
+    );
+    coordinator.start(start_tool()).expect("start activity");
+    let business_revision = coordinator.snapshot().revision;
+    clock.advance_ms(2_000);
+
+    let first = coordinator.heartbeat_snapshot();
+    clock.advance_ms(1_000);
+    let second = coordinator.heartbeat_snapshot();
+
+    assert_eq!(first.revision, business_revision);
+    assert_eq!(second.revision, business_revision);
+    assert_eq!(first.heartbeat_sequence, 1);
+    assert_eq!(second.heartbeat_sequence, 2);
+    assert_eq!(first.activities[0].timing.total_elapsed_ms, 2_000);
+    assert_eq!(second.activities[0].timing.total_elapsed_ms, 3_000);
+}
+
+#[test]
+fn snapshot_retains_a_bounded_terminal_history() {
+    let (coordinator, _) = coordinator();
+
+    for index in 0..80 {
+        let activity_id = coordinator
+            .start(StartActivity {
+                run_step_id: None,
+                parent_activity_id: None,
+                source: ActivitySource::Compaction(ActivityId::new(format!("source-{index}"))),
+                kind: ActivityKind::Compaction,
+                detail: ActivityDetail::Compact {
+                    stage: sdk::CompactStageView::Preparing,
+                    work: sdk::CompactWorkView::Indeterminate,
+                },
+                audience: ActivityAudienceView::User,
+            })
+            .expect("start retained activity");
+        coordinator
+            .finish(activity_id, ActivityTerminal::Succeeded)
+            .expect("finish retained activity");
+    }
+
+    let snapshot = coordinator.snapshot();
+    assert_eq!(snapshot.activities.len(), 64);
+    assert!(snapshot
+        .activities
+        .iter()
+        .all(|activity| activity.state == sdk::ActivityStateView::Succeeded));
+}
+
+#[test]
+fn coordinator_publishes_snapshot_instead_of_changed_event_after_mutation() {
+    let clock = FixedActivityClock::new();
+    let publisher = RecordingActivityPublisher::default();
+    let coordinator = ActivityCoordinator::new_with_publisher(
+        RunId::new("run-publish"),
+        Arc::new(clock),
+        Arc::new(FixedActivityIdSource::default()),
+        Arc::new(publisher.clone()),
+    );
+
+    coordinator.start(start_tool()).expect("start activity");
+
+    let snapshots = publisher.snapshots.lock().expect("snapshots lock");
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].revision, 1);
+    assert_eq!(snapshots[0].heartbeat_sequence, 0);
+}
+
+#[test]
 fn coordinator_source_keeps_structured_activity_diagnostic_fields_without_payloads() {
     let source = include_str!("coordinator.rs");
     for field in [
         "activity_change change={:?} run_id={} activity_id={} source={:?} kind={:?} state={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
-        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
+        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} heartbeat_sequence={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
     ] {
         assert!(source.contains(field), "missing activity diagnostic: {field}");
     }
@@ -359,18 +442,25 @@ fn coordinator_publishes_complete_change_after_each_successful_mutation() {
         .finish(activity_id.clone(), ActivityTerminal::Succeeded)
         .expect("finish activity");
 
-    let changes = publisher.changes.lock().expect("activity changes lock");
-    assert_eq!(changes.len(), 4);
-    assert_eq!(changes[0].0, ActivityChangeKind::Started);
-    assert_eq!(changes[0].1.revision, 1);
-    assert_eq!(changes[1].0, ActivityChangeKind::Updated);
-    assert_eq!(changes[1].1.state, sdk::ActivityStateView::Waiting);
-    assert_eq!(changes[2].0, ActivityChangeKind::Updated);
-    assert_eq!(changes[2].1.state, sdk::ActivityStateView::Running);
-    assert_eq!(changes[3].0, ActivityChangeKind::Finished);
-    assert_eq!(changes[3].1.id, activity_id);
-    assert_eq!(changes[3].1.state, sdk::ActivityStateView::Succeeded);
-    assert_eq!(changes[3].1.revision, 4);
+    let snapshots = publisher.snapshots.lock().expect("activity snapshots lock");
+    assert_eq!(snapshots.len(), 4);
+    assert_eq!(snapshots[0].revision, 1);
+    assert_eq!(snapshots[1].revision, 2);
+    assert_eq!(
+        snapshots[1].activities[0].state,
+        sdk::ActivityStateView::Waiting
+    );
+    assert_eq!(snapshots[2].revision, 3);
+    assert_eq!(
+        snapshots[2].activities[0].state,
+        sdk::ActivityStateView::Running
+    );
+    assert_eq!(snapshots[3].revision, 4);
+    assert_eq!(snapshots[3].activities[0].id, activity_id);
+    assert_eq!(
+        snapshots[3].activities[0].state,
+        sdk::ActivityStateView::Succeeded
+    );
 }
 
 #[test]
@@ -389,7 +479,7 @@ fn coordinator_publishes_initial_and_recovery_snapshots() {
     coordinator.publish_snapshot();
 
     let snapshots = publisher.snapshots.lock().expect("activity snapshots lock");
-    assert_eq!(snapshots.len(), 2);
+    assert_eq!(snapshots.len(), 3);
     assert_eq!(snapshots[0].run_id, RunId::new("run-snapshot"));
     assert_eq!(snapshots[0].revision, 0);
     assert!(snapshots[0].activities.is_empty());
@@ -418,9 +508,9 @@ fn idempotent_transition_does_not_publish_a_duplicate_change() {
 
     assert_eq!(
         publisher
-            .changes
+            .snapshots
             .lock()
-            .expect("activity changes lock")
+            .expect("activity snapshots lock")
             .len(),
         1
     );

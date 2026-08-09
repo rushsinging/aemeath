@@ -224,12 +224,6 @@ pub(crate) fn map_activity_event(
     event: crate::application::loop_engine::chat::RuntimeActivityEvent,
 ) -> ChatEvent {
     match event {
-        crate::application::loop_engine::chat::RuntimeActivityEvent::Changed { kind, activity } => {
-            ChatEvent::ActivityChanged {
-                kind,
-                activity: *activity,
-            }
-        }
         crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot) => {
             ChatEvent::ActivitySnapshot(snapshot)
         }

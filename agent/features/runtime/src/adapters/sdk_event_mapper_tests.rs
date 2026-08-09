@@ -86,27 +86,19 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
         timing: sdk::ActivityTimingView::default(),
     };
 
-    let changed = map_activity_event(RuntimeActivityEvent::Changed {
-        kind: sdk::ActivityChangeKind::Updated,
-        activity: Box::new(activity.clone()),
-    });
     let snapshot = map_activity_event(RuntimeActivityEvent::Snapshot(sdk::ActivitySnapshotView {
         run_id: activity.run_id.clone(),
         revision: 3,
+        heartbeat_sequence: 2,
         activities: vec![activity.clone()],
     }));
 
     assert!(matches!(
-        changed,
-        sdk::ChatEvent::ActivityChanged {
-            kind: sdk::ActivityChangeKind::Updated,
-            activity: mapped,
-        } if mapped == activity
-    ));
-    assert!(matches!(
         snapshot,
         sdk::ChatEvent::ActivitySnapshot(mapped)
-            if mapped.revision == 3 && mapped.activities == vec![activity]
+            if mapped.revision == 3
+                && mapped.heartbeat_sequence == 2
+                && mapped.activities == vec![activity]
     ));
 }
 

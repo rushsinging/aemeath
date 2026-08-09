@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(spinner.frame, 12);
         assert_eq!(spinner.verb, "Forging");
         assert_eq!(spinner.elapsed_secs, 12);
-        assert_eq!(spinner.phase_elapsed_secs, 0);
+        assert_eq!(spinner.phase_elapsed_secs, Some(0));
         assert_eq!(spinner.phase_text.as_deref(), Some("Thinking…"));
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]);
         assert_eq!(vm.queued_lines, vec!["> queued input"]);

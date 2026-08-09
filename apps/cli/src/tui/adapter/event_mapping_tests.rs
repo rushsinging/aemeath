@@ -470,6 +470,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
         sdk::ActivitySnapshotView {
             run_id: run_id.clone(),
             revision: 11,
+            heartbeat_sequence: 4,
             activities,
         },
     ));

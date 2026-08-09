@@ -32,15 +32,6 @@ impl SdkChatEventSink {
 impl crate::application::activity::ActivityChangePublisher
     for crate::application::loop_engine::chat::ChatEventSinkHandle
 {
-    fn publish_change(&self, kind: sdk::ActivityChangeKind, activity: sdk::ActivityView) {
-        self.send_activity_event(
-            crate::application::loop_engine::chat::RuntimeActivityEvent::Changed {
-                kind,
-                activity: Box::new(activity),
-            },
-        );
-    }
-
     fn publish_snapshot(&self, snapshot: sdk::ActivitySnapshotView) {
         self.send_activity_event(
             crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot),

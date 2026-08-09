@@ -10,10 +10,12 @@ impl ActivityCoordinator {
         &self,
         events: &[RuntimeLifecycleEvent],
     ) -> Result<(), ActivityError> {
-        for event in events {
-            self.observe_run_event(event)?;
-        }
-        Ok(())
+        self.transaction(|| {
+            for event in events {
+                self.observe_run_event(event)?;
+            }
+            Ok(())
+        })
     }
 
     fn observe_run_event(&self, event: &RuntimeLifecycleEvent) -> Result<(), ActivityError> {

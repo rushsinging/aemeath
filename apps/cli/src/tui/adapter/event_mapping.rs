@@ -647,6 +647,7 @@ fn activity_snapshot(value: sdk::ActivitySnapshotView) -> TuiActivitySnapshot {
     TuiActivitySnapshot {
         run_id: run_id(value.run_id),
         revision: value.revision,
+        heartbeat_sequence: value.heartbeat_sequence,
         activities: value
             .activities
             .into_iter()
