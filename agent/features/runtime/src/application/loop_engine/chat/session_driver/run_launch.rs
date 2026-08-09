@@ -73,7 +73,8 @@ where
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
-            let mut messages = Vec::new();            let mut initial_git_context = (!initial_git_context.is_empty())
+            let mut messages = Vec::new();
+            let mut initial_git_context = (!initial_git_context.is_empty())
                 .then_some(Message::system_generated_user(initial_git_context));
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
@@ -855,7 +856,6 @@ where
                     tool_result_materializer.clone(),
                 );
 
-                let tool_workspace_root = workspace.read().current_workspace_root();
                 // #1494：边流边执行句柄——流中 ToolCallCompleted 即旁路执行工具。
                 // 与工具轮次共享 policy/hook/并发编排；结果缓冲由 engine Tools 阶段统一汇总。
                 let streaming_tool =
@@ -865,7 +865,7 @@ where
                         turn_context.clone(),
                         run_id.clone(),
                         language.clone(),
-                        tool_workspace_root.clone(),
+                        workspace.read(),
                         max_tool_concurrency,
                     ));
                 let model_observer = main_run_port::ChatModelObserver {
@@ -907,7 +907,7 @@ where
                     crate::application::loop_engine::run_services::RuntimeStopHook::new(
                         crate::application::hook::stop_coordination::StopHookExecutionContext::new(
                             runtime_context.hooks(),
-                            workspace.read().current_workspace_root(),
+                            workspace.read(),
                             session_id.clone(),
                             language.clone(),
                         ),
@@ -916,13 +916,12 @@ where
                             continuation: input_continuation.clone(),
                         },
                     );
-                let tool_workspace_root = workspace.read().current_workspace_root();
                 let tool_context = crate::application::tool::coordination::ToolRoundContext {
                     runtime_context: &runtime_context,
                     agent: tool_agent,
                     turn_context: turn_context.clone(),
                     language: &language,
-                    workspace_root: tool_workspace_root.clone(),
+                    workspace_read: workspace.read(),
                     session_id: &session_id,
                     materializer: tool_result_materializer.as_ref(),
                     log_patch: logging::LogContextPatch::default(),
@@ -932,12 +931,13 @@ where
                         tool_context,
                         main_run_port::ChatToolRoundObserver {
                             runtime_context: runtime_context.clone(),
-                            workspace_root: tool_workspace_root,
+                            workspace_read: workspace.read(),
                             turn_context: turn_context.clone(),
                             session_id: session_id.clone(),
                             materializer: tool_result_materializer.clone(),
                         },
-                    );                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
+                    );
+                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
                     active_run.as_ref(),
                     &run_id,
                 );

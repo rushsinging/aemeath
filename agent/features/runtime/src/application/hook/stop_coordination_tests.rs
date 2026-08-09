@@ -9,6 +9,48 @@
 use super::*;
 use crate::application::hook::outcome_mapper::{RuntimeHookExecutionStatus, RuntimeHookReason};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingWorkspaceHook {
+    dispatched_cwds: Mutex<Vec<PathBuf>>,
+}
+
+#[async_trait]
+impl HookPort for RecordingWorkspaceHook {
+    async fn dispatch(
+        &self,
+        _invocation: HookInvocation,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        hook::HookOutcome::proceed()
+    }
+
+    async fn dispatch_at(
+        &self,
+        _invocation: HookInvocation,
+        context: HookDispatchContext,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        self.dispatched_cwds
+            .lock()
+            .unwrap()
+            .push(context.cwd().to_path_buf());
+        hook::HookOutcome::proceed()
+    }
+}
+
+struct StopContextObserver {
+    context: StopHookExecutionContext,
+}
+
+#[async_trait]
+impl StopHookObserver for StopContextObserver {
+    fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
+        Some(self.context.clone())
+    }
+}
 
 /// Helper: build a dispatcher that always returns Continue.
 fn continue_hook_port() -> Arc<dyn HookPort> {
@@ -58,6 +100,81 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
         ))
         .unwrap(),
     )
+}
+
+#[tokio::test]
+async fn stop_hook_reads_workspace_root_when_dispatch_begins() {
+    let repository = tempfile::tempdir().unwrap();
+    let run_git = |args: &[&str], cwd: &std::path::Path| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run_git(
+        &["init", "--initial-branch=main"],
+        repository.path()
+    ));
+    assert!(run_git(&["config", "user.name", "test"], repository.path()));
+    assert!(run_git(
+        &["config", "user.email", "test@example.com"],
+        repository.path()
+    ));
+    assert!(run_git(
+        &["config", "commit.gpgsign", "false"],
+        repository.path()
+    ));
+    std::fs::write(repository.path().join("README.md"), "init").unwrap();
+    assert!(run_git(&["add", "-A"], repository.path()));
+    assert!(run_git(&["commit", "-m", "init"], repository.path()));
+    let linked_root = repository.path().join("linked");
+    assert!(run_git(
+        &[
+            "worktree",
+            "add",
+            linked_root.to_str().unwrap(),
+            "-b",
+            "linked"
+        ],
+        repository.path()
+    ));
+    let main_root = repository.path().canonicalize().unwrap();
+    let workspace = project::wire_production_workspace(main_root.clone())
+        .expect("workspace 初始化成功")
+        .into_views();
+    workspace
+        .control()
+        .enter(Some(linked_root), None, None)
+        .expect("进入 linked worktree");
+    let hook = Arc::new(RecordingWorkspaceHook::default());
+    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let mut observer = StopContextObserver {
+        context: StopHookExecutionContext::new(
+            hook_port,
+            workspace.read(),
+            "test-session".to_string(),
+            "en".to_string(),
+        ),
+    };
+    workspace
+        .control()
+        .exit()
+        .expect("dispatch 前退出 worktree");
+    let mut execution = RunExecutionState::new();
+
+    let outcome = coordinate_stop_hook(
+        &mut observer,
+        &mut execution,
+        1,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("Stop Hook 协调成功");
+
+    assert!(matches!(outcome.decision, StopHookDecision::Proceed));
+    assert_eq!(hook.dispatched_cwds.lock().unwrap().as_slice(), [main_root]);
 }
 
 #[tokio::test]

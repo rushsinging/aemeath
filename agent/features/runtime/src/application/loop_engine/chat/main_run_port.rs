@@ -295,7 +295,7 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
 
 pub(crate) struct ChatToolRoundObserver {
     pub runtime_context: RuntimeContext,
-    pub workspace_root: std::path::PathBuf,
+    pub workspace_read: Arc<dyn project::WorkspaceRead>,
     pub turn_context: RuntimeRunContext,
     pub session_id: String,
     pub materializer:
@@ -341,7 +341,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
             cancel,
             call_count,
             run_step,
-            &self.workspace_root,
+            &self.workspace_read,
         )
         .await;
     }

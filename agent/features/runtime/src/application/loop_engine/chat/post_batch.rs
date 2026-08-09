@@ -11,8 +11,9 @@ pub(crate) async fn run_post_tool_batch(
     cancel: &CancellationToken,
     tool_count: usize,
     step_count: usize,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
 ) {
+    let workspace_root = workspace_read.current_workspace_root();
     let _ = dispatch_hook(
         hook_port,
         activities,
@@ -21,8 +22,12 @@ pub(crate) async fn run_post_tool_batch(
             tool_count,
             summary: format!("batch with {tool_count} tools after {step_count} run steps"),
         }),
-        workspace_root,
+        &workspace_root,
         cancel,
     )
     .await;
 }
+
+#[cfg(test)]
+#[path = "post_batch_tests.rs"]
+mod tests;
