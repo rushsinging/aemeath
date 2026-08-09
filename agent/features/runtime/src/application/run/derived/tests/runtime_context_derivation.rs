@@ -308,6 +308,7 @@ fn make_test_factory() -> RuntimeContextFactory {
         Arc::new(FakeReflHist),
         crate::application::run::test_task_access(),
         Arc::new(FakeHookPort),
+        Arc::new(crate::ports::UnavailableUsageSink),
     )
 }
 

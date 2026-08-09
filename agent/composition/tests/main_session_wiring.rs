@@ -482,6 +482,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         reflection_history,
         task_access,
         hook_runner,
+        Arc::new(runtime::UnavailableUsageSink),
     ));
     let agent_runner = runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopRunner),

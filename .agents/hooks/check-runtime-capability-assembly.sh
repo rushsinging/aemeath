@@ -563,6 +563,8 @@ approved_root_exports = {
     "ToolResultBlobRef",
     "ToolResultMaterializationPolicy",
     "ToolResultMaterializer",
+    "UnavailableUsageSink",
+    "UsageSink",
     "build_agent_runner",
     "build_static_prompt",
     "build_system_prompt_parts",
