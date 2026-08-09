@@ -1,10 +1,10 @@
-use super::agent_progress::AgentActivityLine;
-use super::agent_progress::SubRunActivityWatermark;
+use super::agent_activity::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
 use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use crate::tui::render::output::tool_display::{result_policy, ResultPolicy};
 
 const STREAM_CAP: usize = 4 * 1024;
@@ -118,7 +118,7 @@ impl ConversationModel {
         }
 
         let changes = visible_activity.map_or_else(Vec::new, |activity_line| {
-            self.record_agent_progress(
+            self.record_agent_activities(
                 chat_id,
                 run_id,
                 activity.spawned_by_tool_call_id,
@@ -251,7 +251,7 @@ impl ConversationModel {
         ]
     }
 
-    pub(super) fn record_agent_progress(
+    pub(super) fn record_agent_activities(
         &mut self,
         chat_id: ChatId,
         run_id: ChatRunId,
@@ -259,7 +259,7 @@ impl ConversationModel {
         activities: Vec<AgentActivityLine>,
     ) -> Vec<ConversationChange> {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 View Assembler 投影为
-        // streaming preview 子块），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        // streaming preview 子块），而不是作为独立根级 Agent activity block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
             if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
                 c.id.as_ref()
@@ -273,7 +273,7 @@ impl ConversationModel {
             }
         }
         vec![
-            ConversationChange::AgentProgressRecorded {
+            ConversationChange::AgentActivitiesRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),
                 tool_id: tool_id.to_string(),
             },
@@ -283,8 +283,8 @@ impl ConversationModel {
 
     /// 工具 stdout 流式输出（如 Bash 长输出命令）。
     ///
-    /// 直接写入目标 `ToolCall.streaming_preview`，不经 `agent_progress` 列表。
-    /// 与 sub-agent 的 `record_agent_progress` 职责完全独立。
+    /// 直接写入目标 `ToolCall.streaming_preview`，不经 activity preview。
+    /// 与 sub-agent 的 `record_agent_activities` 职责完全独立。
     pub(super) fn record_tool_streaming_output(
         &mut self,
         chat_id: ChatId,
@@ -310,7 +310,7 @@ impl ConversationModel {
 
     /// 写入 Agent 工具的 role/model 元数据（issue #499）。
     ///
-    /// 由 `AgentProgressKind::Started` 事件触发。仅当 ToolCall 存在且
+    /// 由 `Started activity` 事件触发。仅当 ToolCall 存在且
     /// `agent_meta` 尚未设置时才写入，避免重复覆盖。
     pub(super) fn update_agent_meta(
         &mut self,

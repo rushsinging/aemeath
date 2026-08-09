@@ -195,7 +195,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ErrorAppended { .. }
             | ConversationChange::QueuedSubmissionAdded { .. }
             | ConversationChange::QueuedSubmissionsCleared { .. }
-            | ConversationChange::AgentProgressRecorded { .. }
+            | ConversationChange::AgentActivitiesRecorded { .. }
             | ConversationChange::ToolStreamingOutputRecorded { .. }
             | ConversationChange::AgentMetaUpdated { .. }
             | ConversationChange::BlockCompleted { .. }

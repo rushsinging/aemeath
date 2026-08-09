@@ -125,11 +125,11 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         status: ToolCallStatus::Ready,
     });
     // Agent progress（不影响绑定）
-    model.apply(RecordAgentProgress {
+    model.apply(RecordAgentActivities {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
         tool_id: super::ids::ToolCallId::new("call_agent_1"),
-        message: "reading files...".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files...".to_string())],
     });
     // Agent tool result
     let changes = model.apply(ToolResult {

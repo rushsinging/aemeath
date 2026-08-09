@@ -53,7 +53,7 @@ pub enum ConversationChange {
     QueuedSubmissionsCleared {
         count: usize,
     },
-    AgentProgressRecorded {
+    AgentActivitiesRecorded {
         block_id: String,
         tool_id: String,
     },

@@ -19,7 +19,7 @@ fn test_ensure_runtime_turn_does_not_change_active_chat() {
 }
 
 #[test]
-fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_drifted() {
+fn test_record_agent_activities_uses_explicit_runtime_context_when_active_turn_drifted() {
     let mut model = ConversationModel::default();
     let live_chat = super::ids::ChatId::new("session-live");
     let live_turn = super::ids::ChatRunId::new("turn-live");
@@ -38,11 +38,11 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
     });
     model.ensure_runtime_turn(stale_chat.clone(), stale_turn.clone());
 
-    model.apply(RecordAgentProgress {
+    model.apply(RecordAgentActivities {
         chat_id: live_chat.clone(),
         run_id: live_turn.clone(),
         tool_id: agent_tool_id.clone(),
-        message: "reading files".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files".to_string())],
     });
 
     let live_call = model

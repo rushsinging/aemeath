@@ -291,5 +291,35 @@ PY
 expect_failure "retired stringly CompactProgress"
 cp "$ROOT/packages/sdk/src/chat_event.rs" "$TMP/packages/sdk/src/chat_event.rs"
 
+python3 - "$TMP/apps/cli/src/tui/model/conversation/intent.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "    RecordAgentActivities(RecordAgentActivities),",
+    "    RecordAgentActivities(RecordAgentActivities),\n    RecordAgentProgress(RecordAgentActivities),",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "legacy AgentProgress restored in TUI conversation intent"
+cp "$ROOT/apps/cli/src/tui/model/conversation/intent.rs" \
+  "$TMP/apps/cli/src/tui/model/conversation/intent.rs"
+
+python3 - "$TMP/apps/cli/src/tui/model/output_timeline/item.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "pub enum OutputTimelineItem {",
+    "pub enum OutputTimelineItem {\n    AgentProgress { id: String },",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "dead AgentProgress timeline variant restored"
+cp "$ROOT/apps/cli/src/tui/model/output_timeline/item.rs" \
+  "$TMP/apps/cli/src/tui/model/output_timeline/item.rs"
+
 run_guard
 echo "Runtime event naming negative probes passed."

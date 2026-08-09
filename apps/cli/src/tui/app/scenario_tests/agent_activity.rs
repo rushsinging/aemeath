@@ -3,8 +3,6 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiSubRunIdentity, TuiSubRunStarted, TuiToolCallStatus,
 };
 
-use crate::tui::model::output_timeline::OutputTimelineItem;
-
 use super::super::testing::TuiScenarioHarness;
 
 #[test]
@@ -97,6 +95,7 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         role: Some("coder".to_string()),
         model: "MiniMax/MiniMax-M3".to_string(),
     }));
+    let timeline_len_before_activity = harness.app.model.conversation.timeline.items().len();
     harness.runtime_event(TuiRuntimeEvent::SubRunActivity(TuiSubRunActivity {
         identity: sub_run_identity,
         sequence: 1,
@@ -118,16 +117,10 @@ fn child_progress_attaches_to_parent_agent_block_without_leaking_into_main_timel
         .find(|call| call.name == "Agent")
         .expect("parent Agent tool call should exist");
     assert_eq!(agent_call.activities, vec![marker.to_string()]);
-    assert!(
-        harness
-            .app
-            .model
-            .conversation
-            .timeline
-            .items()
-            .iter()
-            .all(|item| !matches!(item, OutputTimelineItem::AgentProgress { .. })),
-        "child progress must remain inline in the parent Agent block"
+    assert_eq!(
+        harness.app.model.conversation.timeline.items().len(),
+        timeline_len_before_activity,
+        "child activity must not add an independent timeline item"
     );
     assert_eq!(harness.screen().matches(marker).count(), 1);
     harness.assert_idle();

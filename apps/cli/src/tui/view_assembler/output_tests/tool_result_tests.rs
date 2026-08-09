@@ -446,11 +446,11 @@ fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
         status: ToolCallStatus::Ready,
     });
     // 子代理运行中发送 progress（写入 activities）
-    conversation.apply(RecordAgentProgress {
+    conversation.apply(RecordAgentActivities {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
-        message: "子代理最终输出文本".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("子代理最终输出文本".to_string())],
     });
     // 工具完成
     conversation.apply(ToolResult {
@@ -563,11 +563,11 @@ fn test_output_assembler_shows_streaming_preview_while_tool_running() {
         arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(RecordAgentProgress {
+    conversation.apply(RecordAgentActivities {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
-        message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("Agent turn 1/200, messages: 2, est_tokens: 500".to_string())],
     });
 
     let vm = assemble_output_view(&conversation, None);
@@ -699,11 +699,11 @@ fn test_output_assembler_completed_tool_has_single_authoritative_result_child() 
         status: ToolCallStatus::Ready,
     });
     // 运行中发送 streaming progress
-    conversation.apply(RecordAgentProgress {
+    conversation.apply(RecordAgentActivities {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
-        message: "intermediate preview".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("intermediate preview".to_string())],
     });
     // 工具完成
     conversation.apply(ToolResult {

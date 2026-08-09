@@ -158,6 +158,18 @@ if sub_run_model_source.is_file():
             "Sub Run ToolCall presentation must retain structured name/input until View Assembler supplies workspace_root"
         )
 
+conversation_internal_sources = {
+    "intent": root / "apps/cli/src/tui/model/conversation/intent.rs",
+    "change": root / "apps/cli/src/tui/model/conversation/change.rs",
+    "block": root / "apps/cli/src/tui/model/conversation/block.rs",
+    "timeline": root / "apps/cli/src/tui/model/output_timeline/item.rs",
+}
+for source_name, source_path in conversation_internal_sources.items():
+    if source_path.is_file() and "AgentProgress" in source_path.read_text():
+        violations.append(
+            f"TUI {source_name} domain must use AgentActivities naming; AgentProgress is SDK compatibility ingress only"
+        )
+
 conversation_model_source = root / "apps/cli/src/tui/model/conversation/model.rs"
 if conversation_model_source.is_file():
     conversation_model_text = conversation_model_source.read_text()

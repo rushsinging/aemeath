@@ -314,22 +314,9 @@ impl ConversationUpdate for RecordSubRunActivity {
     }
 }
 
-impl ConversationUpdate for RecordAgentProgress {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_progress(
-            self.chat_id,
-            self.run_id,
-            self.tool_id,
-            vec![super::agent_progress::AgentActivityLine::message(
-                self.message,
-            )],
-        )
-    }
-}
-
 impl ConversationUpdate for RecordAgentActivities {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_progress(self.chat_id, self.run_id, self.tool_id, self.activities)
+        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
     }
 }
 impl ConversationUpdate for RecordToolStreamingOutput {
@@ -679,7 +666,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
             Self::RecordSubRunActivity(s) => s.update(model),
-            Self::RecordAgentProgress(s) => s.update(model),
             Self::RecordAgentActivities(s) => s.update(model),
             Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),

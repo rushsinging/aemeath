@@ -1,4 +1,4 @@
-use super::agent_progress::AgentActivityLine;
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolStreamingPreviewPolicy {
@@ -36,7 +36,7 @@ impl ToolStreamingPreviewBuffer {
     }
 
     pub fn push_activity(&mut self, activity: AgentActivityLine) {
-        let super::agent_progress::AgentActivityContent::Text(content) = &activity.content else {
+        let super::agent_activity::AgentActivityContent::Text(content) = &activity.content else {
             self.committed_lines.push(activity);
             self.trim_committed_lines();
             return;
@@ -77,7 +77,7 @@ impl ToolStreamingPreviewBuffer {
         selected
             .into_iter()
             .map(|mut activity| {
-                if let super::agent_progress::AgentActivityContent::Text(content) =
+                if let super::agent_activity::AgentActivityContent::Text(content) =
                     &mut activity.content
                 {
                     *content = truncate_chars(content, self.policy.max_line_chars);

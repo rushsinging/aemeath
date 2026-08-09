@@ -2,7 +2,6 @@
 //!
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
-use super::agent_progress::AgentActivityLine;
 use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::interaction::{
@@ -11,6 +10,7 @@ use super::interaction::{
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -148,14 +148,6 @@ pub struct RecordSubRunActivity {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecordAgentProgress {
-    pub chat_id: ChatId,
-    pub run_id: ChatRunId,
-    pub tool_id: ToolCallId,
-    pub message: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordAgentActivities {
     pub chat_id: ChatId,
     pub run_id: ChatRunId,
@@ -165,7 +157,7 @@ pub struct RecordAgentActivities {
 
 /// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
 /// 由 TUI ACL 消费 `ToolOutputDelta` 后触发，直接写入 `ToolCall.streaming_preview`，
-/// 供 TUI 实时 tail 显示。与 `RecordAgentProgress` 语义独立。
+/// 供 TUI 实时 tail 显示。与结构化 Sub Run activity 语义独立。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordToolStreamingOutput {
     pub chat_id: ChatId,
@@ -175,7 +167,7 @@ pub struct RecordToolStreamingOutput {
 }
 
 /// 更新 Agent 工具的元数据（issue #499）。
-/// 由 `AgentProgressKind::Started` 事件触发，携带 sub-agent resolve 后的
+/// 由 compatibility ACL 翻译的 Started activity 触发，携带 sub-agent resolve 后的
 /// role/model，用于 header 渲染。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpdateAgentMeta {
@@ -415,7 +407,6 @@ pub enum ConversationIntent {
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordSubRunActivity(RecordSubRunActivity),
-    RecordAgentProgress(RecordAgentProgress),
     RecordAgentActivities(RecordAgentActivities),
     RecordToolStreamingOutput(RecordToolStreamingOutput),
     UpdateAgentMeta(UpdateAgentMeta),

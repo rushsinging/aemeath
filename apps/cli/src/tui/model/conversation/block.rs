@@ -91,11 +91,6 @@ pub enum ConversationBlock {
         input_id: String,
         text: String,
     },
-    AgentProgress {
-        id: String,
-        tool_id: ToolCallId,
-        message: String,
-    },
     OrphanToolResult {
         id: String,
         /// 产生该结果的工具名（结果早于 ToolCall 绑定到达）。用于渲染工具摘要，
@@ -141,7 +136,6 @@ impl ConversationBlock {
             | ConversationBlock::System { id, .. }
             | ConversationBlock::Error { id, .. }
             | ConversationBlock::QueuedUserMessage { id, .. }
-            | ConversationBlock::AgentProgress { id, .. }
             | ConversationBlock::OrphanToolResult { id, .. }
             | ConversationBlock::AskUserBatch { id, .. } => id,
             ConversationBlock::ToolCall { id, .. } | ConversationBlock::ToolResult { id, .. } => {

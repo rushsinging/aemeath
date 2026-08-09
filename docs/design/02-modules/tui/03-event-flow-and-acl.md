@@ -456,10 +456,10 @@ type AgentId = String;  // "main" 或 sub-agent 的唯一标识
 1. **MUST** `ChatEventContext` 携带 `agent_id`，标识事件来源的 agent
 2. **MUST** 主 agent 的 `agent_id = "main"`（或 `AgentId::default()`）
 3. **MUST** sub-agent 的 `agent_id` 由 `AgentTool` 在派发时生成（基于 tool_call_id）
-4. **MUST** TUI Model 按 `agent_id` 路由事件到对应的 AgentProgressEntry
+4. **MUST** TUI Model 按 `(agent_id, sub_run_id)` 维护 latest `(sequence, sequence_index)` watermark，并按父 Run 与派生 ToolCall 归属 activity
 5. **MUST** `event_mapping.rs` 把 SDK context 转为携带同一 `agent_id` 的 TUI-owned `UiTurnContext`
-6. **MUST** `agent_event.rs` 与 ConversationModel 按 `agent_id` 路由 `AgentProgress`；ToolCallId **NEVER** 代替 AgentId
-7. **MUST** Main/Sub 并行场景测试证明文本、tool call、progress 与终态不会串流
+6. **MUST** `agent_event.rs` 与 ConversationModel 使用 typed Sub Run identity 路由 activity；ToolCallId **NEVER** 代替 AgentId
+7. **MUST** Main/Sub 并行场景测试证明文本、tool call、activity 与终态不会串流
 
 ## 6. Sub-agent 事件路由（#612）
 
@@ -472,8 +472,8 @@ TUI OutputTimeline
   ├─ UserMessage
   ├─ AssistantText（父 agent 文本）
   ├─ ToolCall: Agent（sub-agent 派发）
-  │   ├─ AgentProgress: "Searching files..."（sub-agent 进度）
-  │   ├─ AgentProgress: "Reading config.rs"（sub-agent 进度）
+  │   ├─ AgentActivity: "Searching files..."（sub-agent activity）
+  │   ├─ AgentActivity: "Reading config.rs"（sub-agent activity）
   │   └─ ToolResult: "Found 3 matches..."（sub-agent result）
   ├─ AssistantText（父 agent 继续文本）
   └─ ...
@@ -483,7 +483,7 @@ TUI OutputTimeline
 |---|---|---|
 | 事件实时性 | 实时传递 | 长任务可观测性 |
 | 展示方式 | 嵌套在 ToolCall 块下 | 明确归属关系 |
-| agent_id 路由 | 按 agent_id 分组 AgentProgressEntry | 支持多 sub-agent 并行 |
+| Sub Run identity 路由 | 每个 `(agent_id, sub_run_id)` 只保留 latest ordering watermark，并将 visible activity 附到 owning Agent ToolCall | 支持多 sub-agent 并行且 retained state 有界 |
 | sub-agent result | 完整回传父 LLM + TUI 展示摘要 | 父 LLM 需完整 result，TUI 只需摘要 |
 | config 继承 | sub-agent 启动时快照父 agent config | 运行中不受父 agent 切换影响 |
 
@@ -497,7 +497,7 @@ TUI OutputTimeline
 | `SubRunActivity::ToolOutput` / `ToolResult` | `RecordSubRunActivity` | 保留结构化输出与结果内容，展示层按工具策略 sanitize |
 | `SubRunActivity::Terminal` | `RecordSubRunActivity` | 保留 typed terminal outcome |
 
-SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；legacy `ToolCalls` 中每个结构化 call 必须按原顺序展开为一个 `SubRunActivity::ToolCall`，共享原始 sequence，并以 `sequence_index` 保存 batch 内顺序，NEVER 截断首项或伪造后续 Runtime sequence。空 batch 映射为空 `RuntimeBatch`，不制造 `Noop` fact。`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
+SDK `AgentProgress` 仅为 compatibility input，只能在 `sdk_event_to_tui_event` 第一 ACL 归一化为上述 canonical facts；ACL 之后，Conversation intent/change 只使用 `RecordAgentActivities` / `AgentActivitiesRecorded`，activity 只内联于 owning Agent ToolCall，且 ConversationBlock / OutputTimelineItem **NEVER** 定义独立 progress variant。legacy `ToolCalls` 中每个结构化 call 必须按原顺序展开为一个 `SubRunActivity::ToolCall`，共享原始 sequence，并以 `sequence_index` 保存 batch 内顺序，NEVER 截断首项或伪造后续 Runtime sequence。空 batch 映射为空 `RuntimeBatch`，不制造 `Noop` fact。`UiEvent::AgentProgress` 与旧 `processing/event_mapping.rs` 已退役，NEVER 恢复第二条兼容链。
 
 Sub Run ToolCall 的 name/input 属于事实，`workspace_root` 属于 TUI presentation context：Model **MUST** 保存结构化 ToolCall activity，**NEVER** 在 reducer 中以 `None` 提前压扁为 header 字符串；View Assembler **MUST** 使用 `WorkspaceProvider` 的当前 `workspace_root` 调 `format_subagent_tool_header`。因此 worktree 变化触发的 output reassembly 可重新生成正确的相对路径，Runtime/SDK event、TUI canonical fact 与 Conversation intent 均 **NEVER** 携带该展示上下文副本。
 

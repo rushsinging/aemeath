@@ -229,14 +229,6 @@ impl OutputViewAssembler {
                 }),
             )),
             OutputTimelineItem::QueuedUserMessage { .. } => None,
-            OutputTimelineItem::AgentProgress { id, message, .. } => Some(leaf(
-                id.clone(),
-                OutputBlockKind::DiagnosticNotice(TextBlockView {
-                    key: id.clone(),
-                    text: message.clone(),
-                    style: SemanticStyle::Running,
-                }),
-            )),
             OutputTimelineItem::AskUserBatch {
                 id,
                 slots,

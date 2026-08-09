@@ -285,17 +285,17 @@ ConversationModel 维护两套**互补投影**：
 | `HookNotice` | Hook 通知 |
 | `Error` | 错误消息 |
 | `Interaction` | UserQuestions / ToolApproval / PlanApproval / HardPause 交互块（同一时刻至多一个） |
-| `AgentProgress` | sub-agent 进度块 |
+- Agent 子 Run activity 不创建独立 block 或 timeline variant；它仅作为 owning Agent ToolCall 的 bounded `activities` preview，由 `RecordAgentActivities` / `AgentActivitiesRecorded` 更新并内联渲染，避免双显示
 
 **一致性保证**：
 
 - 两个投影都由同一次 reducer Intent 事务更新；同一 Intent 涉及二者时，必须先完成全部校验再原子提交，**NEVER** 留下半更新
-- 两者重叠的 User / Assistant / ToolCall / ToolResult、QueuedSubmission 与 AgentProgress 事实使用相同稳定 ID，并保持 Run 内相对顺序、关联关系与终态一致
+- 两者重叠的 User / Assistant / ToolCall / ToolResult 与 QueuedSubmission 事实使用相同稳定 ID，并保持 Run 内相对顺序、关联关系与终态一致；Agent activity 只归 owning ToolCall 所有，不产生平行 timeline 事实
 - `SystemMessage` / `HookNotice` / `Error` / `Interaction` 是 timeline-only 事实；结构化投影 **NEVER** 伪造字段只为让 timeline 可重建
 - `revision` 在一次完整 reducer 事务产生 Change 后只 `wrapping_add(1)` 一次
 - 渲染层以 `(conversation.revision(), workspace_root, view_state.collapsed_revision())` 三元组为 cache key，不变时跳过全量重建；不变量与完整定义见 [04-view-layer.md §3.3 / §5.1](04-view-layer.md)
 - `move_tool_result_after_tool_call` 强制 result 跟在对应 call 之后，处理流式事件乱序
-- invariant test 对重叠 ID、Run 内相对顺序、ToolCall / ToolResult 关联、queued / progress 关联和终态做断言
+- invariant test 对重叠 ID、Run 内相对顺序、ToolCall / ToolResult 关联、queued 关联、Agent activity 的 parent attachment / no-double-display 和终态做断言
 
 结构化 Conversation 投影与 `timeline` **NEVER** 声称可由对方完整重建：它们由 Runtime Published Language 与本地用户 Intent 经同一 reducer 事务形成互补 UI 投影。跨二者只约束重叠事实，不建立虚假的全量派生关系。
 
@@ -564,7 +564,7 @@ ConversationChange 覆盖：
 - 内容追加：`UserMessageAppended` / `AssistantTextAppended` / `ThinkingTextAppended` / `SystemMessageAppended` / `ErrorAppended`
 - 工具追踪：`ToolCallObserved` / `ToolCallBound` / `ToolCallCompleted` / `OrphanToolResultObserved`
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
-- Agent 进度：`AgentProgressRecorded` / `AgentMetaUpdated`
+- Agent activity：`AgentActivitiesRecorded` / `AgentMetaUpdated`；前者只更新 owning Agent ToolCall 的 bounded preview，不创建独立 conversation block 或 output timeline item
 - Interaction：`InteractionShown` / `InteractionUpdated` / `InteractionReplyRequested` / `InteractionCancelRequested` / `InteractionStateChanged` / `InteractionProtocolConflict`
 - 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `RuntimeStatusReplaced` / `ActivityObservationChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
 - 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`

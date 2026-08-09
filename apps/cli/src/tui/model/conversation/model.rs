@@ -1,5 +1,5 @@
 use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
-use super::agent_progress::SubRunActivityWatermark;
+use super::agent_activity::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatRun;
@@ -22,7 +22,7 @@ pub(crate) struct ConversationRetainedStateSnapshot {
     pub tool_calls: usize,
     pub timeline_items: usize,
     pub sub_run_watermarks: usize,
-    pub legacy_agent_progress_entries: usize,
+    pub has_legacy_activity_history: bool,
     pub output_view_journal_entries: usize,
     pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
@@ -173,7 +173,7 @@ impl ConversationModel {
             tool_calls,
             timeline_items: self.timeline.items().len(),
             sub_run_watermarks: self.sub_run_watermarks.len(),
-            legacy_agent_progress_entries: 0,
+            has_legacy_activity_history: false,
             output_view_journal_entries,
             output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),
@@ -426,7 +426,7 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         | ConversationChange::AskUserShown { id: block_id }
         | ConversationChange::AskUserUpdated { id: block_id }
         | ConversationChange::OrphanToolResultObserved { id: block_id }
-        | ConversationChange::AgentProgressRecorded {
+        | ConversationChange::AgentActivitiesRecorded {
             block_id,
             tool_id: _,
         }
