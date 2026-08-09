@@ -465,7 +465,7 @@ pub struct ReflectionHistoryView {
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
-    /// Runtime Activity 的完整增量观测。
+    /// Public wire compatibility：旧消费者仍可反序列化完整增量观测；生产 mapper 不再发布。
     ActivityChanged {
         kind: ActivityChangeKind,
         activity: ActivityView,

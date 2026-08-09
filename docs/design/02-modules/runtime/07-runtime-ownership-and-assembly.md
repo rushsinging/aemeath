@@ -684,19 +684,18 @@ Runtime application 回答“何时发生什么业务动作”：
 - 在 Run 创建点调用 `RunFactory::create` 取得 `RunInstance`；
 - 驱动 Loop 和领域状态迁移。
 
-### 7.3 退役 `from_args.rs` 大装配器
+### 7.3 Runtime bootstrap 已收敛但仍待拆薄
 
-当前 `from_args.rs` 同时承担参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、Agent runner 创建、基础设施创建和 Client 构造，已形成 Runtime 内第二个 Composition Root。
+当前 `application/client/from_args.rs` 不再构造供应 BC 的具体 adapter；Composition 通过 `RuntimeBootstrapDependencies` 注入 opaque wiring、ports、窄 factory 与唯一 `RuntimeContextFactory`，Main/Derived Run 都经 `RunFactory` → `RunLauncher`。因此它已经不是第二个 Composition Root。
 
-目标不是把整个文件移动到 `agent/composition`，而是按职责拆解：
+该文件仍承担 Session 恢复、模型/Prompt/Skill 绑定进 Client shell、typed bootstrap request 处理和 Client 构造等多个 Runtime application bootstrap 职责。后续拆分属于可维护性工作：
 
-- 入站边界先将 CLI/SDK args 标准化为 typed bootstrap request；
-- Composition 完成具体 adapter/object graph；
-- Runtime bootstrap 只执行 Session 启动用例并创建 `SessionState`；
-- Provider、Prompt、Skill 初始化委托各自 application service；
-- Run 创建统一提交 `RunCreationRequest`。
+- 入站边界继续将 CLI/SDK args 标准化为 typed bootstrap request；
+- Composition 保持具体 adapter/object graph 的唯一装配所有者；
+- Runtime bootstrap 按 Session、模型、Prompt/Skill 与 Client construction 拆成窄 application services；
+- Run 创建继续唯一提交 `RunCreationRequest`，不得恢复 Main/Sub 分叉装配。
 
-最终 `from_args.rs` 应删除，或收敛为很薄的 `bootstrap_runtime(request, services)` 入口。
+`from_args.rs` 的退出标准是收敛为薄的 `bootstrap_runtime(request, services)` 编排入口；文件大小本身不是恢复第二 Composition Root 的证据。
 
 ## 8. Workspace、Prompt、Skills 与 Config
 

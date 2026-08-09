@@ -289,7 +289,9 @@ ActivityCoordinator
   ViewAssembler → low-noise Activity Summary
 ```
 
-增量和快照共享同一 Run identity 与 revision 序列。消费者发现 revision gap 时不得从现有事实猜测缺失变化；应保留上一个可信镜像并等待快照。Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
+Runtime production 只发布完整 `ActivitySnapshot`。logical business commit 推进 revision 并把 heartbeat sequence 归零；fixed heartbeat 保持 revision、递增 sequence，并用单一 monotonic observation point 刷新 timing。TUI 按 `(revision, heartbeat_sequence)` 原子替换同一 Run 的 Activity fact mirror。SDK `ActivityChanged` 仅保留 public compatibility ingress；Runtime production **NEVER** 发送增量 Activity，也不再依赖 revision gap repair。
+
+Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
 
 
 Runtime 拥有 Reflection 的执行编排；Memory 拥有 prompt/parse/apply 领域能力与 history append/query。Interval、PreCompact、Manual 三种 trigger **MUST** 全部提交到同一个 Runtime 单槽后台 adapter：
