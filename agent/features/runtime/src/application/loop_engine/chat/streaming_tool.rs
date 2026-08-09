@@ -9,7 +9,6 @@
 //!   ToolResult）并暂存 `ToolRoundResult`，由 engine 的 Tools 阶段统一登记与汇总。
 //! - 并发受 `max_tool_concurrency` 限制（semaphore），与普通工具轮次一致。
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -41,7 +40,7 @@ struct StreamingToolInner {
     turn_context: RuntimeRunContext,
     run_id: sdk::RunId,
     language: String,
-    workspace_root: PathBuf,
+    workspace_read: Arc<dyn project::WorkspaceRead>,
     semaphore: Arc<tokio::sync::Semaphore>,
     state: std::sync::Mutex<StreamingToolState>,
 }
@@ -167,7 +166,7 @@ impl StreamingToolExecutor {
         turn_context: RuntimeRunContext,
         run_id: sdk::RunId,
         language: String,
-        workspace_root: PathBuf,
+        workspace_read: Arc<dyn project::WorkspaceRead>,
         max_tool_concurrency: usize,
     ) -> Self {
         Self {
@@ -177,7 +176,7 @@ impl StreamingToolExecutor {
                 turn_context,
                 run_id,
                 language,
-                workspace_root,
+                workspace_read,
                 semaphore: Arc::new(tokio::sync::Semaphore::new(max_tool_concurrency.max(1))),
                 state: std::sync::Mutex::new(StreamingToolState::default()),
             }),
@@ -270,7 +269,7 @@ impl StreamingToolExecutor {
                 spawn_inner.runtime_context.activities().as_ref(),
                 &invocation.cancel,
                 &spawn_inner.language,
-                &spawn_inner.workspace_root,
+                &spawn_inner.workspace_read,
                 &guarded,
             )
             .await;

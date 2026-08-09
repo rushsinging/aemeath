@@ -42,19 +42,20 @@ pub(crate) async fn execute_tool_round<S>(
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
 ) -> ToolRoundResult
 where
     S: ChatEventSink,
 {
+    let workspace_root = workspace_read.current_workspace_root();
     let prepared = prepare_tool_round(
         guarded_calls,
         catalog,
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let denied_results = deny_tool_calls(
         &prepared.denied,
@@ -64,7 +65,7 @@ where
         activities,
         step_id,
         cancel,
-        workspace_root,
+        &workspace_root,
         agent,
     )
     .await;
@@ -135,7 +136,7 @@ where
         activities,
         &non_agent_approved,
         language,
-        workspace_root,
+        workspace_read,
         policy,
         run_id,
         step_id,
@@ -154,7 +155,7 @@ where
         hook_port,
         activities,
         cancel,
-        workspace_root,
+        workspace_read,
         catalog,
         policy,
         run_id,
@@ -301,8 +302,9 @@ pub(crate) async fn run_post_tool_hooks(
     call: &ToolCall,
     execution: &ToolExecution,
     cancel: &CancellationToken,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
 ) {
+    let workspace_root = workspace_read.current_workspace_root();
     let output = &execution.outcome.text;
     let is_error = execution.outcome.is_error;
 
@@ -316,7 +318,7 @@ pub(crate) async fn run_post_tool_hooks(
             tool_output: output.to_string(),
             is_error,
         }),
-        workspace_root,
+        &workspace_root,
         cancel,
     )
     .await;
@@ -331,7 +333,7 @@ pub(crate) async fn run_post_tool_hooks(
                 tool_input: call.input.clone(),
                 error: output.to_string(),
             }),
-            workspace_root,
+            &workspace_root,
             cancel,
         )
         .await;
@@ -569,11 +571,11 @@ mod tests {
             started: started.clone(),
         });
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Arc::new(Agent::for_test(registry.as_ref(), ctx, 10));
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
         let call = ToolCall {
             id: ToolCallId::from_legacy_or_new("agent-cancel"),
             provider_id: "provider-agent-cancel".to_string(),
@@ -586,7 +588,7 @@ mod tests {
         let execution_context = context.clone();
         let execution_sink = sink.clone();
         let execution_hook_port = hook_port.clone();
-        let execution_workspace_root = workspace_root.clone();
+        let execution_workspace_read = workspace_read.clone();
         let execution_call = call.clone();
         let execution_cancel = step_cancel.clone();
         let execution_activities = crate::application::activity::ActivityCoordinator::new(
@@ -608,7 +610,7 @@ mod tests {
                 &execution_activities,
                 &execution_cancel,
                 "en",
-                &execution_workspace_root,
+                &execution_workspace_read,
                 &[(execution_call.clone(), ToolGuardDecision::Allow)],
             )
             .await
@@ -631,11 +633,11 @@ mod tests {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
         let activities = crate::application::activity::ActivityCoordinator::new(
             sdk::RunId::new_v7(),
@@ -656,7 +658,7 @@ mod tests {
             &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
-            &workspace_root,
+            &workspace_read,
             &[(
                 call.clone(),
                 ToolGuardDecision::SoftBlock {
@@ -682,6 +684,7 @@ mod tests {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let mut events = HashMap::new();
@@ -706,7 +709,6 @@ mod tests {
             .unwrap(),
         );
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
         let call = lifecycle_call(0);
         let activities = crate::application::activity::ActivityCoordinator::new(
             sdk::RunId::new_v7(),
@@ -727,7 +729,7 @@ mod tests {
             &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
-            &workspace_root,
+            &workspace_read,
             &[(call.clone(), ToolGuardDecision::Allow)],
         )
         .await;
@@ -752,11 +754,11 @@ mod tests {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
         let activities = crate::application::activity::ActivityCoordinator::new(
             sdk::RunId::new_v7(),
             Arc::new(crate::application::activity::SystemActivityClock),
@@ -782,7 +784,7 @@ mod tests {
             &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
-            &workspace_root,
+            &workspace_read,
             &guarded_calls,
         )
         .await;

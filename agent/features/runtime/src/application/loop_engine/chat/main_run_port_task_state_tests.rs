@@ -120,7 +120,9 @@ fn observer_with_task_store(
 
     ChatToolRoundObserver {
         runtime_context: instance.context().clone(),
-        workspace_root: std::env::temp_dir(),
+        workspace_read: project::wire_production_workspace(std::env::temp_dir())
+            .expect("workspace 初始化成功")
+            .read(),
         turn_context: RuntimeRunContext::new(
             sdk::ChatId::new("chat-live"),
             sdk::ChatRunId::new("run-live"),
@@ -150,7 +152,7 @@ async fn task_mutation_round_publishes_one_final_complete_authoritative_state() 
     let dispatcher = super::committed_side_effect::task_dispatcher(
         &observer.runtime_context,
         observer.session_id.clone(),
-        observer.workspace_root.clone(),
+        observer.workspace_read.current_workspace_root(),
     );
 
     dispatcher

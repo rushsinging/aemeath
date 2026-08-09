@@ -31,7 +31,7 @@ pub(crate) async fn execute_agent_calls<S>(
     hook_port: &Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
@@ -53,7 +53,7 @@ where
             let mut agent_tool_context = agent_ctx.clone();
             let context = context.clone();
             let cancel = cancel.clone();
-            let workspace_root = workspace_root.to_path_buf();
+            let workspace_read = workspace_read.clone();
             let catalog = catalog.clone();
             let run_id = run_id.clone();
             let step_id = step_id.clone();
@@ -74,7 +74,7 @@ where
                     agent,
                     &mut agent_tool_context,
                     &workspace_persist,
-                    &workspace_root,
+                    &workspace_read,
                     &cancel,
                     authorization,
                     &catalog,
@@ -112,7 +112,7 @@ async fn execute_one_agent<S>(
     agent: &crate::application::tool::agent::Agent,
     agent_tool_context: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     cancel: &CancellationToken,
     authorization: tools::AuthorizationContext,
     catalog: &tools::ToolCatalogSnapshot,
@@ -123,6 +123,7 @@ async fn execute_one_agent<S>(
 where
     S: ChatEventSink,
 {
+    let workspace_root = workspace_read.current_workspace_root();
     log::debug!(target: crate::LOG_TARGET,
         "pretooluse timing start: kind=agent tool_name={} runtime_id={} provider_id={} index={} input_len={}",
         call.name,
@@ -142,7 +143,7 @@ where
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
         }),
-        workspace_root,
+        &workspace_root,
         cancel,
     )
     .await;
@@ -182,7 +183,7 @@ where
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let (effective_call, _effective_authorization, _hook_context) = match hook_outcome {
         HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
@@ -349,7 +350,7 @@ where
         &effective_call,
         &execution,
         cancel,
-        workspace_root,
+        workspace_read,
     )
     .await;
     send_tool_result(
@@ -798,7 +799,7 @@ mod tests {
                 &hook_port,
                 &activities,
                 &cancel,
-                std::path::Path::new("."),
+                &ctx.workspace_read(),
                 &catalog,
                 &policy::AllowAllPolicy,
                 &sdk::RunId::new_v7(),

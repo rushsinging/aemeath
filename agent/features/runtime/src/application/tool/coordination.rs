@@ -24,7 +24,7 @@ pub(crate) struct ToolRoundContext<'a> {
     pub agent: crate::application::tool::agent::Agent,
     pub turn_context: crate::application::loop_engine::chat::RuntimeRunContext,
     pub language: &'a str,
-    pub workspace_root: std::path::PathBuf,
+    pub workspace_read: std::sync::Arc<dyn project::WorkspaceRead>,
     pub session_id: &'a str,
     pub materializer:
         &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
@@ -144,6 +144,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         });
     }
     let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+    let workspace_root = context.workspace_read.current_workspace_root();
     let agent = &context.agent;
     let executable = prepare_tool_round(
         calls,
@@ -151,7 +152,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         context.runtime_context.policy_ref().as_ref(),
         run_id,
         step_id,
-        &context.workspace_root,
+        &workspace_root,
     )
     .executable
     .into_iter()
@@ -174,7 +175,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         context.runtime_context.activities().as_ref(),
         cancel,
         context.language,
-        &context.workspace_root,
+        &context.workspace_read,
         calls,
     )
     .await;
