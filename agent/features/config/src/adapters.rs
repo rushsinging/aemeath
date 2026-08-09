@@ -35,7 +35,7 @@ impl std::fmt::Display for ConfigAdapterError {
             Self::Io => write!(formatter, "配置文件读写失败"),
             Self::Parse => write!(formatter, "配置文件格式无效"),
             Self::Invalid => write!(formatter, "配置内容无效"),
-            Self::InvalidModel { detail } => write!(formatter, "模型选择无效：{detail}"),
+            Self::InvalidModel { detail } => write!(formatter, "{detail}"),
             Self::CorruptTransaction => write!(formatter, "配置写入事务损坏"),
             Self::UnsupportedDurability => write!(formatter, "不支持的持久化保证"),
         }
@@ -685,6 +685,8 @@ mod tests {
         );
 
         let error = ConfigValidator::validate(&config).unwrap_err();
+        // Display 直接透传根因，不再叠加「模型选择无效」等冗余包装。
+        let display = error.to_string();
         let ConfigAdapterError::InvalidModel { detail } = error else {
             panic!("未知模型来源应返回带详情的 InvalidModel，实际：{error:?}");
         };
@@ -701,6 +703,7 @@ mod tests {
             detail.contains("未找到模型来源"),
             "detail 应为中文可读诊断：{detail}"
         );
+        assert_eq!(display, detail);
     }
 
     #[test]
