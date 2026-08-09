@@ -38,7 +38,7 @@ pub use application::run::context_factory::RuntimeContextFactory;
 pub use domain::agent_run::RuntimeLifecycleEvent;
 pub use ports::{
     ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
-    ToolResultBlobPort, ToolResultBlobRef,
+    ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
 };
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,

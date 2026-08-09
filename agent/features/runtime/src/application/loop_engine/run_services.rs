@@ -385,7 +385,9 @@ where
     async fn invoke_model(
         &mut self,
         execution: &mut RunExecutionState,
+        run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
+        invocation_id: &sdk::ModelInvocationId,
         cancel: &CancellationToken,
     ) -> Result<
         (
@@ -407,7 +409,9 @@ where
             crate::application::model::invocation::orchestrate_model_invocation(
                 &mut self.observer,
                 execution,
+                run_id,
                 step_id,
+                invocation_id,
                 cancel,
             ),
         )

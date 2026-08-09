@@ -597,10 +597,11 @@ pub trait ModelInvocationPort: Send {
     async fn invoke_model(
         &mut self,
         execution: &mut RunExecutionState,
+        run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
+        invocation_id: &sdk::ModelInvocationId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
-
     /// #1494：取走边流边执行的旁路结果（流中 ToolCallCompleted 已执行完的轮次）。
     /// 非空时 engine 的 Tools 阶段跳过 `execute_tools`，直接汇总缓冲结果。
     async fn take_streaming_tool_results(

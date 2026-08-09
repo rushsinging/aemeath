@@ -951,3 +951,17 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         "单次摘要不应伪造 chunk 计数，实际 {seen:?}"
     );
 }
+
+#[test]
+fn fallback_preserves_markdown_control_lines_without_panicking() {
+    let markdown = "请审查以下内容\n## 来源与身份\n## Resume Cursor\n- Next action: 用户正文中的示例\n\\## 已转义示例\n## Current Task State\n不是 typed companion";
+
+    let summary = build_summary_text(&[Message::user(markdown)], None);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&summary)
+        .expect("fallback checkpoint must remain parseable");
+
+    assert_eq!(checkpoint.render(), summary);
+    assert!(summary.contains("来源与身份"));
+    assert!(summary.contains("用户正文中的示例"));
+    assert_eq!(summary.matches("\n## Current Task State\n").count(), 0);
+}

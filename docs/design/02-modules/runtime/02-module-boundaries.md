@@ -131,6 +131,7 @@ agent/features/runtime/src/
 ### model_invocation 的 Usage 出口
 - Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；`RunStepId` 由 Loop Engine 直接从 Run 聚合取得，**NEVER** 经 adapter 伪造或旁路。
 - `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态。Runtime 只消费 Provider ACL 标准化结果，**NEVER** 解释 vendor wire 字段或重复定义 Usage DTO。
+- Main Session 唯一 `RuntimeContextFactory` 持有 session-scoped `Arc<dyn UsageSink>`；派生 Sub Run 通过同一 factory/services 继承该 Arc，并使用 canonical Main Session ID 构造记录。RuntimeContext 不持有 worker handle，Sub Run 不创建或关闭 Audit worker。
 
 ### agent_client（入站 façade）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；将命令标准化为 typed bootstrap/session/run request，并调用 application service

@@ -69,6 +69,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             }
             Arc::new(FakeHook)
         },
+        usage_sink: Arc::new(crate::ports::UnavailableUsageSink),
     };
     Arc::new(
         crate::application::run::context_factory::RuntimeContextFactory::new(
@@ -78,6 +79,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             services.reflection_history,
             services.task,
             services.hooks,
+            services.usage_sink,
         ),
     )
 }

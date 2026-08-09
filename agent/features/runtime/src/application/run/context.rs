@@ -305,8 +305,9 @@ pub struct RuntimeServices {
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookPort>,
+    /// Audit Usage 事实的非阻塞出站端口。
+    pub usage_sink: Arc<dyn crate::ports::UsageSink>,
 }
-
 #[derive(Clone)]
 pub struct RunCapabilityBindings {
     pub model: ModelBindings,
@@ -373,6 +374,7 @@ pub struct RuntimeContext {
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookPort>,
+    usage_sink: Arc<dyn crate::ports::UsageSink>,
     skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
     skill_load_session_id: String,
     reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
@@ -426,6 +428,7 @@ impl RuntimeContext {
             reflection_history: services.reflection_history,
             task: services.task,
             hooks: services.hooks,
+            usage_sink: services.usage_sink,
             skill_load_state,
             skill_load_session_id: bindings.skill_load_session_id,
             reasoning: bindings.model.reasoning,
@@ -486,6 +489,10 @@ impl RuntimeContext {
     /// Hook 端口，`Arc` clone。
     pub fn hooks(&self) -> Arc<dyn HookPort> {
         self.hooks.clone()
+    }
+    /// Audit Usage 事实的非阻塞出站端口，`Arc` clone。
+    pub fn usage_sink(&self) -> Arc<dyn crate::ports::UsageSink> {
+        self.usage_sink.clone()
     }
     /// Skill 加载状态端口，Sub-run 继承父级的 Context-owned durable backing。
     pub fn skill_load_state(&self) -> Arc<dyn tools::SkillLoadStatePort> {

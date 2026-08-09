@@ -1156,9 +1156,10 @@ impl ModelInvocationPort for ModelInvocationFake {
     async fn invoke_model(
         &mut self,
         _execution: &mut crate::application::run::execution_state::RunExecutionState,
+        _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-        cancel: &CancellationToken,
-    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+        _invocation_id: &sdk::ModelInvocationId,
+        cancel: &CancellationToken,    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         let (
             registered_step,
             cancel_model,

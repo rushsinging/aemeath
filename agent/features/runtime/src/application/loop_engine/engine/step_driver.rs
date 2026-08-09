@@ -119,17 +119,25 @@ pub(super) async fn execute_step_with_scope(
     let model_parent_activity_id = port.activity_parent_id()?;
     let model_name = port.model_name()?.to_string();
     let mut model_attempt = 1_u32;
+    let mut model_invocation_id = sdk::ModelInvocationId::new_v7();
     let mut model_activity_id = port.start_model_activity(
         step_id.clone(),
         model_parent_activity_id,
-        sdk::ModelInvocationId::new_v7(),
+        model_invocation_id.clone(),
         model_name.clone(),
         model_attempt,
     )?;
     let mut compacted_after_context_too_long = false;
     let (model_step, token_usage) = loop {
-        match run_model_invocation_phase(run, execution, &step_id, &step_cancel, port.model_mut())
-            .await
+        match run_model_invocation_phase(
+            run,
+            execution,
+            &step_id,
+            &model_invocation_id,
+            &step_cancel,
+            port.model_mut(),
+        )
+        .await
         {
             ModelInvocationOutcome::Invoked(step, usage) => {
                 port.update_model_activity(
@@ -194,10 +202,11 @@ pub(super) async fn execute_step_with_scope(
                     .await?;
                 transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
                 model_attempt += 1;
+                model_invocation_id = sdk::ModelInvocationId::new_v7();
                 model_activity_id = port.start_model_activity(
                     step_id.clone(),
                     port.activity_parent_id()?,
-                    sdk::ModelInvocationId::new_v7(),
+                    model_invocation_id.clone(),
                     model_name.clone(),
                     model_attempt,
                 )?;

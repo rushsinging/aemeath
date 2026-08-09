@@ -483,20 +483,40 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
         .last()
         .unwrap_or("- Unknown current objective.")
         .to_string();
-    let current_checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(
-        &format!(
-            "## Immutable Constraints\n- Preserve the user's requested action level; do not infer new authority.\n\n\
-             ## Current Objective\n{current_objective}\n\n\
-             ## Committed Facts\n- No completed work could be established from the fallback input.\n\n\
-             ## Uncommitted Working Set\n{user_requests}\n\n\
-             ## Open Decisions / Risks\n- Local text-compaction path used; all reports below are unverified.\n{work_completed}\n\n\
-             ## Resume Cursor\n- Next action: {next_action}\n- Prohibited: do not claim completion, commit, push, merge, or close without evidence and authority.\n\n\
-             ## Required Revalidation\n- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation.\n\n\
-             ## Archived Milestones\n- No stable milestone references established by fallback.\n\n\
-             ## Continuation Status\n{continuation_status}"
-        ),
+    let current_checkpoint = crate::domain::compact::ContinuationCheckpoint::from_sections(
+        crate::domain::compact::CheckpointSections {
+            immutable_constraints: vec![
+                "- Preserve the user's requested action level; do not infer new authority."
+                    .to_string(),
+            ],
+            current_objective: vec![current_objective],
+            committed_facts: vec![
+                "- No completed work could be established from the fallback input.".to_string(),
+            ],
+            uncommitted_working_set: user_requests.lines().map(str::to_string).collect(),
+            open_decisions_and_risks: std::iter::once(
+                "- Local text-compaction path used; all reports below are unverified."
+                    .to_string(),
+            )
+            .chain(work_completed.lines().map(str::to_string))
+            .collect(),
+            resume_cursor_lines: vec![
+                "- Prohibited: do not claim completion, commit, push, merge, or close without evidence and authority."
+                    .to_string(),
+            ],
+            next_action,
+            required_revalidation: vec![
+                "- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation."
+                    .to_string(),
+            ],
+            archived_milestones: vec![
+                "- No stable milestone references established by fallback.".to_string(),
+            ],
+            status: continuation_status.0,
+            status_reason: Some(continuation_status.1),
+        },
     )
-    .expect("fallback checkpoint template must be valid");
+    .expect("fallback checkpoint typed fields must be valid");
     let checkpoint = previous_checkpoint.map_or(current_checkpoint.clone(), |previous| {
         crate::domain::compact::ContinuationCheckpoint::parse(&previous)
             .expect("normalized previous checkpoint must parse")
@@ -558,31 +578,47 @@ fn indicates_completion(text: &str) -> bool {
     .any(|marker| lower.contains(marker))
 }
 
-fn fallback_continuation(last_text: Option<&(Role, String)>) -> (String, String) {
+fn fallback_continuation(
+    last_text: Option<&(Role, String)>,
+) -> (String, (crate::domain::compact::ContinuationStatus, String)) {
     match last_text {
         Some((Role::User, text)) => (
             format!("Address the latest user request without expanding its scope: {text}"),
-            "Continue — the latest compacted message is an unresolved user request.".to_string(),
+            (
+                crate::domain::compact::ContinuationStatus::Continue,
+                "the latest compacted message is an unresolved user request.".to_string(),
+            ),
         ),
         Some((Role::Assistant, text)) if indicates_waiting_for_user(text) => (
             format!("Wait for the user input or approval reported here: {text}"),
-            "Waiting for User — the assistant explicitly reported that user input or approval is required."
-                .to_string(),
+            (
+                crate::domain::compact::ContinuationStatus::WaitingForUser,
+                "the assistant explicitly reported that user input or approval is required."
+                    .to_string(),
+            ),
         ),
         Some((Role::Assistant, text)) if indicates_completion(text) => (
             format!("Wait for the user to confirm completion or request follow-up; reported state: {text}"),
-            "Waiting for User — the assistant reported completion, but deterministic fallback cannot verify delivery or whether follow-up remains."
-                .to_string(),
+            (
+                crate::domain::compact::ContinuationStatus::WaitingForUser,
+                "the assistant reported completion, but deterministic fallback cannot verify delivery or whether follow-up remains."
+                    .to_string(),
+            ),
         ),
         Some((Role::Assistant, text)) => (
             format!("Wait for a new user instruction; last assistant report: {text}"),
-            "Waiting for User — no unambiguous pending user action can be established from the fallback input."
-                .to_string(),
+            (
+                crate::domain::compact::ContinuationStatus::WaitingForUser,
+                "no unambiguous pending user action can be established from the fallback input."
+                    .to_string(),
+            ),
         ),
         None => (
             "Wait for a new user instruction because no actionable text was available.".to_string(),
-            "Waiting for User — deterministic fallback found no actionable user or assistant text."
-                .to_string(),
+            (
+                crate::domain::compact::ContinuationStatus::WaitingForUser,
+                "deterministic fallback found no actionable user or assistant text.".to_string(),
+            ),
         ),
     }
 }

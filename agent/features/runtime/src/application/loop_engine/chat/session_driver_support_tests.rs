@@ -373,8 +373,8 @@ fn test_shell_with_catalog(
                 test_reflection_history_store(),
                 Arc::new(task::TaskStore::new()),
                 hooks,
-            ),
-        ),
+                Arc::new(crate::ports::UnavailableUsageSink),
+            ),        ),
     }
 }
 
@@ -470,8 +470,8 @@ fn test_shell_with_task_store(
                 test_reflection_history_store(),
                 task_store,
                 hooks,
-            ),
-        ),
+                Arc::new(crate::ports::UnavailableUsageSink),
+            ),        ),
     }
 }
 

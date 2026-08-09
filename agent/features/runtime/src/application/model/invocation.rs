@@ -134,10 +134,20 @@ where
     pub(crate) async fn invoke(
         self,
         execution: &mut RunExecutionState,
+        run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
+        invocation_id: &sdk::ModelInvocationId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        invoke_model_impl(self.observer, execution, step_id, cancel).await
+        invoke_model_impl(
+            self.observer,
+            execution,
+            run_id,
+            step_id,
+            invocation_id,
+            cancel,
+        )
+        .await
     }
 }
 
@@ -171,18 +181,22 @@ pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
 pub(crate) async fn orchestrate_model_invocation(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     ModelInvocationContext::new(observer)
-        .invoke(execution, step_id, cancel)
+        .invoke(execution, run_id, step_id, invocation_id, cancel)
         .await
 }
 
 async fn invoke_model_impl(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
@@ -300,6 +314,19 @@ async fn invoke_model_impl(
         }
     };
     let elapsed_secs = started.elapsed().as_secs_f64();
+    let runtime_context = observer.runtime_context();
+    record_successful_usage(
+        runtime_context.usage_sink().as_ref(),
+        crate::application::model::usage::UsageRecordContext {
+            session_id: sdk::SessionId::new(runtime_context.skill_load_session_id()),
+            run_id: run_id.clone(),
+            run_step_id: step_id.clone(),
+            model_invocation_id: invocation_id.clone(),
+            model: binding.model.clone(),
+        },
+        &response,
+        unix_timestamp_millis,
+    );
     observer
         .runtime_context()
         .usage()
@@ -451,6 +478,29 @@ fn deterministic_jitter_millis(attempt: u32) -> u64 {
         u64::from(attempt.wrapping_mul(73) % 251)
     }
 }
+
+fn record_successful_usage(
+    sink: &dyn crate::ports::UsageSink,
+    context: crate::application::model::usage::UsageRecordContext,
+    response: &InvocationResponse,
+    clock: impl Fn() -> u64,
+) {
+    let factory = crate::application::model::usage::UsageRecordFactory::new(clock);
+    if let Some(record) = factory.build_from_raw_usage(context, response.usage.clone()) {
+        let _ = sink.try_record(record);
+    }
+}
+
+fn unix_timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+#[path = "invocation_usage_tests.rs"]
+mod usage_tests;
 
 #[cfg(test)]
 mod tests {

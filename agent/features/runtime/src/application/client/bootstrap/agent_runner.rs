@@ -176,6 +176,7 @@ mod tests {
                     refl,
                     crate::application::run::test_task_access(),
                     hooks,
+                    Arc::new(crate::ports::UnavailableUsageSink),
                 )
             }),
         );

@@ -23,6 +23,22 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
     quiet
 }
 
+async fn run_frontend_with_audit_drain<F, Fut, Error>(
+    client: std::sync::Arc<dyn sdk::AgentClient>,
+    session_audit: Option<&composition::audit::SessionAudit>,
+    frontend: F,
+) -> Result<(), Error>
+where
+    F: FnOnce(std::sync::Arc<dyn sdk::AgentClient>) -> Fut,
+    Fut: std::future::Future<Output = Result<(), Error>>,
+{
+    let result = frontend(client).await;
+    if let Some(session_audit) = session_audit {
+        let _ = session_audit.shutdown().await;
+    }
+    result
+}
+
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
     let quiet = args.quiet;
@@ -57,14 +73,20 @@ pub(crate) async fn run_chat(args: Args) {
             if should_emit_quiet_cli_diagnostic_log(quiet) {
                 crate::tui::log_info!("quiet chat started: session={session_id}");
             }
-            crate::chat::no_tui::run_no_tui_chat(
-                bootstrap.client,
-                session_id,
-                bootstrap.command_router,
-            )
+            let client = bootstrap.client.clone();
+            let command_router = bootstrap.command_router.clone();
+            let quiet_session_id = session_id.clone();
+            run_frontend_with_audit_drain(client, bootstrap.session_audit.as_ref(), move |client| async move {
+                crate::chat::no_tui::run_no_tui_chat(
+                    client,
+                    quiet_session_id,
+                    command_router,
+                )
+                .await
+            })
             .await
-            .unwrap_or_else(|e| {
-                eprintln!("Error: {e}");
+            .unwrap_or_else(|error| {
+                eprintln!("Error: {error}");
                 std::process::exit(1);
             });
             return;
@@ -122,8 +144,13 @@ pub(crate) async fn run_chat(args: Args) {
                 app.session.session_id()
             );
         }
-        app.run(bootstrap.client).await.unwrap_or_else(|e| {
-            crate::tui::log_error!("TUI error: {e}");
+        let client = bootstrap.client.clone();
+        run_frontend_with_audit_drain(client, bootstrap.session_audit.as_ref(), move |client| async move {
+            app.run(client).await
+        })
+        .await
+        .unwrap_or_else(|error| {
+            crate::tui::log_error!("TUI error: {error}");
             std::process::exit(1);
         });
         println!("aemeath --resume {}", session_id);
@@ -135,6 +162,29 @@ pub(crate) async fn run_chat(args: Args) {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn frontend_preserves_original_result_when_audit_drain_is_absent() {
+        let client = std::sync::Arc::new(NoChatClient);
+
+        let result = run_frontend_with_audit_drain(client, None, |_| async {
+            Err::<(), sdk::SdkError>(sdk::SdkError::Internal("frontend failed".to_string()))
+        })
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(sdk::SdkError::Internal(ref message)) if message == "frontend failed"
+        ));
+    }
+
+    struct NoChatClient;
+
+    #[async_trait::async_trait]
+    impl sdk::AgentClient for NoChatClient {
+        async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+            Err(sdk::SdkError::Internal("测试不发起 chat".to_string()))
+        }
+    }
     #[test]
     fn test_should_emit_cli_frontend_started_log() {
         assert!(should_emit_cli_frontend_started_log());

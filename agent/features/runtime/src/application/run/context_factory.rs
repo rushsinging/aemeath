@@ -149,6 +149,7 @@ impl RuntimeContextFactory {
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
+        usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -157,9 +158,9 @@ impl RuntimeContextFactory {
             reflection_history,
             task,
             hooks,
+            usage_sink,
         )
     }
-
     #[allow(clippy::too_many_arguments)]
     fn from_services(
         tool_catalog: Arc<dyn ToolCatalogPort>,
@@ -168,6 +169,7 @@ impl RuntimeContextFactory {
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
+        usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -179,6 +181,7 @@ impl RuntimeContextFactory {
                 published_state:
                     crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
+                usage_sink,
             },
             provider_factory: None,
             skill_catalog: None,
