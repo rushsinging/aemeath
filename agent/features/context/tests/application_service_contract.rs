@@ -312,6 +312,69 @@ fn service() -> ContextApplicationService {
     service_with_session(simple_fake_session())
 }
 
+fn request_with_context_reduction(
+    snip_enabled: bool,
+    microcompact_enabled: bool,
+) -> ContextRequest {
+    let mut request = request();
+    let mut config = Config::default();
+    config.context.snip_enabled = snip_enabled;
+    config.context.microcompact_enabled = microcompact_enabled;
+    request.config_snapshot = ConfigSnapshot::new(config);
+    request
+}
+
+fn result_text(window: &context::domain::ContextWindow, call_id: &str) -> String {
+    window
+        .messages
+        .iter()
+        .flat_map(|message| message.content.iter())
+        .find_map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id, text, ..
+            } if tool_use_id == call_id => text.clone(),
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[tokio::test]
+async fn build_window_honors_independent_context_reduction_switches() {
+    let cases = [
+        (false, false, "obsolete read body", "old search body"),
+        (
+            true,
+            false,
+            "[Superseded tool result: Read /repo/src/lib.rs]",
+            "old search body",
+        ),
+        (
+            false,
+            true,
+            "[Microcompacted tool result: Read]",
+            "[Microcompacted tool result: WebSearch]",
+        ),
+        (
+            true,
+            true,
+            "[Superseded tool result: Read /repo/src/lib.rs]",
+            "[Microcompacted tool result: WebSearch]",
+        ),
+    ];
+
+    for (snip_enabled, microcompact_enabled, expected_read, expected_search) in cases {
+        let mut request = request_with_context_reduction(snip_enabled, microcompact_enabled);
+        request.run_id = RunId::new("active-run");
+        let window = service_with_session(structured_fake_session())
+            .build_window(&request)
+            .await
+            .unwrap();
+
+        assert_eq!(result_text(&window, "old-read-call"), expected_read);
+        assert_eq!(result_text(&window, "old-search-call"), expected_search);
+    }
+}
+
 #[tokio::test]
 async fn build_window_applies_l2_then_l3_before_prompt_memory_and_token_decision() {
     let mut request = request();

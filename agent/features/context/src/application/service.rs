@@ -63,8 +63,17 @@ impl ContextApplicationService {
                 request.run_id.as_ref(),
                 crate::domain::compact::ProtectedRunPolicy::latest_complete_runs(3),
             );
-            let candidate = crate::domain::compact::snip_superseded_exploration(&candidate);
-            crate::domain::compact::microcompact_exploration(&candidate).messages()
+            let candidate = if request.config_snapshot.context_snip_enabled() {
+                crate::domain::compact::snip_superseded_exploration(&candidate)
+            } else {
+                candidate
+            };
+            let candidate = if request.config_snapshot.context_microcompact_enabled() {
+                crate::domain::compact::microcompact_exploration(&candidate)
+            } else {
+                candidate
+            };
+            candidate.messages()
         } else {
             snapshot.messages.clone()
         };
