@@ -429,7 +429,7 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
     assert_eq!(
         port.events()
             .iter()
-            .filter(|event| matches!(event, RunDomainEvent::Terminated { .. }))
+            .filter(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. }))
             .count(),
         1,
         "Run termination must emit exactly one terminal domain event"
@@ -463,11 +463,11 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::StepCancelled { .. })));
 }
 
 #[tokio::test]
@@ -528,11 +528,11 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::StepCancelled { .. })));
 }
 
 #[tokio::test]
@@ -591,7 +591,7 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1308,11 +1308,11 @@ mod interaction_routing {
         assert!(!port
             .events()
             .iter()
-            .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+            .any(|event| matches!(event, RuntimeLifecycleEvent::Resumed { .. })));
         assert_eq!(
             port.events()
                 .iter()
-                .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+                .filter(|event| matches!(event, RuntimeLifecycleEvent::Completed { .. }))
                 .count(),
             1
         );

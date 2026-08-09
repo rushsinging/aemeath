@@ -19,7 +19,7 @@ use crate::application::loop_engine::{EventSinkPort, LoopEngineError, ModelStep}
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{Agent, ToolCall};
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use crate::ports::ContextRequest;
 
 fn request_context_size(request: Option<&ContextRequest>) -> usize {
@@ -161,6 +161,12 @@ pub(crate) fn make_agent(
         agent_semaphore,
         workspace_persist: workspace.persist(),
         tool_result_materializer,
+        committed_side_effects:
+            crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                runtime_context,
+                session_id.to_string(),
+                workspace.read().current_workspace_root(),
+            ),
         runtime_cancellation: cancel.clone(),
     }
 }
@@ -178,7 +184,7 @@ impl EventSinkPort for ChatEventPort {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
         ChatStreamEventObserver {
             sink: self.sink.clone(),
@@ -314,27 +320,11 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
         }
     }
 
-    async fn results_materialized(
-        &mut self,
-        execution: &RunExecutionState,
-        has_task_mutation: bool,
-    ) {
+    async fn results_materialized(&mut self, execution: &RunExecutionState) {
         self.runtime_context
             .event_sink()
             .send_message_state_changed(execution.messages_len())
             .await;
-        if has_task_mutation {
-            let state = crate::application::loop_engine::chat::task_snapshot::build_task_state_view(
-                &**self.runtime_context.task_ref(),
-                self.session_id.as_str(),
-            );
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::TaskStateChanged {
-                    state: Box::new(state),
-                })
-                .await;
-        }
     }
 
     async fn round_finished(

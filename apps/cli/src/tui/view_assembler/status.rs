@@ -72,9 +72,16 @@ impl StatusViewAssembler {
             session_id: session.and_then(|s| s.current_session_id.clone()),
             input_tokens: conversation.runtime.usage.input_tokens,
             output_tokens: conversation.runtime.usage.output_tokens,
-            last_input_tokens: conversation.runtime.usage.last_input_tokens,
+            context_usage_permille: conversation
+                .runtime
+                .runtime_status
+                .as_ref()
+                .map(|status| status.context_budget.usage_permille),
             api_calls: conversation.runtime.usage.api_calls,
-            context_size: presentation.context_size(),
+            context_size: conversation.runtime.runtime_status.as_ref().map_or_else(
+                || presentation.context_size(),
+                |status| status.context_budget.context_size,
+            ),
             tps: conversation.runtime.live_tps.unwrap_or(0.0),
             context: StatusContextViewModel {
                 path_base: workspace.path_base().unwrap_or_default().to_string(),

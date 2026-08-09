@@ -1,9 +1,244 @@
 use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
-    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiHookPoint, TuiInteractionKind,
-    TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    TuiActivitySource, TuiActivityState, TuiCompactStage, TuiCompactWork, TuiHookPoint,
+    TuiInteractionKind, TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
 };
+
+#[test]
+fn assistant_and_thinking_deltas_keep_explicit_tui_fact_names() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-content-delta"),
+        sdk::ChatRunId::new("run-content-delta"),
+    );
+
+    let assistant = sdk_event_to_tui_event(sdk::ChatEvent::AssistantTextDelta {
+        context: context.clone(),
+        delta: "answer".to_owned(),
+    });
+    let thinking = sdk_event_to_tui_event(sdk::ChatEvent::ThinkingDelta {
+        context,
+        delta: "reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. })
+            if delta == "answer"
+    ));
+    assert!(matches!(
+        thinking,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ThinkingDelta { delta, .. })
+            if delta == "reasoning"
+    ));
+}
+
+#[test]
+fn legacy_content_variants_normalize_at_the_tui_boundary() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-legacy-content"),
+        sdk::ChatRunId::new("run-legacy-content"),
+    );
+
+    let assistant = sdk_event_to_tui_event(sdk::ChatEvent::Token {
+        context: context.clone(),
+        text: "legacy answer".to_owned(),
+    });
+    let thinking = sdk_event_to_tui_event(sdk::ChatEvent::Thinking {
+        context,
+        text: "legacy reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. })
+            if delta == "legacy answer"
+    ));
+    assert!(matches!(
+        thinking,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ThinkingDelta { delta, .. })
+            if delta == "legacy reasoning"
+    ));
+}
+
+#[test]
+fn tool_call_started_normalizes_new_and_legacy_sdk_inputs() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-started"),
+        sdk::ChatRunId::new("run-tool-started"),
+    );
+    let id = sdk::ToolCallId::new("tool-started");
+
+    let started = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStarted {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-started".to_owned()),
+        name: "Grep".to_owned(),
+        index: 3,
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStart {
+        context,
+        id,
+        provider_id: Some("provider-started".to_owned()),
+        name: "Grep".to_owned(),
+        index: 3,
+    });
+
+    assert!(matches!(
+        started,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStarted { name, index: 3, .. })
+            if name == "Grep"
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStarted { name, index: 3, .. })
+            if name == "Grep"
+    ));
+}
+
+#[test]
+fn tool_call_delta_and_state_keep_distinct_tui_fact_names() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-split"),
+        sdk::ChatRunId::new("run-tool-split"),
+    );
+    let id = sdk::ToolCallId::new("tool-split");
+
+    let delta = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallArgumentsDelta {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        delta: "{\"file_".to_owned(),
+    });
+    let state = sdk_event_to_tui_event(sdk::ChatEvent::ToolCallStateChanged {
+        context,
+        id,
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        arguments: Some(serde_json::json!({"file_path": "src/lib.rs"})),
+        status: sdk::ToolCallStatusView::Ready,
+    });
+
+    assert!(matches!(
+        delta,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallArgumentsDelta {
+            delta,
+            ..
+        }) if delta == "{\"file_"
+    ));
+    assert!(matches!(
+        state,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolCallStateChanged {
+            arguments: Some(arguments),
+            status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
+            ..
+        }) if arguments["file_path"] == "src/lib.rs"
+    ));
+}
+
+#[test]
+fn tool_output_delta_normalizes_new_and_legacy_sdk_inputs() {
+    let context = sdk::ChatEventContext::new(
+        sdk::ChatId::new("chat-tool-output"),
+        sdk::ChatRunId::new("run-tool-output"),
+    );
+    let tool_id = sdk::ToolCallId::new("tool-output");
+
+    let delta = sdk_event_to_tui_event(sdk::ChatEvent::ToolOutputDelta {
+        context: context.clone(),
+        tool_id: tool_id.clone(),
+        delta: "new output".to_owned(),
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::ToolProgress {
+        context,
+        tool_id,
+        event: sdk::ToolProgressEventView {
+            text: "legacy output".to_owned(),
+        },
+    });
+
+    assert!(matches!(
+        delta,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta { delta, .. })
+            if delta == "new output"
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta { delta, .. })
+            if delta == "legacy output"
+    ));
+}
+
+#[test]
+fn microcompact_completed_normalizes_new_and_legacy_sdk_inputs() {
+    let messages = vec![sdk::ChatMessage::user_text("after compact")];
+
+    let completed = sdk_event_to_tui_event(sdk::ChatEvent::MicrocompactCompleted {
+        messages: messages.clone(),
+        cleared_count: 2,
+    });
+    let legacy = sdk_event_to_tui_event(sdk::ChatEvent::MicrocompactDone {
+        messages,
+        cleared_count: 2,
+    });
+
+    assert!(matches!(
+        completed,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::MicrocompactCompleted {
+            cleared_count: 2,
+            ..
+        })
+    ));
+    assert!(matches!(
+        legacy,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::MicrocompactCompleted {
+            cleared_count: 2,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn compact_operation_facts_normalize_new_and_legacy_sdk_inputs() {
+    let messages = vec![sdk::ChatMessage::user_text("compact")];
+
+    let rolled_back = sdk_event_to_tui_event(sdk::ChatEvent::CompactOperationRolledBack {
+        messages: messages.clone(),
+    });
+    let legacy_rollback = sdk_event_to_tui_event(sdk::ChatEvent::CompactRollback {
+        messages: messages.clone(),
+    });
+    let completed = sdk_event_to_tui_event(sdk::ChatEvent::CompactOperationCompleted {
+        messages: messages.clone(),
+        notice: "complete".to_owned(),
+    });
+    let legacy_finished = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
+        messages,
+        notice: "legacy complete".to_owned(),
+    });
+
+    assert!(matches!(
+        rolled_back,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationRolledBack { .. })
+    ));
+    assert!(matches!(
+        legacy_rollback,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationRolledBack { .. })
+    ));
+    assert!(matches!(
+        completed,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { notice, .. })
+            if notice == "complete"
+    ));
+    assert!(matches!(
+        legacy_finished,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { notice, .. })
+            if notice == "legacy complete"
+    ));
+}
 
 #[test]
 fn session_message_state_maps_count_and_revision_without_messages() {
@@ -147,8 +382,8 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
     let expected_hook_dispatch_id = hook_dispatch_id.as_str().to_string();
     let compaction_id = sdk::ActivityId::new("compaction");
     let expected_compaction_id = compaction_id.as_str().to_string();
-    let child_run_id = sdk::RunId::new("child-run");
-    let expected_child_run_id = child_run_id.as_str().to_string();
+    let sub_run_id = sdk::RunId::new("child-run");
+    let expected_sub_run_id = sub_run_id.as_str().to_string();
     let activities = vec![
         fixture(
             0,
@@ -206,10 +441,10 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
         ),
         fixture(
             5,
-            sdk::ActivitySourceView::ChildRun(child_run_id),
-            sdk::ActivityKindView::ChildRun,
+            sdk::ActivitySourceView::SubRun(sub_run_id),
+            sdk::ActivityKindView::SubRun,
             sdk::ActivityStateView::Waiting,
-            sdk::ActivityDetailView::ChildRun {
+            sdk::ActivityDetailView::SubRun {
                 role: "reviewer".to_string(),
                 model: "claude-opus".to_string(),
             },
@@ -222,8 +457,10 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
             sdk::ActivityStateView::Running,
             sdk::ActivityDetailView::Compact {
                 stage: sdk::CompactStageView::Finalizing,
-                current: Some(2),
-                total: Some(3),
+                work: sdk::CompactWorkView::Determinate {
+                    completed: 2,
+                    total: 3,
+                },
             },
             sdk::ActivityAudienceView::Operational,
         ),
@@ -233,6 +470,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
         sdk::ActivitySnapshotView {
             run_id: run_id.clone(),
             revision: 11,
+            heartbeat_sequence: 4,
             activities,
         },
     ));
@@ -254,10 +492,10 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, ref script, attempt: 4 } if script == "check-stop-failure.sh")
                 && matches!(snapshot.activities[4].source, TuiActivitySource::Interaction(ref id) if id == &expected_interaction_id)
                 && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
-                && matches!(snapshot.activities[5].source, TuiActivitySource::ChildRun(ref id) if id.as_str() == expected_child_run_id)
-                && matches!(snapshot.activities[5].detail, TuiActivityDetail::ChildRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
+                && matches!(snapshot.activities[5].source, TuiActivitySource::SubRun(ref id) if id.as_str() == expected_sub_run_id)
+                && matches!(snapshot.activities[5].detail, TuiActivityDetail::SubRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
                 && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
-                && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, current: Some(2), total: Some(3) })
+                && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, work: TuiCompactWork::Determinate { completed: 2, total: 3 } })
     ));
 }
 
@@ -489,18 +727,6 @@ fn interaction_request_keeps_request_run_and_body_identity() {
             if request.request_id.as_str() == expected_request_id
                 && request.run_id.as_str() == expected_run_id
     ));
-}
-
-#[test]
-fn ask_user_batch_is_retired_and_mapped_to_nop() {
-    let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
-
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::AskUserBatch {
-        items: Vec::new(),
-        reply_tx,
-    });
-
-    assert!(matches!(mapped, SdkEventMapping::Nop));
 }
 
 #[test]

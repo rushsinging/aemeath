@@ -29,17 +29,15 @@ impl App {
             | UiEvent::ToolResult { .. }
             | UiEvent::Usage { .. }
             | UiEvent::LiveTps(_)
-            | UiEvent::AgentProgress { .. }
             | UiEvent::UserMessagesAdopted { .. }
             | UiEvent::UserMessagesQueued { .. }
             | UiEvent::TurnStarted { .. }
             | UiEvent::MicrocompactDone { .. }
             | UiEvent::SessionMessageStateChanged { .. }
             | UiEvent::HookNotice(_)
-            | UiEvent::CompactRollback { .. }
-            | UiEvent::CompactFinished { .. }
+            | UiEvent::CompactOperationRolledBack { .. }
+            | UiEvent::CompactOperationCompleted { .. }
             | UiEvent::GraphPhaseChanged { .. }
-            | UiEvent::CompactProgress { .. }
             | UiEvent::UserMessagesWithdrawn(_)
             | UiEvent::SessionReset
             | UiEvent::ApiError { .. } => {

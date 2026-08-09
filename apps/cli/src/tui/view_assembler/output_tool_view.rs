@@ -109,12 +109,18 @@ pub(super) fn find_tool_view(
             Some(
                 call.activities
                     .iter()
-                    .map(|activity| AgentActivityLineView {
-                        kind: match activity.kind {
-                            crate::tui::model::conversation::agent_progress::AgentActivityKind::Message => AgentActivityKindView::Message,
-                            crate::tui::model::conversation::agent_progress::AgentActivityKind::ToolCall => AgentActivityKindView::ToolCall,
+                    .map(|activity| match &activity.content {
+                        crate::tui::model::conversation::agent_activity::AgentActivityContent::Text(content) => AgentActivityLineView {
+                            kind: AgentActivityKindView::Message,
+                            content: crate::tui::view_model::output::AgentActivityContentView::Text(content.clone()),
                         },
-                        content: activity.content.clone(),
+                        crate::tui::model::conversation::agent_activity::AgentActivityContent::ToolCall { name, input } => AgentActivityLineView {
+                            kind: AgentActivityKindView::ToolCall,
+                            content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                                name: name.clone(),
+                                input: input.clone(),
+                            },
+                        },
                     })
                     .collect(),
             )

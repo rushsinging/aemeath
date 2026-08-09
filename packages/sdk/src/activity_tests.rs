@@ -1,8 +1,8 @@
 use crate::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    ChatEvent, CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView,
-    RunPhaseKindView, RunPurposeView,
+    ChatEvent, CompactStageView, CompactWorkView, HookPointView, InteractionKindView,
+    ModelStreamStateView, RunPhaseKindView, RunPurposeView,
 };
 
 fn activity_fixture() -> ActivityView {
@@ -44,15 +44,29 @@ fn activity_view_round_trip_preserves_identity_revision_and_timing() {
 }
 
 #[test]
+fn activity_snapshot_defaults_legacy_missing_heartbeat_sequence() {
+    let decoded: ActivitySnapshotView = serde_json::from_value(serde_json::json!({
+        "run_id": "019629b7-e290-718d-a600-75299b783309",
+        "revision": 9,
+        "activities": []
+    }))
+    .expect("decode legacy activity snapshot");
+
+    assert_eq!(decoded.heartbeat_sequence, 0);
+}
+
+#[test]
 fn activity_snapshot_carries_complete_views_at_one_run_revision() {
     let snapshot = ActivitySnapshotView {
         run_id: crate::RunId::new("run-1"),
         revision: 9,
+        heartbeat_sequence: 3,
         activities: vec![activity_fixture()],
     };
 
     assert_eq!(snapshot.activities[0].run_id, snapshot.run_id);
     assert_eq!(snapshot.revision, 9);
+    assert_eq!(snapshot.heartbeat_sequence, 3);
 }
 
 #[test]
@@ -68,7 +82,7 @@ fn activity_published_language_serializes_every_closed_variant() {
         serde_json::to_value(ActivityKindView::HookDispatch).unwrap(),
         serde_json::to_value(ActivityKindView::Compaction).unwrap(),
         serde_json::to_value(ActivityKindView::Interaction).unwrap(),
-        serde_json::to_value(ActivityKindView::ChildRun).unwrap(),
+        serde_json::to_value(ActivityKindView::SubRun).unwrap(),
         serde_json::to_value(ActivityStateView::Waiting).unwrap(),
         serde_json::to_value(ActivityStateView::Succeeded).unwrap(),
         serde_json::to_value(ActivityStateView::Failed).unwrap(),
@@ -97,16 +111,18 @@ fn activity_published_language_serializes_every_closed_variant() {
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Compact {
-            stage: CompactStageView::Summarizing,
-            current: Some(2),
-            total: Some(4),
+            stage: CompactStageView::Mapping,
+            work: CompactWorkView::Determinate {
+                completed: 2,
+                total: 4,
+            },
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Interaction {
             kind: InteractionKindView::ToolApproval,
         })
         .unwrap(),
-        serde_json::to_value(ActivityDetailView::ChildRun {
+        serde_json::to_value(ActivityDetailView::SubRun {
             role: "reviewer".to_string(),
             model: "claude-sonnet-4-5".to_string(),
         })
@@ -125,6 +141,7 @@ fn activity_events_keep_change_kind_and_complete_snapshot() {
     let snapshot = ChatEvent::ActivitySnapshot(ActivitySnapshotView {
         run_id: crate::RunId::new("run-1"),
         revision: 9,
+        heartbeat_sequence: 0,
         activities: vec![activity_fixture()],
     });
 

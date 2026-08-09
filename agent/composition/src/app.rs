@@ -11,9 +11,11 @@ use std::path::Path;
 
 pub type AgentClientHandle = Arc<dyn AgentClient>;
 pub type DisplayHistoryQueryHandle = Arc<dyn sdk::DisplayHistoryQuery>;
+pub type RunControlClientHandle = Arc<dyn sdk::RunControlClient>;
 
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
+    pub run_control_client: RunControlClientHandle,
     pub session_audit: Option<crate::audit::SessionAudit>,
     pub display_history_query: DisplayHistoryQueryHandle,
     pub session_id: String,
@@ -306,12 +308,14 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
+    let run_control_client: RunControlClientHandle = Arc::new(runtime_client.client.clone());
     let client = agent_client_from_runtime(runtime_client.client);
     let session_audit = runtime_client.audit;
     let cwd = launch.cwd.clone();
 
     Ok(AgentClientBootstrap {
         client,
+        run_control_client,
         session_audit,
         display_history_query,
         session_id: launch.session_id,

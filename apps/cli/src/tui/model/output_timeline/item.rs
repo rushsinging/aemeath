@@ -70,11 +70,6 @@ pub enum OutputTimelineItem {
         input_id: String,
         text: String,
     },
-    AgentProgress {
-        id: String,
-        tool_id: ToolCallId,
-        message: String,
-    },
     OrphanToolResult {
         id: String,
         tool_name: String,
@@ -109,7 +104,6 @@ impl OutputTimelineItem {
             | OutputTimelineItem::System { id, .. }
             | OutputTimelineItem::Error { id, .. }
             | OutputTimelineItem::QueuedUserMessage { id, .. }
-            | OutputTimelineItem::AgentProgress { id, .. }
             | OutputTimelineItem::OrphanToolResult { id, .. }
             | OutputTimelineItem::AskUserBatch { id, .. } => Cow::Borrowed(id),
             OutputTimelineItem::ToolCall { reference } => Cow::Owned(format!(

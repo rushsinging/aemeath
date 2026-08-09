@@ -178,6 +178,8 @@ impl RuntimeContextFactory {
                 policy,
                 reflection_history,
                 task,
+                published_state:
+                    crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
                 usage_sink,
             },

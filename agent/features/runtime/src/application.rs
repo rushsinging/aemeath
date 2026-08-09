@@ -11,6 +11,7 @@ pub(crate) mod interaction;
 pub(crate) mod loop_engine;
 pub(crate) mod model;
 pub(crate) mod prompt;
+pub(crate) mod published_state;
 pub(crate) mod reflection;
 pub(crate) mod run;
 pub(crate) mod session;

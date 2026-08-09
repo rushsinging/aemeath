@@ -1,4 +1,5 @@
 mod agent_calls;
+pub(crate) mod committed_side_effect;
 pub(crate) mod config_reload;
 pub(crate) mod events;
 #[cfg(test)]
@@ -41,8 +42,8 @@ pub(crate) mod task_snapshot;
 pub(crate) mod tools;
 
 pub use events::{
-    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeResumedSessionStep, RuntimeRunContext,
-    RuntimeStreamEvent, RuntimeToolCallStatus,
+    ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeActivityEvent,
+    RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 pub use input_gate::{
     apply_gate, GateKind, InputEventDrainPort, InputEventFuture, InputEventOptFuture,

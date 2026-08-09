@@ -84,13 +84,13 @@ mod tests {
 
         let now = std::time::Instant::now();
         let mut activity = RunActivityState::default();
-        activity.sync_main_run(Some(&run_id), true, 2, 12_345, 678, now);
+        activity.sync_main_run(Some(&run_id), true, 2, 12_345, 2, 678, now);
         let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);
         assert_eq!(spinner.verb, "Forging");
         assert_eq!(spinner.elapsed_secs, 12);
-        assert_eq!(spinner.phase_elapsed_secs, 0);
+        assert_eq!(spinner.phase_elapsed_secs, Some(0));
         assert_eq!(spinner.phase_text.as_deref(), Some("Thinking…"));
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 1/2 ━━", "✓ #1 done"]);
         assert_eq!(vm.queued_lines, vec!["> queued input"]);

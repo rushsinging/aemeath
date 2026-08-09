@@ -1,8 +1,7 @@
 use super::*;
 use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ResumeConversation, SetCompactProgress, StartChat, ToolCallStart,
-    ToolCallUpdate,
+    ConversationIntent, ResumeConversation, StartChat, ToolCallStart, ToolCallUpdate,
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
@@ -203,33 +202,4 @@ fn error_change_requests_hook_effect_through_coordinator() {
         effect,
         Effect::RunHook { name, message } if name == "error" && message == "坏了"
     )));
-}
-#[test]
-fn set_compact_progress_marks_output_dirty_not_status_only() {
-    let mut model = TuiModel::default();
-    let result = reduce_agent_event(
-        &mut model,
-        AgentEventMapping {
-            conversation: vec![ConversationIntent::SetCompactProgress(SetCompactProgress {
-                stage: "summarizing".into(),
-                current: Some(2),
-                total: Some(10),
-            })],
-            ..Default::default()
-        },
-    );
-    assert!(
-        result.dirty.output,
-        "SetCompactProgress 必须 mark output_dirty（进度条嵌在 spinner 行）"
-    );
-    assert_eq!(
-        model
-            .conversation
-            .runtime
-            .compact_progress
-            .as_ref()
-            .map(|p| p.stage.as_str()),
-        Some("summarizing"),
-        "apply 后 model 应保存 progress 状态"
-    );
 }

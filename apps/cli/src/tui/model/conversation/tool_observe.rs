@@ -1,13 +1,11 @@
-use super::agent_progress::ChildRunActivityEntry;
-use super::agent_progress::{AgentActivityLine, AgentProgressEntry};
+use super::agent_activity::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
 use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
-use crate::tui::render::output::tool_display::{
-    format_subagent_tool_header, result_policy, ResultPolicy,
-};
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
+use crate::tui::render::output::tool_display::{result_policy, ResultPolicy};
 
 const STREAM_CAP: usize = 4 * 1024;
 
@@ -38,58 +36,48 @@ pub(super) struct ToolCallUpdateObservation {
 }
 
 impl ConversationModel {
-    pub(super) fn record_child_run_activity(
+    pub(super) fn record_sub_run_activity(
         &mut self,
-        activity: crate::tui::model::conversation::intent::RecordChildRunActivity,
+        activity: crate::tui::model::conversation::intent::RecordSubRunActivity,
     ) -> Vec<ConversationChange> {
-        use crate::tui::adapter::tui_runtime_event::TuiChildRunActivityKind;
+        use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
 
-        if self.child_run_activities.iter().any(|entry| {
-            entry.agent_id == activity.agent_id
-                && entry.run_id == activity.child_run_id
-                && entry.sequence == activity.sequence
-        }) {
-            return Vec::new();
-        }
-        if let Some(latest_sequence) = self
-            .child_run_activities
-            .iter()
-            .filter(|entry| {
-                entry.agent_id == activity.agent_id && entry.run_id == activity.child_run_id
-            })
-            .map(|entry| entry.sequence)
-            .max()
-        {
-            if activity.sequence <= latest_sequence {
+        let watermark = self.sub_run_watermarks.iter_mut().find(|watermark| {
+            watermark.agent_id == activity.agent_id && watermark.run_id == activity.sub_run_id
+        });
+        if let Some(watermark) = watermark.as_ref() {
+            let latest_sequence = (watermark.sequence, watermark.sequence_index);
+            if (activity.sequence, activity.sequence_index) <= latest_sequence {
                 crate::tui::log_debug!(
-                    "child_run_activity_out_of_order agent_id={} child_run_id={} sequence={} latest_sequence={}",
+                    "sub_run_activity_out_of_order agent_id={} sub_run_id={} sequence={} sequence_index={} latest_sequence={:?}",
                     activity.agent_id,
-                    activity.child_run_id,
+                    activity.sub_run_id,
                     activity.sequence,
+                    activity.sequence_index,
                     latest_sequence,
                 );
                 return Vec::new();
             }
         }
 
-        let visible_message = match &activity.kind {
-            TuiChildRunActivityKind::Text { text } | TuiChildRunActivityKind::Thinking { text } => {
-                Some(text.clone())
+        let visible_activity = match &activity.kind {
+            TuiSubRunActivityKind::Text { text } | TuiSubRunActivityKind::Thinking { text } => {
+                Some(AgentActivityLine::message(text.clone()))
             }
-            TuiChildRunActivityKind::ToolOutput { tool_name, text } => {
-                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| text.clone())
+            TuiSubRunActivityKind::ToolOutput { tool_name, text } => {
+                (!matches!(result_policy(tool_name), ResultPolicy::Hidden))
+                    .then(|| AgentActivityLine::message(text.clone()))
             }
-            TuiChildRunActivityKind::ToolCall { name, input, .. } => {
-                Some(format_subagent_tool_header(name, input, None))
+            TuiSubRunActivityKind::ToolCall { name, input, .. } => {
+                Some(AgentActivityLine::tool_call(name.clone(), input.clone()))
             }
-            TuiChildRunActivityKind::ToolResult {
+            TuiSubRunActivityKind::ToolResult {
                 tool_name, output, ..
-            } => {
-                (!matches!(result_policy(tool_name), ResultPolicy::Hidden)).then(|| output.clone())
-            }
-            TuiChildRunActivityKind::Terminal { outcome } => {
-                Some(format!("Sub-agent terminal: {outcome:?}"))
-            }
+            } => (!matches!(result_policy(tool_name), ResultPolicy::Hidden))
+                .then(|| AgentActivityLine::message(output.clone())),
+            TuiSubRunActivityKind::Terminal { outcome } => Some(AgentActivityLine::message(
+                format!("Sub-agent terminal: {outcome:?}"),
+            )),
         };
 
         let parent_tool_context = self.chats.iter().find_map(|chat| {
@@ -106,9 +94,9 @@ impl ConversationModel {
         });
         let Some((chat_id, run_id)) = parent_tool_context else {
             crate::tui::log_debug!(
-                "child_run_activity_unknown_parent agent_id={} child_run_id={} parent_run_id={} spawned_by_tool_call_id={} sequence={}",
+                "sub_run_activity_unknown_parent agent_id={} sub_run_id={} parent_run_id={} spawned_by_tool_call_id={} sequence={}",
                 activity.agent_id,
-                activity.child_run_id,
+                activity.sub_run_id,
                 activity.parent_run_id,
                 activity.spawned_by_tool_call_id,
                 activity.sequence,
@@ -116,21 +104,25 @@ impl ConversationModel {
             return Vec::new();
         };
 
-        self.child_run_activities.push(ChildRunActivityEntry {
-            agent_id: activity.agent_id,
-            run_id: activity.child_run_id,
-            parent_run_id: activity.parent_run_id,
-            spawned_by_tool_call_id: activity.spawned_by_tool_call_id.to_string(),
-            sequence: activity.sequence,
-            kind: activity.kind,
-        });
+        match watermark {
+            Some(watermark) => {
+                watermark.sequence = activity.sequence;
+                watermark.sequence_index = activity.sequence_index;
+            }
+            None => self.sub_run_watermarks.push(SubRunActivityWatermark {
+                agent_id: activity.agent_id,
+                run_id: activity.sub_run_id,
+                sequence: activity.sequence,
+                sequence_index: activity.sequence_index,
+            }),
+        }
 
-        let changes = visible_message.map_or_else(Vec::new, |message| {
-            self.record_agent_progress(
+        let changes = visible_activity.map_or_else(Vec::new, |activity_line| {
+            self.record_agent_activities(
                 chat_id,
                 run_id,
                 activity.spawned_by_tool_call_id,
-                vec![AgentActivityLine::message(message)],
+                vec![activity_line],
             )
         });
         if changes.is_empty() {
@@ -259,7 +251,7 @@ impl ConversationModel {
         ]
     }
 
-    pub(super) fn record_agent_progress(
+    pub(super) fn record_agent_activities(
         &mut self,
         chat_id: ChatId,
         run_id: ChatRunId,
@@ -267,7 +259,7 @@ impl ConversationModel {
         activities: Vec<AgentActivityLine>,
     ) -> Vec<ConversationChange> {
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 View Assembler 投影为
-        // streaming preview 子块），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        // streaming preview 子块），而不是作为独立根级 Agent activity block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &run_id) {
             if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
                 c.id.as_ref()
@@ -280,12 +272,8 @@ impl ConversationModel {
                 }
             }
         }
-        self.agent_progress
-            .extend(activities.iter().map(|activity| {
-                AgentProgressEntry::new(tool_id.to_string(), activity.content.clone())
-            }));
         vec![
-            ConversationChange::AgentProgressRecorded {
+            ConversationChange::AgentActivitiesRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),
                 tool_id: tool_id.to_string(),
             },
@@ -295,8 +283,8 @@ impl ConversationModel {
 
     /// 工具 stdout 流式输出（如 Bash 长输出命令）。
     ///
-    /// 直接写入目标 `ToolCall.streaming_preview`，不经 `agent_progress` 列表。
-    /// 与 sub-agent 的 `record_agent_progress` 职责完全独立。
+    /// 直接写入目标 `ToolCall.streaming_preview`，不经 activity preview。
+    /// 与 sub-agent 的 `record_agent_activities` 职责完全独立。
     pub(super) fn record_tool_streaming_output(
         &mut self,
         chat_id: ChatId,
@@ -322,7 +310,7 @@ impl ConversationModel {
 
     /// 写入 Agent 工具的 role/model 元数据（issue #499）。
     ///
-    /// 由 `AgentProgressKind::Started` 事件触发。仅当 ToolCall 存在且
+    /// 由 `Started activity` 事件触发。仅当 ToolCall 存在且
     /// `agent_meta` 尚未设置时才写入，避免重复覆盖。
     pub(super) fn update_agent_meta(
         &mut self,

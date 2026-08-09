@@ -104,7 +104,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 
 ```
 Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
-  → sdk_event_to_ui_event（adapter/event_mapping.rs）
+  → sdk_event_to_tui_event（adapter/event_mapping.rs）
   → UiEvent → mpsc channel (cap 256)
   → ui_rx → tokio::select! → TuiMsg::Ui(ui_event)
   → App::update_agent_event()

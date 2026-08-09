@@ -172,24 +172,48 @@ where
                                 dyn context::compact::CompactProgressFn,
                             > = std::sync::Arc::new(
                                 move |stage: context::compact::CompactStage,
-                                      current: Option<usize>,
-                                      total: Option<usize>| {
+                                      work: context::compact::CompactWork| {
                                     let view_stage = match stage {
                                         context::compact::CompactStage::Preparing => {
                                             sdk::CompactStageView::Preparing
                                         }
-                                        context::compact::CompactStage::Summarizing => {
-                                            sdk::CompactStageView::Summarizing
+                                        context::compact::CompactStage::Generating => {
+                                            sdk::CompactStageView::Generating
+                                        }
+                                        context::compact::CompactStage::Mapping => {
+                                            sdk::CompactStageView::Mapping
+                                        }
+                                        context::compact::CompactStage::Reducing => {
+                                            sdk::CompactStageView::Reducing
+                                        }
+                                        context::compact::CompactStage::Refreshing => {
+                                            sdk::CompactStageView::Refreshing
                                         }
                                         context::compact::CompactStage::Finalizing => {
                                             sdk::CompactStageView::Finalizing
                                         }
                                     };
+                                    let view_work = match work {
+                                        context::compact::CompactWork::Indeterminate => {
+                                            sdk::CompactWorkView::Indeterminate
+                                        }
+                                        context::compact::CompactWork::Determinate {
+                                            completed,
+                                            total,
+                                        } => {
+                                            let (Ok(completed), Ok(total)) = (
+                                                u32::try_from(completed),
+                                                u32::try_from(total),
+                                            ) else {
+                                                return;
+                                            };
+                                            sdk::CompactWorkView::Determinate { completed, total }
+                                        }
+                                    };
                                     let _ = coordinator.update_compaction(
                                         activity_id.clone(),
                                         view_stage,
-                                        current.and_then(|value| u32::try_from(value).ok()),
-                                        total.and_then(|value| u32::try_from(value).ok()),
+                                        view_work,
                                     );
                                 },
                             );
@@ -215,8 +239,7 @@ where
                                 if let Err(error) = activity_coordinator.update_compaction(
                                     activity_id.clone(),
                                     sdk::CompactStageView::Finalizing,
-                                    None,
-                                    None,
+                                    sdk::CompactWorkView::Indeterminate,
                                 ) {
                                     log::warn!(
                                         target: crate::LOG_TARGET,
@@ -234,7 +257,7 @@ where
                                 }
                             }
                             messages = result.recent_messages.clone();
-                            sink.send_event(RuntimeStreamEvent::CompactFinished {
+                            sink.send_event(RuntimeStreamEvent::CompactOperationCompleted {
                                 messages: result.recent_messages,
                                 notice: "✓ 上下文压缩完成".to_string(),
                             }).await;
@@ -673,6 +696,33 @@ where
                 let spec = run_instance.run().spec().clone();
 
                 let cancel = runtime_context.cancel().token().clone();
+                let heartbeat_cancel = tokio_util::sync::CancellationToken::new();
+                let heartbeat_task = {
+                    let heartbeat_cancel = heartbeat_cancel.clone();
+                    let registry = runtime_context.published_state();
+                    let sink = runtime_context.event_sink();
+                    let activities = runtime_context.activities().clone();
+                    tokio::spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(std::time::Duration::from_secs(1));
+                        interval.tick().await;
+                        loop {
+                            tokio::select! {
+                                _ = heartbeat_cancel.cancelled() => break,
+                                _ = interval.tick() => {
+                                    if let Some(status) = registry.heartbeat() {
+                                        activities.publish_heartbeat();
+                                        sink.try_send_event(RuntimeStreamEvent::RuntimeStatusChanged {
+                                            status: Box::new(status),
+                                        });
+                                    } else {
+                                        activities.publish_heartbeat();
+                                    }
+                                }
+                            }
+                        }
+                    })
+                };
                 let cacheable_system_prompt = system_blocks
                     .iter()
                     .map(|block| block.text())
@@ -928,6 +978,8 @@ where
                     ),
                 )
                 .await;
+                heartbeat_cancel.cancel();
+                let _ = heartbeat_task.await;
 
                   // #1385 Task 7: Guard is dropped when the block ends,
                   // clearing only the generation we installed.

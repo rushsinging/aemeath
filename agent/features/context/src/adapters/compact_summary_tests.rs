@@ -816,9 +816,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         })
         .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
-    let seen = Arc::new(Mutex::new(
-        Vec::<(String, Option<usize>, Option<usize>)>::new(),
-    ));
+    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWork)>::new()));
 
     struct EchoGenerator;
     #[async_trait::async_trait]
@@ -834,10 +832,10 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
 
     let progress = {
         let seen = seen.clone();
-        move |stage: CompactStage, current: Option<usize>, total: Option<usize>| {
+        move |stage: CompactStage, work: CompactWork| {
             seen.lock()
                 .unwrap()
-                .push((stage.as_str().to_string(), current, total));
+                .push((stage.as_str().to_string(), work));
         }
     };
 
@@ -855,29 +853,44 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
 
     let seen = seen.lock().unwrap();
     assert_eq!(
-        seen.first().map(|(stage, _, _)| stage.as_str()),
+        seen.first().map(|(stage, _)| stage.as_str()),
         Some("preparing"),
         "首个进度必须是 preparing，实际 {seen:?}"
     );
     assert_eq!(
-        seen.last().map(|(stage, _, _)| stage.as_str()),
+        seen.last().map(|(stage, _)| stage.as_str()),
         Some("finalizing"),
         "末个进度必须是 finalizing，实际 {seen:?}"
     );
-    let summarizing: Vec<_> = seen
+    let mapping: Vec<_> = seen
         .iter()
-        .filter(|(stage, _, _)| stage == "summarizing")
+        .filter(|(stage, _)| stage == "mapping")
         .collect();
     assert!(
-        summarizing.len() >= 3,
-        "map-reduce 应上报多个 chunk 进度，实际 {summarizing:?}"
+        mapping.len() >= 3,
+        "map-reduce 应按真实完成上报多个 chunk 进度，实际 {mapping:?}"
     );
-    let (_, first_current, first_total) = summarizing[0];
-    let (_, last_current, last_total) = summarizing.last().unwrap();
-    assert_eq!(first_current, &Some(1), "chunk 进度应从 1 开始");
+    let CompactWork::Determinate {
+        completed: first_completed,
+        total: first_total,
+    } = mapping[0].1
+    else {
+        panic!("mapping 必须是 determinate work")
+    };
+    let CompactWork::Determinate {
+        completed: last_completed,
+        total: last_total,
+    } = mapping.last().unwrap().1
+    else {
+        panic!("mapping 必须是 determinate work")
+    };
+    assert_eq!(first_completed, 1, "chunk 完成计数应从 1 开始");
     assert_eq!(first_total, last_total, "total 必须全程一致");
-    let total = first_total.expect("chunk 进度必须携带 total");
-    assert_eq!(last_current, &Some(total), "最后 chunk 计数应等于 total");
+    assert_eq!(last_completed, last_total, "最后完成计数应等于 total");
+    assert!(
+        seen.iter().any(|(stage, _)| stage == "reducing"),
+        "mapping 完成后必须进入 reducing，实际 {seen:?}"
+    );
 }
 
 /// #1500：单次摘要（非 map-reduce）progress 为阶段事件，chunk 计数为 None。
@@ -889,9 +902,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         .map(|index| Message::user(format!("短会话消息编号 {index}，不足以触发 map-reduce。")))
         .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
-    let seen = Arc::new(Mutex::new(
-        Vec::<(String, Option<usize>, Option<usize>)>::new(),
-    ));
+    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWork)>::new()));
 
     struct EchoGenerator;
     #[async_trait::async_trait]
@@ -907,10 +918,10 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
 
     let progress = {
         let seen = seen.clone();
-        move |stage: CompactStage, current: Option<usize>, total: Option<usize>| {
+        move |stage: CompactStage, work: CompactWork| {
             seen.lock()
                 .unwrap()
-                .push((stage.as_str().to_string(), current, total));
+                .push((stage.as_str().to_string(), work));
         }
     };
 
@@ -929,15 +940,15 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     let seen = seen.lock().unwrap();
     assert_eq!(
         seen.iter()
-            .map(|(stage, _, _)| stage.as_str())
+            .map(|(stage, _)| stage.as_str())
             .collect::<Vec<_>>(),
-        vec!["preparing", "summarizing", "finalizing"],
+        vec!["preparing", "generating", "finalizing"],
         "单次摘要进度序列，实际 {seen:?}"
     );
     assert!(
         seen.iter()
-            .all(|(_, current, total)| current.is_none() && total.is_none()),
-        "单次摘要不应带 chunk 计数，实际 {seen:?}"
+            .all(|(_, work)| *work == CompactWork::Indeterminate),
+        "单次摘要不应伪造 chunk 计数，实际 {seen:?}"
     );
 }
 

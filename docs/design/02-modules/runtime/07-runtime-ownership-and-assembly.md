@@ -650,7 +650,7 @@ attachment_context + tool_id
 1. 派生 Run 创建自己的 `source_context`；同一派生 Run 的 Started、Message、ToolCalls 和 ToolOutput 事件都保留该身份。
 2. 父 Run 执行 Agent ToolCall 时创建 `attachment_context + tool_id`；进度转发器只补充挂载信息，不得改写 `source_context`。
 3. Runtime 出站事件同时携带 `source_context` 与 `attachment_context`。SDK 和 Consumer Adapter 只做逐字段映射，禁止把二者折叠为单一 `context`。
-4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentProgress`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
+4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentActivities`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
 5. Conversation Model 必须按显式 `attachment_context + tool_id` 定位 ToolCall，禁止按 active turn 或全局 `tool_id` 回退搜索。并发 Agent ToolCall 必须保持隔离。
 6. Agent progress 不进入根级 timeline；它只更新 Agent ToolCall 的 `agent_meta` 与 `activities`。工具完成后由既有 ToolResult 渲染规则接管。
 

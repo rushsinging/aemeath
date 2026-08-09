@@ -71,7 +71,7 @@ struct ConversationModel {
     active_main_run_id: Option<RunId>,
     timeline: OutputTimelineModel,
     queued_submissions: Vec<QueuedSubmission>,
-    agent_progress: Vec<AgentProgressEntry>,
+    sub_run_watermarks: Vec<SubRunActivityWatermark>,
     next_run_sequence: usize,
     next_block_sequence: usize,
     revision: u64,
@@ -88,7 +88,8 @@ struct ConversationModel {
 |---|---|---|
 | `run_states` / `active_main_run_id` | private | Runtime typed Run 状态事实镜像；只读 accessor 对 ViewAssembler 开放 |
 | `timeline` | private | 有序展示与交互投影；只读 accessor 对 ViewAssembler 开放（见 §3.5） |
-| `queued_submissions` / `agent_progress` | private | 排队输入与 sub-agent 进度投影 |
+| `queued_submissions` | private | 排队输入投影 |
+| `sub_run_watermarks` | private | 每个 `(agent_id, Sub Run id)` 仅保留最新 `(sequence, sequence_index)`，用于拒绝重复/乱序活动；完整活动只保留在父 Agent ToolCall 的 bounded presentation preview |
 | `next_run_sequence` / `next_block_sequence` | private | ID 序列号 |
 | `revision` | private | 内容版本号，供渲染层 memo |
 | `active_text_block_id` / `active_text_context` | private | 流式文本块追踪 |
@@ -149,6 +150,8 @@ enum TuiRunStatus {
 目标 Runtime 终态只有 `Completed / Failed / Terminated`。迁移期 `Cancelling / Cancelled` 必须由 SDK 与 TUI ACL 无损接纳，但不构成 TUI 自有状态机；用户可见 terminal cause 继续只消费 Runtime 权威 terminal 事件，command result、Interaction reply 或内容事件均不得伪造终态。
 
 `RunStarted`、`RunAwaitingUser`、`RunResumed`、控制 ACK 和 terminal 事件在兼容期仍可承担身份、交互或用户终态职责，但 spinner / 活动展示的生命周期只能由 typed `RunStatusView` 更新的 snapshot 决定。
+
+控制链使用 typed target identity：TUI 在 `RunStepStarted` 时缓存当前 Main `(run_id, step_id)`，Esc / Ctrl+C 优先发出 `CancelRunStep`；仅在 identity 尚不可用的兼容窗口回退到 `CancelCurrentRun`。`CancelRunStepOutcome` 仅是 command ACK：`Accepted / AlreadyCancelling` 可更新 cancelling 提示，但不得停止 processing、追加 terminal notice 或生成取消内容。Step 取消终态只消费 Runtime 发布的 `RunStepCancellationTerminal::{Cancelled, CancellationUnconfirmed}`；Live 与 Resume 均以 Context finalized Step 中同一 typed receipt 事实为输入。
 
 ### 3.3 RunStep 投影与 RunStepStatus 状态机
 
@@ -265,7 +268,7 @@ ConversationModel 维护两套**互补投影**：
 
 | 表示 | 类型 | 用途 |
 |---|---|---|
-| 结构化 Conversation 投影 | `runs` + `queued_submissions` + `agent_progress` | Run / RunStep / ToolCall 生命周期、排队输入与 agent 关联结构 |
+| 结构化 Conversation 投影 | `runs` + `queued_submissions` + `sub_run_watermarks` | Run / RunStep / ToolCall 生命周期、排队输入与 Sub Run 最新顺序水位；NEVER 为活动再建无消费者的完整历史镜像 |
 | 有序交互投影 | `timeline: OutputTimelineModel` | 消息、工具、系统 / Hook / Error、Interaction、progress 与 queued submission 的展示顺序 |
 
 **OutputTimelineItem 变体**：
@@ -282,17 +285,17 @@ ConversationModel 维护两套**互补投影**：
 | `HookNotice` | Hook 通知 |
 | `Error` | 错误消息 |
 | `Interaction` | UserQuestions / ToolApproval / PlanApproval / HardPause 交互块（同一时刻至多一个） |
-| `AgentProgress` | sub-agent 进度块 |
+- Agent 子 Run activity 不创建独立 block 或 timeline variant；它仅作为 owning Agent ToolCall 的 bounded `activities` preview，由 `RecordAgentActivities` / `AgentActivitiesRecorded` 更新并内联渲染，避免双显示
 
 **一致性保证**：
 
 - 两个投影都由同一次 reducer Intent 事务更新；同一 Intent 涉及二者时，必须先完成全部校验再原子提交，**NEVER** 留下半更新
-- 两者重叠的 User / Assistant / ToolCall / ToolResult、QueuedSubmission 与 AgentProgress 事实使用相同稳定 ID，并保持 Run 内相对顺序、关联关系与终态一致
+- 两者重叠的 User / Assistant / ToolCall / ToolResult 与 QueuedSubmission 事实使用相同稳定 ID，并保持 Run 内相对顺序、关联关系与终态一致；Agent activity 只归 owning ToolCall 所有，不产生平行 timeline 事实
 - `SystemMessage` / `HookNotice` / `Error` / `Interaction` 是 timeline-only 事实；结构化投影 **NEVER** 伪造字段只为让 timeline 可重建
 - `revision` 在一次完整 reducer 事务产生 Change 后只 `wrapping_add(1)` 一次
 - 渲染层以 `(conversation.revision(), workspace_root, view_state.collapsed_revision())` 三元组为 cache key，不变时跳过全量重建；不变量与完整定义见 [04-view-layer.md §3.3 / §5.1](04-view-layer.md)
 - `move_tool_result_after_tool_call` 强制 result 跟在对应 call 之后，处理流式事件乱序
-- invariant test 对重叠 ID、Run 内相对顺序、ToolCall / ToolResult 关联、queued / progress 关联和终态做断言
+- invariant test 对重叠 ID、Run 内相对顺序、ToolCall / ToolResult 关联、queued 关联、Agent activity 的 parent attachment / no-double-display 和终态做断言
 
 结构化 Conversation 投影与 `timeline` **NEVER** 声称可由对方完整重建：它们由 Runtime Published Language 与本地用户 Intent 经同一 reducer 事务形成互补 UI 投影。跨二者只约束重叠事实，不建立虚假的全量派生关系。
 
@@ -304,16 +307,16 @@ Run 生命周期事实只存在于 `RunStateSnapshot`；本节保留 usage、pro
 struct RunRuntimeState {
     usage: UsageSummary,
     live_tps: Option<f64>,
+    runtime_status: Option<TuiRuntimeStatus>,
     task_status: TaskStatusSnapshot,
     processing_jobs: Vec<ProcessingJob>,
     status_notice: StatusNotice,
     graph_phase: Option<String>,
     transient_notice_expiry: Option<Instant>,
-    compact_progress: Option<CompactProgressModel>,
 }
 ```
 
-`RunRuntimeState` **NEVER** 保存 `chat_active`、业务 `SpinnerPhase`、running tool counter 或任何能独立启动/停止活动展示的字段。Tool 名称从当前 RunStep 的 tool calls 只读派生；Hook 与 compact progress 仅作为与 typed status 相符时的 detail，缺失或迟到只影响文案精度，不影响生命周期。
+`RunRuntimeState` **NEVER** 保存 `chat_active`、业务 `SpinnerPhase`、running tool counter 或 Compact progress 本地镜像。Tool 名称与 Compact operation progress 从当前 Run 的 typed Activity facts 只读派生；`runtime_status` 按 `(session_id, revision, heartbeat_sequence)` 原子替换。缺失或迟到的 observation 只影响文案精度，不影响生命周期。
 
 ### 3.6.7 Activity 事实镜像
 
@@ -386,6 +389,8 @@ fn assemble_run_activity(
 
 Main `InvokingModel` 静默策略属于 ViewState：进入状态时用可注入单调时钟记录起点；非空 Text、非空 Thinking、ToolCallStart、参数内容实际变化的 ToolCallUpdate 重置静默起点。Usage、重复状态、空 delta、日志、诊断、控制和 Sub Run 事件不重置。离开 `InvokingModel` 立即清除条件，再次进入重新计时。
 
+Spinner 双计时必须保留 Runtime Activity 的两个独立观测域：outer 读取 Main Run root 的 `total_elapsed_ms` 与 root revision，inner 读取当前 primary Activity 的 `state_elapsed_ms` 与 phase revision。`RunActivityState` 分别维护两组本地单调插值基线；root 更新不得重置 phase 基线，phase 切换不得重置或回基 outer 总计时。ViewState 只在 Runtime 观测之间插值，**NEVER** 推导或拥有 Run / phase 生命周期。
+
 临时占位拥有同一静默区间内稳定的 block identity，但不写入 timeline、history 或持久化。真实消息到达后，Assembler 在同一帧不再产出占位，正常内容块按既有路径展示。Runtime 与 SDK **NEVER** 发布 `ModelStreamWaiting` 或 heartbeat。
 
 #### 3.6.2 UsageSummary
@@ -415,16 +420,11 @@ enum ProcessingStatus { Running, Finished, Failed }
 | `start_processing_job(id, chat_id)` | 添加 Running job |
 | `finish_processing_job(id, success)` | 标记 Finished / Failed |
 
-#### 3.6.4 CompactProgressModel
+#### 3.6.4 Runtime Status full-state
 
-```rust
-struct CompactProgressModel { stage: String, current: Option<u32>, total: Option<u32> }
-```
+`TuiRuntimeStatus` 是 Runtime Published State 的 TUI-owned 完整镜像。`ReplaceRuntimeStatus` 只接受同一 Session 更高 business revision，或同 revision 更高 heartbeat sequence；stale 与 duplicate 状态幂等丢弃。Context percentage、threshold 与 decision source 只读该 snapshot，NEVER 从 `UsageSummary.last_input_tokens` 与本地 context size 重建。
 
-| 方法 | 说明 |
-|---|---|
-| `set_compact_progress(stage, current, total)` | 设置进度 + 调用 `start_compact()` 激活 spinner |
-| `clear_compact_runtime()` | 清空 compact_progress + running_tool_count 归零（不改 Run 投影；phase / run_active 继续纯派生） |
+Compact operation progress 不存入 `RunRuntimeState`，而是由 Activity fact mirror 中最新的非 terminal typed `CompactOperation { stage, work }` 派生。旧 stringly `CompactProgressModel`、`set_compact_progress` 与并行清理路径已退役，NEVER 恢复。
 
 #### 3.6.5 StatusNotice
 
@@ -566,9 +566,9 @@ ConversationChange 覆盖：
 - 内容追加：`UserMessageAppended` / `AssistantTextAppended` / `ThinkingTextAppended` / `SystemMessageAppended` / `ErrorAppended`
 - 工具追踪：`ToolCallObserved` / `ToolCallBound` / `ToolCallCompleted` / `OrphanToolResultObserved`
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
-- Agent 进度：`AgentProgressRecorded` / `AgentMetaUpdated`
+- Agent activity：`AgentActivitiesRecorded` / `AgentMetaUpdated`；前者只更新 owning Agent ToolCall 的 bounded preview，不创建独立 conversation block 或 output timeline item
 - Interaction：`InteractionShown` / `InteractionUpdated` / `InteractionReplyRequested` / `InteractionCancelRequested` / `InteractionStateChanged` / `InteractionProtocolConflict`
-- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `CompactProgressChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `RuntimeStatusReplaced` / `ActivityObservationChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
 - 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`
 
 > `InteractionReplyRejected`（outcome=`InvalidReply`）与 `InteractionCancelRejected`（outcome=`CancelRejected`）都经 `InteractionStateChanged` Change 回退 phase 并保留 draft，**NEVER** 折叠进 `InteractionReplyFailed`；完整 outcome → Intent → Change 映射见 [03-event-flow-and-acl.md §4.6](03-event-flow-and-acl.md#46-interaction-command-outcome-类型化投影)。
@@ -888,7 +888,7 @@ enum ConfigChange {
 
 ```text
 SDK ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }
-  → sdk_event_to_ui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
+  → sdk_event_to_tui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
   → UiEvent::WorkingDirectoryChanged(WorkspaceSnapshot)
   → AgentEventMapper（TUI ACL 第二层）
   → WorkspaceIntent::ApplySnapshot(snapshot)

@@ -28,7 +28,7 @@ pub fn result_render_kind(name: &str) -> ResultRender {
     }
 }
 
-/// Format a tool call for sub-agent progress: header only, no result/details.
+/// Format a tool call for sub-agent activity: header only, no result/details.
 pub fn format_subagent_tool_header(
     name: &str,
     input: &serde_json::Value,

@@ -262,17 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn child_run_activity_preserves_identity() {
-        let identity = ChildRunIdentity {
+    fn sub_run_activity_preserves_identity() {
+        let identity = SubRunIdentity {
             agent_id: "agent-child-a".to_string(),
             run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
             parent_run_id: "run-main".to_string(),
             spawned_by_tool_call_id: "tool-agent-a".to_string(),
         };
-        let event = ChildRunActivityEvent {
+        let event = SubRunActivityEvent {
             identity: identity.clone(),
             sequence: 7,
-            kind: ChildRunActivityKind::Thinking {
+            kind: SubRunActivityKind::Thinking {
                 text: "分析配置".to_string(),
             },
         };
@@ -281,7 +282,7 @@ mod tests {
         assert_eq!(event.sequence, 7);
         assert!(matches!(
             event.kind,
-            ChildRunActivityKind::Thinking { ref text } if text == "分析配置"
+            SubRunActivityKind::Thinking { ref text } if text == "分析配置"
         ));
     }
 
@@ -330,15 +331,16 @@ mod tests {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChildRunIdentity {
+pub struct SubRunIdentity {
     pub agent_id: String,
     pub run_id: String,
+    pub parent_chat_id: String,
     pub parent_run_id: String,
     pub spawned_by_tool_call_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ChildRunActivityKind {
+pub enum SubRunActivityKind {
     Text {
         text: String,
     },
@@ -362,22 +364,30 @@ pub enum ChildRunActivityKind {
         is_error: bool,
     },
     Terminal {
-        outcome: ChildRunTerminalOutcome,
+        outcome: SubRunTerminalOutcome,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChildRunTerminalOutcome {
+pub enum SubRunTerminalOutcome {
     Completed,
     Failed { error: String },
     Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChildRunActivityEvent {
-    pub identity: ChildRunIdentity,
+pub struct SubRunStartedEvent {
+    pub identity: SubRunIdentity,
     pub sequence: u64,
-    pub kind: ChildRunActivityKind,
+    pub role: Option<String>,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubRunActivityEvent {
+    pub identity: SubRunIdentity,
+    pub sequence: u64,
+    pub kind: SubRunActivityKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -437,7 +447,7 @@ pub enum AgentProgressKind {
         is_error: bool,
     },
     Terminal {
-        outcome: ChildRunTerminalOutcome,
+        outcome: SubRunTerminalOutcome,
     },
 }
 

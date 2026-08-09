@@ -1,7 +1,7 @@
 use super::super::intent::{AppendUserMessage, AssistantText};
 use super::{ConversationModel, OutputViewChange, OutputViewChanges, OUTPUT_VIEW_JOURNAL_CAPACITY};
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
-use crate::tui::model::conversation::intent::{RecordAgentProgress, ToolCallStart};
+use crate::tui::model::conversation::intent::{RecordAgentActivities, ToolCallStart};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
@@ -100,11 +100,15 @@ fn tool_progress_invalidates_the_existing_tool_root() {
     });
     let cursor = model.output_view_cursor();
 
-    model.apply(RecordAgentProgress {
+    model.apply(RecordAgentActivities {
         chat_id,
         run_id,
         tool_id,
-        message: "reviewing".to_string(),
+        activities: vec![
+            crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
+                "reviewing".to_string(),
+            ),
+        ],
     });
 
     let changes = match model.output_view_changes_since(cursor) {

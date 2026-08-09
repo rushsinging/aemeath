@@ -2,13 +2,12 @@ pub mod activity_observation;
 #[cfg(test)]
 #[path = "conversation/activity_observation_tests.rs"]
 mod activity_observation_tests;
-pub mod agent_progress;
+pub mod agent_activity;
 pub mod ask_user;
 pub mod block;
 pub mod change;
 pub mod chat;
 pub mod chat_turn;
-pub mod compact_progress;
 pub mod history_parse;
 pub mod ids;
 pub mod intent;

@@ -11,7 +11,7 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::{CompactProgressFn, CompactStage};
+pub use compact::{CompactProgressFn, CompactStage, CompactWork};
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
@@ -329,10 +329,12 @@ pub struct CompactionDecision {
     pub needed: bool,
     pub urgency: Urgency,
     /// Token count used for the decision — either provider-reported actual usage
-    /// or the heuristic candidate estimate.  Named `decision_token_count` to
-    /// distinguish it from SDK UI estimates.
+    /// or the heuristic candidate estimate. Named to distinguish it from
+    /// operation progress.
     pub decision_token_count: usize,
     pub threshold: usize,
+    pub context_size: usize,
+    pub effective_window: usize,
     pub reason: DecisionReason,
 }
 

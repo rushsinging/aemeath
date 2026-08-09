@@ -24,6 +24,10 @@ pub enum Effect {
         request: sdk::DisplayHistoryWindowRequest,
     },
     CancelCurrentRun,
+    CancelRunStep {
+        run_id: sdk::RunId,
+        step_id: sdk::RunStepId,
+    },
     ReplyInteraction {
         request_id: UiInteractionRequestId,
         reply: UiInteractionReply,

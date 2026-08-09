@@ -28,17 +28,20 @@ impl LiveStatusAssembler {
         let compact_progress = activity_summary
             .as_ref()
             .and_then(|summary| compact_progress_from_activity(conversation, &summary.run_id));
-        let spinner = activity_summary.map(|summary| SpinnerLineView {
-            frame: activity.frame.max(anim.frame),
-            verb: if activity.verb.is_empty() {
-                anim.verb.clone()
-            } else {
-                activity.verb.clone()
-            },
-            elapsed_secs: activity.total_elapsed_secs(now),
-            phase_elapsed_secs: activity.phase_elapsed_secs(now),
-            phase_text: Some(summary.phase_text),
-            detail_text: summary.detail,
+        let spinner = activity_summary.map(|summary| {
+            let primary = summary.primary;
+            SpinnerLineView {
+                frame: activity.frame.max(anim.frame),
+                verb: if activity.verb.is_empty() {
+                    anim.verb.clone()
+                } else {
+                    activity.verb.clone()
+                },
+                elapsed_secs: activity.total_elapsed_secs(now),
+                phase_elapsed_secs: primary.as_ref().map(|_| activity.phase_elapsed_secs(now)),
+                phase_text: primary.as_ref().map(|primary| primary.phase_text.clone()),
+                detail_text: primary.and_then(|primary| primary.detail),
+            }
         });
         let queued_lines = queued_texts
             .iter()
@@ -58,7 +61,7 @@ fn compact_progress_from_activity(
     run_id: &crate::tui::model::conversation::interaction::UiRunId,
 ) -> Option<crate::tui::view_model::live_status::CompactProgressView> {
     use crate::tui::adapter::tui_runtime_event::{
-        TuiActivityDetail, TuiActivityKind, TuiActivityState, TuiCompactStage,
+        TuiActivityDetail, TuiActivityKind, TuiActivityState, TuiCompactStage, TuiCompactWork,
     };
 
     let activity = conversation
@@ -74,26 +77,36 @@ fn compact_progress_from_activity(
                 )
         })
         .max_by_key(|activity| activity.revision)?;
-    let TuiActivityDetail::Compact {
-        stage,
-        current,
-        total,
-    } = activity.detail
-    else {
+    let TuiActivityDetail::Compact { stage, work } = activity.detail else {
         return None;
     };
     let (stage, ratio_millis) = match stage {
         TuiCompactStage::Preparing => ("preparing", 50),
-        TuiCompactStage::Summarizing => {
-            let ratio_millis = match (current, total) {
-                (Some(current), Some(total)) if total > 0 => {
-                    150u32.saturating_add(700u32.saturating_mul(current) / total)
+        TuiCompactStage::Generating => ("generating", 300),
+        TuiCompactStage::Mapping => {
+            let ratio_millis = match work {
+                TuiCompactWork::Determinate { completed, total } if total > 0 => {
+                    150u32.saturating_add(450u32.saturating_mul(completed) / total)
                 }
-                _ => 500,
+                _ => 350,
             };
-            ("summarizing", ratio_millis)
+            ("mapping", ratio_millis)
+        }
+        TuiCompactStage::Reducing => ("reducing", 700),
+        TuiCompactStage::Refreshing => {
+            let ratio_millis = match work {
+                TuiCompactWork::Determinate { completed, total } if total > 0 => {
+                    750u32.saturating_add(100u32.saturating_mul(completed) / total)
+                }
+                _ => 800,
+            };
+            ("refreshing", ratio_millis)
         }
         TuiCompactStage::Finalizing => ("finalizing", 900),
+    };
+    let (current, total) = match work {
+        TuiCompactWork::Indeterminate => (None, None),
+        TuiCompactWork::Determinate { completed, total } => (Some(completed), Some(total)),
     };
 
     Some(crate::tui::view_model::live_status::CompactProgressView {
@@ -121,7 +134,7 @@ mod tests {
     use super::*;
     use crate::tui::adapter::tui_runtime_event::{
         TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
-        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiCompactStage,
+        TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiCompactStage, TuiCompactWork,
         TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
     };
     use crate::tui::model::conversation::intent::UpdateTaskLines;
@@ -205,17 +218,55 @@ mod tests {
         )
     }
 
-    fn activity_state() -> RunActivityState {
+    fn activity_state_for(model: &ConversationModel) -> RunActivityState {
         let mut state = RunActivityState::default();
-        state.sync_main_run(
-            Some(&UiRunId::from("main-1")),
-            false,
-            2,
-            12_345,
-            6_789,
-            Instant::now(),
-        );
+        let summary = ActivitySummaryAssembler::assemble(model.activity_observations());
+        state.sync_activity_summary(summary.as_ref(), Instant::now());
         state
+    }
+
+    #[test]
+    fn phase_change_resets_inner_timer_without_resetting_outer_total() {
+        let anim = SpinnerAnim::default();
+        let mut model = conversation_with_activities(
+            TuiActivityKind::ModelInvocation,
+            TuiActivityDetail::Model {
+                model: "claude".to_string(),
+                attempt: 1,
+                stream: TuiModelStreamState::Streaming,
+            },
+        );
+        let first_summary = ActivitySummaryAssembler::assemble(model.activity_observations())
+            .expect("first activity summary");
+        let now = Instant::now();
+        let mut activity = RunActivityState::default();
+        activity.sync_activity_summary(Some(&first_summary), now);
+
+        let run_id = first_summary.run_id.clone();
+        let mut observations = model.activity_observations().activities().to_vec();
+        let root = observations
+            .iter_mut()
+            .find(|observation| observation.kind == TuiActivityKind::Run)
+            .expect("main root");
+        root.timing.total_elapsed_ms = 14_000;
+        let phase = observations
+            .iter_mut()
+            .find(|observation| observation.kind != TuiActivityKind::Run)
+            .expect("visible phase");
+        phase.revision = phase.revision.saturating_add(1);
+        phase.timing.state_elapsed_ms = 0;
+        model
+            .activity_observations_mut()
+            .replace_for_test(run_id, 3, observations);
+        let next_summary = ActivitySummaryAssembler::assemble(model.activity_observations())
+            .expect("next activity summary");
+        activity.sync_activity_summary(Some(&next_summary), now);
+
+        let view = LiveStatusAssembler::assemble(&model, &activity, &anim, &[]);
+        let spinner = view.spinner.expect("activity spinner");
+        assert!(spinner.elapsed_secs >= 12);
+        assert!(spinner.elapsed_secs > spinner.phase_elapsed_secs.unwrap());
+        assert!(spinner.phase_elapsed_secs.unwrap() <= 1);
     }
 
     #[test]
@@ -229,7 +280,7 @@ mod tests {
                 stream: TuiModelStreamState::Streaming,
             },
         );
-        let view = LiveStatusAssembler::assemble(&model, &activity_state(), &anim, &[]);
+        let view = LiveStatusAssembler::assemble(&model, &activity_state_for(&model), &anim, &[]);
         assert_eq!(
             view.spinner
                 .as_ref()
@@ -238,7 +289,7 @@ mod tests {
         );
         let spinner = view.spinner.expect("activity spinner");
         assert_eq!(spinner.elapsed_secs, 12);
-        assert_eq!(spinner.phase_elapsed_secs, 6);
+        assert_eq!(spinner.phase_elapsed_secs, Some(6));
 
         let empty = LiveStatusAssembler::assemble(
             &ConversationModel::default(),
@@ -254,15 +305,17 @@ mod tests {
         let conversation = conversation_with_activities(
             TuiActivityKind::Compaction,
             TuiActivityDetail::Compact {
-                stage: TuiCompactStage::Summarizing,
-                current: Some(2),
-                total: Some(4),
+                stage: TuiCompactStage::Mapping,
+                work: TuiCompactWork::Determinate {
+                    completed: 2,
+                    total: 4,
+                },
             },
         );
 
         let view = LiveStatusAssembler::assemble(
             &conversation,
-            &activity_state(),
+            &activity_state_for(&conversation),
             &SpinnerAnim::default(),
             &[],
         );
@@ -270,8 +323,8 @@ mod tests {
         assert_eq!(
             view.compact_progress,
             Some(crate::tui::view_model::live_status::CompactProgressView {
-                ratio_millis: 500,
-                stage: "summarizing".to_string(),
+                ratio_millis: 375,
+                stage: "mapping".to_string(),
                 current: Some(2),
                 total: Some(4),
             })
@@ -300,7 +353,7 @@ mod tests {
             );
             let view = LiveStatusAssembler::assemble(
                 &model,
-                &activity_state(),
+                &activity_state_for(&model),
                 &SpinnerAnim::default(),
                 &[],
             );
@@ -346,9 +399,14 @@ mod tests {
 
         let short = conversation_with_observations(2, vec![root.clone(), tool(2, 499, 1)]);
         assert_eq!(
-            LiveStatusAssembler::assemble(&short, &activity_state(), &SpinnerAnim::default(), &[],)
-                .spinner
-                .and_then(|spinner| spinner.detail_text),
+            LiveStatusAssembler::assemble(
+                &short,
+                &activity_state_for(&short),
+                &SpinnerAnim::default(),
+                &[],
+            )
+            .spinner
+            .and_then(|spinner| spinner.detail_text),
             None
         );
 
@@ -356,7 +414,7 @@ mod tests {
         assert_eq!(
             LiveStatusAssembler::assemble(
                 &single,
-                &activity_state(),
+                &activity_state_for(&single),
                 &SpinnerAnim::default(),
                 &[],
             )
@@ -369,7 +427,7 @@ mod tests {
         assert_eq!(
             LiveStatusAssembler::assemble(
                 &parallel,
-                &activity_state(),
+                &activity_state_for(&parallel),
                 &SpinnerAnim::default(),
                 &[],
             )
@@ -413,14 +471,16 @@ mod tests {
             ],
         );
 
-        assert!(LiveStatusAssembler::assemble(
+        let spinner = LiveStatusAssembler::assemble(
             &model,
-            &activity_state(),
+            &activity_state_for(&model),
             &SpinnerAnim::default(),
             &[],
         )
         .spinner
-        .is_none());
+        .expect("live root keeps outer spinner without a visible primary");
+        assert!(spinner.phase_text.is_none());
+        assert!(spinner.phase_elapsed_secs.is_none());
     }
 
     #[test]

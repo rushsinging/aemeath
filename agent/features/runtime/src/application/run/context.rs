@@ -301,6 +301,8 @@ pub struct RuntimeServices {
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
     /// Task BC 低权限访问端口（会话级）。
     pub task: Arc<dyn TaskAccess>,
+    /// Runtime Published State（会话级，跨 Run 复用）。
+    pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookPort>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -386,6 +388,8 @@ pub struct RuntimeContext {
     input: RunInputBufferHandle,
     /// per-Run Activity 观察注册表唯一 owner。
     activities: Arc<ActivityCoordinator>,
+    /// SDK-facing full-state delivery registry；不拥有业务决策。
+    published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
 }
@@ -434,6 +438,7 @@ impl RuntimeContext {
             usage: bindings.lifecycle.usage,
             input: bindings.io.input,
             activities,
+            published_state: services.published_state.clone(),
             session_lease: None,
         }
     }
@@ -507,6 +512,12 @@ impl RuntimeContext {
         &self.config
     }
     /// per-Run ActivityCoordinator，只读共享引用。
+    pub(crate) fn published_state(
+        &self,
+    ) -> crate::application::published_state::PublishedStateRegistry {
+        self.published_state.clone()
+    }
+
     pub(crate) fn activities(&self) -> &Arc<ActivityCoordinator> {
         &self.activities
     }

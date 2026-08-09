@@ -20,11 +20,14 @@ pub use continuation_checkpoint::*;
 pub use microcompact::{microcompact_chain, microcompact_messages};
 pub use restore::*;
 
-/// Compact 进度阶段。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Compact 操作阶段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactStage {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
 }
 
@@ -32,26 +35,31 @@ impl CompactStage {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Preparing => "preparing",
-            Self::Summarizing => "summarizing",
+            Self::Generating => "generating",
+            Self::Mapping => "mapping",
+            Self::Reducing => "reducing",
+            Self::Refreshing => "refreshing",
             Self::Finalizing => "finalizing",
         }
     }
 }
 
-/// Compact 进度回调（domain 单一真相，#1500 由 adapters 上移）。
-///
-/// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
-/// 调用此回调通知调用方。map-reduce 模式下，每个 chunk 处理前也会调用，
-/// 携带 `(current, total)` chunk 计数。闭包形式可自动实现（F: Fn）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactWork {
+    Indeterminate,
+    Determinate { completed: usize, total: usize },
+}
+
+/// Compact 进度回调（domain 单一真相）。
 pub trait CompactProgressFn: Send + Sync {
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>);
+    fn emit(&self, stage: CompactStage, work: CompactWork);
 }
 
 impl<F> CompactProgressFn for F
 where
-    F: Fn(CompactStage, Option<usize>, Option<usize>) + Send + Sync,
+    F: Fn(CompactStage, CompactWork) + Send + Sync,
 {
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
-        self(stage, current, total)
+    fn emit(&self, stage: CompactStage, work: CompactWork) {
+        self(stage, work)
     }
 }

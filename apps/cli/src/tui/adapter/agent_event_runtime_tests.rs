@@ -49,6 +49,7 @@ fn activity_events_map_to_dedicated_conversation_intents() {
     let snapshot = map_runtime_event(&TuiRuntimeEvent::ActivitySnapshot(TuiActivitySnapshot {
         run_id: UiRunId::from("run-1"),
         revision: 3,
+        heartbeat_sequence: 0,
         activities: vec![activity("run-1", "activity-1", 3)],
     }));
     assert!(matches!(
@@ -88,7 +89,10 @@ fn runtime_cancelled_step_maps_to_presentation_only_intent() {
         run_id: UiRunId::from("run-1"),
         parent_run_id: None,
         step_id: UiRunStepId::from("step-1"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
 
     assert!(matches!(
@@ -105,7 +109,10 @@ fn child_cancelled_step_remains_observational_only() {
         run_id: UiRunId::from("child-run"),
         parent_run_id: Some(UiRunId::from("root-run")),
         step_id: UiRunStepId::from("child-step"),
-        event: TuiRunStepEvent::Cancelled { confirmed: true },
+        event: TuiRunStepEvent::Cancelled {
+            terminal:
+                crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled,
+        },
     });
 
     assert!(mapping.conversation.is_empty());
@@ -137,7 +144,7 @@ fn runtime_interaction_maps_to_sender_free_show_interaction() {
 
 #[test]
 fn compact_finished_syncs_messages_and_appends_runtime_notice_once() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactFinished {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::CompactOperationCompleted {
         messages: Vec::new(),
         notice: "✓ 上下文压缩完成".to_string(),
     });
@@ -168,16 +175,14 @@ fn runtime_workspace_snapshot_maps_without_git_metadata() {
 }
 
 #[test]
-fn runtime_tool_progress_maps_to_record_tool_streaming_output_intent() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::ToolProgress {
+fn runtime_tool_output_delta_maps_to_record_tool_streaming_output_intent() {
+    let mapping = map_runtime_event(&TuiRuntimeEvent::ToolOutputDelta {
         context: crate::tui::adapter::tui_runtime_event::TuiRunContext {
             chat_id: "chat-1".to_string(),
             run_id: "run-1".to_string(),
         },
         tool_id: "bash-1".to_string(),
-        event: crate::tui::adapter::tui_runtime_event::TuiToolProgressEvent {
-            text: "line of stdout\n".to_string(),
-        },
+        delta: "line of stdout\n".to_string(),
     });
 
     assert!(matches!(

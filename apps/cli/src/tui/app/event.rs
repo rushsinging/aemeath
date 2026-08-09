@@ -113,12 +113,12 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    /// Compact 失败回滚，TUI 只同步消息。
-    CompactRollback {
+    /// Compact operation 失败回滚，TUI 只同步消息。
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    /// Compact 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
-    CompactFinished {
+    /// Compact operation 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
         notice: String,
     },
@@ -159,13 +159,6 @@ pub enum AppEvent {
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    /// Sub-agent progress update (streams per-run output to TUI)
-    AgentProgress {
-        source_context: UiTurnContext,
-        attachment_context: UiTurnContext,
-        tool_id: sdk::ids::ToolCallId,
-        event: sdk::AgentProgressEventView,
-    },
     /// 当前 run 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentRunChanged(usize),
     /// Current tool path base/working root changed.
@@ -186,12 +179,6 @@ pub enum AppEvent {
     /// Reasoning Graph 阶段变化（Phase 2）。更新 status bar 的阶段展示。
     GraphPhaseChanged {
         node: String,
-    },
-    /// Compact 进度更新。TUI 渲染 Gauge 进度条。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
     },
     /// 模型切换完成（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {

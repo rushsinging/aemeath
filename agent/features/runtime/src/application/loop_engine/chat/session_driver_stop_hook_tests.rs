@@ -62,7 +62,7 @@ async fn test_run_session_command_driver_stop_hook_blocked_continues_until_succe
         .expect("blocked Stop hook feedback should publish message state");
     let hook_activity = events
         .iter()
-        .position(|event| event.starts_with("HookActivityChanged:Finished:"))
+        .position(|event| event.starts_with("HookActivitySnapshot:Terminal:"))
         .expect("blocked Stop hook should finish its activity");
     let second_text = events
         .iter()
@@ -135,7 +135,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
             if driver_sink
                 .events()
                 .iter()
-                .any(|event| event.starts_with("HookActivityChanged:Started:"))
+                .any(|event| event.starts_with("HookActivitySnapshot:Live:"))
             {
                 break;
             }
@@ -444,7 +444,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     assert!(sink
         .events()
         .iter()
-        .any(|event| event.starts_with("HookActivityChanged:Finished:")));
+        .any(|event| event.starts_with("HookActivitySnapshot:Terminal:")));
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);

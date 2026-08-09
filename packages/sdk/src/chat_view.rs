@@ -60,18 +60,19 @@ impl OptionItem {
     }
 }
 
-/// Child Run identity published with every structured activity event.
+/// Sub Run identity published with every structured activity event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ChildRunIdentityView {
+pub struct SubRunIdentityView {
     pub agent_id: crate::AgentId,
     pub run_id: crate::RunId,
+    pub parent_chat_id: crate::ChatId,
     pub parent_run_id: crate::RunId,
     pub spawned_by_tool_call_id: crate::ToolCallId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ChildRunActivityKindView {
+pub enum SubRunActivityKindView {
     Text {
         text: String,
     },
@@ -95,23 +96,31 @@ pub enum ChildRunActivityKindView {
         is_error: bool,
     },
     Terminal {
-        outcome: ChildRunTerminalOutcomeView,
+        outcome: SubRunTerminalOutcomeView,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum ChildRunTerminalOutcomeView {
+pub enum SubRunTerminalOutcomeView {
     Completed,
     Failed { error: String },
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ChildRunActivityEventView {
-    pub identity: ChildRunIdentityView,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SubRunStartedEventView {
+    pub identity: SubRunIdentityView,
     pub sequence: u64,
-    pub kind: ChildRunActivityKindView,
+    pub role: Option<String>,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubRunActivityEventView {
+    pub identity: SubRunIdentityView,
+    pub sequence: u64,
+    pub kind: SubRunActivityKindView,
 }
 
 /// Sub-agent 工具调用进度。
@@ -216,16 +225,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn child_run_activity_round_trips_without_field_loss() {
-        let event = ChildRunActivityEventView {
-            identity: ChildRunIdentityView {
-                agent_id: crate::AgentId::from_legacy_or_new("agent-child-a"),
-                run_id: crate::RunId::from_legacy_or_new("run-child-a"),
+    fn sub_run_activity_round_trips_without_field_loss() {
+        let event = SubRunActivityEventView {
+            identity: SubRunIdentityView {
+                agent_id: crate::AgentId::from_legacy_or_new("agent-sub-a"),
+                run_id: crate::RunId::from_legacy_or_new("run-sub-a"),
+                parent_chat_id: crate::ChatId::from_legacy_or_new("parent-chat"),
                 parent_run_id: crate::RunId::from_legacy_or_new("run-main"),
                 spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
             },
             sequence: 9,
-            kind: ChildRunActivityKindView::ToolResult {
+            kind: SubRunActivityKindView::ToolResult {
                 tool_call_id: crate::ToolCallId::from_legacy_or_new("skill-call"),
                 tool_name: "Skill".to_string(),
                 output: "SKILL_BODY_SENTINEL".to_string(),
@@ -235,11 +245,11 @@ mod tests {
         };
 
         let json = serde_json::to_string(&event).unwrap();
-        let restored: ChildRunActivityEventView = serde_json::from_str(&json).unwrap();
+        let restored: SubRunActivityEventView = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, event);
         assert!(matches!(
             restored.kind,
-            ChildRunActivityKindView::ToolResult { ref tool_name, .. }
+            SubRunActivityKindView::ToolResult { ref tool_name, .. }
                 if tool_name == "Skill"
         ));
     }

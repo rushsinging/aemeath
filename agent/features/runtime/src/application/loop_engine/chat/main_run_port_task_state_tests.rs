@@ -1,6 +1,7 @@
 use super::events::{ChatEventSink, EventFuture, RuntimeRunContext, RuntimeStreamEvent};
 use super::main_run_port::ChatToolRoundObserver;
 use crate::application::run::run_factory_support::SessionRunFixture;
+use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::ToolRoundObserver;
 use crate::application::tool::tool_result_materializer::{
     ToolResultMaterializationPolicy, ToolResultMaterializer,
@@ -64,6 +65,34 @@ fn create_task(access: &dyn TaskAccess, subject: &str, now_ms: u64) {
         .unwrap();
 }
 
+fn task_execution_with_committed_change(store: &task::TaskStore) -> ToolExecution {
+    let command_result = store
+        .create_task(
+            TaskCreateSpec::try_new(
+                "second".to_owned(),
+                String::new(),
+                None,
+                TaskPriority::Normal,
+            )
+            .unwrap(),
+            3,
+        )
+        .unwrap();
+    let call = ToolCall {
+        id: sdk::ToolCallId::new_v7(),
+        provider_id: "provider-call".to_owned(),
+        name: "ordinary".to_owned(),
+        index: 0,
+        input: serde_json::json!({}),
+    };
+    ToolExecution::new(
+        &call,
+        tools::ToolOutcome::new("ok", serde_json::Value::Null, Vec::new()).with_task_change(
+            tools::CommittedTaskChange::from_command_result(&command_result),
+        ),
+    )
+}
+
 fn observer_with_task_store(
     sink: TaskStateRecordingSink,
     store: Arc<task::TaskStore>,
@@ -109,11 +138,29 @@ async fn task_mutation_round_publishes_one_final_complete_authoritative_state() 
         .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     create_task(store.as_ref(), "first", 2);
-    let mut observer = observer_with_task_store(sink.clone(), store.clone());
-    let execution = crate::application::run::execution_state::RunExecutionState::new();
+    let observer = observer_with_task_store(sink.clone(), store.clone());
+    let execution = task_execution_with_committed_change(store.as_ref());
+    let call = ToolCall {
+        id: execution.call_id.clone(),
+        provider_id: execution.provider_id.clone(),
+        name: execution.tool_name.clone(),
+        index: 0,
+        input: serde_json::json!({}),
+    };
+    let dispatcher = super::committed_side_effect::task_dispatcher(
+        &observer.runtime_context,
+        observer.session_id.clone(),
+        observer.workspace_root.clone(),
+    );
 
-    create_task(store.as_ref(), "second", 3);
-    observer.results_materialized(&execution, true).await;
+    dispatcher
+        .observe(
+            &call,
+            &execution,
+            &sdk::RunStepId::new_v7(),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
 
     let states = sink.states.lock().unwrap();
     assert_eq!(states.len(), 1);
@@ -137,7 +184,7 @@ async fn round_without_committed_task_mutation_publishes_no_task_state() {
     let mut observer = observer_with_task_store(sink.clone(), store);
     let execution = crate::application::run::execution_state::RunExecutionState::new();
 
-    observer.results_materialized(&execution, false).await;
+    observer.results_materialized(&execution).await;
 
     assert!(sink.states.lock().unwrap().is_empty());
 }

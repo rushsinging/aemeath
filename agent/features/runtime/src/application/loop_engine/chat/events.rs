@@ -3,7 +3,7 @@ use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
-use tools::{AgentProgressEvent, ImageData, ToolProgressEvent};
+use tools::ImageData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRunContext {
@@ -27,7 +27,6 @@ pub enum RuntimeToolCallStatus {
 }
 
 /// Compact 进度阶段（re-export from context crate）。
-pub use context::compact::CompactStage;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeResumedSessionStep {
@@ -39,38 +38,45 @@ pub struct RuntimeResumedSessionStep {
 }
 
 #[derive(Debug)]
+pub enum RuntimeActivityEvent {
+    Snapshot(sdk::ActivitySnapshotView),
+}
+
+#[derive(Debug)]
 pub enum RuntimeStreamEvent {
-    ActivityChanged {
-        kind: sdk::ActivityChangeKind,
-        activity: sdk::ActivityView,
-    },
-    ActivitySnapshot(sdk::ActivitySnapshotView),
-    Text {
+    AssistantTextDelta {
         context: RuntimeRunContext,
-        text: String,
+        delta: String,
     },
-    Thinking {
+    ThinkingDelta {
         context: RuntimeRunContext,
-        text: String,
+        delta: String,
     },
     BlockComplete {
         context: RuntimeRunContext,
         text: String,
     },
-    ToolCallStart {
+    ToolCallStarted {
         context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
-    ToolCallUpdate {
+    ToolCallArgumentsDelta {
         context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        arguments_delta: Option<String>,
+        delta: String,
+    },
+    ToolCallStateChanged {
+        context: RuntimeRunContext,
+        id: ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
         arguments: Option<serde_json::Value>,
         status: RuntimeToolCallStatus,
     },
@@ -96,7 +102,7 @@ pub enum RuntimeStreamEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<Message>,
         cleared_count: usize,
     },
@@ -110,10 +116,10 @@ pub enum RuntimeStreamEvent {
         messages: Vec<Message>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<Message>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<Message>,
         notice: String,
     },
@@ -157,28 +163,17 @@ pub enum RuntimeStreamEvent {
     },
     LiveTps(f64),
     RunChanged(usize),
-    AskUserBatch {
-        items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
-    },
-    /// #1246: typed interaction request (pure value, no sender).
-    /// Production path replaces `AskUserBatch`.
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    AgentProgress {
-        source_context: RuntimeRunContext,
-        attachment_context: RuntimeRunContext,
-        tool_id: ToolCallId,
-        event: AgentProgressEvent,
-    },
-    /// 工具 stdout 流式输出（如 Bash 长输出命令）。与 AgentProgress 平级但语义独立。
-    ToolProgress {
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
+    ToolOutputDelta {
         context: RuntimeRunContext,
         tool_id: ToolCallId,
-        event: ToolProgressEvent,
+        delta: String,
     },
-    ChildRunActivity(tools::ChildRunActivityEvent),
+    SubRunStarted(tools::SubRunStartedEvent),
+    SubRunActivity(tools::SubRunActivityEvent),
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,
     },
@@ -193,12 +188,6 @@ pub enum RuntimeStreamEvent {
         view: sdk::ConfigView,
     },
 
-    /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。
-    CompactProgress {
-        stage: CompactStage,
-        current: Option<usize>,
-        total: Option<usize>,
-    },
     /// 模型切换完成通知（#567）。runtime idle 分支解析 selection 构建 client 后回传结果。
     ModelSwitched {
         result: sdk::ModelSwitchResult,
@@ -254,6 +243,9 @@ pub enum RuntimeStreamEvent {
     TaskStateChanged {
         state: Box<sdk::TaskStateView>,
     },
+    RuntimeStatusChanged {
+        status: Box<sdk::RuntimeStatusView>,
+    },
     /// #567：成本信息回传。
     CostUpdate {
         cost: sdk::CostInfo,
@@ -265,9 +257,11 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 
     fn try_send_event(&self, event: RuntimeStreamEvent);
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, _event: RuntimeActivityEvent) {}
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        _event: crate::domain::agent_run::RunDomainEvent,
+        _event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
         Box::pin(async {})
     }
@@ -276,9 +270,10 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 trait DynChatEventSink: Send + Sync {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
     fn try_send_event(&self, event: RuntimeStreamEvent);
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent);
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a>;
 }
 
@@ -294,11 +289,15 @@ where
         ChatEventSink::try_send_event(self, event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        ChatEventSink::send_activity_event(self, event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        ChatEventSink::send_domain_event(self, event)
+        ChatEventSink::send_lifecycle_event(self, event)
     }
 }
 
@@ -344,10 +343,14 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.try_send_event(event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        self.inner.send_activity_event(event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        self.inner.send_domain_event(event)
+        self.inner.send_lifecycle_event(event)
     }
 }

@@ -195,7 +195,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ErrorAppended { .. }
             | ConversationChange::QueuedSubmissionAdded { .. }
             | ConversationChange::QueuedSubmissionsCleared { .. }
-            | ConversationChange::AgentProgressRecorded { .. }
+            | ConversationChange::AgentActivitiesRecorded { .. }
             | ConversationChange::ToolStreamingOutputRecorded { .. }
             | ConversationChange::AgentMetaUpdated { .. }
             | ConversationChange::BlockCompleted { .. }
@@ -214,8 +214,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ActivitySnapshotReplaced { .. } => {
                 ModelChange::output_and_status_dirty()
             }
-            ConversationChange::CompactProgressChanged
-            | ConversationChange::QueuedSubmissionsSynced { .. }
+            ConversationChange::QueuedSubmissionsSynced { .. }
             | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatStarted { .. }
