@@ -243,6 +243,16 @@ impl ConfigSnapshot {
         self.inner.model.context_size
     }
 
+    // ── Context read reduction ────────────────────────────────
+
+    pub fn context_snip_enabled(&self) -> bool {
+        self.inner.context.snip_enabled
+    }
+
+    pub fn context_microcompact_enabled(&self) -> bool {
+        self.inner.context.microcompact_enabled
+    }
+
     // ── Permissions ──────────────────────────────────────────
 
     pub fn permission_mode(&self) -> PermissionModeConfig {

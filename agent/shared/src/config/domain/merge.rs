@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::{
     audit::AuditConfig,
+    context::ContextConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -37,6 +38,8 @@ pub struct ConfigPatch {
     pub model: Option<ModelConfigPatch>,
     #[serde(default)]
     pub models: Option<ModelsConfigPatch>,
+    #[serde(default)]
+    pub context: Option<ContextConfigPatch>,
     #[serde(default)]
     pub tools: Option<ToolsConfigPatch>,
     #[serde(default)]
@@ -75,6 +78,7 @@ impl ConfigPatch {
         self.api.is_none()
             && self.model.is_none()
             && self.models.is_none()
+            && self.context.is_none()
             && self.tools.is_none()
             && self.agents.is_none()
             && self.ui.is_none()
@@ -137,6 +141,15 @@ pub struct ModelsConfigPatch {
     pub fallback_api_key: Option<String>,
     #[serde(default)]
     pub guidance: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextConfigPatch {
+    #[serde(default)]
+    pub snip_enabled: Option<bool>,
+    #[serde(default)]
+    pub microcompact_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -364,6 +377,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     if let Some(models) = patch.models {
         base.models = apply_models_patch(base.models, models);
     }
+    if let Some(context) = patch.context {
+        base.context = apply_context_patch(base.context, context);
+    }
     if let Some(tools) = patch.tools {
         base.tools = apply_tools_patch(base.tools, tools);
     }
@@ -483,6 +499,19 @@ pub(crate) fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatc
         for (k, v) in guidance {
             base.guidance.insert(k, v);
         }
+    }
+    base
+}
+
+pub(crate) fn apply_context_patch(
+    mut base: ContextConfig,
+    patch: ContextConfigPatch,
+) -> ContextConfig {
+    if let Some(value) = patch.snip_enabled {
+        base.snip_enabled = value;
+    }
+    if let Some(value) = patch.microcompact_enabled {
+        base.microcompact_enabled = value;
     }
     base
 }

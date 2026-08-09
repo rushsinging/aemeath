@@ -57,9 +57,27 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
-        let mut messages = snapshot
-            .messages
-            .with_pending(request.pending_messages.clone());
+        let committed_messages = if let Some(history) = snapshot.structured_history.as_ref() {
+            let candidate = crate::domain::compact::ContextReadCandidate::from_history(
+                history,
+                request.run_id.as_ref(),
+                crate::domain::compact::ProtectedRunPolicy::latest_complete_runs(3),
+            );
+            let candidate = if request.config_snapshot.context_snip_enabled() {
+                crate::domain::compact::snip_superseded_exploration(&candidate)
+            } else {
+                candidate
+            };
+            let candidate = if request.config_snapshot.context_microcompact_enabled() {
+                crate::domain::compact::microcompact_exploration(&candidate)
+            } else {
+                candidate
+            };
+            candidate.messages()
+        } else {
+            snapshot.messages.clone()
+        };
+        let mut messages = committed_messages.with_pending(request.pending_messages.clone());
         let reminder_payloads = invocation_reminder_log_payloads(
             request.language.as_str(),
             &request.invocation_reminders,

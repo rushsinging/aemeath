@@ -179,11 +179,6 @@ impl ChatChain {
         &self.segments
     }
 
-    /// 活跃链的段列表（可变访问，供 microcompact 等原地修改）
-    pub fn active_segments_mut(&mut self) -> &mut [ChatSegment] {
-        &mut self.segments
-    }
-
     /// 所有段是否均为空消息
     pub fn is_empty(&self) -> bool {
         self.segments.iter().all(|s| s.messages.is_empty())

@@ -777,14 +777,15 @@ impl CanonicalSession {
             .collect()
     }
 
-    pub fn visible_message_steps(&self) -> Vec<CommittedStepMessages> {
+    pub fn visible_history(&self) -> SessionHistory {
         let start_at = self
             .compact
             .as_ref()
             .and_then(|marker| marker.start_at.as_ref());
         let mut visible = self.compact.is_none();
-        let mut steps = Vec::new();
+        let mut slices = Vec::new();
         for slice in &self.run_slices {
+            let mut visible_steps = Vec::new();
             for step in &slice.steps {
                 if !visible
                     && start_at.is_some_and(|cursor| {
@@ -794,16 +795,27 @@ impl CanonicalSession {
                     visible = true;
                 }
                 if visible {
-                    if let Some(input) = &step.accepted_input {
-                        steps.push(input.messages.clone());
-                    }
-                    if let Some(outcome) = &step.outcome {
-                        steps.push(outcome.messages.clone());
-                    }
+                    visible_steps.push(step.clone());
                 }
             }
+            if !visible_steps.is_empty() {
+                slices.push(CommittedRunSlice::new(slice.run_id.clone(), visible_steps));
+            }
         }
-        steps
+        SessionHistory::from_slices(slices)
+    }
+
+    pub fn visible_message_steps(&self) -> Vec<CommittedStepMessages> {
+        self.visible_history()
+            .iter()
+            .flat_map(|slice| slice.steps.iter())
+            .flat_map(|step| {
+                step.accepted_input
+                    .iter()
+                    .map(|input| input.messages.clone())
+                    .chain(step.outcome.iter().map(|outcome| outcome.messages.clone()))
+            })
+            .collect()
     }
 
     pub fn structured_messages(&self) -> Vec<Message> {

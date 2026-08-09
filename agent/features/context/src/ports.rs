@@ -39,6 +39,7 @@ pub trait SessionDecoder: Send + Sync {
 pub struct SessionSnapshot {
     pub revision: SessionRevision,
     pub messages: ContextMessages,
+    pub structured_history: Option<crate::domain::session::SessionHistory>,
     pub active_summary: Option<String>,
 }
 

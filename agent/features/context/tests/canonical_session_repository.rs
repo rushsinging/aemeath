@@ -983,6 +983,20 @@ async fn snapshot_shares_committed_step_message_backing() {
     let snapshot = repository.snapshot(&session_id).await.unwrap();
 
     assert_eq!(snapshot.messages.len(), 10);
+    let structured_history = snapshot
+        .structured_history
+        .as_ref()
+        .expect("canonical snapshot must expose structured visible history");
+    assert_eq!(structured_history.len(), 10);
+    assert_eq!(
+        structured_history[0].steps[0]
+            .outcome
+            .as_ref()
+            .unwrap()
+            .messages
+            .as_ptr(),
+        original_ptr
+    );
     assert_eq!(
         snapshot.messages.first().map(|message| message as *const _),
         Some(original_ptr)
@@ -1044,6 +1058,15 @@ async fn snapshot_after_compact_shares_only_visible_step_backing() {
         visible_ptrs,
         all_ptrs[all_ptrs.len() - visible_ptrs.len()..]
     );
+    let structured_history = snapshot
+        .structured_history
+        .as_ref()
+        .expect("compacted canonical snapshot must keep visible Run identity");
+    let structured_ptrs = structured_history
+        .iter()
+        .map(|slice| slice.steps[0].outcome.as_ref().unwrap().messages.as_ptr())
+        .collect::<Vec<_>>();
+    assert_eq!(structured_ptrs, visible_ptrs);
 }
 
 #[tokio::test]

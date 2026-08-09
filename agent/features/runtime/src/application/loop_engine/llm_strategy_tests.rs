@@ -74,6 +74,64 @@ fn bounded_tool_result_maps_to_identical_provider_bytes_without_mutating_window(
 }
 
 #[test]
+fn structured_l2_l3_window_maps_to_identical_provider_bytes_without_rewriting_placeholders() {
+    let messages = vec![Message {
+        role: Role::Assistant,
+        content: vec![
+            ContentBlock::ToolUse {
+                id: "read-call".into(),
+                name: "Read".into(),
+                input: serde_json::json!({"file_path": "/repo/src/lib.rs"}),
+            },
+            ContentBlock::ToolResult {
+                tool_use_id: "read-call".into(),
+                content: serde_json::json!({
+                    "aemeath_context": {
+                        "kind": "superseded_exploration",
+                        "path": "/repo/src/lib.rs",
+                        "tool": "Read"
+                    }
+                }),
+                is_error: false,
+                text: Some("[Superseded tool result: Read /repo/src/lib.rs]".into()),
+            },
+            ContentBlock::ToolUse {
+                id: "search-call".into(),
+                name: "WebSearch".into(),
+                input: serde_json::json!({"query": "context"}),
+            },
+            ContentBlock::ToolResult {
+                tool_use_id: "search-call".into(),
+                content: serde_json::json!({
+                    "aemeath_context": {
+                        "kind": "microcompacted_exploration",
+                        "tool": "WebSearch"
+                    }
+                }),
+                is_error: false,
+                text: Some("[Microcompacted tool result: WebSearch]".into()),
+            },
+        ],
+        metadata: None,
+    }];
+    let window = window(messages);
+    let window_bytes = serde_json::to_vec(&window.messages).unwrap();
+
+    let first = extract_invocation_context(&window);
+    let second = extract_invocation_context(&window);
+    let first_bytes = serde_json::to_vec(&first.messages_for_api).unwrap();
+    let second_bytes = serde_json::to_vec(&second.messages_for_api).unwrap();
+
+    assert_eq!(first_bytes, second_bytes);
+    assert_eq!(serde_json::to_vec(&window.messages).unwrap(), window_bytes);
+    let provider_json = String::from_utf8(first_bytes).unwrap();
+    assert!(provider_json.contains("[Superseded tool result: Read /repo/src/lib.rs]"));
+    assert!(provider_json.contains("[Microcompacted tool result: WebSearch]"));
+    assert!(!provider_json.contains("superseded_exploration"));
+    assert!(!provider_json.contains("microcompacted_exploration"));
+}
+
+#[test]
 fn invocation_context_preserves_messages_without_task_reminder_decoration() {
     let messages = vec![
         Message::user("original"),
