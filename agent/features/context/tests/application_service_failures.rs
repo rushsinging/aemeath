@@ -23,6 +23,7 @@ impl SessionRepository for Session {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(0),
             messages: vec![].into(),
+            structured_history: None,
             active_summary: None,
         })
     }

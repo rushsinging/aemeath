@@ -540,17 +540,24 @@ impl SessionRepository for CanonicalSessionRepository {
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
         }
+        let structured_history = session.visible_history();
         let messages = crate::domain::ContextMessages::from_committed_steps(
-            session
-                .visible_message_steps()
-                .into_iter()
-                .map(|messages| messages.as_arc())
+            structured_history
+                .iter()
+                .flat_map(|slice| slice.steps.iter())
+                .flat_map(|step| {
+                    step.accepted_input
+                        .iter()
+                        .map(|input| input.messages.as_arc())
+                        .chain(step.outcome.iter().map(|outcome| outcome.messages.as_arc()))
+                })
                 .collect(),
             Vec::new(),
         );
         Ok(SessionSnapshot {
             revision: SessionRevision::new(session.revision),
             messages,
+            structured_history: Some(structured_history),
             active_summary: session.active_summary().map(str::to_string),
         })
     }

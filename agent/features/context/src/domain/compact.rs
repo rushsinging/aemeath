@@ -3,9 +3,11 @@
 //! 设计文档：`docs/design/02-modules/context-management/02-compact.md`
 
 mod autocompact;
+mod context_read_candidate;
 mod continuation_checkpoint;
 mod microcompact;
 mod restore;
+mod snip;
 
 // 显式 re-export token_budget 的预算/估算函数（#1486：排除
 // FALLBACK_PREVIOUS_SUMMARY_CAP，避免与 compact_summary 的 glob
@@ -16,9 +18,13 @@ pub use crate::domain::token_budget::{
     estimate_tool_schemas_tokens, summary_budget,
 };
 pub use autocompact::*;
+pub use context_read_candidate::{
+    ContextReadCandidate, ContextReadRun, ContextReadStep, ProtectedRunPolicy,
+};
 pub use continuation_checkpoint::*;
-pub use microcompact::{microcompact_chain, microcompact_messages};
+pub use microcompact::microcompact_exploration;
 pub use restore::*;
+pub use snip::snip_superseded_exploration;
 
 /// Compact 进度阶段。
 #[derive(Debug, Clone, PartialEq, Eq)]

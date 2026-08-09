@@ -33,6 +33,7 @@ impl SessionRepository for BaselineSession {
         Ok(SessionSnapshot {
             revision: self.revision,
             messages: self.messages.clone(),
+            structured_history: None,
             active_summary: Some("summary".into()),
         })
     }
