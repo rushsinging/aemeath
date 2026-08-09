@@ -4,7 +4,7 @@ use crate::ports::{
     Urgency,
 };
 use provider::RequestSystemBlock;
-use share::message::{Message, MessageMetadata, MessageSource, Role};
+use share::message::{ContentBlock, Message, MessageMetadata, MessageSource, Role};
 
 fn window(messages: Vec<Message>) -> ContextWindow {
     ContextWindow {
@@ -23,6 +23,54 @@ fn window(messages: Vec<Message>) -> ContextWindow {
             reason: DecisionReason::HeuristicFallback,
         },
     }
+}
+
+#[test]
+fn bounded_tool_result_maps_to_identical_provider_bytes_without_mutating_window() {
+    let preview = "<persisted-output>bounded preview</persisted-output>";
+    let canonical_message = Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "tool".to_string(),
+            content: serde_json::json!({
+                "text": preview,
+                "truncated": true,
+                "original_chars": 50_001,
+                "original_bytes": 50_001,
+                "omitted_chars": 47_501,
+                "blob": {
+                    "status": "unavailable",
+                    "reason": "write_failed"
+                }
+            }),
+            is_error: false,
+            text: Some(preview.to_string()),
+        }],
+        metadata: None,
+    };
+    let window = window(vec![canonical_message]);
+    let canonical_bytes = serde_json::to_vec(&window.messages[0]).unwrap();
+
+    let first = extract_invocation_context(&window);
+    let second = extract_invocation_context(&window);
+    let first_provider_bytes = serde_json::to_vec(&first.messages_for_api[0]).unwrap();
+    let second_provider_bytes = serde_json::to_vec(&second.messages_for_api[0]).unwrap();
+
+    assert_eq!(first_provider_bytes, second_provider_bytes);
+    assert_eq!(
+        serde_json::to_vec(&window.messages[0]).unwrap(),
+        canonical_bytes
+    );
+    let [ContentBlock::ToolResult { content, text, .. }] =
+        first.messages_for_api[0].content.as_slice()
+    else {
+        panic!("expected provider tool result view");
+    };
+    assert_eq!(content.as_str(), Some(preview));
+    assert!(text.is_none());
+    let provider_json = String::from_utf8(first_provider_bytes).unwrap();
+    assert!(!provider_json.contains("write_failed"));
+    assert!(!provider_json.contains("FULL_PAYLOAD_SENTINEL"));
 }
 
 #[test]

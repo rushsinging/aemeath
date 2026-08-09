@@ -11,10 +11,9 @@ mod restore;
 // FALLBACK_PREVIOUS_SUMMARY_CAP，避免与 compact_summary 的 glob
 // re-export 产生歧义——该常量由 compact_summary 单点导出）。
 pub use crate::domain::token_budget::{
-    autocompact_threshold, compaction_urgency, effective_context_window, estimate_json_tokens,
-    estimate_message_tokens, estimate_messages_tokens, estimate_tokens, estimate_tokens_with_ratio,
-    estimate_tool_schemas_tokens, needs_compaction, needs_compaction_actual, needs_compaction_full,
-    needs_compaction_total, needs_compaction_with_output, summary_budget,
+    autocompact_threshold, effective_context_window, estimate_json_tokens, estimate_message_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tokens_with_ratio,
+    estimate_tool_schemas_tokens, summary_budget,
 };
 pub use autocompact::*;
 pub use continuation_checkpoint::*;
