@@ -313,6 +313,7 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
         true,
         1,
         0,
+        1,
         0,
         std::time::Instant::now(),
     );

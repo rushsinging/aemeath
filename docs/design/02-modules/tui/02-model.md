@@ -389,6 +389,8 @@ fn assemble_run_activity(
 
 Main `InvokingModel` 静默策略属于 ViewState：进入状态时用可注入单调时钟记录起点；非空 Text、非空 Thinking、ToolCallStart、参数内容实际变化的 ToolCallUpdate 重置静默起点。Usage、重复状态、空 delta、日志、诊断、控制和 Sub Run 事件不重置。离开 `InvokingModel` 立即清除条件，再次进入重新计时。
 
+Spinner 双计时必须保留 Runtime Activity 的两个独立观测域：outer 读取 Main Run root 的 `total_elapsed_ms` 与 root revision，inner 读取当前 primary Activity 的 `state_elapsed_ms` 与 phase revision。`RunActivityState` 分别维护两组本地单调插值基线；root 更新不得重置 phase 基线，phase 切换不得重置或回基 outer 总计时。ViewState 只在 Runtime 观测之间插值，**NEVER** 推导或拥有 Run / phase 生命周期。
+
 临时占位拥有同一静默区间内稳定的 block identity，但不写入 timeline、history 或持久化。真实消息到达后，Assembler 在同一帧不再产出占位，正常内容块按既有路径展示。Runtime 与 SDK **NEVER** 发布 `ModelStreamWaiting` 或 heartbeat。
 
 #### 3.6.2 UsageSummary

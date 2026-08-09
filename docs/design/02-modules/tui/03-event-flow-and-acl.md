@@ -216,6 +216,7 @@ SDK ActivityChanged / ActivitySnapshot
 - Snapshot 只替换同一 Run 的 Activity 集合，成功修复后恢复摘要展示。
 - `audience` 是 Runtime 发布的展示边界；TUI 只向用户显示 User 事实，Operational / Diagnostic detail 不得自动进入主状态行。
 - LiveStatus 只消费 Activity Summary，**NEVER** 再读取旧 Run status、`chat_active`、业务 SpinnerPhase 或 running tool counter。
+- Activity Summary 必须分别传递 Main Run root total timing 的 revision/baseline 与当前 primary Activity state timing 的 revision/baseline；TUI 的 outer/inner 本地插值互不 rebase，且不构成第二套生命周期或计时权威。
 - Activity 事实镜像与 timeline 是互补投影；Activity 不写 Session、不拥有 Interaction reply、不驱动 Runtime command。
 
 ### 3.8 Runtime Status 与 Task full-state ACL

@@ -76,6 +76,43 @@ fn model_with_leaf(leaf: TuiActivityObservation) -> ActivityObservationModel {
 }
 
 #[test]
+fn summary_exposes_independent_root_and_phase_timing_revisions() {
+    let mut root = activity(
+        "root",
+        3,
+        TuiActivityKind::Run,
+        TuiActivityState::Running,
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Main,
+        },
+        TuiActivityAudience::User,
+    );
+    root.run_step_id = None;
+    root.timing.total_elapsed_ms = 12_000;
+    let mut phase = activity(
+        "phase",
+        7,
+        TuiActivityKind::RunPhase(TuiRunPhaseKind::PreparingContext),
+        TuiActivityState::Running,
+        TuiActivityDetail::Phase {
+            phase: TuiRunPhaseKind::PreparingContext,
+        },
+        TuiActivityAudience::User,
+    );
+    phase.parent_activity_id = Some(root.id.clone());
+    phase.timing.state_elapsed_ms = 2_000;
+    let mut model = ActivityObservationModel::default();
+    model.replace_for_test(UiRunId::from("run"), 9, vec![root, phase]);
+
+    let summary = ActivitySummaryAssembler::assemble(&model).expect("activity summary");
+
+    assert_eq!(summary.root_timing_revision, 3);
+    assert_eq!(summary.phase_timing_revision, 7);
+    assert_eq!(summary.total_elapsed_ms, 12_000);
+    assert_eq!(summary.phase_elapsed_ms, 2_000);
+}
+
+#[test]
 fn operational_running_and_waiting_hooks_are_visible_without_opening_other_operational_activities()
 {
     let hook = activity(

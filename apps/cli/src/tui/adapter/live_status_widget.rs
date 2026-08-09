@@ -84,7 +84,7 @@ mod tests {
 
         let now = std::time::Instant::now();
         let mut activity = RunActivityState::default();
-        activity.sync_main_run(Some(&run_id), true, 2, 12_345, 678, now);
+        activity.sync_main_run(Some(&run_id), true, 2, 12_345, 2, 678, now);
         let vm = LiveStatusAssembler::assemble(&model, &activity, &anim, &queued);
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);

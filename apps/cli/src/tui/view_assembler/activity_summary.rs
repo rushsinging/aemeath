@@ -8,7 +8,8 @@ use crate::tui::model::conversation::interaction::UiRunId;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ActivitySummary {
     pub(crate) run_id: UiRunId,
-    pub(crate) revision: u64,
+    pub(crate) root_timing_revision: u64,
+    pub(crate) phase_timing_revision: u64,
     pub(crate) phase_text: String,
     pub(crate) total_elapsed_ms: u64,
     pub(crate) phase_elapsed_ms: u64,
@@ -49,7 +50,8 @@ impl ActivitySummaryAssembler {
         let phase_text = phase_label(primary)?;
 
         Some(ActivitySummary {
-            revision: model.revision_for(&run_id).unwrap_or(root.revision),
+            root_timing_revision: root.revision,
+            phase_timing_revision: primary.revision,
             run_id,
             phase_text,
             total_elapsed_ms: root.timing.total_elapsed_ms,

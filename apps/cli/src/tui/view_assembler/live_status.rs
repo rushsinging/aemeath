@@ -222,10 +222,55 @@ mod tests {
             false,
             2,
             12_345,
+            2,
             6_789,
             Instant::now(),
         );
         state
+    }
+
+    #[test]
+    fn phase_change_resets_inner_timer_without_resetting_outer_total() {
+        let anim = SpinnerAnim::default();
+        let mut model = conversation_with_activities(
+            TuiActivityKind::ModelInvocation,
+            TuiActivityDetail::Model {
+                model: "claude".to_string(),
+                attempt: 1,
+                stream: TuiModelStreamState::Streaming,
+            },
+        );
+        let first_summary = ActivitySummaryAssembler::assemble(model.activity_observations())
+            .expect("first activity summary");
+        let now = Instant::now();
+        let mut activity = RunActivityState::default();
+        activity.sync_activity_summary(Some(&first_summary), now);
+
+        let run_id = first_summary.run_id.clone();
+        let mut observations = model.activity_observations().activities().to_vec();
+        let root = observations
+            .iter_mut()
+            .find(|observation| observation.kind == TuiActivityKind::Run)
+            .expect("main root");
+        root.timing.total_elapsed_ms = 14_000;
+        let phase = observations
+            .iter_mut()
+            .find(|observation| observation.kind != TuiActivityKind::Run)
+            .expect("visible phase");
+        phase.revision = phase.revision.saturating_add(1);
+        phase.timing.state_elapsed_ms = 0;
+        model
+            .activity_observations_mut()
+            .replace_for_test(run_id, 3, observations);
+        let next_summary = ActivitySummaryAssembler::assemble(model.activity_observations())
+            .expect("next activity summary");
+        activity.sync_activity_summary(Some(&next_summary), now);
+
+        let view = LiveStatusAssembler::assemble(&model, &activity, &anim, &[]);
+        let spinner = view.spinner.expect("activity spinner");
+        assert!(spinner.elapsed_secs >= 12);
+        assert!(spinner.elapsed_secs > spinner.phase_elapsed_secs);
+        assert!(spinner.phase_elapsed_secs <= 1);
     }
 
     #[test]

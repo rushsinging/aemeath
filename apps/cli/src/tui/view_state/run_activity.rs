@@ -7,8 +7,10 @@ const MODEL_SILENCE_THRESHOLD: Duration = Duration::from_secs(10);
 pub struct RunActivityState {
     main_run_id: Option<UiRunId>,
     invoking_model_silence_started_at: Option<Instant>,
-    timing_observed_at: Option<Instant>,
-    timing_observation_revision: Option<u64>,
+    total_timing_observed_at: Option<Instant>,
+    phase_timing_observed_at: Option<Instant>,
+    root_timing_revision: Option<u64>,
+    phase_timing_revision: Option<u64>,
     total_elapsed_ms: u64,
     phase_elapsed_ms: u64,
     silence_interval: u64,
@@ -23,14 +25,15 @@ impl RunActivityState {
         now: Instant,
     ) {
         let Some(summary) = summary else {
-            self.sync_main_run(None, false, 0, 0, 0, now);
+            self.sync_main_run(None, false, 0, 0, 0, 0, now);
             return;
         };
         self.sync_main_run(
             Some(&summary.run_id),
             summary.invoking_model,
-            summary.revision,
+            summary.root_timing_revision,
             summary.total_elapsed_ms,
+            summary.phase_timing_revision,
             summary.phase_elapsed_ms,
             now,
         );
@@ -40,30 +43,41 @@ impl RunActivityState {
         &mut self,
         run_id: Option<&UiRunId>,
         invoking_model: bool,
-        timing_observation_revision: u64,
+        root_timing_revision: u64,
         total_elapsed_ms: u64,
+        phase_timing_revision: u64,
         phase_elapsed_ms: u64,
         now: Instant,
     ) {
         let identity_changed = self.main_run_id.as_ref() != run_id;
         if identity_changed {
             self.main_run_id = run_id.cloned();
-            self.timing_observation_revision = None;
+            self.root_timing_revision = None;
+            self.phase_timing_revision = None;
             self.frame = 0;
             self.verb.clear();
         }
-        let timing_observation_changed = run_id.is_some()
-            && self.timing_observation_revision != Some(timing_observation_revision);
-        if timing_observation_changed {
-            self.timing_observation_revision = Some(timing_observation_revision);
+        let root_timing_changed =
+            run_id.is_some() && self.root_timing_revision != Some(root_timing_revision);
+        if root_timing_changed {
+            self.root_timing_revision = Some(root_timing_revision);
             self.total_elapsed_ms = total_elapsed_ms;
+            self.total_timing_observed_at = Some(now);
+        }
+        let phase_timing_changed =
+            run_id.is_some() && self.phase_timing_revision != Some(phase_timing_revision);
+        if phase_timing_changed {
+            self.phase_timing_revision = Some(phase_timing_revision);
             self.phase_elapsed_ms = phase_elapsed_ms;
-            self.timing_observed_at = Some(now);
-        } else if run_id.is_none() {
-            self.timing_observation_revision = None;
+            self.phase_timing_observed_at = Some(now);
+        }
+        if run_id.is_none() {
+            self.root_timing_revision = None;
+            self.phase_timing_revision = None;
             self.total_elapsed_ms = 0;
             self.phase_elapsed_ms = 0;
-            self.timing_observed_at = None;
+            self.total_timing_observed_at = None;
+            self.phase_timing_observed_at = None;
         }
 
         if run_id.is_some() && invoking_model {
@@ -101,11 +115,13 @@ impl RunActivityState {
     }
 
     pub fn total_elapsed_secs(&self, now: Instant) -> u64 {
-        self.elapsed_ms_since_observation(now, self.total_elapsed_ms) / 1000
+        self.elapsed_ms_since_observation(now, self.total_elapsed_ms, self.total_timing_observed_at)
+            / 1000
     }
 
     pub fn phase_elapsed_secs(&self, now: Instant) -> u64 {
-        self.elapsed_ms_since_observation(now, self.phase_elapsed_ms) / 1000
+        self.elapsed_ms_since_observation(now, self.phase_elapsed_ms, self.phase_timing_observed_at)
+            / 1000
     }
 
     pub fn silence_block_id(&self) -> Option<String> {
@@ -118,8 +134,13 @@ impl RunActivityState {
         ))
     }
 
-    fn elapsed_ms_since_observation(&self, now: Instant, baseline_ms: u64) -> u64 {
-        let delta_ms = self.timing_observed_at.map_or(0, |observed_at| {
+    fn elapsed_ms_since_observation(
+        &self,
+        now: Instant,
+        baseline_ms: u64,
+        observed_at: Option<Instant>,
+    ) -> u64 {
+        let delta_ms = observed_at.map_or(0, |observed_at| {
             u64::try_from(now.saturating_duration_since(observed_at).as_millis())
                 .unwrap_or(u64::MAX)
         });

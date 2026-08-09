@@ -10,7 +10,7 @@ fn model_silence_placeholder_is_transient_and_stable_within_interval() {
     let run_id = UiRunId::from("main-1");
     let now = Instant::now();
     let mut activity = RunActivityState::default();
-    activity.sync_main_run(Some(&run_id), true, 1, 0, 0, now);
+    activity.sync_main_run(Some(&run_id), true, 1, 0, 1, 0, now);
     let revision = conversation.revision();
     let timeline_len = conversation.timeline.items().len();
 
@@ -63,7 +63,7 @@ fn real_activity_removes_placeholder_until_next_silence_boundary() {
     let run_id = UiRunId::from("main-1");
     let now = Instant::now();
     let mut activity = RunActivityState::default();
-    activity.sync_main_run(Some(&run_id), true, 1, 0, 0, now);
+    activity.sync_main_run(Some(&run_id), true, 1, 0, 1, 0, now);
     assert!(activity.observe_main_model_activity(&run_id, now + Duration::from_secs(10)));
 
     let after_activity = OutputViewAssembler::assemble_from_conversation_with_activity(

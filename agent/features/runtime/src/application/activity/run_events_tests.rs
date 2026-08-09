@@ -12,6 +12,11 @@ impl FixedActivityClock {
     fn new() -> Self {
         Self(Arc::new(Mutex::new(1_000)))
     }
+
+    fn advance(&self, elapsed_ms: u64) {
+        let mut now = self.0.lock().expect("fixed clock lock");
+        *now = now.saturating_add(elapsed_ms);
+    }
 }
 
 impl ActivityClock for FixedActivityClock {
@@ -37,12 +42,20 @@ impl ActivityIdSource for FixedActivityIdSource {
     }
 }
 
-fn coordinator(run_id: &RunId) -> ActivityCoordinator {
-    ActivityCoordinator::new(
-        run_id.clone(),
-        Arc::new(FixedActivityClock::new()),
-        Arc::new(FixedActivityIdSource::default()),
+fn coordinator_with_clock(run_id: &RunId) -> (ActivityCoordinator, FixedActivityClock) {
+    let clock = FixedActivityClock::new();
+    (
+        ActivityCoordinator::new(
+            run_id.clone(),
+            Arc::new(clock.clone()),
+            Arc::new(FixedActivityIdSource::default()),
+        ),
+        clock,
     )
+}
+
+fn coordinator(run_id: &RunId) -> ActivityCoordinator {
+    coordinator_with_clock(run_id).0
 }
 
 fn observe_draining(coordinator: &ActivityCoordinator, run: &mut Run) {
@@ -80,6 +93,43 @@ fn started_run_creates_one_root_and_one_draining_phase() {
     assert_eq!(root.state, ActivityStateView::Running);
     assert_eq!(phase.parent_activity_id.as_ref(), Some(&root.id));
     assert_eq!(phase.state, ActivityStateView::Running);
+}
+
+#[test]
+fn phase_transition_keeps_root_total_and_resets_new_phase_elapsed() {
+    let mut run = Run::with_id(
+        RunId::new("run-timing"),
+        crate::domain::agent_run::RunSpec::main(),
+        None,
+    );
+    let (coordinator, clock) = coordinator_with_clock(run.id());
+    observe_draining(&coordinator, &mut run);
+    clock.advance(12_000);
+
+    run.transition(RunTransition::DrainInputs)
+        .expect("prepare context");
+    coordinator
+        .observe_run_events(&run.drain_events())
+        .expect("observe preparing context");
+    clock.advance(2_000);
+
+    let snapshot = coordinator.snapshot();
+    let root = snapshot
+        .activities
+        .iter()
+        .find(|activity| activity.kind == ActivityKindView::Run)
+        .expect("run root activity");
+    let phase = snapshot
+        .activities
+        .iter()
+        .find(|activity| {
+            activity.kind == ActivityKindView::RunPhase(RunPhaseKindView::PreparingContext)
+                && activity.state == ActivityStateView::Running
+        })
+        .expect("preparing context phase");
+    assert_eq!(root.timing.total_elapsed_ms, 14_000);
+    assert_eq!(phase.timing.state_elapsed_ms, 2_000);
+    assert!(root.timing.total_elapsed_ms > phase.timing.state_elapsed_ms);
 }
 
 #[test]
