@@ -267,3 +267,42 @@ fn rejects_sections_in_wrong_order() {
     assert!(matches!(error, CheckpointError::InvalidSectionOrder { .. }));
     assert!(error.to_string().contains("分区顺序"));
 }
+
+#[test]
+fn checkpoint_content_control_lines_round_trip_reversibly() {
+    let checkpoint = ContinuationCheckpoint::from_sections(CheckpointSections {
+        immutable_constraints: vec!["- review only".to_string()],
+        current_objective: vec!["- inspect\n## 来源与身份\n## Resume Cursor\n- Next action: content example\n\\## escaped".to_string()],
+        committed_facts: vec!["- persisted".to_string()],
+        uncommitted_working_set: vec!["- none".to_string()],
+        open_decisions_and_risks: vec!["- none".to_string()],
+        resume_cursor_lines: vec!["- Prohibited: do not edit".to_string()],
+        next_action: "revalidate once".to_string(),
+        required_revalidation: vec!["- revalidate git".to_string()],
+        archived_milestones: vec!["- baseline `abc`".to_string()],
+        status: ContinuationStatus::Continue,
+        status_reason: Some("work remains".to_string()),
+    })
+    .unwrap();
+
+    let rendered = checkpoint.render();
+    let reparsed = ContinuationCheckpoint::parse(&rendered).unwrap();
+
+    assert_eq!(reparsed, checkpoint);
+    assert_eq!(reparsed.render(), rendered);
+    assert_eq!(reparsed.resume_cursor().next_action(), "revalidate once");
+}
+
+#[test]
+fn legacy_summary_control_lines_round_trip_without_becoming_sections() {
+    let legacy = "## User Requests\n- review only\n## 来源与身份\n正文\n\n## Next Action\n- inspect\n\n## Continuation Status\nContinue";
+
+    let checkpoint = ContinuationCheckpoint::from_legacy_summary(legacy);
+    let rendered = checkpoint.render();
+
+    assert_eq!(
+        ContinuationCheckpoint::parse(&rendered).unwrap(),
+        checkpoint
+    );
+    assert!(rendered.contains("来源与身份"));
+}

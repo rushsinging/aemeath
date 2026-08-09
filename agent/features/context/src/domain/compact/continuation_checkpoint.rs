@@ -53,6 +53,21 @@ impl ResumeCursor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckpointSections {
+    pub immutable_constraints: Vec<String>,
+    pub current_objective: Vec<String>,
+    pub committed_facts: Vec<String>,
+    pub uncommitted_working_set: Vec<String>,
+    pub open_decisions_and_risks: Vec<String>,
+    pub resume_cursor_lines: Vec<String>,
+    pub next_action: String,
+    pub required_revalidation: Vec<String>,
+    pub archived_milestones: Vec<String>,
+    pub status: ContinuationStatus,
+    pub status_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationCheckpoint {
     sections: [Vec<String>; 9],
     resume_cursor: ResumeCursor,
@@ -60,6 +75,55 @@ pub struct ContinuationCheckpoint {
 }
 
 impl ContinuationCheckpoint {
+    pub fn from_sections(parts: CheckpointSections) -> Result<Self, CheckpointError> {
+        let next_action = normalize_control_text(&parts.next_action);
+        if next_action.is_empty() {
+            return Err(CheckpointError::InvalidResumeCursor {
+                next_action_count: 0,
+            });
+        }
+        let mut resume_cursor_lines = parts.resume_cursor_lines;
+        resume_cursor_lines.retain(|line| !line.trim_start().starts_with("- Next action:"));
+        resume_cursor_lines.push(format!("- Next action: {next_action}"));
+        let status_word = match parts.status {
+            ContinuationStatus::Continue => "Continue",
+            ContinuationStatus::WaitingForUser => "Waiting for User",
+            ContinuationStatus::Completed => "Completed",
+        };
+        let status_line = parts
+            .status_reason
+            .filter(|reason| !reason.trim().is_empty())
+            .map_or_else(
+                || status_word.to_string(),
+                |reason| format!("{status_word} — {}", normalize_control_text(&reason)),
+            );
+        let mut sections = [
+            parts.immutable_constraints,
+            parts.current_objective,
+            parts.committed_facts,
+            parts.uncommitted_working_set,
+            parts.open_decisions_and_risks,
+            resume_cursor_lines,
+            parts.required_revalidation,
+            parts.archived_milestones,
+            vec![status_line],
+        ];
+        for section in &mut sections {
+            *section = section
+                .iter()
+                .flat_map(|content| content.lines().map(str::to_string))
+                .collect();
+            trim_blank_lines(section);
+        }
+        Ok(Self {
+            sections,
+            resume_cursor: ResumeCursor {
+                next_action: next_action.to_string(),
+            },
+            status: parts.status,
+        })
+    }
+
     pub fn from_legacy_summary(source: &str) -> Self {
         let legacy_sections = parse_legacy_sections(source);
         let current_objective = legacy_sections
@@ -77,30 +141,39 @@ impl ContinuationCheckpoint {
             .and_then(|lines| lines.iter().find(|line| !line.trim().is_empty()))
             .and_then(|line| ContinuationStatus::parse(line).ok())
             .unwrap_or(ContinuationStatus::WaitingForUser);
-        let status_text = match legacy_status {
-            ContinuationStatus::Continue => "Continue — migrated from legacy summary.",
-            ContinuationStatus::WaitingForUser => {
-                "Waiting for User — migrated from legacy summary."
-            }
-            ContinuationStatus::Completed => "Completed — migrated from legacy summary.",
-        };
         let legacy_working_set = if source.trim().is_empty() {
             "- None established from the legacy summary.".to_string()
         } else {
             format!("- unverified legacy summary: {}", source.replace('\n', " "))
         };
-        let source = format!(
-            "## Immutable Constraints\n- Preserve the action level of the legacy user request.\n\n\
-             ## Current Objective\n{}\n\n\
-             ## Committed Facts\n- None established from the legacy summary.\n\n\
-             ## Uncommitted Working Set\n{legacy_working_set}\n\n\
-             ## Open Decisions / Risks\n- unverified legacy summary: facts and completion claims require confirmation.\n\n\
-             ## Resume Cursor\n- Next action: {legacy_next_action}\n- Prohibited: do not widen the legacy action level.\n\n\
-             ## Required Revalidation\n- Revalidate all dynamic Git, GitHub, CI, and worktree state from the legacy summary.\n\n\
-             ## Archived Milestones\n- No stable milestone references recovered.\n\n\
-             ## Continuation Status\n{status_text}",            current_objective.join("\n")
-        );
-        Self::parse(&source).expect("constructed legacy checkpoint must be valid")
+        Self::from_sections(CheckpointSections {
+            immutable_constraints: vec![
+                "- Preserve the action level of the legacy user request.".to_string(),
+            ],
+            current_objective,
+            committed_facts: vec![
+                "- None established from the legacy summary.".to_string(),
+            ],
+            uncommitted_working_set: vec![legacy_working_set],
+            open_decisions_and_risks: vec![
+                "- unverified legacy summary: facts and completion claims require confirmation."
+                    .to_string(),
+            ],
+            resume_cursor_lines: vec![
+                "- Prohibited: do not widen the legacy action level.".to_string(),
+            ],
+            next_action: legacy_next_action,
+            required_revalidation: vec![
+                "- Revalidate all dynamic Git, GitHub, CI, and worktree state from the legacy summary."
+                    .to_string(),
+            ],
+            archived_milestones: vec![
+                "- No stable milestone references recovered.".to_string(),
+            ],
+            status: legacy_status,
+            status_reason: Some("migrated from legacy summary.".to_string()),
+        })
+        .expect("legacy checkpoint typed fields must be valid")
     }
 
     pub fn parse(source: &str) -> Result<Self, CheckpointError> {
@@ -131,7 +204,7 @@ impl ContinuationCheckpoint {
             }
 
             if let Some(index) = current_section {
-                sections[index].push(line.to_string());
+                sections[index].push(decode_content_line(line));
             } else if !line.trim().is_empty() {
                 return Err(CheckpointError::ContentBeforeFirstSection);
             }
@@ -279,12 +352,37 @@ impl ContinuationCheckpoint {
             .iter()
             .enumerate()
             .map(|(index, heading)| {
-                let content = self.sections[index].join("\n");
+                let content = self.sections[index]
+                    .iter()
+                    .map(|line| encode_content_line(line))
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 format!("## {heading}\n{content}")
             })
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+}
+
+const CONTENT_ESCAPE_PREFIX: &str = "\\";
+
+fn encode_content_line(line: &str) -> String {
+    if line.starts_with("## ") || line.starts_with(CONTENT_ESCAPE_PREFIX) {
+        format!("{CONTENT_ESCAPE_PREFIX}{line}")
+    } else {
+        line.to_string()
+    }
+}
+
+fn decode_content_line(line: &str) -> String {
+    line.strip_prefix(CONTENT_ESCAPE_PREFIX)
+        .filter(|content| content.starts_with("## ") || content.starts_with(CONTENT_ESCAPE_PREFIX))
+        .unwrap_or(line)
+        .to_string()
+}
+
+fn normalize_control_text(source: &str) -> String {
+    source.lines().map(str::trim).collect::<Vec<_>>().join(" ")
 }
 
 pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
