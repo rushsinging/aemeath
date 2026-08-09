@@ -486,7 +486,7 @@ fn record_successful_usage(
     clock: impl Fn() -> u64,
 ) {
     let factory = crate::application::model::usage::UsageRecordFactory::new(clock);
-    if let Some(record) = factory.from_raw_usage(context, response.usage.clone()) {
+    if let Some(record) = factory.build_from_raw_usage(context, response.usage.clone()) {
         let _ = sink.try_record(record);
     }
 }

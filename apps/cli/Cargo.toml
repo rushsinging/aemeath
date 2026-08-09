@@ -40,8 +40,6 @@ env_logger = "0.11"
 libc = "0.2"
 
 [dev-dependencies]
-audit = { path = "../../agent/features/audit" }
-share = { path = "../../agent/shared" }
 insta = "1"
 portable-pty = "0.9"
 tempfile = "3"

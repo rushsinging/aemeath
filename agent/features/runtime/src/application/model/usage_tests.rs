@@ -28,7 +28,7 @@ fn factory_maps_reported_usage_and_preserves_correlation() {
     };
 
     let record = UsageRecordFactory::new(|| 1_720_000_000_123)
-        .from_raw_usage(context, usage)
+        .build_from_raw_usage(context, usage)
         .expect("reported usage must produce a record");
 
     assert_eq!(record.recorded_at_unix_ms, 1_720_000_000_123);
@@ -53,11 +53,11 @@ fn factory_distinguishes_unreported_usage_from_reported_zero() {
     let factory = UsageRecordFactory::new(|| 42);
 
     assert!(factory
-        .from_raw_usage(context(), RawUsageSnapshot::default())
+        .build_from_raw_usage(context(), RawUsageSnapshot::default())
         .is_none());
 
     let record = factory
-        .from_raw_usage(
+        .build_from_raw_usage(
             context(),
             RawUsageSnapshot {
                 cache_read_tokens: Some(0),

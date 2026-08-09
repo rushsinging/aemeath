@@ -24,7 +24,7 @@ where
         Self { clock }
     }
 
-    pub(crate) fn from_raw_usage(
+    pub(crate) fn build_from_raw_usage(
         &self,
         context: UsageRecordContext,
         usage: RawUsageSnapshot,

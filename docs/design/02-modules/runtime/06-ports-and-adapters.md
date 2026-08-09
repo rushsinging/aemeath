@@ -269,7 +269,7 @@ trait EventSink: Send + Sync {                         // 纯投影出口；NEVE
 }
 ```
 
-`UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；#931 由 Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
+`UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。该 bridge 由 Main Session 的 `SessionAudit` 持有，并以同一个 session-scoped `Arc<dyn UsageSink>` 注入唯一 `RuntimeContextFactory`；Main 与派生 Sub Run 共享该 Arc 和 canonical Main Session ID，但使用各自的 `RunId` / `RunStepId` / `ModelInvocationId`。worker handle 不进入 per-Run `RuntimeContext`，Sub Run 不拥有 lifecycle。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
 
 ### 2.3.1 Activity 观测发布
 

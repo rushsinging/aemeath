@@ -369,10 +369,288 @@ mod tests {
         build_calls: AtomicUsize,
     }
 
+    struct ReportedUsageProvider {
+        invocation_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl runtime::ProviderPort for ReportedUsageProvider {
+        fn capabilities(
+            &self,
+            model: &provider::ModelId,
+        ) -> Result<provider::ModelCapability, ProviderError> {
+            Ok(provider::ModelCapability {
+                model: model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                reasoning: provider::ReasoningCapability::new(
+                    [provider::ReasoningLevel::Off],
+                    provider::ReasoningMappingKind::None,
+                )?,
+                context_limit: Some(128_000),
+                output_limit: Some(8_192),
+            })
+        }
+
+        async fn invoke(
+            &self,
+            _request: provider::InvocationRequest,
+            _cancellation: &dyn provider::CancellationSignal,
+        ) -> Result<provider::InvocationStream, ProviderError> {
+            let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
+            let completion = match invocation_index {
+                0 => provider::ProviderCompletion {
+                    output: vec![provider::ProviderContentBlock::ToolCall(
+                        provider::ProviderToolCall {
+                            id: provider::ProviderToolCallId("call-sub-agent".to_string()),
+                            name: "Agent".to_string(),
+                            arguments: serde_json::json!({
+                                "description": "record child usage",
+                                "prompt": "finish successfully",
+                                "role": "coder"
+                            }),
+                        },
+                    )],
+                    stop_reason: provider::ProviderStopReason::ToolUse,
+                    usage: Some(provider::RawUsageSnapshot {
+                        input_tokens: Some(13),
+                        output_tokens: Some(8),
+                        cache_write_tokens: Some(0),
+                        cache_read_tokens: None,
+                        reasoning_tokens: None,
+                    }),
+                    effective_reasoning: provider::ReasoningLevel::Off,
+                },
+                1 => provider::ProviderCompletion {
+                    output: vec![provider::ProviderContentBlock::Text(
+                        "sub-agent complete".to_string(),
+                    )],
+                    stop_reason: provider::ProviderStopReason::EndTurn,
+                    usage: Some(provider::RawUsageSnapshot {
+                        input_tokens: Some(21),
+                        output_tokens: Some(5),
+                        cache_write_tokens: None,
+                        cache_read_tokens: Some(3),
+                        reasoning_tokens: None,
+                    }),
+                    effective_reasoning: provider::ReasoningLevel::Off,
+                },
+                _ => provider::ProviderCompletion {
+                    output: vec![provider::ProviderContentBlock::Text(
+                        "main-agent complete".to_string(),
+                    )],
+                    stop_reason: provider::ProviderStopReason::EndTurn,
+                    usage: None,
+                    effective_reasoning: provider::ReasoningLevel::Off,
+                },
+            };
+            Ok(Box::pin(futures_util::stream::iter(vec![
+                provider::InvocationEvent::Completed(completion),
+            ])))
+        }
+    }
+
+    struct ReportedUsageProviderFactory {
+        invocation_count: Arc<AtomicUsize>,
+    }
+
+    impl ReportedUsageProviderFactory {
+        fn new() -> Self {
+            Self {
+                invocation_count: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    impl ProviderFactory for ReportedUsageProviderFactory {
+        fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
+            Ok(ProviderBinding {
+                provider: Arc::new(ReportedUsageProvider {
+                    invocation_count: self.invocation_count.clone(),
+                }),
+                model: spec.model,
+                max_tokens: spec.max_tokens,
+                requested_reasoning: spec.requested_reasoning,
+                context_window: spec.context_window,
+            })
+        }
+    }
+
     impl ProviderFactory for CountingProviderFactory {
         fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
             self.build_calls.fetch_add(1, Ordering::SeqCst);
             crate::provider::provider_factory().build(spec)
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn successful_runtime_invocation_persists_versioned_session_usage_jsonl() {
+        let temp = tempfile::tempdir().expect("create temp root");
+        let root = temp.path().join("root");
+        let agents_dir = temp.path().join("agents");
+        std::fs::create_dir_all(&root).expect("create project root");
+        std::fs::create_dir_all(&agents_dir).expect("create agents dir");
+        std::fs::write(
+            agents_dir.join("aemeath.json"),
+            serde_json::json!({
+                "models": {
+                    "default": "local/test-model",
+                    "providers": {
+                        "local": {
+                            "baseUrl": "http://127.0.0.1:1/v1",
+                            "apiKey": "test-api-key",
+                            "driver": "openai",
+                            "models": [{
+                                "id": "test-model",
+                                "name": "Test Model",
+                                "input": ["text"],
+                                "contextWindow": 128000,
+                                "max_tokens": 8192
+                            }]
+                        }
+                    }
+                },
+                "agents": {
+                    "roles": {
+                        "coder": {
+                            "model": "local/test-model",
+                            "description": "test child usage"
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("write global config");
+        std::fs::write(agents_dir.join("mcp.json"), "{\"mcpServers\":{}}")
+            .expect("write mcp config");
+        let args = AgentArgs {
+            cwd: Some(root),
+            api_key: Some("test-api-key".to_string()),
+            base_url: Some("http://127.0.0.1:1/v1".to_string()),
+            model: Some("local/test-model".to_string()),
+            context_size: 128_000,
+            ..AgentArgs::default()
+        };
+        let config = config::wire_project_config_with_agents_dir(
+            args.cwd.as_deref().expect("cwd"),
+            &agents_dir,
+            wire_config_override_store(&agents_dir).expect("override store"),
+            cli_config_input(&args),
+        )
+        .await
+        .expect("config wiring");
+        let workspace = project::wire_production_workspace(args.cwd.clone().expect("cwd"))
+            .expect("workspace")
+            .into_views();
+        let gateways = FeatureGateways::new(
+            Arc::new(ReportedUsageProviderFactory::new()),
+            configured_policy(&config),
+        );
+        let assembly =
+            crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+                .await
+                .expect("runtime assembly");
+        let session_id = assembly.client.session_id();
+        let (input_sender, input_receiver) = tokio::sync::mpsc::unbounded_channel();
+        input_sender
+            .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+            .expect("send user input");
+        drop(input_sender);
+        let input_port = TestInputEventPort::new(input_receiver);
+        let mut stream = sdk::AgentClient::chat(
+            &assembly.client,
+            sdk::ChatRequest {
+                ingress: Arc::new(input_port),
+            },
+        )
+        .await
+        .expect("chat stream");
+        while stream.recv().await.is_some() {}
+
+        assembly
+            .audit
+            .as_ref()
+            .expect("session audit")
+            .shutdown()
+            .await;
+        let usage_path = agents_dir
+            .join("audit/usage")
+            .join(format!("{session_id}.jsonl"));
+        let source = std::fs::read_to_string(&usage_path).expect("read usage jsonl");
+        let lines: Vec<_> = source.lines().collect();
+        assert_eq!(lines.len(), 2, "source: {source}");
+        let envelopes: Vec<serde_json::Value> = lines
+            .iter()
+            .map(|line| serde_json::from_str(line).expect("usage envelope"))
+            .collect();
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["schema_version"] == 1));
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["record"]["session_id"] == session_id));
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["record"]["provider"] == "local"));
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["record"]["model"] == "test-model"));
+        let run_ids: std::collections::HashSet<_> = envelopes
+            .iter()
+            .map(|envelope| {
+                envelope["record"]["run_id"]
+                    .as_str()
+                    .expect("run id")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(run_ids.len(), 2, "source: {source}");
+        assert!(envelopes.iter().any(|envelope| {
+            envelope["record"]["input_tokens"] == 13
+                && envelope["record"]["output_tokens"] == 8
+                && envelope["record"]["cache_write_tokens"] == 0
+        }));
+        assert!(envelopes.iter().any(|envelope| {
+            envelope["record"]["input_tokens"] == 21
+                && envelope["record"]["output_tokens"] == 5
+                && envelope["record"]["cache_read_tokens"] == 3
+        }));
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["record"]["run_step_id"].as_str().is_some()));
+        assert!(envelopes
+            .iter()
+            .all(|envelope| envelope["record"]["model_invocation_id"].as_str().is_some()));
+    }
+
+    struct TestInputEventPort {
+        receiver: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<sdk::ChatInputEvent>>,
+    }
+
+    impl TestInputEventPort {
+        fn new(receiver: tokio::sync::mpsc::UnboundedReceiver<sdk::ChatInputEvent>) -> Self {
+            Self {
+                receiver: tokio::sync::Mutex::new(receiver),
+            }
+        }
+    }
+
+    impl sdk::ChatInputEventPort for TestInputEventPort {
+        fn recv_next<'a>(&'a self) -> sdk::InputEventOptFuture<'a> {
+            Box::pin(async move { self.receiver.lock().await.recv().await })
+        }
+
+        fn drain_input_events<'a>(&'a self) -> sdk::InputEventFuture<'a> {
+            Box::pin(async move {
+                let mut receiver = self.receiver.lock().await;
+                let mut events = Vec::new();
+                while let Ok(event) = receiver.try_recv() {
+                    events.push(event);
+                }
+                events
+            })
         }
     }
 

@@ -160,62 +160,19 @@ pub(crate) async fn run_chat(args: Args) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use audit::{UsageEmitOutcome, UsageRecord};
-    use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
     #[tokio::test]
-    async fn frontend_completion_drains_session_audit() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let snapshot =
-            share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default());
-        let session_audit =
-            composition::audit::wire_session_audit(temp.path(), &snapshot).expect("session audit");
-        let sink = session_audit.usage_sink();
-        let record = UsageRecord {
-            recorded_at_unix_ms: 1,
-            session_id: SessionId::new("01900000-0000-7000-8000-000000000031"),
-            run_id: RunId::new("01900000-0000-7000-8000-000000000032"),
-            run_step_id: RunStepId::new("01900000-0000-7000-8000-000000000033"),
-            model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000034"),
-            provider: "provider".to_string(),
-            model: "model".to_string(),
-            input_tokens: 1,
-            output_tokens: 2,
-            cache_write_tokens: None,
-            cache_read_tokens: None,
-            reasoning_tokens: None,
-        };
-        assert_eq!(sink.try_record(record), UsageEmitOutcome::Accepted);
+    async fn frontend_preserves_original_result_when_audit_drain_is_absent() {
         let client = std::sync::Arc::new(NoChatClient);
 
-        let result = run_frontend_with_audit_drain(client, Some(&session_audit), |_| async {
-            Ok::<(), sdk::SdkError>(())
+        let result = run_frontend_with_audit_drain(client, None, |_| async {
+            Err::<(), sdk::SdkError>(sdk::SdkError::Internal("frontend failed".to_string()))
         })
         .await;
 
-        assert!(result.is_ok());
-        let usage_path = temp
-            .path()
-            .join("audit/usage/01900000-0000-7000-8000-000000000031.jsonl");
-        assert!(usage_path.is_file());
         assert!(matches!(
-            sink.try_record(UsageRecord {
-                recorded_at_unix_ms: 2,
-                session_id: SessionId::new("01900000-0000-7000-8000-000000000031"),
-                run_id: RunId::new("01900000-0000-7000-8000-000000000032"),
-                run_step_id: RunStepId::new("01900000-0000-7000-8000-000000000033"),
-                model_invocation_id: ModelInvocationId::new(
-                    "01900000-0000-7000-8000-000000000035",
-                ),
-                provider: "provider".to_string(),
-                model: "model".to_string(),
-                input_tokens: 1,
-                output_tokens: 2,
-                cache_write_tokens: None,
-                cache_read_tokens: None,
-                reasoning_tokens: None,
-            }),
-            UsageEmitOutcome::Dropped(_)
+            result,
+            Err(sdk::SdkError::Internal(ref message)) if message == "frontend failed"
         ));
     }
 

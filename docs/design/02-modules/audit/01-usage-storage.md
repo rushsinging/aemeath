@@ -29,8 +29,10 @@ Envelope 版本属于 Audit schema；#927 定义 `UsageEnvelopeV1 { schema_versi
 UsagePartition = SessionId
 ```
 
-选择按 SessionId 分文件是查询与故障隔离策略，不表示 Usage 是 Session 聚合的一部分：
+选择按 canonical Main Session `SessionId` 分文件是查询与故障隔离策略，不表示 Usage 是 Session 聚合的一部分：
 
+- 同一 Main Session 的 Main Run 与所有派生 Sub Run 使用同一分区文件；
+- Main/Sub 记录以各自的 RunId / RunStepId / ModelInvocationId 区分；
 - Session JSON 与 Audit JSONL 路径完全分离；
 - Context Management 不持有 UsagePort；
 - resume 不加载 Usage；
