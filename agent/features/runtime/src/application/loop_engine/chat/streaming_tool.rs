@@ -68,6 +68,7 @@ struct StreamingToolState {
     invocation: Option<StreamingInvocation>,
     next_generation: u64,
     pending: Vec<tokio::task::JoinHandle<()>>,
+    sequential_tail: Option<tokio::sync::oneshot::Receiver<()>>,
     results: Vec<StreamingToolRoundResult>,
 }
 
@@ -91,6 +92,7 @@ impl StreamingToolState {
         if let Some(invocation) = self.invocation.take() {
             invocation.cancel.cancel();
         }
+        self.sequential_tail = None;
         std::mem::take(&mut self.pending)
     }
 
@@ -121,6 +123,40 @@ async fn await_pending_tasks(handles: Vec<tokio::task::JoinHandle<()>>) {
     for handle in handles {
         let _ = handle.await;
     }
+}
+
+fn spawn_after_sequential_predecessor(
+    predecessor: Option<tokio::sync::oneshot::Receiver<()>>,
+    operation: impl std::future::Future<Output = ()> + Send + 'static,
+) -> (
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<()>,
+) {
+    let (completed_tx, completed_rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(async move {
+        if let Some(predecessor) = predecessor {
+            let _ = predecessor.await;
+        }
+        operation.await;
+        let _ = completed_tx.send(());
+    });
+    (handle, completed_rx)
+}
+
+fn enqueue_streaming_operation(
+    state: &mut StreamingToolState,
+    is_concurrency_safe: bool,
+    operation: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let handle = if is_concurrency_safe {
+        tokio::spawn(operation)
+    } else {
+        let predecessor = state.sequential_tail.take();
+        let (handle, completed) = spawn_after_sequential_predecessor(predecessor, operation);
+        state.sequential_tail = Some(completed);
+        handle
+    };
+    state.pending.push(handle);
 }
 
 impl StreamingToolExecutor {
@@ -206,8 +242,13 @@ impl StreamingToolExecutor {
             call.id,
             call.index
         );
+        let is_concurrency_safe = inner
+            .agent
+            .catalog
+            .find(&tools::ToolName::new(&call.name))
+            .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         let spawn_inner = inner.clone();
-        let handle = tokio::spawn(async move {
+        let operation = async move {
             let _permit = match spawn_inner.semaphore.clone().acquire_owned().await {
                 Ok(permit) => permit,
                 Err(_) => return,
@@ -255,13 +296,12 @@ impl StreamingToolExecutor {
                     invocation.generation
                 );
             }
-        });
-        inner
+        };
+        let mut state = inner
             .state
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .pending
-            .push(handle);
+            .unwrap_or_else(|poison| poison.into_inner());
+        enqueue_streaming_operation(&mut state, is_concurrency_safe, operation);
     }
 
     /// 等待全部旁路执行完成并取走结果（engine Tools 阶段调用）。
