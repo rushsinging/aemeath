@@ -319,7 +319,7 @@ fn coordinator_source_keeps_structured_activity_diagnostic_fields_without_payloa
     let source = include_str!("coordinator.rs");
     for field in [
         "activity_change change={:?} run_id={} activity_id={} source={:?} kind={:?} state={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
-        "activity_snapshot run_id={} revision={} activity_count={}",
+        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
     ] {
         assert!(source.contains(field), "missing activity diagnostic: {field}");
     }

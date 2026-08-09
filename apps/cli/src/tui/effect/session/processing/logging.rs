@@ -425,13 +425,26 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             activity.timing.active_elapsed_ms,
             activity.timing.state_elapsed_ms,
         ),
-        sdk::ChatEvent::ActivitySnapshot(snapshot) => crate::tui::log_debug!(
-            "{} activity_snapshot run_id={} revision={} activity_count={}",
-            stage,
-            snapshot.run_id,
-            snapshot.revision,
-            snapshot.activities.len(),
-        ),
+        sdk::ChatEvent::ActivitySnapshot(snapshot) => {
+            let root = snapshot.activities.iter().find(|activity| {
+                activity.kind == sdk::ActivityKindView::Run
+                    && activity.parent_activity_id.is_none()
+                    && matches!(
+                        activity.state,
+                        sdk::ActivityStateView::Running | sdk::ActivityStateView::Waiting
+                    )
+            });
+            crate::tui::log_debug!(
+                "[ACTIVITY_TIMING] sdk_ingress stage={} run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
+                stage,
+                snapshot.run_id,
+                snapshot.revision,
+                snapshot.activities.len(),
+                root.map_or("-", |activity| activity.id.as_str()),
+                root.map_or(0, |activity| activity.revision),
+                root.map_or(0, |activity| activity.timing.total_elapsed_ms),
+            )
+        }
         // These metadata/list events are intentionally omitted from trace logging.
         sdk::ChatEvent::SkillsUpdated { .. }
         | sdk::ChatEvent::ModelList { .. }

@@ -933,6 +933,33 @@ impl App {
             crate::tui::view_assembler::activity_summary::ActivitySummaryAssembler::assemble(
                 self.model.conversation.activity_observations(),
             );
+        if let Some(summary) = activity_summary.as_ref() {
+            let state = &self.view_state.run_activity;
+            let root_changed = state.root_timing_identity()
+                != Some((
+                    summary.root_activity_id.as_str(),
+                    summary.root_timing_revision,
+                ));
+            let primary_changed = state.phase_timing_identity()
+                != Some((
+                    summary.primary_activity_id.as_str(),
+                    summary.phase_timing_revision,
+                ));
+            if root_changed || primary_changed {
+                crate::tui::log_debug!(
+                    "[ACTIVITY_TIMING] summary_selected run_id={} root_activity_id={} root_revision={} total_elapsed_ms={} primary_activity_id={} phase_revision={} phase_elapsed_ms={} root_changed={} phase_changed={}",
+                    summary.run_id.as_str(),
+                    summary.root_activity_id,
+                    summary.root_timing_revision,
+                    summary.total_elapsed_ms,
+                    summary.primary_activity_id,
+                    summary.phase_timing_revision,
+                    summary.phase_elapsed_ms,
+                    root_changed,
+                    primary_changed,
+                );
+            }
+        }
         self.view_state
             .run_activity
             .sync_activity_summary(activity_summary.as_ref(), std::time::Instant::now());

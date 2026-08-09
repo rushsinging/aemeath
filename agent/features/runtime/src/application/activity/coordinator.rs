@@ -3,8 +3,8 @@ use super::model::{
     ActivityTiming,
 };
 use sdk::{
-    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityTimingView,
-    ActivityView, RunId, RunStepId,
+    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivityKindView, ActivitySnapshotView,
+    ActivityStateView, ActivityTimingView, ActivityView, RunId, RunStepId,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -148,12 +148,23 @@ fn log_activity_change(kind: ActivityChangeKind, activity: &ActivityView) {
 }
 
 fn log_activity_snapshot(snapshot: &ActivitySnapshotView) {
+    let root = snapshot.activities.iter().find(|activity| {
+        activity.kind == ActivityKindView::Run
+            && activity.parent_activity_id.is_none()
+            && matches!(
+                activity.state,
+                ActivityStateView::Running | ActivityStateView::Waiting
+            )
+    });
     log::debug!(
         target: crate::LOG_TARGET,
-        "activity_snapshot run_id={} revision={} activity_count={}",
+        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
         snapshot.run_id,
         snapshot.revision,
         snapshot.activities.len(),
+        root.map_or("-", |activity| activity.id.as_str()),
+        root.map_or(0, |activity| activity.revision),
+        root.map_or(0, |activity| activity.timing.total_elapsed_ms),
     );
 }
 

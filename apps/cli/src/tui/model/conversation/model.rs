@@ -195,7 +195,23 @@ impl ConversationModel {
     ) -> Vec<ConversationChange> {
         let run_id = activity.run_id.clone();
         let activity_id = activity.id.clone();
-        match self.activity_observations.observe_increment(activity) {
+        let activity_kind = activity.kind;
+        let activity_revision = activity.revision;
+        let total_elapsed_ms = activity.timing.total_elapsed_ms;
+        let state_elapsed_ms = activity.timing.state_elapsed_ms;
+        let outcome = self.activity_observations.observe_increment(activity);
+        crate::tui::log_debug!(
+            "[ACTIVITY_TIMING] mirror_increment run_id={} activity_id={} kind={:?} activity_revision={} total_elapsed_ms={} state_elapsed_ms={} outcome={:?} mirror_revision={}",
+            run_id.as_str(),
+            activity_id.as_str(),
+            activity_kind,
+            activity_revision,
+            total_elapsed_ms,
+            state_elapsed_ms,
+            outcome,
+            self.activity_observations.revision_for(&run_id).unwrap_or(0),
+        );
+        match outcome {
             ActivityIncrementOutcome::Applied => {
                 vec![ConversationChange::ActivityObservationChanged {
                     run_id,
@@ -214,7 +230,41 @@ impl ConversationModel {
         snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
     ) -> Vec<ConversationChange> {
         let run_id = snapshot.run_id.clone();
-        if self.activity_observations.replace_snapshot(snapshot) {
+        let snapshot_revision = snapshot.revision;
+        let activity_count = snapshot.activities.len();
+        let root = snapshot.activities.iter().find(|activity| {
+            activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
+                && activity.parent_activity_id.is_none()
+                && matches!(
+                    activity.state,
+                    crate::tui::adapter::tui_runtime_event::TuiActivityState::Running
+                        | crate::tui::adapter::tui_runtime_event::TuiActivityState::Waiting
+                )
+                && matches!(
+                    activity.detail,
+                    crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
+                        purpose: crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                    }
+                )
+        });
+        let root_activity_id = root
+            .map(|activity| activity.id.as_str().to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let root_revision = root.map_or(0, |activity| activity.revision);
+        let total_elapsed_ms = root.map_or(0, |activity| activity.timing.total_elapsed_ms);
+        let applied = self.activity_observations.replace_snapshot(snapshot);
+        crate::tui::log_debug!(
+            "[ACTIVITY_TIMING] mirror_snapshot run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={} applied={} mirror_revision={}",
+            run_id.as_str(),
+            snapshot_revision,
+            activity_count,
+            root_activity_id,
+            root_revision,
+            total_elapsed_ms,
+            applied,
+            self.activity_observations.revision_for(&run_id).unwrap_or(0),
+        );
+        if applied {
             vec![ConversationChange::ActivitySnapshotReplaced { run_id }]
         } else {
             Vec::new()

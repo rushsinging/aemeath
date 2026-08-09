@@ -11,6 +11,8 @@ pub struct RunActivityState {
     phase_timing_observed_at: Option<Instant>,
     root_timing_revision: Option<u64>,
     phase_timing_revision: Option<u64>,
+    root_activity_id: Option<String>,
+    primary_activity_id: Option<String>,
     total_elapsed_ms: u64,
     phase_elapsed_ms: u64,
     silence_interval: u64,
@@ -28,11 +30,13 @@ impl RunActivityState {
             self.sync_main_run(None, false, 0, 0, 0, 0, now);
             return;
         };
-        self.sync_main_run(
+        self.sync_main_run_with_activity_ids(
             Some(&summary.run_id),
             summary.invoking_model,
+            Some(&summary.root_activity_id),
             summary.root_timing_revision,
             summary.total_elapsed_ms,
+            Some(&summary.primary_activity_id),
             summary.phase_timing_revision,
             summary.phase_elapsed_ms,
             now,
@@ -49,17 +53,46 @@ impl RunActivityState {
         phase_elapsed_ms: u64,
         now: Instant,
     ) {
+        self.sync_main_run_with_activity_ids(
+            run_id,
+            invoking_model,
+            None,
+            root_timing_revision,
+            total_elapsed_ms,
+            None,
+            phase_timing_revision,
+            phase_elapsed_ms,
+            now,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn sync_main_run_with_activity_ids(
+        &mut self,
+        run_id: Option<&UiRunId>,
+        invoking_model: bool,
+        root_activity_id: Option<&str>,
+        root_timing_revision: u64,
+        total_elapsed_ms: u64,
+        primary_activity_id: Option<&str>,
+        phase_timing_revision: u64,
+        phase_elapsed_ms: u64,
+        now: Instant,
+    ) {
         let identity_changed = self.main_run_id.as_ref() != run_id;
         if identity_changed {
             self.main_run_id = run_id.cloned();
             self.root_timing_revision = None;
             self.phase_timing_revision = None;
+            self.root_activity_id = None;
+            self.primary_activity_id = None;
             self.frame = 0;
             self.verb.clear();
         }
         let root_timing_changed =
             run_id.is_some() && self.root_timing_revision != Some(root_timing_revision);
         if root_timing_changed {
+            self.root_activity_id = root_activity_id.map(str::to_string);
             self.root_timing_revision = Some(root_timing_revision);
             self.total_elapsed_ms = total_elapsed_ms;
             self.total_timing_observed_at = Some(now);
@@ -67,6 +100,7 @@ impl RunActivityState {
         let phase_timing_changed =
             run_id.is_some() && self.phase_timing_revision != Some(phase_timing_revision);
         if phase_timing_changed {
+            self.primary_activity_id = primary_activity_id.map(str::to_string);
             self.phase_timing_revision = Some(phase_timing_revision);
             self.phase_elapsed_ms = phase_elapsed_ms;
             self.phase_timing_observed_at = Some(now);
@@ -74,10 +108,29 @@ impl RunActivityState {
         if run_id.is_none() {
             self.root_timing_revision = None;
             self.phase_timing_revision = None;
+            self.root_activity_id = None;
+            self.primary_activity_id = None;
             self.total_elapsed_ms = 0;
             self.phase_elapsed_ms = 0;
             self.total_timing_observed_at = None;
             self.phase_timing_observed_at = None;
+        }
+
+        if identity_changed || root_timing_changed || phase_timing_changed || run_id.is_none() {
+            crate::tui::log_debug!(
+                "[ACTIVITY_TIMING] state_sync run_id={} identity_changed={} root_activity_id={} root_revision={} root_changed={} total_elapsed_ms={} primary_activity_id={} phase_revision={} phase_changed={} phase_elapsed_ms={} cleared={}",
+                run_id.map_or("-", UiRunId::as_str),
+                identity_changed,
+                root_activity_id.unwrap_or("-"),
+                root_timing_revision,
+                root_timing_changed,
+                total_elapsed_ms,
+                primary_activity_id.unwrap_or("-"),
+                phase_timing_revision,
+                phase_timing_changed,
+                phase_elapsed_ms,
+                run_id.is_none(),
+            );
         }
 
         if run_id.is_some() && invoking_model {
@@ -112,6 +165,20 @@ impl RunActivityState {
             .is_some_and(|started_at| {
                 now.saturating_duration_since(started_at) >= MODEL_SILENCE_THRESHOLD
             })
+    }
+
+    pub(crate) fn root_timing_identity(&self) -> Option<(&str, u64)> {
+        Some((
+            self.root_activity_id.as_deref()?,
+            self.root_timing_revision?,
+        ))
+    }
+
+    pub(crate) fn phase_timing_identity(&self) -> Option<(&str, u64)> {
+        Some((
+            self.primary_activity_id.as_deref()?,
+            self.phase_timing_revision?,
+        ))
     }
 
     pub fn total_elapsed_secs(&self, now: Instant) -> u64 {
