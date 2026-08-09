@@ -348,3 +348,43 @@ fn manifest_codec_fixture_remains_current_for_reader_contract() {
         "fixture"
     );
 }
+
+#[tokio::test]
+async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("control-lines", 3, "visible");
+    let checkpoint = context::domain::compact::ContinuationCheckpoint::from_sections(
+        context::domain::compact::CheckpointSections {
+            immutable_constraints: vec!["- review only".to_string()],
+            current_objective: vec!["- inspect\n## 来源与身份".to_string()],
+            committed_facts: vec!["- persisted".to_string()],
+            uncommitted_working_set: vec!["- none".to_string()],
+            open_decisions_and_risks: vec!["- none".to_string()],
+            resume_cursor_lines: vec!["- Prohibited: do not edit".to_string()],
+            next_action: "revalidate once".to_string(),
+            required_revalidation: vec!["- revalidate git".to_string()],
+            archived_milestones: vec!["- baseline `abc`".to_string()],
+            status: context::domain::compact::ContinuationStatus::Continue,
+            status_reason: Some("work remains".to_string()),
+        },
+    )
+    .unwrap()
+    .render();
+    session.compact = Some(context::domain::session::ActiveCompactMarker {
+        summary: checkpoint.clone(),
+        start_at: None,
+        source_revision: 2,
+    });
+    writer.save_initial(&session).await.unwrap();
+
+    let prepared = DatasetSessionReader::new(dataset, None)
+        .load_for_resume("control-lines")
+        .await
+        .unwrap();
+    let restored = prepared.active_session.compact.unwrap().summary;
+
+    assert_eq!(restored, checkpoint);
+    assert!(context::domain::compact::ContinuationCheckpoint::parse(&restored).is_ok());
+}
