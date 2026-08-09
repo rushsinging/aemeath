@@ -158,6 +158,14 @@ if sub_run_model_source.is_file():
             "Sub Run ToolCall presentation must retain structured name/input until View Assembler supplies workspace_root"
         )
 
+conversation_model_source = root / "apps/cli/src/tui/model/conversation/model.rs"
+if conversation_model_source.is_file():
+    conversation_model_text = conversation_model_source.read_text()
+    if "pub agent_progress:" in conversation_model_text or "pub sub_run_activities:" in conversation_model_text:
+        violations.append(
+            "ConversationModel must retain bounded ToolCall previews and one Sub Run ordering watermark, not duplicate activity histories"
+        )
+
 ack_terminal_compatibility = set(baseline["ack_terminal_compatibility_names"])
 ack_terminal_patterns = [re.compile(pattern) for pattern in baseline["ack_terminal_patterns"]]
 for event_name in sorted(all_actual):

@@ -1,6 +1,51 @@
 use super::ids::{ChatId, ChatRunId, ToolCallId};
-use super::intent::{ConversationIntent, RecordAgentProgress, ToolCallStart};
+use super::intent::{ConversationIntent, RecordAgentProgress, RecordSubRunActivity, ToolCallStart};
 use super::model::ConversationModel;
+use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
+
+#[test]
+fn sub_run_activity_retains_only_one_ordering_watermark_per_run() {
+    let mut model = ConversationModel::default();
+    let chat_id = ChatId::new("chat-retained");
+    let run_id = ChatRunId::new("turn-retained");
+    let tool_id = ToolCallId::new("tool-retained");
+    model.ensure_runtime_turn(chat_id, run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: ChatId::new("chat-retained"),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    for sequence in 1..=100 {
+        model.apply(RecordSubRunActivity {
+            agent_id: "researcher".to_string(),
+            sub_run_id: "sub-run".to_string(),
+            parent_run_id: run_id.to_string(),
+            spawned_by_tool_call_id: tool_id.clone(),
+            sequence,
+            sequence_index: 0,
+            kind: TuiSubRunActivityKind::Text {
+                text: format!("activity-{sequence}"),
+            },
+        });
+    }
+
+    let retained = model.retained_state_snapshot();
+    assert_eq!(retained.sub_run_watermarks, 1);
+    assert_eq!(retained.legacy_agent_progress_entries, 0);
+    assert_eq!(
+        model
+            .tool_call(&ChatId::new("chat-retained"), &run_id, &tool_id,)
+            .expect("parent Agent ToolCall")
+            .activities
+            .len(),
+        5,
+        "presentation preview remains bounded independently of ordering state"
+    );
+}
 
 #[test]
 fn retained_state_snapshot_separates_history_from_transient_state() {
@@ -33,8 +78,8 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
     assert_eq!(retained.runs, 1);
     assert_eq!(retained.tool_calls, 1);
     assert_eq!(retained.timeline_items, 1);
-    assert_eq!(retained.agent_progress_entries, 3);
-    assert_eq!(retained.agent_progress_bytes, 69);
+    assert_eq!(retained.sub_run_watermarks, 0);
+    assert_eq!(retained.legacy_agent_progress_entries, 0);
     assert!(retained.output_view_journal_entries > 0);
     assert!(retained.output_view_journal_item_id_bytes > 0);
     assert!(!retained.has_active_interaction);
@@ -44,10 +89,13 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
 fn retained_state_snapshot_returns_to_zero_after_reset() {
     let mut model = ConversationModel::default();
     model
-        .agent_progress
-        .push(super::agent_progress::AgentProgressEntry::new(
-            "tool-1", "working",
-        ));
+        .sub_run_watermarks
+        .push(super::agent_progress::SubRunActivityWatermark {
+            agent_id: "agent".to_string(),
+            run_id: "sub-run".to_string(),
+            sequence: 1,
+            sequence_index: 0,
+        });
     model.reset();
 
     let retained = model.retained_state_snapshot();
@@ -55,8 +103,8 @@ fn retained_state_snapshot_returns_to_zero_after_reset() {
     assert_eq!(retained.runs, 0);
     assert_eq!(retained.tool_calls, 0);
     assert_eq!(retained.timeline_items, 0);
-    assert_eq!(retained.agent_progress_entries, 0);
-    assert_eq!(retained.agent_progress_bytes, 0);
+    assert_eq!(retained.sub_run_watermarks, 0);
+    assert_eq!(retained.legacy_agent_progress_entries, 0);
     assert_eq!(retained.output_view_journal_entries, 1);
     assert_eq!(retained.output_view_journal_item_id_bytes, 0);
     assert!(!retained.has_active_interaction);

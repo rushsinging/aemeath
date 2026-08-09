@@ -71,7 +71,7 @@ struct ConversationModel {
     active_main_run_id: Option<RunId>,
     timeline: OutputTimelineModel,
     queued_submissions: Vec<QueuedSubmission>,
-    agent_progress: Vec<AgentProgressEntry>,
+    sub_run_watermarks: Vec<SubRunActivityWatermark>,
     next_run_sequence: usize,
     next_block_sequence: usize,
     revision: u64,
@@ -88,7 +88,8 @@ struct ConversationModel {
 |---|---|---|
 | `run_states` / `active_main_run_id` | private | Runtime typed Run 状态事实镜像；只读 accessor 对 ViewAssembler 开放 |
 | `timeline` | private | 有序展示与交互投影；只读 accessor 对 ViewAssembler 开放（见 §3.5） |
-| `queued_submissions` / `agent_progress` | private | 排队输入与 sub-agent 进度投影 |
+| `queued_submissions` | private | 排队输入投影 |
+| `sub_run_watermarks` | private | 每个 `(agent_id, Sub Run id)` 仅保留最新 `(sequence, sequence_index)`，用于拒绝重复/乱序活动；完整活动只保留在父 Agent ToolCall 的 bounded presentation preview |
 | `next_run_sequence` / `next_block_sequence` | private | ID 序列号 |
 | `revision` | private | 内容版本号，供渲染层 memo |
 | `active_text_block_id` / `active_text_context` | private | 流式文本块追踪 |
@@ -267,7 +268,7 @@ ConversationModel 维护两套**互补投影**：
 
 | 表示 | 类型 | 用途 |
 |---|---|---|
-| 结构化 Conversation 投影 | `runs` + `queued_submissions` + `agent_progress` | Run / RunStep / ToolCall 生命周期、排队输入与 agent 关联结构 |
+| 结构化 Conversation 投影 | `runs` + `queued_submissions` + `sub_run_watermarks` | Run / RunStep / ToolCall 生命周期、排队输入与 Sub Run 最新顺序水位；NEVER 为活动再建无消费者的完整历史镜像 |
 | 有序交互投影 | `timeline: OutputTimelineModel` | 消息、工具、系统 / Hook / Error、Interaction、progress 与 queued submission 的展示顺序 |
 
 **OutputTimelineItem 变体**：

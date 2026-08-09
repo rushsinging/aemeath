@@ -1,5 +1,5 @@
 use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
-use super::agent_progress::{AgentProgressEntry, SubRunActivityEntry};
+use super::agent_progress::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatRun;
@@ -21,8 +21,8 @@ pub(crate) struct ConversationRetainedStateSnapshot {
     pub runs: usize,
     pub tool_calls: usize,
     pub timeline_items: usize,
-    pub agent_progress_entries: usize,
-    pub agent_progress_bytes: usize,
+    pub sub_run_watermarks: usize,
+    pub legacy_agent_progress_entries: usize,
     pub output_view_journal_entries: usize,
     pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
@@ -35,8 +35,7 @@ pub struct ConversationModel {
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
-    pub agent_progress: Vec<AgentProgressEntry>,
-    pub sub_run_activities: Vec<SubRunActivityEntry>,
+    pub sub_run_watermarks: Vec<SubRunActivityWatermark>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
     /// 单调递增的内容版本号；每次产生 change 的 apply +1。
@@ -61,8 +60,7 @@ impl Default for ConversationModel {
             active_chat_id: None,
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
-            agent_progress: Vec::new(),
-            sub_run_activities: Vec::new(),
+            sub_run_watermarks: Vec::new(),
             next_chat_sequence: 0,
             next_block_sequence: 0,
             revision: 0,
@@ -166,11 +164,6 @@ impl ConversationModel {
             .flat_map(|chat| &chat.runs)
             .map(|turn| turn.tool_calls.len())
             .sum();
-        let agent_progress_bytes = self
-            .agent_progress
-            .iter()
-            .map(|entry| entry.tool_id.len().saturating_add(entry.message.len()))
-            .sum();
         let (output_view_journal_entries, output_view_journal_item_id_bytes) =
             self.output_view_journal.retained_metrics();
 
@@ -179,8 +172,8 @@ impl ConversationModel {
             runs,
             tool_calls,
             timeline_items: self.timeline.items().len(),
-            agent_progress_entries: self.agent_progress.len(),
-            agent_progress_bytes,
+            sub_run_watermarks: self.sub_run_watermarks.len(),
+            legacy_agent_progress_entries: 0,
             output_view_journal_entries,
             output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),

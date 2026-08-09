@@ -1,12 +1,9 @@
-#[derive(Clone, Debug, PartialEq)]
-pub struct SubRunActivityEntry {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubRunActivityWatermark {
     pub agent_id: String,
     pub run_id: String,
-    pub parent_run_id: String,
-    pub spawned_by_tool_call_id: String,
     pub sequence: u64,
     pub sequence_index: u32,
-    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -86,43 +83,5 @@ impl PartialEq<&str> for AgentActivityLine {
 impl PartialEq<String> for AgentActivityLine {
     fn eq(&self, other: &String) -> bool {
         matches!(&self.content, AgentActivityContent::Text(content) if content == other)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentProgressEntry {
-    pub tool_id: String,
-    pub message: String,
-}
-
-impl AgentProgressEntry {
-    pub fn new(tool_id: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            tool_id: tool_id.into(),
-            message: message.into(),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_agent_progress_stores_tool_id() {
-        let progress = AgentProgressEntry::new("tool-1", "working");
-        assert_eq!(progress.tool_id, "tool-1");
-    }
-
-    #[test]
-    fn test_agent_progress_stores_message() {
-        let progress = AgentProgressEntry::new("tool-1", "working");
-        assert_eq!(progress.message, "working");
-    }
-
-    #[test]
-    fn test_agent_progress_allows_empty_message() {
-        let progress = AgentProgressEntry::new("tool-1", "");
-        assert_eq!(progress.message, "");
     }
 }

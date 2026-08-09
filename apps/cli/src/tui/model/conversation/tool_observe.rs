@@ -1,5 +1,5 @@
-use super::agent_progress::SubRunActivityEntry;
-use super::agent_progress::{AgentActivityLine, AgentProgressEntry};
+use super::agent_progress::AgentActivityLine;
+use super::agent_progress::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
@@ -42,23 +42,11 @@ impl ConversationModel {
     ) -> Vec<ConversationChange> {
         use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
 
-        if self.sub_run_activities.iter().any(|entry| {
-            entry.agent_id == activity.agent_id
-                && entry.run_id == activity.sub_run_id
-                && entry.sequence == activity.sequence
-                && entry.sequence_index == activity.sequence_index
-        }) {
-            return Vec::new();
-        }
-        if let Some(latest_sequence) = self
-            .sub_run_activities
-            .iter()
-            .filter(|entry| {
-                entry.agent_id == activity.agent_id && entry.run_id == activity.sub_run_id
-            })
-            .map(|entry| (entry.sequence, entry.sequence_index))
-            .max()
-        {
+        let watermark = self.sub_run_watermarks.iter_mut().find(|watermark| {
+            watermark.agent_id == activity.agent_id && watermark.run_id == activity.sub_run_id
+        });
+        if let Some(watermark) = watermark.as_ref() {
+            let latest_sequence = (watermark.sequence, watermark.sequence_index);
             if (activity.sequence, activity.sequence_index) <= latest_sequence {
                 crate::tui::log_debug!(
                     "sub_run_activity_out_of_order agent_id={} sub_run_id={} sequence={} sequence_index={} latest_sequence={:?}",
@@ -116,15 +104,18 @@ impl ConversationModel {
             return Vec::new();
         };
 
-        self.sub_run_activities.push(SubRunActivityEntry {
-            agent_id: activity.agent_id,
-            run_id: activity.sub_run_id,
-            parent_run_id: activity.parent_run_id,
-            spawned_by_tool_call_id: activity.spawned_by_tool_call_id.to_string(),
-            sequence: activity.sequence,
-            sequence_index: activity.sequence_index,
-            kind: activity.kind,
-        });
+        match watermark {
+            Some(watermark) => {
+                watermark.sequence = activity.sequence;
+                watermark.sequence_index = activity.sequence_index;
+            }
+            None => self.sub_run_watermarks.push(SubRunActivityWatermark {
+                agent_id: activity.agent_id,
+                run_id: activity.sub_run_id,
+                sequence: activity.sequence,
+                sequence_index: activity.sequence_index,
+            }),
+        }
 
         let changes = visible_activity.map_or_else(Vec::new, |activity_line| {
             self.record_agent_progress(
@@ -281,14 +272,6 @@ impl ConversationModel {
                 }
             }
         }
-        self.agent_progress.extend(activities.iter().filter_map(
-            |activity| match &activity.content {
-                super::agent_progress::AgentActivityContent::Text(content) => Some(
-                    AgentProgressEntry::new(tool_id.to_string(), content.clone()),
-                ),
-                super::agent_progress::AgentActivityContent::ToolCall { .. } => None,
-            },
-        ));
         vec![
             ConversationChange::AgentProgressRecorded {
                 block_id: format!("tool-call-{chat_id}/{run_id}/{tool_id}"),

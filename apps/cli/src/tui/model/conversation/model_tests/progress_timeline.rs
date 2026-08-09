@@ -90,9 +90,7 @@ fn sub_run_hidden_tool_result_is_not_attached_to_parent_activity() {
 
     let parent_call = tool_call(&model, &chat_id, &run_id, &parent_tool_id)
         .expect("parent Agent ToolCall");
-    assert!(model.sub_run_activities.iter().any(|entry| {
-        matches!(entry.kind, TuiSubRunActivityKind::ToolResult { .. })
-    }));
+    assert_eq!(model.sub_run_watermarks.len(), 1);
     assert_eq!(
         parent_call.activities,
         vec![super::agent_progress::AgentActivityLine::tool_call(
@@ -220,7 +218,7 @@ fn sub_run_activities_attach_by_parent_tool_identity_and_deduplicate() {
             .activities,
         vec!["second child thinking"]
     );
-    assert_eq!(model.sub_run_activities.len(), 3);
+    assert_eq!(model.sub_run_watermarks.len(), 2);
 }
 
 #[test]
@@ -279,7 +277,7 @@ fn sub_run_activity_rejects_unknown_parent_and_out_of_order_sequence() {
             .activities,
         vec!["Sub-agent terminal: Completed"]
     );
-    assert_eq!(model.sub_run_activities.len(), 1);
+    assert_eq!(model.sub_run_watermarks.len(), 1);
 }
 
 #[test]

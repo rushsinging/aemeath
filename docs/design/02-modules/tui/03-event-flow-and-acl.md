@@ -97,7 +97,7 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event_
 
 1. **Intent 拆分**：一个输入事件可能产生多个 Intent（跨 Context），如 `Error` 同时产生 ConversationIntent + DiagnosticIntent；ACL **NEVER** 直接产生 Effect
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
-3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
+3. **Sub Run activity 投影**：结构化 Text/Thinking/ToolCall/ToolOutput/ToolResult/Terminal 进入父 Agent ToolCall 的 bounded activity preview；Model 只另存每个 Sub Run 最新 `(sequence, sequence_index)` watermark 用于去重/乱序拒绝，NEVER 复制无消费者的 progress 历史
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
 5. **模型活动信号**：非空 `AssistantTextDelta` / `ThinkingDelta`、`ToolCallStarted`、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；SDK 旧 `Token` / `Thinking` / `ToolCallStart` 只在第一层兼容读取并立即归一化为 typed fact；ACL 不创建或清理 placeholder
 6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）

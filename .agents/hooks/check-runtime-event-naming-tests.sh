@@ -262,6 +262,21 @@ expect_failure "Sub Run ToolCall flattened before workspace-aware view assembly"
 cp "$ROOT/apps/cli/src/tui/model/conversation/tool_observe.rs" \
   "$TMP/apps/cli/src/tui/model/conversation/tool_observe.rs"
 
+python3 - "$TMP/apps/cli/src/tui/model/conversation/model.rs" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text().replace(
+    "pub sub_run_watermarks: Vec<SubRunActivityWatermark>,",
+    "pub sub_run_watermarks: Vec<SubRunActivityWatermark>,\n    pub sub_run_activities: Vec<()>,",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure "duplicate Sub Run activity history restored beside ordering watermark"
+cp "$ROOT/apps/cli/src/tui/model/conversation/model.rs" \
+  "$TMP/apps/cli/src/tui/model/conversation/model.rs"
+
 python3 - "$TMP/packages/sdk/src/chat_event.rs" <<'PY'
 from pathlib import Path
 import sys

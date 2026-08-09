@@ -67,7 +67,8 @@ fn retained_state_workload_is_deterministic_at_representative_scales() {
         assert_eq!(retained.chats, scale);
         assert_eq!(retained.runs, scale);
         assert_eq!(retained.tool_calls, scale);
-        assert_eq!(retained.agent_progress_entries, scale);
+        assert_eq!(retained.sub_run_watermarks, 0);
+        assert_eq!(retained.legacy_agent_progress_entries, 0);
         assert_eq!(retained.timeline_items, scale * 4);
         assert!(retained.output_view_journal_entries <= 256);
         assert!(retained.output_view_journal_item_id_bytes <= 256 * 64);
@@ -99,10 +100,10 @@ fn retained_state_release_workload() {
         let cache = renderer.retained_cache_capacity();
 
         println!(
-            "scale={scale:>4} timeline={} progress={} progress_bytes={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
+            "scale={scale:>4} timeline={} sub_run_watermarks={} legacy_progress={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
             retained.timeline_items,
-            retained.agent_progress_entries,
-            retained.agent_progress_bytes,
+            retained.sub_run_watermarks,
+            retained.legacy_agent_progress_entries,
             retained.output_view_journal_entries,            retained.output_view_journal_item_id_bytes,
             vm.roots.len(),
             assemble_ns as f64 / 1_000_000.0,
