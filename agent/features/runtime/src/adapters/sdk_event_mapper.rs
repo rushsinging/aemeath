@@ -645,9 +645,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::RuntimeStatusChanged {
             status,
         } => ChatEvent::RuntimeStatusChanged { status },
-        crate::application::loop_engine::chat::RuntimeStreamEvent::CostUpdate { cost } => {
-            ChatEvent::CostUpdate { cost }
-        }
     }
 }
 

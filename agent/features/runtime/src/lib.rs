@@ -41,8 +41,7 @@ pub use ports::{
     ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
 };
 pub use sdk::{
-    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
-    TaskSummary,
+    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, ProjectContext, TaskSummary,
 };
 
 #[cfg(test)]

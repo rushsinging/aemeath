@@ -51,7 +51,7 @@ Workspace payload 应包含 path base、workspace root、branch、worktree kind 
 | `CommandResultText` | system/error presentation | Compatibility；stringly result |
 | `Result` | 映射为 command result text | Deprecated compatibility |
 | `ReflectionHistory` | safe history view | Target Rename：`ReflectionHistorySnapshot` |
-| `CostUpdate` | cost presentation | Target Rename：`CostChanged`，并声明 delta/cumulative |
+| Cost presentation | SDK/Runtime/TUI 旧 DTO/event 已物理退役；`/cost` 仅是 token Usage alias | Removed；Future Audit-owned Cost/Pricing 另行设计 |
 
 新 command SHOULD 返回 typed outcome 或发布明确 Subject fact，禁止扩展 `CommandResultText` 成通用业务通道。
 

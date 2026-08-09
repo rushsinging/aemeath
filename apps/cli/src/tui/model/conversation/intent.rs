@@ -314,7 +314,6 @@ pub struct RecordUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub last_input_tokens: u64,
-    pub cost_usd: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -305,6 +305,7 @@ Audit domain/application/worker 不依赖 Runtime、TUI、Logging 具体实现�
 - 不得使用未知模型的隐式 fallback 价格；
 - 是否保存 PricingSnapshot、历史 Cost 是否重算，必须另行决策；
 - 任何临时 Cost 实现都不是本期目标模型，迁移和退役统一记录在 Migration Governance。
+- 已存在的 `~/.agents/cost_history.json` 是未迁移的 legacy artifact：v0.1.0 不读、不导入、不覆盖、不清空或删除；Future importer 只能在另行批准的版本化、幂等方案下导入可验证 raw token，且不得伪造关联 ID。
 
 ## 11. 不变量
 
@@ -353,8 +354,10 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-21 | #930 实现 Audit-owned `UsageQueryPort`：按关联 ID/provider/model/半开时间范围过滤、版本化 opaque cursor、单页 1000 条 clamp、逐行 V1 decoder、损坏行/截断尾行 warning 与纯 token summary；查询仅经 `UsageAppendStorePort` 逐分区读取，CLI/TUI 不解析 JSONL，生产 wiring 仍归 #931 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
-| 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly；Runtime bridge/Invocation wiring 仍归 #931 | [#929](https://github.com/rushsinging/aemeath/issues/929) |
+| 2026-08-09 | #932 完整退役 Runtime Pricing/Cost、SDK/Runtime/TUI Cost DTO/event/presentation、Shared legacy cost-history path API 与无消费者 Storage Cost namespace；`/cost` 仅保留为 token Usage alias；既有 `cost_history.json` 不读、不导入、不覆盖、不删除，并由 Target Guard 防回流 | [#932](https://github.com/rushsinging/aemeath/issues/932) |
+| 2026-08-09 | #931 完成 Runtime logical invocation → session-scoped UsageSink → SessionAudit worker 生产接线，Main/Sub 共用 canonical Session 分区并在前端收敛后 drain | [#931](https://github.com/rushsinging/aemeath/issues/931) |
+| 2026-07-21 | #930 实现 Audit-owned `UsageQueryPort`：按关联 ID/provider/model/半开时间范围过滤、版本化 opaque cursor、单页 1000 条 clamp、逐行 V1 decoder、损坏行/截断尾行 warning 与纯 token summary；查询仅经 `UsageAppendStorePort` 逐分区读取，CLI/TUI 不解析 JSONL | [#930](https://github.com/rushsinging/aemeath/issues/930) |
+| 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly | [#929](https://github.com/rushsinging/aemeath/issues/929) |
 | 2026-07-17 | #927 冻结 Usage PL：跨 BC ID 复用 SDK 唯一 newtype，Audit 拥有 UsageRecord/V1 envelope/emit/query DTO，Runtime 仅拥有 UsageSink trait；配置归 #929，查询行为归 #930，并按真实交付增量建立 domain/ports 层 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | #988 删除无行为的 `api/contract/gateway` COLA 占位；Usage 实现前仅保留真实 crate 入口，后续按已冻结的 Usage Target 增量建层 | [#988](https://github.com/rushsinging/aemeath/issues/988) |
 | 2026-07-12 | 初稿：Usage-only Audit MVP、非阻塞 Sink、查询与独立 JSONL 分区 | #790 |

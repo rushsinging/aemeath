@@ -283,11 +283,11 @@ Out-of-scope 必须保留精确 owner：#947 承接 TUI slash I/O 全 Effect 化
 | PHA8 | **Stop Hook completion/continuation、配置来源与 Main/Sub 边界已收口** | 共享 Loop 在 Stop block 前提交 assistant Step，将 feedback 与同次用户追问合并为 continuation；`Run` 使用 frozen `StopHookPolicy` 判断 `StopHookBlockResult::RetryExhausted`。Sub 的 `BoundaryHookPort` 由 Hook metadata 放行 Stop 与生命周期 boundary，不再用硬编码 allow-list 绕过 Stop。 | Dispatcher 捕获 `HookExecutionPolicy`；每个 Main/Sub Run 冻结 `StopHookPolicy`；运行期不得读取 live config。 | 已完成 |
 | PHA9 | **Main/Sub Hook 通过同一 Loop 与 metadata-governed capability 执行** | Main 使用 Full；Sub 使用 BoundaryOnly，按 `HookPointMetadata.class` 转发 Boundary（含 Stop/SubRun lifecycle），过滤 Tool/Notification。 | 保持 Main/Sub Stop 相邻测试和 metadata 全枚举测试，禁止恢复双 Loop、EmptyHookPort 或变体 allow-list。 | 已完成 |
 | PHA10 | **Hook input/context mutation 契约已建立，生产消费按 point 显式接线** | PreToolUse 的 UpdatedInput 经 Tools-owned schema 校验后重跑 Policy；Stop 消费 Block/feedback；其余已 emit point多为 fire-and-forget/Activity，未 emit point是 Future。`failure_policy` 当前仅为领域/Dispatcher PL，用户 HookEntry 尚未发布配置字段。 | Future 接线必须同时实现 trigger、directive/context/input consumer、message consumer 与相邻层测试，禁止以 PL/Config surface 冒充支持。 | Current 矩阵已记录；Future 按需接线 |
-| PHA11 | **Audit Usage 写入与查询管线已建立，生产接线待落地** | #927 Usage PL/query port/统一 ID；#928 append store；#929 bounded sender/worker/config/lifecycle/metrics；#930 通过 `UsageQueryPort` 实现分区扫描、filter、版本化 cursor、坏行 warning 与 token summary | #931 Composition bridge/Invocation 生产接线 → #932 旧 Cost 退役 | S5 |
-| PHA12 | **Usage/Cost/Pricing 混在 Runtime** | CostTracker 同时记录 usage、计算 cost、读写全量 cost_history.json | #927 建立无 Cost 的 Audit Usage PL；#931 切生产写链，#932 退役 CostTracker/Price/旧 history；Cost/Pricing 保留 Future | S5/S7 |
-| PHA13 | **Usage 统一关联 ID 契约已建立，生产接线待迁移** | #927 通过 SDK 发布唯一 Session/Run/RunStep/ModelInvocation ID，并由 Audit UsageRecord 直接复用；旧 CostTracker 仍缺完整关联 | #931 将 Provider/Runtime Invocation 生产链接入新 ID 与 UsageSink；#932 退役旧 CostTracker | S3/S5 |
-| PHA14 | **Usage 写入阻塞且全量重写** | Runtime 直接 fs read/write JSON 数组 | 非阻塞 bounded UsageSink；worker 经 Audit UsageAppendStorePort 写 JSONL | S5 |
-| PHA15 | **Usage 与 Session 存储边界不清** | cost_history 为全局混合文件，缺独立 Audit 分区语义 | `~/.agents/audit/usage/{session_id}.jsonl`；Session 删除不级联 | S5 |
+| PHA11 | **Audit Usage 写入、查询与生产接线已完成** | #927 Usage PL/query port/统一 ID；#928 append store；#929 bounded sender/worker/config/lifecycle/metrics；#930 分区查询；#931 session-scoped UsageSink/worker 与 Main/Sub 真实 invocation 接线 | 保持 Runtime non-blocking、Audit worker per Main Session、查询只读 versioned Usage JSONL | 已完成（#927–#931） |
+| PHA12 | **Runtime Cost/Pricing 与旧 presentation 已退役** | #932 删除 Runtime Pricing/Cost owner、SDK/Runtime/TUI Cost DTO/event/`cost_usd`、Shared legacy path API 与 Storage Cost namespace；`/cost` 仅为 token Usage alias | Future Cost/Pricing 必须另行建立 Audit-owned PL、定价来源和迁移语义；Guard 禁止旧 surface 回流 | 已完成（#932） |
+| PHA13 | **Usage 关联 ID 与 Main/Sub 生产链已完成** | Audit `UsageRecord` 复用唯一 Session/Run/RunStep/ModelInvocation ID；Runtime 在成功 logical invocation terminal 记账，Main/Sub 共用 canonical Session sink | 保持 failure/cancel/no-usage 不写、retry/fallback 不按 attempt 重复 | 已完成（#927/#931） |
+| PHA14 | **阻塞全量 Cost 数组写路径已退役** | 生产只经 bounded UsageSink → Audit worker → append+flush JSONL；旧同步数组 writer/path API 已删除 | Guard 阻止 Runtime direct fs、Cost owner 与旧 path API 回流 | 已完成（#928/#929/#931/#932） |
+| PHA15 | **Usage 与 Session 存储边界已明确** | `~/.agents/audit/usage/{session_id}.jsonl` 独立分区；Session 删除不级联；既有 `cost_history.json` 不读、不导入、不覆盖、不删除 | Future retention/importer 仍归 Audit 独立设计 | 已完成（#928/#930/#932） |
 | PHA16 | **Audit/Logging 混淆风险** | Usage/Hook 信息依赖诊断日志展示，无事实查询端口 | Logging 只做诊断；UsageQueryPort 读取 Audit 事实，不解析日志 | S5 |
 
 ## 11. 死代码 / 退役清单
@@ -312,8 +312,8 @@ Out-of-scope 必须保留精确 owner：#947 承接 TUI slash I/O 全 Effect 化
 | 普通诊断 `agent-audit.log` 路由 | `aemeath:agent:audit` 与 `agent-audit.log` 已删除；Audit 模块运行诊断改为明确的 diagnostic target/file | routing guard 断言 Audit Fact 名称不存在于 Diagnostic catalog | 已完成（#942） |
 | Update 单体 `UpdateService` / Gateway | 检查/缓存/下载/安装混成单对象 | ApplicationVersionPort + 内部 source/cache/installer adapters | S5/S7 |
 | `AuditApiMarker` / `gateway::__empty` | #988 已删除；Audit BC 不再以空 COLA 层冒充领域契约 | 后续 Usage leaf 只按真实 domain/application/port/adapter 证据增量建层，禁止恢复占位类型 | 已完成（#988） |
-| Runtime `CostTracker` / `pricing` / `CostSummary` | Usage、Cost、Pricing、持久化混合，且不符合 Usage-only MVP | 迁移 raw Usage 后退役；Cost/Pricing 作为 Future 另行设计 | S5/S7 |
-| `cost_history.json` 全量写路径 | 每次保存重写数组，记录含派生 cost 且缺 Run IDs | 后续 importer 只迁可验证 raw token；旧路径有计划退役 | S5/S7 |
+| Runtime `CostTracker` / `pricing` / `CostSummary` | #932 已删除 owner、符号和所有生产/测试引用 | `check-cost-tracker-retirement.sh` 阻止 Runtime Cost/Pricing、Cost DTO/event/presentation 与旧路径回流；Future 另行设计 | 已完成（#932） |
+| `cost_history.json` 全量写路径 | #932 已删除 writer、Shared path API 与无消费者 Storage Cost namespace；用户既有文件原样保留 | v0.1.0 不读、不导入、不覆盖、不清空或删除；Future importer 需版本化、幂等且只接纳可验证 raw token | 已完成（#932） |
 | Stop Hook 超限强制 Done | Stop 未放行却伪造 Completed | 改为第 16 次 RunFailed 后删除旧 helper | S3/S5 |
 | 生产 `allow(dead_code)` baseline | #1015 机械统计出 10 个生产豁免；新增数量已被 Stop 守卫阻断，但历史符号尚未逐项退役 | #649/#947 删除 Runtime/TUI 历史豁免；其他 owner 在相关模块迁移时只减不增；#1018 决定最终执行位置 | S5/S7 |
 | 测试 flaky debt | `.agents/flaky-debt.json` 集中记录真实墙钟、固定 `/tmp`、全局 env/cwd 与随机源风险 | owner Issue 按退出条件清理；#1018 runner 保留首次失败，#1050 承接慢速 P1/PTY/platform | S7 |

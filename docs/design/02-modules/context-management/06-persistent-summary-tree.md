@@ -336,9 +336,7 @@ pub struct CompactAttemptUsage {
   `ModelInvocationId`，且不能让 Audit enqueue / flush 结果影响 checkpoint。
 - Session 总量展示在 query / presentation 层把 Main、Sub-agent 的既有来源与
   `CompactUsageSummary` 合并；Context 只拥有 compact 分量。
-- sidecar **NEVER** 持久化 Price 或 Cost。`/cost` 如展示 compact 金额，只能在
-  读取时复用 Runtime 现有 pricing 由 token 派生，并明确标记 estimated；Audit
-  v0.1.0 仍不计算 Cost。
+- sidecar **NEVER** 持久化 Price 或 Cost。当前 `/cost` 只是 token Usage 的历史命令名 alias，不展示金额。Future Cost 必须先建立 Audit-owned Pricing/Cost Published Language 与定价来源，再在读取时从 Usage 派生；**NEVER** 恢复 Runtime pricing 或把金额写回 sidecar / Audit Usage。
 - 复用 shard记录 `reused_shards`，但 **NEVER** 虚构精确“节省 token”。
 
 ## 11. Ports、所有权与装配
@@ -394,7 +392,7 @@ async fn compact_status(
 
 ## 12. TUI 与可观测性
 
-- `/cost`：Session 总量中单列 Compact，并拆 leaf / backfill map / branch reduce / reflection；金额是读取时派生 estimate，**NEVER** 回写 sidecar 或 Audit。
+- `/usage` 与历史 alias `/cost`：展示 token Usage；Session 总量可单列 Compact，并拆 leaf / backfill map / branch reduce / reflection。v0.1.0 **NEVER** 展示或持久化金额。
 - `/compact`：展示 coverage、pending tokens、reused shards、当前 phase 和累计 compact tokens。
 - 后台成功不刷屏；session circuit breaker 打开或持久化损坏时只发一次明确通知。
 - `info` 只记录 job / projection 生命周期；per-shard / per-attempt 使用 `debug`，token 累计和细粒度状态使用 `trace`。

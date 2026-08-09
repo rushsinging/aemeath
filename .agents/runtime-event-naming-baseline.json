@@ -17,7 +17,7 @@
         "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
         "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
-        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+        "TaskStateChanged", "RuntimeStatusChanged"
       ]
     },
     "sdk": {
@@ -41,7 +41,7 @@
         "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
         "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
-        "TaskStateChanged", "RuntimeStatusChanged", "CostUpdate"
+        "TaskStateChanged", "RuntimeStatusChanged"
       ]
     },
     "tui": {
@@ -59,7 +59,7 @@
         "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
         "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
         "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
-        "RuntimeStatusChanged", "TaskStateChanged", "CostUpdate", "ConfigChanged",
+        "RuntimeStatusChanged", "TaskStateChanged", "ConfigChanged",
         "ConfigReloaded"
       ]
     }
@@ -140,7 +140,7 @@
     "LiveTps", "RunChanged",
     "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
     "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
-    "ReminderList", "SessionList", "ProjectInfo", "CostUpdate"
+    "ReminderList", "SessionList", "ProjectInfo"
   ],
   "retired_symbols": [
     "CompactProgress", "TasksSnapshot", "AskUserBatch"

@@ -76,27 +76,17 @@ impl RuntimeState {
         input_tokens: u64,
         output_tokens: u64,
         last_input_tokens: u64,
-        cost_usd: f64,
-    ) -> (u64, u64, f64) {
+    ) -> (u64, u64) {
         self.usage.input_tokens += input_tokens;
         self.usage.output_tokens += output_tokens;
         self.usage.last_input_tokens = last_input_tokens;
         self.usage.api_calls += 1;
-        self.usage.cost_usd += cost_usd;
-        (
-            self.usage.input_tokens,
-            self.usage.output_tokens,
-            self.usage.cost_usd,
-        )
+        (self.usage.input_tokens, self.usage.output_tokens)
     }
 
-    pub fn update_last_input_tokens(&mut self, tokens: u64) -> (u64, u64, f64) {
+    pub fn update_last_input_tokens(&mut self, tokens: u64) -> (u64, u64) {
         self.usage.last_input_tokens = tokens;
-        (
-            self.usage.input_tokens,
-            self.usage.output_tokens,
-            self.usage.cost_usd,
-        )
+        (self.usage.input_tokens, self.usage.output_tokens)
     }
 
     pub fn set_live_tps(&mut self, tps: f64) {

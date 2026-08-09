@@ -114,6 +114,7 @@ Future retention 必须由 Audit Config 定义，并通过 Audit 的 File Append
 
 若 Future 需要从其他 Usage 数据源导入记录：
 
+- v0.1.0 不提供 importer；既有 `~/.agents/cost_history.json` 不读、不导入、不覆盖、不清空或删除；
 - 只导入可验证的 raw token 字段；
 - 忽略 cost / price 等派生字段；
 - 缺少 RunId / RunStepId / ModelInvocationId 时不得伪造完整关联；
@@ -137,7 +138,9 @@ Future retention 必须由 Audit Config 定义，并通过 Audit 的 File Append
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-21 | #930 完成版本化 V1 decoder、坏行/截断尾行 warning、关联字段与时间 filter、opaque cursor 续页和纯 token summary；缺失 Session 分区安全返回空，Runtime/Composition production wiring 仍归 #931 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
+| 2026-08-09 | #932 退役旧 Cost history 读写/path surface；既有 `cost_history.json` 保持用户 artifact，不自动导入、不覆盖、不删除，查询只读取 Audit Usage JSONL | [#932](https://github.com/rushsinging/aemeath/issues/932) |
+| 2026-08-09 | #931 完成真实 Main/Sub logical invocation 写入同一 canonical Session Usage 分区与 SessionAudit drain | [#931](https://github.com/rushsinging/aemeath/issues/931) |
+| 2026-07-21 | #930 完成版本化 V1 decoder、坏行/截断尾行 warning、关联字段与时间 filter、opaque cursor 续页和纯 token summary；缺失 Session 分区安全返回空 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
 | 2026-07-17 | #927 冻结嵌套 `UsageEnvelopeV1` serde 契约与责任边界：#928 只处理 bytes append/read，#930 实现版本化 decoder 与坏行处理 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-12 | 初稿：按 SessionId 分区的独立 Audit JSONL、逐条 flush 与损坏隔离 | #790 |
 | 2026-07-15 | 修正职责归属：append/flush/IO 隔离/retention 执行改为 Audit-owned File AppendLog Adapter 直接实现，不再归 Storage | [#972](https://github.com/rushsinging/aemeath/issues/972) |

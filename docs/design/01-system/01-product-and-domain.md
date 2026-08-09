@@ -37,7 +37,7 @@ aemeath 是一个基于 Rust 的 **AI 编程助手**，以 TUI 为主要交付�
 | **Task Management** | 任务聚合：状态机（pending→in_progress→completed）与依赖图不变量（blocked_by 不成环）。 |
 | **Project / Workspace** | worktree 工作区上下文、git 状态供给。 |
 | **Policy** | 权限评估（工具执行前的准入判断）。 |
-| **Audit** | 审计事件记录，含成本 / 用量 / 定价（Cost）。 |
+| **Audit** | v0.1.0 记录与查询 Usage metadata；Cost / Pricing 仅为 Future 能力，当前不计算、不持久化。 |
 | **Tool & Skill & Command** | 工具生态：内置 Tool、Skill、Slash 命令、MCP 集成。 |
 | **Workflow** | agent 行为的推理调节：reasoning effort 阶段调节（reasoning graph），经端口被 Agent Runtime 消费。不做多-agent 图编排；sub-agent 的派生与执行属 Agent Runtime。 |
 
@@ -102,7 +102,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 2. **策略与机制分离**：数据 BC 决定业务策略和 Snapshot 语义；Storage/Logging/Hook 等通用 BC 提供物理机制。
 3. **编排与能力分离**：Agent Runtime 决定调用时机和控制流；Provider、Tool、Policy 等 BC 守护各自局部语义。
 4. **数据、Snapshot 与投影分离**：领域聚合由对应 BC 拥有；BC 的可序列化 Snapshot / 派生视图属于其 Published Language，物理落盘经 Storage；TUI/Server/SDK 再消费 PL 形成交付层投影。
-5. **跨界必须显式**：一项需求同时命中两个 BC 时，先确定不变量所有者，再通过 Port + Published Language / Event 集成；不得复制模型。典型分层包括 Provider raw usage → Audit Cost/Usage 聚合、Config 静态值 → 策略 BC 应用、数据 BC Snapshot → Storage 物理落盘。
+5. **跨界必须显式**：一项需求同时命中两个 BC 时，先确定不变量所有者，再通过 Port + Published Language / Event 集成；不得复制模型。典型分层包括 Provider raw usage → Runtime logical invocation 关联 → Audit Usage 事实、Future Audit Cost/Pricing 从 Usage 派生、Config 静态值 → 策略 BC 应用、数据 BC Snapshot → Storage 物理落盘。
 6. **静态值与业务策略分离**：Config 拥有默认值、阈值和来源优先级；消费 BC 拥有如何使用这些值的业务行为。
 7. **未归属先停设计**：若职责在表中无明确所有者，必须先更新本章程和 Context Map，再进入模块设计或代码实现。
 
@@ -128,6 +128,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-09 | 明确 Audit v0.1.0 为 Usage-only；Runtime/SDK/TUI 旧 Cost surface 与历史写路径退役，Future Cost/Pricing 需另行设计 | #932 |
 | 2026-07-11 | 初稿：产品目标、子域三分类、15 BC 清单、关键约束 | #760 |
 | 2026-07-11 | 改为纯目标态（移除当前代码落点列）、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
