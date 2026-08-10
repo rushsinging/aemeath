@@ -356,6 +356,8 @@ pub struct CompactRequest {
     /// 当前 Task 状态文本（#1537）：compact summary 定稿后拼接到末尾，
     /// 防止递进压缩后 task 上下文丢失。`None` 表示无活跃 task。
     pub task_context: Option<String>,
+    /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl std::fmt::Debug for CompactRequest {
@@ -370,6 +372,7 @@ impl std::fmt::Debug for CompactRequest {
                 "task_context",
                 &self.task_context.as_ref().map(|_| "<text>"),
             )
+            .field("cancelled", &self.cancellation.is_cancelled())
             .finish()
     }
 }
@@ -402,11 +405,48 @@ impl std::fmt::Debug for ManualCompactRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactGenerationFailureKind {
+    Cancelled,
+    RateLimited,
+    ContextTooLong,
+    Timeout,
+    Provider,
+    InvalidSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactGenerationFailure {
+    pub kind: CompactGenerationFailureKind,
+    pub message: String,
+}
+
+impl CompactGenerationFailure {
+    pub fn new(kind: CompactGenerationFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    pub const fn permits_local_fallback(&self) -> bool {
+        !matches!(self.kind, CompactGenerationFailureKind::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactSummaryQuality {
+    Llm,
+    LocalFallback(CompactGenerationFailureKind),
+    LocalOnly,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompactResult {
     pub summary: String,
     pub recent_messages: Vec<ContextMessage>,
     pub source_revision: SessionRevision,
+    pub quality: CompactSummaryQuality,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,6 +454,7 @@ pub enum CompactSkipReason {
     ResumeProtection,
     HookBlocked,
     CircuitBreakerOpen,
+    Cancelled,
 }
 
 #[derive(Debug, Clone)]

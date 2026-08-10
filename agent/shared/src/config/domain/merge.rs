@@ -150,6 +150,8 @@ pub struct ContextConfigPatch {
     pub snip_enabled: Option<bool>,
     #[serde(default)]
     pub microcompact_enabled: Option<bool>,
+    #[serde(default)]
+    pub auto_compact_failure_limit: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -512,6 +514,9 @@ pub(crate) fn apply_context_patch(
     }
     if let Some(value) = patch.microcompact_enabled {
         base.microcompact_enabled = value;
+    }
+    if let Some(value) = patch.auto_compact_failure_limit {
+        base.auto_compact_failure_limit = value;
     }
     base
 }
@@ -978,6 +983,31 @@ mod tests {
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    #[test]
+    fn auto_compact_failure_limit_patch_preserves_unspecified_context_values() {
+        let base = Config {
+            context: ContextConfig {
+                snip_enabled: false,
+                auto_compact_failure_limit: 7,
+                ..ContextConfig::default()
+            },
+            ..Config::default()
+        };
+        let merged = apply_patch(
+            base,
+            ConfigPatch {
+                context: Some(ContextConfigPatch {
+                    auto_compact_failure_limit: Some(2),
+                    ..ContextConfigPatch::default()
+                }),
+                ..ConfigPatch::default()
+            },
+        );
+
+        assert!(!merged.context.snip_enabled);
+        assert_eq!(merged.context.auto_compact_failure_limit, 2);
     }
 
     #[test]

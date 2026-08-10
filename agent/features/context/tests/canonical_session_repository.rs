@@ -222,6 +222,12 @@ fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
     }
 }
 
+fn valid_checkpoint(objective: &str) -> String {
+    format!(
+        "## Immutable Constraints\n- preserve constraints\n\n## Current Objective\n- {objective}\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue"
+    )
+}
+
 fn compact_request(session_id: SessionId) -> ContextRequest {
     ContextRequest {
         session_id,
@@ -245,7 +251,7 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
 }
 
 fn repository_with_session(
-    writer: Arc<RecordingWriter>,
+    writer: Arc<dyn CanonicalSessionWriter>,
     session: CanonicalSession,
 ) -> (
     CanonicalSessionRepository,
@@ -360,6 +366,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
@@ -504,6 +511,7 @@ async fn compaction_preserves_skill_load_records() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
@@ -720,6 +728,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         }),
     )
     .await;
@@ -1334,6 +1343,333 @@ async fn failed_durable_write_does_not_publish_candidate() {
 }
 
 #[tokio::test]
+async fn compact_generation_does_not_hold_session_mutation_gate() {
+    use context::compact::CompactGenerator;
+    use tokio::sync::{mpsc, oneshot};
+    use tokio_util::sync::CancellationToken;
+
+    struct BlockingGenerator {
+        started: Mutex<Option<oneshot::Sender<()>>>,
+        release: tokio::sync::Mutex<mpsc::Receiver<()>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for BlockingGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, context::domain::CompactGenerationFailure> {
+            if let Some(started) = self.started.lock().unwrap().take() {
+                let _ = started.send(());
+            }
+            self.release.lock().await.recv().await;
+            Ok(format!(
+                "<summary>{}</summary>",
+                valid_checkpoint("generated")
+            ))
+        }
+    }
+
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("unlocked-generation-session");
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+    let (started_sender, started_receiver) = oneshot::channel();
+    let (release_sender, release_receiver) = mpsc::channel(1);
+    let repository = Arc::new(repository.with_generator(Arc::new(BlockingGenerator {
+        started: Mutex::new(Some(started_sender)),
+        release: tokio::sync::Mutex::new(release_receiver),
+    })));
+    let request = compact_request(session_id.clone());
+    let compact_task = {
+        let repository = Arc::clone(&repository);
+        tokio::spawn(async move {
+            repository
+                .commit_compaction(&CompactRequest {
+                    run_id: request.run_id.clone(),
+                    source_revision: SessionRevision::new(0),
+                    source: request,
+                    trigger: CompactTrigger::Automatic,
+                    progress: None,
+                    task_context: None,
+                    cancellation: tokio_util::sync::CancellationToken::new(),
+                })
+                .await
+        })
+    };
+
+    started_receiver
+        .await
+        .expect("compact generator should begin before concurrent mutation");
+    let mut concurrent_append = append("concurrent");
+    concurrent_append.session_id = session_id;
+    concurrent_append.run_id = RunId::new("concurrent-run");
+    concurrent_append.step_id = RunStepId::new("concurrent-step");
+    let append_receipt = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        repository.append_finalized(&concurrent_append),
+    )
+    .await
+    .expect("Provider await 期间合法 Session mutation 必须能取得 mutation gate")
+    .expect("concurrent append should commit");
+    assert_eq!(append_receipt.committed_revision, SessionRevision::new(1));
+
+    release_sender.send(()).await.unwrap();
+    let compact_result = compact_task.await.unwrap();
+    assert!(matches!(
+        compact_result,
+        Err(context::domain::ContextPortError::Compact(ref message))
+            if message.contains("Session revision 冲突")
+    ));
+    let session = holder.read().unwrap();
+    assert_eq!(session.revision, 1);
+    assert!(session.compact.is_none());
+    assert!(session
+        .structured_messages()
+        .iter()
+        .any(|message| message.text_content() == "fact"));
+}
+
+#[tokio::test]
+async fn cancelled_compaction_does_not_commit_local_fallback() {
+    use context::compact::CompactGenerator;
+    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use tokio_util::sync::CancellationToken;
+
+    struct CancelledGenerator;
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for CancelledGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            cancel: &CancellationToken,
+        ) -> Result<String, CompactGenerationFailure> {
+            assert!(cancel.is_cancelled());
+            Err(CompactGenerationFailure::new(
+                CompactGenerationFailureKind::Cancelled,
+                "cancelled",
+            ))
+        }
+    }
+
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("cancelled-compact-session");
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
+    let repository = repository.with_generator(Arc::new(CancelledGenerator));
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let request = compact_request(session_id);
+
+    let outcome = repository
+        .commit_compaction(&CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: CompactTrigger::Automatic,
+            progress: None,
+            task_context: None,
+            cancellation,
+        })
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Skipped(context::domain::CompactSkipReason::Cancelled)
+    ));
+    let session = holder.read().unwrap();
+    assert_eq!(session.revision, 0);
+    assert!(session.compact.is_none());
+}
+
+#[tokio::test]
+async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
+    use context::compact::CompactGenerator;
+    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio_util::sync::CancellationToken;
+
+    struct FailingGenerator {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for FailingGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, CompactGenerationFailure> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(CompactGenerationFailure::new(
+                CompactGenerationFailureKind::Provider,
+                "provider failed",
+            ))
+        }
+    }
+
+    struct FailingWriter;
+
+    #[async_trait]
+    impl CanonicalSessionWriter for FailingWriter {
+        async fn commit(
+            &self,
+            _session_id: &str,
+            _expected_revision: u64,
+            _plan: SessionCommitPlan,
+        ) -> Result<(), String> {
+            Err("disk full".to_string())
+        }
+    }
+
+    let session_id = SessionId::new("circuit-breaker-session");
+    let (repository, _) = repository_with_session(
+        Arc::new(FailingWriter),
+        ten_step_session(&session_id, vec![], 0),
+    );
+    let calls = Arc::new(AtomicUsize::new(0));
+    let repository = repository.with_generator(Arc::new(FailingGenerator {
+        calls: Arc::clone(&calls),
+    }));
+    let mut request = compact_request(session_id.clone());
+    request.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
+        context: share::config::ContextConfig {
+            auto_compact_failure_limit: 2,
+            ..Default::default()
+        },
+        ..Config::default()
+    }));
+
+    for _ in 0..2 {
+        assert!(repository
+            .commit_compaction(&CompactRequest {
+                run_id: request.run_id.clone(),
+                source_revision: SessionRevision::new(0),
+                source: request.clone(),
+                trigger: CompactTrigger::Automatic,
+                progress: None,
+                task_context: None,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .is_err());
+    }
+    let outcome = repository
+        .commit_compaction(&CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: CompactTrigger::Automatic,
+            progress: None,
+            task_context: None,
+            cancellation: CancellationToken::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        context::domain::CompactOutcome::Skipped(
+            context::domain::CompactSkipReason::CircuitBreakerOpen
+        )
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn manual_compact_bypasses_automatic_circuit_breaker() {
+    use context::compact::CompactGenerator;
+    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use tokio_util::sync::CancellationToken;
+
+    struct SwitchableGenerator {
+        should_fail: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for SwitchableGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, CompactGenerationFailure> {
+            if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
+                Err(CompactGenerationFailure::new(
+                    CompactGenerationFailureKind::Provider,
+                    "provider failed",
+                ))
+            } else {
+                Ok(format!("<summary>{}</summary>", valid_checkpoint("manual")))
+            }
+        }
+    }
+
+    let session_id = SessionId::new("manual-bypass-session");
+    let mut session = ten_step_session(&session_id, vec![], 0);
+    session.run_slices = (0..10)
+        .map(|index| {
+            CommittedRunSlice::new(
+                format!("run-{index}"),
+                vec![CommittedRunStep::compatibility_outcome_only(
+                    format!("step-{index}"),
+                    vec![
+                        Message::user(format!("message-{index}-user")),
+                        Message::user(format!("message-{index}-assistant")),
+                    ],
+                )],
+            )
+        })
+        .collect::<Vec<_>>()
+        .into();
+    let (repository, holder) =
+        repository_with_session(Arc::new(RecordingWriter::default()), session);
+    let should_fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let repository = repository.with_generator(Arc::new(SwitchableGenerator {
+        should_fail: Arc::clone(&should_fail),
+    }));
+    let mut automatic_source = compact_request(session_id.clone());
+    automatic_source.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
+        context: share::config::ContextConfig {
+            auto_compact_failure_limit: 1,
+            ..Default::default()
+        },
+        ..Config::default()
+    }));
+    let automatic = CompactRequest {
+        run_id: automatic_source.run_id.clone(),
+        source_revision: SessionRevision::new(99),
+        source: automatic_source,
+        trigger: CompactTrigger::Automatic,
+        progress: None,
+        task_context: None,
+        cancellation: CancellationToken::new(),
+    };
+    let _ = repository.commit_compaction(&automatic).await;
+    should_fail.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let outcome = repository
+        .commit_manual_compaction(&ManualCompactRequest {
+            session_id,
+            run_id: RunId::new("manual-run"),
+            system_prompt: SystemPromptSpec::new("system"),
+            context_size: 200_000,
+            progress: None,
+            task_context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(outcome, context::domain::CompactOutcome::Committed(_)),
+        "unexpected manual compact outcome: {outcome:?}"
+    );
+    assert!(holder.read().unwrap().compact.is_some());
+}
+
+#[tokio::test]
 async fn automatic_compaction_executes_after_actual_token_decision() {
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("actual-token-session");
@@ -1351,6 +1687,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
@@ -1474,6 +1811,7 @@ async fn compaction_rejects_stale_source_revision() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await;
 
@@ -1539,7 +1877,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, context::domain::CompactGenerationFailure> {
             Ok(format!("<summary>{}</summary>", self.0))
         }
     }
@@ -1562,6 +1900,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
@@ -1612,6 +1951,7 @@ async fn commit_compaction_appends_task_context_to_summary() {
             trigger: context::domain::CompactTrigger::Automatic,
             progress: None,
             task_context: Some("■ #1 实现压缩拼接".to_string()),
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();

@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use context::compact::CompactGenerator;
+use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
 use futures::StreamExt;
 use provider::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, ModelId, ReasoningLevel,
@@ -42,7 +43,7 @@ impl CompactGenerator for ProviderCompactGenerator {
         &self,
         request: Vec<Message>,
         cancel: &CancellationToken,
-    ) -> Result<String, String> {
+    ) -> Result<String, CompactGenerationFailure> {
         let mut invocation = InvocationRequest::new(
             self.model.clone(),
             request,
@@ -55,7 +56,7 @@ impl CompactGenerator for ProviderCompactGenerator {
             .provider
             .invoke(invocation, cancel)
             .await
-            .map_err(|error| error.safe_message.clone())?;
+            .map_err(compact_generation_failure)?;
 
         let mut text = String::new();
         let mut stream = stream;
@@ -65,12 +66,36 @@ impl CompactGenerator for ProviderCompactGenerator {
                 InvocationEvent::Delta(_) => {}
                 InvocationEvent::Completed(_) => return Ok(text),
                 InvocationEvent::Failed(error) => {
-                    return Err(error.safe_message.clone());
+                    return Err(compact_generation_failure(error));
                 }
             }
         }
-        Err("provider stream ended without completion".to_string())
+        Err(CompactGenerationFailure::new(
+            CompactGenerationFailureKind::Provider,
+            "Provider 流在完成事件前结束",
+        ))
     }
+}
+
+fn compact_generation_failure(error: provider::ProviderError) -> CompactGenerationFailure {
+    use provider::ProviderErrorKind;
+
+    let kind = match error.kind {
+        ProviderErrorKind::Cancelled => CompactGenerationFailureKind::Cancelled,
+        ProviderErrorKind::RateLimited => CompactGenerationFailureKind::RateLimited,
+        ProviderErrorKind::ContextTooLong => CompactGenerationFailureKind::ContextTooLong,
+        ProviderErrorKind::Timeout => CompactGenerationFailureKind::Timeout,
+        ProviderErrorKind::Authentication
+        | ProviderErrorKind::PermissionDenied
+        | ProviderErrorKind::InvalidRequest
+        | ProviderErrorKind::ModelUnavailable
+        | ProviderErrorKind::UpstreamUnavailable
+        | ProviderErrorKind::Network
+        | ProviderErrorKind::Protocol
+        | ProviderErrorKind::StreamTruncated
+        | ProviderErrorKind::Configuration => CompactGenerationFailureKind::Provider,
+    };
+    CompactGenerationFailure::new(kind, error.safe_message)
 }
 
 #[cfg(test)]

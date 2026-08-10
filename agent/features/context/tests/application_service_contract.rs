@@ -228,6 +228,7 @@ impl SessionRepository for FakeSession {
                 summary: "manual".into(),
                 recent_messages: vec![],
                 source_revision: SessionRevision::new(4),
+                quality: context::domain::CompactSummaryQuality::LocalOnly,
             },
         ))
     }

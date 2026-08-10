@@ -81,7 +81,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _ = request;
             Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
@@ -503,7 +503,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             self.call_count.fetch_add(1, Ordering::SeqCst);
@@ -581,7 +581,7 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .first()
@@ -633,7 +633,7 @@ impl CompactGenerator for MockGenerator {
         &self,
         _request: Vec<Message>,
         _cancel: &CancellationToken,
-    ) -> Result<String, String> {
+    ) -> Result<String, crate::domain::CompactGenerationFailure> {
         Ok(format!("<summary>{}</summary>", self.text))
     }
 }
@@ -656,7 +656,47 @@ async fn compact_with_generator_uses_llm_summary() {
 
     // The summary should come from the generator, not the fallback text.
     assert_eq!(result.summary, VALID_CHECKPOINT);
+    assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
     assert!(!result.summary.contains("Local text-compaction path"));
+}
+
+#[tokio::test]
+async fn compact_cancelled_generator_does_not_fallback() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    struct CancelledGenerator;
+    #[async_trait::async_trait]
+    impl CompactGenerator for CancelledGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            Err(crate::domain::CompactGenerationFailure::new(
+                crate::domain::CompactGenerationFailureKind::Cancelled,
+                "cancelled",
+            ))
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&CancelledGenerator),
+        None,
+        &cancel,
+    )
+    .await;
+
+    assert!(
+        result.is_none(),
+        "cancelled compact must not create fallback"
+    );
 }
 
 #[tokio::test]
@@ -673,8 +713,11 @@ async fn compact_falls_back_when_generator_errors() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
-            Err("simulated LLM failure".to_string())
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            Err(crate::domain::CompactGenerationFailure::new(
+                crate::domain::CompactGenerationFailureKind::Provider,
+                "simulated LLM failure",
+            ))
         }
     }
 
@@ -693,6 +736,12 @@ async fn compact_falls_back_when_generator_errors() {
     assert!(result.summary.contains("## Current Objective"));
     assert!(result.summary.contains("Local text-compaction path"));
     assert!(!result.summary.contains("Semantic LLM compaction failed"));
+    assert_eq!(
+        result.quality,
+        crate::domain::CompactSummaryQuality::LocalFallback(
+            crate::domain::CompactGenerationFailureKind::Provider
+        )
+    );
 }
 
 /// #1490：再压提示词必须使用缩减预算（summary_budget × 0.8）并硬约束，
@@ -754,7 +803,7 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .first()
@@ -825,7 +874,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }
@@ -911,7 +960,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, String> {
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
         }
     }

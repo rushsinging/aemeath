@@ -74,6 +74,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 

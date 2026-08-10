@@ -315,6 +315,56 @@ impl MainContextFactory for ProductionMainContextFactory {
     }
 }
 
+#[derive(Clone)]
+struct CompactSource {
+    revision: SessionRevision,
+    messages: Vec<share::message::Message>,
+    visible_steps: Vec<(
+        crate::domain::session::RunStepCursor,
+        Vec<share::message::Message>,
+    )>,
+    previous_summary: Option<String>,
+}
+
+struct GeneratedCompact {
+    summary: String,
+    recent_messages: Vec<share::message::Message>,
+    quality: crate::domain::CompactSummaryQuality,
+}
+
+struct AutoCompactAttemptPermit {
+    state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
+    failure_limit: u8,
+    finished: bool,
+}
+
+impl AutoCompactAttemptPermit {
+    fn finish(mut self, outcome: &Result<CompactOutcome, ContextPortError>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match outcome {
+            Ok(CompactOutcome::Committed(_)) => state.record_success(),
+            Ok(CompactOutcome::Skipped(_)) => {}
+            Err(_) => state.record_failure(self.failure_limit),
+        }
+        self.finished = true;
+    }
+}
+
+impl Drop for AutoCompactAttemptPermit {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_failure(self.failure_limit);
+    }
+}
+
 pub struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
@@ -326,6 +376,7 @@ pub struct CanonicalSessionRepository {
     /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
     /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
     generator: Option<Arc<dyn CompactGenerator>>,
+    auto_compact_state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
 }
 
 impl CanonicalSessionRepository {
@@ -345,6 +396,9 @@ impl CanonicalSessionRepository {
             writer,
             mutation_gate,
             generator: None,
+            auto_compact_state: Arc::new(std::sync::Mutex::new(
+                crate::domain::compact::AutoCompactState::default(),
+            )),
         }
     }
 
@@ -401,7 +455,8 @@ impl CanonicalSessionRepository {
         previous_summary: Option<&str>,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-    ) -> Option<(String, Vec<share::message::Message>)> {
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Option<crate::adapters::compact_summary::CompactResult> {
         match &self.generator {
             Some(generator) => {
                 let result = compact_messages_with_llm(
@@ -410,32 +465,32 @@ impl CanonicalSessionRepository {
                     context_size,
                     Some(generator.as_ref()),
                     progress.as_deref(),
-                    &tokio_util::sync::CancellationToken::new(),
+                    cancellation,
                 )
                 .await;
-                result.map(|compacted| {
+                result.inspect(|compacted| {
                     log::info!(
                         target: crate::LOG_TARGET,
-                        "[compact] LLM 路径提交：summary={} chars recent={}",
+                        "[compact] LLM 路径生成完成：summary={} chars recent={} quality={:?}",
                         compacted.summary.len(),
                         compacted.recent_messages.len(),
+                        compacted.quality,
                     );
-                    (compacted.summary, compacted.recent_messages)
                 })
             }
             None => {
-                let compacted = crate::adapters::compact_summary::compact_messages(messages)?;
+                let mut compacted = crate::adapters::compact_summary::compact_messages(messages)?;
                 let window = crate::adapters::compact_summary::compact_window(messages.len())?;
                 let early = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
-                let summary =
+                compacted.summary =
                     crate::adapters::compact_summary::build_summary_text(early, previous_summary);
                 log::info!(
                     target: crate::LOG_TARGET,
-                    "[compact] 本地路径提交：summary={} chars recent={}",
-                    summary.len(),
+                    "[compact] 本地路径生成完成：summary={} chars recent={}",
+                    compacted.summary.len(),
                     compacted.recent_messages.len(),
                 );
-                Some((summary, compacted.recent_messages))
+                Some(compacted)
             }
         }
     }
@@ -453,6 +508,182 @@ impl CanonicalSessionRepository {
             }
             _ => checkpoint.to_string(),
         }
+    }
+
+    async fn commit_automatic_compaction(
+        &self,
+        request: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let source = self
+            .freeze_compact_source(&request.source.session_id, Some(request.source_revision))
+            .await?;
+        let generated = match self
+            .generate_compact(
+                &source,
+                request.source.context_size,
+                request.progress.clone(),
+                &request.task_context,
+                &request.cancellation,
+            )
+            .await
+        {
+            Ok(Some(generated)) => generated,
+            Ok(None) => {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+            }
+            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+        };
+        self.commit_generated_compact(&request.source.session_id, &source, generated)
+            .await
+    }
+
+    fn begin_auto_compact_attempt(&self, failure_limit: u8) -> Option<AutoCompactAttemptPermit> {
+        let state = self
+            .auto_compact_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.should_attempt() {
+            return None;
+        }
+        drop(state);
+        Some(AutoCompactAttemptPermit {
+            state: Arc::clone(&self.auto_compact_state),
+            failure_limit: failure_limit.max(1),
+            finished: false,
+        })
+    }
+
+    async fn freeze_compact_source(
+        &self,
+        session_id: &SessionId,
+        expected_revision: Option<SessionRevision>,
+    ) -> Result<CompactSource, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+        }
+        let revision = SessionRevision::new(current.revision);
+        if let Some(expected_revision) = expected_revision {
+            if expected_revision != revision {
+                return Err(Self::compact_revision_conflict(expected_revision, revision));
+            }
+        }
+        let visible_steps = current.flattened_steps_from_marker();
+        let messages = visible_steps
+            .iter()
+            .flat_map(|(_, messages)| messages.iter().cloned())
+            .collect();
+        Ok(CompactSource {
+            revision,
+            messages,
+            visible_steps,
+            previous_summary: current
+                .compact
+                .as_ref()
+                .map(|marker| marker.summary.clone()),
+        })
+    }
+
+    async fn generate_compact(
+        &self,
+        source: &CompactSource,
+        context_size: usize,
+        progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
+        task_context: &Option<String>,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
+        let Some(compacted) = self
+            .compact_visible_messages(
+                &source.messages,
+                source.previous_summary.as_deref(),
+                context_size,
+                progress,
+                cancellation,
+            )
+            .await
+        else {
+            return if cancellation.is_cancelled() {
+                Err(crate::domain::CompactSkipReason::Cancelled)
+            } else {
+                Ok(None)
+            };
+        };
+        Ok(Some(GeneratedCompact {
+            summary: Self::append_task_context(&compacted.summary, task_context),
+            recent_messages: compacted.recent_messages,
+            quality: compacted.quality,
+        }))
+    }
+
+    async fn commit_generated_compact(
+        &self,
+        session_id: &SessionId,
+        source: &CompactSource,
+        generated: GeneratedCompact,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+        }
+        let actual_revision = SessionRevision::new(current.revision);
+        if actual_revision != source.revision {
+            return Err(Self::compact_revision_conflict(
+                source.revision,
+                actual_revision,
+            ));
+        }
+        let keep_messages = generated.recent_messages.len();
+        let mut retained = 0usize;
+        let mut start_at = None;
+        for (cursor, step_messages) in source.visible_steps.iter().rev() {
+            retained += step_messages.len();
+            start_at = Some(cursor.clone());
+            if retained >= keep_messages {
+                break;
+            }
+        }
+        let mut candidate = (*current).clone();
+        candidate.compact = Some(ActiveCompactMarker {
+            summary: generated.summary.clone(),
+            start_at,
+            source_revision: source.revision.get(),
+        });
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        self.persist_candidate(
+            &current,
+            &candidate,
+            SessionSaveIntent::CommitPartialHistory,
+        )
+        .await
+        .map_err(ContextPortError::Compact)?;
+        self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
+        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
+            summary: generated.summary,
+            recent_messages: generated.recent_messages,
+            source_revision: source.revision,
+            quality: generated.quality,
+        }))
+    }
+
+    fn compact_revision_conflict(
+        expected: SessionRevision,
+        actual: SessionRevision,
+    ) -> ContextPortError {
+        ContextPortError::Compact(format!(
+            "Session revision 冲突：期望 {expected:?}，实际 {actual:?}"
+        ))
     }
 
     fn receipt(append: &ContextAppend, revision: SessionRevision) -> AppendReceipt {
@@ -843,153 +1074,46 @@ impl SessionRepository for CanonicalSessionRepository {
         &self,
         request: &CompactRequest,
     ) -> Result<CompactOutcome, ContextPortError> {
-        let _mutation = self.mutation_gate.lock().await;
-        let current = self
-            .session
-            .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
-            .clone();
-        if current.id != request.source.session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(
-                request.source.session_id.clone(),
+        let Some(attempt) = self.begin_auto_compact_attempt(
+            request.source.config_snapshot.auto_compact_failure_limit(),
+        ) else {
+            return Ok(CompactOutcome::Skipped(
+                CompactSkipReason::CircuitBreakerOpen,
             ));
-        }
-        let source_revision = request.source_revision;
-        let actual_revision = SessionRevision::new(current.revision);
-        if source_revision != actual_revision {
-            return Err(ContextPortError::Compact(format!(
-                "Session revision 冲突：期望 {source_revision:?}，实际 {actual_revision:?}"
-            )));
-        }
-        let visible_steps = current.flattened_steps_from_marker();
-        let messages: Vec<_> = visible_steps
-            .iter()
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect();
-        let previous_summary = current
-            .compact
-            .as_ref()
-            .map(|marker| marker.summary.as_str());
-        let Some((summary, recent_messages)) = self
-            .compact_visible_messages(
-                &messages,
-                previous_summary,
-                request.source.context_size,
-                request.progress.clone(),
-            )
-            .await
-        else {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
-        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
-        let summary = Self::append_task_context(&summary, &request.task_context);
-        let mut candidate = (*current).clone();
-        let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = recent_messages.len();
-        let mut retained = 0usize;
-        let mut start_at = None;
-        for (cursor, step_messages) in visible_steps.iter().rev() {
-            retained += step_messages.len();
-            start_at = Some(cursor.clone());
-            if retained >= keep_messages {
-                break;
-            }
-        }
-        candidate.compact = Some(ActiveCompactMarker {
-            summary: summary.clone(),
-            start_at,
-            source_revision: source_revision.get(),
-        });
-        candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
-        self.publish_generation(&current, candidate)
-            .map_err(ContextPortError::SessionRepository)?;
-        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary,
-            recent_messages,
-            source_revision,
-        }))
+        let result = self.commit_automatic_compaction(request).await;
+        attempt.finish(&result);
+        result
     }
+
     async fn commit_manual_compaction(
         &self,
         request: &ManualCompactRequest,
     ) -> Result<CompactOutcome, ContextPortError> {
-        let _mutation = self.mutation_gate.lock().await;
-        let current = self
-            .session
-            .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
-            .clone();
-        if current.id != request.session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(
-                request.session_id.clone(),
-            ));
-        }
-        let visible_steps = current.flattened_steps_from_marker();
-        let messages: Vec<_> = visible_steps
-            .iter()
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect();
-        if messages.len() <= 4 {
+        let source = self
+            .freeze_compact_source(&request.session_id, None)
+            .await?;
+        if source.messages.len() <= 4 {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         }
-        let previous_summary = current
-            .compact
-            .as_ref()
-            .map(|marker| marker.summary.as_str());
-        let Some((summary, recent_messages)) = self
-            .compact_visible_messages(
-                &messages,
-                previous_summary,
+        let generated = match self
+            .generate_compact(
+                &source,
                 request.context_size,
                 request.progress.clone(),
+                &request.task_context,
+                &tokio_util::sync::CancellationToken::new(),
             )
             .await
-        else {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-        };
-        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
-        let summary = Self::append_task_context(&summary, &request.task_context);
-        let mut candidate = (*current).clone();
-        let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = recent_messages.len();
-        let mut retained = 0usize;
-        let mut start_at = None;
-        for (cursor, step_messages) in visible_steps.iter().rev() {
-            retained += step_messages.len();
-            start_at = Some(cursor.clone());
-            if retained >= keep_messages {
-                break;
+        {
+            Ok(Some(generated)) => generated,
+            Ok(None) => {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
             }
-        }
-        candidate.compact = Some(ActiveCompactMarker {
-            summary: summary.clone(),
-            start_at,
-            source_revision: source_revision.get(),
-        });
-        candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
-        self.publish_generation(&current, candidate)
-            .map_err(ContextPortError::SessionRepository)?;
-        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary,
-            recent_messages,
-            source_revision,
-        }))
+            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+        };
+        self.commit_generated_compact(&request.session_id, &source, generated)
+            .await
     }
 
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {

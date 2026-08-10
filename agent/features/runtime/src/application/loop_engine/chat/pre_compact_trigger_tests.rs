@@ -369,6 +369,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     });
     let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
 
@@ -521,6 +522,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     })));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();

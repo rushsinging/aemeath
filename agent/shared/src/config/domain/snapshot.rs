@@ -253,6 +253,10 @@ impl ConfigSnapshot {
         self.inner.context.microcompact_enabled
     }
 
+    pub fn auto_compact_failure_limit(&self) -> u8 {
+        self.inner.context.auto_compact_failure_limit.max(1)
+    }
+
     // ── Permissions ──────────────────────────────────────────
 
     pub fn permission_mode(&self) -> PermissionModeConfig {
@@ -634,6 +638,17 @@ mod tests {
 
         // Act & Assert
         assert_eq!(snap.context_size(), 32000);
+    }
+
+    #[test]
+    fn snapshot_auto_compact_failure_limit_defaults_and_normalizes_zero() {
+        let default_snapshot = ConfigSnapshot::new(Config::default());
+        assert_eq!(default_snapshot.auto_compact_failure_limit(), 3);
+
+        let mut config = Config::default();
+        config.context.auto_compact_failure_limit = 0;
+        let normalized_snapshot = ConfigSnapshot::new(config);
+        assert_eq!(normalized_snapshot.auto_compact_failure_limit(), 1);
     }
 
     /// Config.model.max_tokens=8192 时，消费方调 snapshot.max_tokens() 应得 8192。
