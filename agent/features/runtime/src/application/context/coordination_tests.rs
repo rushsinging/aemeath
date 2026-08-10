@@ -84,6 +84,7 @@ impl ContextPort for RecordingPort {
             summary: "summary".to_string(),
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -96,6 +97,7 @@ impl ContextPort for RecordingPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -170,6 +172,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
             SessionRevision::new(1),
             std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
             None,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -545,6 +548,7 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
                 SessionRevision::new(0),
                 std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
                 None,
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .unwrap(),
@@ -564,6 +568,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             summary: "summary".to_string(),
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }),
         &usage,
         &mut window,
@@ -610,7 +615,13 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
     };
 
     coordinator
-        .compact(&frozen, SessionRevision::new(1), view, None)
+        .compact(
+            &frozen,
+            SessionRevision::new(1),
+            view,
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .unwrap();
 

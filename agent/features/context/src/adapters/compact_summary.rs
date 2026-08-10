@@ -4,6 +4,9 @@
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
 use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStage, CompactWork};
+use crate::domain::{
+    CompactGenerationFailure, CompactGenerationFailureKind, CompactSummaryQuality,
+};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
@@ -73,7 +76,7 @@ pub trait CompactGenerator: Send + Sync {
         &self,
         request: Vec<Message>,
         cancel: &CancellationToken,
-    ) -> Result<String, String>;
+    ) -> Result<String, CompactGenerationFailure>;
 }
 
 /// compact 结果：summary 走 system 通道，recent_messages 作为新链的消息。
@@ -83,6 +86,8 @@ pub struct CompactResult {
     pub summary: String,
     /// recent tail（从 split_point 到末尾的原始消息）
     pub recent_messages: Vec<Message>,
+    /// 摘要来源与降级质量。
+    pub quality: CompactSummaryQuality,
 }
 
 /// 发送给 LLM 的压缩提示模板。
@@ -228,7 +233,7 @@ async fn llm_refresh(
     summary: &str,
     budget: usize,
     cancel: &CancellationToken,
-) -> Result<String, String> {
+) -> Result<String, CompactGenerationFailure> {
     let prompt = build_refresh_prompt(summary, budget);
     llm_generate(generator, vec![Message::user(prompt)], cancel).await
 }
@@ -260,6 +265,7 @@ pub fn compact_messages(messages: &[Message]) -> Option<CompactResult> {
     Some(CompactResult {
         summary,
         recent_messages: recent,
+        quality: CompactSummaryQuality::LocalOnly,
     })
 }
 
@@ -659,7 +665,7 @@ pub async fn compact_messages_with_llm(
         early_messages.len(),
         if generator.is_some() { "llm" } else { "local" },
     );
-    let summary = match generator {
+    let (summary, quality) = match generator {
         Some(generator) => {
             let result = if early_tokens > chunk_target_tokens(context_size) {
                 compact_messages_map_reduce(
@@ -687,27 +693,48 @@ pub async fn compact_messages_with_llm(
                     &text,
                     crate::domain::token_budget::summary_budget(context_size),
                 ) {
-                    Ok(checkpoint) => checkpoint,
+                    Ok(checkpoint) => (checkpoint, CompactSummaryQuality::Llm),
                     Err(error) => {
+                        let failure = CompactGenerationFailure::new(
+                            CompactGenerationFailureKind::InvalidSummary,
+                            error,
+                        );
                         log::warn!(
                             target: crate::LOG_TARGET,
-                            "[compact] LLM checkpoint 不合规，回退本地路径：{error}",
+                            "[compact] LLM checkpoint 不合规，回退本地路径：{}",
+                            failure.message,
                         );
-                        build_summary_text(early_messages, previous_summary)
+                        (
+                            build_summary_text(early_messages, previous_summary),
+                            CompactSummaryQuality::LocalFallback(failure.kind),
+                        )
                     }
                 },
-                Err(error) => {
-                    // #1486 可跟踪性：LLM 摘要失败原因必须记录，否则无法判断
-                    // 为何回退本地路径（超限 / 空摘要 / provider 错误）。
+                Err(error) if error.permits_local_fallback() => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "[compact] LLM 摘要失败，回退本地路径：{error}",
+                        "[compact] LLM 摘要失败，回退本地路径：{}",
+                        error.message,
                     );
-                    build_summary_text(early_messages, previous_summary)
+                    (
+                        build_summary_text(early_messages, previous_summary),
+                        CompactSummaryQuality::LocalFallback(error.kind),
+                    )
+                }
+                Err(error) => {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[compact] LLM 摘要取消，不提交本地 fallback：{}",
+                        error.message,
+                    );
+                    return None;
                 }
             }
         }
-        None => build_summary_text(early_messages, previous_summary),
+        None => (
+            build_summary_text(early_messages, previous_summary),
+            CompactSummaryQuality::LocalOnly,
+        ),
     };
 
     emit_progress(progress, CompactStage::Finalizing);
@@ -728,6 +755,7 @@ pub async fn compact_messages_with_llm(
     Some(CompactResult {
         summary,
         recent_messages: recent,
+        quality,
     })
 }
 
@@ -736,11 +764,14 @@ async fn llm_generate(
     generator: &dyn CompactGenerator,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<String, String> {
+) -> Result<String, CompactGenerationFailure> {
     let full_text = generator.generate(request, cancel).await?;
     let summary = parse_compact_response(&full_text);
     if summary.is_empty() {
-        return Err("LLM returned empty summary".into());
+        return Err(CompactGenerationFailure::new(
+            CompactGenerationFailureKind::InvalidSummary,
+            "LLM 返回了空摘要",
+        ));
     }
     Ok(summary)
 }
@@ -752,7 +783,7 @@ async fn llm_compact(
     previous_summary: Option<&str>,
     context_size: usize,
     cancel: &CancellationToken,
-) -> Result<String, String> {
+) -> Result<String, CompactGenerationFailure> {
     let request = build_compact_request(early_messages, previous_summary, context_size);
     llm_generate(generator, request, cancel).await
 }
@@ -800,7 +831,7 @@ async fn compact_messages_map_reduce(
     progress: Option<&dyn CompactProgressFn>,
     context_size: usize,
     cancel: &CancellationToken,
-) -> Result<String, String> {
+) -> Result<String, CompactGenerationFailure> {
     use crate::domain::token_budget::estimate_messages_tokens;
 
     let chunk_target = chunk_target_tokens(context_size);
@@ -829,7 +860,7 @@ async fn compact_messages_map_reduce(
             async move {
                 let summary =
                     llm_compact(generator, chunk, previous_for_chunk, context_size, cancel).await?;
-                Ok::<_, String>((chunk_index, summary))
+                Ok::<_, CompactGenerationFailure>((chunk_index, summary))
             }
         })
         .collect::<Vec<_>>();

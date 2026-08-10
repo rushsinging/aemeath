@@ -80,6 +80,7 @@ impl ContextPort for FakeContextPort {
             summary: "summary".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -91,6 +92,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(5),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -158,6 +160,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap(),

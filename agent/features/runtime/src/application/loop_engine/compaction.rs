@@ -109,6 +109,7 @@ impl CompactionCoordinator {
         observer: &mut O,
         progress: std::sync::Arc<dyn CompactProgressView>,
         task_context: Option<String>,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError>
     where
         O: CompactionObserver,
@@ -130,7 +131,13 @@ impl CompactionCoordinator {
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         let outcome = self
             .context
-            .compact(&request, source_revision, progress, task_context)
+            .compact(
+                &request,
+                source_revision,
+                progress,
+                task_context,
+                cancellation,
+            )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
         apply_automatic_compact_outcome(&outcome, &self.usage, execution.context_window_mut());

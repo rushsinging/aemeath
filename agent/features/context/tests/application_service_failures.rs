@@ -51,6 +51,7 @@ impl SessionRepository for Session {
                 summary: "manual".into(),
                 recent_messages: vec![],
                 source_revision: SessionRevision::new(1),
+                quality: context::domain::CompactSummaryQuality::LocalOnly,
             },
         ))
     }
