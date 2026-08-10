@@ -626,11 +626,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 hidden_count: state.hidden_count,
             }),
         },
-        ChatEvent::CostUpdate { cost } => TuiRuntimeEvent::CostUpdate {
-            input_tokens: cost.input_tokens,
-            output_tokens: cost.output_tokens,
-            cost_usd: cost.cost_usd,
-        },
     };
     SdkEventMapping::Runtime(runtime)
 }

@@ -633,6 +633,22 @@
       "status": "active"
     },
     {
+      "id": "policy.audit.cost-retirement",
+      "guard": "check-cost-tracker-retirement.sh",
+      "module": "audit",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent"
+      },
+      "classification": "target_capability_policy",
+      "owner": "audit",
+      "reason": "Usage-only Audit MVP keeps Runtime pricing, legacy Cost history paths, Cost DTO/events, Cost presentation state and the unused Storage Cost namespace retired",
+      "tracking_issue": 932,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only after a separately approved Audit-owned Cost/Pricing design defines new Published Language and migration semantics",
+      "status": "active"
+    },
+    {
       "id": "policy.runtime.activity-observation",
       "guard": "check-runtime-activity-observation.sh",
       "module": "runtime",

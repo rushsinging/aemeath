@@ -246,10 +246,6 @@ pub enum RuntimeStreamEvent {
     RuntimeStatusChanged {
         status: Box<sdk::RuntimeStatusView>,
     },
-    /// #567：成本信息回传。
-    CostUpdate {
-        cost: sdk::CostInfo,
-    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

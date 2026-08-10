@@ -210,7 +210,7 @@ fn builtin_command_descriptors(
         (
             "cost",
             &[],
-            "Show API cost statistics",
+            "Show current token usage (legacy alias)",
             M::SnapshotQuery,
             T::Audit,
             A::None,

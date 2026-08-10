@@ -130,7 +130,6 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ReminderList` | 同名 | reminder catalog | query/revision | snapshot | Catalog | Target Rename |
 | `SessionList` | 同名 | session catalog | query/revision | snapshot | Catalog | Target Rename |
 | `ProjectInfo` | 同名 | project projection | workspace/project | snapshot | Workspace | Target Rename/Merge |
-| `CostUpdate` | 同名 | cost presentation | run/session | 未明确 delta/cumulative | 否 | Target Clarify/Rename |
 | `CommandResultText` | 同名 | system/error message | command | string result | 否 | Compatibility |
 | legacy ChatInput | `Result` | command result text | command | string result | 否 | Deprecated |
 
@@ -139,6 +138,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | 名称 | 原问题 | 替代事实 | 状态 |
 |---|---|---|---|
 | stringly `CompactProgress { stage, current, total }` | stage 类型擦除；scheduled work 被误作 completed；TUI 镜像竞争 | Activity typed `CompactOperation` stage/work | Removed；NEVER 恢复 |
+| `CostUpdate` / `CostInfo` / `cost_usd` | Runtime 无定价 owner，旧跨层 surface 无 producer 且会伪装 Cost 支持 | `Usage` token 事实；Future Cost/Pricing 另行设计 | Removed；NEVER 恢复 |
 
 ## 10. 命名迁移清单
 
@@ -157,6 +157,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `CompactRollback` | 缺 operation subject/过去式 | 已由 `CompactOperationRolledBack` 替代生产发布；SDK 旧 variant 仅 compatibility dual-read | Public SDK compatibility；Runtime/TUI internal migration complete |
 | `TasksSnapshot` | 与 `TaskStateChanged` 双路径 | 已从 Runtime/SDK/TUI transport 物理退役；由 revisioned `TaskStateChanged` 取代 | Removed；Guard 禁止恢复 |
 | `AskUserBatch` | sender 穿透 Published Language | 已从 Runtime/SDK/TUI transport 物理退役；由纯值 `InteractionRequested` 与 command reply 取代 | Removed；Guard 禁止恢复 |
+| `CostUpdate` / `CostInfo` / `cost_usd` | 无生产定价 owner 的 Cost 空壳跨层传播 | 已从 SDK/Runtime/TUI 物理退役；当前只保留 `Usage` token 事实，历史 `/cost` 命令名映射 token Usage | Removed；Cost retirement Guard 禁止恢复 |
 | `SkillsUpdated` | plural + Updated | `SkillCatalogChanged` | 跨层 wire |
 | `ModelList` | query response 与 event 混淆 | `ModelCatalogSnapshot/Changed` | 语义澄清 |
 | `ReminderList` | 同上 | `ReminderCatalogSnapshot/Changed` | 语义澄清 |
@@ -165,7 +166,6 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `WorkingDirectoryChanged` | Subject 不稳定 | `WorkspaceChanged` | 跨层 wire |
 | `Result` / `CommandResultText` | stringly 通用通道 | typed command outcome/fact | Public compatibility |
 | `LiveTps` | UI 指标缩写 | `ModelThroughputChanged` 候选 | 跨层 wire |
-| `CostUpdate` | Updated + delta 不明 | `CostChanged` 并声明 delivery | 语义澄清 |
 
 ## 11. 索引维护规则
 

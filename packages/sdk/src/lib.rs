@@ -111,8 +111,8 @@ pub use tui::{
     TuiLaunchContext,
 };
 pub use types::{
-    char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
-    StrSlice, TaskState, TaskSummary,
+    char_to_byte, format_tokens, ByteIdx, CharIdx, PermissionPrompt, StatusInfo, StrSlice,
+    TaskState, TaskSummary,
 };
 pub use update::{UpdateResult, UpdateService, VersionCheck};
 pub use utils::{slice_head, slice_tail};

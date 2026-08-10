@@ -486,11 +486,9 @@ impl ConversationUpdate for RecordUsage {
         model.runtime.usage.output_tokens += self.output_tokens;
         model.runtime.usage.last_input_tokens = self.last_input_tokens;
         model.runtime.usage.api_calls += 1;
-        model.runtime.usage.cost_usd += self.cost_usd;
         vec![ConversationChange::UsageChanged {
             input_tokens: model.runtime.usage.input_tokens,
             output_tokens: model.runtime.usage.output_tokens,
-            cost_usd: model.runtime.usage.cost_usd,
         }]
     }
 }
@@ -501,7 +499,6 @@ impl ConversationUpdate for UpdateLastInputTokens {
         vec![ConversationChange::UsageChanged {
             input_tokens: model.runtime.usage.input_tokens,
             output_tokens: model.runtime.usage.output_tokens,
-            cost_usd: model.runtime.usage.cost_usd,
         }]
     }
 }

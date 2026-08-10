@@ -182,7 +182,6 @@ pub fn map_agent_event_for_ui(event: &UiEvent) -> AgentEventMapping {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
             })];
             if *elapsed_secs > 0.0 {
                 intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
@@ -400,7 +399,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
             })];
             if *elapsed_secs > 0.0 {
                 intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
@@ -626,7 +624,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::ReminderList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Run { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::RunStep {
             run_id,

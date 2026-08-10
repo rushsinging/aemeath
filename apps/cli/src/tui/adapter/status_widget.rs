@@ -38,7 +38,6 @@ mod tests {
                         input_tokens: 12_400,
                         output_tokens: 1_800,
                         last_input_tokens: 74_000,
-                        cost_usd: 0.0,
                     },
                 ),
             ),

@@ -82,6 +82,7 @@
 | 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent`、SDK mapper `map_lifecycle_event` 以及 Composition 接入 Audit worker 与失败降级所需的 Runtime-owned `UsageSink` / `UnavailableUsageSink` 出站端口；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；BoundaryOnly Hook adapter 必须从 `HookPointMetadata.class` 派生过滤并禁止变体 allow-list，从而保留 Stop 与生命周期 Boundary；Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名。配套正反例脚本验证未登记 façade 以 exit code 2 阻断，并验证登记的 lifecycle、SDK mapper 与 Usage façade clean pass |
 | 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；Runtime production 只允许 logical-commit `ActivitySnapshot` 与 heartbeat，禁止 `RuntimeActivityEvent::Changed` / `publish_change` 回流；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
 | 23g | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress` / `TasksSnapshot` / `AskUserBatch`；不破坏仍登记的 SDK wire compatibility |
+| 23h | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -639,6 +640,14 @@
 
 `check-runtime-capability-assembly-tests.sh`、`check-runtime-event-naming-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。事件命名主体 Guard 同样进入 `fast`，其结构化负例脚本只进入 `full`。
 
+## 23h. check-cost-tracker-retirement.sh
+
+- **位置**：`.agents/hooks/check-cost-tracker-retirement.sh`；正反例脚本为 `check-cost-tracker-retirement-tests.sh`。
+- **功能**：锁定 Usage-only Audit MVP 的退役边界：`agent/features/runtime/src/application/cost{.rs,/}` 与 Runtime 文件名含 `cost` / `pricing` 的实现不得恢复；`CostTracker`、`CostSummary`、`SessionCostSummary`、`ModelPricing`、`CostInfo`、`CostUpdate`、`cost_usd`、`COST_HISTORY_FILE`、`global_cost_history_path`、`StorageNamespace::Cost` 与 Rust 源码中的 `cost_history.json` 路径 literal 在 `agent/`、`apps/`、`packages/` 保持零引用。
+- **数据边界**：Guard 只扫描仓库源码，**NEVER** 读取、迁移、清空或删除用户磁盘上的 `~/.agents/cost_history.json`。旧文件是未迁移 artifact；当前生产查询只读 Audit Usage JSONL。
+- **编排**：静态主体进入 Stop `--fast`；复制仓库并注入 Runtime owner、Runtime pricing/cost 文件、旧 tracker、legacy path API/literal、SDK Cost DTO 与 Storage namespace 的八类负向探针只进入 `--full`。
+- **治理**：注册为 `policy.audit.cost-retirement` Target policy，不增加 migration exception、scope exclusion 或 inline allow。Future Cost/Pricing 若获批准，必须先建立 Audit-owned Published Language、定价来源和迁移语义，再以等价或更强 policy 替换，**NEVER** 直接删除 Guard。
+
 ## 24. check-config-reader-injection.sh
 
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
@@ -726,6 +735,7 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-09 | #932 新增 `check-cost-tracker-retirement.sh` Target policy 与八类负向探针，锁定 Runtime Pricing/Cost、legacy history path、SDK/Runtime/TUI Cost surface 和 Storage Cost namespace 零引用；不接触用户旧文件，迁移债务保持不变 | [#932](https://github.com/rushsinging/aemeath/issues/932) |
 | 2026-08-04 | #1521 cola-layer-purity 守卫从 xtask 移植为 perl 单进程核心（Stop Hook fast 瓶颈 40~80s → 0.22s）；退役 xtask `cola-layer-purity` / `run-test` / `changed-lines` 子命令与 `flaky.rs` / `changed_lines.rs`（净删 1042 行）；清理 §5 stale `LAYER_MIGRATION_EXCEPTIONS` 白名单表（tools business 目录已不存在） | [#1521](https://github.com/rushsinging/aemeath/issues/1521) |
 | 2026-08-04 | #1399 退役 Runtime 旧容器、`ChatLoopContext` 参数袋、Runtime-owned TUI launch adapter 与 Tokio cancellation adapter；具体 SDK ingress/egress 构造归 Runtime adapter façade并由 Composition 注入；`RUNTIME_LAYER_MIGRATION_EXCEPTIONS` 清零，registry migration debt 收敛为 repository 1 / Runtime 0 / TUI 1；Runtime capability Guard 新增旧符号与 application→adapters 反向依赖禁入 | [#1399](https://github.com/rushsinging/aemeath/issues/1399) |
 | 2026-07-17 | 登记 #983 的 AtomicDataset crate-root public façade；因跨 crate Memory 消费 deferred 至 #896，不提前修改 `ROOT_ACCESS_ALLOW.storage`，且 #983 无 Guard exception / allowlist 净增 | [#983](https://github.com/rushsinging/aemeath/issues/983) |

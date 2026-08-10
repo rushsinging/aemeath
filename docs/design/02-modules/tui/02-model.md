@@ -398,13 +398,13 @@ Spinner 双计时必须保留 Runtime Activity 的两个独立观测域：outer 
 ```rust
 struct UsageSummary {
     input_tokens: u64, output_tokens: u64, last_input_tokens: u64,
-    api_calls: u64, context_size: u64, cost_usd: f64,
+    api_calls: u64, context_size: u64,
 }
 ```
 
 | 方法 | 说明 |
 |---|---|
-| `record_usage(input, output, last_input, cost)` | 累加 token 与成本，返回 (input, output, cost) 元组 |
+| `record_usage(input, output, last_input)` | 累加 token 与 API 调用次数，返回 input/output 累计值 |
 | `set_context_size(size)` | 设置 context window 大小 |
 | `update_last_input_tokens(tokens)` | 更新最近一次 input token 数 |
 

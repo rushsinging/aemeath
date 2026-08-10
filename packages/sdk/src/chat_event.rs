@@ -836,10 +836,6 @@ pub enum ChatEvent {
     RuntimeStatusChanged {
         status: Box<crate::RuntimeStatusView>,
     },
-    /// #567：成本信息回传。
-    CostUpdate {
-        cost: crate::CostInfo,
-    },
 }
 
 /// `SessionResumeFailed` 的失败分类（#636 D2）。

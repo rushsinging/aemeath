@@ -95,7 +95,7 @@ impl super::App {
                 }
             }
             "help" => self.show_slash_help(),
-            "usage" => {
+            "usage" | "cost" => {
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
@@ -206,18 +206,6 @@ Build info:
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 }
-            }
-            "cost" => {
-                // #567: QueryCost 变体已删除，改为本地从 model 状态渲染。
-                let usage = &self.model.conversation.runtime.usage;
-                let total = usage.input_tokens + usage.output_tokens;
-                self.append_system_notice(format!(
-                    "API calls: {} | Tokens: {} in / {} out / {} total",
-                    usage.api_calls,
-                    sdk::format_tokens(usage.input_tokens),
-                    sdk::format_tokens(usage.output_tokens),
-                    sdk::format_tokens(total)
-                ));
             }
             "status" => {
                 // #567: QueryStatus 变体已删除，改为本地渲染状态信息。

@@ -738,11 +738,6 @@ pub(crate) enum TuiRuntimeEvent {
     TaskStateChanged {
         state: Box<super::runtime_view::TuiTaskState>,
     },
-    CostUpdate {
-        input_tokens: u64,
-        output_tokens: u64,
-        cost_usd: f64,
-    },
     ConfigChanged {
         cause: TuiConfigChangeCause,
         changed_fields: Vec<TuiConfigField>,
