@@ -114,8 +114,9 @@ impl TypedTool for BashTool {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
-        #[cfg(unix)]
-        command_process.process_group(0);
+        if let Err(error) = utils::configure_tokio_noninteractive(&mut command_process) {
+            return TypedToolResult::error(format!("failed to isolate command process: {error}"));
+        }
         let mut child = match command_process.spawn() {
             Ok(c) => c,
             Err(e) => return TypedToolResult::error(format!("failed to execute: {e}")),

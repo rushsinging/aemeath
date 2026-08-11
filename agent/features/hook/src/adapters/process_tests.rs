@@ -56,6 +56,27 @@ async fn unsupported_platform_returns_typed_failure_without_running_command() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn child_starts_new_session_without_controlling_terminal() {
+    let output = ProcessDriver
+        .execute(
+            request("python3 - <<'PY'\nimport os\ntry:\n    tty = open('/dev/tty', 'rb')\nexcept OSError:\n    tty_open = 0\nelse:\n    tty.close()\n    tty_open = 1\nprint(f'{os.getpgid(0)} {os.getsid(0)} {tty_open}')\nPY"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("session probe should run");
+
+    let stdout = String::from_utf8(output.stdout).expect("session probe utf8");
+    let fields: Vec<&str> = stdout.split_whitespace().collect();
+    assert_eq!(fields.len(), 3, "unexpected probe output: {stdout:?}");
+    assert_eq!(
+        fields[0], fields[1],
+        "hook process group must own its session"
+    );
+    assert_eq!(fields[2], "0", "hook child must not have a controlling tty");
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn normal_exit_preserves_status_and_bounded_output() {
     let output = ProcessDriver
         .execute(

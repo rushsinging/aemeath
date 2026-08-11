@@ -1350,6 +1350,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "utils",
  "uuid",
 ]
 
@@ -3896,6 +3897,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "url",
+ "utils",
  "uuid",
 ]
 
