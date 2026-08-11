@@ -746,30 +746,9 @@ impl MemoryPort for InMemoryMemory {
             } else {
                 Box::new(active)
             };
-        let mut hits = entries
-            .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-            .filter_map(|(entry, location)| {
-                relevance(entry, &query.text).map(|relevance| MemorySearchHit {
-                    entry: entry.clone(),
-                    location,
-                    outdated: entry.outdated,
-                    ttl_expired: entry.is_ttl_expired(query.now),
-                    relevance: Some(relevance),
-                })
-            })
-            .collect::<Vec<_>>();
-        hits.sort_by(|left, right| {
-            right
-                .relevance
-                .partial_cmp(&left.relevance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    search_tie_break_score(&right.entry, query.now)
-                        .cmp(&search_tie_break_score(&left.entry, query.now))
-                })
-                .then_with(|| left.entry.id.cmp(&right.entry.id))
-        });
-        hits.truncate(query.limit);
+        let candidates =
+            entries.filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
@@ -1066,30 +1045,6 @@ fn matches_filters(
 ) -> bool {
     layer.is_none_or(|layer| entry.layer == layer)
         && category.is_none_or(|category| entry.category == category)
-}
-
-fn relevance(entry: &MemoryEntry, text: &str) -> Option<f64> {
-    let text = text.trim().to_lowercase();
-    if text.is_empty() {
-        return None;
-    }
-    let content = entry.content.to_lowercase();
-    let category = format!("{:?}", entry.category).to_lowercase();
-    let layer = format!("{:?}", entry.layer).to_lowercase();
-    if content == text {
-        Some(1.0)
-    } else if content.contains(&text)
-        || entry
-            .tags
-            .iter()
-            .any(|tag| tag.to_lowercase().contains(&text))
-        || category.contains(&text)
-        || layer.contains(&text)
-    {
-        Some(0.5)
-    } else {
-        None
-    }
 }
 
 fn count_layer(entries: &[MemoryEntry], layer: MemoryLayer) -> usize {

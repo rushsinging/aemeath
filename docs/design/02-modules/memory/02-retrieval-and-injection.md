@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Memory BC 的检索策略、注入格式、`similarity_threshold` 双重用途，以及 #551 语义检索升级路径。**只描述目标态**；现状子串匹配的差距记入 `03-engineering/03-migration-governance.md`。
+> 本文定义 Memory BC 的检索策略、注入格式、显式检索相关性，以及 #551 的 Tier 1 词法检索。**只描述目标态**。
 
 ## 1. 检索模式
 
@@ -40,7 +40,7 @@ fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
 
 ## 2. 检索分层（#551）
 
-### Tier 0 — 子串匹配（现状）
+### Tier 0 — 子串匹配（已退役）
 
 ```rust
 fn entry_matches(entry: &MemoryEntry, query: &str) -> bool {
@@ -55,29 +55,17 @@ fn entry_matches(entry: &MemoryEntry, query: &str) -> bool {
 - **问题**：无相关性排序（命中即返回）、无模糊匹配、`similarity_threshold` 配置项不生效。
 - **适用**：条目数少（< 100）时够用。
 
-### Tier 1 — BM25 关键词相关性（v0.1.0 目标）
+### Tier 1 — 确定性 BM25 词法相关性（v0.1.0）
 
-```rust
-struct BM25Index {
-    docs: Vec<Vec<String>>,        // 分词后的文档
-    avg_doc_len: f64,
-    doc_freqs: HashMap<String, usize>,
-    k1: f64,                       // 默认 1.2
-    b: f64,                        // 默认 0.75
-}
+生产实现由 Memory domain 的单一 `rank_explicit_search` 路径承担，`MemoryService` 与 `InMemoryMemory` 两种 backing 均复用该函数：
 
-impl BM25Index {
-    fn build(entries: &[MemoryEntry]) -> Self;
-    fn score(&self, query: &str, doc_idx: usize) -> f64;
-    fn search(&self, query: &str, entries: &[MemoryEntry], limit: usize) -> Vec<(usize, f64)>;
-}
-```
-
-- **成本**：纯 Rust 实现，无外部依赖。
-- **收益**：按相关性排序（TF-IDF + 文档长度归一化），比子串匹配显著提升检索质量。
-- **`similarity_threshold` 接入**：BM25 分数归一化到 [0, 1] 后，低于 threshold 的结果排除。
-- **中文支持**：分词需兼顾中文（按字符 bigram 或接入简易分词）。
-- **构建时机**：首次检索时构建索引并缓存，写入/归档后失效。
+- 对 query、content、tags、category、layer 做小写字母数字分词；空 query 返回空结果。
+- 使用 BM25（`k1 = 1.2`、`b = 0.75`）计算词项相关性。
+- content、tag、facet 分别采用 `3.0 / 2.0 / 1.0` 的字段权重，完整 content 精确匹配获得固定 boost。
+- 只保留正相关结果；先按 relevance 降序，再按 `search_tie_break_score` 与 Memory id 稳定排序，因此同一 state/query 的结果确定。
+- relevance 是显式检索的排序 metadata，不承诺跨不同 corpus 可直接比较，也不改变自动注入的 `InjectionPriority` 语义。
+- active/archive、outdated、TTL-expired 状态不被静默过滤；它们随 structured hit 返回。
+- 当前实现每次基于只读候选集构建轻量统计，不引入第二索引 backing、缓存失效协议或持久化格式变更。
 
 ### Tier 2 — Embedding 语义检索（v0.2.0+，方向预留）
 
@@ -89,11 +77,10 @@ impl BM25Index {
 ### 升级路径
 
 ```text
-Tier 0（现状）           Tier 1（v0.1.0 目标）         Tier 2（v0.2.0+）
-子串匹配        ──→     BM25 关键词相关性     ──→     Embedding 语义检索
-无排序                   归一化分数排序                cosine similarity
-threshold 不生效         threshold 过滤                threshold 过滤
-零依赖                   纯 Rust                      需模型服务
+Tier 0（已退役）         Tier 1（v0.1.0）              Tier 2（v0.2.0+）
+子串匹配        ──→     BM25 词法相关性       ──→     Embedding 语义检索
+无排序                   确定性分数排序                 cosine similarity
+零依赖                   纯 Rust、无第二索引 backing    需模型服务
 ```
 
 **v0.1.0 决策**：推进 Tier 1（BM25），暂不做 Tier 2。理由：
@@ -133,25 +120,21 @@ Memory BC 输出检索结果后，由 **Context Management** 决定注入位置�
 
 Memory BC 只输出"这些条目值得注入，格式如下"；Context Management 决定"放哪、放多少、与什么排序"。
 
-## 4. similarity_threshold 双重用途
+## 4. similarity_threshold 边界
 
-```rust
-struct MemoryConfig {
-    similarity_threshold: f64,    // 默认 0.8，范围 [0, 1]
-}
-```
+`similarity_threshold` 继续只用于写入去重的 Jaccard 判断。Tier 1 BM25 relevance 未归一化，当前不复用该配置做检索过滤，避免把不同量纲强行绑定；若未来增加搜索 threshold，**MUST** 发布独立配置与分数语义，而不是复用写入去重阈值。
 
-| 用途 | 语义 | Tier 0 | Tier 1 | Tier 2 |
-|---|---|---|---|---|
-| **去重** | 写入时 Jaccard ≥ threshold → 合并 | ✅ | ✅ | ✅ |
-| **检索过滤** | 检索相关性 < threshold → 排除 | ❌ 不生效 | ✅ BM25 归一化分数 | ✅ cosine similarity |
+## 5. Memory Tool Published Language
 
-Tier 1 落地时，BM25 分数归一化到 [0, 1]：
-- 归一化方式：`score / max_score`（相对归一化）。
-- threshold = 0.8 意味着只保留与最高分条目相似度 ≥ 80% 的结果。
-- 可配置调整：降低 threshold → 更多结果但质量参差；提高 threshold → 更少但更精准。
+`Memory` Tool 必须让模型明确区分两类状态：
 
-## 5. inject_count 配置
+- `global` / `project` 是持久化 Memory 层；分类固定为 `fact`、`decision`、`preference`、`pattern`、`pitfall`。
+- `add_reminder` / `complete_reminder` 是当前 Session reminder，不写入持久化 Memory。
+- input schema 对 action、layer、category、priority 发布枚举约束，而不是无边界字符串。
+- `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
+- Reflection 写入的 `MemorySuggestion` 经同一个 `MemoryPort` 成为普通 `MemoryEntry`，因此无需修改 Reflection trigger/workflow 即可被 Tool search 检索。
+
+## 6. inject_count 配置
 
 ```rust
 struct MemoryConfig {
@@ -163,7 +146,7 @@ struct MemoryConfig {
 - **Tier 1 落地后**：可提高默认值（相关性排序后注入质量提升，可注入更多条目）或改为动态决定（按 token 预算反推条数）。
 - **动态注入**（未来方向）：Context Management 根据 token budget 动态决定注入条数，Memory BC 只提供排序后的候选池。
 
-## 6. 检索不变量
+## 7. 检索不变量
 
 | # | 不变量 | 说明 |
 |---|---|---|
@@ -174,7 +157,7 @@ struct MemoryConfig {
 | R5 | pinned 只在 eligible 集合中获得最高优先级 | pinned 不能绕过 outdated / TTL eligibility |
 | R6 | search 平分使用 search_tie_break_score | archived/outdated/TTL hit NEVER 调 injection_score |
 
-## 7. 相关文档
+## 8. 相关文档
 
 - 模块入口：[README.md](README.md)
 - 领域模型（scoring 函数）：[01-domain-model.md](01-domain-model.md) §4
@@ -187,5 +170,6 @@ struct MemoryConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-12 | 初稿：检索模式、BM25 分层(#551)、注入格式、similarity_threshold 双重用途、注入职责边界 | #789 |
+| 2026-07-26 | 落地共享确定性 BM25 词法排序与 typed Memory Tool PL；明确 Reflection 无需修改、search relevance 不复用写入去重 threshold | Tier 1 retrieval |
+| 2026-07-12 | 初稿：检索模式、BM25 分层、注入格式、similarity_threshold 双重用途、注入职责边界 | 初始设计 |
 | 2026-07-17 | 对齐 #895：旧 top query 统一为只读 `retrieve_for_inject`；outdated/TTL 改为 eligibility 硬过滤；显式 search 改用 relevance + 独立 tie-break，并由 Context 独占 render | #895 |

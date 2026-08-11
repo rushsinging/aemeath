@@ -74,7 +74,10 @@ pub use brief::{BriefInput, BriefResult};
 pub use list_mcp_resources::ListMcpResourcesResult;
 pub use mcp_manager::McpManagerResult;
 pub use mcp_tool::McpToolResult;
-pub use memory::{MemoryInput, MemoryResult};
+pub use memory::{
+    MemoryCategoryInput, MemoryEntryResult, MemoryInput, MemoryLayerInput, MemoryLocationResult,
+    MemoryResult, MemorySearchHitResult,
+};
 pub use plan_mode::{EnterPlanModeInput, ExitPlanModeInput, PlanModeResult};
 pub use read_mcp_resource::ReadMcpResourceResult;
 pub use task_block_by::{TaskBlockByInput, TaskBlockByResult};

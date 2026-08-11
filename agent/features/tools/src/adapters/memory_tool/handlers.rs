@@ -1,8 +1,11 @@
-use crate::domain::types::memory::MemoryResult;
+use crate::domain::types::memory::{
+    MemoryCategoryInput, MemoryEntryResult, MemoryLayerInput, MemoryLocationResult, MemoryResult,
+    MemorySearchHitResult,
+};
 use crate::domain::{ToolExecutionContext, TypedToolResult};
 use memory::api::{
-    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer, MemoryPort,
-    MemorySearchQuery as Query, MemorySource as Source, WriteResult,
+    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer, MemoryLocation,
+    MemoryPort, MemorySearchHit, MemorySearchQuery as Query, MemorySource as Source, WriteResult,
 };
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -54,15 +57,19 @@ pub(super) async fn add_memory(
 
     match port.write(entry).await {
         Ok(WriteResult::Added { id }) => TypedToolResult::success(
-            format!("记忆已添加。ID: {}", short_id(&id)),
+            format!("记忆已添加。ID: {id}"),
             MemoryResult {
                 action: "added".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
             },
         ),
         Ok(WriteResult::Merged { existing_id }) => TypedToolResult::success(
-            format!("已与相似记忆合并: {}", short_id(&existing_id)),
+            format!("已与相似记忆合并: {existing_id}"),
             MemoryResult {
                 action: "merged".to_string(),
+                id: Some(existing_id.to_string()),
+                ..MemoryResult::default()
             },
         ),
         Ok(WriteResult::NeedsEviction { candidates: _ }) => {
@@ -72,6 +79,7 @@ pub(super) async fn add_memory(
             "记忆写入已跳过。",
             MemoryResult {
                 action: "noop".to_string(),
+                ..MemoryResult::default()
             },
         ),
         Err(error) => TypedToolResult::error(error.to_string()),
@@ -93,6 +101,8 @@ pub(super) async fn delete_memory(
             "记忆已删除。",
             MemoryResult {
                 action: "delete".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
             },
         ),
         Ok(false) => TypedToolResult::error("记忆不存在。"),
@@ -127,15 +137,13 @@ pub(super) fn search_memory(input: Value, port: &dyn MemoryPort) -> TypedToolRes
         now,
     };
     let result = port.search(&query);
-    let message = if result.hits.is_empty() {
-        "暂无记忆。".to_string()
-    } else {
-        format!("找到 {} 条记忆。", result.hits.len())
-    };
+    let message = render_search_hits(&result.hits);
     TypedToolResult::success(
         message,
         MemoryResult {
             action: "search".to_string(),
+            hits: Some(result.hits.iter().map(search_hit_result).collect()),
+            ..MemoryResult::default()
         },
     )
 }
@@ -163,6 +171,8 @@ pub(super) async fn pin_memory(
             },
             MemoryResult {
                 action: "pin".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
             },
         ),
         Ok(false) => TypedToolResult::error("记忆不存在。"),
@@ -176,17 +186,144 @@ pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResul
         Err(error) => return TypedToolResult::error(error),
     };
     let entries = port.list(layer);
-    let message = if entries.is_empty() {
-        "暂无记忆。".to_string()
-    } else {
-        format!("共 {} 条记忆。", entries.len())
-    };
+    let message = render_memory_entries(&entries, current_timestamp_secs());
     TypedToolResult::success(
         message,
         MemoryResult {
             action: "list".to_string(),
+            entries: Some(
+                entries
+                    .iter()
+                    .map(|entry| memory_entry_result(entry, current_timestamp_secs()))
+                    .collect(),
+            ),
+            ..MemoryResult::default()
         },
     )
+}
+
+fn render_search_hits(hits: &[MemorySearchHit]) -> String {
+    if hits.is_empty() {
+        return "暂无记忆。".to_string();
+    }
+    hits.iter()
+        .map(|hit| {
+            let entry = &hit.entry;
+            format!(
+                "- id={} layer={} category={} tags={} location={} pinned={} outdated={} ttl_expired={} relevance={:.6}\n  {}",
+                entry.id,
+                memory_layer_name(entry.layer),
+                memory_category_name(entry.category),
+                render_tags(&entry.tags),
+                match hit.location {
+                    MemoryLocation::Active => "active",
+                    MemoryLocation::Archive => "archive",
+                },
+                entry.pinned,
+                hit.outdated,
+                hit.ttl_expired,
+                hit.relevance.unwrap_or_default(),
+                entry.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_memory_entries(entries: &[MemoryEntry], now: u64) -> String {
+    if entries.is_empty() {
+        return "暂无记忆。".to_string();
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "- id={} layer={} category={} tags={} pinned={} outdated={} ttl_expired={}\n  {}",
+                entry.id,
+                memory_layer_name(entry.layer),
+                memory_category_name(entry.category),
+                render_tags(&entry.tags),
+                entry.pinned,
+                entry.outdated,
+                entry.is_ttl_expired(now),
+                entry.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_tags(tags: &[String]) -> String {
+    if tags.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", tags.join(","))
+    }
+}
+
+fn memory_layer_name(layer: Layer) -> &'static str {
+    match layer {
+        Layer::Global => "global",
+        Layer::Project => "project",
+    }
+}
+
+fn memory_category_name(category: Category) -> &'static str {
+    match category {
+        Category::Fact => "fact",
+        Category::Decision => "decision",
+        Category::Preference => "preference",
+        Category::Pattern => "pattern",
+        Category::Pitfall => "pitfall",
+    }
+}
+
+fn memory_entry_result(entry: &MemoryEntry, now: u64) -> MemoryEntryResult {
+    MemoryEntryResult {
+        id: entry.id.to_string(),
+        content: entry.content.clone(),
+        layer: memory_layer_result(entry.layer),
+        category: memory_category_result(entry.category),
+        tags: entry.tags.clone(),
+        pinned: entry.pinned,
+        outdated: entry.outdated,
+        ttl_expired: entry.is_ttl_expired(now),
+    }
+}
+
+fn search_hit_result(hit: &MemorySearchHit) -> MemorySearchHitResult {
+    MemorySearchHitResult {
+        id: hit.entry.id.to_string(),
+        content: hit.entry.content.clone(),
+        layer: memory_layer_result(hit.entry.layer),
+        category: memory_category_result(hit.entry.category),
+        tags: hit.entry.tags.clone(),
+        pinned: hit.entry.pinned,
+        location: match hit.location {
+            MemoryLocation::Active => MemoryLocationResult::Active,
+            MemoryLocation::Archive => MemoryLocationResult::Archive,
+        },
+        outdated: hit.outdated,
+        ttl_expired: hit.ttl_expired,
+        relevance: hit.relevance,
+    }
+}
+
+fn memory_layer_result(layer: Layer) -> MemoryLayerInput {
+    match layer {
+        Layer::Global => MemoryLayerInput::Global,
+        Layer::Project => MemoryLayerInput::Project,
+    }
+}
+
+fn memory_category_result(category: Category) -> MemoryCategoryInput {
+    match category {
+        Category::Fact => MemoryCategoryInput::Fact,
+        Category::Decision => MemoryCategoryInput::Decision,
+        Category::Preference => MemoryCategoryInput::Preference,
+        Category::Pattern => MemoryCategoryInput::Pattern,
+        Category::Pitfall => MemoryCategoryInput::Pitfall,
+    }
 }
 
 fn current_timestamp_secs() -> u64 {
@@ -194,11 +331,6 @@ fn current_timestamp_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-fn short_id(id: &Id) -> String {
-    let s = id.to_string();
-    s[..8.min(s.len())].to_string() // allow unsafe_text_op: UUID is ASCII
 }
 
 pub(super) fn add_reminder(
@@ -231,6 +363,8 @@ pub(super) fn add_reminder(
                     format!("已添加会话提醒: {id}"),
                     MemoryResult {
                         action: "add_reminder".to_string(),
+                        id: Some(id),
+                        ..MemoryResult::default()
                     },
                 ),
                 Err(error) => TypedToolResult::error(error.to_string()),
@@ -258,6 +392,8 @@ pub(super) fn complete_reminder(
                 "会话提醒已完成。",
                 MemoryResult {
                     action: "complete_reminder".to_string(),
+                    id: Some(id.to_string()),
+                    ..MemoryResult::default()
                 },
             ),
             Err(error) => TypedToolResult::error(error.to_string()),

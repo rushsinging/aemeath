@@ -11,8 +11,8 @@ pub fn agent(lang: &str) -> &'static str {
 /// Memory description。
 pub fn memory(lang: &str) -> &'static str {
     match lang {
-        "zh" => "管理持久化记忆。支持 add、delete、search、pin 和 list 操作。",
-        _ => "Manage persistent memory. Supports add, delete, search, pin, and list actions.",
+        "zh" => "管理持久化记忆（Memory）与当前会话提醒（Reminder）。持久化 Memory 支持 add、delete、search、pin、list：global 层跨项目生效，project 层仅用于当前项目；分类包括 fact、decision、preference、pattern、pitfall。Memory 可由系统自动注入上下文，也可用 search 主动检索。add_reminder 和 complete_reminder 只管理当前会话提醒，不写入持久化 Memory。",
+        _ => "Manage persistent Memory and current-session reminders. Persistent Memory supports add, delete, search, pin, and list: the global layer applies across projects, while the project layer applies only to the current project; categories are fact, decision, preference, pattern, and pitfall. Memory may be included by automatic injection or retrieved explicitly with search. add_reminder and complete_reminder manage current-session reminders only and do not write persistent Memory.",
     }
 }
 

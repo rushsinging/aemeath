@@ -240,35 +240,14 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             .iter()
             .chain(project.archive())
             .map(|entry| (entry, MemoryLocation::Archive));
-        let mut hits = if query.include_archive {
+        let candidates = if query.include_archive {
             active.chain(archive).collect::<Vec<_>>()
         } else {
             active.collect::<Vec<_>>()
         }
         .into_iter()
-        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-        .filter_map(|(entry, location)| {
-            relevance(entry, &query.text).map(|score| MemorySearchHit {
-                entry: entry.clone(),
-                location,
-                outdated: entry.outdated,
-                ttl_expired: entry.is_ttl_expired(query.now),
-                relevance: Some(score),
-            })
-        })
-        .collect::<Vec<_>>();
-        hits.sort_by(|left, right| {
-            right
-                .relevance
-                .partial_cmp(&left.relevance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    search_tie_break_score(&right.entry, query.now)
-                        .cmp(&search_tie_break_score(&left.entry, query.now))
-                })
-                .then_with(|| left.entry.id.cmp(&right.entry.id))
-        });
-        hits.truncate(query.limit);
+        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
@@ -644,30 +623,6 @@ fn matches_filters(
         && category.is_none_or(|category| entry.category == category)
 }
 
-fn relevance(entry: &MemoryEntry, text: &str) -> Option<f64> {
-    let text = text.trim().to_lowercase();
-    if text.is_empty() {
-        return None;
-    }
-    let content = entry.content.to_lowercase();
-    let category = format!("{:?}", entry.category).to_lowercase();
-    let layer = format!("{:?}", entry.layer).to_lowercase();
-    if content == text {
-        Some(1.0)
-    } else if content.contains(&text)
-        || entry
-            .tags
-            .iter()
-            .any(|tag| tag.to_lowercase().contains(&text))
-        || category.contains(&text)
-        || layer.contains(&text)
-    {
-        Some(0.5)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 #[path = "service_reflection_tests.rs"]
 mod reflection_tests;
@@ -1007,6 +962,218 @@ mod tests {
         assert_eq!(stats.global_archive_count, 1);
         assert_eq!(stats.project_count, 2);
         assert_eq!(stats.project_archive_count, 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "rust ownership memory safety"),
+                        entry(MemoryLayer::Project, "rust ownership"),
+                        entry(MemoryLayer::Project, "python memory safety"),
+                    ],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "rust safety".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+
+        let contents = result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contents,
+            vec![
+                "rust ownership memory safety",
+                "rust ownership",
+                "python memory safety"
+            ]
+        );
+        assert!(
+            result.hits[0].relevance > result.hits[1].relevance,
+            "matching both query terms must outrank matching one"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
+        let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
+        let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+        let mut first = entry(MemoryLayer::Project, "stable lexical match");
+        first.id = first_id;
+        let mut second = entry(MemoryLayer::Project, "stable lexical match");
+        second.id = second_id;
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+        let query = MemorySearchQuery {
+            text: "stable lexical".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        };
+
+        let first_result = service.search(&query);
+        let second_result = service.search(&query);
+        let first_ids = first_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        let second_ids = second_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        assert_eq!(first_ids, second_ids);
+        assert_eq!(first_ids, vec![first_id, second_id]);
+
+        let empty = service.search(&MemorySearchQuery {
+            text: "  ".to_string(),
+            ..query
+        });
+        assert!(empty.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_search_filters_by_tag_category_and_layer() {
+        let matching = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000010").unwrap(),
+            4_000,
+            MemoryLayer::Project,
+            MemoryCategory::Pattern,
+            "workspace validation",
+            MemorySource::User,
+        )
+        .map(|mut entry| {
+            entry.tags = vec!["clippy".to_string()];
+            entry
+        })
+        .unwrap();
+        let filtered_by_category = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000011").unwrap(),
+            4_000,
+            MemoryLayer::Project,
+            MemoryCategory::Fact,
+            "clippy fact",
+            MemorySource::User,
+        )
+        .unwrap();
+        let filtered_by_layer = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000012").unwrap(),
+            4_000,
+            MemoryLayer::Global,
+            MemoryCategory::Pattern,
+            "clippy global",
+            MemorySource::User,
+        )
+        .unwrap();
+        let store = ScriptedStore::new(
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Global,
+                    vec![filtered_by_layer],
+                ))],
+                vec![],
+            ),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![matching, filtered_by_category],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "clippy".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: Some(MemoryCategory::Pattern),
+            include_archive: false,
+            now: 4_242,
+        });
+
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].entry.tags, vec!["clippy"]);
+        assert_eq!(result.hits[0].entry.layer, MemoryLayer::Project);
+        assert_eq!(result.hits[0].entry.category, MemoryCategory::Pattern);
+    }
+
+    #[tokio::test]
+    async fn explicit_search_includes_archive_status_without_mutation() {
+        let active = entry(MemoryLayer::Project, "archive query active");
+        let mut archived = entry(MemoryLayer::Project, "archive query historical");
+        archived.outdated = true;
+        archived.ttl = Some(std::time::Duration::from_secs(1));
+        let dataset =
+            MemoryDataset::new(MemoryLayer::Project, vec![active], vec![archived.clone()]).unwrap();
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(CommittedMemoryDataset {
+                    dataset,
+                    revision: 1,
+                })],
+                vec![],
+            ),
+        );
+        let observer = store.clone();
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "archive query".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 4_242,
+        });
+
+        assert_eq!(result.hits.len(), 2);
+        let archived_hit = result
+            .hits
+            .iter()
+            .find(|hit| hit.location == MemoryLocation::Archive)
+            .unwrap();
+        assert!(archived_hit.outdated);
+        assert!(archived_hit.ttl_expired);
+        assert_eq!(archived_hit.entry.id, archived.id);
+        assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
     }
 
     fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {

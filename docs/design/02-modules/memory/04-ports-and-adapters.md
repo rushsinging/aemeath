@@ -95,6 +95,15 @@ enum MemoryStorageErrorKind {
 - **MUST** `search` 按 query 的 `include_archive` 跨 active + archive 检索且不隐式修改 access_count；需要访问统计时必须另发显式、fallible mutation。
 - **MUST** `compact` 跳过 pinned 条目；`archive` / `compact` 对每个受影响 layer 的 active + archive 成对提交，**NEVER** 暴露只移动一边的半归档。
 
+## 1.1 MemoryTool ACL 与 current port
+
+Tools BC 的 `MemoryTool` 持有 `MemoryPortSource`，每次 action 执行时调用 `current()`，**NEVER** 在 registry bootstrap 捕获旧的 `Arc<dyn MemoryPort>`；因此 Resume / Session 切换后 search、list 与 mutation 都读取当前 committed port。
+
+- Memory BC 发布过滤、排序、hit identity、location/status/relevance；Tools 只做 typed input/output 与 text-first 映射，**NEVER** 二次排序。
+- ToolRegistry 向 Provider 发布 action/layer/category/priority 枚举和 action-specific required 约束；SDK 只薄 re-export 同一类型。
+- search/list 的 LLM text 与 structured data 都必须携完整可管理 ID 和有序内容；TUI/server 可消费 structured data，Provider 仅消费 text-first view。
+- `add_reminder` / `complete_reminder` 通过 Session reminder port，不进入持久化 Memory dataset。
+
 ## 2. ReflectionWorkflow
 
 `ReflectionWorkflow` 是 Memory application façade：Runtime 提供消息快照、Provider 原始响应、token usage 与执行 identity；Memory 在 owner 内统一完成 prompt 构建、output parsing、对当前 `MemoryPort` 的 apply，以及 Running/terminal history 物化。Memory BC 自身不调 LLM。
@@ -314,6 +323,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 | 2026-07-20 | #1283 将 `ReflectionHistoryQuery` 收窄为仅返回 `ReflectionSafeSummary`，完整 record 不跨 Memory query 边界 | #1283 |
 | 2026-07-19 | #900 删除 Composition 第二 active Memory open，将 concrete dataset store/project opener/service 收回 Memory crate 内，生产仅经 Main Session `DatasetMemoryOpener` 返回 `MemoryPort` | #900 |
 | 2026-07-18 | #899 实现 Memory-owned durable Reflection history append/query；冻结 `/reflect [limit]` 仅安全摘要、正文不进入 TUI/日志 | #899 |
+| 2026-07-26 | 明确 MemoryTool 每次调用解析 current committed port，并冻结 Memory → Tools → ToolRegistry/Provider → SDK 的 typed/text-first ACL | Memory Tool PL |
 | 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |
 | 2026-07-25 | 将 prompt/parse/apply/history 顺序收口为 Memory-owned `ReflectionWorkflow`，Runtime 只保留 Provider 调用与任务生命周期 | #1397 |
 | 2026-07-12 | 初稿：MemoryPort trait、Reflection prompt 规则、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
