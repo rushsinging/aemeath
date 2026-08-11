@@ -1,6 +1,6 @@
 # Issue #1065 Audit 测试完整性审查设计
 
-> 状态：已批准，待实施
+> 状态：已实施，证据见 `docs/design/02-modules/audit/01-usage-storage.md` §10
 > 范围：父项 #857「Audit：Usage-only 非阻塞审计 MVP」及其直接执行叶子
 > 交付：行为—测试矩阵、测试与必要修正、验证证据、设计回写、Issue 更新及独立 PR
 
