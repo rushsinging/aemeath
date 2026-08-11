@@ -318,11 +318,12 @@ async fn terminate_process_tree(child: &mut tokio::process::Child) {
     );
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        let term_status = Command::new("kill")
-            .arg("-TERM")
-            .arg(format!("-{pid}"))
-            .status()
-            .await;
+        let mut term_command = Command::new("kill");
+        term_command.arg("-TERM").arg(format!("-{pid}"));
+        let term_status = match utils::configure_tokio_noninteractive(&mut term_command) {
+            Ok(()) => term_command.status().await,
+            Err(error) => Err(error),
+        };
         log::debug!(
             target: crate::LOG_TARGET,
             "bash process group SIGTERM sent: pid={} status={term_status:?}",
@@ -339,11 +340,12 @@ async fn terminate_process_tree(child: &mut tokio::process::Child) {
             );
             return;
         }
-        let kill_status = Command::new("kill")
-            .arg("-KILL")
-            .arg(format!("-{pid}"))
-            .status()
-            .await;
+        let mut kill_command = Command::new("kill");
+        kill_command.arg("-KILL").arg(format!("-{pid}"));
+        let kill_status = match utils::configure_tokio_noninteractive(&mut kill_command) {
+            Ok(()) => kill_command.status().await,
+            Err(error) => Err(error),
+        };
         log::debug!(
             target: crate::LOG_TARGET,
             "bash process group SIGKILL sent: pid={} status={kill_status:?}",

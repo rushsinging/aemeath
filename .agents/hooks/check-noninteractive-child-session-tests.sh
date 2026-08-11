@@ -15,12 +15,15 @@ mkdir -p "$fixture_root/apps/cli/src" "$fixture_root/packages/global/utils/src"
 
 cat > "$fixture_root/apps/cli/src/bad.rs" <<'RS'
 fn run() {
-    let mut command = std::process::Command::new("git");
-    let _ = command.output();
+    let mut configured = std::process::Command::new("git");
+    utils::configure_std_noninteractive(&mut configured)?;
+    let _ = configured.output();
+    let mut unconfigured = std::process::Command::new("curl");
+    let _ = unconfigured.output();
 }
 RS
 if AEMEATH_PROJECT_DIR="$fixture_root" "$GUARD" >/dev/null 2>&1; then
-  echo "guard must reject an unconfigured production command" >&2
+  echo "guard must reject an unconfigured production command even when another command is configured" >&2
   exit 1
 fi
 

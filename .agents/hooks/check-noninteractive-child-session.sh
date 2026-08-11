@@ -13,6 +13,15 @@ while IFS= read -r file; do
   case "$file" in
     */tests/*|*/tests.rs|*_tests.rs|*_test.rs|*/packages/global/utils/src/process.rs|*/agent/features/project/src/lib.rs) continue ;;
   esac
+  if [ "${file##*/}" = "git.rs" ] && grep -q 'struct SystemGitRunner' "$file"; then
+    command_count=1
+    isolation_count=$(grep -Ec 'utils::configure_(std|tokio)_noninteractive' "$file" || true)
+    if [ "$isolation_count" -lt "$command_count" ]; then
+      echo "$file: SystemGitRunner must use the noninteractive isolation boundary" >&2
+      fail=1
+    fi
+    continue
+  fi
 
   has_external_command=0
   if grep -Eq '(std::process::Command::new|tokio::process::Command::new)' "$file"; then
@@ -24,8 +33,10 @@ while IFS= read -r file; do
   if [ "$has_external_command" -eq 0 ]; then
     continue
   fi
-  if ! grep -Eq 'utils::configure_(std|tokio)_noninteractive' "$file"; then
-    echo "$file: production external process construction must use utils::configure_*_noninteractive" >&2
+  command_count=$(grep -Ec '(std::process::Command::new|tokio::process::Command::new|\bCommand::new)' "$file" || true)
+  isolation_count=$(grep -Ec 'utils::configure_(std|tokio)_noninteractive' "$file" || true)
+  if [ "$isolation_count" -lt "$command_count" ]; then
+    echo "$file: found $command_count external process construction(s) but only $isolation_count isolation call(s)" >&2
     fail=1
   fi
   if grep -Eq '\.(process_group|pre_exec)\(' "$file" || grep -Eq '\blibc::setsid\(' "$file"; then
