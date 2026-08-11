@@ -116,19 +116,19 @@
 
 | Crate | 允许依赖（workspace crate） |
 |---|---|
-| `cli` | `composition`, `sdk` |
+| `cli` | `composition`, `sdk`, `utils` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging`, `utils` |
 | `share` | `logging`, `utils` |
-| `project` | `share` |
+| `project` | `share`, `utils` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk`, `utils` |
 | `memory` | `share`, `storage`, `utils` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `memory`, `task` |
+| `tools` | `share`, `project`, `storage`, `memory`, `task`, `utils` |
 | `storage` | `share` |
 | `task` | ∅ |
-| `hook` | `share` |
+| `hook` | `share`, `utils` |
 | `audit` | `share`, `sdk`, `storage` |
 | `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
@@ -149,10 +149,10 @@
 
 ## 2. check-cli-thin-entry.sh
 
-- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
+- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + utils 纯技术进程边界`。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
-  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
+  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk, utils}`
   - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
