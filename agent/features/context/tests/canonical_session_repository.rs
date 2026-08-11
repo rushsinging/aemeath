@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use async_trait::async_trait;
 use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
     SessionCommitPlan, SnapshotState,
 };
 use context::domain::{
@@ -82,7 +82,7 @@ impl context::adapters::ToolReceiptWriter for RecordingToolReceiptWriter {
     }
 }
 
-type AcceptedInputWrite = (String, u64, String, String, AcceptedInputProjection);
+type AcceptedInputWrite = (String, u64, String, String, AcceptedInputRecord);
 
 #[derive(Default)]
 struct RecordingAcceptedInputWriter {
@@ -99,7 +99,7 @@ impl context::adapters::AcceptedInputWriter for RecordingAcceptedInputWriter {
         revision: u64,
         run_id: &str,
         step_id: &str,
-        input: &AcceptedInputProjection,
+        input: &AcceptedInputRecord,
     ) -> Result<(), String> {
         if self.fail {
             return Err("input disk full".to_string());
@@ -592,13 +592,13 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             "run",
             vec![CommittedRunStep {
                 step_id: "step".to_string(),
-                accepted_input: Some(AcceptedInputProjection::new(
+                accepted_input: Some(AcceptedInputRecord::new(
                     vec![Message::user("accepted")],
                     "input",
                     revision,
                 )),
                 outcome: Some(
-                    context::domain::session::FinalizedOutcomeProjection::compatibility(vec![
+                    context::domain::session::FinalizedOutcomeRecord::compatibility(vec![
                         tool_result,
                     ]),
                 ),
@@ -1098,7 +1098,7 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
             "run",
             vec![CommittedRunStep::accepted_only(
                 "step",
-                AcceptedInputProjection::new(vec![Message::user("structured-only")], "fp", 0),
+                AcceptedInputRecord::new(vec![Message::user("structured-only")], "fp", 0),
             )],
         )]
         .into(),
@@ -1165,7 +1165,7 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
             "run-existing",
             vec![CommittedRunStep::accepted_only(
                 "step-existing",
-                AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+                AcceptedInputRecord::new(vec![Message::user("existing")], "existing", 1),
             )],
         )]
         .into(),

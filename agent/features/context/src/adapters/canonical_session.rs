@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedStep,
-    FinalizedOutcomeProjection, SessionCommitPlan, SnapshotState,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
+    FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
 };
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
@@ -39,7 +39,7 @@ pub trait AcceptedInputWriter: Send + Sync {
         revision: u64,
         run_id: &str,
         step_id: &str,
-        input: &AcceptedInputProjection,
+        input: &AcceptedInputRecord,
     ) -> Result<(), String>;
 
     async fn acknowledge_finalized_input(
@@ -66,7 +66,7 @@ impl AcceptedInputWriter for NoOpAcceptedInputWriter {
         _revision: u64,
         _run_id: &str,
         _step_id: &str,
-        _input: &AcceptedInputProjection,
+        _input: &AcceptedInputRecord,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -100,7 +100,7 @@ impl AcceptedInputWriter for AtomicBlobAcceptedInputWriter {
         revision: u64,
         run_id: &str,
         step_id: &str,
-        input: &AcceptedInputProjection,
+        input: &AcceptedInputRecord,
     ) -> Result<(), String> {
         crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
             Arc::clone(&self.blob),
@@ -828,7 +828,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.append_accepted_input(
             append.run_id.as_ref(),
             append.step_id.as_str(),
-            AcceptedInputProjection::new(
+            AcceptedInputRecord::new(
                 append.messages.clone(),
                 append.fingerprint.as_str(),
                 candidate.revision,
@@ -1034,7 +1034,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.append_finalized_outcome(
             append.run_id.as_ref(),
             append.step_id.as_str(),
-            FinalizedOutcomeProjection {
+            FinalizedOutcomeRecord {
                 finalize_cause: append.finalize_cause,
                 duration_ms: append.duration_ms,
                 messages: append.messages.clone().into(),

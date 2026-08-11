@@ -16,7 +16,7 @@ use context::application::main_session::{
 };
 use context::domain::session::{
     CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeProjection, SnapshotState,
+    FinalizedOutcomeRecord, SnapshotState,
 };
 use context::domain::{
     AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
@@ -308,7 +308,7 @@ fn finalized_tool_step(
     CommittedRunStep {
         step_id: normalized_step_id.as_str().to_string(),
         accepted_input: None,
-        outcome: Some(FinalizedOutcomeProjection {
+        outcome: Some(FinalizedOutcomeRecord {
             finalize_cause: FinalizeCause::Completed,
             duration_ms: None,
             messages: CommittedStepMessages::from(vec![Message {

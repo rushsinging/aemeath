@@ -3,7 +3,7 @@ use super::{
     SessionGenerationWireError, SessionStepMember,
 };
 use crate::domain::session::{
-    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, RunStepCursor,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, RunStepCursor,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
 use share::message::{HookNotice, HookNoticeKind, Message, MessageSource};
@@ -18,7 +18,7 @@ fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> 
                 *run_id,
                 vec![CommittedRunStep::accepted_only(
                     *step_id,
-                    AcceptedInputProjection::new(
+                    AcceptedInputRecord::new(
                         vec![Message::user(*text)],
                         format!("{run_id}:{step_id}:{text}"),
                         revision,
@@ -73,7 +73,7 @@ fn finalized_append_changes_manifest_state_and_only_new_step_member() {
     after.run_slices = after.run_slices.append_accepted_input(
         "run-b",
         "step-b",
-        AcceptedInputProjection::new(vec![Message::user("b")], "run-b:step-b:b", 2),
+        AcceptedInputRecord::new(vec![Message::user("b")], "run-b:step-b:b", 2),
     );
 
     let changes = SessionCommitPlan::between(&before, &after).expect("change set");
@@ -157,7 +157,7 @@ fn receipt_update_replaces_only_affected_step_member() {
     after.run_slices = after.run_slices.append_accepted_input(
         "run-b",
         "step-b",
-        AcceptedInputProjection::new(vec![Message::user("changed")], "changed", 2),
+        AcceptedInputRecord::new(vec![Message::user("changed")], "changed", 2),
     );
 
     let changes = SessionCommitPlan::between(&before, &after).expect("change set");
@@ -256,7 +256,7 @@ fn overlay_step_missing_from_persisted_generation_is_written_instead_of_reused()
     before.run_slices = before.run_slices.append_accepted_input(
         "run-overlay",
         "step-overlay",
-        AcceptedInputProjection::new(
+        AcceptedInputRecord::new(
             vec![Message::user("overlay")],
             "run-overlay:step-overlay:overlay",
             2,
@@ -301,7 +301,7 @@ fn overlay_step_missing_from_persisted_generation_is_not_removed() {
     before.run_slices = before.run_slices.append_accepted_input(
         "run-overlay",
         "step-overlay",
-        AcceptedInputProjection::new(
+        AcceptedInputRecord::new(
             vec![Message::user("overlay")],
             "run-overlay:step-overlay:overlay",
             2,
@@ -547,7 +547,7 @@ fn step_member_round_trips_hook_notice_metadata() {
         },
         CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputProjection::new(
+            AcceptedInputRecord::new(
                 vec![Message::hook_notice("model feedback", notice.clone())],
                 "hook-notice-fingerprint",
                 1,

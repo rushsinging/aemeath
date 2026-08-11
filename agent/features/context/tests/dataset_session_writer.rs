@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use context::adapters::DatasetCanonicalSessionWriter;
 use context::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionCommitPlan,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    CommittedRunStep, FinalizedOutcomeRecord, RunStepCursor, SessionCommitPlan,
     SessionGenerationCodec,
 };
 use share::message::Message;
@@ -22,7 +22,7 @@ fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> 
                 *run_id,
                 vec![CommittedRunStep::accepted_only(
                     *step_id,
-                    AcceptedInputProjection::new(
+                    AcceptedInputRecord::new(
                         vec![Message::user(*text)],
                         format!("{run_id}:{step_id}:{text}"),
                         revision,
@@ -84,7 +84,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
     after.run_slices = after.run_slices.append_accepted_input(
         "run-b",
         "step-b",
-        AcceptedInputProjection::new(vec![Message::user("b")], "run-b:step-b:b", 2),
+        AcceptedInputRecord::new(vec![Message::user("b")], "run-b:step-b:b", 2),
     );
     writer
         .save_incremental(
@@ -154,7 +154,7 @@ async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
     before.run_slices = before.run_slices.append_accepted_input(
         "run-overlay",
         "step-overlay",
-        AcceptedInputProjection::new(vec![Message::user("overlay")], "overlay", 2),
+        AcceptedInputRecord::new(vec![Message::user("overlay")], "overlay", 2),
     );
     let mut after = before.clone();
     after.revision = 2;
@@ -218,7 +218,7 @@ async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() 
     after.run_slices = after.run_slices.append_accepted_input(
         "run-new",
         "step-new",
-        AcceptedInputProjection::new(vec![Message::user("new input")], "new-input", 2),
+        AcceptedInputRecord::new(vec![Message::user("new input")], "new-input", 2),
     );
     writer
         .save_incremental(
@@ -292,7 +292,7 @@ async fn active_resume_append_reuses_compact_history_members() {
     appended.run_slices = appended.run_slices.append_accepted_input(
         "run-next",
         "step-next",
-        AcceptedInputProjection::new(vec![Message::user("next")], "next", 8),
+        AcceptedInputRecord::new(vec![Message::user("next")], "next", 8),
     );
 
     writer
@@ -370,7 +370,7 @@ async fn active_resume_finalize_reuses_compact_history_members() {
     finalized.append_finalized_outcome(
         "run-active",
         "step-active",
-        FinalizedOutcomeProjection::compatibility(vec![Message::user("done")]),
+        FinalizedOutcomeRecord::compatibility(vec![Message::user("done")]),
     );
 
     writer
@@ -494,7 +494,7 @@ async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
     after.run_slices = after.run_slices.append_accepted_input(
         "run",
         "step",
-        AcceptedInputProjection::new(vec![Message::user("first")], "first", 1),
+        AcceptedInputRecord::new(vec![Message::user("first")], "first", 1),
     );
     let plan = SessionCommitPlan::between(&before, &after).expect("first commit plan");
 

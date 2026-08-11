@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use context::adapters::{DatasetCanonicalSessionWriter, DatasetSessionReader};
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
     SessionGenerationCodec, SessionGenerationManifest,
 };
 use share::message::Message;
@@ -19,7 +19,7 @@ fn session_with_step(id: &str, revision: u64, text: &str) -> CanonicalSession {
         "run",
         vec![CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputProjection::new(vec![Message::user(text)], text, revision),
+            AcceptedInputRecord::new(vec![Message::user(text)], text, revision),
         )],
     )]
     .into();
@@ -202,22 +202,14 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
             "run-1",
             vec![CommittedRunStep::accepted_only(
                 "step-1",
-                AcceptedInputProjection::new(
-                    vec![Message::user("hidden before compact")],
-                    "fp-1",
-                    1,
-                ),
+                AcceptedInputRecord::new(vec![Message::user("hidden before compact")], "fp-1", 1),
             )],
         ),
         CommittedRunSlice::new(
             "run-2",
             vec![CommittedRunStep::accepted_only(
                 "step-2",
-                AcceptedInputProjection::new(
-                    vec![Message::user("visible after compact")],
-                    "fp-2",
-                    7,
-                ),
+                AcceptedInputRecord::new(vec![Message::user("visible after compact")], "fp-2", 7),
             )],
         ),
     ]
@@ -287,14 +279,14 @@ async fn dataset_reader_loads_requested_display_history_steps_from_same_generati
             "run-1",
             vec![CommittedRunStep::accepted_only(
                 "step-1",
-                AcceptedInputProjection::new(vec![Message::user("first body")], "fp-1", 1),
+                AcceptedInputRecord::new(vec![Message::user("first body")], "fp-1", 1),
             )],
         ),
         CommittedRunSlice::new(
             "run-2",
             vec![CommittedRunStep::accepted_only(
                 "step-2",
-                AcceptedInputProjection::new(vec![Message::user("second body")], "fp-2", 9),
+                AcceptedInputRecord::new(vec![Message::user("second body")], "fp-2", 9),
             )],
         ),
     ]
