@@ -1,6 +1,6 @@
 ---
 source: apps/cli/src/tui/app/scenario_tests/chat.rs
-expression: harness.screen()
+expression: normalize_completed_terminal_verb(&completed_screen)
 ---
 
   Aemeath - AI Agent
@@ -13,7 +13,7 @@ expression: harness.screen()
 
 ● The result is ready.
 
-
+  ✻ CompletedVerb for 5s
 
 
 

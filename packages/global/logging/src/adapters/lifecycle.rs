@@ -185,7 +185,7 @@ impl FileSinkLifecycle {
         }
         for index in (1..=self.max_backups).rev() {
             let from = rotated_path(&self.path, index);
-            // Existence is fallible by contract: never turn an error into `false`.
+            // Existence is fallible by contract: never run_step an error into `false`.
             if !self.files.exists(&from)? {
                 continue;
             }

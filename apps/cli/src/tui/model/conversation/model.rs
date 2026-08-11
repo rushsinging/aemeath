@@ -1,16 +1,16 @@
-use super::agent_progress::AgentProgressEntry;
+use super::activity_observation::{ActivityIncrementOutcome, ActivityObservationModel};
+use super::agent_activity::SubRunActivityWatermark;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
-use super::chat_turn::ChatTurn;
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
-use super::interaction::{AgentRunState, InteractionState, UiRunId};
+use super::chat_turn::ChatRun;
+use super::ids::{ChatId, ChatRunId, ToolCallId};
+use super::interaction::InteractionState;
 use super::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
 };
 use super::queued_submission::QueuedSubmission;
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
-use crate::tui::app::event::ModelStreamWaitingView;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
 use std::time::Instant;
 
@@ -18,14 +18,11 @@ use std::time::Instant;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ConversationRetainedStateSnapshot {
     pub chats: usize,
-    pub turns: usize,
+    pub runs: usize,
     pub tool_calls: usize,
     pub timeline_items: usize,
-    pub agent_progress_entries: usize,
-    pub agent_progress_bytes: usize,
-    pub agent_runs: usize,
-    pub agent_run_steps: usize,
-    pub terminal_agent_runs: usize,
+    pub sub_run_watermarks: usize,
+    pub has_legacy_activity_history: bool,
     pub output_view_journal_entries: usize,
     pub output_view_journal_item_id_bytes: usize,
     pub has_active_interaction: bool,
@@ -35,11 +32,10 @@ pub(crate) struct ConversationRetainedStateSnapshot {
 pub struct ConversationModel {
     // ── 对话内容 ──
     pub chats: Vec<Chat>,
-    pub(crate) resumed_history: super::resumed_history::ResumedHistoryBacking,
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
-    pub agent_progress: Vec<AgentProgressEntry>,
+    pub sub_run_watermarks: Vec<SubRunActivityWatermark>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
     /// 单调递增的内容版本号；每次产生 change 的 apply +1。
@@ -47,12 +43,11 @@ pub struct ConversationModel {
     revision: u64,
     output_view_journal: OutputViewJournal,
     pub(super) active_text_block_id: Option<String>,
-    pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_text_context: Option<(ChatId, ChatRunId)>,
     pub(super) active_thinking_block_id: Option<String>,
-    pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
-    pub model_stream_placeholder: Option<ModelStreamWaitingView>,
+    pub(super) active_thinking_context: Option<(ChatId, ChatRunId)>,
     pub(super) active_interaction: Option<InteractionState>,
-    pub(super) agent_runs: Vec<AgentRunState>,
+    activity_observations: ActivityObservationModel,
 
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -62,11 +57,10 @@ impl Default for ConversationModel {
     fn default() -> Self {
         Self {
             chats: Vec::new(),
-            resumed_history: super::resumed_history::ResumedHistoryBacking::default(),
             active_chat_id: None,
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
-            agent_progress: Vec::new(),
+            sub_run_watermarks: Vec::new(),
             next_chat_sequence: 0,
             next_block_sequence: 0,
             revision: 0,
@@ -75,46 +69,14 @@ impl Default for ConversationModel {
             active_text_context: None,
             active_thinking_block_id: None,
             active_thinking_context: None,
-            model_stream_placeholder: None,
             active_interaction: None,
-            agent_runs: Vec::new(),
+            activity_observations: ActivityObservationModel::default(),
             runtime: RuntimeState::default(),
         }
     }
 }
 
 impl ConversationModel {
-    pub(crate) fn resumed_history_steps(&self) -> usize {
-        self.resumed_history.steps().len()
-    }
-
-    pub(crate) fn resumed_history_step(
-        &self,
-        index: usize,
-    ) -> Option<&super::resumed_history::ResumedHistoryStep> {
-        self.resumed_history.steps().get(index)
-    }
-
-    pub(crate) fn resumed_history_items(&self) -> &[super::resumed_history::ResumedHistoryItem] {
-        self.resumed_history.items()
-    }
-
-    pub(crate) fn resumed_history_item(
-        &self,
-        id: &str,
-    ) -> Option<&super::resumed_history::ResumedHistoryItem> {
-        self.resumed_history.item(id)
-    }
-
-    pub(crate) fn replace_resumed_history(
-        &mut self,
-        backing: super::resumed_history::ResumedHistoryBacking,
-    ) {
-        self.reset();
-        self.resumed_history = backing;
-        self.revision = self.revision.wrapping_add(1);
-    }
-
     /// 清空整段对话，回到初始空状态。用于 `/clear` 等需要重置单一真相源的场景。
     pub fn reset(&mut self) {
         let mut journal = std::mem::take(&mut self.output_view_journal);
@@ -124,11 +86,10 @@ impl ConversationModel {
     }
 
     pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
-        let before_placeholder = self.model_stream_placeholder.clone();
         let changes = update.update(self);
         if !changes.is_empty() {
             self.revision = self.revision.wrapping_add(1);
-            self.publish_output_view_changes(before_placeholder.as_ref(), &changes);
+            self.publish_output_view_changes(&changes);
         } else {
             let _ = self.timeline.take_pending_view_changes();
         }
@@ -157,25 +118,21 @@ impl ConversationModel {
     pub(crate) fn tool_call(
         &self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_call_id: &ToolCallId,
     ) -> Option<&super::tool_call::ToolCall> {
         self.chats
             .iter()
             .find(|chat| &chat.id == chat_id)?
-            .turns
+            .runs
             .iter()
-            .find(|turn| &turn.id == turn_id)?
+            .find(|turn| &turn.id == run_id)?
             .tool_calls
             .iter()
             .find(|call| call.id.as_ref() == Some(tool_call_id))
     }
 
-    fn publish_output_view_changes(
-        &mut self,
-        before_placeholder: Option<&ModelStreamWaitingView>,
-        changes: &[ConversationChange],
-    ) {
+    fn publish_output_view_changes(&mut self, changes: &[ConversationChange]) {
         let timeline_changes = self.timeline.take_pending_view_changes();
         let mut changed_item_ids = std::collections::HashSet::new();
         for change in &timeline_changes {
@@ -185,18 +142,9 @@ impl ConversationModel {
                 | OutputViewChange::Remove { item_id } => {
                     changed_item_ids.insert(item_id.clone());
                 }
-                OutputViewChange::Reset | OutputViewChange::Placeholder => {}
+                OutputViewChange::Reset => {}
             }
             self.output_view_journal.publish(change.clone());
-        }
-
-        if before_placeholder != self.model_stream_placeholder.as_ref()
-            && !timeline_changes
-                .iter()
-                .any(|change| matches!(change, OutputViewChange::Placeholder))
-        {
-            self.output_view_journal
-                .publish(OutputViewChange::Placeholder);
         }
 
         for item_id in changes.iter().filter_map(output_view_item_id_for_change) {
@@ -209,126 +157,120 @@ impl ConversationModel {
 
     #[cfg(test)]
     pub(crate) fn retained_state_snapshot(&self) -> ConversationRetainedStateSnapshot {
-        use super::interaction::AgentRunPhase;
-
-        let turns = self.chats.iter().map(|chat| chat.turns.len()).sum();
+        let runs = self.chats.iter().map(|chat| chat.runs.len()).sum();
         let tool_calls = self
             .chats
             .iter()
-            .flat_map(|chat| &chat.turns)
+            .flat_map(|chat| &chat.runs)
             .map(|turn| turn.tool_calls.len())
             .sum();
-        let agent_progress_bytes = self
-            .agent_progress
-            .iter()
-            .map(|entry| entry.tool_id.len().saturating_add(entry.message.len()))
-            .sum();
-        let agent_run_steps = self.agent_runs.iter().map(|run| run.steps().len()).sum();
-        let terminal_agent_runs = self
-            .agent_runs
-            .iter()
-            .filter(|run| {
-                matches!(
-                    run.phase(),
-                    AgentRunPhase::Cancelled | AgentRunPhase::Completed | AgentRunPhase::Failed
-                )
-            })
-            .count();
-
         let (output_view_journal_entries, output_view_journal_item_id_bytes) =
             self.output_view_journal.retained_metrics();
 
         ConversationRetainedStateSnapshot {
             chats: self.chats.len(),
-            turns,
+            runs,
             tool_calls,
             timeline_items: self.timeline.items().len(),
-            agent_progress_entries: self.agent_progress.len(),
-            agent_progress_bytes,
-            agent_runs: self.agent_runs.len(),
-            agent_run_steps,
-            terminal_agent_runs,
+            sub_run_watermarks: self.sub_run_watermarks.len(),
+            has_legacy_activity_history: false,
             output_view_journal_entries,
             output_view_journal_item_id_bytes,
             has_active_interaction: self.active_interaction.is_some(),
         }
     }
 
-    pub(crate) fn agent_run(&self, run_id: &UiRunId) -> Option<&AgentRunState> {
-        self.agent_runs.iter().find(|run| run.run_id() == run_id)
+    pub(crate) fn activity_observations(&self) -> &ActivityObservationModel {
+        &self.activity_observations
     }
 
-    pub(super) fn start_agent_run(&mut self, run_id: UiRunId) -> bool {
-        if self.agent_run(&run_id).is_some() {
-            return false;
+    #[cfg(test)]
+    pub(crate) fn activity_observations_mut(&mut self) -> &mut ActivityObservationModel {
+        &mut self.activity_observations
+    }
+
+    pub(super) fn observe_activity_change(
+        &mut self,
+        activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
+    ) -> Vec<ConversationChange> {
+        let run_id = activity.run_id.clone();
+        let activity_id = activity.id.clone();
+        let activity_kind = activity.kind;
+        let activity_revision = activity.revision;
+        let total_elapsed_ms = activity.timing.total_elapsed_ms;
+        let state_elapsed_ms = activity.timing.state_elapsed_ms;
+        let outcome = self.activity_observations.observe_increment(activity);
+        crate::tui::log_debug!(
+            "[ACTIVITY_TIMING] mirror_increment run_id={} activity_id={} kind={:?} activity_revision={} total_elapsed_ms={} state_elapsed_ms={} outcome={:?} mirror_revision={}",
+            run_id.as_str(),
+            activity_id.as_str(),
+            activity_kind,
+            activity_revision,
+            total_elapsed_ms,
+            state_elapsed_ms,
+            outcome,
+            self.activity_observations.revision_for(&run_id).unwrap_or(0),
+        );
+        match outcome {
+            ActivityIncrementOutcome::Applied => {
+                vec![ConversationChange::ActivityObservationChanged {
+                    run_id,
+                    activity_id,
+                }]
+            }
+            ActivityIncrementOutcome::GapDetected => {
+                vec![ConversationChange::ActivityObservationStale { run_id }]
+            }
+            ActivityIncrementOutcome::Ignored => Vec::new(),
         }
-        self.agent_runs.push(AgentRunState::new(run_id));
-        true
     }
 
-    pub(super) fn transition_agent_run(
+    pub(super) fn replace_activity_snapshot(
         &mut self,
-        run_id: &UiRunId,
-        phase: super::interaction::AgentRunPhase,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.transition_to(phase))
-    }
-
-    pub(super) fn start_agent_run_step(
-        &mut self,
-        run_id: &UiRunId,
-        step_id: super::interaction::UiRunStepId,
-        tool_reference: Option<String>,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.start_step(step_id, tool_reference))
-    }
-
-    pub(super) fn complete_agent_run_step(
-        &mut self,
-        run_id: &UiRunId,
-        step_id: &super::interaction::UiRunStepId,
-    ) -> bool {
-        self.agent_runs
-            .iter_mut()
-            .find(|run| run.run_id() == run_id)
-            .is_some_and(|run| run.complete_step(step_id))
-    }
-
-    pub(super) fn clear_model_stream_placeholder(&mut self) -> Vec<ConversationChange> {
-        if let Some(placeholder) = self.model_stream_placeholder.take() {
-            crate::tui::log_debug!(
-                "clear model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-                placeholder.context.chat_id,
-                placeholder.context.turn_id,
-                placeholder.elapsed_secs,
-                placeholder.phase,
-            );
-            vec![ConversationChange::OutputDirty]
+        snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
+    ) -> Vec<ConversationChange> {
+        let run_id = snapshot.run_id.clone();
+        let snapshot_revision = snapshot.revision;
+        let activity_count = snapshot.activities.len();
+        let root = snapshot.activities.iter().find(|activity| {
+            activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
+                && activity.parent_activity_id.is_none()
+                && matches!(
+                    activity.state,
+                    crate::tui::adapter::tui_runtime_event::TuiActivityState::Running
+                        | crate::tui::adapter::tui_runtime_event::TuiActivityState::Waiting
+                )
+                && matches!(
+                    activity.detail,
+                    crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
+                        purpose: crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                    }
+                )
+        });
+        let root_activity_id = root
+            .map(|activity| activity.id.as_str().to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let root_revision = root.map_or(0, |activity| activity.revision);
+        let total_elapsed_ms = root.map_or(0, |activity| activity.timing.total_elapsed_ms);
+        let applied = self.activity_observations.replace_snapshot(snapshot);
+        crate::tui::log_debug!(
+            "[ACTIVITY_TIMING] mirror_snapshot run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={} applied={} mirror_revision={}",
+            run_id.as_str(),
+            snapshot_revision,
+            activity_count,
+            root_activity_id,
+            root_revision,
+            total_elapsed_ms,
+            applied,
+            self.activity_observations.revision_for(&run_id).unwrap_or(0),
+        );
+        if applied {
+            vec![ConversationChange::ActivitySnapshotReplaced { run_id }]
         } else {
             Vec::new()
         }
     }
 
-    pub(super) fn upsert_model_stream_placeholder(
-        &mut self,
-        placeholder: ModelStreamWaitingView,
-    ) -> Vec<ConversationChange> {
-        crate::tui::log_debug!(
-            "upsert model_stream_placeholder chat_id={} turn_id={} elapsed_secs={} phase={}",
-            placeholder.context.chat_id,
-            placeholder.context.turn_id,
-            placeholder.elapsed_secs,
-            placeholder.phase,
-        );
-        self.model_stream_placeholder = Some(placeholder);
-        vec![ConversationChange::OutputDirty]
-    }
     pub(super) fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
         let chat_id = ChatId::new_v7();
@@ -336,7 +278,7 @@ impl ConversationModel {
         self.active_chat_id = Some(chat_id.clone());
         self.chats.push(chat);
         let user_block_id = self.next_block_id("user");
-        let turn_id = ChatTurnId::new_v7();
+        let run_id = ChatRunId::new_v7();
         self.timeline.push(OutputTimelineItem::UserMessage {
             id: user_block_id.clone(),
             text: submission,
@@ -347,7 +289,7 @@ impl ConversationModel {
             },
             ConversationChange::ChatTurnStarted {
                 chat_id: chat_id.to_string(),
-                turn_id: turn_id.to_string(),
+                run_id: run_id.to_string(),
             },
             ConversationChange::UserMessageAppended {
                 block_id: user_block_id,
@@ -371,38 +313,38 @@ impl ConversationModel {
     pub(crate) fn ensure_runtime_turn(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
-    ) -> (ChatId, ChatTurnId) {
+        run_id: ChatRunId,
+    ) -> (ChatId, ChatRunId) {
         if let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) {
             chat.status = ChatStatus::Running;
-            if !chat.turns.iter().any(|turn| turn.id == turn_id) {
-                let sequence = chat.turns.len();
-                chat.turns.push(ChatTurn::new(turn_id.clone(), sequence));
+            if !chat.runs.iter().any(|turn| turn.id == run_id) {
+                let sequence = chat.runs.len();
+                chat.runs.push(ChatRun::new(run_id.clone(), sequence));
             }
-            return (chat_id, turn_id);
+            return (chat_id, run_id);
         }
         let mut chat = Chat::new(chat_id.clone(), String::new());
-        chat.turns.clear();
-        chat.turns.push(ChatTurn::new(turn_id.clone(), 0));
+        chat.runs.clear();
+        chat.runs.push(ChatRun::new(run_id.clone(), 0));
         self.chats.push(chat);
-        (chat_id, turn_id)
+        (chat_id, run_id)
     }
 
     pub(super) fn runtime_turn_mut(
         &mut self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
-    ) -> Option<&mut ChatTurn> {
+        run_id: &ChatRunId,
+    ) -> Option<&mut ChatRun> {
         self.chats
             .iter_mut()
             .find(|chat| &chat.id == chat_id)
-            .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
+            .and_then(|chat| chat.runs.iter_mut().find(|turn| &turn.id == run_id))
     }
 
     pub(super) fn complete_chat(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
     ) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
         self.active_text_context = None;
@@ -411,7 +353,7 @@ impl ConversationModel {
         let Some(chat) = self.chats.iter_mut().find(|chat| chat.id == chat_id) else {
             return Vec::new();
         };
-        if !chat.turns.iter().any(|turn| turn.id == turn_id) {
+        if !chat.runs.iter().any(|turn| turn.id == run_id) {
             return Vec::new();
         }
         chat.status = ChatStatus::Completing;
@@ -533,28 +475,32 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
         }
         | ConversationChange::AskUserShown { id: block_id }
         | ConversationChange::AskUserUpdated { id: block_id }
-        | ConversationChange::OrphanToolResultObserved { id: block_id } => Some(block_id.clone()),
+        | ConversationChange::OrphanToolResultObserved { id: block_id }
+        | ConversationChange::AgentActivitiesRecorded {
+            block_id,
+            tool_id: _,
+        }
+        | ConversationChange::ToolStreamingOutputRecorded { block_id } => Some(block_id.clone()),
         ConversationChange::AskUserDismissed { .. } => None,
         ConversationChange::ToolCallObserved { .. } => None,
         ConversationChange::OutputDirty => None,
         ConversationChange::ToolCallBound {
             chat_id,
-            turn_id,
+            run_id,
             id,
             ..
         }
         | ConversationChange::ToolCallCompleted {
             chat_id,
-            turn_id,
+            run_id,
             id,
             ..
         }
         | ConversationChange::AgentMetaUpdated {
             chat_id,
-            turn_id,
+            run_id,
             tool_id: id,
-        } => Some(format!("tool-call-{chat_id}/{turn_id}/{id}")),
-        ConversationChange::AgentProgressRecorded { .. } => None,
+        } => Some(format!("tool-call-{chat_id}/{run_id}/{id}")),
         _ => None,
     }
 }
@@ -599,7 +545,7 @@ mod tests {
         // 空文本的 AssistantText 返回空 change（no-op）。
         let changes = model.apply(AssistantText {
             chat_id: ChatId::new("c1"),
-            turn_id: ChatTurnId::new("t1"),
+            run_id: ChatRunId::new("t1"),
             text: String::new(),
         });
         assert!(changes.is_empty(), "空文本 AssistantText 应为 no-op");

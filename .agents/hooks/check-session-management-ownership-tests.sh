@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,8 +11,8 @@ mkdir -p "$TMP/agent/features/context/src/adapters" \
   "$TMP/agent/features/runtime/src/application" \
   "$TMP/agent/composition/src"
 
-cat >"$TMP/agent/features/context/src/adapters/atomic_blob_session_management.rs" <<'RS'
-pub struct AtomicBlobSessionManagement;
+cat >"$TMP/agent/features/context/src/adapters/dataset_session_management.rs" <<'RS'
+pub struct DatasetSessionManagement;
 RS
 cat >"$TMP/agent/features/context/src/ports/session_management.rs" <<'RS'
 pub trait SessionManagementPort {}
@@ -22,8 +22,10 @@ fn consume() {}
 RS
 cat >"$TMP/agent/composition/src/runtime.rs" <<'RS'
 fn wire() {
+    let session_dataset = file_system_dataset();
     let session_blob = file_system_blob();
-    let _port = AtomicBlobSessionManagement::new(session_blob.clone());
+    let _port = DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone());
+    let _writer = DatasetCanonicalSessionWriter::new(session_dataset);
     let _deps = MainSessionDependencies { session_management: session_management.clone() };
     RuntimeBootstrapDependencies::new(session_management);
 }

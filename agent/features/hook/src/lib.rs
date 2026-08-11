@@ -5,11 +5,11 @@ mod adapters;
 mod domain;
 mod ports;
 
-// 稳定 façade：仅导出生产 Dispatcher（含设计常量 MAX_ATTEMPTS）+ 领域 PL。
+// 稳定 façade：仅导出生产 Dispatcher 与领域 PL。
 // Executor / RawExecution / ExecutionFault / ProcessDriverExecutor 等技术类型
 // 是 adapters detail，**NEVER** 进入 crate 公开面。
 pub use adapters::config::build_dispatcher;
-pub use adapters::dispatcher::{Dispatcher, MAX_ATTEMPTS};
+pub use adapters::dispatcher::Dispatcher;
 pub use domain::invocation::*;
 pub use domain::{
     classify_directive, ClassifyError, HookBlockDetail, HookClass, HookCommand, HookDirective,
@@ -17,4 +17,7 @@ pub use domain::{
     HookFailurePolicy, HookInvocation, HookMatcher, HookOutcome, HookPoint, HookPointMetadata,
     HookReason, HookSubscription, ProtocolViolation, SubscriptionError,
 };
-pub use ports::{CancellationSignal, HookDispatchContext, HookPort};
+pub use ports::{
+    CancellationSignal, HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
+};

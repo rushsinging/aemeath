@@ -33,7 +33,8 @@ fn build_resume_workload(step_count: usize, tools_per_step: usize) -> Vec<TuiRes
                         })
                         .collect(),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
+                    skill_request: None,
                     input_id: None,
                 };
                 let result = TuiChatMessage {
@@ -47,7 +48,8 @@ fn build_resume_workload(step_count: usize, tools_per_step: usize) -> Vec<TuiRes
                         })
                         .collect(),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
+                    skill_request: None,
                     input_id: None,
                 };
                 vec![assistant, result]

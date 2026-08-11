@@ -7,22 +7,19 @@ mod key_scroll;
 mod notice;
 mod reminder;
 mod spawn_context;
-mod spinner;
 mod ui_event;
 
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::{map_agent_event_with_tool_header, map_runtime_event};
+use crate::tui::adapter::agent_event::{map_agent_event_for_ui, map_runtime_event};
 use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRuntimeEvent};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::block::AskUserSlot;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output::rendered::RenderedLineAnchor;
-use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::intent::AgentIntent;
 use crate::tui::update::msg::TuiMsg;
@@ -63,15 +60,14 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ToolResult { .. } => "ToolResult",
         UiEvent::Usage { .. } => "Usage",
         UiEvent::Error(_) => "Error",
-        UiEvent::RunCancelled => "RunCancelled",
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
-        UiEvent::StopHookBlocked { .. } => "StopHookBlocked",
-        UiEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
+        UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
+        UiEvent::HookNotice(_) => "HookNotice",
         UiEvent::ApiError { .. } => "ApiError",
-        UiEvent::CompactRollback { .. } => "CompactRollback",
-        UiEvent::CompactFinished { .. } => "CompactFinished",
+        UiEvent::CompactOperationRolledBack { .. } => "CompactRollback",
+        UiEvent::CompactOperationCompleted { .. } => "CompactFinished",
         UiEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted",
         UiEvent::UserMessagesQueued { .. } => "UserMessagesQueued",
         UiEvent::Done { .. } => "Done",
@@ -79,27 +75,24 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::LiveTps(_) => "LiveTps",
         UiEvent::ClipboardImage(_) => "ClipboardImage",
         UiEvent::SystemMessage(_) => "SystemMessage",
-        UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
         UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::InteractionRequested { .. } => "InteractionRequested",
-        UiEvent::HookEvent(_) => "HookEvent",
-        UiEvent::HookMessage(_) => "HookMessage",
-        UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
         UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
-        UiEvent::TaskStatusChanged(_) => "TaskStatusChanged",
-        UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
+        UiEvent::TaskStateChanged(_) => "TaskStateChanged",
+        UiEvent::CurrentRunChanged(_) => "CurrentRunChanged",
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
         UiEvent::SessionReset => "SessionReset",
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
         UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
-        UiEvent::CompactProgress { .. } => "CompactProgress",
         UiEvent::ModelSwitched { .. } => "ModelSwitched",
         UiEvent::ThinkingChanged { .. } => "ThinkingChanged",
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
         UiEvent::CommandResultText { .. } => "CommandResultText",
         UiEvent::SessionResumed { .. } => "SessionResumed",
+        UiEvent::DisplayHistoryWindowLoaded { .. } => "DisplayHistoryWindowLoaded",
+        UiEvent::DisplayHistoryWindowLoadFailed { .. } => "DisplayHistoryWindowLoadFailed",
         UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
     }
 }
@@ -262,7 +255,19 @@ impl App {
                     self.view_state.animation.spinner_frame.wrapping_add(1);
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
+                let before_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
                 self.view_state.spinner.advance();
+                self.view_state.run_activity.advance_frame();
+                let after_silent = self
+                    .view_state
+                    .run_activity
+                    .is_model_silent(std::time::Instant::now());
+                if before_silent != after_silent || after_silent {
+                    self.mark_output_dirty();
+                }
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
@@ -271,17 +276,15 @@ impl App {
                 {
                     self.mark_output_dirty();
                 }
-                // 动画只在 viewport 绘制阶段按当前 frame 解析；不要标脏 output，
-                // 否则每 90ms 都会扫描完整 roots 并重建历史文档。
-                let request_render = self.model.conversation.runtime.spinner.chat_active;
-                crate::tui::log_trace!(                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
+                let request_render = self.view_state.run_activity.is_active();
+                crate::tui::log_trace!(
+                    "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} verb={} dirty_output={}",
                     before_frame,
                     self.view_state.animation.spinner_frame,
                     before_version,
                     self.view_state.animation.version,
                     self.view_state.spinner.frame,
-                    self.model.conversation.runtime.spinner.chat_active,
-                    self.model.conversation.runtime.spinner.phase,
+                    self.view_state.run_activity.is_active(),
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
                 );
@@ -330,9 +333,10 @@ impl App {
 
     fn update_runtime_event(&mut self, event: TuiRuntimeEvent) -> UpdateResult {
         let diagnostic_kind = match &event {
-            TuiRuntimeEvent::Text { .. } => Some("Text"),
+            TuiRuntimeEvent::AssistantTextDelta { .. } => Some("AssistantTextDelta"),
             TuiRuntimeEvent::BlockComplete { .. } => Some("BlockComplete"),
             TuiRuntimeEvent::UserMessagesAdopted { .. } => Some("UserMessagesAdopted"),
+            TuiRuntimeEvent::HookNotice(_) => Some("HookNotice"),
             TuiRuntimeEvent::Done { .. } => Some("Done"),
             _ => None,
         };
@@ -355,12 +359,76 @@ impl App {
             } => {
                 self.set_tui_skill_snapshot(revision.clone(), skills.clone(), slash_routes.clone());
             }
-            TuiRuntimeEvent::UserMessagesAdopted { items, .. } => {
+            TuiRuntimeEvent::UserMessagesAdopted { items, queued } => {
+                crate::tui::log_debug!(
+                    "skill_request boundary=tui_adopted_event items={} queued={} skill_items={} user_items={}",
+                    items.len(),
+                    queued.len(),
+                    items
+                        .iter()
+                        .filter(|item| matches!(item.source, crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest))
+                        .count(),
+                    items
+                        .iter()
+                        .filter(|item| matches!(item.source, crate::tui::adapter::runtime_view::TuiMessageSource::User))
+                        .count()
+                );
                 for item in items {
                     if let Some(id) = item.input_id.as_ref() {
                         self.clear_queued_submission_echo_by_id(id);
                     }
-                    self.append_user_echo(item.text_content());
+                    match item.source {
+                        crate::tui::adapter::runtime_view::TuiMessageSource::User => {
+                            self.append_user_echo(item.text_content());
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
+                            if let Some(payload) = item.skill_request.as_ref() {
+                                crate::tui::log_debug!(
+                                    "skill_request boundary=tui_adopted_item source=skill input_id={:?} content_blocks={} content_text_len={} metadata_present=true skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                                    item.input_id,
+                                    item.content.len(),
+                                    item.text_content().len(),
+                                    payload.skill,
+                                    payload.arguments.len(),
+                                    payload.raw_input.len(),
+                                    payload.raw_input.chars().take(120).collect::<String>()
+                                );
+                                self.append_user_echo(payload.raw_input.clone());
+                            } else {
+                                crate::tui::log_debug!(
+                                    "skill_request boundary=tui_adopted_item source=skill input_id={:?} content_blocks={} content_text_len={} metadata_present=false action=skip_echo",
+                                    item.input_id,
+                                    item.content.len(),
+                                    item.text_content().len()
+                                );
+                            }
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {
+                            if let Some(notice) = item.hook_notice.as_ref() {
+                                let mapping = crate::tui::adapter::agent_event::AgentEventMapping {
+                                    conversation: vec![
+                                        crate::tui::model::conversation::intent::ConversationIntent::AppendHookNotice(
+                                            crate::tui::model::conversation::intent::AppendHookNotice {
+                                                title: notice.title(),
+                                                text: notice.display_text(),
+                                                kind: notice.kind.clone(),
+                                            },
+                                        ),
+                                    ],
+                                    ..Default::default()
+                                };
+                                let reduced = crate::tui::update::root_reducer::reduce_agent_event(
+                                    &mut self.model,
+                                    mapping,
+                                );
+                                crate::tui::update::dirty::merge_dirty(
+                                    &mut self.view_state.dirty,
+                                    reduced.dirty,
+                                );
+                            }
+                        }
+                        crate::tui::adapter::runtime_view::TuiMessageSource::SystemGenerated => {}
+                    }
                 }
                 // 用户消息已经成为已提交的会话尾部内容。即使 resume 后用户先向上
                 // 浏览过历史，也必须把视图恢复到最新窗口，否则新消息只进入 model，
@@ -369,20 +437,18 @@ impl App {
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::TurnStarted { .. } => {
-                self.spinner_phase(SpinnerPhase::Thinking);
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::ApiError { error, .. } => {
-                self.spinner_stop();
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
-            TuiRuntimeEvent::CompactFinished { .. } => {
+            TuiRuntimeEvent::CompactOperationCompleted { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));
             }
-            TuiRuntimeEvent::CompactRollback { .. } => {
+            TuiRuntimeEvent::CompactOperationRolledBack { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
                 ));
@@ -413,8 +479,10 @@ impl App {
             }
             TuiRuntimeEvent::SessionResumed {
                 steps,
+                display_history,
                 session_id,
                 created_at,
+                compacted,
             } => {
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_received session_id={} steps={} messages={}",
@@ -422,7 +490,13 @@ impl App {
                     steps.len(),
                     steps.iter().map(|step| step.messages.len()).sum::<usize>()
                 );
-                self.resume_session_messages(session_id, steps.clone(), created_at.to_string());
+                self.resume_session_messages(
+                    session_id,
+                    steps.clone(),
+                    display_history.clone(),
+                    created_at.to_string(),
+                    *compacted,
+                );
                 crate::tui::log_debug!(
                     "resume_lifecycle boundary=tui_runtime stage=session_resumed_applied session_id={} timeline_items={} chats={} revision={}",
                     session_id,
@@ -437,10 +511,6 @@ impl App {
                 };
             }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
-                // InteractionRequested 走 Runtime 路径，但 spinner_stop / mark_output_dirty
-                // 是 App 级副作用，map_runtime_event 只返回 conversation intent。
-                // 必须在此处理，否则 spinner 不停。
-                self.spinner_stop();
                 self.mark_output_dirty();
                 // 桥接到已有的 ask_user_batch inline block 渲染
                 if let TuiInteractionBody::UserQuestions(questions) = &req.body {
@@ -477,10 +547,20 @@ impl App {
                     self.show_ask_user_batch(req.request_id.clone(), slots);
                 }
             }
+            TuiRuntimeEvent::RunStep {
+                run_id,
+                parent_run_id: None,
+                step_id,
+                event: crate::tui::adapter::tui_runtime_event::TuiRunStepEvent::Started,
+            } => {
+                self.chat.active_run_step = Some((
+                    sdk::RunId::from_legacy_or_new(run_id.as_str()),
+                    sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
+                ));
+            }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
-                // Done/Cancelled 走 Runtime 路径，但 stop_processing 是 App 级副作用；
-                // 不执行会让 is_processing 永远保持 true。
-                self.spinner_stop();
+                // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
+                self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }
@@ -489,14 +569,51 @@ impl App {
         let mapping = map_runtime_event(&event);
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
-                "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
-                kind,
-                mapping.conversation.len(),
-                mapping.diagnostic.len(),
-                mapping.session.len()
-            );
+              "event_delivery boundary=tui_mapper kind={} outcome=mapped conversation_intents={} diagnostic_intents={} session_intents={}",
+              kind,
+              mapping.conversation.len(),
+              mapping.diagnostic.len(),
+              mapping.session.len()
+          );
         }
         let model_result = reduce_agent_event(&mut self.model, mapping);
+        self.refresh_live_status_from_model();
+        let valid_model_activity = match &event {
+            TuiRuntimeEvent::AssistantTextDelta { delta, .. }
+            | TuiRuntimeEvent::ThinkingDelta { delta, .. } => !delta.is_empty(),
+            TuiRuntimeEvent::ToolCallStarted { .. } => true,
+            TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
+            TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),
+            _ => false,
+        };
+        if valid_model_activity {
+            let active_run_id = self
+                .model
+                .conversation
+                .activity_observations()
+                .activities()
+                .iter()
+                .find(|activity| {
+                    activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
+                        && matches!(
+                            activity.detail,
+                            crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
+                                purpose:
+                                    crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                            }
+                        )
+                })
+                .map(|activity| activity.run_id.clone());
+            if let Some(run_id) = active_run_id.as_ref() {
+                if self
+                    .view_state
+                    .run_activity
+                    .observe_main_model_activity(run_id, std::time::Instant::now())
+                {
+                    self.mark_output_dirty();
+                }
+            }
+        }
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
                 "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
@@ -522,14 +639,7 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let workspace_root = self
-            .model
-            .workspace_provider
-            .workspace_root()
-            .map(std::path::Path::new);
-        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
-            format_subagent_tool_header(name, input, workspace_root)
-        });
+        let mapping = map_agent_event_for_ui(&ev);
         crate::tui::log_trace!(
             "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={}",
             ui_event_name(&ev),
@@ -567,7 +677,7 @@ impl App {
             .max(1)
     }
 
-    pub(crate) fn refresh_output_document_from_model(&mut self) {
+    pub(crate) fn refresh_output_document_from_model(&mut self) -> Option<Effect> {
         let before_lines = self.output_area.document().total_lines();
         let revision = self.model.conversation.revision();
         let current_workspace_root: Option<String> = self
@@ -589,10 +699,24 @@ impl App {
         };
         let materialized = cache.retained.materialize_window(
             &self.model.conversation,
+            &self.model.display_history,
             workspace_root,
             requested_window,
         );
         let indexed_items = materialized.indexed_items;
+        if let Some(request) = materialized.missing_history_request {
+            let request_key = (
+                request.session_id.clone(),
+                request.generation_revision,
+                request.member_names.clone(),
+            );
+            if cache.loading_history_window.as_ref() != Some(&request_key) {
+                cache.loading_history_window = Some(request_key);
+                return Some(Effect::LoadDisplayHistoryWindow { request });
+            }
+        } else {
+            cache.loading_history_window = None;
+        }
         let sync_stats = materialized.stats;
         #[cfg(test)]
         crate::tui::render::performance::record_retained_view_sync(
@@ -703,7 +827,7 @@ impl App {
                         "渲染失败，已记录 panic.log",
                     ))),
                 ));
-                return;
+                return None;
             }
         };
         crate::tui::log_trace!(
@@ -731,16 +855,21 @@ impl App {
             need_rebuild
         );
         self.output_area.replace_document(document);
+        None
     }
 
-    pub(crate) fn flush_dirty_view_models(&mut self) {
+    pub(crate) fn flush_dirty_view_models(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if self.view_state.dirty.output {
-            self.refresh_output_document_from_model();
+            if let Some(effect) = self.refresh_output_document_from_model() {
+                effects.push(effect);
+            }
             self.view_state.dirty.clear_output();
         }
         if self.view_state.dirty.status {
             self.view_state.dirty.clear_status();
         }
+        effects
     }
     pub(crate) fn apply_agent_intent(
         &mut self,
@@ -772,8 +901,8 @@ impl App {
         )
     }
 
-    /// 据 Model 业务态（spinner.chat_active + phase / task lines / queued submissions）
-    /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
+    /// 据 typed Main Run snapshot、task lines、queued submissions 与纯动画态
+    /// 派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
         let queued_texts: Vec<String> = self
             .model
@@ -784,6 +913,7 @@ impl App {
             .collect();
         crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
             &self.model.conversation,
+            &self.view_state.run_activity,
             &self.view_state.spinner,
             &queued_texts,
         )
@@ -799,32 +929,43 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        // #536: 可见性由 chat_active 驱动。
-        let active = self.model.conversation.runtime.spinner.chat_active;
-        let before_anim = self.view_state.spinner.clone();
-        if active {
-            if self.view_state.spinner.verb.is_empty() {
-                self.view_state.spinner.pick_verb();
+        let activity_summary =
+            crate::tui::view_assembler::activity_summary::ActivitySummaryAssembler::assemble(
+                self.model.conversation.activity_observations(),
+            );
+        if let Some(summary) = activity_summary.as_ref() {
+            let state = &self.view_state.run_activity;
+            let root_changed = state.root_timing_identity()
+                != Some((
+                    summary.root_activity_id.as_str(),
+                    summary.root_timing_revision,
+                ));
+            let primary = summary.primary.as_ref();
+            let primary_changed = state.phase_timing_identity()
+                != primary.map(|primary| (primary.activity_id.as_str(), primary.timing_revision));
+            if root_changed || primary_changed {
+                crate::tui::log_debug!(
+                    "[ACTIVITY_TIMING] summary_selected run_id={} root_activity_id={} root_revision={} total_elapsed_ms={} primary_activity_id={} phase_revision={} phase_elapsed_ms={} root_changed={} phase_changed={}",
+                    summary.run_id.as_str(),
+                    summary.root_activity_id,
+                    summary.root_timing_revision,
+                    summary.total_elapsed_ms,
+                    primary.map_or("-", |primary| primary.activity_id.as_str()),
+                    primary.map_or(0, |primary| primary.timing_revision),
+                    primary.map_or(0, |primary| primary.elapsed_ms),
+                    root_changed,
+                    primary_changed,
+                );
             }
-            self.view_state
-                .spinner
-                .sync_phase(self.model.conversation.runtime.spinner.phase.clone());
-        } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
-            self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
-        crate::tui::log_trace!(
-            "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
-            active,
-            self.model.conversation.runtime.spinner.phase,
-            before_anim.frame,
-            self.view_state.spinner.frame,
-            before_anim.phase_frame,
-            self.view_state.spinner.phase_frame,
-            before_anim.phase,
-            self.view_state.spinner.phase,
-            before_anim.verb,
-            self.view_state.spinner.verb
-        );
+        self.view_state
+            .run_activity
+            .sync_activity_summary(activity_summary.as_ref(), std::time::Instant::now());
+        if self.view_state.run_activity.verb.is_empty() && activity_summary.is_some() {
+            self.view_state.spinner.pick_verb();
+            self.view_state.run_activity.verb = self.view_state.spinner.verb.clone();
+        }
+        self.view_state.run_activity.frame = self.view_state.spinner.frame;
     }
     /// 根据当前 document 与 layout/live-status 投影同步 OutputViewState 滚动真相。
     /// 每帧渲染前调用；OutputArea render 直接消费 view_state.output，不再写 widget 镜像。

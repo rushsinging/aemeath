@@ -57,6 +57,16 @@ impl StepPersistenceCoordinator {
         observer.on_accepted_input(execution).await
     }
 
+    pub(crate) async fn load_step_receipts(
+        &self,
+        request: &crate::ports::ContextRequest,
+    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        self.context
+            .step_receipts(request)
+            .await
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))
+    }
+
     pub(crate) async fn persist_step_commit(
         &self,
         commit: &StepCommit,
@@ -66,15 +76,23 @@ impl StepPersistenceCoordinator {
         else {
             return Ok(());
         };
+        let receipts = if commit.receipts.is_empty() {
+            self.context
+                .step_receipts(request)
+                .await
+                .map_err(|error| LoopEngineError::Adapter(error.to_string()))?
+        } else {
+            commit.receipts.clone()
+        };
         self.context
             .append_finalized(
                 request,
                 commit.step_id.clone(),
                 expected_revision,
                 commit.cause,
-                None,
+                commit.duration_ms,
                 commit.messages.clone(),
-                vec![],
+                receipts,
                 self.usage.get(),
             )
             .await

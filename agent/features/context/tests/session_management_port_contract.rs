@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use context::adapters::{decode_session, CanonicalSessionWriter};
+use context::adapters::decode_session;
 use context::domain::session::{CanonicalSession, SessionCodec, SnapshotState};
 use context::domain::{SessionId, ToolCallIdentity};
 use context::ports::SessionManagementPort;
@@ -68,7 +68,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         .await
         .expect("resume session with receipt ledger");
 
-    assert_eq!(resumed.revision, 1);
+    assert_eq!(resumed.revision, 0);
     assert_eq!(resumed.run_slices[0].steps[0].tool_receipts[0], receipt);
     std::fs::remove_dir_all(root).expect("remove storage root");
 }

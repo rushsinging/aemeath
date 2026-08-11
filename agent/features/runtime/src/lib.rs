@@ -3,10 +3,11 @@ pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
 pub(crate) mod adapters;
 pub(crate) mod application;
+pub mod composition;
 pub(crate) mod domain;
 pub(crate) mod ports;
 
-pub use adapters::sdk_event_mapper::map_domain_event;
+pub use adapters::sdk_event_mapper::map_lifecycle_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
 pub use application::run::active_registry::ActiveRunRegistry;
 pub use application::tool::tool_result_materializer::{
@@ -18,8 +19,10 @@ pub use application::client::{
     resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
     AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
     PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
-    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
+    RuntimeIngressAssembly, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
+    SkillBootstrapAssembly,
 };
+pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
 // RuntimeContextFactory::new(…).
@@ -32,14 +35,13 @@ pub use application::reflection::{
 };
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
-pub use domain::agent_run::RunDomainEvent;
+pub use domain::agent_run::RuntimeLifecycleEvent;
 pub use ports::{
     ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
-    ToolResultBlobPort, ToolResultBlobRef,
+    ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
 };
 pub use sdk::{
-    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
-    TaskSummary,
+    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, ProjectContext, TaskSummary,
 };
 
 #[cfg(test)]
@@ -50,13 +52,16 @@ mod boundary_tests {
     fn application_top_level_modules_have_stable_owners() {
         let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
         let allowed = [
+            "activity",
             "client",
+            "compact_generator",
             "context",
             "hook",
             "interaction",
             "loop_engine",
             "model",
             "prompt",
+            "published_state",
             "reflection",
             "run",
             "session",

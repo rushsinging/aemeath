@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：检查交互 AgentClient 与可寻址 RunControlClient 各自保持最小公开面。

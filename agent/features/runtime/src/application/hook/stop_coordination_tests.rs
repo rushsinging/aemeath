@@ -9,6 +9,48 @@
 use super::*;
 use crate::application::hook::outcome_mapper::{RuntimeHookExecutionStatus, RuntimeHookReason};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingWorkspaceHook {
+    dispatched_cwds: Mutex<Vec<PathBuf>>,
+}
+
+#[async_trait]
+impl HookPort for RecordingWorkspaceHook {
+    async fn dispatch(
+        &self,
+        _invocation: HookInvocation,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        hook::HookOutcome::proceed()
+    }
+
+    async fn dispatch_at(
+        &self,
+        _invocation: HookInvocation,
+        context: HookDispatchContext,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        self.dispatched_cwds
+            .lock()
+            .unwrap()
+            .push(context.cwd().to_path_buf());
+        hook::HookOutcome::proceed()
+    }
+}
+
+struct StopContextObserver {
+    context: StopHookExecutionContext,
+}
+
+#[async_trait]
+impl StopHookObserver for StopContextObserver {
+    fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
+        Some(self.context.clone())
+    }
+}
 
 /// Helper: build a dispatcher that always returns Continue.
 fn continue_hook_port() -> Arc<dyn HookPort> {
@@ -21,7 +63,18 @@ fn continue_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
+                },
+                ..share::config::Config::default()
+            },
+        ))
+        .unwrap(),
+    )
 }
 
 /// Helper: build a dispatcher that always blocks (exit code 2).
@@ -35,7 +88,93 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&HooksConfig { events }).unwrap())
+    Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
+                },
+                ..share::config::Config::default()
+            },
+        ))
+        .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn stop_hook_reads_workspace_root_when_dispatch_begins() {
+    let repository = tempfile::tempdir().unwrap();
+    let run_git = |args: &[&str], cwd: &std::path::Path| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run_git(
+        &["init", "--initial-branch=main"],
+        repository.path()
+    ));
+    assert!(run_git(&["config", "user.name", "test"], repository.path()));
+    assert!(run_git(
+        &["config", "user.email", "test@example.com"],
+        repository.path()
+    ));
+    assert!(run_git(
+        &["config", "commit.gpgsign", "false"],
+        repository.path()
+    ));
+    std::fs::write(repository.path().join("README.md"), "init").unwrap();
+    assert!(run_git(&["add", "-A"], repository.path()));
+    assert!(run_git(&["commit", "-m", "init"], repository.path()));
+    let linked_root = repository.path().join("linked");
+    assert!(run_git(
+        &[
+            "worktree",
+            "add",
+            linked_root.to_str().unwrap(),
+            "-b",
+            "linked"
+        ],
+        repository.path()
+    ));
+    let main_root = repository.path().canonicalize().unwrap();
+    let workspace = project::wire_production_workspace(main_root.clone())
+        .expect("workspace 初始化成功")
+        .into_views();
+    workspace
+        .control()
+        .enter(Some(linked_root), None, None)
+        .expect("进入 linked worktree");
+    let hook = Arc::new(RecordingWorkspaceHook::default());
+    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let mut observer = StopContextObserver {
+        context: StopHookExecutionContext::new(
+            hook_port,
+            workspace.read(),
+            "test-session".to_string(),
+            "en".to_string(),
+        ),
+    };
+    workspace
+        .control()
+        .exit()
+        .expect("dispatch 前退出 worktree");
+    let mut execution = RunExecutionState::new();
+
+    let outcome = coordinate_stop_hook(
+        &mut observer,
+        &mut execution,
+        1,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("Stop Hook 协调成功");
+
+    assert!(matches!(outcome.decision, StopHookDecision::Proceed));
+    assert_eq!(hook.dispatched_cwds.lock().unwrap().as_slice(), [main_root]);
 }
 
 #[tokio::test]
@@ -44,18 +183,40 @@ async fn continue_decision_preserves_typed_dispatch_for_mapping() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )
     .await;
 
     assert!(matches!(outcome.decision, StopHookDecision::Proceed));
-    assert_eq!(outcome.dispatch.directive, RuntimeHookDirective::Continue);
-    assert_eq!(outcome.point, hook::HookPoint::Stop);
+    assert!(outcome.feedback_message.is_none());
+}
+
+#[tokio::test]
+async fn cancelled_stop_hook_does_not_materialize_llm_feedback() {
+    let port = always_blocking_hook_port();
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+
+    let outcome = orchestrate_stop_hook(
+        &port,
+        StopHookContext {
+            run_steps: 3,
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            session_id: "test-session".to_string(),
+            language: "en".to_string(),
+            subscription_execution_observer: None,
+        },
+        &cancellation,
+    )
+    .await;
+
+    assert!(matches!(outcome.decision, StopHookDecision::Cancelled));
     assert!(outcome.feedback_message.is_none());
 }
 
@@ -65,10 +226,11 @@ async fn block_outcome_materializes_feedback_message_once() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "zh".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )
@@ -78,7 +240,7 @@ async fn block_outcome_materializes_feedback_message_once() {
     let message = outcome
         .feedback_message
         .expect("blocked outcome must carry one feedback message");
-    assert_eq!(message.source(), share::message::MessageSource::StopHook);
+    assert_eq!(message.source(), share::message::MessageSource::Hook);
     assert!(message.text_content().contains("<system-reminder>"));
 }
 
@@ -88,10 +250,11 @@ async fn block_returns_typed_reason_not_string() {
     let outcome = orchestrate_stop_hook(
         &port,
         StopHookContext {
-            turns: 3,
+            run_steps: 3,
             workspace_root: std::path::PathBuf::from("/tmp"),
             session_id: "test-session".to_string(),
             language: "en".to_string(),
+            subscription_execution_observer: None,
         },
         &tokio_util::sync::CancellationToken::new(),
     )
@@ -156,7 +319,7 @@ fn feedback_material_truncates_long_output() {
         stderr: String::new(),
     };
     let feedback = super::build_stop_hook_feedback(&detail, &reason, "en", None);
-    let payload = feedback.payload;
+    let payload = feedback.notice;
 
     // stdout preview should be truncated to TUI_STDOUT_PREVIEW_LINES (3)
     let stdout_lines: Vec<&str> = payload.stdout_preview.lines().collect();
@@ -196,7 +359,7 @@ async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
 
     let feedback = super::materialize_stop_hook_feedback(&detail, &reason, &session_id, "zh").await;
     let path = feedback
-        .payload
+        .notice
         .output_file
         .as_deref()
         .expect("long output must be persisted");

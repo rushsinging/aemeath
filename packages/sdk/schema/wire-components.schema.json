@@ -1,5 +1,581 @@
 {
   "$defs": {
+    "ActivityAudienceView": {
+      "enum": [
+        "user",
+        "operational",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "ActivityChangeKind": {
+      "enum": [
+        "started",
+        "updated",
+        "finished"
+      ],
+      "title": "ActivityChangeKind",
+      "type": "string"
+    },
+    "ActivityDetailView": {
+      "oneOf": [
+        {
+          "properties": {
+            "detail_type": {
+              "const": "run",
+              "type": "string"
+            },
+            "purpose": {
+              "$ref": "#/$defs/RunPurposeView"
+            }
+          },
+          "required": [
+            "detail_type",
+            "purpose"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail_type": {
+              "const": "phase",
+              "type": "string"
+            },
+            "phase": {
+              "$ref": "#/$defs/RunPhaseKindView"
+            }
+          },
+          "required": [
+            "detail_type",
+            "phase"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempt": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "detail_type": {
+              "const": "model",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "stream": {
+              "$ref": "#/$defs/ModelStreamStateView"
+            }
+          },
+          "required": [
+            "detail_type",
+            "model",
+            "attempt",
+            "stream"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail_type": {
+              "const": "tool",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parallel_count": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "summary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "detail_type",
+            "name",
+            "parallel_count"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempt": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "detail_type": {
+              "const": "hook",
+              "type": "string"
+            },
+            "point": {
+              "$ref": "#/$defs/HookPointView"
+            },
+            "script": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "detail_type",
+            "point",
+            "script",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail_type": {
+              "const": "compact",
+              "type": "string"
+            },
+            "stage": {
+              "$ref": "#/$defs/CompactStageView"
+            },
+            "work": {
+              "$ref": "#/$defs/CompactWorkView"
+            }
+          },
+          "required": [
+            "detail_type",
+            "stage",
+            "work"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail_type": {
+              "const": "interaction",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/InteractionKindView"
+            }
+          },
+          "required": [
+            "detail_type",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail_type": {
+              "const": "sub_run",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "detail_type",
+            "role",
+            "model"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ActivityId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "ActivityKindView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "run_phase",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/RunPhaseKindView"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "model_invocation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "hook_dispatch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "compaction",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "interaction",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "sub_run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ActivitySnapshotView": {
+      "properties": {
+        "activities": {
+          "items": {
+            "$ref": "#/$defs/ActivityView"
+          },
+          "type": "array"
+        },
+        "heartbeat_sequence": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RunId"
+        }
+      },
+      "required": [
+        "run_id",
+        "revision",
+        "activities"
+      ],
+      "title": "ActivitySnapshotView",
+      "type": "object"
+    },
+    "ActivitySourceView": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "run_step",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/RunStepId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "model_invocation",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ModelInvocationId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "tool_call",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ToolCallId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "hook_dispatch",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ActivityId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "compaction",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/ActivityId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "interaction",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/InteractionRequestId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "sub_run",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ActivityStateView": {
+      "enum": [
+        "running",
+        "waiting",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "terminated"
+      ],
+      "type": "string"
+    },
+    "ActivityTimingView": {
+      "properties": {
+        "active_elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "finished_at_unix_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "started_at_unix_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state_elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total_elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_elapsed_ms",
+        "active_elapsed_ms",
+        "state_elapsed_ms"
+      ],
+      "type": "object"
+    },
+    "ActivityView": {
+      "properties": {
+        "audience": {
+          "$ref": "#/$defs/ActivityAudienceView"
+        },
+        "detail": {
+          "$ref": "#/$defs/ActivityDetailView"
+        },
+        "id": {
+          "$ref": "#/$defs/ActivityId"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActivityKindView"
+        },
+        "parent_activity_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActivityId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "run_id": {
+          "$ref": "#/$defs/RunId"
+        },
+        "run_step_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunStepId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ActivitySourceView"
+        },
+        "state": {
+          "$ref": "#/$defs/ActivityStateView"
+        },
+        "timing": {
+          "$ref": "#/$defs/ActivityTimingView"
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "source",
+        "kind",
+        "state",
+        "detail",
+        "audience",
+        "revision",
+        "timing"
+      ],
+      "type": "object"
+    },
     "ApprovalDecision": {
       "oneOf": [
         {
@@ -36,19 +612,10 @@
         "AlreadyCancelling",
         "RunTerminating",
         "RunTerminal",
+        "NoActiveStep",
         "NoActiveRun"
       ],
       "title": "CancelCurrentRunOutcome",
-      "type": "string"
-    },
-    "CancelRunOutcome": {
-      "enum": [
-        "Accepted",
-        "AlreadyCancelling",
-        "AlreadyTerminal",
-        "NotFound"
-      ],
-      "title": "CancelRunOutcome",
       "type": "string"
     },
     "CancelRunStepOutcome": {
@@ -64,18 +631,18 @@
       "type": "string"
     },
     "ChatEventContext": {
-      "description": "Runtime stream context used to bind UI events to the authoritative chat/turn.",
+      "description": "Runtime stream context used to bind UI events to the authoritative chat/run.",
       "properties": {
         "chat_id": {
           "$ref": "#/$defs/ChatId"
         },
-        "turn_id": {
-          "$ref": "#/$defs/ChatTurnId"
+        "run_id": {
+          "$ref": "#/$defs/ChatRunId"
         }
       },
       "required": [
         "chat_id",
-        "turn_id"
+        "run_id"
       ],
       "title": "ChatEventContext",
       "type": "object"
@@ -128,19 +695,29 @@
     },
     "ChatMessageMetadata": {
       "properties": {
-        "source": {
-          "$ref": "#/$defs/ChatMessageSource",
-          "default": "user"
-        },
-        "stop_hook": {
+        "hook_notice": {
           "anyOf": [
             {
-              "$ref": "#/$defs/StopHookFeedbackView"
+              "$ref": "#/$defs/HookNoticeView"
             },
             {
               "type": "null"
             }
           ]
+        },
+        "skill_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SkillRequestMetadataView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ChatMessageSource",
+          "default": "user"
         }
       },
       "type": "object"
@@ -149,14 +726,66 @@
       "enum": [
         "user",
         "system_generated",
-        "stop_hook"
+        "hook",
+        "skill_request"
       ],
       "type": "string"
     },
-    "ChatTurnId": {
+    "ChatRunId": {
       "format": "uuid",
       "type": "string",
       "x-aemeath-uuid-version": 7
+    },
+    "CompactStageView": {
+      "enum": [
+        "preparing",
+        "generating",
+        "mapping",
+        "reducing",
+        "refreshing",
+        "finalizing"
+      ],
+      "type": "string"
+    },
+    "CompactWorkView": {
+      "oneOf": [
+        {
+          "properties": {
+            "work_type": {
+              "const": "indeterminate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "work_type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "work_type": {
+              "const": "determinate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "work_type",
+            "completed",
+            "total"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ConfigApplicationScopeView": {
       "enum": [
@@ -1120,51 +1749,100 @@
       },
       "type": "object"
     },
-    "HookMessageKindView": {
-      "description": "Hook 面向展示层的消息类别。",
+    "HookNoticeKindView": {
       "enum": [
-        "additional_context",
-        "system_message"
+        "blocked",
+        "failed",
+        "info"
       ],
       "type": "string"
     },
-    "HookMessageView": {
-      "description": "Hook 面向展示层的结构化消息。",
+    "HookNoticeView": {
       "properties": {
-        "attempt": {
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": "integer"
+        "command": {
+          "type": "string"
         },
-        "execution_ordinal": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "kind": {
-          "$ref": "#/$defs/HookMessageKindView"
+          "$ref": "#/$defs/HookNoticeKindView",
+          "default": "blocked"
+        },
+        "output_file": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "point": {
+          "default": "Stop",
           "type": "string"
         },
-        "source": {
+        "reason": {
           "type": "string"
         },
-        "text": {
+        "stderr_preview": {
+          "type": "string"
+        },
+        "stderr_truncated": {
+          "type": "boolean"
+        },
+        "stdout_preview": {
+          "type": "string"
+        },
+        "stdout_truncated": {
+          "type": "boolean"
+        },
+        "summary": {
           "type": "string"
         }
       },
       "required": [
-        "point",
-        "source",
-        "execution_ordinal",
-        "attempt",
-        "kind",
-        "text"
+        "summary",
+        "command",
+        "reason",
+        "stdout_preview",
+        "stderr_preview",
+        "stdout_truncated",
+        "stderr_truncated"
       ],
-      "title": "HookMessageView",
       "type": "object"
+    },
+    "HookPointView": {
+      "enum": [
+        "pre_tool_use",
+        "user_prompt_submit",
+        "pre_compact",
+        "permission_request",
+        "elicitation",
+        "user_prompt_expansion",
+        "stop",
+        "post_tool_use",
+        "post_tool_use_failure",
+        "post_compact",
+        "post_tool_batch",
+        "elicitation_result",
+        "session_start",
+        "session_end",
+        "sub_run_start",
+        "sub_run_stop",
+        "task_created",
+        "task_completed",
+        "notification",
+        "instructions_loaded",
+        "stop_failure",
+        "permission_denied",
+        "config_change",
+        "cwd_changed",
+        "file_changed",
+        "teammate_idle"
+      ],
+      "type": "string"
     },
     "ImageSource": {
       "oneOf": [
@@ -1229,6 +1907,15 @@
         }
       ],
       "title": "InteractionCommandOutcome"
+    },
+    "InteractionKindView": {
+      "enum": [
+        "tool_approval",
+        "user_question",
+        "plan_approval",
+        "stuck_diagnostic"
+      ],
+      "type": "string"
     },
     "InteractionReply": {
       "oneOf": [
@@ -1469,6 +2156,20 @@
       },
       "type": "object"
     },
+    "ModelInvocationId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
+    "ModelStreamStateView": {
+      "enum": [
+        "invoking",
+        "waiting_for_first_token",
+        "streaming",
+        "retrying"
+      ],
+      "type": "string"
+    },
     "ModelSummary": {
       "description": "`aemeath models` 展示所需的模型摘要。",
       "properties": {
@@ -1703,6 +2404,31 @@
       "type": "string",
       "x-aemeath-uuid-version": 7
     },
+    "RunPhaseKindView": {
+      "enum": [
+        "draining_input",
+        "preparing_context",
+        "applying_response",
+        "awaiting_tool_approval",
+        "executing_tools",
+        "finalizing_step",
+        "cancelling_step",
+        "terminating"
+      ],
+      "type": "string"
+    },
+    "RunPurposeView": {
+      "enum": [
+        "main",
+        "derived"
+      ],
+      "type": "string"
+    },
+    "RunStepId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
+    },
     "RunTerminationReason": {
       "enum": [
         "UserExit",
@@ -1871,51 +2597,22 @@
       "title": "SessionSummary",
       "type": "object"
     },
-    "StopHookFeedbackView": {
+    "SkillRequestMetadataView": {
       "properties": {
-        "command": {
+        "arguments": {
           "type": "string"
         },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "output_file": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
+        "raw_input": {
           "type": "string"
         },
-        "stderr_preview": {
-          "type": "string"
-        },
-        "stderr_truncated": {
-          "type": "boolean"
-        },
-        "stdout_preview": {
-          "type": "string"
-        },
-        "stdout_truncated": {
-          "type": "boolean"
-        },
-        "summary": {
+        "skill": {
           "type": "string"
         }
       },
       "required": [
-        "summary",
-        "command",
-        "reason",
-        "stdout_preview",
-        "stderr_preview",
-        "stdout_truncated",
-        "stderr_truncated"
+        "skill",
+        "arguments",
+        "raw_input"
       ],
       "type": "object"
     },
@@ -1935,6 +2632,158 @@
         "reason",
         "recent_actions"
       ],
+      "type": "object"
+    },
+    "TaskBatchStatusView": {
+      "enum": [
+        "active",
+        "paused",
+        "archived"
+      ],
+      "title": "TaskBatchStatusView",
+      "type": "string"
+    },
+    "TaskBatchView": {
+      "properties": {
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskBatchStatusView"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "title": "TaskBatchView",
+      "type": "object"
+    },
+    "TaskItemStatusView": {
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed"
+      ],
+      "title": "TaskItemStatusView",
+      "type": "string"
+    },
+    "TaskItemView": {
+      "properties": {
+        "blocked_by_sequences": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "priority": {
+          "$ref": "#/$defs/TaskPriorityView"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskItemStatusView"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "subject",
+        "status",
+        "priority",
+        "blocked_by_sequences"
+      ],
+      "title": "TaskItemView",
+      "type": "object"
+    },
+    "TaskPriorityView": {
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "urgent"
+      ],
+      "title": "TaskPriorityView",
+      "type": "string"
+    },
+    "TaskStateView": {
+      "properties": {
+        "completed": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "current_batch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskBatchView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hidden_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "in_progress": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TaskItemView"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "total": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "revision",
+        "total",
+        "completed",
+        "in_progress",
+        "items",
+        "hidden_count"
+      ],
+      "title": "TaskStateView",
       "type": "object"
     },
     "TerminateRunOutcome": {
@@ -1965,6 +2814,11 @@
         "risk_level"
       ],
       "type": "object"
+    },
+    "ToolCallId": {
+      "format": "uuid",
+      "type": "string",
+      "x-aemeath-uuid-version": 7
     },
     "UserAnswer": {
       "type": "string"

@@ -1,4 +1,3 @@
-use super::block::HookNoticeContent;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
@@ -22,13 +21,19 @@ impl ConversationModel {
         changes
     }
 
-    pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
+    pub(super) fn append_hook_notice(
+        &mut self,
+        title: String,
+        text: String,
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+    ) -> Vec<ConversationChange> {
         self.clear_active_text_blocks();
-        let block_id = self.next_block_id("system");
-        let text = strip_system_reminder_envelope_owned(text);
-        self.timeline.push(OutputTimelineItem::System {
+        let block_id = self.next_block_id("hook-notice");
+        self.timeline.push(OutputTimelineItem::HookNotice {
             id: block_id.clone(),
+            title,
             text,
+            kind,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },
@@ -37,15 +42,24 @@ impl ConversationModel {
         ]
     }
 
-    pub(super) fn append_hook_notice(
-        &mut self,
-        content: HookNoticeContent,
-    ) -> Vec<ConversationChange> {
+    pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
+        let text = strip_system_reminder_envelope_owned(text);
+        if let Some(OutputTimelineItem::System { text: existing, .. }) =
+            self.timeline.items_mut().last_mut()
+        {
+            if existing == "✻ Cancelled" && text.starts_with("✻ Cancelled, ran ") {
+                *existing = text;
+                return vec![ConversationChange::OutputDirty];
+            }
+            if existing == &text {
+                return Vec::new();
+            }
+        }
         self.clear_active_text_blocks();
-        let block_id = self.next_block_id("hook");
-        self.timeline.push(OutputTimelineItem::HookNotice {
+        let block_id = self.next_block_id("system");
+        self.timeline.push(OutputTimelineItem::System {
             id: block_id.clone(),
-            content,
+            text,
         });
         vec![
             ConversationChange::SystemMessageAppended { block_id },
@@ -114,7 +128,7 @@ mod tests {
         });
         model.apply(AssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
             text: "streaming".to_string(),
         });
         model.apply(AppendSystemMessage {
@@ -122,7 +136,7 @@ mod tests {
         });
         model.apply(AssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
             text: "after".to_string(),
         });
         let assistant_blocks = model

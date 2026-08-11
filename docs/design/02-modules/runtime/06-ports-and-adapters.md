@@ -90,7 +90,7 @@ enum InteractionCommandOutcome {
 - `ControlDeadline` 是 wire-only 绝对时间；Runtime 在控制边界转换到注入的 monotonic clock，嵌套 Sub **NEVER** 重新分配 5s/10s。
 - TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` / `step_id` 的薄控制 handle；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
 - `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
-- 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
+- Run 级 `cancel_run` / `CancelRunOutcome` 已退役；SDK OHS 只发布 current-Step cancellation 与 identity-scoped Run termination，**NEVER** 恢复第二套 Run lifecycle 语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
 - SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event mapping；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 
@@ -102,7 +102,7 @@ Loop Engine 直接编排 `Run + RunExecutionState + RuntimeContext`，不消费�
 
 Runtime-owned Port 只对应真实外部 seam：
 
-- `InputPort`：SessionIngress 分类后的 Run 输入接纳端口，只接收 `UserMessage`，负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation；
+- `InputPort`：Session ingress 分类后的 Run 输入接纳端口，只接收 canonical `AcceptedUserInput`（`UserMessage` / `SkillRequest`），负责 FIFO、batch drain、epoch、Open/Sealed/Closed 生命周期和 AwaitingInput park；不拥有 Step 或 continuation，也不并行维护 event/message 两种 adopted payload；
 - `EventSink`：接收领域事件；跨 SDK 边界的纯值转换由 `sdk_event_mapper` 完成；
 - `ProviderPort`、`ToolCatalogPort`、`ToolExecutionPort`、`ContextPort`：执行单一外部能力；
 - `InteractionPort`：一次 request/reply transport；reply/cancel 按 `run_id + request_id` 直接完成 pending interaction，**NEVER** 经普通输入队列排队；
@@ -269,9 +269,30 @@ trait EventSink: Send + Sync {                         // 纯投影出口；NEVE
 }
 ```
 
-`UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；#931 由 Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
+`UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。该 bridge 由 Main Session 的 `SessionAudit` 持有，并以同一个 session-scoped `Arc<dyn UsageSink>` 注入唯一 `RuntimeContextFactory`；Main 与派生 Sub Run 共享该 Arc 和 canonical Main Session ID，但使用各自的 `RunId` / `RunStepId` / `ModelInvocationId`。worker handle 不进入 per-Run `RuntimeContext`，Sub Run 不拥有 lifecycle。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
 
-### 2.4 Reflection 异步执行 adapter（#899）
+### 2.3.1 Activity 观测发布
+
+Activity 不新增 Runtime → TUI 的旁路 Port；它复用 Runtime 已有的出站事件出口。`ActivityCoordinator` 负责把完整 typed observation 转换为 SDK `ActivityView`，由 `EventSink` / SDK stream adapter 发布：
+
+```text
+ActivityCoordinator
+  ├─ ActivityChanged { kind, activity, revision }
+  └─ ActivitySnapshot { run_id, revision, activities }
+       ↓
+  EventSink / sdk_event_mapper
+       ↓
+  SDK ChatEvent
+       ↓
+  TUI ACL → root reducer → Activity fact mirror
+       ↓
+  ViewAssembler → low-noise Activity Summary
+```
+
+Runtime production 只发布完整 `ActivitySnapshot`。logical business commit 推进 revision 并把 heartbeat sequence 归零；fixed heartbeat 保持 revision、递增 sequence，并用单一 monotonic observation point 刷新 timing。TUI 按 `(revision, heartbeat_sequence)` 原子替换同一 Run 的 Activity fact mirror。SDK `ActivityChanged` 仅保留 public compatibility ingress；Runtime production **NEVER** 发送增量 Activity，也不再依赖 revision gap repair。
+
+Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
+
 
 Runtime 拥有 Reflection 的执行编排；Memory 拥有 prompt/parse/apply 领域能力与 history append/query。Interval、PreCompact、Manual 三种 trigger **MUST** 全部提交到同一个 Runtime 单槽后台 adapter：
 
@@ -416,17 +437,18 @@ fn parent_mediated_interaction_is_child_scoped() {
 }
 
 #[test]
-fn sub_hook_is_empty() {
+fn sub_hook_is_boundary_only() {
     let hooks = prepare_sub_run().context.hooks();
-    assert_proceed_without_dispatch(hooks, any_hook_invocation());
+    assert_dispatches_boundary_points(hooks, [stop_invocation(), sub_run_stop_invocation()]);
+    assert_proceed_without_dispatch(hooks, tool_hook_invocation());
 }
 ```
 
-测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、Sub Hook 绑定独立空实现；不能只用最终 Loop 测试替代这些相邻契约。
+测试伪代码要求每个断言绑定一个 IoC 不变量：Composition 实现契约、Factory 执行能力选择、ParentMediated 隔离 identity、Sub Hook 绑定独立 BoundaryOnly adapter；不能只用最终 Loop 测试替代这些相邻契约。
 
 Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的 `SessionSnapshot`；若为派生 Run，只提供受限 `ParentRunCapabilities`。Factory 实现可借助 composition-private wiring 获得 lease、派生 workspace、打开 Context/Memory、构造 Provider/Tool/Hook adapter，但返回给 Runtime 的只有冻结能力。lease 必须由返回 capability 的生命周期守卫持有，调用方不能单独缓存或释放。
 
-`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建不持底层 HookPort 的 `EmptyHookPort`，所有 invocation 都无副作用返回。两者都必须在 factory 内完成，不能先返回完整父 Port 再要求调用方自律过滤。
+`InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建包装 run-scoped Dispatcher 的 `BoundaryHookPort`。该 adapter 以 Hook-owned `HookPointMetadata.class` 为唯一过滤真相：Boundary point（含 Stop 与 SubRun 生命周期）必须转发，Tool/Notification point 无副作用返回 Proceed。两者都必须在 factory 内完成，不能先返回完整 Port 再要求调用方自律过滤，也不能复制 HookPoint allow-list。
 
 `reasoning` 装配 **MUST** 只构造 Workflow-owned requested-level 状态：Adaptive 使用五节点固定默认 effort，Fixed 使用 RunSpec 声明值，Inherit 冻结父 requested value，NoOp 绑定无副作用实现。它 **NEVER** 接收具体 Provider client；每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。
 

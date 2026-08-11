@@ -20,7 +20,14 @@ pub enum Effect {
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },
+    LoadDisplayHistoryWindow {
+        request: sdk::DisplayHistoryWindowRequest,
+    },
     CancelCurrentRun,
+    CancelRunStep {
+        run_id: sdk::RunId,
+        step_id: sdk::RunStepId,
+    },
     ReplyInteraction {
         request_id: UiInteractionRequestId,
         reply: UiInteractionReply,
@@ -56,8 +63,8 @@ pub enum Effect {
         name: String,
         message: String,
     },
-    SetCurrentTurn {
-        turn: usize,
+    SetCurrentRun {
+        run_step: usize,
     },
     StartTimer {
         id: String,

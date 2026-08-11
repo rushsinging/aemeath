@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.runtime.capability-assembly
 set -euo pipefail
 
@@ -22,9 +22,17 @@ RUN_MODULE = root / "agent/features/runtime/src/application/run.rs"
 APPLICATION_MODULE = root / "agent/features/runtime/src/application.rs"
 RUNTIME_LIB = root / "agent/features/runtime/src/lib.rs"
 ENGINE = root / "agent/features/runtime/src/application/loop_engine/engine.rs"
+ENGINE_RESPONSIBILITIES = root / "agent/features/runtime/src/application/loop_engine/engine"
 RUN_LOOP = root / "agent/features/runtime/src/application/loop_engine/run_loop.rs"
 STUCK = root / "agent/features/runtime/src/application/loop_engine/stuck_guard.rs"
 RUN_DOMAIN = root / "agent/features/runtime/src/domain/agent_run/domain.rs"
+RUN_DOMAIN_EVENT = root / "agent/features/runtime/src/domain/agent_run/event.rs"
+RUN_DOMAIN_STATE = root / "agent/features/runtime/src/domain/agent_run/state.rs"
+RUNTIME_STREAM_EVENT = root / "agent/features/runtime/src/application/loop_engine/chat/events.rs"
+ACTIVE_RUN_REGISTRY = root / "agent/features/runtime/src/application/run/active_registry.rs"
+SDK_RUN = root / "packages/sdk/src/run.rs"
+SDK_CHAT_EVENT = root / "packages/sdk/src/chat_event.rs"
+SDK_WIRE = root / "packages/sdk/src/wire.rs"
 INTERACTION = root / "agent/features/runtime/src/application/interaction/port.rs"
 EMPTY_HOOK = root / "agent/features/runtime/src/application/hook/empty.rs"
 RUNTIME_SOURCE = root / "agent/features/runtime/src"
@@ -245,6 +253,12 @@ for source_path in rust_source_paths():
 # ── 3. Retired symbols absent from production code ──
 RETIRED = {
     r'\bRuntimeContextParts\b': "RuntimeContextParts struct",
+    r'\bRuntimeResources\b': "RuntimeResources container",
+    r'\bChatRuntimeContext\b': "ChatRuntimeContext wrapper",
+    r'\bChatLoopContext\b': "ChatLoopContext compatibility parameter bag",
+    r'\bRunLoopPort\b': "fat RunLoopPort",
+    r'\bMainRunPort\b': "MainRunPort role adapter",
+    r'\bSubAgentRun\b': "SubAgentRun role adapter",
     r'\bassemble_main_runtime_context\b': "assemble_main_runtime_context function",
     r'\bModelStep::StopHookBlocked\b': "ModelStep::StopHookBlocked variant",
     r'\bInteractionBridge::disabled\b': "InteractionBridge::disabled() method",
@@ -260,6 +274,16 @@ for candidate in _glob.glob("agent/**/*.rs", recursive=True):
         if re.search(retired_pattern, production_source):
             violations.append(f"3. Retired '{retired_name}' in production: {candidate_path}")
 
+# ── 3a. Runtime application must not construct concrete adapters ──
+for source_path in rust_source_paths():
+    if "/application/" not in source_path.as_posix() or is_test_source(source_path):
+        continue
+    production_source = production_text(source_path)
+    if re.search(r'\bcrate\s*::\s*adapters\s*::', production_source):
+        violations.append(
+            f"3a. Runtime application constructs or imports a concrete adapter: {source_path}"
+        )
+
 # ── 4. RunKind::Main/Sub not in factory, engine, or launcher ──
 for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/application/run/launcher.rs"]:
     if not check_file.is_file():
@@ -271,6 +295,10 @@ for check_file in [FACTORY, ENGINE, root / "agent/features/runtime/src/applicati
 # ── 5. record_stop_hook_block() called from shared engine, NOT from StuckGuard ──
 if ENGINE.is_file():
     prod = production_text(ENGINE)
+    if ENGINE_RESPONSIBILITIES.is_dir():
+        prod += "\n" + "\n".join(
+            production_text(path) for path in sorted(ENGINE_RESPONSIBILITIES.glob("*.rs"))
+        )
     if not re.search(r'record_stop_hook_block\s*\(', prod):
         violations.append("5. Shared engine must call record_stop_hook_block()")
 
@@ -316,8 +344,10 @@ if EMPTY_HOOK.is_file():
     prod = production_text(EMPTY_HOOK)
     if "struct BoundaryHookPort" not in prod:
         violations.append("9. BoundaryHookPort implementation is missing")
-    if not all(point in prod for point in ["SessionStart", "SessionEnd", "SubRunStart", "SubRunStop"]):
-        violations.append("9. BoundaryHookPort must allow only Run/SubRun lifecycle boundaries")
+    if "point.metadata().class == HookClass::Boundary" not in prod:
+        violations.append("9. BoundaryHookPort must derive filtering from HookPointMetadata.class")
+    if re.search(r'matches!\s*\(\s*point\s*,\s*HookPoint::', prod):
+        violations.append("9. BoundaryHookPort must not duplicate a HookPoint variant allow-list")
     if "HookOutcome::proceed()" not in prod:
         violations.append("9. BoundaryHookPort must return proceed for filtered invocations")
 else:
@@ -343,7 +373,10 @@ if FACTORY.is_file():
         violations.append("12. Factory preparation must return typed RunCreationError")
 
 # ── 13. P6.9.9 pure-value Run creation entry and aggregate launch ──
-MAIN_CALLER = root / "agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+MAIN_CALLERS = [
+    root / "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs",
+    root / "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs",
+]
 DERIVED_CALLER = root / "agent/features/runtime/src/application/run/derived/setup.rs"
 DERIVED_LAUNCHER = root / "agent/features/runtime/src/application/run/derived/loop_run.rs"
 if RUN_FACTORY.is_file():
@@ -379,7 +412,7 @@ if RUN_LAUNCHER.is_file():
         if retired in prod:
             violations.append(f"13. RunLauncher retains split or legacy launch shape: {retired}")
 
-for caller in [MAIN_CALLER, DERIVED_CALLER]:
+for caller in [*MAIN_CALLERS, DERIVED_CALLER]:
     if not caller.is_file():
         continue
     prod = production_text(caller)
@@ -391,9 +424,9 @@ for caller in [MAIN_CALLER, DERIVED_CALLER]:
     if "run_instance.into_parts()" in prod:
         violations.append(f"13. Production Run caller unpacks RunInstance before launch: {caller}")
 
-if MAIN_CALLER.is_file():
-    prod = production_text(MAIN_CALLER)
-    if "run_factory.create(request)" not in prod or "run::launcher::launch(" not in prod:
+main_prod = "\n".join(production_text(caller) for caller in MAIN_CALLERS if caller.is_file())
+if main_prod:
+    if "run_factory.create(preparation.request)" not in main_prod or "run::launcher::launch(" not in main_prod:
         violations.append("13. Main Run must use RunFactory::create and RunLauncher::launch")
 if DERIVED_CALLER.is_file():
     prod = production_text(DERIVED_CALLER)
@@ -506,6 +539,7 @@ approved_root_exports = {
     "ProviderBuildSpec",
     "ProviderFactory",
     "ProviderPort",
+    "ProviderCompactGenerator",
     "ReflectionError",
     "ReflectionTaskAdapter",
     "ReflectionTaskCompletion",
@@ -515,10 +549,11 @@ approved_root_exports = {
     "ReflectionTaskSubmitOutcome",
     "ReflectionTaskTrigger",
     "ResumeError",
-    "RunDomainEvent",
+    "RuntimeLifecycleEvent",
     "RuntimeBootstrapDependencies",
     "RuntimeContextFactory",
     "RuntimeCoreDependencies",
+    "RuntimeIngressAssembly",
     "RuntimeToolAssemblyDependencies",
     "SessionBootstrapAssembly",
     "SkillBootstrapAssembly",
@@ -528,12 +563,14 @@ approved_root_exports = {
     "ToolResultBlobRef",
     "ToolResultMaterializationPolicy",
     "ToolResultMaterializer",
+    "UnavailableUsageSink",
+    "UsageSink",
     "build_agent_runner",
     "build_static_prompt",
     "build_system_prompt_parts",
     "config_snapshot_to_sdk",
     "from_args_with_workspace",
-    "map_domain_event",
+    "map_lifecycle_event",
     "resolve_concurrency_limits",
     "resolve_model_runtime_settings",
     "resume_session_to_backing",
@@ -633,6 +670,40 @@ for source_path in rust_source_paths():
     production = production_text(source_path)
     if re.search(r'\b(?:dyn\s+Any|TypeId|service_locator|capability_map|service_map)\b', production):
         violations.append(f"20. Runtime production code contains a dynamic capability locator: {source_path}")
+
+# ── 21. Run lifecycle exposes Step cancellation and typed Run termination only ──
+retired_run_lifecycle_symbols = {
+    RUN_DOMAIN_STATE: [
+        r'(?s)enum\s+RunStatus\s*\{[^}]*\bCancelling\b',
+        r'(?s)enum\s+RunStatus\s*\{[^}]*\bCancelled\b',
+        r'\bCancellationFinished\b',
+    ],
+    RUN_DOMAIN: [r'\bRunCancellationRequest\b', r'\brequest_cancellation\b', r'\bfinish_cancellation\b'],
+    RUN_DOMAIN_EVENT: [r'\bCancellationRequested\b', r'\bCancelled\b'],
+    RUNTIME_STREAM_EVENT: [r'\bRunCancelling\b', r'\bRunCancelled\b'],
+    SDK_RUN: [r'\bCancelRunOutcome\b'],
+    SDK_CHAT_EVENT: [r'\bRunCancelling\b', r'\bRunCancelled\b'],
+    SDK_WIRE: [r'\bCancelRunOutcome\b'],
+}
+for source_path, retired_patterns in retired_run_lifecycle_symbols.items():
+    production = production_text(source_path)
+    for retired_pattern in retired_patterns:
+        if re.search(retired_pattern, production):
+            violations.append(
+                f"21. Retired Run cancellation lifecycle symbol matches {retired_pattern}: {source_path}"
+            )
+
+registry_source = production_text(ACTIVE_RUN_REGISTRY)
+for lifecycle_copy in [
+    r'\bcancelling\s*:\s*',
+    r'\bterminal\s*:\s*',
+    r'\bclaim_cancellation\b',
+    r'\bclaim_terminal\b',
+]:
+    if re.search(lifecycle_copy, registry_source):
+        violations.append(
+            f"21. ActiveRunRegistry retains a parallel Run lifecycle owner matching {lifecycle_copy}"
+        )
 
 # ── Report ──
 if violations:

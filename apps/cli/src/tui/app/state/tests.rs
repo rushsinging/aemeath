@@ -200,7 +200,8 @@ mod tests {
                     content: vec![TuiContentBlock::text("search bug 76")],
                     input_id: Some(input_id),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
+                    skill_request: None,
                 }],
                 queued: vec![],
             }),
@@ -286,7 +287,8 @@ mod tests {
                     content: vec![TuiContentBlock::text("search bug 76")],
                     input_id: Some(input_id),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
+                    skill_request: None,
                 }],
                 queued: vec![],
             }),
@@ -365,7 +367,7 @@ mod tests {
     fn test_turn_context() -> crate::tui::app::event::UiTurnContext {
         crate::tui::app::event::UiTurnContext {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-test"),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-test"),
         }
     }
 

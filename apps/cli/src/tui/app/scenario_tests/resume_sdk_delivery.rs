@@ -6,7 +6,7 @@ use super::super::testing::{input, TuiScenarioHarness};
 fn sdk_context() -> sdk::ChatEventContext {
     sdk::ChatEventContext::new(
         sdk::ids::ChatId::new("resume-sdk-chat"),
-        sdk::ids::ChatTurnId::new("resume-sdk-turn"),
+        sdk::ids::ChatRunId::new("resume-sdk-turn"),
     )
 }
 
@@ -29,9 +29,11 @@ fn sdk_events_after_resumed_history_are_batched_reduced_and_rendered_at_tail() {
         )
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-sdk-session".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     while harness.app.view_state.output.render_line_limit() < 3_000 {

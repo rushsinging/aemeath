@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.task.crate-root-facade
 set -euo pipefail
 
@@ -62,10 +62,11 @@ PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW
 # 只经 crate 根发布 Published Language，禁止恢复 tools::api。
 TOOLS_DOMAIN_FACADE = {
     "AgentDispatch", "AgentProgressEvent", "AgentProgressKind", "AgentProgressSourceContext",
+    "SubRunActivityEvent", "SubRunActivityKind", "SubRunIdentity", "SubRunStartedEvent", "SubRunTerminalOutcome",
     "AgentRunRequest",
     "AgentRunTerminal", "AgentRunner", "AgentToolCallProgress", "AuthorizationContext",
     "CancellationDeclaration", "CleanupConfirmation",
-    "CancellationSignal", "CatalogQuery", "ConcurrencyDeclaration", "ExecutionScope",
+    "CancellationSignal", "CatalogQuery", "CommittedTaskChange", "ConcurrencyDeclaration", "ExecutionScope",
     "ExecutionScopeBuilder", "FixedGuidance", "FixedPlanMode", "Guidance", "ImageData",
     "InputSafetyDeclaration", "InvocationSource", "MemoryPortSource", "MutexReadSet",
     "PlanModeState", "ProfileExpansionError", "ProgressSink", "ReadSet",
@@ -78,11 +79,11 @@ TOOLS_DOMAIN_FACADE = {
     "CommandName", "CommandParseError", "CommandRoute", "CommandRouterPort", "CommandTarget",
     "ParsedArguments", "SlashInput", "SnapshotQueryCommand",
     "SnapshotQueryTarget",
-    "RegistryScopeName", "SessionReminder", "SessionReminders", "Tool", "ToolCapabilities",
+    "RegistryScopeName", "SessionReminder", "SessionReminders", "TaskChangeFact", "Tool", "ToolCapabilities",
     "ToolCapability", "ToolCatalogError", "ToolCatalogPort", "ToolCatalogSnapshot", "ToolDescriptor",
     "ToolErrorKind", "ToolExecutionContext", "ToolExecutionOutcome", "ToolExecutionPort",
     "ToolExecutionPorts", "ToolInvocation", "ToolListProvider", "ToolName", "ToolOutcome",
-    "ToolProfile", "ToolProfileName", "ToolResult", "ToolSuspension", "ToolTerminalDetails",
+    "ToolProfile", "ToolProfileName", "ToolProgressEvent", "ToolResult", "ToolSuspension", "ToolTerminalDetails",
     "TypedTool",
     "TypedToolAdapter", "TypedToolResult", "UserInteractionSpec", "UserOption", "UserQuestion",
     "WorkspaceReadAccess",
@@ -178,6 +179,7 @@ ROOT_ACCESS_ALLOW = {
         "ProviderFactory",
         "ProviderPort",
         "InitialProviderAssembly", "SessionBootstrapAssembly", "PromptAssembly", "SkillBootstrapAssembly", "ModelRuntimeSettings", "resolve_model_runtime_settings",        "PromptContext", "build_system_prompt_parts", "build_static_prompt",        "AgentRunnerAssembly", "ParentRunContextSource", "build_agent_runner", "resolve_concurrency_limits",        "RuntimeBootstrapDependencies", "RuntimeToolAssemblyDependencies",        "ToolResultMaterializer", "ToolResultMaterializationPolicy", "ActiveRunRegistry",        "AtomicBlobToolResultStore",
+        "ProviderCompactGenerator",
         "UsageSink",
         "config_snapshot_to_sdk",
         "from_args_with_workspace",
@@ -195,7 +197,9 @@ ROOT_ACCESS_ALLOW = {
         "HookDisplayMessage", "HookDisplayMessageKind", "HookExecution",
         "HookExecutionStatus", "HookFailurePolicy", "HookInvocation", "HookMatcher",
         "HookOutcome", "HookPoint", "HookPointMetadata", "HookPort", "HookReason",
-        "HookSubscription", "InstructionsInput", "PermissionInput", "PostToolBatchInput",
+        "HookSubscription", "HookSubscriptionExecutionEvent",
+        "HookSubscriptionExecutionObserver", "HookSubscriptionExecutionTerminal",
+        "InstructionsInput", "PermissionInput", "PostToolBatchInput",
         "PostToolUseFailureInput", "PostToolUseInput", "PreToolUseInput", "ProtocolViolation",
         "SubRunInput", "SubRunStopInput", "SubscriptionError", "TaskInput", "StopInput",
         "build_dispatcher",

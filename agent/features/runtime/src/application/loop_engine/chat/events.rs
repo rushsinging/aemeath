@@ -1,72 +1,23 @@
-use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+use sdk::ids::{ChatId, ChatRunId, ToolCallId};
 use share::message::Message;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
-use tools::{AgentProgressEvent, ImageData};
+use tools::ImageData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeTurnContext {
+pub struct RuntimeRunContext {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
-impl RuntimeTurnContext {
-    pub fn new(chat_id: ChatId, turn_id: ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+impl RuntimeRunContext {
+    pub fn new(chat_id: ChatId, run_id: ChatRunId) -> Self {
+        Self { chat_id, run_id }
     }
 }
 
 pub type EventFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeHookEventStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookExecutionResult {
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub decision: Option<String>,
-    pub reason: Option<String>,
-    pub additional_context: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookEvent {
-    pub hook_name: String,
-    pub status: RuntimeHookEventStatus,
-    pub matcher: Option<String>,
-    pub command: Option<String>,
-    pub result: Option<RuntimeHookExecutionResult>,
-}
-
-/// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeHookMessageKind {
-    /// Hook JSON `additional_context`。
-    AdditionalContext,
-    /// Hook JSON `system_message`。
-    SystemMessage,
-}
-
-/// Hook 面向展示层的结构化消息。
-///
-/// 该类型独立于 `SystemMessage`，使消费方能按 HookPoint、来源和 attempt 归因。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHookMessage {
-    pub point: hook::HookPoint,
-    pub source: String,
-    pub execution_ordinal: u32,
-    pub attempt: u8,
-    pub kind: RuntimeHookMessageKind,
-    pub text: String,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeToolCallStatus {
@@ -76,7 +27,6 @@ pub enum RuntimeToolCallStatus {
 }
 
 /// Compact 进度阶段（re-export from context crate）。
-pub use context::compact::CompactStage;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeResumedSessionStep {
@@ -88,38 +38,50 @@ pub struct RuntimeResumedSessionStep {
 }
 
 #[derive(Debug)]
+pub enum RuntimeActivityEvent {
+    Snapshot(sdk::ActivitySnapshotView),
+}
+
+#[derive(Debug)]
 pub enum RuntimeStreamEvent {
-    Text {
-        context: RuntimeTurnContext,
-        text: String,
+    AssistantTextDelta {
+        context: RuntimeRunContext,
+        delta: String,
     },
-    Thinking {
-        context: RuntimeTurnContext,
-        text: String,
+    ThinkingDelta {
+        context: RuntimeRunContext,
+        delta: String,
     },
     BlockComplete {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         text: String,
     },
-    ToolCallStart {
-        context: RuntimeTurnContext,
+    ToolCallStarted {
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
-    ToolCallUpdate {
-        context: RuntimeTurnContext,
+    ToolCallArgumentsDelta {
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        arguments_delta: Option<String>,
+        delta: String,
+    },
+    ToolCallStateChanged {
+        context: RuntimeRunContext,
+        id: ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
         arguments: Option<serde_json::Value>,
         status: RuntimeToolCallStatus,
     },
     ToolResult {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         id: ToolCallId,
         provider_id: String,
         tool_name: String,
@@ -129,13 +91,8 @@ pub enum RuntimeStreamEvent {
         images: Vec<ImageData>,
     },
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: RuntimeTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     ModelInvocationRetrying {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         attempt: u32,
         delay: std::time::Duration,
     },
@@ -145,25 +102,26 @@ pub enum RuntimeStreamEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<Message>,
         cleared_count: usize,
     },
-    StopHookBlocked {
-        messages: Vec<Message>,
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
-    PostToolExecutionSync {
-        messages: Vec<Message>,
-    },
+    /// Hook 用户可见 typed notice；与活动观测及消息状态同步职责分离。
+    HookNotice(share::message::HookNotice),
     ApiError {
         messages: Vec<Message>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<Message>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<Message>,
+        notice: String,
     },
     TurnStarted {
         messages: Vec<Message>,
@@ -189,46 +147,33 @@ pub enum RuntimeStreamEvent {
         texts: Vec<String>,
     },
     Done {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     },
     DoneWithDuration {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         duration: std::time::Duration,
     },
     RunStarted {
         run_id: sdk::RunId,
         parent_run_id: Option<sdk::RunId>,
     },
-    RunCancelling {
-        run_id: sdk::RunId,
-    },
-    RunCancelled {
-        run_id: sdk::RunId,
-    },
     Cancelled {
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
         duration: std::time::Duration,
     },
     LiveTps(f64),
-    TurnChanged(usize),
-    HookEvent(RuntimeHookEvent),
-    /// 结构化 hook 执行消息（typed value）。
-    HookMessage(RuntimeHookMessage),
-    AskUserBatch {
-        items: Vec<sdk::AskUserQuestionItem>,
-        reply_tx: tokio::sync::oneshot::Sender<sdk::AskUserReply>,
-    },
-    /// #1246: typed interaction request (pure value, no sender).
-    /// Production path replaces `AskUserBatch`.
+    RunChanged(usize),
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    AgentProgress {
-        source_context: RuntimeTurnContext,
-        attachment_context: RuntimeTurnContext,
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
+    ToolOutputDelta {
+        context: RuntimeRunContext,
         tool_id: ToolCallId,
-        event: AgentProgressEvent,
+        delta: String,
     },
+    SubRunStarted(tools::SubRunStartedEvent),
+    SubRunActivity(tools::SubRunActivityEvent),
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,
     },
@@ -243,12 +188,6 @@ pub enum RuntimeStreamEvent {
         view: sdk::ConfigView,
     },
 
-    /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。
-    CompactProgress {
-        stage: CompactStage,
-        current: Option<usize>,
-        total: Option<usize>,
-    },
     /// 模型切换完成通知（#567）。runtime idle 分支解析 selection 构建 client 后回传结果。
     ModelSwitched {
         result: sdk::ModelSwitchResult,
@@ -270,8 +209,10 @@ pub enum RuntimeStreamEvent {
     /// 会话恢复完成通知（#497）。
     SessionResumed {
         steps: Vec<RuntimeResumedSessionStep>,
+        display_history: Option<context::api::DisplayHistoryStepIndex>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
     /// 会话恢复失败（#636 D2）。区分 not_found / corrupt / io，前端展示对应错误。
     SessionResumeFailed {
@@ -299,30 +240,12 @@ pub enum RuntimeStreamEvent {
     ProjectInfo {
         project: sdk::ProjectContext,
     },
-    /// #567：任务状态快照回传（携带数据，替代轮询）。
-    TasksSnapshot {
-        tasks: Box<sdk::TaskStatusView>,
+    TaskStateChanged {
+        state: Box<sdk::TaskStateView>,
     },
-    /// #567：成本信息回传。
-    CostUpdate {
-        cost: sdk::CostInfo,
+    RuntimeStatusChanged {
+        status: Box<sdk::RuntimeStatusView>,
     },
-}
-
-/// 判断 tool 名是否属于 task store mutation（会改变 task 状态）。
-///
-/// 用于 `TasksSnapshot` 事件推送触发点：只有 task mutation 工具执行后，
-/// 才需要重新取 task snapshot 并推送给前端（#642）。
-pub(crate) fn is_task_store_mutation(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "TaskCreate"
-            | "TaskUpdate"
-            | "TaskBlockBy"
-            | "TaskStop"
-            | "TaskListCreate"
-            | "TaskListComplete"
-    )
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {
@@ -330,9 +253,11 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 
     fn try_send_event(&self, event: RuntimeStreamEvent);
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, _event: RuntimeActivityEvent) {}
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        _event: crate::domain::agent_run::RunDomainEvent,
+        _event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
         Box::pin(async {})
     }
@@ -341,9 +266,10 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
 trait DynChatEventSink: Send + Sync {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
     fn try_send_event(&self, event: RuntimeStreamEvent);
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent);
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a>;
 }
 
@@ -359,17 +285,22 @@ where
         ChatEventSink::try_send_event(self, event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        ChatEventSink::send_activity_event(self, event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        ChatEventSink::send_domain_event(self, event)
+        ChatEventSink::send_lifecycle_event(self, event)
     }
 }
 
 #[derive(Clone)]
 pub struct ChatEventSinkHandle {
     inner: std::sync::Arc<dyn DynChatEventSink>,
+    message_state_revision: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ChatEventSinkHandle {
@@ -379,7 +310,23 @@ impl ChatEventSinkHandle {
     {
         Self {
             inner: std::sync::Arc::new(sink),
+            message_state_revision: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
+    }
+
+    pub async fn send_message_state_changed(&self, message_count: usize) {
+        let revision = self
+            .message_state_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .saturating_add(1);
+        ChatEventSink::send_event(
+            self,
+            RuntimeStreamEvent::SessionMessageStateChanged {
+                message_count,
+                revision,
+            },
+        )
+        .await;
     }
 }
 
@@ -392,10 +339,14 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.try_send_event(event);
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(&self, event: RuntimeActivityEvent) {
+        self.inner.send_activity_event(event);
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> EventFuture<'a> {
-        self.inner.send_domain_event(event)
+        self.inner.send_lifecycle_event(event)
     }
 }

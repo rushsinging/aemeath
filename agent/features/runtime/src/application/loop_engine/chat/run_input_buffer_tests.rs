@@ -3,6 +3,55 @@ use crate::application::loop_engine::DrainEpoch;
 use sdk::ChatInputEvent;
 
 #[test]
+fn skill_request_drain_preserves_canonical_message_metadata() {
+    let mut buf = RunInputBuffer::new();
+    let input_id = sdk::InputId::new_v7();
+    let skill_metadata = share::message::SkillRequestMetadata {
+        skill: "superpowers:brainstorming".to_string(),
+        arguments: "idea".to_string(),
+        raw_input: "/superpowers:brainstorming idea".to_string(),
+    };
+    let expected_model_text = crate::application::loop_engine::input::format_skill_request(
+        &sdk::SkillRequest {
+            input_id: input_id.clone(),
+            skill: skill_metadata.skill.clone(),
+            arguments: skill_metadata.arguments.clone(),
+            raw_input: skill_metadata.raw_input.clone(),
+        },
+        "en",
+    );
+    buf.push_accepted(
+        crate::application::loop_engine::AcceptedUserInput::SkillRequest(sdk::SkillRequest {
+            input_id: input_id.clone(),
+            skill: skill_metadata.skill.clone(),
+            arguments: skill_metadata.arguments.clone(),
+            raw_input: skill_metadata.raw_input.clone(),
+        }),
+    );
+
+    match buf.drain_or_seal(DrainEpoch(0)) {
+        BufferDrain::Ready { batch, .. } => {
+            assert_eq!(batch.len(), 1);
+            assert_eq!(batch[0].input_id(), Some(&input_id));
+            let message = batch[0].message();
+            assert_eq!(
+                message.source(),
+                share::message::MessageSource::SkillRequest
+            );
+            assert_eq!(message.text_content(), expected_model_text);
+            assert_eq!(
+                message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref()),
+                Some(&skill_metadata)
+            );
+        }
+        other => panic!("expected ready Skill request, got {other:?}"),
+    }
+}
+
+#[test]
 fn skill_request_is_user_input_and_withdraw_returns_raw_slash() {
     let mut buf = RunInputBuffer::new();
     let id = sdk::InputId::new_v7();

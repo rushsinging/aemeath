@@ -109,27 +109,16 @@ pub trait StrSlice {
 
 impl StrSlice for str {
     fn bslice(&self, range: ops::Range<ByteIdx>) -> &str {
-        &self[range.start.0..range.end.0]
+        &self[range.start.0..range.end.0] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
 
     fn bslice_to(&self, end: ByteIdx) -> &str {
-        &self[..end.0]
+        &self[..end.0] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
 
     fn bslice_from(&self, start: ByteIdx) -> &str {
-        &self[start.0..]
+        &self[start.0..] // allow unsafe_text_op: CharIdx/ByteIdx guaranteed boundary (safe API impl)
     }
-}
-
-/// 成本信息（Atomic 读取，纳秒级）。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct CostInfo {
-    /// 输入 token 数。
-    pub input_tokens: u64,
-    /// 输出 token 数。
-    pub output_tokens: u64,
-    /// 估算费用（USD）。
-    pub cost_usd: f64,
 }
 
 /// 权限确认请求。

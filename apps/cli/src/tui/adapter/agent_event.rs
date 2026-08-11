@@ -1,11 +1,7 @@
-use crate::tui::adapter::runtime_view::TuiMessageSource;
-use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiHookStatus, TuiRuntimeEvent, TuiToolCallStatus,
-};
+use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus};
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::stop_hook_notice::stop_hook_notice_content;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
@@ -13,7 +9,6 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 
-mod progress;
 mod sanitize;
 
 #[cfg(test)]
@@ -22,11 +17,18 @@ mod runtime_tests;
 #[cfg(test)]
 mod tests;
 
-use progress::format_agent_progress;
 use sanitize::{
     json_value_kind, sanitize_tool_arguments_delta, sanitize_tool_output,
     sanitize_tool_result_content,
 };
+
+fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
+    match status {
+        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
+        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
+        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
+    }
+}
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
@@ -38,73 +40,31 @@ pub struct AgentEventMapping {
 }
 
 #[cfg(test)]
-fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String {
-    let raw = match input {
-        serde_json::Value::String(s) => s.clone(),
-        value => value.to_string(),
-    };
-    if raw.is_empty() {
-        crate::tui::view_model::tool_name::tool_display_name(name).to_string()
-    } else {
-        format!(
-            "{} {}",
-            crate::tui::view_model::tool_name::tool_display_name(name),
-            truncate_agent_progress_json(&raw)
-        )
-    }
-}
-
-#[cfg(test)]
-fn truncate_agent_progress_json(raw: &str) -> String {
-    const MAX_CHARS: usize = 100;
-    if raw.chars().count() <= MAX_CHARS {
-        return raw.to_string();
-    }
-    let mut output: String = raw.chars().take(MAX_CHARS.saturating_sub(3)).collect();
-    output.push_str("...");
-    output
-}
-
-fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
-    match status {
-        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
-        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
-        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
-    }
-}
-
-#[cfg(test)]
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
-    map_agent_event_with_tool_header(event, default_subagent_tool_header)
+    map_agent_event_for_ui(event)
 }
 
-pub fn map_agent_event_with_tool_header<F>(
-    event: &UiEvent,
-    mut format_subagent_tool_header: F,
-) -> AgentEventMapping
-where
-    F: FnMut(&str, &serde_json::Value) -> String,
-{
+pub fn map_agent_event_for_ui(event: &UiEvent) -> AgentEventMapping {
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
             }))
         }
         UiEvent::ToolCallStart {
@@ -115,17 +75,17 @@ where
             index,
         } => {
             crate::tui::log_debug!(
-                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                "map tool_call_start chat_id={} run_id={} id={} provider_id={:?} name={} index={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 name,
                 index,
             );
-            clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -146,18 +106,18 @@ where
                 .clone()
                 .or_else(|| arguments.as_ref().map(|value| value.to_string()));
             crate::tui::log_debug!(
-                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} args_len={}",
+                "map tool_call_update chat_id={} run_id={} id={} provider_id={:?} name={} index={} args_len={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 name,
                 index,
                 args.as_ref().map(|s| s.len()).unwrap_or(0),
             );
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -179,9 +139,9 @@ where
             images,
         } => {
             crate::tui::log_debug!(
-                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                "map tool_result chat_id={} run_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
                 context.chat_id,
-                context.turn_id,
+                context.run_id,
                 id,
                 provider_id,
                 tool_name,
@@ -190,9 +150,9 @@ where
                 is_error,
                 images.len(),
             );
-            clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+            conversation(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
                 id: ToolCallId::new(id.as_str()),
                 provider_id: provider_id.clone(),
                 tool_name: tool_name.clone(),
@@ -202,48 +162,12 @@ where
                 image_count: images.len(),
             }))
         }
-        UiEvent::AgentProgress {
-            attachment_context,
-            tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            sdk::AgentProgressKindView::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: attachment_context.chat_id.clone(),
-                    turn_id: attachment_context.turn_id.clone(),
-                    tool_id: ToolCallId::new(tool_id.as_str()),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
-            _ => {
-                let message = format_agent_progress(event, &mut format_subagent_tool_header);
-                let preview: String = message.chars().take(200).collect();
-                crate::tui::log_debug!(
-                    "agent_progress_format kind={} seq={} msg_len={} msg={:?}",
-                    format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
-                    event.sequence,
-                    message.len(),
-                    preview,
-                );
-                conversation(ConversationIntent::RecordAgentProgress(
-                    RecordAgentProgress {
-                        chat_id: attachment_context.chat_id.clone(),
-                        turn_id: attachment_context.turn_id.clone(),
-                        tool_id: ToolCallId::new(tool_id.as_str()),
-                        message,
-                    },
-                ))
-            }
-        },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
         | UiEvent::Cancelled { context, .. } => {
             conversation(ConversationIntent::CompleteChat(CompleteChat {
                 chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
+                run_id: context.run_id.clone(),
             }))
         }
 
@@ -258,7 +182,6 @@ where
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
             })];
             if *elapsed_secs > 0.0 {
                 intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
@@ -304,50 +227,35 @@ where
                 AppendSystemMessage { text: text.clone() },
             ))
         }
-        UiEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: context.clone(),
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::PostToolExecutionSync { messages }
-        | UiEvent::CompactRollback { messages }
-        | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
+        | UiEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
+        UiEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => session(SessionIntent::MessageStateChanged {
+            message_count: *message_count,
+            revision: *revision,
         }),
-        UiEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
+        UiEvent::CompactOperationCompleted { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
                 message_count: messages.len(),
             });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
             mapping
         }
         UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
 
-        // ── HookEvent → notice via conversation ──
-        UiEvent::HookEvent(_) => AgentEventMapping::default(),
-        UiEvent::HookMessage(_) => AgentEventMapping::default(),
         UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
         UiEvent::WorkspaceMetadataResolved(metadata) => AgentEventMapping {
             workspace: vec![WorkspaceIntent::ApplyMetadata {
@@ -363,66 +271,90 @@ where
 }
 
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
-    use crate::tui::adapter::tui_runtime_event::{
-        TuiInteractionBody, TuiRunEvent, TuiRunStepEvent,
-    };
+    use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
         InteractionBody, InteractionRequest, UiApprovalPrompt, UiPlanApprovalPrompt, UiRiskLevel,
         UiStuckDiagnostic, UiUserQuestion,
     };
 
     match event {
+        TuiRuntimeEvent::Noop => AgentEventMapping::default(),
+        TuiRuntimeEvent::ActivityChanged { kind, activity } => conversation(
+            ConversationIntent::ObserveActivityChange(ObserveActivityChange {
+                kind: *kind,
+                activity: activity.clone(),
+            }),
+        ),
+        TuiRuntimeEvent::ActivitySnapshot(snapshot) => conversation(
+            ConversationIntent::ReplaceActivitySnapshot(ReplaceActivitySnapshot {
+                snapshot: snapshot.clone(),
+            }),
+        ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Text { context, text } => {
-            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
-                text: text.clone(),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+                text: delta.clone(),
             }))
         }
-        TuiRuntimeEvent::Thinking { context, text } => {
-            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
-                text: text.clone(),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+                text: delta.clone(),
             }))
         }
         TuiRuntimeEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             }))
         }
-        TuiRuntimeEvent::ToolCallStart {
+        TuiRuntimeEvent::ToolCallStarted {
             context,
             id,
             provider_id,
             name,
             index,
-        } => clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
+        } => conversation(ConversationIntent::ToolCallStart(ToolCallStart {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             id: ToolCallId::new(id),
             provider_id: provider_id.clone(),
             name: name.clone(),
             index: *index,
         })),
-        TuiRuntimeEvent::ToolCallUpdate {
+        TuiRuntimeEvent::ToolCallArgumentsDelta {
             context,
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
+            delta,
+        } => conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+            id: ToolCallId::new(id),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+            arguments: Some(sanitize_tool_arguments_delta(name, delta)),
+            status: ToolCallStatus::PendingArgs,
+        })),
+        TuiRuntimeEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
             arguments,
             status,
         } => {
-            let args = arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(ToString::to_string));
-            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            let args = arguments.as_ref().map(ToString::to_string);
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 id: ToolCallId::new(id),
                 provider_id: provider_id.clone(),
                 name: name.clone(),
@@ -446,9 +378,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             content,
             is_error,
             images,
-        } => clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
+        } => conversation(ConversationIntent::ToolResult(ToolResult {
             chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(&context.turn_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             id: ToolCallId::new(id),
             provider_id: provider_id.clone(),
             tool_name: tool_name.clone(),
@@ -467,7 +399,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
             })];
             if *elapsed_secs > 0.0 {
                 intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
@@ -504,48 +435,36 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ))
             }
         }
-        TuiRuntimeEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
-            UpsertModelStreamPlaceholder {
-                placeholder: crate::tui::app::event::ModelStreamWaitingView {
-                    context: crate::tui::app::event::UiTurnContext {
-                        chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                            &context.chat_id,
-                        ),
-                        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                            &context.turn_id,
-                        ),
-                    },
-                    elapsed_secs: *elapsed_secs,
-                    phase: phase.clone(),
-                },
-            },
-        )),
+        TuiRuntimeEvent::HookNotice(notice) => {
+            conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                title: notice.title(),
+                text: notice.display_text(),
+                kind: notice.kind.clone(),
+            }))
+        }
         TuiRuntimeEvent::TurnStarted { messages }
-        | TuiRuntimeEvent::MicrocompactDone { messages, .. }
-        | TuiRuntimeEvent::PostToolExecutionSync { messages }
-        | TuiRuntimeEvent::CompactRollback { messages }
-        | TuiRuntimeEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
+        | TuiRuntimeEvent::MicrocompactCompleted { messages, .. }
+        | TuiRuntimeEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
+        TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => session(SessionIntent::MessageStateChanged {
+            message_count: *message_count,
+            revision: *revision,
         }),
-        TuiRuntimeEvent::StopHookBlocked { messages } => {
-            let mut mapping = session(SessionIntent::MessagesSynced {
+        TuiRuntimeEvent::CompactOperationCompleted { messages, notice } => {
+            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage {
+                    text: notice.clone(),
+                },
+            ));
+            mapping.session.push(SessionIntent::MessagesSynced {
                 message_count: messages.len(),
             });
-            if let Some(message) = messages
-                .iter()
-                .rev()
-                .find(|message| message.source == TuiMessageSource::StopHook)
-            {
-                mapping
-                    .conversation
-                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                        content: stop_hook_notice_content(message),
-                    }));
-            }
             mapping
         }
         TuiRuntimeEvent::ApiError { messages, error } => {
@@ -572,9 +491,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             conversation: vec![
                 ConversationIntent::CompleteChat(CompleteChat {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
-                    ),
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 }),
                 ConversationIntent::TerminalNotice(TerminalNotice {
                     cause: crate::tui::model::conversation::terminal::TerminalCause::Completed,
@@ -590,9 +507,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             conversation: vec![
                 ConversationIntent::CompleteChat(CompleteChat {
                     chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &context.turn_id,
-                    ),
+                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 }),
                 ConversationIntent::TerminalNotice(TerminalNotice {
                     cause: crate::tui::model::conversation::terminal::TerminalCause::UserCancelled,
@@ -606,17 +521,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 (node != "idle").then(|| node.clone()),
             )))
         }
-        TuiRuntimeEvent::CompactProgress {
-            stage,
-            current,
-            total,
-        } => conversation(ConversationIntent::SetCompactProgress(SetCompactProgress {
-            stage: stage.clone(),
-            current: *current,
-            total: *total,
-        })),
-        TuiRuntimeEvent::TasksSnapshot { lines } => conversation(
-            ConversationIntent::UpdateTaskLines(UpdateTaskLines(lines.clone())),
+        TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
+            ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
+        ),
+        TuiRuntimeEvent::TaskStateChanged { state } => conversation(
+            ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),
         TuiRuntimeEvent::SessionReset => AgentEventMapping::default(),
         TuiRuntimeEvent::UserMessagesWithdrawn { texts: _ } => conversation(
@@ -632,88 +541,43 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ),
             },
         )),
-        TuiRuntimeEvent::TurnChanged(_) => AgentEventMapping::default(),
-        TuiRuntimeEvent::HookEvent(event) => {
-            if event.hook_name == "PostCompact" {
-                AgentEventMapping::default()
-            } else {
-                let mut mapping =
-                    conversation(ConversationIntent::SetSpinnerPhase(SetSpinnerPhase {
-                        phase: crate::tui::adapter::hook_notice::hook_spinner_phase(event),
-                    }));
-                let suppress_notice =
-                    event.hook_name == "Stop" && event.status == TuiHookStatus::Blocked;
-                if !suppress_notice {
-                    if let Some(notice) = crate::tui::adapter::hook_notice::hook_event_notice(event)
-                    {
-                        mapping
-                            .conversation
-                            .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                                content: notice,
-                            }));
-                    }
-                }
-                mapping
-            }
-        }
-        TuiRuntimeEvent::HookMessage(message) => {
-            if message.point == "Stop" {
-                AgentEventMapping::default()
-            } else if let Some(notice) =
-                crate::tui::adapter::hook_notice::hook_message_notice(message)
-            {
-                conversation(ConversationIntent::AppendHookNotice(AppendHookNotice {
-                    content: notice,
-                }))
-            } else {
-                AgentEventMapping::default()
-            }
-        }
-        TuiRuntimeEvent::AgentProgress {
-            attachment_context,
+        TuiRuntimeEvent::RunChanged(_) => AgentEventMapping::default(),
+        TuiRuntimeEvent::ToolOutputDelta {
+            context,
             tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            TuiAgentProgressKind::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
-            TuiAgentProgressKind::Message { text } => conversation(
-                ConversationIntent::RecordAgentProgress(RecordAgentProgress {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    message: format_agent_progress_text(text),
-                }),
-            ),
-            TuiAgentProgressKind::ToolCalls { calls } => conversation(
-                ConversationIntent::RecordAgentProgress(RecordAgentProgress {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    turn_id: crate::tui::model::conversation::ids::ChatTurnId::new(
-                        &attachment_context.turn_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    message: format_agent_progress_calls(calls),
-                }),
-            ),
-        },
+            delta,
+        } => conversation(ConversationIntent::RecordToolStreamingOutput(
+            RecordToolStreamingOutput {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+                tool_id: ToolCallId::new(tool_id),
+                text: delta.clone(),
+            },
+        )),
+        TuiRuntimeEvent::SubRunStarted(event) => {
+            conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                    &event.identity.parent_chat_id,
+                ),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                    event.identity.parent_run_id.as_str(),
+                ),
+                tool_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                role: event.role.clone(),
+                model: event.model.clone(),
+            }))
+        }
+        TuiRuntimeEvent::SubRunActivity(event) => conversation(
+            ConversationIntent::RecordSubRunActivity(RecordSubRunActivity {
+                agent_id: event.identity.agent_id.clone(),
+                sub_run_id: event.identity.run_id.as_str().to_string(),
+                parent_run_id: event.identity.parent_run_id.as_str().to_string(),
+                spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                sequence: event.sequence,
+                sequence_index: event.sequence_index,
+                kind: event.kind.clone(),
+            }),
+        ),
         TuiRuntimeEvent::ConfigChanged { view, .. } => AgentEventMapping {
             ui_preferences: vec![
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(
@@ -760,67 +624,31 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::ReminderList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Run { run_id, event, .. } => match event {
-            TuiRunEvent::Started => conversation(ConversationIntent::RunStarted(RunStarted {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::AwaitingUser => {
-                conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Resumed => conversation(ConversationIntent::RunResumed(RunResumed {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::Cancelling => {
-                conversation(ConversationIntent::RunCancelling(RunCancelling {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Cancelled => {
-                conversation(ConversationIntent::RunCancelled(RunCancelled {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Completed { .. } => {
-                conversation(ConversationIntent::RunCompleted(RunCompleted {
-                    run_id: run_id.clone(),
-                }))
-            }
-            TuiRunEvent::Failed { .. } => conversation(ConversationIntent::RunFailed(RunFailed {
-                run_id: run_id.clone(),
-            })),
-            TuiRunEvent::Stuck { reason } => {
-                conversation(ConversationIntent::AppendError(AppendError {
-                    text: reason.clone(),
-                }))
-            }
-            TuiRunEvent::DrainingInput
-            | TuiRunEvent::TerminationRequested { .. }
-            | TuiRunEvent::Terminated { .. }
-            | TuiRunEvent::Transitioned { .. } => AgentEventMapping::default(),
-        },
+        TuiRuntimeEvent::Run { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::RunStep {
             run_id,
+            parent_run_id,
             step_id,
             event,
-            ..
         } => match event {
-            TuiRunStepEvent::Started => {
-                conversation(ConversationIntent::RunStepStarted(RunStepStarted {
-                    run_id: run_id.clone(),
-                    step_id: step_id.clone(),
-                    tool_reference: None,
-                }))
+            TuiRunStepEvent::Cancelled { terminal } if parent_run_id.is_none() => {
+                let confirmed = matches!(
+                    terminal,
+                    crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled
+                );
+                crate::tui::log_debug!(
+                    "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
+                    run_id,
+                    step_id,
+                    confirmed
+                );
+                conversation(ConversationIntent::PresentCancelledStep(
+                    PresentCancelledStep { confirmed },
+                ))
             }
-            TuiRunStepEvent::Completed => {
-                conversation(ConversationIntent::RunStepCompleted(RunStepCompleted {
-                    run_id: run_id.clone(),
-                    step_id: step_id.clone(),
-                }))
-            }
-            TuiRunStepEvent::CancellationRequested
+            TuiRunStepEvent::Started
+            | TuiRunStepEvent::Completed
+            | TuiRunStepEvent::CancellationRequested
             | TuiRunStepEvent::FinalizationStarted
             | TuiRunStepEvent::Cancelled { .. } => AgentEventMapping::default(),
         },
@@ -890,34 +718,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     }
 }
 
-fn format_agent_progress_text(text: &str) -> String {
-    if text.is_empty() || text.ends_with('\n') {
-        text.to_string()
-    } else {
-        format!("{text}\n")
-    }
-}
-
-fn format_agent_progress_calls(
-    calls: &[crate::tui::adapter::tui_runtime_event::TuiAgentToolCall],
-) -> String {
-    let text = calls
-        .iter()
-        .map(|call| {
-            let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
-            let preview =
-                crate::tui::view_model::tool_name::tool_input_preview(&call.name, &call.input);
-            if preview.is_empty() {
-                format!("→ {name}")
-            } else {
-                format!("→ {name} {preview}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format_agent_progress_text(&text)
-}
-
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
     AgentEventMapping {
         workspace: vec![WorkspaceIntent::ApplySnapshot {
@@ -931,16 +731,6 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
-
-fn clear_placeholder_then(intent: ConversationIntent) -> AgentEventMapping {
-    AgentEventMapping {
-        conversation: vec![
-            ConversationIntent::ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
-            intent,
-        ],
-        ..AgentEventMapping::default()
-    }
-}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {

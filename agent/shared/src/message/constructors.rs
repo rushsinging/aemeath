@@ -18,18 +18,32 @@ impl Message {
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
+                skill_request: None,
             }),
         }
     }
 
-    pub fn stop_hook_feedback(text: impl Into<String>, payload: StopHookFeedback) -> Self {
+    pub fn hook_notice(text: impl Into<String>, notice: HookNotice) -> Self {
         Self {
             role: Role::User,
             content: vec![ContentBlock::Text { text: text.into() }],
             metadata: Some(MessageMetadata {
-                source: MessageSource::StopHook,
-                stop_hook: Some(payload),
+                source: MessageSource::Hook,
+                hook_notice: Some(notice),
+                skill_request: None,
+            }),
+        }
+    }
+
+    pub fn skill_request(text: impl Into<String>, payload: SkillRequestMetadata) -> Self {
+        Self {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: text.into() }],
+            metadata: Some(MessageMetadata {
+                source: MessageSource::SkillRequest,
+                hook_notice: None,
+                skill_request: Some(payload),
             }),
         }
     }
@@ -111,7 +125,7 @@ impl Message {
                 Some((start, end, idx)) => {
                     if start > cursor {
                         content.push(ContentBlock::Text {
-                            text: text[cursor..start].to_string(),
+                            text: text[cursor..start].to_string(), // allow unsafe_text_op: find offset (char boundary)
                         });
                     }
                     let (placeholder, data, media_type) = sorted_images[idx].clone();

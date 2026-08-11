@@ -104,7 +104,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 
 ```
 Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
-  → sdk_event_to_ui_event（adapter/event_mapping.rs）
+  → sdk_event_to_tui_event（adapter/event_mapping.rs）
   → UiEvent → mpsc channel (cap 256)
   → ui_rx → tokio::select! → TuiMsg::Ui(ui_event)
   → App::update_agent_event()
@@ -165,15 +165,11 @@ enum TuiMsg {
 
 ```rust
 enum ConversationIntent {
-    StartRun { text },
-    ProjectRunStarted { run_id, text },
-    ProjectRunResumed { run_id },
-    ProjectRunCompleting { run_id },
-    ProjectRunFailed { run_id, message },
-    ProjectRunCancelling { run_id },
-    ProjectRunCancelled { run_id },
-    RequestRunCancellation { run_id },
-    ResumeConversation { run_id, run_step_id },  // 显式 Intent；恢复历史会话为 Completed，NEVER 由内部 helper 绕过 reducer
+    SubmitUserMessage { text },
+    AssistantText { chat_id, turn_id, text },
+    ToolCallStart { chat_id, turn_id, tool_id },
+    ToolResult { chat_id, turn_id, tool_id, output },
+    CompleteChat { chat_id, turn_id },
     ShowInteraction { request_id, run_id, body },
     UpdateInteractionDraft { request_id, action },
     ConfirmInteraction { request_id },
@@ -195,7 +191,7 @@ enum WorkspaceIntent { ApplySnapshot(WorkspaceSnapshot), ApplyMetadata(Workspace
 ### 6.3 Change（Model 变更产出）
 
 ```rust
-enum ConversationChange { RunStartRequested, RunCancellationRequested, RunStarted, RunCompleting, RunCancelling, RunCancelled, RunCompleted, ToolCallStarted, MessageAppended, ... }
+enum ConversationChange { OutputDirty, ToolCallChanged, ChatStatusChanged, InteractionChanged, ... }
 enum InputChange { BufferModified, SelectionChanged, Submitted, ... }
 enum ModelChange { OutputDirty, StatusDirty, InputDirty, DialogDirty }
 ```
@@ -260,14 +256,16 @@ struct AppViewState {
     status: StatusViewState,            // status line scroll/selection
     input: InputViewState,              // cursor display/selection
     dialog: DialogViewState,            // dialog cursor
-    animation: AnimationState,          // 仅 spinner_frame 等视觉动画帧
+    run_activity: RunActivityState,     // Main Run 静默时间 + 活动动画
     dirty: ViewModelDirty,              // {output, status, input, dialog}
 }
 ```
 
-`SpinnerPhase` **MUST** 由 `RunProjectionStatus`、`RunStepProjectionStatus` 与 Model 中的运行上下文纯函数派生；`ViewState` 只保存视觉动画帧，**NEVER** 保存业务 phase 或 `run_active` 副本。
+`RunActivityState` 只保存 Main Run identity、`InvokingModel` 静默起点、最近一次有效可展示模型活动时间、动画 frame 与当前稳定 verb。它使用可注入单调时间，既不持久化，也不保存 `RunStatus`、业务 phase、`run_active` 或可见性副本。
 
-`ViewState` 的可变性只覆盖 scroll / collapse / selection / animation / cache 等瞬时交互与渲染状态；Run、Interaction、timeline、input buffer 等 UI 业务投影仍只在 Model 中变更。
+活动 phase、文案与可见性 **MUST** 由 Model 的 typed `RunStateSnapshot`、当前 Tool/Hook/Compact detail 与 `RunActivityState` 纯函数派生为 `RunActivityView`。离开 `InvokingModel` 时清除静默条件；Sub Run 事件不得重置 Main Run 的静默时间。
+
+`ViewState` 的可变性只覆盖 scroll / collapse / selection / animation / cache / 本地单调展示时间等瞬时交互与渲染状态；Run、Interaction、timeline、input buffer 等 UI 业务事实仍只在 Model 中变更。
 
 ## 8. SDK DTO 边界
 
@@ -313,9 +311,9 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 3. **唯一副作用入口**：Coordinator 只从 Change 生成 Effect；effect runner 执行 I/O，并把结果包装为 TUI-owned Intent 回到 reducer。
 4. **唯一渲染输入**：ViewAssembler 从 Model + ViewState 产出 ViewModel；Render 不持有 Model 副本。
 5. **异步结果防陈旧覆盖**：Workspace metadata 等 Effect 同时携带资源 identity 与 revision；结果只在 tuple 匹配时 apply。
-6. **派生状态不复制**：spinner phase 与可见性由 Run / RunStep 投影纯函数计算，ViewState 只持视觉交互状态。
+6. **派生状态不复制**：活动 phase 与可见性由 typed `RunStateSnapshot` 和展示 detail 纯函数计算；ViewState 只持动画与本地单调展示时间，不复制业务生命周期。
 7. **互补投影原子更新**：结构化 Conversation 投影（runs / queued / progress）与 `timeline` 由同一 reducer 事务维护；只约束重叠稳定 ID、相对顺序、关联与终态，**NEVER** 声称二者可完整互相重建。
-8. **Runtime 状态权威**：AgentClient interaction command result 只结束本地交互，不推进 Run；只有 SDK `RunResumed` 才恢复 Running，取消先投影 `RunCancelling`，仅 `RunCancelled` 进入终态。TUI 同时最多投影一个 active interaction；Runtime 对并发 Tool suspension 按稳定 ToolCall 顺序逐个发布，TUI **NEVER** 建第二个 pending registry。
+8. **Runtime 状态权威**：AgentClient interaction command result 只结束本地交互；Runtime Run / RunStep lifecycle DTO 在 Conversation mapper 边界为 observational no-op，TUI **NEVER** 建立第二套 Run lifecycle 或 pending registry。Runtime 对并发 Tool suspension 按稳定 ToolCall 顺序逐个发布。
 
 ## 11. 相关文档
 

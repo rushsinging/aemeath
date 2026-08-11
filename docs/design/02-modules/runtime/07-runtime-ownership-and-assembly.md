@@ -210,7 +210,7 @@ Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `Sess
 
 ### 4.3.1 Session ingress、Session mailbox 与 Run input buffer
 
-Session Runtime 对外只有一个 typed ingress。`ChatRequest` 只携带非可选 `ingress`；Composition 将它适配为 `ChatInputEventPort`，Session 级 `SessionInputMailbox` 是唯一允许读取该 source 的 Runtime owner。首条输入、后续输入、Skill 和控制命令均为同一 `ChatInputEvent` 协议，不存在 `user_input`、`initial_messages`、独立 seed 或额外 queue drain 旁路。
+Session Runtime 对外只有一个 typed ingress。`ChatRequest` 只携带非可选 `ingress`；Composition 将它适配为 `ChatInputEventPort`，Session 级 `SessionInputMailbox` 是唯一允许读取该 source 的 Runtime owner。首条输入、后续输入、Skill 和控制命令均为同一 `ChatInputEvent` 协议，不存在 `user_input`、`initial_messages` 或额外 queue drain 旁路。Session idle gate 接纳用户输入后必须立即收敛成唯一 `AcceptedUserInput`；新 Run 的首次 seed 只是在 Run buffer 中转移这份 canonical typed input，**NEVER** 再生成一份平行 event/message payload。
 
 ```rust
 struct ChatRequest {
@@ -232,19 +232,39 @@ struct SessionInputMailbox {
 struct RuntimeContext {
     input: RunInputBufferHandle,
 }
+
+enum AcceptedUserInput {
+    UserMessage {
+        input_id: InputId,
+        text: String,
+        images: Vec<ChatInputImage>,
+    },
+    SkillRequest {
+        input_id: InputId,
+        skill: String,
+        arguments: String,
+        raw_input: String,
+    },
+}
 ```
 
 入站所有权必须保持单向：
 
 1. `SessionInputMailbox` 先读取 deferred，再读取外部 source，因而跨 Run 保持 producer identity 与 FIFO；任何其他 Runtime 类型都不得直接 poll `ChatInputEventPort`。
-2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。
-3. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将已接纳的原始事件推入当前 Run buffer；首条与后续输入走同一 `push_or_reject` 路径，保留 `InputId`、文本和图片。
-4. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是退回 `SessionInputMailbox::defer`，供下一 Run 优先消费。
-5. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
+2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 转成 `AcceptedUserInput` 并激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。
+3. `AcceptedUserInput` 是接纳后的唯一真相。`UserMessage` 保留文本与图片；`SkillRequest` 保留 `skill`、`arguments`、`raw_input` 与 `InputId`。模型 `Message`、Context accepted input 和 `UserMessagesAdopted` 都从同一实例派生，**NEVER** 同时维护 `adopted_messages` / `adopted_events` 或任何同义双轨。
+4. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将 canonical `AcceptedUserInput` 移入当前 Run buffer；首条与后续输入走同一 typed admission 路径。Run buffer 内部可同时暂存 Session 控制事件，但用户输入不再退回 `ChatInputEvent` 后重新 materialize。
+5. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是转换回边界 `ChatInputEvent` 并退回 `SessionInputMailbox::defer`，供下一 Run 优先消费；该转换只发生在 ownership 退回边界，不参与模型消息构造。
+6. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
 
-`RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机：
+`RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机。它以 `BufferedRunInput::Accepted(AcceptedUserInput)` 保存用户输入，以独立 control 变体保存待退回 Session 的命令；drain 时 `LoopInput` 携带同一 `AcceptedUserInput`，避免 `ChatInputEvent → Message → ChatInputEvent → LoopInput → Message` 的有损往返：
 
 ```rust
+enum BufferedRunInput {
+    Accepted(AcceptedUserInput),
+    Control(ChatInputEvent),
+}
+
 enum BufferDrain {
     Ready { batch: Vec<LoopInput>, epoch: DrainEpoch },
     Empty { epoch: DrainEpoch },
@@ -254,7 +274,19 @@ enum BufferDrain {
 }
 ```
 
-FIFO、batch drain、epoch、seal 和 late-input defer 属于 `RunInputBuffer`；`Created → DrainingInput → ...` 属于 `Run`。Run buffer **MUST NOT** 定义 PreparingContext、ExecutingTools 或 Interaction 等业务状态。
+FIFO、batch drain、epoch、seal 和 late-input defer 属于 `RunInputBuffer`；`Created → DrainingInput → ...` 属于 `Run`。Run buffer **MUST NOT** 定义 PreparingContext、ExecutingTools 或 Interaction 等业务状态。`LoopInput` 对 Main 用户输入只包装 canonical `AcceptedUserInput`；无 `InputId` 的 fixed prompt / engine continuation 可保留普通内部消息，但不得伪装成 accepted user input。
+
+### 4.3.1.1 SkillRequest 的模型与交付双视图
+
+`UserMessage` 与 `SkillRequest` 共用 admission、FIFO、drain、freeze、Context append 和 adoption 生命周期，但不共享消息 materialization 规则：
+
+- `UserMessage` 的模型消息来自 `text + images`，交付层回显同一用户文本；
+- `SkillRequest` 的模型消息由 Runtime 从 typed identity/arguments 生成内部 `<skill-request>`，并携带 `MessageSource::SkillRequest + SkillRequestMetadata`；
+- TUI/SDK 用户回显只读取 metadata 中的 `raw_input`，恰好生成一个普通 UserMessage；
+- 内部 `<skill-request>`、Skill metadata JSON 与 Skill Tool 结果正文不得作为 slash 回显；
+- Runtime、SDK、TUI **NEVER** 从普通 Message prose、XML 字符串或 slash 文本猜测 `SkillRequest`，也不得以字符串替换修复 metadata 丢失。
+
+因此二者是一个 `AcceptedUserInput` 生命周期中的两个业务变体，而不是两条 adopted pipeline。
 
 Interaction reply/cancel 与普通输入完全正交：`SessionIngress` 只把 typed `InteractionCommand` 定向交给 `InteractionPort`。`Run` 持有唯一 `Option<PendingInteraction>`，因此单个 Run 同一时刻最多存在一个 active interaction continuation；`InteractionPort::register` 返回的唯一 oneshot receiver 仅等待该 request 的 reply/cancel。端口内部可按 request identity 保存多个 waiter，是为了隔离多个并发 Run，不表示单个 Run 可以同时等待多个 interaction。
 
@@ -290,7 +322,7 @@ reply/cancel 必须匹配 request identity；重复、陈旧或不匹配的命�
 
 - messages 与 committed boundary；
 - Step message ownership；
-- accepted/adopted inputs；
+- accepted inputs 及其 Step adoption receipt；
 - ContextRequest / ContextWindow；
 - turn count 与 invocation usage snapshot；
 - tool identity 与 continuation 工作数据；
@@ -508,10 +540,10 @@ Factory 不负责执行 Loop、恢复 Session、修改 `SessionState`、处理�
 `HookBindingMode` 必须在装配期产生真实 capability adapter：
 
 - `Full`：允许 RunSpec 声明范围内的全部 Hook invocation；
-- `BoundaryOnly`：历史枚举名仅表达 Sub 的最低能力档；实际装配独立 `EmptyHookPort`，任何 invocation 都直接 `proceed`，不执行或转发到底层 Hook；
+- `BoundaryOnly`：Sub 的最低 Hook capability；装配包装本 Run frozen Dispatcher 的 `BoundaryHookPort`，按 Hook-owned `HookPointMetadata.class` 转发所有 Boundary point（含 Stop 与 SubRun lifecycle），过滤 Tool/Notification point；
 - 若未来存在 `Disabled`：绑定 typed no-op/disabled adapter，而不是 `Option`。
 
-Sub Hook capability 不能通过 parent 存在性校验后复用完整 HookPort，也不能保留 start/stop 特例。Factory 必须装配独立 `EmptyHookPort`；它对 `dispatch` 与 `dispatch_at` 都无条件返回 `HookOutcome::proceed()`，且不持有底层 HookPort。Hook BC 继续拥有 Main Run 的 subscription、脚本执行、重试和 typed directive；Sub 生命周期若需观测，应使用 Runtime event/parent result 通道，而不是 Hook。
+Sub Hook capability 不能复用父 `HookPort`，也不能复制 HookPoint allow-list。Factory 必须先从 Sub Run 的 frozen `RunConfigSnapshot` 构造独立 Dispatcher，再由 `BoundaryHookPort` 施加 metadata-governed capability ceiling；`dispatch` 与 `dispatch_at` 保持相同过滤语义。Hook BC 继续拥有 subscription、脚本执行、重试和 typed directive，Runtime shared Loop 继续拥有 Stop 控制流。
 
 ### 5.5 Factory Port 所有权
 
@@ -618,7 +650,7 @@ attachment_context + tool_id
 1. 派生 Run 创建自己的 `source_context`；同一派生 Run 的 Started、Message、ToolCalls 和 ToolOutput 事件都保留该身份。
 2. 父 Run 执行 Agent ToolCall 时创建 `attachment_context + tool_id`；进度转发器只补充挂载信息，不得改写 `source_context`。
 3. Runtime 出站事件同时携带 `source_context` 与 `attachment_context`。SDK 和 Consumer Adapter 只做逐字段映射，禁止把二者折叠为单一 `context`。
-4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentProgress`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
+4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentActivities`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
 5. Conversation Model 必须按显式 `attachment_context + tool_id` 定位 ToolCall，禁止按 active turn 或全局 `tool_id` 回退搜索。并发 Agent ToolCall 必须保持隔离。
 6. Agent progress 不进入根级 timeline；它只更新 Agent ToolCall 的 `agent_meta` 与 `activities`。工具完成后由既有 ToolResult 渲染规则接管。
 
@@ -652,19 +684,18 @@ Runtime application 回答“何时发生什么业务动作”：
 - 在 Run 创建点调用 `RunFactory::create` 取得 `RunInstance`；
 - 驱动 Loop 和领域状态迁移。
 
-### 7.3 退役 `from_args.rs` 大装配器
+### 7.3 Runtime bootstrap 已收敛但仍待拆薄
 
-当前 `from_args.rs` 同时承担参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、Agent runner 创建、基础设施创建和 Client 构造，已形成 Runtime 内第二个 Composition Root。
+当前 `application/client/from_args.rs` 不再构造供应 BC 的具体 adapter；Composition 通过 `RuntimeBootstrapDependencies` 注入 opaque wiring、ports、窄 factory 与唯一 `RuntimeContextFactory`，Main/Derived Run 都经 `RunFactory` → `RunLauncher`。因此它已经不是第二个 Composition Root。
 
-目标不是把整个文件移动到 `agent/composition`，而是按职责拆解：
+该文件仍承担 Session 恢复、模型/Prompt/Skill 绑定进 Client shell、typed bootstrap request 处理和 Client 构造等多个 Runtime application bootstrap 职责。后续拆分属于可维护性工作：
 
-- 入站边界先将 CLI/SDK args 标准化为 typed bootstrap request；
-- Composition 完成具体 adapter/object graph；
-- Runtime bootstrap 只执行 Session 启动用例并创建 `SessionState`；
-- Provider、Prompt、Skill 初始化委托各自 application service；
-- Run 创建统一提交 `RunCreationRequest`。
+- 入站边界继续将 CLI/SDK args 标准化为 typed bootstrap request；
+- Composition 保持具体 adapter/object graph 的唯一装配所有者；
+- Runtime bootstrap 按 Session、模型、Prompt/Skill 与 Client construction 拆成窄 application services；
+- Run 创建继续唯一提交 `RunCreationRequest`，不得恢复 Main/Sub 分叉装配。
 
-最终 `from_args.rs` 应删除，或收敛为很薄的 `bootstrap_runtime(request, services)` 入口。
+`from_args.rs` 的退出标准是收敛为薄的 `bootstrap_runtime(request, services)` 编排入口；文件大小本身不是恢复第二 Composition Root 的证据。
 
 ## 8. Workspace、Prompt、Skills 与 Config
 
@@ -711,7 +742,7 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 | `MainInputStrategy` / `SubInputStrategy` | 删除；factory 绑定统一 `InputPort` adapter |
 | `MainEventStrategy` / `SubEventStrategy` | 删除；factory 绑定统一 `EventSink` adapter |
 | 直接复用父 `InteractionPort` | 改为 child-scoped `ParentMediatedInteractionPort` |
-| Sub Hook 复用或过滤完整 HookPort | 为 Sub 装配无底层委托的 `EmptyHookPort` |
+| Sub Hook 复用父 HookPort 或复制 point allow-list | 从 Sub frozen snapshot 构造独立 Dispatcher，并以 `BoundaryHookPort` 按 metadata 过滤 |
 | `ChatLoopContext` | 拆为 session command driver、`RunCreationRequest` 与 `RunExecutionState` |
 | `ParentRunContextSource` | 以 parent capability registry/frame 的真实语义归入 `SessionState` |
 | `DerivedSubRun` | 删除；所有来源统一返回 `RunInstance` |
@@ -745,7 +776,7 @@ Workspace 不得继续绕过 `RuntimeContext` 旁路进入 Loop adapter。
 - Engine、Launcher 及任一阶段对象均不要求同一类型实现整组 Runtime 能力；不存在 trait alias、supertrait、fat struct、参数袋或展开参数列表形式的能力全集。
 - Chat/Derived 来源目录只拥有 source、observer、topology/request 与 terminal mapping，不拥有模型、工具、Context、Interaction、Persistence、Hook 或 Finalization 主流程。
 - `ParentMediated` 使用 child-scoped adapter，具备 request ownership、并发隔离和精确 teardown。
-- Sub Hook 使用独立 `EmptyHookPort`，禁止执行或转发任何 Hook invocation。
+- Sub Hook 使用包装本 Run frozen Dispatcher 的 `BoundaryHookPort`，按 Hook metadata 转发 Boundary（含 Stop），禁止执行 Tool/Notification Hook 或复用父实例。
 - `Run` 与 `RunExecutionState` 无重复状态所有权。
 - Workspace、Prompt、Skills、Config 均按本文生命周期边界流动。
 - 每层装配、状态转换、能力不扩权、父子并发隔离和端到端场景都有相邻契约测试。

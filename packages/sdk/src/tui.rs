@@ -35,12 +35,6 @@ pub trait ChatInputEventPort: Send + Sync + 'static {
     fn recv_next<'a>(&'a self) -> InputEventOptFuture<'a>;
 }
 
-/// TUI 可直接渲染的任务状态视图。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TaskStatusView {
-    pub lines: Vec<String>,
-}
-
 /// TUI 可渲染的图片输入视图。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClipboardImageView {
@@ -71,7 +65,7 @@ impl From<ClipboardImageView> for crate::ChatInputImage {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReflectionConfigView {
     pub enabled: bool,
-    pub interval_turns: usize,
+    pub interval_run_steps: usize,
     pub auto_apply_suggestions: bool,
 }
 

@@ -11,7 +11,7 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::CompactStage;
+pub use compact::{CompactProgressFn, CompactStage, CompactWork};
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
@@ -75,6 +75,71 @@ impl SessionRevision {
     }
 }
 
+/// 仅对单次 Provider invocation 可见的结构化提醒。
+///
+/// Runtime 负责产生 intent 与生命周期；Context 负责本地化渲染、排序和预算。
+/// 这些值 **NEVER** 写入 canonical Session。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvocationReminder {
+    TaskProgress(TaskProgressReminder),
+    GuidanceSourcesChanged,
+    ModelGuidanceMismatch {
+        session_model_id: String,
+        run_model_id: String,
+    },
+}
+
+impl InvocationReminder {
+    pub fn guidance_sources_changed() -> Self {
+        Self::GuidanceSourcesChanged
+    }
+
+    pub fn model_guidance_mismatch(
+        session_model_id: impl Into<String>,
+        run_model_id: impl Into<String>,
+    ) -> Self {
+        Self::ModelGuidanceMismatch {
+            session_model_id: session_model_id.into(),
+            run_model_id: run_model_id.into(),
+        }
+    }
+
+    pub fn task_progress(progress: TaskProgressReminder) -> Self {
+        Self::TaskProgress(progress)
+    }
+
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::TaskProgress(_) => "task_progress",
+            Self::GuidanceSourcesChanged => "guidance_sources_changed",
+            Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressReminder {
+    pub total: usize,
+    pub completed: usize,
+    pub items: Vec<TaskProgressReminderItem>,
+    pub hidden_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressReminderItem {
+    pub sequence: u64,
+    pub subject: String,
+    pub status: TaskProgressStatus,
+    pub blocked_by_sequences: Vec<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskProgressStatus {
+    Completed,
+    InProgress,
+    Pending,
+}
+
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
 pub struct ContextRequest {
@@ -83,6 +148,7 @@ pub struct ContextRequest {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
+    pub invocation_reminders: Vec<InvocationReminder>,
     pub system_prompt: SystemPromptSpec,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
@@ -92,7 +158,7 @@ pub struct ContextRequest {
     pub context_size: usize,
     pub max_output_tokens: usize,
     /// The most recent API-reported total tokens: normalized input plus output.
-    /// `None` while no turn has completed yet (first turn or after baseline reset).
+    /// `None` while no run has completed yet (first run or after baseline reset).
     pub last_api_total_tokens: Option<u64>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub tool_schema_tokens: usize,
@@ -263,10 +329,12 @@ pub struct CompactionDecision {
     pub needed: bool,
     pub urgency: Urgency,
     /// Token count used for the decision — either provider-reported actual usage
-    /// or the heuristic candidate estimate.  Named `decision_token_count` to
-    /// distinguish it from SDK UI estimates.
+    /// or the heuristic candidate estimate. Named to distinguish it from
+    /// operation progress.
     pub decision_token_count: usize,
     pub threshold: usize,
+    pub context_size: usize,
+    pub effective_window: usize,
     pub reason: DecisionReason,
 }
 
@@ -276,20 +344,101 @@ pub enum CompactTrigger {
     Manual,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CompactRequest {
     pub run_id: RunId,
     pub source_revision: SessionRevision,
     pub source: ContextRequest,
     pub trigger: CompactTrigger,
+    /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
+    /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
+    pub progress: Option<Arc<dyn CompactProgressFn>>,
+    /// 当前 Task 状态文本（#1537）：compact summary 定稿后拼接到末尾，
+    /// 防止递进压缩后 task 上下文丢失。`None` 表示无活跃 task。
+    pub task_context: Option<String>,
+    /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Debug for CompactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactRequest")
+            .field("run_id", &self.run_id)
+            .field("source_revision", &self.source_revision)
+            .field("source", &self.source)
+            .field("trigger", &self.trigger)
+            .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .field(
+                "task_context",
+                &self.task_context.as_ref().map(|_| "<text>"),
+            )
+            .field("cancelled", &self.cancellation.is_cancelled())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct ManualCompactRequest {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub system_prompt: SystemPromptSpec,
     pub context_size: usize,
+    /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
+    pub progress: Option<Arc<dyn CompactProgressFn>>,
+    /// 当前 Task 状态文本（#1537），语义同 [`CompactRequest::task_context`]。
+    pub task_context: Option<String>,
+}
+
+impl std::fmt::Debug for ManualCompactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManualCompactRequest")
+            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
+            .field("system_prompt", &self.system_prompt)
+            .field("context_size", &self.context_size)
+            .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
+            .field(
+                "task_context",
+                &self.task_context.as_ref().map(|_| "<text>"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactGenerationFailureKind {
+    Cancelled,
+    RateLimited,
+    ContextTooLong,
+    Timeout,
+    Provider,
+    InvalidSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactGenerationFailure {
+    pub kind: CompactGenerationFailureKind,
+    pub message: String,
+}
+
+impl CompactGenerationFailure {
+    pub fn new(kind: CompactGenerationFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    pub const fn permits_local_fallback(&self) -> bool {
+        !matches!(self.kind, CompactGenerationFailureKind::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactSummaryQuality {
+    Llm,
+    LocalFallback(CompactGenerationFailureKind),
+    LocalOnly,
 }
 
 #[derive(Debug, Clone)]
@@ -297,6 +446,7 @@ pub struct CompactResult {
     pub summary: String,
     pub recent_messages: Vec<ContextMessage>,
     pub source_revision: SessionRevision,
+    pub quality: CompactSummaryQuality,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -304,6 +454,7 @@ pub enum CompactSkipReason {
     ResumeProtection,
     HookBlocked,
     CircuitBreakerOpen,
+    Cancelled,
 }
 
 #[derive(Debug, Clone)]

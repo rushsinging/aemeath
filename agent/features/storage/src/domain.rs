@@ -15,8 +15,9 @@ pub use atomic_blob::{
 };
 pub(crate) use atomic_dataset::revision_member_digest;
 pub use atomic_dataset::{
-    DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
-    DatasetRead, DatasetReadOutcome, DatasetRevision,
+    DatasetChangeSet, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest,
+    DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome,
+    DatasetRevision,
 };
 pub use blob_recovery::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,

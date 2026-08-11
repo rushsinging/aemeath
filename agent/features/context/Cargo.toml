@@ -31,3 +31,6 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

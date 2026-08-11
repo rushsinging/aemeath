@@ -12,7 +12,7 @@ use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 fn p6_4_production_uses_explicit_tool_round_boundaries() {
     let coordinator = include_str!("coordination.rs");
     let services = include_str!("../loop_engine/run_services.rs");
-    let main = include_str!("../loop_engine/chat/loop_runner.rs");
+    let main = include_str!("../loop_engine/chat/session_driver/run_launch.rs");
     let sub = include_str!("../run/derived/setup.rs");
 
     assert!(coordinator.contains("pub(crate) struct ToolRoundContext"));
@@ -292,6 +292,56 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
 }
 
 #[test]
+fn cancelled_round_convergence_preserves_typed_outcomes_and_call_order() {
+    let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
+    let completed = crate::application::tool::agent::ToolExecution::new_typed(
+        &calls[0],
+        tools::ToolExecutionOutcome::success_text("finished"),
+    );
+    let unconfirmed = crate::application::tool::agent::ToolExecution::new_typed(
+        &calls[1],
+        tools::ToolExecutionOutcome::cancellation_unconfirmed(
+            "cleanup receipt not confirmed",
+            Vec::new(),
+            Vec::new(),
+        ),
+    );
+
+    let convergence = complete_cancelled_tool_round(&calls, vec![unconfirmed, completed]);
+
+    assert_eq!(convergence.results.len(), 3);
+    assert_eq!(convergence.results[0].call_id, calls[0].id);
+    assert_eq!(convergence.results[1].call_id, calls[1].id);
+    assert_eq!(convergence.results[2].call_id, calls[2].id);
+    assert!(matches!(
+        convergence.results[0].typed_outcome,
+        tools::ToolExecutionOutcome::Success(_)
+    ));
+    assert!(matches!(
+        convergence.results[1].typed_outcome,
+        tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
+    ));
+    assert!(matches!(
+        convergence.results[2].typed_outcome,
+        tools::ToolExecutionOutcome::Cancelled(_)
+    ));
+}
+
+#[test]
+fn streaming_and_ordinary_cancellation_share_one_convergence_rule() {
+    let coordination = include_str!("coordination.rs");
+
+    assert_eq!(
+        coordination
+            .matches("converge_cancelled_tool_round(")
+            .count(),
+        3,
+        "定义一次，并由 ordinary 与 streaming 两条入口分别调用"
+    );
+    assert!(!coordination.contains("取消时旁路结果整体丢弃"));
+}
+
+#[test]
 fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_calls() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1)];
     let completed = crate::application::tool::agent::ToolExecution::new(
@@ -299,14 +349,14 @@ fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_ca
         tools::ToolOutcome::new("finished", serde_json::Value::Null, Vec::new()),
     );
 
-    let results = complete_cancelled_tool_round(&calls, vec![completed]);
+    let results = complete_cancelled_tool_round(&calls, vec![completed]).results;
 
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].provider_id, "provider-0");
     assert_eq!(results[0].outcome.text, "finished");
     assert_eq!(results[1].provider_id, "provider-1");
     assert!(results[1].outcome.is_error);
-    assert!(results[1].outcome.text.contains("cancelled"));
+    assert_eq!(results[1].outcome.text, "Command cancelled by user");
 }
 
 #[test]

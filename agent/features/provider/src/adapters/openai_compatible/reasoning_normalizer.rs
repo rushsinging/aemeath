@@ -200,8 +200,8 @@ fn trim_overlap<'a>(accumulated: &str, raw: &'a str) -> Option<NormalizedReasoni
     }
 
     for overlap_len in (MIN_OVERLAP_LEN..=max_possible).rev() {
-        let acc_tail = &acc_chars[acc_chars.len() - overlap_len..];
-        let raw_head = &raw_chars[..overlap_len];
+        let acc_tail = &acc_chars[acc_chars.len() - overlap_len..]; // allow unsafe_text_op: Vec slice
+        let raw_head = &raw_chars[..overlap_len]; // allow unsafe_text_op: Vec slice
         if acc_tail == raw_head {
             // 净增量 = raw 去掉开头 overlap_len 个字符（按 char 偏移转 byte 偏移）
             let byte_offset: usize = raw
@@ -209,7 +209,7 @@ fn trim_overlap<'a>(accumulated: &str, raw: &'a str) -> Option<NormalizedReasoni
                 .nth(overlap_len)
                 .map(|(idx, _)| idx)
                 .unwrap_or(raw.len());
-            let delta_str = &raw[byte_offset..];
+            let delta_str = &raw[byte_offset..]; // allow unsafe_text_op: char_indices offset (char boundary)
             if delta_str.is_empty() {
                 return None; // 完全重叠 = DuplicateDrop 已在 process 中处理
             }

@@ -96,6 +96,16 @@ impl AgentClient for AgentClientImpl {
     }
 }
 
+#[async_trait]
+impl sdk::DisplayHistoryQuery for AgentClientImpl {
+    async fn load_display_history_window(
+        &self,
+        request: sdk::DisplayHistoryWindowRequest,
+    ) -> Result<sdk::DisplayHistoryWindow, SdkError> {
+        super::trait_session::load_display_history_window_impl(self, request).await
+    }
+}
+
 impl RunControlClient for AgentClientImpl {
     fn cancel_run_step(
         &self,

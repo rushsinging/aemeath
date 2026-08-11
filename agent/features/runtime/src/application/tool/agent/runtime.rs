@@ -15,6 +15,7 @@ pub struct ToolExecution {
     pub provider_id: String,
     pub tool_name: String,
     pub outcome: ToolOutcome,
+    pub typed_outcome: ToolExecutionOutcome,
 }
 
 impl ToolExecution {
@@ -23,7 +24,18 @@ impl ToolExecution {
             call_id: call.id.clone(),
             provider_id: call.provider_id.clone(),
             tool_name: call.name.clone(),
+            typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
+        }
+    }
+
+    pub fn new_typed(call: &ToolCall, typed_outcome: ToolExecutionOutcome) -> Self {
+        Self {
+            call_id: call.id.clone(),
+            provider_id: call.provider_id.clone(),
+            tool_name: call.name.clone(),
+            outcome: legacy_outcome(typed_outcome.clone()),
+            typed_outcome,
         }
     }
 
@@ -37,11 +49,13 @@ impl ToolExecution {
             call_id,
             provider_id,
             tool_name,
+            typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Agent {
     pub catalog: ToolCatalogSnapshot,
     pub execution: Arc<dyn ToolExecutionPort>,
@@ -53,6 +67,8 @@ pub struct Agent {
     pub(crate) session_id: context::domain::SessionId,
     pub(crate) tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
+    pub(crate) committed_side_effects:
+        crate::application::loop_engine::chat::committed_side_effect::CommittedSideEffectDispatcher,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
@@ -82,6 +98,7 @@ async fn call_tool_with_timeout(
             is_error: true,
             error_kind: Some(tools::ToolErrorKind::InvalidInput),
             images: Vec::new(),
+            task_change: None,
         });
     }
     let timeout = tool.timeout_secs();
@@ -112,6 +129,7 @@ impl Agent {
             session_id: context::domain::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
+            committed_side_effects: Default::default(),
             ctx,
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -222,9 +240,9 @@ impl Agent {
         ctx: &ToolExecutionContext,
         step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        ToolExecution::new(
+        ToolExecution::new_typed(
             call,
-            legacy_outcome(self.execute_one_outcome_with_ctx(call, ctx, step_id).await),
+            self.execute_one_outcome_with_ctx(call, ctx, step_id).await,
         )
     }
 
@@ -274,6 +292,14 @@ fn safe_input_preview(input: &serde_json::Value) -> String {
     rendered.chars().take(500).collect()
 }
 
+fn legacy_tool_execution_outcome(outcome: &ToolOutcome) -> ToolExecutionOutcome {
+    if outcome.is_error {
+        ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, outcome.text.clone())
+    } else {
+        ToolExecutionOutcome::success_text(outcome.text.clone())
+    }
+}
+
 pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
     match outcome {
         ToolExecutionOutcome::Success(success) => ToolOutcome::new(
@@ -285,12 +311,14 @@ pub(crate) fn legacy_outcome(outcome: ToolExecutionOutcome) -> ToolOutcome {
                 .join("\n"),
             success.data.unwrap_or(serde_json::Value::Null),
             Vec::new(),
-        ),
+        )
+        .with_task_change(success.task_change),
         ToolExecutionOutcome::Failure(failure) => ToolOutcome {
             text: failure.safe_message,
             data: failure.data.unwrap_or(serde_json::Value::Null),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         },
         ToolExecutionOutcome::Cancelled(cancelled) => ToolOutcome::error(cancelled.reason),
         ToolExecutionOutcome::TimedOut(details)

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：守护 agent context 所有权重构（project 拥有 WorkspaceState）的架构不变量。
@@ -181,7 +181,7 @@ def check_r7(violations: list[str]) -> None:
     """R7: ToolExecutionContext / ChatLoopContext must not carry `cwd` field."""
     targets = {
         Path("agent/features/tools/src/domain/context.rs"): "ToolExecutionContext",
-        Path("agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"): "ChatLoopContext",
+        Path("agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs"): "ChatLoopContext",
     }
     for path, target_name in targets.items():
         full = root / path

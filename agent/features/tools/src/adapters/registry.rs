@@ -422,6 +422,14 @@ mod tests {
 
     #[test]
     fn sub_agent_scope_characterization_is_exact() {
-        assert_eq!(names_for(BuiltinRegistryScope::SubAgent), set(SUB_AGENT));
+        let main_names = names_for(BuiltinRegistryScope::Main);
+        let sub_agent_names = names_for(BuiltinRegistryScope::SubAgent);
+
+        assert_eq!(sub_agent_names, set(SUB_AGENT));
+        assert!(main_names.contains("agent"));
+        assert!(!sub_agent_names.contains("agent"));
+        for ordinary_tool in ["read", "grep", "bash", "skill"] {
+            assert!(sub_agent_names.contains(ordinary_tool));
+        }
     }
 }

@@ -22,6 +22,15 @@ use tokio::process::Command;
 use project::WorkspaceControl;
 use std::sync::Arc;
 
+type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
+
+async fn abort_reader_tasks(stdout_handle: ReaderTask, stderr_handle: ReaderTask) {
+    stdout_handle.abort();
+    stderr_handle.abort();
+    let _ = stdout_handle.await;
+    let _ = stderr_handle.await;
+}
+
 pub struct BashTool {
     pub control: Arc<dyn WorkspaceControl>,
 }
@@ -33,7 +42,7 @@ impl TypedTool for BashTool {
         "Bash"
     }
     fn description(&self) -> &str {
-        "Executes a bash command and returns its output. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s)."
+        "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 3600s)."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::bash(lang))
@@ -53,7 +62,7 @@ impl TypedTool for BashTool {
         false
     }
 
-    /// Override: Bash commands may run up to 600s (schema max).
+    /// Override: Bash commands may run up to 3600s (schema max).
     /// The default 120s outer timeout in agent.rs would kill long-running
     /// commands before the internal per-command timeout fires.
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -61,7 +70,7 @@ impl TypedTool for BashTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        600
+        3600
     }
 
     fn is_input_safe(&self, input: &Value) -> bool {
@@ -86,7 +95,7 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_ms = args.timeout.unwrap_or(120_000);
+        let timeout_ms = args.timeout.unwrap_or(120_000).min(3_600_000);
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(
@@ -124,6 +133,14 @@ impl TypedTool for BashTool {
 
         // Race: cancel signal vs timeout vs command completion
         let cancellation = ctx.cancellation();
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "bash cancellation boundary: command={:?} child_pid={:?} initial_cancelled={} timeout_ms={}",
+            command,
+            child_pid,
+            cancellation.is_cancelled(),
+            timeout_ms,
+        );
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
             _ = cancellation.cancelled() => {
@@ -144,9 +161,8 @@ impl TypedTool for BashTool {
                     path_base,
                     start.elapsed().as_millis()
                 );
-                stdout_handle.abort();
-                stderr_handle.abort();
-                return TypedToolResult::error("[interrupted by user]");
+                abort_reader_tasks(stdout_handle, stderr_handle).await;
+                return TypedToolResult::error("Command cancelled by user");
             }
             result = tokio::time::timeout(
                 Duration::from_millis(timeout_ms),
@@ -160,10 +176,9 @@ impl TypedTool for BashTool {
                     Err(_) => {
                         terminate_process_tree(&mut child).await;
                         let _ = child.wait().await;
-                        stdout_handle.abort();
-                        stderr_handle.abort();
-                        // Return early — no point awaiting aborted
-                        // handles.
+                        abort_reader_tasks(stdout_handle, stderr_handle).await;
+                        // Reader tasks are awaited by abort_reader_tasks so their pipe futures
+                        // are dropped before this invocation returns.
                         return TypedToolResult::error(format!("command timed out after {timeout_ms}ms"));
                     }
                 }

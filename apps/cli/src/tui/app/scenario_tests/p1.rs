@@ -1,4 +1,3 @@
-use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::effect::Effect;
 
@@ -44,43 +43,6 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
     harness.paste(" /tmp/p1-fixture.png ");
     assert!(harness.effects().iter().any(
         |effect| matches!(effect, Effect::ProcessImageFile { path } if path == "/tmp/p1-fixture.png")
-    ));
-    harness.assert_idle();
-}
-
-#[test]
-fn error_and_compact_progress_converge_through_frame_driver() {
-    let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.runtime_event(TuiRuntimeEvent::CompactProgress {
-        stage: "Summarizing".into(),
-        current: Some(2),
-        total: Some(4),
-    });
-    assert!(harness
-        .app
-        .model
-        .conversation
-        .runtime
-        .compact_progress
-        .is_some());
-    assert!(harness.app.view_state.dirty.output);
-    harness.render();
-    assert_eq!(
-        harness
-            .app
-            .model
-            .conversation
-            .runtime
-            .compact_progress
-            .as_ref()
-            .map(|progress| progress.stage.as_str()),
-        Some("Summarizing")
-    );
-
-    harness.ui(UiEvent::Error("provider unavailable".into()));
-    assert!(!harness.app.model.conversation.runtime.spinner.chat_active);
-    assert!(harness.effects().iter().any(
-        |effect| matches!(effect, Effect::RunHook { name, message } if name == "error" && message == "provider unavailable")
     ));
     harness.assert_idle();
 }

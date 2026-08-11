@@ -2,7 +2,7 @@
 //! Run's lifetime and provides `drain_or_seal` for step-level consumption within the
 //! same Run, unlike the session-owned `PendingInputBuffer` which creates a fresh Run.
 //!
-//! #1272 Per-turn drain-or-seal linearization:
+//! #1272 Per-run drain-or-seal linearization:
 //! `drain_or_seal` atomically drains user inputs AND seals if empty — a single
 //! synchronous decision point, rather than separate source drains followed by
 //! checking emptiness separately. Once sealed, late-arriving `UserMessage`s are
@@ -12,8 +12,8 @@ use std::collections::VecDeque;
 
 use sdk::ChatInputEvent;
 
-use crate::application::loop_engine::DrainEpoch;
 use crate::application::loop_engine::LoopInput;
+use crate::application::loop_engine::{AcceptedUserInput, DrainEpoch};
 
 /// Result of a single drain-or-seal operation on the buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,9 +62,15 @@ pub(crate) enum BufferDrain {
 /// Each successful drain-or-seal call increments the internal `current_epoch`.
 /// Callers pass their expected epoch to `drain_or_seal`; mismatch returns
 /// `EpochMismatch` without consuming input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BufferedRunInput {
+    Accepted(AcceptedUserInput),
+    Control(ChatInputEvent),
+}
+
 #[derive(Debug)]
 pub(crate) struct RunInputBuffer {
-    events: VecDeque<ChatInputEvent>,
+    events: VecDeque<BufferedRunInput>,
     sealed: bool,
     /// Current expected epoch for the next `drain_or_seal` call.
     current_epoch: DrainEpoch,
@@ -96,11 +102,22 @@ impl RunInputBuffer {
         }
     }
 
+    pub(crate) fn push_accepted(&mut self, input: AcceptedUserInput) {
+        self.events.push_back(BufferedRunInput::Accepted(input));
+    }
+
+    fn buffered_input(event: ChatInputEvent) -> BufferedRunInput {
+        match AcceptedUserInput::from_event(event) {
+            Ok(input) => BufferedRunInput::Accepted(input),
+            Err(control) => BufferedRunInput::Control(control),
+        }
+    }
+
     /// Push an event unconditionally. Callers that may operate on a sealed
     /// buffer should prefer `push_or_reject` for `UserMessage` events so
     /// that late arrivals are not silently buffered.
     pub(crate) fn push(&mut self, event: ChatInputEvent) {
-        self.events.push_back(event);
+        self.events.push_back(Self::buffered_input(event));
     }
 
     /// Push an event. If the buffer is sealed and the event is a `UserMessage`,
@@ -109,15 +126,14 @@ impl RunInputBuffer {
     /// always accepted even on a sealed buffer (control commands must still be
     /// drained back to the session).
     pub(crate) fn push_or_reject(&mut self, event: ChatInputEvent) -> Option<ChatInputEvent> {
-        if self.sealed
-            && matches!(
-                event,
-                ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)
-            )
-        {
-            return Some(event);
+        let input = Self::buffered_input(event);
+        if self.sealed && matches!(input, BufferedRunInput::Accepted(_)) {
+            return Some(match input {
+                BufferedRunInput::Accepted(accepted) => accepted.into_event(),
+                BufferedRunInput::Control(_) => unreachable!(),
+            });
         }
-        self.events.push_back(event);
+        self.events.push_back(input);
         None
     }
 
@@ -141,12 +157,7 @@ impl RunInputBuffer {
     pub(crate) fn pending_user_count(&self) -> usize {
         self.events
             .iter()
-            .filter(|e| {
-                matches!(
-                    e,
-                    ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)
-                )
-            })
+            .filter(|event| matches!(event, BufferedRunInput::Accepted(_)))
             .count()
     }
 
@@ -163,25 +174,10 @@ impl RunInputBuffer {
         let mut retained = VecDeque::new();
         while let Some(event) = self.events.pop_front() {
             match event {
-                ChatInputEvent::UserMessage {
-                    id, text, images, ..
-                } => {
-                    inputs.push(LoopInput {
-                        text,
-                        input_id: Some(id),
-                        images,
-                    });
+                BufferedRunInput::Accepted(input) => {
+                    inputs.push(LoopInput::accepted(input));
                 }
-                ChatInputEvent::SkillRequest(request) => {
-                    inputs.push(LoopInput {
-                        text: crate::application::loop_engine::input::format_skill_request(
-                            &request, "en",
-                        ),
-                        input_id: Some(request.input_id),
-                        images: Vec::new(),
-                    });
-                }
-                other => retained.push_back(other),
+                control @ BufferedRunInput::Control(_) => retained.push_back(control),
             }
         }
         self.events = retained;
@@ -193,7 +189,7 @@ impl RunInputBuffer {
     /// Drain user inputs and advance epoch for engine-driven continuations
     /// (StopHookFeedback / ToolResults). Unlike `drain_or_seal`, this
     /// never seals the buffer — only the normal drain-or-seal path seals
-    /// (#1272 per-turn drain linearization).
+    /// (#1272 per-run drain linearization).
     ///
     /// Returns `Ready` with the drained batch and the consumed epoch.
     /// Returns `EpochMismatch` / `AlreadySealed` on the same guards as
@@ -256,7 +252,7 @@ impl RunInputBuffer {
 
     /// Atomically drain user inputs OR seal the buffer if empty.
     ///
-    /// This is the single linearization point for the per-turn drain-or-seal
+    /// This is the single linearization point for the per-run drain-or-seal
     /// contract (#1272). After this returns `EmptyAndSealed`, the buffer is
     /// sealed — future `UserMessage` pushes via `push_or_reject` are rejected.
     ///
@@ -297,7 +293,7 @@ impl RunInputBuffer {
                 let mut batch = batch;
                 let injected: Vec<_> = self.test_inject_after_drain.drain(..).collect();
                 for event in injected {
-                    self.events.push_back(event);
+                    self.events.push_back(Self::buffered_input(event));
                 }
                 let batch2 = self.drain_user_inputs();
                 batch.extend(batch2);
@@ -326,9 +322,8 @@ impl RunInputBuffer {
         let mut retained = VecDeque::new();
         while let Some(event) = self.events.pop_front() {
             match event {
-                ChatInputEvent::UserMessage { text, .. } => texts.push(text),
-                ChatInputEvent::SkillRequest(request) => texts.push(request.raw_input),
-                other => retained.push_back(other),
+                BufferedRunInput::Accepted(input) => texts.push(input.withdraw_text()),
+                control @ BufferedRunInput::Control(_) => retained.push_back(control),
             }
         }
         self.events = retained;
@@ -344,7 +339,13 @@ impl RunInputBuffer {
     /// should treat them as anomalous (log + route explicitly, not silently
     /// forward to the next Run).
     pub(crate) fn drain_all(&mut self) -> Vec<ChatInputEvent> {
-        self.events.drain(..).collect()
+        self.events
+            .drain(..)
+            .map(|input| match input {
+                BufferedRunInput::Accepted(input) => input.into_event(),
+                BufferedRunInput::Control(event) => event,
+            })
+            .collect()
     }
 
     /// Snapshot current user input events as (InputId, Message) pairs,
@@ -352,15 +353,12 @@ impl RunInputBuffer {
     pub(crate) fn user_message_snapshot(&self) -> Vec<(sdk::InputId, share::message::Message)> {
         self.events
             .iter()
-            .filter_map(|e| match e {
-                ChatInputEvent::UserMessage { id, text, .. } => {
-                    Some((id.clone(), share::message::Message::user(text.clone())))
-                }
-                ChatInputEvent::SkillRequest(request) => Some((
-                    request.input_id.clone(),
-                    share::message::Message::user(request.raw_input.clone()),
+            .filter_map(|event| match event {
+                BufferedRunInput::Accepted(input) => Some((
+                    input.input_id().clone(),
+                    share::message::Message::user(input.withdraw_text()),
                 )),
-                _ => None,
+                BufferedRunInput::Control(_) => None,
             })
             .collect()
     }

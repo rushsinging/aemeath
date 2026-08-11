@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct AgentRunnerAssembly {
     pub runner: Arc<dyn tools::AgentRunner>,
     pub parent_context_source: ParentRunContextSource,
+    pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
@@ -32,11 +33,12 @@ pub fn build_agent_runner(
     runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
 ) -> AgentRunnerAssembly {
     let parent_context_for_runner = parent_context_source.clone();
+    let active_run_for_runner = active_run.clone();
     let semaphore_for_runner = agent_semaphore.clone();
     let factory_for_runner = runtime_context_factory.clone();
     let runner: Arc<dyn tools::AgentRunner> = Arc::new(agent_runner::CliAgentRunner {
         factory,
-        active_run,
+        active_run: active_run_for_runner,
         max_tool_concurrency,
         agent_semaphore: semaphore_for_runner,
         tool_result_materializer,
@@ -48,6 +50,7 @@ pub fn build_agent_runner(
     AgentRunnerAssembly {
         runner,
         parent_context_source,
+        active_run,
         max_tool_concurrency,
         max_agent_concurrency: agent_semaphore.available_permits(),
         agent_semaphore,
@@ -173,6 +176,7 @@ mod tests {
                     refl,
                     crate::application::run::test_task_access(),
                     hooks,
+                    Arc::new(crate::ports::UnavailableUsageSink),
                 )
             }),
         );

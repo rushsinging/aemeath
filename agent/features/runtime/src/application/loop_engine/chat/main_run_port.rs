@@ -10,9 +10,7 @@ use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
-use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
-};
+use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
 use crate::application::loop_engine::input_strategy::{
     BufferedInputAdapter, InputContinuationState, SessionInputPort,
@@ -21,7 +19,7 @@ use crate::application::loop_engine::{EventSinkPort, LoopEngineError, ModelStep}
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{Agent, ToolCall};
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use crate::ports::ContextRequest;
 
 fn request_context_size(request: Option<&ContextRequest>) -> usize {
@@ -45,19 +43,7 @@ pub(crate) fn request_log_context(
 
 #[cfg(test)]
 fn loop_input_messages(inputs: &[crate::application::loop_engine::LoopInput]) -> Vec<Message> {
-    inputs
-        .iter()
-        .map(|input| {
-            if input.images.is_empty() {
-                Message::user(input.text.clone())
-            } else {
-                super::super::input_gate::user_message_with_images(
-                    input.text.clone(),
-                    input.images.clone(),
-                )
-            }
-        })
-        .collect()
+    inputs.iter().map(|input| input.message()).collect()
 }
 
 #[cfg(test)]
@@ -162,7 +148,7 @@ pub(crate) fn make_agent(
             )
             .build(),
             tools::ToolExecutionPorts::new(
-                crate::adapters::tool_runtime::cancellation(cancel.clone()),
+                Arc::new(runtime_context.cancel().clone()),
                 crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone())
                     .read_access(),
                 Arc::new(tools::MutexReadSet(read_files)),
@@ -184,6 +170,12 @@ pub(crate) fn make_agent(
         agent_semaphore,
         workspace_persist: workspace.persist(),
         tool_result_materializer,
+        committed_side_effects:
+            crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                runtime_context,
+                session_id.to_string(),
+                workspace.read().current_workspace_root(),
+            ),
         runtime_cancellation: cancel.clone(),
     }
 }
@@ -191,7 +183,7 @@ pub(crate) fn make_agent(
 pub(crate) struct ChatEventPort {
     pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub session_id: String,
-    pub turn_context: RuntimeTurnContext,
+    pub turn_context: RuntimeRunContext,
     pub task_access: Arc<dyn task::TaskAccess>,
     pub model: String,
 }
@@ -201,7 +193,7 @@ impl EventSinkPort for ChatEventPort {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
         ChatStreamEventObserver {
             sink: self.sink.clone(),
@@ -210,7 +202,7 @@ impl EventSinkPort for ChatEventPort {
             task_access: &self.task_access,
             model: &self.model,
             started_at: execution.started_at().unwrap_or_else(Instant::now),
-            turn_count: execution.turn_count(),
+            step_count: execution.step_count(),
             messages_snapshot: execution.messages_snapshot(),
         }
         .emit(events)
@@ -284,20 +276,6 @@ pub(crate) struct ChatStopHookObserver {
 
 #[async_trait]
 impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopHookObserver {
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        use crate::application::loop_engine::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
-        self.sink
-            .send_event(RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-                hook_name: format!("{:?}", hook::HookPoint::Stop),
-                status: RuntimeHookEventStatus::Running,
-                matcher: None,
-                command: None,
-                result: None,
-            }))
-            .await;
-        Ok(())
-    }
-
     fn install_stop_hook_feedback(&mut self, message: Message) {
         self.continuation.install_stop_hook_feedback(message);
     }
@@ -307,17 +285,17 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
         execution: &RunExecutionState,
         outcome: &crate::application::hook::stop_coordination::StopHookOutcome,
     ) -> Result<(), LoopEngineError> {
-        crate::application::loop_engine::chat::hook_ui::project_hook_dispatch(
-            &self.sink,
-            outcome.point,
-            &outcome.dispatch,
-        )
-        .await;
-        if outcome.feedback_message.is_some() {
+        if let Some(message) = outcome.feedback_message.as_ref() {
+            let notice = message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.hook_notice.clone())
+                .expect("Stop Hook feedback message must carry typed Hook notice");
             self.sink
-                .send_event(RuntimeStreamEvent::StopHookBlocked {
-                    messages: execution.messages_snapshot(),
-                })
+                .send_event(RuntimeStreamEvent::HookNotice(notice))
+                .await;
+            self.sink
+                .send_message_state_changed(execution.messages_len())
                 .await;
         }
         Ok(())
@@ -326,44 +304,53 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
 
 pub(crate) struct ChatToolRoundObserver {
     pub runtime_context: RuntimeContext,
-    pub workspace_root: std::path::PathBuf,
+    pub workspace_read: Arc<dyn project::WorkspaceRead>,
+    pub turn_context: RuntimeRunContext,
+    pub session_id: String,
+    pub materializer:
+        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
 }
 
 #[async_trait]
 impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRoundObserver {
-    async fn results_materialized(
+    async fn cancelled_results_completed(
         &mut self,
-        execution: &RunExecutionState,
-        has_task_mutation: bool,
+        results: &[crate::application::tool::agent::ToolExecution],
     ) {
-        self.runtime_context
-            .event_sink()
-            .send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                messages: execution.messages_snapshot(),
-            })
+        for result in results {
+            crate::application::loop_engine::chat::tools::send_tool_result(
+                &self.runtime_context.event_sink(),
+                &self.turn_context,
+                result,
+                self.materializer.as_ref(),
+                &self.session_id,
+            )
             .await;
-        if has_task_mutation {
-            let snapshot =
-                crate::application::loop_engine::chat::task_snapshot::build_task_snapshot(
-                    &**self.runtime_context.task_ref(),
-                );
-            self.runtime_context
-                .event_sink()
-                .send_event(RuntimeStreamEvent::TasksSnapshot {
-                    tasks: Box::new(snapshot),
-                })
-                .await;
         }
     }
 
-    async fn round_finished(&mut self, call_count: usize, turn: usize, cancel: &CancellationToken) {
+    async fn results_materialized(&mut self, execution: &RunExecutionState) {
+        self.runtime_context
+            .event_sink()
+            .send_message_state_changed(execution.messages_len())
+            .await;
+    }
+
+    async fn round_finished(
+        &mut self,
+        step_id: &sdk::RunStepId,
+        call_count: usize,
+        run_step: usize,
+        cancel: &CancellationToken,
+    ) {
         run_post_tool_batch(
-            &self.runtime_context.event_sink(),
             self.runtime_context.hooks_ref(),
+            self.runtime_context.activities().as_ref(),
+            step_id,
             cancel,
             call_count,
-            turn,
-            &self.workspace_root,
+            run_step,
+            &self.workspace_read,
         )
         .await;
     }
@@ -379,8 +366,11 @@ where
     pub context_size: usize,
     pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
     pub language: String,
-    pub turn_context: RuntimeTurnContext,
+    pub turn_context: RuntimeRunContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
+    /// #1494：边流边执行句柄（流中 ToolCallCompleted → 立即执行，结果缓冲）。
+    pub streaming_tool:
+        Option<Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>,
 }
 
 impl<I> ChatModelObserver<I>
@@ -441,20 +431,22 @@ where
     fn build_reducer(
         &self,
     ) -> InvocationEventReducer<crate::application::loop_engine::chat::ChatEventSinkHandle> {
-        InvocationEventReducer::with_tool_identity(
+        let reducer = InvocationEventReducer::with_tool_identity(
             self.runtime_context.event_sink(),
             self.tool_identity.clone(),
             self.turn_context.clone(),
-        )
+        );
+        match &self.streaming_tool {
+            Some(executor) => reducer.with_streaming_tool(executor.clone()),
+            None => reducer,
+        }
     }
 
-    fn waiting_event_context(
+    fn streaming_tool(
         &self,
-    ) -> Option<(
-        crate::application::loop_engine::chat::ChatEventSinkHandle,
-        RuntimeTurnContext,
-    )> {
-        Some((self.runtime_context.event_sink(), self.turn_context.clone()))
+    ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
+    {
+        self.streaming_tool.as_ref()
     }
 
     fn extract_tool_calls(
@@ -544,7 +536,7 @@ where
         let memory_config = self.runtime_context.config_ref().config().memory();
         if should_run_turn_reflection(
             memory_config,
-            execution.turn_count(),
+            execution.step_count(),
             false,
             &response.stop_reason,
             false,
@@ -552,7 +544,7 @@ where
             let _ = submit_interval_reflection(
                 &self.reflection_tasks,
                 memory_config,
-                execution.turn_count(),
+                execution.step_count(),
                 execution.messages(),
                 self.runtime_context.provider_ref(),
                 &self.system_prompt,

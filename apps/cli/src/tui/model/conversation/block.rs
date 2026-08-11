@@ -1,19 +1,4 @@
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum HookNoticeKind {
-    Blocked,
-    Failed,
-    Info,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HookNoticeContent {
-    pub kind: HookNoticeKind,
-    pub title: String,
-    pub body: String,
-    pub details: Option<String>,
-}
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 
 /// AskUserQuestion 批量交互中的单个问题槽位。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -33,6 +18,26 @@ pub struct AskUserSlot {
     pub answer: Option<String>,
 }
 
+/// AskUser 批量交互的完成状态。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserCompletion {
+    Active,
+    ReplyPending,
+    CancelPending,
+    Answered,
+    Cancelled,
+}
+
+impl AskUserCompletion {
+    pub fn is_interactive(self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Answered | Self::Cancelled)
+    }
+}
+
 /// AskUser 批量交互的阶段。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum AskUserPhase {
@@ -50,24 +55,24 @@ pub enum ConversationBlock {
     AssistantText {
         id: String,
         chat_id: Option<ChatId>,
-        turn_id: Option<ChatTurnId>,
+        run_id: Option<ChatRunId>,
         text: String,
     },
     Thinking {
         id: String,
         chat_id: Option<ChatId>,
-        turn_id: Option<ChatTurnId>,
+        run_id: Option<ChatRunId>,
         text: String,
     },
     ToolCall {
         id: ToolCallId,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
     },
     ToolResult {
         id: ToolCallId,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         output: String,
         content: serde_json::Value,
         is_error: bool,
@@ -77,10 +82,6 @@ pub enum ConversationBlock {
         id: String,
         text: String,
     },
-    HookNotice {
-        id: String,
-        content: HookNoticeContent,
-    },
     Error {
         id: String,
         text: String,
@@ -89,11 +90,6 @@ pub enum ConversationBlock {
         id: String,
         input_id: String,
         text: String,
-    },
-    AgentProgress {
-        id: String,
-        tool_id: ToolCallId,
-        message: String,
     },
     OrphanToolResult {
         id: String,
@@ -126,8 +122,8 @@ pub enum ConversationBlock {
         chat_input_cursor: usize,
         /// 确认页导航光标。
         confirm_cursor: usize,
-        /// 用户已确认提交（block 进入终态）。
-        confirmed: bool,
+        /// Runtime 确认的完成状态。
+        completion: AskUserCompletion,
     },
 }
 
@@ -138,10 +134,8 @@ impl ConversationBlock {
             | ConversationBlock::AssistantText { id, .. }
             | ConversationBlock::Thinking { id, .. }
             | ConversationBlock::System { id, .. }
-            | ConversationBlock::HookNotice { id, .. }
             | ConversationBlock::Error { id, .. }
             | ConversationBlock::QueuedUserMessage { id, .. }
-            | ConversationBlock::AgentProgress { id, .. }
             | ConversationBlock::OrphanToolResult { id, .. }
             | ConversationBlock::AskUserBatch { id, .. } => id,
             ConversationBlock::ToolCall { id, .. } | ConversationBlock::ToolResult { id, .. } => {
@@ -161,7 +155,7 @@ mod tests {
         let block = ConversationBlock::AssistantText {
             id: "assistant-1".to_string(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             text: "hello".to_string(),
         };
         assert_eq!(block.id(), "assistant-1");
@@ -172,7 +166,7 @@ mod tests {
         let block = ConversationBlock::ToolCall {
             id: ToolCallId::new("tool-1"),
             chat_id: ChatId::new("chat-1"),
-            turn_id: ChatTurnId::new("turn-1"),
+            run_id: ChatRunId::new("turn-1"),
         };
         let _ = block.id(); // just verify it returns
     }

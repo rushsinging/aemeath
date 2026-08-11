@@ -3,6 +3,10 @@
 //! `packages/sdk` 只放 trait + 公共类型，零业务依赖。
 //! 实现在 `agent/runtime`。
 
+pub mod activity;
+#[cfg(test)]
+#[path = "activity_tests.rs"]
+mod activity_tests;
 pub mod bootstrap;
 pub mod change_set;
 pub mod chat;
@@ -24,8 +28,11 @@ pub mod session_lock;
 
 /// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
 pub use chat_event::{
-    LocalResumedSessionStep, LocalSessionResumeBacking, SessionResumeFailureKind, SessionResumeView,
+    DisplayHistoryIndex, DisplayHistoryStepReference, DisplayHistoryWindow,
+    DisplayHistoryWindowRequest, LocalResumedSessionStep, LocalSessionResumeBacking,
+    SessionResumeFailureKind, SessionResumeView,
 };
+pub mod task;
 pub mod tool_input;
 pub mod tool_result;
 pub mod tui;
@@ -35,20 +42,29 @@ pub mod wire;
 
 pub mod ids;
 pub mod interaction;
+mod runtime_status;
 
+pub use activity::{
+    ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
+    ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
+    CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
+    RunPhaseKindView, RunPurposeView,
+};
 pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserAnswer,
-    AskUserQuestionItem, AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent,
-    ChatInputImage, ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView,
-    HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
-    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
-    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ResumedStepFinalizeCause, SkillRequest, ToolCallStatusView, ToolResultImage,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
+    ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest, ChatResult,
+    ChatStream, OptionItem, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
     WorkspaceContextView, WorkspaceStackEntryView,
 };
-pub use client::{AgentClient, ConfigFormClient, ConnectClient, RunControlClient};
+pub use client::{
+    AgentClient, ConfigFormClient, ConnectClient, DisplayHistoryQuery, RunControlClient,
+};
 pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
@@ -78,7 +94,7 @@ pub use connect::{
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{
-    AgentId, ChatId, ChatTurnId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
+    AgentId, ChatId, ChatRunId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
     RunId, RunStepId, SessionId, ToolCallId,
 };
 pub use interaction::{
@@ -89,27 +105,33 @@ pub use interaction::{
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
-    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ControlDeadline,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunStepCancellationTerminal,
     RunTerminationReason, TerminateRunOutcome,
 };
+pub use runtime_status::{ContextBudgetView, ContextDecisionSourceView, RuntimeStatusView};
 pub use session::{
-    ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
-    StopHookFeedbackView,
+    ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
+    SessionSnapshot, SessionSummary, SkillRequestMetadataView,
 };
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{
+    HookNotice as LocalResumeHookNotice, HookNoticeKind as LocalResumeHookNoticeKind,
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
     Role as LocalResumeRole,
+};
+pub use task::{
+    TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
+    TaskStateView,
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
     ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
-    TaskStatusView, TuiLaunchContext,
+    TuiLaunchContext,
 };
 pub use types::{
-    char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
-    StrSlice, TaskState, TaskSummary,
+    char_to_byte, format_tokens, ByteIdx, CharIdx, PermissionPrompt, StatusInfo, StrSlice,
+    TaskState, TaskSummary,
 };
 pub use update::{UpdateResult, UpdateService, VersionCheck};
 pub use utils::{slice_head, slice_tail};

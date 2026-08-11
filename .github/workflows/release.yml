@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -21,6 +25,7 @@ jobs:
   validate:
     name: Validate & Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -77,6 +82,7 @@ jobs:
           - target: x86_64-apple-darwin
             runner: macos-14          # Apple Silicon runner (cross-compile)
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:

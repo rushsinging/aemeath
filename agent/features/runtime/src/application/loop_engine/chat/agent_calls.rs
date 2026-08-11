@@ -1,9 +1,10 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::tools::{
     run_post_tool_hooks, send_tool_call_status, send_tool_result,
 };
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
@@ -20,7 +21,7 @@ use tools::ToolOutcome;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent_approved: &[PreparedToolCall],
     agent: &crate::application::tool::agent::Agent,
     agent_ctx: &ToolExecutionContext,
@@ -28,8 +29,9 @@ pub(crate) async fn execute_agent_calls<S>(
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     cancel: &CancellationToken,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
@@ -48,10 +50,10 @@ where
             let hook_port = hook_port.clone();
             let agent_semaphore = agent_semaphore.clone();
             let workspace_persist = workspace_persist.clone();
-            let mut ag_ctx = agent_ctx.clone();
+            let mut agent_tool_context = agent_ctx.clone();
             let context = context.clone();
             let cancel = cancel.clone();
-            let workspace_root = workspace_root.to_path_buf();
+            let workspace_read = workspace_read.clone();
             let catalog = catalog.clone();
             let run_id = run_id.clone();
             let step_id = step_id.clone();
@@ -68,10 +70,11 @@ where
                     call,
                     sink,
                     hook_port,
+                    activities,
                     agent,
-                    &mut ag_ctx,
+                    &mut agent_tool_context,
                     &workspace_persist,
-                    &workspace_root,
+                    &workspace_read,
                     &cancel,
                     authorization,
                     &catalog,
@@ -101,14 +104,15 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     call: ToolCall,
     sink: S,
     hook_port: Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     agent: &crate::application::tool::agent::Agent,
-    ag_ctx: &mut ToolExecutionContext,
+    agent_tool_context: &mut ToolExecutionContext,
     workspace_persist: &Arc<dyn project::WorkspacePersist>,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     cancel: &CancellationToken,
     authorization: tools::AuthorizationContext,
     catalog: &tools::ToolCatalogSnapshot,
@@ -119,6 +123,7 @@ async fn execute_one_agent<S>(
 where
     S: ChatEventSink,
 {
+    let workspace_root = workspace_read.current_workspace_root();
     log::debug!(target: crate::LOG_TARGET,
         "pretooluse timing start: kind=agent tool_name={} runtime_id={} provider_id={} index={} input_len={}",
         call.name,
@@ -128,26 +133,20 @@ where
         call.input.to_string().len(),
     );
     let original_input = call.input.clone();
-    let pre_dispatch = if authorization.enforce_permission_hooks {
-        dispatch_hook(
-            &hook_port,
-            &sink,
-            HookInvocation::PreToolUse(PreToolUseInput {
-                tool_name: call.name.clone(),
-                tool_input: call.input.clone(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await
-    } else {
-        crate::application::hook::outcome_mapper::RuntimeHookDispatch {
-            directive: crate::application::hook::outcome_mapper::RuntimeHookDirective::Continue,
-            executions: Vec::new(),
-            messages: Vec::new(),
-            block_detail: None,
-        }
-    };
+    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行；
+    // 授权上下文不含 hook 开关（permission hook 由授权决策流触发）。
+    let pre_dispatch = dispatch_hook(
+        &hook_port,
+        activities,
+        step_id,
+        HookInvocation::PreToolUse(PreToolUseInput {
+            tool_name: call.name.clone(),
+            tool_input: call.input.clone(),
+        }),
+        &workspace_root,
+        cancel,
+    )
+    .await;
     if crate::application::loop_engine::chat::hook_ui::dispatch_is_blocking(&pre_dispatch) {
         let last_exec = pre_dispatch.executions.last();
         let exit_code = last_exec.and_then(|e| e.exit_code);
@@ -184,7 +183,7 @@ where
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let (effective_call, _effective_authorization, _hook_context) = match hook_outcome {
         HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
@@ -283,49 +282,55 @@ where
         effective_call.provider_id,
     );
 
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "agent tool cancellation context bound: run_id={} step_id={} call_id={} tool={} cancelled={}",
+        run_id,
+        step_id,
+        effective_call.id,
+        effective_call.name,
+        agent_tool_context.cancellation().is_cancelled()
+    );
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
     let prog_adapter = crate::application::run::context::tool_progress_sink(prog_tx);
-    *ag_ctx = ag_ctx.with_progress(Some(prog_adapter.clone()));
+    *agent_tool_context = agent_tool_context.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
+    let child_parent_context = progress_context.clone();
+    let child_parent_tool_id = call_id.clone();
     let progress_log_context = logging::capture();
     let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
+        let mut sub_run_fact_publisher =
+            SubRunFactPublisher::new(child_parent_context, child_parent_tool_id);
         while let Some(event) = prog_rx.recv().await {
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[agent_progress_forward] tool_id={} kind={} seq={} source_chat_id={} source_turn_id={} attachment_chat_id={} attachment_turn_id={}",
+                "[agent_progress_forward] tool_id={} kind={} seq={} source_chat_id={} source_run_id={} attachment_chat_id={} attachment_run_id={}",
                 call_id.as_str(),
                 format!("{:?}", event.kind).split('{').next().unwrap_or("?"),
                 event.sequence,
                 event.source_context.as_ref().map(|source| source.chat_id.as_str()).unwrap_or("<attachment>"),
-                event.source_context.as_ref().map(|source| source.turn_id.as_str()).unwrap_or("<attachment>"),
+                event.source_context.as_ref().map(|source| source.run_id.as_str()).unwrap_or("<attachment>"),
                 progress_context.chat_id,
-                progress_context.turn_id,
+                progress_context.run_id,
             );
-            let source_context = event
-                .source_context
-                .as_ref()
-                .map(|source| {
-                    RuntimeTurnContext::new(
-                        sdk::ChatId::from_legacy_or_new(&source.chat_id),
-                        sdk::ChatTurnId::from_legacy_or_new(&source.turn_id),
-                    )
-                })
-                .unwrap_or_else(|| progress_context.clone());
-            let _ = ui_sink
-                .send_event(RuntimeStreamEvent::AgentProgress {
-                    source_context,
-                    attachment_context: progress_context.clone(),
-                    tool_id: call_id.clone(),
-                    event,
-                })
-                .await;
+            for fact in sub_run_fact_publisher.publish(event) {
+                let runtime_event = match fact {
+                    SubRunPublishedFact::Started(started) => {
+                        RuntimeStreamEvent::SubRunStarted(started)
+                    }
+                    SubRunPublishedFact::Activity(activity) => {
+                        RuntimeStreamEvent::SubRunActivity(activity)
+                    }
+                };
+                let _ = ui_sink.send_event(runtime_event).await;
+            }
         }
     });
 
     let execution = agent
-        .execute_one_with_ctx(&effective_call, ag_ctx, step_id)
+        .execute_one_with_ctx(&effective_call, agent_tool_context, step_id)
         .await;
     let workspace = workspace_persist.snapshot();
     let _ = sink
@@ -335,16 +340,17 @@ where
             workspace,
         })
         .await;
-    *ag_ctx = ag_ctx.with_progress(None);
+    *agent_tool_context = agent_tool_context.with_progress(None);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
     run_post_tool_hooks(
-        &sink,
         &hook_port,
+        activities,
+        step_id,
         &effective_call,
         &execution,
         cancel,
-        workspace_root,
+        workspace_read,
     )
     .await;
     send_tool_result(
@@ -358,18 +364,255 @@ where
     vec![execution]
 }
 
+enum SubRunPublishedFact {
+    Started(tools::SubRunStartedEvent),
+    Activity(tools::SubRunActivityEvent),
+}
+
+struct SubRunFactPublisher {
+    identity: Option<tools::SubRunIdentity>,
+    parent_context: RuntimeRunContext,
+    parent_tool_call_id: sdk::ToolCallId,
+    sequence: u64,
+}
+
+impl SubRunFactPublisher {
+    fn new(parent_context: RuntimeRunContext, parent_tool_call_id: sdk::ToolCallId) -> Self {
+        Self {
+            identity: None,
+            parent_context,
+            parent_tool_call_id,
+            sequence: 0,
+        }
+    }
+
+    fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<SubRunPublishedFact> {
+        if self.identity.is_none() {
+            if let Some(source) = event.source_context.as_ref() {
+                self.identity = Some(tools::SubRunIdentity {
+                    agent_id: source.chat_id.clone(),
+                    run_id: source.run_id.clone(),
+                    parent_chat_id: self.parent_context.chat_id.to_string(),
+                    parent_run_id: self.parent_context.run_id.to_string(),
+                    spawned_by_tool_call_id: self.parent_tool_call_id.to_string(),
+                });
+            }
+        }
+        let Some(identity) = self.identity.clone() else {
+            return Vec::new();
+        };
+        match event.kind {
+            tools::AgentProgressKind::Started { role, model } => {
+                self.sequence = self.sequence.saturating_add(1);
+                vec![SubRunPublishedFact::Started(tools::SubRunStartedEvent {
+                    identity,
+                    sequence: self.sequence,
+                    role,
+                    model,
+                })]
+            }
+            kind => sub_run_activity_kinds(kind)
+                .into_iter()
+                .map(|kind| {
+                    self.sequence = self.sequence.saturating_add(1);
+                    SubRunPublishedFact::Activity(tools::SubRunActivityEvent {
+                        identity: identity.clone(),
+                        sequence: self.sequence,
+                        kind,
+                    })
+                })
+                .collect(),
+        }
+    }
+}
+
+fn sub_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::SubRunActivityKind> {
+    match kind {
+        tools::AgentProgressKind::Started { .. } => Vec::new(),
+        tools::AgentProgressKind::Message { text } => {
+            vec![tools::SubRunActivityKind::Text { text }]
+        }
+        tools::AgentProgressKind::Thinking { text } => {
+            vec![tools::SubRunActivityKind::Thinking { text }]
+        }
+        tools::AgentProgressKind::ToolCalls { calls } => calls
+            .into_iter()
+            .map(|call| tools::SubRunActivityKind::ToolCall {
+                id: call.id,
+                name: call.name,
+                input: call.input,
+            })
+            .collect(),
+        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
+            vec![tools::SubRunActivityKind::ToolOutput { tool_name, text }]
+        }
+        tools::AgentProgressKind::ToolResult {
+            tool_call_id,
+            tool_name,
+            output,
+            content,
+            is_error,
+        } => vec![tools::SubRunActivityKind::ToolResult {
+            tool_call_id,
+            tool_name,
+            output,
+            content,
+            is_error,
+        }],
+        tools::AgentProgressKind::Terminal { outcome } => {
+            vec![tools::SubRunActivityKind::Terminal { outcome }]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::application::loop_engine::chat::{EventFuture, RuntimeStreamEvent};
     use async_trait::async_trait;
-    use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+    use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Notify};
     use tools::{TypedTool, TypedToolResult};
+
+    #[test]
+    fn sub_run_activity_projection_preserves_parent_tool_identity_and_kinds() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let event = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 7,
+            kind: tools::AgentProgressKind::Thinking {
+                text: "reasoning".to_string(),
+            },
+        };
+
+        let mut publisher =
+            SubRunFactPublisher::new(parent_context.clone(), parent_tool_id.clone());
+        let projected = publisher.publish(event);
+
+        assert_eq!(projected.len(), 1);
+        let SubRunPublishedFact::Activity(activity) = &projected[0] else {
+            panic!("expected sub run activity");
+        };
+        assert_eq!(activity.identity.agent_id, "researcher");
+        assert_eq!(activity.identity.run_id, "child-run");
+        assert_eq!(
+            activity.identity.parent_chat_id,
+            parent_context.chat_id.to_string()
+        );
+        assert_eq!(
+            activity.identity.parent_run_id,
+            parent_context.run_id.to_string()
+        );
+        assert_eq!(
+            activity.identity.spawned_by_tool_call_id,
+            parent_tool_id.to_string()
+        );
+        assert_eq!(activity.sequence, 1);
+        assert!(matches!(
+            &activity.kind,
+            tools::SubRunActivityKind::Thinking { text } if text == "reasoning"
+        ));
+    }
+
+    #[test]
+    fn sub_run_tool_result_preserves_canonical_tool_name() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
+        let started = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 0,
+            kind: tools::AgentProgressKind::Started {
+                role: Some("researcher".to_string()),
+                model: "model".to_string(),
+            },
+        };
+        let SubRunPublishedFact::Started(started) = &publisher.publish(started)[0] else {
+            panic!("expected sub run started");
+        };
+        assert_eq!(started.sequence, 1);
+
+        let projected = publisher.publish(tools::AgentProgressEvent {
+            source_context: None,
+            sequence: 1,
+            kind: tools::AgentProgressKind::ToolResult {
+                tool_call_id: "skill-call".to_string(),
+                tool_name: "Skill".to_string(),
+                output: "SKILL_BODY_SENTINEL".to_string(),
+                content: serde_json::json!({"name": "using-superpowers"}),
+                is_error: false,
+            },
+        });
+
+        let SubRunPublishedFact::Activity(activity) = &projected[0] else {
+            panic!("expected sub run activity");
+        };
+        assert!(matches!(
+            &activity.kind,
+            tools::SubRunActivityKind::ToolResult {
+                tool_name,
+                output,
+                ..
+            } if tool_name == "Skill" && output == "SKILL_BODY_SENTINEL"
+        ));
+    }
+
+    #[test]
+    fn sub_run_activity_projection_sequences_tool_output_without_source_context() {
+        let parent_context =
+            RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
+        let parent_tool_id = ToolCallId::new("agent-call");
+        let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
+        let started = tools::AgentProgressEvent {
+            source_context: Some(tools::AgentProgressSourceContext::new(
+                "researcher",
+                "child-run",
+            )),
+            sequence: 0,
+            kind: tools::AgentProgressKind::Started {
+                role: Some("researcher".to_string()),
+                model: "model".to_string(),
+            },
+        };
+        let SubRunPublishedFact::Started(started) = &publisher.publish(started)[0] else {
+            panic!("expected sub run started");
+        };
+        assert_eq!(started.sequence, 1);
+
+        let output = publisher.publish(tools::AgentProgressEvent {
+            source_context: None,
+            sequence: 1,
+            kind: tools::AgentProgressKind::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: "hello".to_string(),
+            },
+        });
+
+        assert_eq!(output.len(), 1);
+        let SubRunPublishedFact::Activity(output) = &output[0] else {
+            panic!("expected sub run activity");
+        };
+        assert_eq!(output.identity.run_id, "child-run");
+        assert_eq!(output.sequence, 2);
+        assert!(matches!(
+            &output.kind,
+            tools::SubRunActivityKind::ToolOutput { tool_name, text }
+                if tool_name == "Bash" && text == "hello"
+        ));
+    }
 
     #[derive(Clone)]
     struct NoopSink;
@@ -513,6 +756,11 @@ mod tests {
         tokio::spawn(async move {
             let sink = NoopSink;
             let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+            let activities = crate::application::activity::ActivityCoordinator::new(
+                sdk::RunId::new_v7(),
+                Arc::new(crate::application::activity::SystemActivityClock),
+                Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+            );
             let prepared = calls
                 .into_iter()
                 .map(|call| PreparedToolCall {
@@ -534,19 +782,24 @@ mod tests {
                     crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 tool_result_materializer:
                     crate::application::tool::test_support::test_tool_result_materializer(),
+                committed_side_effects: Default::default(),
                 runtime_cancellation: cancel.clone(),
             };
+            let step_tool_context = ctx.with_cancellation(Arc::new(
+                crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
+            ));
             execute_agent_calls(
-                &RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn")),
+                &RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn")),
                 &prepared,
                 &agent,
-                &ctx,
+                &step_tool_context,
                 &agent_semaphore,
                 &crate::application::run::workspace_test_support::workspace_persist(&ctx),
                 &sink,
                 &hook_port,
+                &activities,
                 &cancel,
-                std::path::Path::new("."),
+                &ctx.workspace_read(),
                 &catalog,
                 &policy::AllowAllPolicy,
                 &sdk::RunId::new_v7(),
@@ -627,6 +880,35 @@ mod tests {
         first.await.unwrap();
         second.await.unwrap();
         assert_eq!(h.max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn running_agent_call_uses_current_step_cancellation() {
+        let mut harness = harness(&["running"], 1);
+        let step_cancel = CancellationToken::new();
+        let handle = spawn_calls(
+            harness.execution.clone(),
+            harness.ctx.clone(),
+            vec![call("running", 0)],
+            harness.agent_semaphore.clone(),
+            step_cancel.clone(),
+            harness.catalog.clone(),
+        );
+        assert_eq!(harness.started.recv().await.unwrap(), "running");
+
+        step_cancel.cancel();
+        let results = tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("当前 Step 取消必须终止运行中的 Agent tool call")
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].outcome.is_error);
+        assert!(
+            results[0].outcome.text.contains("cancel"),
+            "Agent tool terminal 必须保留取消语义: {}",
+            results[0].outcome.text
+        );
     }
 
     #[tokio::test]

@@ -15,9 +15,8 @@ pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView,
-    ToolSemanticStatus,
+    OutputBlockKind, OutputRenderWindow, OutputViewModel, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
@@ -37,14 +36,14 @@ mod tests {
         let kind = OutputBlockKind::ToolCall(ToolCallBlockView {
             key: "chat-1/turn-1/tool-1".to_string(),
             chat_id: Some("chat-1".to_string()),
-            turn_id: Some("turn-1".to_string()),
+            run_id: Some("turn-1".to_string()),
             tool_call_id: Some("tool-1".to_string()),
             title: "Read(src/main.rs)".to_string(),
             icon: "✓".to_string(),
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Success,
             args_preview: Some("src/main.rs".to_string()),
-            activity_lines: Vec::new(),
+            streaming_preview: None,
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -58,7 +57,13 @@ mod tests {
             kind,
             children: Vec::new(),
         };
-        let model = OutputViewModel::from_roots(vec![node], 1, true);
+        let model = OutputViewModel {
+            roots: vec![node.into()],
+            version: 1,
+            follow_tail_hint: true,
+            source_total_lines: None,
+            folded_earlier_lines: 0,
+        };
         assert_eq!(model.roots.len(), 1);
     }
 }

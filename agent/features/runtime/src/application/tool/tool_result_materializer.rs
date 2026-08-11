@@ -2,7 +2,16 @@ use std::sync::Arc;
 
 use crate::ports::ToolResultBlobPort;
 use share::message::Message;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
 use tools::ImageData;
+
+const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).into()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolResultMaterializationPolicy {
@@ -33,6 +42,7 @@ impl ToolResultMaterializationPolicy {
     }
 }
 
+#[derive(Clone)]
 pub struct ToolResultMaterialization {
     text: String,
     persisted: bool,
@@ -100,10 +110,47 @@ impl ToolResultMaterialization {
     }
 }
 
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct ToolResultMaterializationKey {
+    session_id: String,
+    tool_use_id: String,
+    original_bytes: usize,
+    digest: [u8; 32],
+}
+
+#[derive(Default)]
+struct CompletedToolResultMaterializations {
+    values: HashMap<ToolResultMaterializationKey, ToolResultMaterialization>,
+    order: VecDeque<ToolResultMaterializationKey>,
+}
+
+impl CompletedToolResultMaterializations {
+    fn get(&self, key: &ToolResultMaterializationKey) -> Option<ToolResultMaterialization> {
+        self.values.get(key).cloned()
+    }
+
+    fn insert(
+        &mut self,
+        key: ToolResultMaterializationKey,
+        materialized: ToolResultMaterialization,
+    ) {
+        if !self.values.contains_key(&key) {
+            self.order.push_back(key.clone());
+        }
+        self.values.insert(key, materialized);
+        while self.order.len() > COMPLETED_MATERIALIZATION_CAPACITY {
+            if let Some(expired) = self.order.pop_front() {
+                self.values.remove(&expired);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ToolResultMaterializer {
     blobs: Arc<dyn ToolResultBlobPort>,
     policy: ToolResultMaterializationPolicy,
+    completed: Arc<Mutex<CompletedToolResultMaterializations>>,
 }
 
 impl ToolResultMaterializer {
@@ -111,7 +158,11 @@ impl ToolResultMaterializer {
         blobs: Arc<dyn ToolResultBlobPort>,
         policy: ToolResultMaterializationPolicy,
     ) -> Self {
-        Self { blobs, policy }
+        Self {
+            blobs,
+            policy,
+            completed: Arc::new(Mutex::new(CompletedToolResultMaterializations::default())),
+        }
     }
 
     pub(crate) async fn materialize_display_result(
@@ -180,6 +231,21 @@ impl ToolResultMaterializer {
             };
         }
 
+        let key = ToolResultMaterializationKey {
+            session_id: session_id.to_string(),
+            tool_use_id: tool_use_id.to_string(),
+            original_bytes: output.len(),
+            digest: sha256(output.as_bytes()),
+        };
+        if let Some(materialized) = self
+            .completed
+            .lock()
+            .expect("tool result materialization cache")
+            .get(&key)
+        {
+            return materialized;
+        }
+
         let blob = match self
             .blobs
             .write_once(session_id, tool_use_id, output.as_bytes())
@@ -202,7 +268,7 @@ impl ToolResultMaterializer {
         };
         let text =
             bounded_tool_result_text(output, character_count, self.policy, Some(blob.locator()));
-        ToolResultMaterialization {
+        let materialized = ToolResultMaterialization {
             text,
             persisted: true,
             original_chars: character_count,
@@ -211,7 +277,12 @@ impl ToolResultMaterializer {
             blob_locator: Some(blob.locator().to_string()),
             degradation_reason: None,
             warning: None,
-        }
+        };
+        self.completed
+            .lock()
+            .expect("tool result materialization cache")
+            .insert(key, materialized.clone());
+        materialized
     }
 }
 

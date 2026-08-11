@@ -6,7 +6,7 @@ use crate::{
     MemoryStorageErrorKind, ProjectMemoryKey,
 };
 use async_trait::async_trait;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use storage::api as storage_api;
 
 fn unique_root(case: &str) -> std::path::PathBuf {
@@ -74,6 +74,88 @@ fn storage_error_acl_maps_only_memory_owned_error_kinds() {
 fn adapter_is_memory_owned_store() {
     fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevision>>() {}
     assert_store::<AtomicDatasetMemoryStore>();
+}
+
+#[tokio::test]
+async fn opener_reads_legacy_storage_manifest_without_member_evidence() {
+    let root = unique_root("legacy-storage-manifest");
+    let project = project_key();
+    let expected_entry = entry(MemoryLayer::Project, "legacy dataset bytes");
+    let expected_dataset = MemoryDataset::new(
+        MemoryLayer::Project,
+        vec![expected_entry.clone()],
+        Vec::new(),
+    )
+    .expect("valid project memory dataset");
+    let (active, archive) =
+        crate::codec::encode_dataset(&expected_dataset).expect("encode project memory dataset");
+    let active_member = storage_api::DatasetMember::new(
+        storage_api::SafePathSegment::from_str("active").expect("safe active member"),
+        active.clone(),
+    );
+    let archive_member = storage_api::DatasetMember::new(
+        storage_api::SafePathSegment::from_str("archive").expect("safe archive member"),
+        archive.clone(),
+    );
+    let storage = shared_storage(&root);
+    let dataset_key = storage_api::DatasetKey::new(
+        storage_api::StorageNamespace::Memory,
+        vec![storage_api::SafePathSegment::from_str(project.as_str())
+            .expect("safe project memory key")],
+    )
+    .expect("valid project dataset key");
+    let empty_revision = storage
+        .read_manifest(&dataset_key)
+        .await
+        .expect("read empty project manifest")
+        .revision()
+        .clone();
+    storage
+        .commit_atomic(
+            &dataset_key,
+            &empty_revision,
+            &[active_member.clone(), archive_member.clone()],
+            storage_api::WriteOptions::new(storage_api::Durability::BestEffort),
+        )
+        .await
+        .expect("seed project dataset");
+    let dataset_path = root.join("memory").join(project.as_str());
+    let primary_manifest_path = dataset_path.join("primary/manifest.json");
+    let mut legacy_manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&primary_manifest_path).expect("read seeded manifest"),
+    )
+    .expect("decode seeded manifest");
+    legacy_manifest
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("成员证据");
+    let primary_blobs = dataset_path.join("primary/blobs");
+    std::fs::create_dir_all(&primary_blobs).expect("create legacy member layout");
+    std::fs::write(primary_blobs.join("active"), active_member.bytes())
+        .expect("write legacy active member");
+    std::fs::write(primary_blobs.join("archive"), archive_member.bytes())
+        .expect("write legacy archive member");
+    std::fs::write(primary_manifest_path, legacy_manifest.to_string())
+        .expect("write legacy manifest without member evidence");
+    std::fs::remove_dir_all(dataset_path.join("members"))
+        .expect("remove shared member layout to reproduce legacy storage");
+
+    let opened = ProjectMemoryOpener::new(
+        AtomicDatasetMemoryStore::new(storage, project),
+        Arc::new(ScriptedLegacy {
+            global: no_legacy(),
+            project: no_legacy(),
+        }),
+    )
+    .open(MemoryPolicy::default())
+    .await
+    .expect("legacy storage manifest should open");
+    assert_eq!(
+        opened.list(Some(MemoryLayer::Project)),
+        vec![expected_entry]
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

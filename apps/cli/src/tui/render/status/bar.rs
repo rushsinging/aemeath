@@ -180,11 +180,8 @@ impl StatusBar {
     }
 
     fn context_pct(&self, vm: &StatusRuntimeViewModel) -> u64 {
-        if vm.context_size > 0 && vm.last_input_tokens > 0 {
-            vm.last_input_tokens * 100 / vm.context_size
-        } else {
-            0
-        }
+        vm.context_usage_permille
+            .map_or(0, |permille| u64::from(permille) / 10)
     }
 
     fn runtime_segment_style(&self, style: RuntimeSegmentStyle) -> Style {

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # 功能：扫描 agent/shared/src，禁止 share kernel 出现行为/IO/并发/时钟/状态容器，

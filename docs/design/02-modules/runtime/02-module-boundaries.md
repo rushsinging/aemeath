@@ -86,7 +86,7 @@ agent/features/runtime/src/
 
 ### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
-- **用例**：`start_run` / `cancel_run` / `derive_sub_run`。`AwaitingUser` 由同一次 `run_loop` 调用的同一 future 在内部 `.await` typed continuation；reply 到达后原地继续，既不是 Loop 退出边界，也不会二次入栈
+- **用例**：`start_run` / `cancel_current_run` / `cancel_run_step` / `terminate_run` / `derive_sub_run`。`AwaitingUser` 由同一次 `run_loop` 调用的同一 future 在内部 `.await` typed continuation；reply 到达后原地继续，既不是 Loop 退出边界，也不会二次入栈
 - **不持有** RuntimeContext（作为参数流转），**不直接调 Port**（经 loop_engine + coordinators）
 
 ### loop_engine（Main/Sub 共用）
@@ -119,14 +119,19 @@ agent/features/runtime/src/
 - 触发 Run 状态机迁移到 `AwaitingUser`/`AwaitingToolApproval`，且只有匹配 reply 才能恢复原 continuation
 - **NEVER** 让 Tool adapter 直接等待 TUI channel，也不让 `InteractionPort` 自行发布 `RunResumed`
 
-### sdk_event_mapper（横切）
-- **职责**：领域事件 → SDK `ChatEvent` 的封闭纯转换；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）使用 SDK 发布的 `AgentId` / `RunId` / `RunStepId`
-- 消费：`EventSink`
-- mapper **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
+### activity_observation（横切应用观测）
 
+- **职责**：由 `ActivityCoordinator` 统一创建、变更并发布 Run 内 Activity 事实；把 Run、Run Step、Model Invocation、Tool Call、Hook、Compaction、Interaction 与 Sub Run 的执行观测收口为稳定 identity、父子关系、类型、状态、detail、revision 与 timing。
+- **状态所有权**：Activity 是应用层观测实体集合，不拥有 Run 控制权、不改变 Run 状态机、不持久化 Session，也不承载 Audit Usage 所有权；Run 聚合仍是唯一生命周期状态机。
+- **发布**：Runtime 通过 SDK Published Language 发布 `ActivityChanged` 增量和 `ActivitySnapshot` 快照；增量按 Run 维度递增 revision，快照用于初始化、重连和 revision gap 修复。
+- **边界**：Activity 事实可被 TUI、父 Run 诊断 sink 或其他交付适配器消费；TUI 经 ACL 转为 TUI-owned Activity 镜像，再由 root reducer 写入 Model。Activity Summary 只由 TUI ViewAssembler 从事实镜像派生，**NEVER** 回流 Runtime 或成为第二业务状态源。
+- **约束**：Activity detail 必须是 typed 且受 audience 控制；发布日志只含 identity、类型、状态、revision 与 timing，**NEVER** 含 raw args、stdout、response payload。
+
+### sdk_event_mapper（横切）
 ### model_invocation 的 Usage 出口
 - Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；`RunStepId` 由 Loop Engine 直接从 Run 聚合取得，**NEVER** 经 adapter 伪造或旁路。
 - `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态。Runtime 只消费 Provider ACL 标准化结果，**NEVER** 解释 vendor wire 字段或重复定义 Usage DTO。
+- Main Session 唯一 `RuntimeContextFactory` 持有 session-scoped `Arc<dyn UsageSink>`；派生 Sub Run 通过同一 factory/services 继承该 Arc，并使用 canonical Main Session ID 构造记录。RuntimeContext 不持有 worker handle，Sub Run 不创建或关闭 Audit worker。
 
 ### agent_client（入站 façade）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；将命令标准化为 typed bootstrap/session/run request，并调用 application service
@@ -137,8 +142,10 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 
 | | 拥有 |
 |---|---|
-| **Hook BC** | subscription 匹配、稳定顺序、脚本执行/回收、3 次执行故障重试、输出解析与类型化 directive |
-| **Runtime** | 触发时机（UserPromptSubmit/Stop/PreToolCall/PostToolCall/SubRunStart-Stop/Notification）+ directive 响应编排；Stop 阻断累计 15 次后第 16 次 RunFailed |
+| **Hook BC** | subscription 匹配、稳定顺序、脚本执行/回收、按 frozen `HookExecutionPolicy` 对 ExecutionFailed 重试、输出解析与类型化 directive |
+| **Runtime** | 已接线触发点与 directive 响应编排；每个 Main/Sub Run 使用 frozen `StopHookPolicy`，首个超过 block allowance 的 Stop Block 进入 RunFailed |
+
+生产触发点、outcome/message consumer 与 Future point 的唯一矩阵见 [Hook README §3.1](../hook/README.md#31-published-language-与生产可达性)；不得把 26 点 PL 或 Config surface 当作全部 production-reachable。
 
 触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubRunStart/Stop）。
 

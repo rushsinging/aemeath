@@ -395,34 +395,35 @@ fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
         OutputBlockKind::ThinkingMessage(view) => {
             estimate_wrapped_text_lines(&view.text, text_width, false).max(1)
         }
-        OutputBlockKind::ModelStreamPlaceholder(_) => 2,
-        OutputBlockKind::ToolCall(view) => {
-            let activity_lines = view.activity_lines.iter().fold(0usize, |total, line| {
-                total.saturating_add(estimate_wrapped_line_count(line, text_width))
-            });
-            1usize.saturating_add(activity_lines)
-        }
+        OutputBlockKind::ToolCall(_) => 1usize,
         OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
-        OutputBlockKind::HookNotice(view) => 1usize
-            .saturating_add(view.body.lines().count())
-            .saturating_add(
-                view.details
-                    .as_deref()
-                    .map(str::lines)
-                    .map(Iterator::count)
-                    .unwrap_or(0),
-            ),
+        OutputBlockKind::HookNotice(view) => 1usize.saturating_add(
+            view.body
+                .lines()
+                .count()
+                .saturating_add(usize::from(view.body.ends_with('\n'))),
+        ),
         OutputBlockKind::DiagnosticNotice(view) | OutputBlockKind::SystemNotice(view) => view
             .text
             .lines()
             .count()
             .saturating_add(usize::from(view.text.ends_with('\n'))),
-        OutputBlockKind::AskUserBatch(view) => match (view.confirmed, view.phase) {
-            (true, _) => 2usize.saturating_add(view.slots.len().saturating_mul(3)),
-            (false, AskUserPhaseView::Confirming) => {
-                6usize.saturating_add(view.slots.len().saturating_mul(2))
-            }
-            (false, AskUserPhaseView::Answering) => {
+        OutputBlockKind::AskUserBatch(view) => match (view.completion, view.phase) {
+            (
+                crate::tui::view_model::output::AskUserCompletionView::Answered
+                | crate::tui::view_model::output::AskUserCompletionView::Cancelled
+                | crate::tui::view_model::output::AskUserCompletionView::ReplyPending
+                | crate::tui::view_model::output::AskUserCompletionView::CancelPending,
+                _,
+            ) => 2usize.saturating_add(view.slots.len().saturating_mul(3)),
+            (
+                crate::tui::view_model::output::AskUserCompletionView::Active,
+                AskUserPhaseView::Confirming,
+            ) => 6usize.saturating_add(view.slots.len().saturating_mul(2)),
+            (
+                crate::tui::view_model::output::AskUserCompletionView::Active,
+                AskUserPhaseView::Answering,
+            ) => {
                 let answered = view
                     .slots
                     .iter()

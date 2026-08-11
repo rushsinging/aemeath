@@ -186,6 +186,9 @@ pub(crate) async fn parse_ollama_stream(
 
     for (idx, (id, name, input)) in final_tool_calls.into_iter().enumerate() {
         handler.emit_tool_use_start(&name, Some(&id), idx);
+        // #1494：Ollama 的 tool_calls 只在 done:true chunk 完整给出（无流中增量信号），
+        // 只能在此（流结束）发出 ToolCallCompleted——runtime 的旁路执行此时才触发。
+        handler.emit_tool_call_completed(idx, id.clone(), name.clone(), input.clone());
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 

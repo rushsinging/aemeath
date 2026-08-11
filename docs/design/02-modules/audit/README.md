@@ -47,7 +47,7 @@ struct UsageRecord {
 - 每个 `UsageRecord` 表示一个**成功完成且返回 usage 的逻辑 Model Invocation 聚合事实**，由 Runtime 在所有 retry/fallback attempt 收口后构造，恰好使用一个 `ModelInvocationId`；内部 attempt 可累加到最终 provider/model/token 结果，但不逐 attempt 写 Audit；
 - 失败、取消或所有 attempt 均未返回 usage 时不伪造零值记录；对应运行诊断保留在 Runtime/Logging，不属于 Usage-only Audit fact；
 - `provider` / `model` 记录最终成功产生 usage 的 provider/model；fallback 历史与 attempt ordinal 不进入 v0.1.0 Usage schema；
-- SessionId 是分区和查询维度，不表示 Usage 属于 Session 聚合；
+- SessionId 是 canonical Main Session identity：同一 Main Session 的 Main Run 与全部派生 Sub Run 共享该分区键和 session-scoped `UsageSink` / Audit worker；各条事实以不同 `RunId` / `RunStepId` / `ModelInvocationId` 区分；
 - 不冗余 parent_run_id，父子关系由 Run 模型解释；
 - Provider 负责从供应商响应提取 raw usage，Runtime 在 Model Invocation 完成后构造 UsageRecord。
 
@@ -90,7 +90,7 @@ enum UsageDropReason {
 - warning 分类固定为 `queue_full` / `worker_unavailable` / `encode` / `append` / `flush` / `drain_timeout`。每类累计计数从 0→1 及到达 64 的倍数时，在 `target: LOG_TARGET` 输出包含 kind 与 cumulative_total 的 warn；单条写流程首个失败后立即终结，不继续产生第二类写失败；drain_timeout 每次 shutdown timeout 立即 warn；
 - enqueue Accepted 只表示进入队列，不表示 worker 已接收或已经落盘；Accepted 到 flush 完成之间存在进程异常导致的静默丢失窗口，这是尽力审计的明确语义。
 
-`WorkerUnavailable` 仅在以下状态返回：Composition 尚未完成 worker 启动、worker 已不可恢复退出且 sender 关闭、或 graceful shutdown 已开始且不再接收新记录。
+`WorkerUnavailable` 仅在以下状态返回：Composition 尚未完成 worker 启动、worker 已不可恢复退出且 sender 关闭、或 graceful shutdown 已开始且不再接收新记录。Audit worker 的 ownership 是一 Main Session 一个 worker；Composition 创建 `SessionAudit`，把同一个 `Arc<dyn UsageSink>` 注入 Main Session 唯一 `RuntimeContextFactory`，派生 Sub Run 只继承该共享 sink，**NEVER** 创建、持有或关闭独立 worker。初始化失败时 Composition 注入 `UnavailableUsageSink` 并继续 Agent bootstrap。
 
 ## 5. Worker 与写入语义
 
@@ -116,11 +116,12 @@ receive one UsageRecord
 
 正常退出采用固定时序：
 
-1. `UsageWorkerHandle::shutdown()` 使用启动时注入的唯一 `UsageWorkerConfig.shutdown_timeout`；在 sender 同一短临界区把 lifecycle 从 Running 置为 ShuttingDown 并移走 queue sender。重复 shutdown 等待/返回同一个 completion；
-2. receiver 在 sender 关闭后 drain 已在线性化点前 Accepted 的记录；
-3. worker 按 dequeue 顺序 encode，并 await `UsageAppendStorePort.append + flush`。默认 File adapter 自己在内部 `spawn_blocking` 执行同步 syscall，worker 不绕过 port；
-4. handle 等待已注入的 shutdown timeout；
-5. 超时时在一致 state 锁下计算 `accepted_total - completed_total`，增加 `drain_abandoned_total` 并返回 `TimedOut { unconfirmed }`。这里 abandoned 表示“timeout 时未确认完成”，不是确定丢失：已进入不可取消 blocking syscall 的单条可能稍后落盘。worker task 可 abort，但 blocking closure 不可取消；completion 保留该 unconfirmed 语义。
+1. Main Session 的全部 Main/Sub Run 已收敛且不再产生 Usage 后，CLI 的 Audit-specific frontend boundary 调用 `SessionAudit::shutdown()`；前端原始成功/失败结果保持权威，drain outcome 不覆盖它；
+2. `UsageWorkerHandle::shutdown()` 使用启动时注入的唯一 `UsageWorkerConfig.shutdown_timeout`；在 sender 同一短临界区把 lifecycle 从 Running 置为 ShuttingDown 并移走 queue sender。重复 shutdown 等待/返回同一个 completion；
+3. receiver 在 sender 关闭后 drain 已在线性化点前 Accepted 的记录；
+4. worker 按 dequeue 顺序 encode，并 await `UsageAppendStorePort.append + flush`。默认 File adapter 自己在内部 `spawn_blocking` 执行同步 syscall，worker 不绕过 port；
+5. handle 等待已注入的 shutdown timeout；
+6. 超时时在一致 state 锁下计算 `accepted_total - completed_total`，增加 `drain_abandoned_total` 并返回 `TimedOut { unconfirmed }`。这里 abandoned 表示“timeout 时未确认完成”，不是确定丢失：已进入不可取消 blocking syscall 的单条可能稍后落盘。worker task 可 abort，但 blocking closure 不可取消；completion 保留该 unconfirmed 语义。
 
 `Stopped` 包含自然 worker 退出、不可恢复 task failure 与 shutdown 完成；任何情况下 sender 检测非 Running 或 receiver closed 都返回 WorkerUnavailable。
 
@@ -304,6 +305,7 @@ Audit domain/application/worker 不依赖 Runtime、TUI、Logging 具体实现�
 - 不得使用未知模型的隐式 fallback 价格；
 - 是否保存 PricingSnapshot、历史 Cost 是否重算，必须另行决策；
 - 任何临时 Cost 实现都不是本期目标模型，迁移和退役统一记录在 Migration Governance。
+- 已存在的 `~/.agents/cost_history.json` 是未迁移的 legacy artifact：v0.1.0 不读、不导入、不覆盖、不清空或删除；Future importer 只能在另行批准的版本化、幂等方案下导入可验证 raw token，且不得伪造关联 ID。
 
 ## 11. 不变量
 
@@ -352,8 +354,10 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-21 | #930 实现 Audit-owned `UsageQueryPort`：按关联 ID/provider/model/半开时间范围过滤、版本化 opaque cursor、单页 1000 条 clamp、逐行 V1 decoder、损坏行/截断尾行 warning 与纯 token summary；查询仅经 `UsageAppendStorePort` 逐分区读取，CLI/TUI 不解析 JSONL，生产 wiring 仍归 #931 | [#930](https://github.com/rushsinging/aemeath/issues/930) |
-| 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly；Runtime bridge/Invocation wiring 仍归 #931 | [#929](https://github.com/rushsinging/aemeath/issues/929) |
+| 2026-08-09 | #932 完整退役 Runtime Pricing/Cost、SDK/Runtime/TUI Cost DTO/event/presentation、Shared legacy cost-history path API 与无消费者 Storage Cost namespace；`/cost` 仅保留为 token Usage alias；既有 `cost_history.json` 不读、不导入、不覆盖、不删除，并由 Target Guard 防回流 | [#932](https://github.com/rushsinging/aemeath/issues/932) |
+| 2026-08-09 | #931 完成 Runtime logical invocation → session-scoped UsageSink → SessionAudit worker 生产接线，Main/Sub 共用 canonical Session 分区并在前端收敛后 drain | [#931](https://github.com/rushsinging/aemeath/issues/931) |
+| 2026-07-21 | #930 实现 Audit-owned `UsageQueryPort`：按关联 ID/provider/model/半开时间范围过滤、版本化 opaque cursor、单页 1000 条 clamp、逐行 V1 decoder、损坏行/截断尾行 warning 与纯 token summary；查询仅经 `UsageAppendStorePort` 逐分区读取，CLI/TUI 不解析 JSONL | [#930](https://github.com/rushsinging/aemeath/issues/930) |
+| 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly | [#929](https://github.com/rushsinging/aemeath/issues/929) |
 | 2026-07-17 | #927 冻结 Usage PL：跨 BC ID 复用 SDK 唯一 newtype，Audit 拥有 UsageRecord/V1 envelope/emit/query DTO，Runtime 仅拥有 UsageSink trait；配置归 #929，查询行为归 #930，并按真实交付增量建立 domain/ports 层 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | #988 删除无行为的 `api/contract/gateway` COLA 占位；Usage 实现前仅保留真实 crate 入口，后续按已冻结的 Usage Target 增量建层 | [#988](https://github.com/rushsinging/aemeath/issues/988) |
 | 2026-07-12 | 初稿：Usage-only Audit MVP、非阻塞 Sink、查询与独立 JSONL 分区 | #790 |

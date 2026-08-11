@@ -19,10 +19,8 @@ pub enum RunControl {
 }
 
 pub trait ActiveRunPort: Send + Sync {
-    fn activate(&self, run_id: RunId, cancel: CancellationToken);
-    fn activate_main(&self, run_id: RunId, cancel: CancellationToken) {
-        self.activate(run_id, cancel);
-    }
+    fn activate_child(&self, run_id: RunId, cancel: CancellationToken);
+    fn activate_main(&self, run_id: RunId, cancel: CancellationToken);
     fn set_main_active_step(
         &self,
         _run_id: &RunId,
@@ -30,16 +28,17 @@ pub trait ActiveRunPort: Send + Sync {
         _cancel: CancellationToken,
     ) {
     }
+    fn clear_main_active_step(&self, _run_id: &RunId, _step_id: &RunStepId) {}
     fn take_control(&self, _run_id: &RunId) -> Option<RunControl> {
         None
     }
-    fn claim_terminal(&self, run_id: &RunId) -> bool;
-    fn claim_cancellation(&self, run_id: &RunId) -> bool;
     fn clear(&self, run_id: &RunId);
 }
 
 pub use domain::Run;
-pub use event::{RunDomainEvent, RunId};
+#[cfg(test)]
+pub use event::RunTimingSnapshot;
+pub use event::{RunId, RuntimeLifecycleEvent};
 #[cfg(test)]
 pub use spec::{
     EventRoute, InputMode, InteractionMode, MemoryMode, ReasoningBindingMode, ResourceMode,
@@ -47,12 +46,11 @@ pub use spec::{
 };
 pub use spec::{HookBindingMode, InteractionBindingMode, RunSpec, RunSpecError};
 pub use state::{
-    DrainDecision, InteractionContinuation, RunCancellationRequest, RunStatus,
-    RunStepCancellationRequest, RunStepId, RunTerminationRequest, RunTransition,
-    RunTransitionError, StopHookBlockResult,
+    DrainDecision, InteractionContinuation, RunStatus, RunStepCancellationRequest, RunStepId,
+    RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError, StopHookBlockResult,
 };
 #[cfg(test)]
-pub use state::{PendingInteraction, RunStepStatus, RunTransitionReason};
+pub use state::{PendingInteraction, RunTransitionReason};
 pub use step::{ModelInvocation, ToolCall, ToolCallStatus};
 
 #[cfg(test)]

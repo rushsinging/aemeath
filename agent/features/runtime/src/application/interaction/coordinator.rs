@@ -1,4 +1,4 @@
-//! #1248 Task 4: Interaction coordinator — bridges [`InteractionPort`] and domain [`Run`].
+//! Interaction coordinator bridging [`InteractionPort`] and domain [`Run`].
 //!
 //! The coordinator owns the fixed ordering of an interaction lifecycle:
 //!
@@ -10,9 +10,9 @@
 //! 5. Call [`Run::complete_interaction`] to transition back to the working state
 //! 6. Return the [`InteractionContinuation`] or an error
 //!
-//! Cancel/disconnect handling: [`cancel_and_drain`] drains the port for the run,
-//! removes the pending interaction from the domain Run, and transitions the Run
-//! to `Cancelling` via [`Run::request_cancellation`].
+//! Cancel/disconnect handling: [`cleanup_run`] drains the port for the run and
+//! removes pending interaction state. Run control remains owned by the caller's
+//! typed Step-cancel or Run-termination path.
 
 use sdk::{
     InteractionCancelReason, InteractionReply, InteractionReplyError, InteractionRequest,
@@ -102,7 +102,7 @@ impl From<InteractionPortError> for CoordinationError {
 
 /// Stateless coordinator that bridges an [`InteractionPort`] and a domain [`Run`].
 ///
-/// #1248 Task 4: Single coordinator handles all four body types
+/// A single coordinator handles all four body types
 /// (`UserQuestions`, `ToolApproval`, `PlanApproval`, `HardPause`)
 /// via exhaustive matching.
 #[derive(Debug, Default)]
@@ -199,6 +199,7 @@ impl InteractionCoordinator {
                         data: serde_json::json!({"status": "ok", "answers": answers}),
                         is_error: false,
                         images: Vec::new(),
+                        task_change: None,
                     };
                     (
                         id.clone(),
@@ -293,14 +294,11 @@ impl InteractionCoordinator {
             .map_err(CoordinationError::RunError)
     }
 
-    /// Cancel a pending interaction (does NOT change run status).
+    /// Cancel a pending interaction and restore its continuation phase.
     ///
     /// Removes the pending interaction from the domain [`Run`] and returns
-    /// the continuation.  The caller is responsible for deciding whether
-    /// to terminate the run.
-    ///
-    /// Prefer [`cancel_and_drain`] for complete disconnect/cancel handling
-    /// that also drains the port and transitions the Run to a terminal state.
+    /// the continuation without emitting a `Resumed` event. The caller keeps
+    /// ownership of Step completion and any subsequent Run lifecycle decision.
     pub fn cancel(
         run: &mut Run,
         request_id: &InteractionRequestId,
@@ -309,36 +307,26 @@ impl InteractionCoordinator {
             .map_err(CoordinationError::RunError)
     }
 
-    /// Complete cancel/disconnect: drain the port for this run, cancel the
-    /// pending interaction on the domain Run, and transition the Run to
-    /// `Cancelling` via [`Run::request_cancellation`].
+    /// Remove all pending interaction state for a Run.
     ///
-    /// #1248 Task 4: This is the recommended path for handling parent
-    /// disconnect, user cancellation, or any scenario where the coordinator
-    /// must leave the Run in a legal terminal state without hanging.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(())` when the Run is successfully transitioned to `Cancelling`.
-    /// - `Err(CoordinationError::RunError(AlreadyTerminal))` if the Run was
-    ///   already in a terminal state (no-op — still safe).
-    pub fn cancel_and_drain(
+    /// This operation deliberately does not choose a Run lifecycle transition.
+    /// The caller must continue through the typed current-Step cancellation or
+    /// Run termination protocol.
+    pub fn cleanup_run(
         run: &mut Run,
         execution: &mut RunExecutionState,
         port: &dyn InteractionPort,
         run_id: &RunId,
         reason: InteractionCancelReason,
-    ) -> Result<(), CoordinationError> {
+    ) {
         port.drain_run(run_id, reason);
         execution.take_active_interaction();
         execution.take_pending_interaction_work();
-
-        // Transition the Run to Cancelling.  This clears pending_interaction
-        // and sets the state to Cancelling.
-        match run.request_cancellation() {
-            crate::domain::agent_run::RunCancellationRequest::Accepted => Ok(()),
-            crate::domain::agent_run::RunCancellationRequest::AlreadyCancelling => Ok(()),
-            crate::domain::agent_run::RunCancellationRequest::AlreadyTerminal => Ok(()),
+        if let Some(request_id) = run
+            .pending_interaction()
+            .map(|pending| pending.request_id.clone())
+        {
+            let _ = run.cancel_interaction(&request_id);
         }
     }
 }

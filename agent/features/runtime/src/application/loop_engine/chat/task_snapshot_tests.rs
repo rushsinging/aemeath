@@ -20,23 +20,36 @@ fn access_with_active_batch() -> task::TaskStore {
 }
 
 #[test]
-fn task_snapshot_displays_batch_sequence_before_summary() {
+fn task_state_view_preserves_structured_fields() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
-    access.create_task(task_spec("实现适配器"), 2).unwrap();
+    let created = access.create_task(task_spec("实现适配器"), 2).unwrap();
 
-    let snapshot = build_task_snapshot(access);
+    let state = build_task_state_view(access, "session-a");
 
-    assert_eq!(snapshot.lines[0], "━━ Tasks: 0/1 ━━");
-    assert_eq!(snapshot.lines[1], "□ #1 实现适配器");
-    assert!(!snapshot.lines[1].contains('@'));
+    assert_eq!(state.session_id, "session-a");
+    assert_eq!(state.revision, access.revision().get());
+    assert_eq!(
+        state.current_batch.unwrap().summary.as_deref(),
+        Some("batch")
+    );
+    assert_eq!(state.items[0].id, created.value.id().get());
+    assert_eq!(state.items[0].sequence, 1);
+    assert_eq!(state.items[0].subject, "实现适配器");
+    assert_eq!(state.items[0].status, sdk::TaskItemStatusView::Pending);
+    assert_eq!(state.items[0].priority, sdk::TaskPriorityView::Normal);
 }
 
 #[test]
-fn task_snapshot_empty_without_active_batch() {
+fn task_state_view_empty_without_active_batch_keeps_revision() {
     let store = task::TaskStore::new();
     let access: &dyn TaskAccess = &store;
-    assert!(build_task_snapshot(access).lines.is_empty());
+    let state = build_task_state_view(access, "session-b");
+
+    assert_eq!(state.session_id, "session-b");
+    assert_eq!(state.revision, access.revision().get());
+    assert!(state.current_batch.is_none());
+    assert!(state.items.is_empty());
 }
 
 #[test]
@@ -107,4 +120,88 @@ fn task_status_lines_returns_empty_when_line_limit_is_zero() {
     access.create_task(task_spec("pending"), 2).unwrap();
 
     assert!(task_status_lines(&access.list(), 0).is_empty());
+}
+
+#[test]
+fn task_reminder_intent_preserves_count_and_active_list() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    let completed = access.create_task(task_spec("done"), 2).unwrap().value;
+    let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
+    access
+        .transition(completed.id(), TaskStatus::Completed, 4)
+        .unwrap();
+
+    let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
+    let context::domain::InvocationReminder::TaskProgress(progress) = reminder else {
+        panic!("expected task progress reminder");
+    };
+
+    assert_eq!(progress.completed, 1);
+    assert_eq!(progress.total, 2);
+    assert_eq!(progress.items.len(), 2);
+    assert_eq!(progress.items[0].sequence, 1);
+    assert_eq!(progress.items[0].subject, "done");
+    assert_eq!(
+        progress.items[0].status,
+        context::domain::TaskProgressStatus::Completed
+    );
+    assert_eq!(progress.items[1].sequence, 2);
+    assert_eq!(progress.items[1].subject, "todo");
+    assert_eq!(
+        progress.items[1].status,
+        context::domain::TaskProgressStatus::Pending
+    );
+}
+
+#[test]
+fn task_reminder_intent_none_without_tasks() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_reminder_intent(access, 7).is_none());
+}
+
+#[test]
+fn task_reminder_intent_none_without_active_batch() {
+    let store = task::TaskStore::new();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_reminder_intent(access, 7).is_none());
+}
+
+/// #1537：build_task_snapshot_text 返回纯文本（无标签包装），供 compact 拼接。
+/// compact 路径携带完整标识（batch id / task id / seq），与 TUI 路径不同。
+#[test]
+fn task_snapshot_text_renders_with_full_identifiers_for_compact() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    let completed = access.create_task(task_spec("done"), 2).unwrap().value;
+    let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
+    access
+        .transition(completed.id(), TaskStatus::Completed, 4)
+        .unwrap();
+
+    let text = build_task_snapshot_text(access).expect("snapshot text rendered");
+
+    // 不含 TUI 标签包装
+    assert!(!text.contains("<system-reminder>"));
+    // 携带 batch 标题
+    assert!(text.contains("Batch #"));
+    assert!(text.contains("Tasks: 1/2"));
+    // 携带完整标识：task id + seq
+    assert!(text.contains("task:"));
+    assert!(text.contains("seq:"));
+    // 携带 subject
+    assert!(text.contains("done"));
+    assert!(text.contains("todo"));
+    // ✓ 用于 Completed，□ 用于 Pending
+    assert!(text.contains("✓"));
+    assert!(text.contains("□"));
+}
+
+/// #1537：无活跃 task 时 build_task_snapshot_text 返回 None。
+#[test]
+fn task_snapshot_text_none_without_tasks() {
+    let store = access_with_active_batch();
+    let access: &dyn TaskAccess = &store;
+    assert!(build_task_snapshot_text(access).is_none());
 }

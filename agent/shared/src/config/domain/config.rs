@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::audit::AuditConfig;
+use crate::config::context::ContextConfig;
 use crate::config::hooks::HooksConfig;
 use crate::config::legacy::{ApiConfig, ModelConfig};
 use crate::config::logging::LoggingConfig;
@@ -21,7 +22,7 @@ use crate::config::update::UpdateConfig;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuidanceReloadPolicy {
-    /// 每 turn 在 system prompt 前置 `[guidance 已更新] <diff head>`。
+    /// 每 run 在 system prompt 前置 `[guidance 已更新] <diff head>`。
     Inject,
     /// 发 `<system-reminder>` 让 LLM 自行决定是否用 Read 重新读取。
     #[default]
@@ -76,6 +77,10 @@ pub struct Config {
     /// Multi-source model configuration (preferred).
     #[serde(default)]
     pub models: ModelsConfig,
+
+    /// Context read-model reduction configuration
+    #[serde(default)]
+    pub context: ContextConfig,
 
     /// Tool configuration
     #[serde(default)]
@@ -138,6 +143,7 @@ impl Default for Config {
             api: ApiConfig::default(),
             model: ModelConfig::default(),
             models: ModelsConfig::default(),
+            context: ContextConfig::default(),
             tools: ToolsConfig::default(),
             agents: AgentsConfig::default(),
             ui: UiConfig::default(),

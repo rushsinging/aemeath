@@ -1,9 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.session-management.composition-ownership
 set -euo pipefail
 
 # Composition is the only production constructor of Session backing. Context owns
-# Session semantics through SessionManagementPort; Runtime consumes the injected port.
+# Session semantics through one Dataset-aware SessionManagementPort; Runtime consumes
+# the same injected port. AtomicBlob is allowed only as the injected legacy migration source.
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
@@ -36,7 +37,8 @@ if not composition.is_file():
 else:
     text = composition.read_text()
     required = [
-        r"AtomicBlobSessionManagement::new\(session_blob\.clone\(\)\)",
+        r"DatasetSessionManagement::new\(\s*session_dataset\.clone\(\),\s*session_blob(?:\.clone\(\))?\s*,?\s*\)",
+        r"DatasetCanonicalSessionWriter::new\(session_dataset\)",
         r"session_management:\s*session_management\.clone\(\)",
         r"RuntimeBootstrapDependencies::new\([\s\S]*session_management",
     ]

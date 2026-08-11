@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # 守卫：provider 的所有生产 HTTP 请求发送 / 错误响应体读取必须经由
 # agent/features/provider/src/adapters/http_attempt.rs 的 HttpAttemptExecutor，
 # 且 error_log 模块的 HTTP/network 诊断日志 API（log_network_error /

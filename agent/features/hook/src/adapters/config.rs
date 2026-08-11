@@ -1,3 +1,4 @@
+use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEvent, HooksConfig};
 
 use crate::adapters::dispatcher::Dispatcher;
@@ -33,15 +34,17 @@ pub fn subscriptions_from_config(config: &HooksConfig) -> Vec<HookSubscription> 
 }
 
 /// 构造 Hook BC 唯一的生产 Dispatcher。
-pub fn build_dispatcher(config: &HooksConfig) -> Result<Dispatcher, Vec<SubscriptionError>> {
-    let subscriptions = subscriptions_from_config(config);
+pub fn build_dispatcher(config: &ConfigSnapshot) -> Result<Dispatcher, Vec<SubscriptionError>> {
+    let subscriptions = subscriptions_from_config(config.hooks());
+    let policy = config.hook_execution_policy();
     log::debug!(
         target: crate::LOG_TARGET,
-        "hook dispatcher built: configured_events={} subscriptions={}",
-        config.events.len(),
+        "hook dispatcher built: configured_events={} subscriptions={} max_attempts={}",
+        config.hooks().events.len(),
         subscriptions.len(),
+        policy.max_attempts(),
     );
-    Dispatcher::try_new(subscriptions)
+    Dispatcher::try_new(subscriptions, policy)
 }
 
 fn hook_point_from_event(event: HookEvent) -> HookPoint {

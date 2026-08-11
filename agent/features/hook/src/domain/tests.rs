@@ -623,7 +623,7 @@ fn test_invocation_point_roundtrip() {
         ),
         (
             HookInvocation::PreCompact(PreCompactInput {
-                turns: 1,
+                run_steps: 1,
                 messages_count: 10,
             }),
             HookPoint::PreCompact,
@@ -650,7 +650,7 @@ fn test_invocation_point_roundtrip() {
             HookPoint::UserPromptExpansion,
         ),
         (
-            HookInvocation::Stop(StopInput { turns: 1 }),
+            HookInvocation::Stop(StopInput { run_steps: 1 }),
             HookPoint::Stop,
         ),
         (
@@ -672,7 +672,7 @@ fn test_invocation_point_roundtrip() {
         ),
         (
             HookInvocation::PostCompact(PostCompactInput {
-                turns: 1,
+                run_steps: 1,
                 messages_before: 10,
                 messages_after: 5,
             }),
@@ -714,7 +714,7 @@ fn test_invocation_point_roundtrip() {
                 system: "s".into(),
                 model_spec: None,
                 result: "r".into(),
-                turns: 1,
+                run_steps: 1,
                 is_error: false,
             }),
             HookPoint::SubRunStop,
@@ -749,7 +749,7 @@ fn test_invocation_point_roundtrip() {
         ),
         (
             HookInvocation::StopFailure(StopFailureInput {
-                turns: 1,
+                run_steps: 1,
                 error: "e".into(),
             }),
             HookPoint::StopFailure,

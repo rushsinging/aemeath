@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Regression tests for the layered Agent Stop and Git pre-push gates.
 set -euo pipefail
 
@@ -68,7 +68,7 @@ main() {
   : >"$repo/gate.log"
   current_cache="$(
     cd "$repo"
-    HOME="$repo/home" bash scripts/clean-worktree-targets.sh --current --yes --dry-run \
+    HOME="$repo/home" /bin/bash scripts/clean-worktree-targets.sh --current --yes --dry-run \
       | awk '/no current cache:/ {print $NF}'
   )"
   mkdir -p "$current_cache/build"

@@ -2,6 +2,56 @@ use super::*;
 use crate::domain::agent_run::{ActiveRunPort, RunControl};
 
 #[test]
+fn registry_does_not_duplicate_run_lifecycle_or_expose_legacy_cancel() {
+    let registry_source = include_str!("active_registry.rs");
+    let active_run_port_source = include_str!("../../domain/agent_run.rs");
+
+    for retired in [
+        "pub cancelling: bool",
+        "pub terminal: bool",
+        "fn claim_terminal(",
+        "fn claim_cancellation(",
+        "pub fn cancel(&self",
+        "sdk::CancelRunOutcome",
+    ] {
+        assert!(
+            !registry_source.contains(retired),
+            "ActiveRunRegistry retains a second Run lifecycle source: {retired}"
+        );
+    }
+
+    for retired in ["fn claim_terminal(", "fn claim_cancellation("] {
+        assert!(
+            !active_run_port_source.contains(retired),
+            "ActiveRunPort retains lifecycle arbitration: {retired}"
+        );
+    }
+}
+
+#[test]
+fn cancel_current_main_without_active_step_terminates_current_run() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let root = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1);
+
+    registry.activate_main(run_id.clone(), root.clone());
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(root.is_cancelled());
+    assert_eq!(
+        registry.take_control(&run_id),
+        Some(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        })
+    );
+}
+
+#[test]
 fn cancel_current_main_step_does_not_require_run_identity() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();
@@ -38,7 +88,7 @@ fn sub_run_does_not_replace_current_main_run() {
 
     registry.activate_main(main_id.clone(), main_root.clone());
     registry.set_main_active_step(&main_id, main_step_id, main_step.clone());
-    registry.activate(sub_id, sub_root.clone());
+    registry.activate_child(sub_id, sub_root.clone());
 
     assert_eq!(
         registry.cancel_current_main(deadline),
@@ -72,12 +122,128 @@ fn clearing_old_main_does_not_clear_new_current_main() {
 }
 
 #[test]
+fn stale_main_cannot_register_step_after_foreground_replacement() {
+    let registry = ActiveRunRegistry::default();
+    let stale_run_id = sdk::RunId::new_v7();
+    let current_run_id = sdk::RunId::new_v7();
+    let stale_step_id = sdk::RunStepId::new_v7();
+    let current_step_id = sdk::RunStepId::new_v7();
+    let stale_step = CancellationToken::new();
+    let current_step = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+
+    registry.activate_main(stale_run_id.clone(), CancellationToken::new());
+    registry.activate_main(current_run_id.clone(), CancellationToken::new());
+    registry.set_main_active_step(&stale_run_id, stale_step_id, stale_step.clone());
+    registry.set_main_active_step(
+        &current_run_id,
+        current_step_id.clone(),
+        current_step.clone(),
+    );
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(!stale_step.is_cancelled());
+    assert!(current_step.is_cancelled());
+    assert_eq!(
+        registry.take_control(&current_run_id),
+        Some(RunControl::CancelStep {
+            step_id: current_step_id,
+            deadline,
+        })
+    );
+}
+
+#[test]
 fn cancel_current_main_without_active_run_is_explicit() {
     let registry = ActiveRunRegistry::default();
     assert_eq!(
         registry.cancel_current_main(sdk::ControlDeadline::from_unix_millis(1)),
         sdk::CancelCurrentRunOutcome::NoActiveRun
     );
+}
+
+#[test]
+fn clearing_completed_step_scope_makes_current_cancel_terminate_run() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let step_id = sdk::RunStepId::new_v7();
+    let root = CancellationToken::new();
+    let step = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1);
+
+    registry.activate_main(run_id.clone(), root.clone());
+    registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
+    registry.clear_main_active_step(&run_id, &step_id);
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(root.is_cancelled());
+    assert!(!step.is_cancelled());
+    assert_eq!(
+        registry.take_control(&run_id),
+        Some(RunControl::Terminate {
+            reason: sdk::RunTerminationReason::UserExit,
+            deadline,
+        })
+    );
+}
+
+#[test]
+fn stale_step_cleanup_does_not_clear_replacement_step() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let old_step_id = sdk::RunStepId::new_v7();
+    let current_step_id = sdk::RunStepId::new_v7();
+    let current_step = CancellationToken::new();
+
+    registry.activate_main(run_id.clone(), CancellationToken::new());
+    registry.set_main_active_step(&run_id, old_step_id.clone(), CancellationToken::new());
+    registry.set_main_active_step(&run_id, current_step_id.clone(), current_step.clone());
+    registry.clear_main_active_step(&run_id, &old_step_id);
+
+    assert_eq!(
+        registry.cancel_current_main(sdk::ControlDeadline::from_unix_millis(2)),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(current_step.is_cancelled());
+}
+
+#[test]
+fn cancelled_step_cleanup_clears_delivered_control_before_next_step() {
+    let registry = ActiveRunRegistry::default();
+    let run_id = sdk::RunId::new_v7();
+    let cancelled_step_id = sdk::RunStepId::new_v7();
+    let next_step_id = sdk::RunStepId::new_v7();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
+    let next_step = CancellationToken::new();
+
+    registry.activate_main(run_id.clone(), CancellationToken::new());
+    registry.set_main_active_step(&run_id, cancelled_step_id.clone(), CancellationToken::new());
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(matches!(
+        registry.take_control(&run_id),
+        Some(RunControl::CancelStep { step_id, .. }) if step_id == cancelled_step_id
+    ));
+    registry.clear_main_active_step(&run_id, &cancelled_step_id);
+    registry.set_main_active_step(&run_id, next_step_id.clone(), next_step.clone());
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::Accepted
+    );
+    assert!(next_step.is_cancelled());
+    assert!(matches!(
+        registry.take_control(&run_id),
+        Some(RunControl::CancelStep { step_id, .. }) if step_id == next_step_id
+    ));
 }
 
 #[test]
@@ -184,77 +350,16 @@ fn registry_tracks_runs_independently() {
     let sub_a_token = parent_token.child_token();
     let sub_b_token = parent_token.child_token();
 
-    registry.activate(parent.clone(), parent_token.clone());
-    registry.activate(sub_a.clone(), sub_a_token.clone());
-    registry.activate(sub_b.clone(), sub_b_token.clone());
+    registry.activate_child(parent.clone(), parent_token.clone());
+    registry.activate_child(sub_a.clone(), sub_a_token.clone());
+    registry.activate_child(sub_b.clone(), sub_b_token.clone());
 
     assert_eq!(registry.active_ids().len(), 3);
-    assert_eq!(registry.cancel(&sub_a), sdk::CancelRunOutcome::Accepted);
-    assert!(sub_a_token.is_cancelled());
-    assert!(!parent_token.is_cancelled());
-    assert!(!sub_b_token.is_cancelled());
-
     registry.clear(&sub_a);
     assert_eq!(registry.active_ids().len(), 2);
-    assert_eq!(registry.cancel(&parent), sdk::CancelRunOutcome::Accepted);
-    assert!(parent_token.is_cancelled());
-    assert!(sub_b_token.is_cancelled());
-}
-
-#[test]
-fn cancel_is_synchronous_and_id_scoped() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    let other = sdk::RunId::new_v7();
-    let token = CancellationToken::new();
-    registry.activate(run_id.clone(), token.clone());
-
-    assert_eq!(registry.cancel(&other), sdk::CancelRunOutcome::NotFound);
-    assert!(!token.is_cancelled());
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-    assert!(
-        token.is_cancelled(),
-        "token must be cancelled before return"
-    );
-    assert_eq!(
-        registry.cancel(&run_id),
-        sdk::CancelRunOutcome::AlreadyCancelling
-    );
-}
-
-#[test]
-fn terminal_claim_is_visible_to_late_cancel_until_clear() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert!(registry.claim_terminal(&run_id));
-    assert_eq!(
-        registry.cancel(&run_id),
-        sdk::CancelRunOutcome::AlreadyTerminal
-    );
-    registry.clear(&run_id);
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::NotFound);
-}
-
-#[test]
-fn terminal_claim_blocks_late_cancellation_claim() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert!(registry.claim_terminal(&run_id));
-    assert!(!registry.claim_cancellation(&run_id));
-}
-
-#[test]
-fn cancellation_wins_over_terminal_claim() {
-    let registry = ActiveRunRegistry::default();
-    let run_id = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
-
-    assert_eq!(registry.cancel(&run_id), sdk::CancelRunOutcome::Accepted);
-    assert!(!registry.claim_terminal(&run_id));
+    assert!(!parent_token.is_cancelled());
+    assert!(!sub_a_token.is_cancelled());
+    assert!(!sub_b_token.is_cancelled());
 }
 
 #[test]
@@ -262,7 +367,7 @@ fn clear_only_removes_matching_run() {
     let registry = ActiveRunRegistry::default();
     let run_id = sdk::RunId::new_v7();
     let other = sdk::RunId::new_v7();
-    registry.activate(run_id.clone(), CancellationToken::new());
+    registry.activate_child(run_id.clone(), CancellationToken::new());
 
     registry.clear(&other);
     assert_eq!(registry.active_ids(), vec![run_id.clone()]);

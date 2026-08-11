@@ -1,8 +1,10 @@
 use super::*;
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiContentBlock, TuiHookNotice, TuiMessageSource, TuiSkillRequestMetadata,
+};
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use crate::tui::update::msg::TuiMsg;
 use std::path::PathBuf;
 
@@ -16,6 +18,33 @@ fn test_app() -> App {
         PathBuf::from("/tmp"),
         "test-model".to_string(),
     )
+}
+
+#[test]
+fn display_history_window_failure_clears_inflight_request_for_retry() {
+    let mut app = test_app();
+    let request = sdk::DisplayHistoryWindowRequest {
+        session_id: "retry-session".to_string(),
+        generation_revision: 9,
+        member_names: vec!["steps/0009.json".to_string()],
+    };
+    app.output_view.loading_history_window = Some((
+        request.session_id.clone(),
+        request.generation_revision,
+        request.member_names.clone(),
+    ));
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+
+    app.update_ui(
+        UiEvent::DisplayHistoryWindowLoadFailed {
+            request,
+            message: "读取失败".to_string(),
+        },
+        &ui_tx,
+        &make_spawn_refs(),
+    );
+
+    assert!(app.output_view.loading_history_window.is_none());
 }
 
 #[test]
@@ -69,38 +98,33 @@ fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
     );
 }
 
-/// 消息同步事件（如 PostToolExecutionSync）只镜像 chat.messages，不产生 UserMessage 回显块，
+/// 消息状态投影只更新 session metadata，不产生 UserMessage 回显块，
 /// 也不清除占位（回显与占位清理由 UserMessagesAdopted 负责）。
 #[test]
-fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
+fn test_update_message_state_only_updates_metadata_without_echo() {
     let mut app = test_app();
     let echo_id = "echo-1".to_string();
     app.enqueue_submission_echo(echo_id, "[Copied Text 1]");
-    let messages = vec![
-        TuiChatMessage::user_text("first"),
-        TuiChatMessage::user_text("a\nb\nc"),
-    ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 2,
+            revision: 1,
+        }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // chat.messages 已删除，不再断言镜像数量
-
-    // 不产生任何 UserMessage 回显块（退出 display）
+    assert_eq!(app.model.session.message_count, 2);
     assert!(app.model.conversation.timeline.items().iter().all(|item| {
         !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "a\nb\nc")
     }));
-
-    // 占位未被清除（归 UserMessagesAdopted 负责）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,
-        "消息同步不应清占位"
+        "消息状态投影不应清占位"
     );
 }
 
@@ -108,15 +132,14 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
 fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
-    let messages = vec![
-        TuiChatMessage::user_text("first"),
-        TuiChatMessage::system_generated_user_text(reminder),
-    ];
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync { messages }),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 2,
+            revision: 1,
+        }),
         &ui_tx,
         &spawn_refs,
     );
@@ -130,7 +153,7 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
 ///
 /// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的同步事件。
 /// 期望：
-/// - handler 后 PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+/// - handler 后 SessionMessageStateChanged 不再镜像 chat.messages（字段已删除）
 /// - 不产生任何 UserMessage 回显块（退出 display）
 /// - 占位未被清除（清占位归 UserMessagesAdopted 负责）
 #[test]
@@ -144,17 +167,16 @@ fn test_post_tool_sync_no_display() {
     app.enqueue_submission_echo(id_a, "hello");
     assert_eq!(app.model.conversation.queued_submissions.len(), 1);
 
-    // 构造包含该 user message 的 msgs
-    let msgs = vec![TuiChatMessage::user_text("hello")];
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::PostToolExecutionSync {
-            messages: msgs.clone(),
+        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+            message_count: 1,
+            revision: 1,
         }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+    // SessionMessageStateChanged 不再镜像 chat.messages（字段已删除）
     // 不产生 UserMessage 回显块
 
     // 不产生 UserMessage 回显块
@@ -211,14 +233,16 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             content: vec![TuiContentBlock::text("hi")],
             input_id: Some(id_a.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         },
         TuiChatMessage {
             role: "user".to_string(),
             content: vec![TuiContentBlock::text("yo")],
             input_id: Some(id_b.clone()),
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         },
     ];
     app.update(
@@ -309,7 +333,8 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         ],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
+        skill_request: None,
     }];
 
     app.update(
@@ -353,56 +378,93 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
     );
 }
 
-/// Bug #540：MessagesSync 兜底清理必须同时清空 compact runtime 三态（chat_active、
-/// phase、running_tool_count、compact_progress），否则 compact 完成后 spinner 行会
-/// 残留 Compacting 文案 + 90% 进度条。
 #[test]
-fn test_messages_sync_clears_compact_runtime_state() {
-    use crate::tui::model::conversation::intent::SetCompactProgress;
-    use crate::tui::model::conversation::spinner::SpinnerPhase;
-
+fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echoes() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
-
-    // 模拟 compact 进行中：直接写入 runtime 三态
-    app.model.conversation.runtime.spinner.chat_active = true;
-    app.model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Compacting);
-    app.model.conversation.runtime.spinner.running_tool_count = 2;
-    app.model.conversation.apply(SetCompactProgress {
-        stage: "finalizing".into(),
-        current: Some(8),
-        total: Some(10),
-    });
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_some(),
-        "precondition: compact_progress 已设置"
-    );
+    let skill_id = "skill-input".to_string();
+    let hook_id = "hook-input".to_string();
+    app.enqueue_submission_echo(skill_id.clone(), "/superpowers:brainstorming feature scope");
+    app.enqueue_submission_echo(hook_id.clone(), "hook feedback");
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::CompactFinished { messages: vec![] }),
+        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+            items: vec![
+                TuiChatMessage {
+                    role: "user".to_string(),
+                    content: vec![TuiContentBlock::text("LLM skill prompt")],
+                    input_id: Some(skill_id),
+                    source: TuiMessageSource::SkillRequest,
+                    hook_notice: None,
+                    skill_request: Some(TuiSkillRequestMetadata {
+                        skill: "superpowers:brainstorming".to_string(),
+                        arguments: "feature scope".to_string(),
+                        raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                    }),
+                },
+                TuiChatMessage {
+                    role: "user".to_string(),
+                    content: vec![TuiContentBlock::text("LLM hook prompt")],
+                    input_id: Some(hook_id),
+                    source: TuiMessageSource::Hook,
+                    hook_notice: Some(TuiHookNotice {
+                        point: "Stop".to_string(),
+                        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
+                        summary: "blocked".to_string(),
+                        command: "check.sh".to_string(),
+                        exit_code: Some(2),
+                        reason: "guard failed".to_string(),
+                        stdout_preview: "details".to_string(),
+                        stderr_preview: "blocked".to_string(),
+                        stdout_truncated: false,
+                        stderr_truncated: false,
+                        output_file: None,
+                    }),
+                    skill_request: None,
+                },
+            ],
+            queued: Vec::new(),
+        }),
         &ui_tx,
         &spawn_refs,
     );
 
-    // CompactFinished 后：compact runtime 状态被清空，但 spinner 不停（turn 仍在进行）
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_none(),
-        "CompactFinished 后 compact_progress 必须清空"
+    assert!(app.model.conversation.queued_submissions.is_empty());
+    let user_echo_texts: Vec<_> = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text, ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        user_echo_texts,
+        vec!["/superpowers:brainstorming feature scope"]
     );
-    // spinner 不应被 CompactFinished 停止
-    assert!(
-        app.model.conversation.runtime.spinner.chat_active,
-        "CompactFinished 后 chat_active 保持 true（turn 仍在进行）"
-    );
-    assert!(
-        app.model.conversation.runtime.compact_progress.is_none(),
-        "MessagesSync 后 compact_progress 必须清空（进度条才会消失）"
-    );
-    assert!(
-        app.view_state.dirty.output,
-        "MessagesSync 必须 mark_output_dirty 触发进度条消失渲染"
-    );
+    let notices = system_notice_texts(&app);
+    assert!(!notices.iter().any(|text| text.contains("raw_input")));
+    assert!(!notices.iter().any(|text| text.contains("<skill-request>")));
+    assert!(!notices.iter().any(|text| text.contains("guard failed")));
+    assert!(app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(
+            item,
+            crate::tui::model::output_timeline::OutputTimelineItem::HookNotice { title, text, .. }
+                if title == "Stop hook blocked" && text.contains("guard failed")
+        )));
+    assert!(!notices.iter().any(|text| text.contains("LLM skill prompt")));
+    assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
 
 /// #749：ApiError 退化为纯展示 —— 追加一次错误 notice，NOT 自行清 processing
@@ -465,7 +527,7 @@ fn test_api_error_then_done_clears_processing() {
         UiEvent::DoneWithDuration {
             context: crate::tui::app::event::UiTurnContext {
                 chat_id: ChatId::new("chat-test"),
-                turn_id: ChatTurnId::new("turn-test"),
+                run_id: ChatRunId::new("turn-test"),
             },
             duration: std::time::Duration::from_secs(1),
         },
@@ -522,7 +584,8 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         )],
         input_id: Some(input_id.clone()),
         source: TuiMessageSource::User,
-        stop_hook: None,
+        hook_notice: None,
+        skill_request: None,
     }];
     app.update(
         TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
@@ -583,20 +646,20 @@ fn runtime_batch_applies_all_events_before_the_next_render() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
-    let context = crate::tui::adapter::tui_runtime_event::TuiTurnContext {
+    let context = crate::tui::adapter::tui_runtime_event::TuiRunContext {
         chat_id: "batch-chat".to_string(),
-        turn_id: "batch-turn".to_string(),
+        run_id: "batch-turn".to_string(),
     };
 
     let result = app.update(
         TuiMsg::RuntimeBatch(vec![
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "first ".to_string(),
+                delta: "first ".to_string(),
             },
-            TuiRuntimeEvent::Text {
+            TuiRuntimeEvent::AssistantTextDelta {
                 context: context.clone(),
-                text: "second".to_string(),
+                delta: "second".to_string(),
             },
             TuiRuntimeEvent::BlockComplete {
                 context,

@@ -1,6 +1,6 @@
 ---
 source: apps/cli/src/tui/app/scenario_tests/chat.rs
-expression: screen
+expression: normalize_completed_terminal_verb(&screen)
 ---
 
   Aemeath - AI Agent
@@ -15,7 +15,7 @@ expression: screen
 
 ● replacement after retry
 
-
+  ✻ CompletedVerb for 5s
 
 
 

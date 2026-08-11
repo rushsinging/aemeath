@@ -1,12 +1,41 @@
+use crate::application::loop_engine::chat::ChatEventSink;
 use async_trait::async_trait;
 
 use crate::application::context::coordination::{
     apply_automatic_compact_outcome, ContextCoordinator,
 };
-use crate::application::loop_engine::LoopEngineError;
+use crate::application::loop_engine::{CompactProgressView, LoopEngineError};
 use crate::application::run::context::{RunUsageTracker, RuntimeContext};
 use crate::application::run::execution_state::RunExecutionState;
 use crate::ports::CompactOutcome;
+
+/// 把 Runtime 的 [`CompactProgressView`]（SDK 视图 stage）适配为 Context 的
+/// `CompactProgressFn`（domain stage + usize chunk 计数），#1500 全链路接线。
+pub(crate) struct CompactProgressAdapter(pub(crate) std::sync::Arc<dyn CompactProgressView>);
+
+impl context::compact::CompactProgressFn for CompactProgressAdapter {
+    fn emit(&self, stage: context::compact::CompactStage, work: context::compact::CompactWork) {
+        let view_stage = match stage {
+            context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
+            context::compact::CompactStage::Generating => sdk::CompactStageView::Generating,
+            context::compact::CompactStage::Mapping => sdk::CompactStageView::Mapping,
+            context::compact::CompactStage::Reducing => sdk::CompactStageView::Reducing,
+            context::compact::CompactStage::Refreshing => sdk::CompactStageView::Refreshing,
+            context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
+        };
+        let view_work = match work {
+            context::compact::CompactWork::Indeterminate => sdk::CompactWorkView::Indeterminate,
+            context::compact::CompactWork::Determinate { completed, total } => {
+                let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
+                else {
+                    return;
+                };
+                sdk::CompactWorkView::Determinate { completed, total }
+            }
+        };
+        self.0.emit(view_stage, view_work);
+    }
+}
 
 #[async_trait]
 pub(crate) trait CompactionObserver: Send {
@@ -27,6 +56,9 @@ impl CompactionObserver for NoopCompactionObserver {}
 pub(crate) struct CompactionCoordinator {
     context: ContextCoordinator,
     usage: RunUsageTracker,
+    published_state: crate::application::published_state::PublishedStateRegistry,
+    event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
+    session_id: String,
 }
 
 impl CompactionCoordinator {
@@ -34,6 +66,9 @@ impl CompactionCoordinator {
         Self {
             context: ContextCoordinator::new(runtime_context.context()),
             usage: runtime_context.usage(),
+            published_state: runtime_context.published_state(),
+            event_sink: runtime_context.event_sink(),
+            session_id: runtime_context.skill_load_session_id().to_string(),
         }
     }
 
@@ -49,19 +84,32 @@ impl CompactionCoordinator {
             .build_window(request)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
-        let needed = self
+        let decision = self
             .context
-            .needs_compaction(request)
+            .compaction_decision(request)
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
+        let status = self
+            .published_state
+            .update_context_budget(self.session_id.clone(), &decision);
+        self.event_sink
+            .send_event(
+                crate::application::loop_engine::chat::RuntimeStreamEvent::RuntimeStatusChanged {
+                    status: Box::new(status),
+                },
+            )
+            .await;
         *execution.context_window_mut() = Some(window);
-        Ok(needed)
+        Ok(decision.needed)
     }
 
     pub(crate) async fn compact<O>(
         &self,
         execution: &mut RunExecutionState,
         observer: &mut O,
+        progress: std::sync::Arc<dyn CompactProgressView>,
+        task_context: Option<String>,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError>
     where
         O: CompactionObserver,
@@ -83,7 +131,13 @@ impl CompactionCoordinator {
             .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
         let outcome = self
             .context
-            .compact(&request, source_revision)
+            .compact(
+                &request,
+                source_revision,
+                progress,
+                task_context,
+                cancellation,
+            )
             .await
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
         apply_automatic_compact_outcome(&outcome, &self.usage, execution.context_window_mut());

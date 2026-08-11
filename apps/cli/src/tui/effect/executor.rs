@@ -127,7 +127,11 @@ impl App {
             }
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
+            Effect::LoadDisplayHistoryWindow { request } => {
+                self.load_display_history_window_effect(request, ui_tx)
+            }
             Effect::CancelCurrentRun => self.cancel_current_run(),
+            Effect::CancelRunStep { run_id, step_id } => self.cancel_run_step(&run_id, &step_id),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
             }
@@ -141,7 +145,7 @@ impl App {
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
             Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
-            Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
+            Effect::SetCurrentRun { run_step } => self.set_current_run_effect(run_step),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
@@ -297,6 +301,43 @@ impl App {
         self.apply_agent_intent(AgentIntent::Conversation(intent));
     }
 
+    fn cancel_run_step(&mut self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let deadline = sdk::ControlDeadline::from_unix_millis(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64 + 10_000)
+                .unwrap_or(0),
+        );
+        let outcome = self
+            .run_control_client
+            .as_ref()
+            .map(|client| client.cancel_run_step(run_id, Some(step_id), deadline))
+            .unwrap_or(sdk::CancelRunStepOutcome::NotFound);
+        match outcome {
+            sdk::CancelRunStepOutcome::Accepted | sdk::CancelRunStepOutcome::AlreadyCancelling => {
+                self.chat.start_cancelling();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
+                        "Cancelling current response…",
+                    ))),
+                ));
+            }
+            sdk::CancelRunStepOutcome::RunTerminating => {
+                self.chat.start_cancelling();
+                self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
+            }
+            sdk::CancelRunStepOutcome::NoActiveStep => {
+                self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
+            }
+            sdk::CancelRunStepOutcome::RunTerminal => {
+                self.set_transient_notice(StatusNotice::warning("Current run already finished"));
+            }
+            sdk::CancelRunStepOutcome::NotFound => {
+                self.set_transient_notice(StatusNotice::warning("Current run step was not found"));
+            }
+        }
+    }
+
     fn cancel_current_run(&mut self) {
         let processing_handle_present = self.chat.processing_handle.is_some();
         crate::tui::log_debug!(
@@ -316,22 +357,77 @@ impl App {
             processing_handle_present,
             outcome
         );
-        if matches!(
-            outcome,
+        match outcome {
             sdk::CancelCurrentRunOutcome::Accepted
-                | sdk::CancelCurrentRunOutcome::AlreadyCancelling
-                | sdk::CancelCurrentRunOutcome::RunTerminating
-        ) {
-            self.chat.start_cancelling();
-            self.apply_agent_intent(AgentIntent::Conversation(
-                ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
-                    "Cancelling current response… Press Ctrl+C again to exit",
-                ))),
-            ));
+            | sdk::CancelCurrentRunOutcome::AlreadyCancelling => {
+                self.chat.start_cancelling();
+                self.apply_agent_intent(AgentIntent::Conversation(
+                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
+                        "Cancelling current response…",
+                    ))),
+                ));
+            }
+            sdk::CancelCurrentRunOutcome::RunTerminating => {
+                self.chat.start_cancelling();
+                self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
+            }
+            sdk::CancelCurrentRunOutcome::NoActiveStep => {
+                self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
+            }
+            sdk::CancelCurrentRunOutcome::NoActiveRun => {
+                self.set_transient_notice(StatusNotice::warning("No active run to cancel"));
+            }
+            sdk::CancelCurrentRunOutcome::RunTerminal => {
+                self.chat.stop_processing();
+                self.set_transient_notice(StatusNotice::warning("Current run already finished"));
+            }
         }
     }
 
-    fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
+    fn load_display_history_window_effect(
+        &self,
+        request: sdk::DisplayHistoryWindowRequest,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
+        let Some(display_history_query) = self.display_history_query.clone() else {
+            let ui_tx = ui_tx.clone();
+            crate::tui::effect::spawn_guard::spawn_guarded(
+                "display_history_unavailable",
+                async move {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoadFailed {
+                            request,
+                            message: "展示历史查询端口不可用".to_string(),
+                        })
+                        .await;
+                },
+            );
+            return;
+        };
+        let ui_tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("display_history_window", async move {
+            match display_history_query
+                .load_display_history_window(request.clone())
+                .await
+            {
+                Ok(window) => {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoaded { window })
+                        .await;
+                }
+                Err(error) => {
+                    let _ = ui_tx
+                        .send(UiEvent::DisplayHistoryWindowLoadFailed {
+                            request,
+                            message: error.to_string(),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    pub(crate) fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
         if self.chat.input_event_tx.is_none() {
             crate::tui::log_debug!(
                 "send_chat_input_event DROPPED tx=None event={:?}",
@@ -347,7 +443,7 @@ impl App {
         self.chat.push_input_event(event);
     }
 
-    /// `/save` 命令——仅 UX 反馈。Runtime 已有 turn-level auto-save + loop-exit auto-save，
+    /// `/save` 命令——仅 UX 反馈。Runtime 已有 run_step-level auto-save + loop-exit auto-save，
     /// TUI 不再发 ChatInputEvent::SaveSession。
     fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
         if notify {
@@ -429,8 +525,8 @@ impl App {
         }
     }
 
-    fn set_current_turn_effect(&mut self, _turn: usize) {
-        // #567：set_current_turn 删除——runtime loop 内部自维护 turn 计数器。
+    fn set_current_run_effect(&mut self, _turn: usize) {
+        // #567：set_current_run 删除——runtime loop 内部自维护 run_step 计数器。
     }
 
     fn query_reflection_history_effect(&mut self, limit: usize) {

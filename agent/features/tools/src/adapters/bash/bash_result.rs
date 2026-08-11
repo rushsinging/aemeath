@@ -54,6 +54,6 @@ pub(super) fn preview(s: &str) -> String {
             .last()
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(PREVIEW_MAX);
-        format!("{}...[truncated {} bytes]", &s[..cut], s.len() - cut)
+        format!("{}...[truncated {} bytes]", &s[..cut], s.len() - cut) // allow unsafe_text_op: char_indices offset (char boundary)
     }
 }

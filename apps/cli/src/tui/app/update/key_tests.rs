@@ -3,9 +3,10 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::model::input::completion::SuggestionType;
 use crate::tui::model::input::completion_item::CompletionItem;
 
-/// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
+/// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
+/// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
 #[test]
-fn test_busy_slash_no_placeholder() {
+fn busy_slash_routes_through_pending_slash_without_placeholder() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -14,27 +15,20 @@ fn test_busy_slash_no_placeholder() {
     app.chat.start_processing();
     app.model
         .input
-        .apply(InputIntent::InsertPastedText("/foo bar".to_string()));
+        .apply(InputIntent::InsertPastedText("/compact".to_string()));
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
     let result = app.update_key(key, &spawn_refs);
 
-    // 应产出 ControlCommand 事件
+    assert_eq!(result.pending_slash.as_deref(), Some("/compact"));
     assert!(
-        matches!(
-            result.effects.as_slice(),
-            [Effect::SendChatInputEvent {
-                event: sdk::ChatInputEvent::ControlCommand { raw }
-            }] if raw == "/foo bar"
-        ),
-        "busy-slash 应产出 ControlCommand 事件，got: {:?}",
-        result.effects
+        result.effects.is_empty(),
+        "busy slash 不得降级为无法执行的 ControlCommand"
     );
-    // conversation 中不应有 QueuedUserMessage 块
     assert!(
         app.model.conversation.queued_submissions.is_empty(),
-        "busy-slash 后不应建占位 QueuedUserMessage"
+        "busy slash 后不应建占位 QueuedUserMessage"
     );
 }
 
@@ -65,6 +59,56 @@ fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
 
     assert_eq!(esc.effects, vec![Effect::CancelCurrentRun]);
     assert_eq!(ctrl_c.effects, vec![Effect::CancelCurrentRun]);
+}
+
+#[test]
+fn esc_and_ctrl_c_target_the_active_run_step_identity() {
+    let active_run_id = sdk::RunId::from_legacy_or_new("run-1");
+    let active_step_id = sdk::RunStepId::from_legacy_or_new("step-1");
+    let expected = Effect::CancelRunStep {
+        run_id: active_run_id.clone(),
+        step_id: active_step_id.clone(),
+    };
+
+    let mut esc_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    esc_app.chat.start_processing();
+    esc_app.chat.active_run_step = Some((active_run_id, active_step_id));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+
+    let result = esc_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![expected]);
+    assert!(esc_app.chat.is_processing);
+}
+
+#[test]
+fn cancel_command_ack_does_not_publish_or_apply_terminal() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    let timeline_before_ack = app.model.conversation.timeline.items().len();
+    app.chat.start_cancelling();
+
+    assert!(app.chat.is_processing, "ACK 不能结束 processing");
+    assert!(
+        app.chat.is_cancelling,
+        "accepted ACK 只进入 cancelling 展示态"
+    );
+    assert_eq!(
+        app.model.conversation.timeline.items().len(),
+        timeline_before_ack,
+        "ACK 不能伪造 Runtime terminal"
+    );
 }
 
 #[test]
@@ -133,12 +177,46 @@ fn test_ctrlc_action_processing_first_press_requests_cancel() {
 }
 
 #[test]
-fn test_ctrlc_action_cancelling_second_press_force_quits() {
-    assert_eq!(ctrlc_action(true, None, true, true), CtrlCAction::ForceQuit);
+fn test_ctrlc_action_cancelling_second_press_requests_cancel_again() {
+    assert_eq!(
+        ctrlc_action(true, None, true, true),
+        CtrlCAction::RequestCancel
+    );
     assert_eq!(
         ctrlc_action(false, None, true, true),
-        CtrlCAction::ForceQuit
+        CtrlCAction::RequestCancel
     );
+}
+
+/// 忙时提交含多字节 UTF-8 字符的长文本时，日志预览截断不得在字符边界内
+/// 用字节索引切片 panic（59 字节 ASCII 后接「任」，60 字节截断点落在字符中间）。
+#[test]
+fn test_busy_enter_multibyte_long_text_does_not_panic() {
+    // log_debug! 在级别未达 Debug 时不求值参数，必须显式打开才能让
+    // mid_turn.enter 的预览截断代码真正执行。
+    log::set_max_level(log::LevelFilter::Debug);
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    // 59 个 ASCII + 1 个「任」：字符区间 59..62，字节截断点 60 落在字符中间。
+    let long_text = format!("{}任", "x".repeat(59));
+    app.model
+        .input
+        .apply(InputIntent::InsertPastedText(long_text.clone()));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+    let result = app.update_key(key, &spawn_refs);
+
+    assert!(matches!(
+        result.effects.as_slice(),
+        [Effect::SendChatInputEvent {
+            event: sdk::ChatInputEvent::UserMessage { text, .. }
+        }] if text == &long_text
+    ));
 }
 
 #[test]

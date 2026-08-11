@@ -3,6 +3,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::Path;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 pub struct FileReadTool;
 
@@ -58,51 +59,94 @@ impl TypedTool for FileReadTool {
 
         let offset = args.offset.unwrap_or(0) as usize;
         let limit = args.limit.unwrap_or(2000) as usize;
-        match tokio::fs::read_to_string(&path).await {
-            Ok(content) => {
-                let lines: Vec<&str> = content.lines().collect();
-                let total = lines.len();
-                let start = offset.min(total);
-                let end = (start + limit).min(total);
-                // Use fixed-width line numbers (no tab) to avoid TUI rendering issues
-                let num_width = format!("{}", end).len();
-                let numbered: String = lines[start..end]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, line)| {
-                        format!("{:>width$}  {}", start + i + 1, line, width = num_width)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+        match read_text_window(&path, offset, limit).await {
+            Ok(window) => {
                 // Track this file as read
                 ctx.read_set().record(&file_path);
                 ctx.read_set().record(path.to_string_lossy().as_ref());
-                if numbered.is_empty() {
+                if window.lines.is_empty() {
                     let data = ReadResult {
                         content: String::new(),
                         file_path: file_path.to_string(),
                         line_count: 0,
                         start_line: 0,
-                        total_lines: 0,
+                        total_lines: window.reached_eof.then_some(window.consumed_lines as u64),
                     };
                     TypedToolResult::success("(empty file)", data)
                 } else {
-                    let line_count = end - start;
+                    let end_line = window.start_line.saturating_add(window.lines.len());
+                    let num_width = end_line.to_string().len();
+                    let numbered = window
+                        .lines
+                        .iter()
+                        .enumerate()
+                        .map(|(line_index, line)| {
+                            format!(
+                                "{:>width$}  {}",
+                                window.start_line + line_index + 1,
+                                line,
+                                width = num_width
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     let data = ReadResult {
                         content: numbered.clone(),
                         file_path: file_path.to_string(),
-                        line_count: line_count as u64,
-                        start_line: start as u64,
-                        total_lines: total as u64,
+                        line_count: window.lines.len() as u64,
+                        start_line: window.start_line as u64,
+                        total_lines: window.reached_eof.then_some(window.consumed_lines as u64),
                     };
                     // output = 完整带行号内容（给 LLM，经 to_llm_view text-first）；
                     // data = 同样内容的结构化 ReadResult（给 TUI）。
                     TypedToolResult::success(numbered, data)
                 }
             }
-            Err(e) => TypedToolResult::error(format!("failed to read file: {e}")),
+            Err(error) => TypedToolResult::error(format!("failed to read file: {error}")),
         }
     }
+}
+
+struct TextWindow {
+    lines: Vec<String>,
+    start_line: usize,
+    consumed_lines: usize,
+    reached_eof: bool,
+}
+
+async fn read_text_window(path: &Path, offset: usize, limit: usize) -> std::io::Result<TextWindow> {
+    let file = tokio::fs::File::open(path).await?;
+    let mut lines = BufReader::new(file).lines();
+    let mut consumed_lines = 0usize;
+    while consumed_lines < offset {
+        if lines.next_line().await?.is_none() {
+            return Ok(TextWindow {
+                lines: Vec::new(),
+                start_line: 0,
+                consumed_lines,
+                reached_eof: true,
+            });
+        }
+        consumed_lines = consumed_lines.saturating_add(1);
+    }
+
+    let start_line = consumed_lines;
+    let mut window_lines = Vec::with_capacity(limit.min(2_000));
+    let mut reached_eof = false;
+    while window_lines.len() < limit {
+        let Some(line) = lines.next_line().await? else {
+            reached_eof = true;
+            break;
+        };
+        consumed_lines = consumed_lines.saturating_add(1);
+        window_lines.push(line);
+    }
+    Ok(TextWindow {
+        lines: window_lines,
+        start_line,
+        consumed_lines,
+        reached_eof,
+    })
 }
 
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
@@ -147,7 +191,7 @@ async fn read_image_file(file_path: &str, path: &Path) -> TypedToolResult<ReadRe
             file_path: file_path.to_string(),
             line_count: 0,
             start_line: 0,
-            total_lines: 0,
+            total_lines: None,
         },
     )
     .with_image(base64, media_type)
@@ -178,3 +222,7 @@ fn detect_media_type(data: &[u8], path: &str) -> String {
     }
     .to_string()
 }
+
+#[cfg(test)]
+#[path = "file_read_tests.rs"]
+mod tests;

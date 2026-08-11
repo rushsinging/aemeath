@@ -2,6 +2,36 @@ use super::*;
 use sdk::InteractionRequestId;
 use std::time::Duration;
 
+#[test]
+fn run_domain_exposes_step_cancel_and_termination_only() {
+    let state_source = include_str!("state.rs");
+    let domain_source = include_str!("domain.rs");
+    let event_source = include_str!("event.rs");
+
+    for forbidden in [
+        "    Cancelling,\n    Terminating,",
+        "CancellationFinished",
+        "RunCancellationRequest",
+    ] {
+        assert!(
+            !state_source.contains(forbidden) && !domain_source.contains(forbidden),
+            "Run Domain must not expose retired cancellation symbol: {forbidden}"
+        );
+    }
+
+    for forbidden in [
+        "request_cancellation",
+        "finish_cancellation",
+        "RuntimeLifecycleEvent::CancellationRequested",
+        "RuntimeLifecycleEvent::Cancelled",
+    ] {
+        assert!(
+            !domain_source.contains(forbidden) && !event_source.contains(forbidden),
+            "Run Domain must not retain retired cancellation path: {forbidden}"
+        );
+    }
+}
+
 fn run() -> Run {
     Run::new(RunSpec::main(), None)
 }
@@ -29,7 +59,7 @@ fn pending_interaction_enters_awaiting_user_and_emits_request_identity() {
     );
     assert!(run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::AwaitingUser {
+        RuntimeLifecycleEvent::AwaitingUser {
             request_id: emitted,
             ..
         } if emitted == &request_id
@@ -83,7 +113,7 @@ fn completing_interaction_requires_matching_id_and_clears_exactly_once() {
 }
 
 #[test]
-fn cancelling_interaction_clears_pending_without_emitting_resumed() {
+fn cancelling_interaction_restores_working_status_without_emitting_resumed() {
     let mut run = run_at_status(RunStatus::ExecutingTools);
     let request_id = InteractionRequestId::new_v7();
     let continuation = tool_continuation("call-cancel");
@@ -93,12 +123,16 @@ fn cancelling_interaction_clears_pending_without_emitting_resumed() {
 
     assert_eq!(run.cancel_interaction(&request_id).unwrap(), continuation);
 
-    assert_eq!(run.status(), RunStatus::AwaitingUser);
+    assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
     assert!(!run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Resumed { .. })));
+    assert_eq!(
+        run.cancel_interaction(&request_id),
+        Err(RunTransitionError::NoPendingInteraction)
+    );
 }
 
 #[test]
@@ -257,7 +291,7 @@ fn scenario_terminate_discards_controlled_step_and_closes_run() {
     );
     assert!(run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Terminated {
+        RuntimeLifecycleEvent::Terminated {
             reason: sdk::RunTerminationReason::SessionShutdown,
             ..
         }
@@ -340,7 +374,7 @@ fn run_follows_the_happy_path_to_completed() {
     assert!(run.is_terminal());
     assert!(matches!(
         run.events().last(),
-        Some(RunDomainEvent::Completed { result, .. }) if result == "final answer"
+        Some(RuntimeLifecycleEvent::Completed { result, .. }) if result == "final answer"
     ));
 }
 
@@ -355,7 +389,7 @@ fn every_state_change_emits_transitioned_with_reason() {
         .events()
         .iter()
         .filter_map(|event| match event {
-            RunDomainEvent::Transitioned {
+            RuntimeLifecycleEvent::Transitioned {
                 from, to, reason, ..
             } => Some((*from, *to, *reason)),
             _ => None,
@@ -380,30 +414,58 @@ fn every_state_change_emits_transitioned_with_reason() {
 }
 
 #[test]
-fn cancellation_and_completion_use_the_same_transition_event() {
-    let mut cancelled = run();
-    cancelled.start_draining().unwrap();
-    cancelled.request_cancellation();
-    cancelled.finish_cancellation().unwrap();
+fn termination_and_completion_use_the_same_transition_event() {
+    let mut terminated = run();
+    terminated.start_draining().unwrap();
+    terminated.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    );
+    terminated.finish_termination().unwrap();
 
-    assert!(cancelled.events().iter().any(|event| matches!(
+    assert!(terminated.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Transitioned {
+        RuntimeLifecycleEvent::Transitioned {
             from: RunStatus::DrainingInput,
-            to: RunStatus::Cancelling,
-            reason: RunTransitionReason::InterruptRequested,
+            to: RunStatus::Terminating,
+            reason: RunTransitionReason::TerminationRequested,
             ..
         }
     )));
-    assert!(cancelled.events().iter().any(|event| matches!(
+    assert!(terminated.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Transitioned {
-            from: RunStatus::Cancelling,
-            to: RunStatus::Cancelled,
-            reason: RunTransitionReason::CancellationFinished,
+        RuntimeLifecycleEvent::Transitioned {
+            from: RunStatus::Terminating,
+            to: RunStatus::Terminated,
+            reason: RunTransitionReason::TerminationFinished,
             ..
         }
     )));
+}
+
+#[test]
+fn transition_event_reports_runtime_owned_total_and_phase_elapsed() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+
+    let transition = run
+        .events()
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            RuntimeLifecycleEvent::Transitioned {
+                to: RunStatus::PreparingContext,
+                timing,
+                ..
+            } => Some(*timing),
+            _ => None,
+        })
+        .expect("preparing-context transition timing");
+
+    assert!(transition.total_elapsed_ms >= transition.phase_elapsed_ms);
+    assert_eq!(transition.phase_elapsed_ms, 0);
 }
 
 #[test]
@@ -415,7 +477,7 @@ fn rejected_transition_does_not_emit_transitioned_event() {
     assert!(!run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Transitioned { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Transitioned { .. })));
 }
 #[test]
 fn run_rejects_illegal_transition_without_mutating_status() {
@@ -434,77 +496,91 @@ fn run_rejects_illegal_transition_without_mutating_status() {
 }
 
 #[test]
-fn cancellation_is_two_phase_and_idempotent() {
+fn termination_is_two_phase_and_idempotent() {
     let mut run = run();
     run.start_draining().unwrap();
     run.apply_drain_decision(DrainDecision::Inputs, None)
         .unwrap();
     run.transition(RunTransition::ContextPrepared).unwrap();
+    let reason = sdk::RunTerminationReason::SessionShutdown;
+    let deadline = sdk::ControlDeadline::from_unix_millis(0);
 
-    assert_eq!(run.request_cancellation(), RunCancellationRequest::Accepted);
-    assert_eq!(run.status(), RunStatus::Cancelling);
     assert_eq!(
-        run.request_cancellation(),
-        RunCancellationRequest::AlreadyCancelling
+        run.request_termination(reason, deadline),
+        RunTerminationRequest::Accepted
+    );
+    assert_eq!(run.status(), RunStatus::Terminating);
+    assert_eq!(
+        run.request_termination(reason, deadline),
+        RunTerminationRequest::AlreadyTerminating
     );
 
-    run.finish_cancellation().unwrap();
+    run.finish_termination().unwrap();
 
-    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::Terminated);
     assert_eq!(
-        run.request_cancellation(),
-        RunCancellationRequest::AlreadyTerminal
+        run.request_termination(
+            sdk::RunTerminationReason::SessionShutdown,
+            sdk::ControlDeadline::from_unix_millis(0),
+        ),
+        RunTerminationRequest::AlreadyTerminal
     );
     let lifecycle: Vec<_> = run
         .events()
         .iter()
-        .filter(|event| !matches!(event, RunDomainEvent::Transitioned { .. }))
+        .filter(|event| !matches!(event, RuntimeLifecycleEvent::Transitioned { .. }))
         .cloned()
         .collect();
     assert_eq!(
         lifecycle,
         vec![
-            RunDomainEvent::Started {
+            RuntimeLifecycleEvent::Started {
                 run_id: run.id().clone(),
                 parent_run_id: None,
             },
-            RunDomainEvent::DrainingInput {
+            RuntimeLifecycleEvent::DrainingInput {
                 run_id: run.id().clone(),
                 parent_run_id: None,
             },
-            RunDomainEvent::CancellationRequested {
+            RuntimeLifecycleEvent::TerminationRequested {
                 run_id: run.id().clone(),
                 parent_run_id: None,
+                reason: sdk::RunTerminationReason::SessionShutdown,
+                deadline,
             },
-            RunDomainEvent::Cancelled {
+            RuntimeLifecycleEvent::Terminated {
                 run_id: run.id().clone(),
                 parent_run_id: None,
+                reason: sdk::RunTerminationReason::SessionShutdown,
             },
         ]
     );
 }
 
 #[test]
-fn cancelling_run_rejects_new_work() {
+fn terminating_run_rejects_new_work() {
     let mut run = run();
     run.start_draining().unwrap();
-    run.request_cancellation();
+    run.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    );
 
     assert!(matches!(
         run.begin_step(),
-        Err(RunTransitionError::RunNotActive(RunStatus::Cancelling))
+        Err(RunTransitionError::RunNotActive(RunStatus::Terminating))
     ));
     assert!(matches!(
         run.transition(RunTransition::BeginCompaction),
         Err(RunTransitionError::IllegalTransition {
-            from: RunStatus::Cancelling,
+            from: RunStatus::Terminating,
             transition: RunTransition::BeginCompaction,
         })
     ));
 }
 
 #[test]
-fn cancellation_closes_the_active_step_and_rejects_late_completion() {
+fn termination_closes_the_active_step_and_rejects_late_completion() {
     let mut run = run();
     run.start_draining().unwrap();
     run.apply_drain_decision(DrainDecision::Inputs, None)
@@ -512,13 +588,19 @@ fn cancellation_closes_the_active_step_and_rejects_late_completion() {
     run.transition(RunTransition::ContextPrepared).unwrap();
     let step_id = run.begin_step().unwrap();
 
-    run.request_cancellation();
-    run.finish_cancellation().unwrap();
+    run.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    );
+    run.finish_termination().unwrap();
 
-    assert_eq!(run.steps()[0].status(), RunStepStatus::Cancelled);
+    assert_eq!(
+        run.steps()[0].status(),
+        RunStepStatus::CancellationUnconfirmed
+    );
     assert!(matches!(
         run.complete_step(&step_id),
-        Err(RunTransitionError::RunNotActive(RunStatus::Cancelled))
+        Err(RunTransitionError::RunNotActive(RunStatus::Terminated))
     ));
 }
 
@@ -552,7 +634,7 @@ fn parent_identity_is_carried_by_every_domain_event() {
         .all(|event| event.parent_run_id() == Some(&parent)));
 }
 
-const ALL_RUN_STATUSES: [RunStatus; 17] = [
+const ALL_RUN_STATUSES: [RunStatus; 15] = [
     RunStatus::Created,
     RunStatus::DrainingInput,
     RunStatus::PreparingContext,
@@ -564,15 +646,13 @@ const ALL_RUN_STATUSES: [RunStatus; 17] = [
     RunStatus::Compacting,
     RunStatus::CancellingStep,
     RunStatus::FinalizingStep,
-    RunStatus::Cancelling,
     RunStatus::Terminating,
     RunStatus::Completed,
     RunStatus::Failed,
-    RunStatus::Cancelled,
     RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
+const ALL_RUN_TRANSITIONS: [RunTransition; 18] = [
     RunTransition::StartDraining,
     RunTransition::DrainInputs,
     RunTransition::DrainInternalContinuation,
@@ -591,7 +671,6 @@ const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
     RunTransition::ToolsCompleted,
     RunTransition::StepCancelled,
     RunTransition::TerminationFinished,
-    RunTransition::CancellationFinished,
 ];
 
 fn invoke_to_applying(run: &mut Run) -> RunStepId {
@@ -653,9 +732,6 @@ fn run_at_status(status: RunStatus) -> Run {
             run.request_step_cancellation(&step_id);
             run.begin_step_finalization(&step_id).unwrap();
         }
-        RunStatus::Cancelling => {
-            assert_eq!(run.request_cancellation(), RunCancellationRequest::Accepted);
-        }
         RunStatus::Terminating => {
             run.request_termination(
                 sdk::RunTerminationReason::UserExit,
@@ -679,10 +755,6 @@ fn run_at_status(status: RunStatus) -> Run {
         }
         RunStatus::Failed => {
             run.fail("failed").unwrap();
-        }
-        RunStatus::Cancelled => {
-            assert_eq!(run.request_cancellation(), RunCancellationRequest::Accepted);
-            run.finish_cancellation().unwrap();
         }
     }
     assert_eq!(run.status(), status);
@@ -732,7 +804,6 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
-        (RunStatus::Cancelling, RunTransition::CancellationFinished) => Some(RunStatus::Cancelled),
         _ => None,
     }
 }
@@ -761,6 +832,30 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
             }
         }
     }
+}
+
+#[test]
+fn configured_stop_hook_block_limit_controls_retry_exhaustion() {
+    let mut run = Run::new_with_stop_hook_block_limit(RunSpec::main(), None, 2);
+
+    assert_eq!(run.stop_hook_block_count(), 0);
+    assert_eq!(
+        run.record_stop_hook_block(),
+        StopHookBlockResult::Blocked { count: 1 }
+    );
+    assert_eq!(
+        run.record_stop_hook_block(),
+        StopHookBlockResult::Blocked { count: 2 }
+    );
+    assert_eq!(
+        run.record_stop_hook_block(),
+        StopHookBlockResult::RetryExhausted { count: 3 }
+    );
+    assert_eq!(run.stop_hook_block_count(), 3);
+    assert_eq!(
+        run.record_stop_hook_block(),
+        StopHookBlockResult::RetryExhausted { count: 4 }
+    );
 }
 
 fn tool_call(provider_id: &str) -> crate::domain::agent_run::ToolCall {
@@ -868,10 +963,13 @@ fn tool_call_cannot_be_added_to_another_or_inactive_step() {
         Err(RunTransitionError::StepNotFound)
     );
 
-    run.request_cancellation();
+    run.request_termination(
+        sdk::RunTerminationReason::SessionShutdown,
+        sdk::ControlDeadline::from_unix_millis(0),
+    );
     assert_eq!(
-        run.add_tool_call(&active_step, tool_call("cancelled")),
-        Err(RunTransitionError::RunNotActive(RunStatus::Cancelling))
+        run.add_tool_call(&active_step, tool_call("terminated")),
+        Err(RunTransitionError::RunNotActive(RunStatus::Terminating))
     );
 }
 
@@ -1431,11 +1529,11 @@ fn created_only_transitions_into_draining_input() {
     assert!(run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Started { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Started { .. })));
     assert!(run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::DrainingInput { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::DrainingInput { .. })));
 }
 
 #[test]
@@ -1536,7 +1634,7 @@ fn draining_input_empty_and_sealed_emits_completed_via_domain_only() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "final"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "final"
         )),
         "domain should publish Completed on EmptyAndSealed, not the engine"
     );
@@ -1590,7 +1688,7 @@ fn set_pending_completion_result_is_used_by_empty_and_sealed() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "explicit result"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "explicit result"
         )),
         "Completed event must carry the result set via set_pending_completion_result"
     );
@@ -1609,7 +1707,7 @@ fn empty_and_sealed_without_explicit_result_emits_empty_completed() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result.is_empty()
+            RuntimeLifecycleEvent::Completed { result, .. } if result.is_empty()
         )),
         "Completed event must still be emitted with an empty result"
     );
@@ -1627,7 +1725,7 @@ fn terminal_text_still_works_for_backward_compat() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "legacy text"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "legacy text"
         )),
         "terminal_text parameter must still work for backward compat"
     );
@@ -1645,7 +1743,7 @@ fn set_pending_completion_result_is_consumed_and_not_reused() {
 
     assert!(!run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Completed { result, .. } if result.is_empty()
+        RuntimeLifecycleEvent::Completed { result, .. } if result.is_empty()
     )));
 }
 

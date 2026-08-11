@@ -1,3 +1,5 @@
+use crate::domain::CommittedTaskChange;
+
 #[derive(Debug, Clone)]
 pub struct ImageData {
     pub base64: String,
@@ -25,6 +27,7 @@ pub struct ToolOutcome {
     pub data: serde_json::Value,
     pub is_error: bool,
     pub images: Vec<ImageData>,
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl ToolOutcome {
@@ -35,7 +38,13 @@ impl ToolOutcome {
             data,
             is_error: false,
             images,
+            task_change: None,
         }
+    }
+
+    pub fn with_task_change(mut self, task_change: Option<CommittedTaskChange>) -> Self {
+        self.task_change = task_change;
+        self
     }
 
     /// 错误结果。
@@ -49,6 +58,7 @@ impl ToolOutcome {
             text,
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         }
     }
 
@@ -59,6 +69,7 @@ impl ToolOutcome {
             data: r.data,
             is_error: r.is_error,
             images: r.images,
+            task_change: r.task_change,
         }
     }
 }
@@ -93,6 +104,7 @@ mod tool_outcome_tests {
             is_error: false,
             error_kind: None,
             images: vec![],
+            task_change: None,
         };
         let o = ToolOutcome::from_tool_result(r);
         assert_eq!(o.text, "out");
@@ -127,6 +139,7 @@ pub struct ToolResult {
     pub error_kind: Option<crate::domain::ToolErrorKind>,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
+    pub task_change: Option<CommittedTaskChange>,
 }
 
 impl ToolResult {
@@ -145,7 +158,13 @@ impl ToolResult {
             is_error,
             error_kind: is_error.then_some(crate::domain::ToolErrorKind::InvalidInput),
             images: Vec::new(),
+            task_change: None,
         }
+    }
+
+    pub fn with_task_change(mut self, task_change: Option<CommittedTaskChange>) -> Self {
+        self.task_change = task_change;
+        self
     }
 
     pub fn with_image(mut self, base64: String, media_type: String) -> Self {
@@ -162,6 +181,7 @@ impl Default for ToolResult {
             is_error: false,
             error_kind: None,
             images: Vec::new(),
+            task_change: None,
         }
     }
 }
@@ -239,12 +259,31 @@ mod tests {
         // 不同变体不相等
         let d = AgentProgressKind::Message { text: "x".into() };
         assert_ne!(a, d);
+    }
 
-        let e = AgentProgressKind::ToolOutput {
-            tool_name: "Bash".into(),
-            text: "stdout".into(),
+    #[test]
+    fn sub_run_activity_preserves_identity() {
+        let identity = SubRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
         };
-        assert_ne!(a, e);
+        let event = SubRunActivityEvent {
+            identity: identity.clone(),
+            sequence: 7,
+            kind: SubRunActivityKind::Thinking {
+                text: "分析配置".to_string(),
+            },
+        };
+
+        assert_eq!(event.identity, identity);
+        assert_eq!(event.sequence, 7);
+        assert!(matches!(
+            event.kind,
+            SubRunActivityKind::Thinking { ref text } if text == "分析配置"
+        ));
     }
 
     #[test]
@@ -266,18 +305,102 @@ mod tests {
             other => panic!("expected ToolOutput, got {other:?}"),
         }
     }
+
+    #[test]
+    fn tool_progress_event_carries_text() {
+        let ev = ToolProgressEvent {
+            text: "checking PR status…\n".to_string(),
+        };
+        assert_eq!(ev.text, "checking PR status…\n");
+    }
+
+    #[test]
+    fn tool_progress_event_partial_eq() {
+        let a = ToolProgressEvent {
+            text: "line1".into(),
+        };
+        let b = ToolProgressEvent {
+            text: "line1".into(),
+        };
+        assert_eq!(a, b);
+
+        let c = ToolProgressEvent {
+            text: "line2".into(),
+        };
+        assert_ne!(a, c);
+    }
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubRunIdentity {
+    pub agent_id: String,
+    pub run_id: String,
+    pub parent_chat_id: String,
+    pub parent_run_id: String,
+    pub spawned_by_tool_call_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubRunActivityKind {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        tool_name: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: SubRunTerminalOutcome,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubRunTerminalOutcome {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubRunStartedEvent {
+    pub identity: SubRunIdentity,
+    pub sequence: u64,
+    pub role: Option<String>,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubRunActivityEvent {
+    pub identity: SubRunIdentity,
+    pub sequence: u64,
+    pub kind: SubRunActivityKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProgressSourceContext {
     pub chat_id: String,
-    pub turn_id: String,
+    pub run_id: String,
 }
 
 impl AgentProgressSourceContext {
-    pub fn new(chat_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+    pub fn new(chat_id: impl Into<String>, run_id: impl Into<String>) -> Self {
         Self {
             chat_id: chat_id.into(),
-            turn_id: turn_id.into(),
+            run_id: run_id.into(),
         }
     }
 }
@@ -302,10 +425,10 @@ pub enum AgentProgressKind {
     ToolCalls {
         calls: Vec<AgentToolCallProgress>,
     },
-    /// Output streamed by a tool running inside a sub-agent.
+    /// Sub-agent 内部工具执行的输出流（`agent_calls.rs` 转发）。
     ///
-    /// TUI may use this for diagnostics or future expandable views, but it
-    /// must not be rendered as normal sub-agent progress activity.
+    /// 顶层 Bash stdout 已独立为 [`ToolProgressEvent`] 通道，不再使用此 variant；
+    /// 此 variant 仅保留给 sub-agent 内部工具的嵌套输出转发。
     ToolOutput {
         tool_name: String,
         text: String,
@@ -313,6 +436,30 @@ pub enum AgentProgressKind {
     Message {
         text: String,
     },
+    Thinking {
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: String,
+        tool_name: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: SubRunTerminalOutcome,
+    },
+}
+
+/// 工具 stdout 流式输出事件。
+///
+/// 与 [`AgentProgressEvent`] 平级但语义独立：不寄居在 sub-agent 事件模型中。
+/// Bash 等长输出工具按行产出此事件，经 runtime → sdk → tui 全链路独立转发，
+/// 最终写入 `ToolCall.streaming_preview` 供 TUI 实时 tail 显示。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolProgressEvent {
+    /// 单行或多行 stdout 文本片段。
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

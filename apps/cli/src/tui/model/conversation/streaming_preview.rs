@@ -1,3 +1,5 @@
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolStreamingPreviewPolicy {
     pub max_lines: usize,
@@ -20,7 +22,7 @@ impl ToolStreamingPreviewPolicy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolStreamingPreviewBuffer {
     policy: ToolStreamingPreviewPolicy,
-    committed_lines: Vec<String>,
+    committed_lines: Vec<AgentActivityLine>,
     partial_line: String,
 }
 
@@ -30,6 +32,23 @@ impl ToolStreamingPreviewBuffer {
             policy,
             committed_lines: Vec::new(),
             partial_line: String::new(),
+        }
+    }
+
+    pub fn push_activity(&mut self, activity: AgentActivityLine) {
+        let super::agent_activity::AgentActivityContent::Text(content) = &activity.content else {
+            self.committed_lines.push(activity);
+            self.trim_committed_lines();
+            return;
+        };
+        let mut lines = content.lines();
+        if let Some(first_line) = lines.next() {
+            self.committed_lines
+                .push(AgentActivityLine::message(first_line));
+            for line in lines {
+                self.committed_lines.push(AgentActivityLine::message(line));
+            }
+            self.trim_committed_lines();
         }
     }
 
@@ -44,15 +63,11 @@ impl ToolStreamingPreviewBuffer {
         }
     }
 
-    pub fn display_text(&self) -> String {
-        self.display_lines().join("\n")
-    }
-
-    pub fn display_lines(&self) -> Vec<String> {
+    pub fn display_lines(&self) -> Vec<AgentActivityLine> {
         let max_lines = self.policy.max_lines.max(1);
         let mut lines = self.committed_lines.clone();
         if self.policy.include_partial_line && !self.partial_line.is_empty() {
-            lines.push(self.partial_line.clone());
+            lines.push(AgentActivityLine::message(self.partial_line.clone()));
         }
         let selected = if self.policy.tail_mode && lines.len() > max_lines {
             lines[lines.len() - max_lines..].to_vec()
@@ -61,13 +76,22 @@ impl ToolStreamingPreviewBuffer {
         };
         selected
             .into_iter()
-            .map(|line| truncate_chars(&line, self.policy.max_line_chars))
+            .map(|mut activity| {
+                if let super::agent_activity::AgentActivityContent::Text(content) =
+                    &mut activity.content
+                {
+                    *content = truncate_chars(content, self.policy.max_line_chars);
+                }
+                activity
+            })
             .collect()
     }
 
     fn commit_partial_line(&mut self) {
         self.committed_lines
-            .push(std::mem::take(&mut self.partial_line));
+            .push(AgentActivityLine::message(std::mem::take(
+                &mut self.partial_line,
+            )));
         self.trim_committed_lines();
     }
 

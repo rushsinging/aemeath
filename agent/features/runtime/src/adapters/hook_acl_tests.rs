@@ -405,6 +405,28 @@ fn execution_blocked_status_preserved() {
 }
 
 #[test]
+fn execution_cancelled_preserves_typed_status() {
+    let outcome = outcome(
+        HookDirective::Continue,
+        vec![exec(
+            HookExecutionStatus::Cancelled,
+            1,
+            None,
+            "",
+            "",
+            Duration::ZERO,
+        )],
+    );
+
+    let dispatch = map_hook_outcome(&outcome);
+
+    assert!(matches!(
+        dispatch.executions[0].status,
+        RuntimeHookExecutionStatus::Cancelled
+    ));
+}
+
+#[test]
 fn execution_failed_preserves_error_message() {
     let outcome = outcome(
         HookDirective::Continue,

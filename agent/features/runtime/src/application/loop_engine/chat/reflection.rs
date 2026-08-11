@@ -17,7 +17,7 @@ use provider::ProviderStopReason;
 pub(crate) fn submit_interval_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
-    turn_count: usize,
+    step_count: usize,
     messages: &[share::message::Message],
     binding: &Arc<ProviderBinding>,
     system_prompt_text: &str,
@@ -27,7 +27,7 @@ pub(crate) fn submit_interval_reflection(
 ) -> ReflectionTaskSubmitOutcome {
     submit(
         adapter,
-        ReflectionTaskTrigger::Interval { turn_count },
+        ReflectionTaskTrigger::Interval { step_count },
         config,
         messages.to_vec(),
         binding,
@@ -126,7 +126,7 @@ fn submit(
 
 pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
-    turn_count: usize,
+    step_count: usize,
     has_tool_calls: bool,
     stop_reason: &ProviderStopReason,
     before_finish_gate_continue: bool,
@@ -134,12 +134,12 @@ pub(crate) fn should_run_turn_reflection(
     if before_finish_gate_continue
         || !config.enabled
         || !config.reflection.enabled
-        || config.reflection.interval_turns == 0
+        || config.reflection.interval_run_steps == 0
     {
         return false;
     }
     if has_tool_calls && stop_reason != &ProviderStopReason::EndTurn {
         return false;
     }
-    turn_count.is_multiple_of(config.reflection.interval_turns)
+    step_count.is_multiple_of(config.reflection.interval_run_steps)
 }

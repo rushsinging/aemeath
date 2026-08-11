@@ -1,75 +1,397 @@
-use super::sdk_event_mapper::map_stream_event;
-use crate::application::loop_engine::chat::events::RuntimeHookExecutionResult;
+use super::sdk_event_mapper::{map_activity_event, map_stream_event};
 use crate::application::loop_engine::chat::{
-    RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookMessage, RuntimeHookMessageKind,
-    RuntimeResumedSessionStep, RuntimeStreamEvent, RuntimeTurnContext,
+    RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
-
 #[test]
-fn sdk_agent_progress_preserves_source_and_attachment_contexts() {
-    let source_context = RuntimeTurnContext::new(
-        sdk::ids::ChatId::new("child-chat"),
-        sdk::ids::ChatTurnId::new("child-turn"),
-    );
-    let attachment_context = RuntimeTurnContext::new(
-        sdk::ids::ChatId::new("parent-chat"),
-        sdk::ids::ChatTurnId::new("parent-turn"),
-    );
-    let expected_source = source_context.clone();
-    let expected_attachment = attachment_context.clone();
-    let tool_id = sdk::ids::ToolCallId::new("agent-tool");
-    let event = RuntimeStreamEvent::AgentProgress {
-        source_context,
-        attachment_context,
-        tool_id: tool_id.clone(),
-        event: tools::AgentProgressEvent {
-            source_context: None,
-            sequence: 7,
-            kind: tools::AgentProgressKind::Message {
-                text: "working".to_string(),
-            },
-        },
+fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
+    let first_id = sdk::InputId::new("input-a");
+    let second_id = sdk::InputId::new("input-b");
+    let queued_id = sdk::InputId::new("input-c");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![
+            (first_id.clone(), share::message::Message::user("first")),
+            (second_id.clone(), share::message::Message::user("second")),
+        ],
+        queued: vec![(queued_id.clone(), share::message::Message::user("queued"))],
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::AgentProgress {
-            source_context,
-            attachment_context,
-            tool_id: mapped_tool_id,
-            event,
-        } => {
-            assert_eq!(source_context.chat_id, expected_source.chat_id);
-            assert_eq!(source_context.turn_id, expected_source.turn_id);
-            assert_eq!(attachment_context.chat_id, expected_attachment.chat_id);
-            assert_eq!(attachment_context.turn_id, expected_attachment.turn_id);
-            assert_eq!(mapped_tool_id, tool_id);
-            assert_eq!(event.sequence, 7);
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].input_id.as_ref(), Some(&first_id));
+            assert_eq!(items[0].text_content(), "first");
+            assert_eq!(items[1].input_id.as_ref(), Some(&second_id));
+            assert_eq!(items[1].text_content(), "second");
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].input_id.as_ref(), Some(&queued_id));
+            assert_eq!(queued[0].text_content(), "queued");
         }
         other => panic!("unexpected event: {other:?}"),
     }
 }
 
 #[test]
-fn session_resume_mapping_preserves_context_run_step_boundaries() {
-    let event = RuntimeStreamEvent::SessionResumed {
-        steps: vec![RuntimeResumedSessionStep {
-            run_id: "run-1".into(),
-            step_id: "step-1".into(),
-            message_segments: vec![vec![share::message::Message::user("hello")].into()],
-            finalize_cause: None,
-            duration_ms: None,
-        }],
-        session_id: "session-1".into(),
-        created_at: 0,
+fn adopted_typed_skill_request_mapping_preserves_display_metadata_for_sdk() {
+    let input_id = sdk::InputId::new("skill-input");
+    let event = RuntimeStreamEvent::UserMessagesAdopted {
+        items: vec![(
+            input_id.clone(),
+            share::message::Message::skill_request(
+                "LLM prompt",
+                share::message::SkillRequestMetadata {
+                    skill: "superpowers:brainstorming".to_string(),
+                    arguments: "feature scope".to_string(),
+                    raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                },
+            ),
+        )],
+        queued: Vec::new(),
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::SessionResumed { steps, .. } => {
-            assert_eq!(steps[0].run_id, "run-1");
-            assert_eq!(steps[0].step_id, "step-1");
-            assert_eq!(steps[0].messages[0].text_content(), "hello");
+        sdk::ChatEvent::UserMessagesAdopted { items, .. } => {
+            assert_eq!(items[0].input_id.as_ref(), Some(&input_id));
+            assert_eq!(
+                items[0].metadata.as_ref().map(|metadata| metadata.source),
+                Some(sdk::ChatMessageSource::SkillRequest)
+            );
+            assert_eq!(
+                items[0]
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())
+                    .map(|request| request.raw_input.as_str()),
+                Some("/superpowers:brainstorming feature scope")
+            );
         }
         other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn activity_events_map_without_losing_change_or_snapshot_facts() {
+    let activity = sdk::ActivityView {
+        id: sdk::ActivityId::new("activity-map"),
+        run_id: sdk::RunId::new("run-map"),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: sdk::ActivitySourceView::Run,
+        kind: sdk::ActivityKindView::Run,
+        state: sdk::ActivityStateView::Running,
+        detail: sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Main,
+        },
+        audience: sdk::ActivityAudienceView::User,
+        revision: 3,
+        timing: sdk::ActivityTimingView::default(),
+    };
+
+    let snapshot = map_activity_event(RuntimeActivityEvent::Snapshot(sdk::ActivitySnapshotView {
+        run_id: activity.run_id.clone(),
+        revision: 3,
+        heartbeat_sequence: 2,
+        activities: vec![activity.clone()],
+    }));
+
+    assert!(matches!(
+        snapshot,
+        sdk::ChatEvent::ActivitySnapshot(mapped)
+            if mapped.revision == 3
+                && mapped.heartbeat_sequence == 2
+                && mapped.activities == vec![activity]
+    ));
+}
+
+#[test]
+fn sdk_event_mapper_sub_run_activity_preserves_identity() {
+    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
+        identity: tools::SubRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        },
+        sequence: 3,
+        kind: tools::SubRunActivityKind::Text {
+            text: "检查配置".to_string(),
+        },
+    });
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::SubRunActivity { event } => {
+            assert_eq!(
+                event.identity.agent_id,
+                sdk::AgentId::from_legacy_or_new("agent-child-a")
+            );
+            assert_eq!(
+                event.identity.run_id,
+                sdk::RunId::from_legacy_or_new("run-child-a")
+            );
+            assert_eq!(
+                event.identity.parent_run_id,
+                sdk::RunId::from_legacy_or_new("run-main")
+            );
+            assert_eq!(
+                event.identity.spawned_by_tool_call_id,
+                sdk::ToolCallId::from_legacy_or_new("tool-agent-a")
+            );
+            assert!(matches!(
+                event.kind,
+                sdk::SubRunActivityKindView::Text { ref text } if text == "检查配置"
+            ));
+        }
+        other => panic!("expected SubRunActivity, got {other:?}"),
+    }
+}
+
+#[test]
+fn sdk_sub_run_tool_result_preserves_tool_name() {
+    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
+        identity: tools::SubRunIdentity {
+            agent_id: "agent-child-a".to_string(),
+            run_id: "run-child-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        },
+        sequence: 4,
+        kind: tools::SubRunActivityKind::ToolResult {
+            tool_call_id: "skill-call".to_string(),
+            tool_name: "Skill".to_string(),
+            output: "SKILL_BODY_SENTINEL".to_string(),
+            content: serde_json::json!({"name": "using-superpowers"}),
+            is_error: false,
+        },
+    });
+
+    let sdk::ChatEvent::SubRunActivity { event } = map_stream_event(event) else {
+        panic!("expected SubRunActivity");
+    };
+    assert!(matches!(
+        event.kind,
+        sdk::SubRunActivityKindView::ToolResult {
+            ref tool_name,
+            ref output,
+            ..
+        } if tool_name == "Skill" && output == "SKILL_BODY_SENTINEL"
+    ));
+}
+
+#[test]
+fn sub_run_started_preserves_identity_role_model_and_sequence() {
+    let expected_agent_id = sdk::AgentId::from_legacy_or_new("agent-sub-a");
+    let expected_parent_chat_id = sdk::ChatId::from_legacy_or_new("parent-chat");
+    let expected_tool_call_id = sdk::ToolCallId::from_legacy_or_new("tool-agent-a");
+    let event = RuntimeStreamEvent::SubRunStarted(tools::SubRunStartedEvent {
+        identity: tools::SubRunIdentity {
+            agent_id: "agent-sub-a".to_string(),
+            run_id: "run-sub-a".to_string(),
+            parent_chat_id: "parent-chat".to_string(),
+            parent_run_id: "run-main".to_string(),
+            spawned_by_tool_call_id: "tool-agent-a".to_string(),
+        },
+        sequence: 1,
+        role: Some("researcher".to_string()),
+        model: "claude-sonnet".to_string(),
+    });
+
+    let sdk::ChatEvent::SubRunStarted { event } = map_stream_event(event) else {
+        panic!("expected SubRunStarted");
+    };
+    assert_eq!(event.identity.agent_id, expected_agent_id);
+    assert_eq!(event.identity.parent_chat_id, expected_parent_chat_id);
+    assert_eq!(
+        event.identity.spawned_by_tool_call_id,
+        expected_tool_call_id
+    );
+    assert_eq!(event.sequence, 1);
+    assert_eq!(event.role.as_deref(), Some("researcher"));
+    assert_eq!(event.model, "claude-sonnet");
+}
+
+#[test]
+fn tool_output_delta_preserves_context_tool_id_and_delta() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-1"),
+        sdk::ids::ChatRunId::new("run-1"),
+    );
+    let expected_context = context.clone();
+    let tool_id = sdk::ids::ToolCallId::new("bash-tool");
+    let event = RuntimeStreamEvent::ToolOutputDelta {
+        context,
+        tool_id: tool_id.clone(),
+        delta: "checking PRs…\n".to_string(),
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ToolOutputDelta {
+            context,
+            tool_id: mapped_tool_id,
+            delta,
+        } => {
+            assert_eq!(context.chat_id, expected_context.chat_id);
+            assert_eq!(context.run_id, expected_context.run_id);
+            assert_eq!(mapped_tool_id, tool_id);
+            assert_eq!(delta, "checking PRs…\n");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn microcompact_completed_preserves_messages_and_cleared_count() {
+    let event = map_stream_event(RuntimeStreamEvent::MicrocompactCompleted {
+        messages: vec![share::message::Message::user("before compact")],
+        cleared_count: 3,
+    });
+
+    assert!(matches!(
+        event,
+        sdk::ChatEvent::MicrocompactCompleted {
+            messages,
+            cleared_count: 3,
+        } if messages.len() == 1
+    ));
+}
+
+#[test]
+fn session_resume_mapping_preserves_body_free_history_index() {
+    let event = RuntimeStreamEvent::SessionResumed {
+        steps: Vec::new(),
+        display_history: Some(context::api::DisplayHistoryStepIndex::fixture(
+            "session-index",
+            17,
+            vec![("run-1", "step-1", "step-run-step.json", 23)],
+        )),
+        session_id: "session-index".into(),
+        created_at: 42,
+        compacted: false,
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::SessionResumed {
+            steps,
+            display_history: Some(index),
+            ..
+        } => {
+            assert!(steps.is_empty());
+            assert_eq!(index.session_id, "session-index");
+            assert_eq!(index.generation_revision, 17);
+            assert_eq!(index.steps[0].member_name, "step-run-step.json");
+            assert_eq!(index.steps[0].estimated_lines, 23);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn message_state_mapping_preserves_count_and_revision_without_snapshot() {
+    match map_stream_event(RuntimeStreamEvent::SessionMessageStateChanged {
+        message_count: 7,
+        revision: 3,
+    }) {
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => {
+            assert_eq!(message_count, 7);
+            assert_eq!(revision, 3);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn hook_notice_mapping_preserves_point_kind_and_all_fields_for_sdk() {
+    let notice = share::message::HookNotice {
+        point: "PreToolUse".to_string(),
+        kind: share::message::HookNoticeKind::Blocked,
+        summary: "Stop hook 阻止了停止。".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(2),
+        reason: "exit code 2".to_string(),
+        stdout_preview: "stdout preview".to_string(),
+        stderr_preview: "stderr preview".to_string(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        output_file: Some("/tmp/stop-hook.txt".to_string()),
+    };
+
+    match map_stream_event(RuntimeStreamEvent::HookNotice(notice)) {
+        sdk::ChatEvent::HookNotice { notice } => {
+            assert_eq!(notice.point, "PreToolUse");
+            assert_eq!(notice.kind, sdk::HookNoticeKindView::Blocked);
+            assert_eq!(notice.summary, "Stop hook 阻止了停止。");
+            assert_eq!(notice.command, "check-agent-stop.sh");
+            assert_eq!(notice.exit_code, Some(2));
+            assert_eq!(notice.reason, "exit code 2");
+            assert_eq!(notice.stdout_preview, "stdout preview");
+            assert_eq!(notice.stderr_preview, "stderr preview");
+            assert!(notice.stdout_truncated);
+            assert!(!notice.stderr_truncated);
+            assert_eq!(notice.output_file.as_deref(), Some("/tmp/stop-hook.txt"));
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn compact_operation_facts_preserve_messages_and_notice() {
+    let rolled_back = map_stream_event(RuntimeStreamEvent::CompactOperationRolledBack {
+        messages: vec![share::message::Message::user("rollback")],
+    });
+    let completed = map_stream_event(RuntimeStreamEvent::CompactOperationCompleted {
+        messages: vec![share::message::Message::user("recent")],
+        notice: "✓ 上下文压缩完成".to_string(),
+    });
+
+    assert!(matches!(
+        rolled_back,
+        sdk::ChatEvent::CompactOperationRolledBack { messages }
+            if messages.len() == 1 && messages[0].text_content() == "rollback"
+    ));
+    assert!(matches!(
+        completed,
+        sdk::ChatEvent::CompactOperationCompleted { messages, notice }
+            if messages.len() == 1
+                && messages[0].text_content() == "recent"
+                && notice == "✓ 上下文压缩完成"
+    ));
+}
+
+#[test]
+fn session_resume_mapping_preserves_context_run_step_boundaries_and_terminal_facts() {
+    for finalize_cause in [
+        context::domain::FinalizeCause::Completed,
+        context::domain::FinalizeCause::UserCancelledStep,
+        context::domain::FinalizeCause::RunTerminated,
+    ] {
+        let event = RuntimeStreamEvent::SessionResumed {
+            steps: vec![RuntimeResumedSessionStep {
+                run_id: "run-1".into(),
+                step_id: "step-1".into(),
+                message_segments: vec![vec![share::message::Message::user("hello")].into()],
+                finalize_cause: Some(finalize_cause),
+                duration_ms: Some(125_000),
+            }],
+            display_history: None,
+            session_id: "session-1".into(),
+            created_at: 0,
+            compacted: false,
+        };
+
+        let expected_cause = crate::application::client::map_finalize_cause_to_sdk(finalize_cause);
+        match map_stream_event(event) {
+            sdk::ChatEvent::SessionResumed { steps, .. } => {
+                assert_eq!(steps[0].run_id, "run-1");
+                assert_eq!(steps[0].step_id, "step-1");
+                assert_eq!(steps[0].messages[0].text_content(), "hello");
+                assert_eq!(steps[0].finalize_cause, Some(expected_cause));
+                assert_eq!(steps[0].duration_ms, Some(125_000));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }
 
@@ -87,9 +409,9 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
         }
     });
     let event = RuntimeStreamEvent::ToolResult {
-        context: RuntimeTurnContext::new(
+        context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-tool-result"),
-            sdk::ids::ChatTurnId::new("turn-tool-result"),
+            sdk::ids::ChatRunId::new("turn-tool-result"),
         ),
         id: sdk::ids::ToolCallId::new("runtime-call"),
         provider_id: "provider-call".to_string(),
@@ -120,11 +442,77 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
 }
 
 #[test]
-fn tool_call_projection_preserves_canonical_name() {
-    let event = RuntimeStreamEvent::ToolCallStart {
-        context: RuntimeTurnContext::new(
+fn assistant_and_thinking_deltas_keep_explicit_subject_and_delivery_in_sdk() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-content-delta"),
+        sdk::ids::ChatRunId::new("run-content-delta"),
+    );
+
+    let assistant = map_stream_event(RuntimeStreamEvent::AssistantTextDelta {
+        context: context.clone(),
+        delta: "answer".to_owned(),
+    });
+    let thinking = map_stream_event(RuntimeStreamEvent::ThinkingDelta {
+        context,
+        delta: "reasoning".to_owned(),
+    });
+
+    assert!(matches!(
+        assistant,
+        sdk::ChatEvent::AssistantTextDelta { delta, .. } if delta == "answer"
+    ));
+    assert!(matches!(
+        thinking,
+        sdk::ChatEvent::ThinkingDelta { delta, .. } if delta == "reasoning"
+    ));
+}
+
+#[test]
+fn tool_call_argument_delta_and_state_fact_map_to_distinct_sdk_events() {
+    let context = RuntimeRunContext::new(
+        sdk::ids::ChatId::new("chat-tool-split"),
+        sdk::ids::ChatRunId::new("run-tool-split"),
+    );
+    let id = sdk::ids::ToolCallId::new("tool-split");
+
+    let delta = map_stream_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
+        context: context.clone(),
+        id: id.clone(),
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        delta: "{\"file_".to_owned(),
+    });
+    let state = map_stream_event(RuntimeStreamEvent::ToolCallStateChanged {
+        context,
+        id,
+        provider_id: Some("provider-split".to_owned()),
+        name: "Read".to_owned(),
+        index: 2,
+        arguments: Some(serde_json::json!({"file_path": "src/lib.rs"})),
+        status: crate::application::loop_engine::chat::RuntimeToolCallStatus::Ready,
+    });
+
+    assert!(matches!(
+        delta,
+        sdk::ChatEvent::ToolCallArgumentsDelta { delta, .. } if delta == "{\"file_"
+    ));
+    assert!(matches!(
+        state,
+        sdk::ChatEvent::ToolCallStateChanged {
+            arguments: Some(arguments),
+            status: sdk::ToolCallStatusView::Ready,
+            ..
+        } if arguments["file_path"] == "src/lib.rs"
+    ));
+}
+
+#[test]
+fn tool_call_started_keeps_explicit_fact_name_and_canonical_tool_name() {
+    let event = RuntimeStreamEvent::ToolCallStarted {
+        context: RuntimeRunContext::new(
             sdk::ids::ChatId::new("chat-1"),
-            sdk::ids::ChatTurnId::new("turn-1"),
+            sdk::ids::ChatRunId::new("turn-1"),
         ),
         id: sdk::ids::ToolCallId::new("tool-1"),
         provider_id: Some("provider-1".to_string()),
@@ -133,86 +521,7 @@ fn tool_call_projection_preserves_canonical_name() {
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ToolCallStart { name, .. } => assert_eq!(name, "Grep"),
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_event_mapping_preserves_authoritative_status_and_final_diagnostics() {
-    let event = RuntimeStreamEvent::HookEvent(RuntimeHookEvent {
-        hook_name: "Stop".to_string(),
-        status: RuntimeHookEventStatus::Succeeded,
-        matcher: Some("*".to_string()),
-        command: Some("check-agent-stop.sh".to_string()),
-        result: Some(RuntimeHookExecutionResult {
-            exit_code: Some(0),
-            stdout: "ok".to_string(),
-            stderr: String::new(),
-            decision: Some("continue".to_string()),
-            reason: None,
-            additional_context: None,
-        }),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookEvent(view) => {
-            assert_eq!(view.status, sdk::HookEventStatus::Succeeded);
-            assert_eq!(view.matcher.as_deref(), Some("*"));
-            assert_eq!(view.command.as_deref(), Some("check-agent-stop.sh"));
-            let result = view.result.expect("hook result");
-            assert_eq!(result.exit_code, Some(0));
-            assert_eq!(result.stdout, "ok");
-            assert!(result.stderr.is_empty());
-            assert_eq!(result.decision.as_deref(), Some("continue"));
-            assert!(result.reason.is_none());
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_additional_context_attribution() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PreToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 0,
-        attempt: 1,
-        kind: RuntimeHookMessageKind::AdditionalContext,
-        text: "extra context".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.point, "PreToolUse");
-            assert_eq!(view.source, "Bash");
-            assert_eq!(view.execution_ordinal, 0);
-            assert_eq!(view.attempt, 1);
-            assert_eq!(view.kind, sdk::HookMessageKindView::AdditionalContext);
-            assert_eq!(view.text, "extra context");
-        }
-        other => panic!("unexpected event: {other:?}"),
-    }
-}
-
-#[test]
-fn hook_message_mapping_preserves_system_message_attempt() {
-    let event = RuntimeStreamEvent::HookMessage(RuntimeHookMessage {
-        point: hook::HookPoint::PostToolUse,
-        source: "Bash".to_string(),
-        execution_ordinal: 2,
-        attempt: 3,
-        kind: RuntimeHookMessageKind::SystemMessage,
-        text: "warning".to_string(),
-    });
-
-    match map_stream_event(event) {
-        sdk::ChatEvent::HookMessage(view) => {
-            assert_eq!(view.kind, sdk::HookMessageKindView::SystemMessage);
-            assert_eq!(view.execution_ordinal, 2);
-            assert_eq!(view.attempt, 3);
-            assert_eq!(view.text, "warning");
-        }
+        sdk::ChatEvent::ToolCallStarted { name, .. } => assert_eq!(name, "Grep"),
         other => panic!("unexpected event: {other:?}"),
     }
 }
@@ -247,12 +556,12 @@ fn config_reload_mapping_preserves_immediate_scope_and_committed_view() {
 
 #[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
-    let context = RuntimeTurnContext::new(
+    let context = RuntimeRunContext::new(
         sdk::ids::ChatId::new("chat-retry"),
-        sdk::ids::ChatTurnId::new("turn-retry"),
+        sdk::ids::ChatRunId::new("turn-retry"),
     );
     let expected_chat_id = context.chat_id.clone();
-    let expected_turn_id = context.turn_id.clone();
+    let expected_run_id = context.run_id.clone();
     let event = RuntimeStreamEvent::ModelInvocationRetrying {
         context,
         attempt: 2,
@@ -266,7 +575,7 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
             delay,
         } => {
             assert_eq!(context.chat_id, expected_chat_id);
-            assert_eq!(context.turn_id, expected_turn_id);
+            assert_eq!(context.run_id, expected_run_id);
             assert_eq!(attempt, 2);
             assert_eq!(delay, std::time::Duration::from_millis(10_250));
         }

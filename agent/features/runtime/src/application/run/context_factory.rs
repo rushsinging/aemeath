@@ -133,6 +133,7 @@ pub struct RuntimeContextFactory {
     services: RuntimeServices,
     provider_factory: Option<Arc<dyn crate::ports::ProviderFactory>>,
     skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
+    use_injected_hooks: bool,
 }
 
 impl RuntimeContextFactory {
@@ -148,6 +149,7 @@ impl RuntimeContextFactory {
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
+        usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -156,9 +158,9 @@ impl RuntimeContextFactory {
             reflection_history,
             task,
             hooks,
+            usage_sink,
         )
     }
-
     #[allow(clippy::too_many_arguments)]
     fn from_services(
         tool_catalog: Arc<dyn ToolCatalogPort>,
@@ -167,6 +169,7 @@ impl RuntimeContextFactory {
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
+        usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -175,11 +178,20 @@ impl RuntimeContextFactory {
                 policy,
                 reflection_history,
                 task,
+                published_state:
+                    crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
+                usage_sink,
             },
             provider_factory: None,
             skill_catalog: None,
+            use_injected_hooks: cfg!(test),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn use_snapshot_hooks_for_test(&mut self) {
+        self.use_injected_hooks = false;
     }
 
     pub fn with_derived_bindings(
@@ -191,6 +203,7 @@ impl RuntimeContextFactory {
             services: self.services.clone(),
             provider_factory: Some(provider_factory),
             skill_catalog: Some(skill_catalog),
+            use_injected_hooks: self.use_injected_hooks,
         }
     }
 
@@ -220,10 +233,14 @@ impl RuntimeContextFactory {
         let parent = bindings.parent().map(|parent| parent.context().clone());
         let interaction =
             self.select_interaction_port(request.spec(), bindings, parent.as_deref())?;
-        let hook = self.select_hook_port(request.spec(), parent.as_deref())?;
+        let run_config = crate::application::run::config::RunConfigSnapshot::capture(
+            session.snapshot.config().clone(),
+        );
+        let hook = self.select_hook_port(request.spec(), &run_config, parent.as_deref())?;
         let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
         let event_route = self.select_event_route(bindings)?;
-        let lifecycle = self.select_lifecycle(request, parent.as_deref())?;
+        let activity_publisher = Arc::new(event_route.sink.clone());
+        let lifecycle = self.select_lifecycle(request, bindings, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
         let bindings = RunCapabilityBindings {
             model: crate::application::run::context::ModelBindings {
@@ -231,9 +248,7 @@ impl RuntimeContextFactory {
                 provider: provider.binding,
                 interaction: interaction.port,
                 memory: memory.port,
-                config: crate::application::run::config::RunConfigSnapshot::capture(
-                    session.snapshot.config().clone(),
-                ),
+                config: run_config,
                 reasoning: reasoning.port,
                 tool_catalog: tool_catalog.port,
             },
@@ -248,6 +263,11 @@ impl RuntimeContextFactory {
             skill_load_session_id: skill_load.session_id,
         };
         self.bind_runtime_context(
+            request
+                .run_id()
+                .cloned()
+                .unwrap_or_else(crate::domain::agent_run::RunId::new_v7),
+            activity_publisher,
             bindings,
             hook,
             skill_load.state,
@@ -257,6 +277,8 @@ impl RuntimeContextFactory {
 
     fn bind_runtime_context(
         &self,
+        run_id: crate::domain::agent_run::RunId,
+        activity_publisher: Arc<dyn crate::application::activity::ActivityChangePublisher>,
         bindings: RunCapabilityBindings,
         hook: HookSelection,
         skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
@@ -282,6 +304,12 @@ impl RuntimeContextFactory {
             services,
             bindings,
             skill_load_state,
+            Arc::new(
+                crate::application::activity::ActivityCoordinator::production(
+                    run_id,
+                    activity_publisher,
+                ),
+            ),
             RuntimeContextAssemblyToken::new(),
         );
         let context = match resources.session.lease {
@@ -506,13 +534,22 @@ impl RuntimeContextFactory {
     fn select_hook_port(
         &self,
         spec: &RunSpec,
+        config: &crate::application::run::config::RunConfigSnapshot,
         parent: Option<&RuntimeContext>,
     ) -> Result<HookSelection, RunCreationError> {
+        let run_hooks: Arc<dyn HookPort> = if cfg!(test) && self.use_injected_hooks {
+            self.services.hooks.clone()
+        } else {
+            Arc::new(
+                hook::build_dispatcher(config.config())
+                    .map_err(|_| RunCreationError::ContextAssembly)?,
+            )
+        };
         let port = match spec.hook_binding() {
-            HookBindingMode::Full => self.services.hooks.clone(),
+            HookBindingMode::Full => run_hooks,
             HookBindingMode::BoundaryOnly => {
                 parent.ok_or(RunCreationError::ContextAssembly)?;
-                Arc::new(BoundaryHookPort::new(self.services.hooks.clone()))
+                Arc::new(BoundaryHookPort::new(run_hooks))
             }
         };
         Ok(HookSelection { port })
@@ -555,13 +592,20 @@ impl RuntimeContextFactory {
     fn select_lifecycle(
         &self,
         _request: &RunCreationRequest,
+        bindings: &RunCreationBindings,
         parent: Option<&RuntimeContext>,
     ) -> Result<LifecycleSelection, RunCreationError> {
         Ok(LifecycleSelection {
             cancel: parent
                 .map(|context| context.cancel().child_scope())
                 .unwrap_or_default(),
-            usage: crate::application::run::context::RunUsageTracker::new(),
+            // Session Runs share a per-Session usage tracker so that a new Run
+            // inherits the last known API total tokens from the previous Run.
+            // Sub-Runs (Parent variant) get an isolated tracker.
+            usage: match bindings.session() {
+                Some(session) => session.usage().clone(),
+                None => crate::application::run::context::RunUsageTracker::new(),
+            },
         })
     }
 

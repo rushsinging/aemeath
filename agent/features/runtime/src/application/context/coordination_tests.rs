@@ -54,6 +54,8 @@ impl ContextPort for RecordingPort {
                 urgency: Urgency::None,
                 decision_token_count: 0,
                 threshold: 1,
+                context_size: 200_000,
+                effective_window: 180_000,
                 reason: DecisionReason::HeuristicFallback,
             },
         })
@@ -69,6 +71,8 @@ impl ContextPort for RecordingPort {
             urgency: Urgency::Must,
             decision_token_count: 100,
             threshold: 90,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::ActualProviderUsage,
         })
     }
@@ -80,6 +84,7 @@ impl ContextPort for RecordingPort {
             summary: "summary".to_string(),
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -92,6 +97,7 @@ impl ContextPort for RecordingPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -137,6 +143,7 @@ fn request() -> ContextRequest {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("input")],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
@@ -160,7 +167,13 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
     coordinator.build_window(&frozen).await.unwrap();
     coordinator.needs_compaction(&frozen).await.unwrap();
     coordinator
-        .compact(&frozen, SessionRevision::new(1))
+        .compact(
+            &frozen,
+            SessionRevision::new(1),
+            std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .unwrap();
 
@@ -208,6 +221,8 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
             run_id: frozen.run_id.clone(),
             system_prompt: frozen.system_prompt.clone(),
             context_size: frozen.context_size,
+            progress: None,
+            task_context: None,
         })
         .await
         .unwrap();
@@ -528,7 +543,13 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
     let coordinator = ContextCoordinator::new(Arc::new(SkippingPort));
     assert!(matches!(
         coordinator
-            .compact(&request(), SessionRevision::new(0))
+            .compact(
+                &request(),
+                SessionRevision::new(0),
+                std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
             .await
             .unwrap(),
         CompactOutcome::Skipped(CompactSkipReason::ResumeProtection)
@@ -547,6 +568,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             summary: "summary".to_string(),
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }),
         &usage,
         &mut window,
@@ -570,4 +592,82 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 
     assert_eq!(usage.get(), Some(42));
     assert_eq!(window, Some("window"));
+}
+
+/// #1500：ContextCoordinator 必须把 Runtime 的进度视图透传到 CompactRequest，
+/// 且 domain stage/chunk 计数正确映射为 SDK 视图（Preparing/Summarizing
+/// 带 chunk 计数/Finalizing）。
+#[tokio::test]
+async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
+    let port = Arc::new(RecordingPort::default());
+    let coordinator = ContextCoordinator::new(port.clone());
+    let frozen = request();
+
+    type CompactProgressRecord = (sdk::CompactStageView, sdk::CompactWorkView);
+    let received: Arc<Mutex<Vec<CompactProgressRecord>>> = Arc::new(Mutex::new(Vec::new()));
+    let view = {
+        let received = received.clone();
+        std::sync::Arc::new(
+            move |stage: sdk::CompactStageView, work: sdk::CompactWorkView| {
+                received.lock().unwrap().push((stage, work));
+            },
+        )
+    };
+
+    coordinator
+        .compact(
+            &frozen,
+            SessionRevision::new(1),
+            view,
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let requests = port.compact_requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let progress = requests[0]
+        .progress
+        .as_ref()
+        .expect("compact progress 必须接线到 CompactRequest");
+
+    // 触发 context 侧进度 → 视图收到映射后的 stage/chunk 计数
+    progress.emit(
+        context::compact::CompactStage::Preparing,
+        context::compact::CompactWork::Indeterminate,
+    );
+    progress.emit(
+        context::compact::CompactStage::Mapping,
+        context::compact::CompactWork::Determinate {
+            completed: 2,
+            total: 5,
+        },
+    );
+    progress.emit(
+        context::compact::CompactStage::Finalizing,
+        context::compact::CompactWork::Indeterminate,
+    );
+
+    assert_eq!(
+        *received.lock().unwrap(),
+        vec![
+            (
+                sdk::CompactStageView::Preparing,
+                sdk::CompactWorkView::Indeterminate,
+            ),
+            (
+                sdk::CompactStageView::Mapping,
+                sdk::CompactWorkView::Determinate {
+                    completed: 2,
+                    total: 5,
+                },
+            ),
+            (
+                sdk::CompactStageView::Finalizing,
+                sdk::CompactWorkView::Indeterminate,
+            ),
+        ],
+        "domain 进度必须原样映射到 SDK 视图（#1500）"
+    );
 }

@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "terminal_tests.rs"]
+mod tests;
+
 /// Conversation 终态原因。实时事件与 Session Resume 必须投影为同一语义。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalCause {
@@ -42,13 +46,16 @@ fn format_duration(duration: Duration) -> String {
 
 pub fn terminal_notice(cause: TerminalCause, duration: Option<Duration>) -> Option<String> {
     match cause {
-        TerminalCause::Completed => duration.map(|duration| {
+        TerminalCause::Completed => {
             use std::sync::atomic::{AtomicUsize, Ordering};
             static COUNTER: AtomicUsize = AtomicUsize::new(0);
-            let idx = COUNTER.fetch_add(1, Ordering::Relaxed) % DONE_VERBS.len();
-            let verb = DONE_VERBS.get(idx).copied().unwrap_or(DONE_VERBS[0]);
-            format!("✻ {verb} for {}", format_duration(duration))
-        }),
+            let index = COUNTER.fetch_add(1, Ordering::Relaxed) % DONE_VERBS.len();
+            let verb = DONE_VERBS.get(index).copied().unwrap_or(DONE_VERBS[0]);
+            Some(duration.map_or_else(
+                || format!("✻ {verb}"),
+                |duration| format!("✻ {verb} for {}", format_duration(duration)),
+            ))
+        }
         TerminalCause::UserCancelled => Some(duration.map_or_else(
             || "✻ Cancelled".to_string(),
             |duration| format!("✻ Cancelled, ran {}", format_duration(duration)),

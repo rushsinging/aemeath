@@ -389,7 +389,10 @@ fn translate_hooks(settings: ClaudeSettingsConfig) -> HooksConfig {
             events.insert(event, entries);
         }
     }
-    HooksConfig { events }
+    HooksConfig {
+        events,
+        ..HooksConfig::default()
+    }
 }
 
 pub struct CompatibilityAdapter;

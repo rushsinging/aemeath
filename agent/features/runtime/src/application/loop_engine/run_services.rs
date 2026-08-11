@@ -21,9 +21,9 @@ use crate::application::loop_engine::step_persistence::{
     AcceptedInputObserver, StepPersistenceCoordinator,
 };
 use crate::application::loop_engine::{
-    CompactionPort, InteractionMailboxPort, LoopEngineError, ModelInvocationPort,
-    PendingInteractionWork, StepCommit, StepPersistencePort, ToolGuardDecision,
-    ToolOrchestrationPort,
+    CompactProgressView, CompactionPort, InteractionMailboxPort, LoopEngineError,
+    ModelInvocationPort, PendingInteractionWork, StepCommit, StepPersistencePort,
+    ToolGuardDecision, ToolOrchestrationPort,
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
@@ -41,6 +41,7 @@ pub(crate) struct ContextRequestData<'a> {
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
+    pub invocation_reminders: Vec<context::domain::InvocationReminder>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
@@ -48,6 +49,7 @@ pub(crate) struct RuntimeStepPersistence<'a, O> {
     context_request: ContextRequestData<'a>,
     input_prefix: Option<Message>,
     accepted_input: O,
+    reminder_intents_available: bool,
 }
 
 impl<'a, O> RuntimeStepPersistence<'a, O>
@@ -65,6 +67,7 @@ where
             context_request,
             input_prefix,
             accepted_input,
+            reminder_intents_available: true,
         }
     }
 
@@ -99,11 +102,39 @@ where
         _run_id: &sdk::RunId,
         step_id: &RunStepId,
     ) -> Option<ContextRequest> {
-        Some(ContextRequestCoordinator::new(self.source()).build_request(
+        let mut request = ContextRequestCoordinator::new(self.source()).build_request(
             &self.run_id,
             step_id,
             execution.step_outcome(),
-        ))
+        );
+        if self.reminder_intents_available {
+            request.invocation_reminders = self.context_request.invocation_reminders.clone();
+            if !request.invocation_reminders.is_empty() {
+                let kinds = request
+                    .invocation_reminders
+                    .iter()
+                    .map(context::domain::InvocationReminder::kind)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "invocation_reminders_attached count={} kinds={} run_id={} step_id={}",
+                    request.invocation_reminders.len(),
+                    kinds,
+                    self.run_id,
+                    step_id.as_str(),
+                );
+            }
+        } else if !self.context_request.invocation_reminders.is_empty() {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "invocation_reminders_skipped reason=already_consumed count={} run_id={} step_id={}",
+                self.context_request.invocation_reminders.len(),
+                self.run_id,
+                step_id.as_str(),
+            );
+        }
+        Some(request)
     }
 
     async fn accept_step_input(
@@ -111,8 +142,18 @@ where
         execution: &mut RunExecutionState,
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
+        self.reminder_intents_available = false;
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .accept_step_input(execution, step_id, &mut self.accepted_input)
+            .await
+    }
+
+    async fn load_step_receipts(
+        &mut self,
+        request: &ContextRequest,
+    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
+            .load_step_receipts(request)
             .await
     }
 
@@ -157,10 +198,22 @@ where
     async fn compact(
         &mut self,
         execution: &mut RunExecutionState,
-        _cancel: &CancellationToken,
+        cancel: &CancellationToken,
+        progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError> {
+        // #1537：渲染当前 Task 状态，compact summary 定稿后拼接到末尾。
+        let task_context =
+            crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+                &*self.runtime_context.task_ref().clone(),
+            );
         CompactionCoordinator::from_context(self.runtime_context)
-            .compact(execution, &mut self.observer)
+            .compact(
+                execution,
+                &mut self.observer,
+                progress,
+                task_context,
+                cancel.clone(),
+            )
             .await
     }
 }
@@ -306,7 +359,7 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
         request: &sdk::InteractionRequest,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!("Interaction: id={}", request.id),
         );
         Ok(())
@@ -315,17 +368,17 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
 
 pub(crate) struct RuntimeModelInvocation<O> {
     observer: O,
-    advance_turn: bool,
+    advance_step: bool,
 }
 
 impl<O> RuntimeModelInvocation<O>
 where
     O: crate::application::model::invocation::ModelInvocationObserver,
 {
-    pub(crate) fn new(observer: O, advance_turn: bool) -> Self {
+    pub(crate) fn new(observer: O, advance_step: bool) -> Self {
         Self {
             observer,
-            advance_turn,
+            advance_step,
         }
     }
 }
@@ -338,6 +391,9 @@ where
     async fn invoke_model(
         &mut self,
         execution: &mut RunExecutionState,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        invocation_id: &sdk::ModelInvocationId,
         cancel: &CancellationToken,
     ) -> Result<
         (
@@ -346,23 +402,35 @@ where
         ),
         LoopEngineError,
     > {
-        if self.advance_turn {
-            execution.advance_turn();
+        if self.advance_step {
+            execution.advance_step();
         }
-        let turn = execution.turn_count();
+        let run_step = execution.step_count();
         logging::within(
             logging::LogContextPatch {
-                turn: logging::FieldPatch::Set(turn),
+                run_step: logging::FieldPatch::Set(run_step),
                 request_id: logging::FieldPatch::Clear,
                 ..logging::LogContextPatch::default()
             },
             crate::application::model::invocation::orchestrate_model_invocation(
                 &mut self.observer,
                 execution,
+                run_id,
+                step_id,
+                invocation_id,
                 cancel,
             ),
         )
         .await
+    }
+
+    async fn take_streaming_tool_results(
+        &mut self,
+    ) -> Vec<crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult> {
+        match self.observer.streaming_tool() {
+            Some(executor) => executor.take_results().await,
+            None => Vec::new(),
+        }
     }
 }
 
@@ -403,6 +471,20 @@ where
             .execute(execution, run_id, step_id, calls, cancel)
             .await
     }
+
+    async fn finalize_streaming_tool_results(
+        &mut self,
+        execution: &mut RunExecutionState,
+        step_id: &sdk::RunStepId,
+        rounds: Vec<
+            crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult,
+        >,
+        cancel: &CancellationToken,
+    ) -> Result<crate::application::tool::coordination::ToolRoundOutcome, LoopEngineError> {
+        self.coordinator
+            .finalize_streaming(execution, step_id, rounds, cancel)
+            .await
+    }
 }
 
 pub(crate) struct RuntimeStopHook<O> {
@@ -423,10 +505,6 @@ where
 {
     fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
         Some(self.context.clone())
-    }
-
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        self.observer.begin_stop_hook_status().await
     }
 
     fn install_stop_hook_feedback(&mut self, message: Message) {

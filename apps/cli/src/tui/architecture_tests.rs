@@ -47,6 +47,141 @@ fn production_source(source: &str) -> String {
 }
 
 #[test]
+fn activity_observation_has_single_runtime_constructor_and_tui_mutation_path() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let runtime = repository.join("agent/features/runtime/src");
+    let tui = repository.join("apps/cli/src/tui");
+
+    for file in rust_files_under(&runtime) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == runtime.join("application/activity/coordinator.rs")
+            || file == runtime.join("application/activity/model.rs")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read runtime source"));
+        assert!(
+            !source.contains("ActivityObservation {"),
+            "{} must delegate ActivityObservation construction to ActivityCoordinator; model.rs only defines the type",
+            file.display()
+        );
+    }
+
+    let root_reducer = tui.join("update/root_reducer.rs");
+    for file in rust_files_under(&tui) {
+        if file == root_reducer
+            || file
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file
+                .components()
+                .any(|component| component.as_os_str() == "scenario_tests")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read TUI source"));
+        assert!(
+            !source.contains("activity_observations_mut("),
+            "{} must not mutate ActivityObservationModel outside root reducer",
+            file.display()
+        );
+    }
+
+    let live_status = fs::read_to_string(tui.join("view_assembler/live_status.rs"))
+        .expect("read live status assembler");
+    for forbidden in ["RunStatusView", "TuiRunStatus", "RunTransitioned"] {
+        assert!(
+            !production_source(&live_status).contains(forbidden),
+            "LiveStatus must not depend on legacy Run status {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn activity_diagnostics_are_structured_and_payload_free() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let runtime = fs::read_to_string(
+        repository.join("agent/features/runtime/src/application/activity/coordinator.rs"),
+    )
+    .expect("read ActivityCoordinator");
+    let tui = fs::read_to_string(
+        repository.join("apps/cli/src/tui/effect/session/processing/logging.rs"),
+    )
+    .expect("read TUI event logging");
+
+    for source in [&runtime, &tui] {
+        for field in [
+            "run_id={}",
+            "revision={}",
+            "total_elapsed_ms={}",
+            "active_elapsed_ms={}",
+            "state_elapsed_ms={}",
+        ] {
+            assert!(source.contains(field), "activity log missing field {field}");
+        }
+        for sensitive in ["raw_args", "stdout", "response={}"] {
+            assert!(
+                !source.contains(sensitive),
+                "activity logs must not expose {sensitive}"
+            );
+        }
+    }
+}
+
+#[test]
+fn run_activity_has_no_legacy_business_state_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let forbidden_symbols = [
+        "RunStatusObserved",
+        "RunStateSnapshot",
+        "run_state_snapshots",
+        "active_main_run_snapshot",
+        "active_main_run_id",
+        "TuiRunStatus",
+        "TuiRunTiming",
+        "ObserveRunStatus",
+        "SpinnerModel",
+        "SpinnerPhase",
+        "chat_active",
+        "running_tool_count",
+        "SetSpinnerPhase",
+        "StopSpinner",
+        "spinner_phase(",
+        "spinner_stop(",
+        "pause_chat(",
+        "resume_chat(",
+        "set_spinner_phase(",
+        "stop_spinner(",
+    ];
+
+    for file in rust_files_under(&root) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == root.join("architecture_tests.rs")
+        {
+            continue;
+        }
+        let source = production_source(&fs::read_to_string(&file).expect("read rust source"));
+        for forbidden in forbidden_symbols {
+            assert!(
+                !source.contains(forbidden),
+                "{} must not retain legacy run activity state symbol {forbidden}",
+                file.display()
+            );
+        }
+    }
+}
+
+#[test]
 fn test_phase_one_root_reducer_intent_entrypoint_exists() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let intent = fs::read_to_string(root.join("update/intent.rs")).expect("read AgentIntent");
@@ -296,21 +431,17 @@ fn test_phase_four_workspace_provider_owns_workspace_fields() {
 fn test_phase_four_workspace_metadata_git_is_executor_only() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let app = fs::read_to_string(root.join("app.rs")).expect("read app");
-    let mapping = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read event mapping");
     let event = fs::read_to_string(root.join("app/event.rs")).expect("read app event");
     let provider = fs::read_to_string(root.join("model/workspace_provider.rs"))
         .expect("read workspace provider");
     let executor = fs::read_to_string(root.join("effect/executor.rs")).expect("read executor");
 
-    for source in [&app, &mapping] {
-        assert!(
-            !source.contains("Command::new(\"git\")")
-                && !source.contains("git_branch_for")
-                && !source.contains("worktree_kind_for"),
-            "SDK event and app paths must not synchronously resolve Git metadata"
-        );
-    }
+    assert!(
+        !app.contains("Command::new(\"git\")")
+            && !app.contains("git_branch_for")
+            && !app.contains("worktree_kind_for"),
+        "SDK event and app paths must not synchronously resolve Git metadata"
+    );
     let snapshot_event = event
         .split("pub struct StatusContextUpdate")
         .nth(1)
@@ -331,46 +462,54 @@ fn test_phase_four_workspace_metadata_git_is_executor_only() {
 }
 
 #[test]
-fn test_phase_five_agent_run_state_is_tui_owned_and_mapper_is_not_wired() {
+fn test_runtime_lifecycle_events_are_observational_only() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
-    let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))
-        .expect("read interaction model");
     let intent = fs::read_to_string(root.join("model/conversation/intent.rs"))
         .expect("read conversation intent");
-    let change = fs::read_to_string(root.join("model/conversation/change.rs"))
-        .expect("read conversation change");
-    let mapper = fs::read_to_string(root.join("effect/session/processing/event_mapping.rs"))
-        .expect("read processing mapper");
+    let interaction = fs::read_to_string(root.join("model/conversation/interaction.rs"))
+        .expect("read interaction model");
+    let mapper =
+        fs::read_to_string(root.join("adapter/agent_event.rs")).expect("read agent event mapper");
 
-    let run_intents = intent
-        .split("pub struct RunStarted")
-        .nth(1)
-        .and_then(|source| source.split("// ════════════════════════════════════════════════════════════════════\n//  Runtime intent structs").next())
-        .expect("extract agent run intent declarations");
-    for (name, source) in [
-        ("agent run model", interaction.as_str()),
-        ("agent run intent", run_intents),
-        ("agent run change", change.as_str()),
-    ] {
-        for forbidden in [
-            "sdk::",
-            "oneshot::Sender",
-            "tokio::sync",
-            "AgentClient",
-            ".await",
-            "spawn",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} must remain TUI-owned and pure: found {forbidden}"
-            );
-        }
-    }
     assert!(
-        mapper.contains("sdk::ChatEvent::RunStarted { .. }")
-            && mapper.contains("UiEvent::SystemMessage(String::new())"),
-        "#943 must wire Runtime lifecycle DTOs; #944 5A must not modify the SDK mapper"
+        !intent.contains("RunCancelling") && !intent.contains("RunCancelled"),
+        "conversation intent must not retain old Run cancellation lifecycle variants"
     );
+    assert!(
+        !interaction.contains("pub(crate) enum AgentRunPhase")
+            && !interaction.contains("pub(crate) struct AgentRunState")
+            && !interaction.contains("pub(crate) struct AgentRunStepState"),
+        "conversation model must not retain a second Run lifecycle state source"
+    );
+    assert!(
+        !mapper.contains("ConversationIntent::RunStarted")
+            && !mapper.contains("ConversationIntent::RunAwaitingUser")
+            && !mapper.contains("ConversationIntent::RunResumed")
+            && !mapper.contains("ConversationIntent::RunCancelling")
+            && !mapper.contains("ConversationIntent::RunCancelled")
+            && !mapper.contains("ConversationIntent::RunCompleted")
+            && !mapper.contains("ConversationIntent::RunFailed"),
+        "Run lifecycle observations must not mutate ConversationModel"
+    );
+}
+#[test]
+fn run_control_ack_cannot_become_a_terminal_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let executor = fs::read_to_string(root.join("effect/executor.rs")).expect("read executor");
+    let key = fs::read_to_string(root.join("app/update/key.rs")).expect("read key update");
+
+    assert!(key.contains("Effect::CancelRunStep"));
+    assert!(executor.contains("CancelRunStepOutcome::Accepted"));
+    for forbidden in [
+        "CancelRunStepOutcome::Accepted => self.chat.stop_processing",
+        "CancelRunStepOutcome::Accepted => ConversationIntent::TerminalNotice",
+        "CancelRunStepOutcome::Accepted => ConversationIntent::PresentCancelledStep",
+    ] {
+        assert!(
+            !executor.contains(forbidden),
+            "ACK must not publish terminal: {forbidden}"
+        );
+    }
 }
 
 #[test]

@@ -9,7 +9,7 @@ pub enum ConversationChange {
     },
     ChatTurnStarted {
         chat_id: String,
-        turn_id: String,
+        run_id: String,
     },
     UserMessageAppended {
         block_id: String,
@@ -29,14 +29,14 @@ pub enum ConversationChange {
     },
     ToolCallBound {
         chat_id: String,
-        turn_id: String,
+        run_id: String,
         id: String,
         name: String,
         running: bool,
     },
     ToolCallCompleted {
         chat_id: String,
-        turn_id: String,
+        run_id: String,
         id: String,
         status: ToolCallStatus,
     },
@@ -53,14 +53,18 @@ pub enum ConversationChange {
     QueuedSubmissionsCleared {
         count: usize,
     },
-    AgentProgressRecorded {
+    AgentActivitiesRecorded {
         block_id: String,
         tool_id: String,
+    },
+    /// 工具 stdout 流式输出已写入 ToolCall.activities，需 invalidate 该 block 的 root_cache。
+    ToolStreamingOutputRecorded {
+        block_id: String,
     },
     /// Agent 工具的 role/model 元数据已写入（issue #499）。
     AgentMetaUpdated {
         chat_id: String,
-        turn_id: String,
+        run_id: String,
         tool_id: String,
     },
     ChatCompleting {
@@ -105,14 +109,15 @@ pub enum ConversationChange {
         active_request_id: UiInteractionRequestId,
         received_request_id: UiInteractionRequestId,
     },
-    AgentRunChanged {
+    ActivityObservationChanged {
         run_id: super::interaction::UiRunId,
-        phase: super::interaction::AgentRunPhase,
+        activity_id: crate::tui::adapter::tui_runtime_event::UiActivityId,
     },
-    AgentRunStepChanged {
+    ActivityObservationStale {
         run_id: super::interaction::UiRunId,
-        step_id: super::interaction::UiRunStepId,
-        phase: super::interaction::AgentRunStepPhase,
+    },
+    ActivitySnapshotReplaced {
+        run_id: super::interaction::UiRunId,
     },
     OutputDirty,
     StyleBoundaryResetRequired,
@@ -120,7 +125,6 @@ pub enum ConversationChange {
     UsageChanged {
         input_tokens: u64,
         output_tokens: u64,
-        cost_usd: f64,
     },
     LiveTpsChanged {
         tps: f64,
@@ -133,11 +137,6 @@ pub enum ConversationChange {
     ProcessingJobChanged {
         id: String,
     },
-    /// Compact 进度条嵌入 spinner 行（output 区），与 phase 变化解耦——单独归类为 output_dirty，
-    /// 避免依赖 SpinnerTick 每 90ms 兜底 mark_output_dirty 的不可靠时序（#540）。
-    CompactProgressChanged,
-    SpinnerPhaseChanged,
-    SpinnerStopped,
     QueuedSubmissionsSynced {
         count: usize,
     },

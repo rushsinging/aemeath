@@ -183,7 +183,7 @@ Harness 是场景测试唯一入口，至少提供以下能力：
 
 ### 4.3 Runtime/Agent 脚本
 
-Runtime fixture 使用有序事件脚本表达一轮交互，例如：
+Runtime fixture 使用有序事件脚本表达一轮交互，例如普通输入：
 
 ```text
 expect UserMessage("读取 Cargo.toml")
@@ -197,7 +197,27 @@ expect UserMessage("读取 Cargo.toml")
   → TurnCompleted
 ```
 
-事件 ID、顺序和 payload 均由 fixture 固定。脚本必须允许场景逐步推进，以便分别检查 Thinking、Tool Running 和完成态。
+Skill 输入使用同一 adoption 生命周期，但保留 typed metadata：
+
+```text
+expect SkillRequest {
+      skill: "superpowers:brainstorming",
+      arguments: "feature scope",
+      raw_input: "/superpowers:brainstorming feature scope"
+    }
+  → UserMessagesAdopted {
+      source: SkillRequest,
+      raw_input: "/superpowers:brainstorming feature scope"
+    }
+  → TurnStarted
+  → ToolCallStart(Skill)
+  → ToolResult(model_only_skill_body)
+  → TurnCompleted
+```
+
+该 Skill 场景的 framebuffer 必须同时证明：`> /superpowers:brainstorming feature scope` 恰好出现一次；`<skill-request>`、metadata JSON、合成 `Skill ...` notice 与隐藏 Skill 结果正文均不出现。Runtime 相邻测试另行证明模型消息仍包含内部 `<skill-request>` 和完整 `SkillRequestMetadata`，场景测试不得以最终屏幕替代中间层字段完整性测试。
+
+事件 ID、顺序和 payload 均由 fixture 固定。脚本必须允许场景逐步推进，以便分别检查 Thinking、Tool Running、Skill 用户回显和完成态。
 
 ## 5. TestBackend 与屏幕规范化
 

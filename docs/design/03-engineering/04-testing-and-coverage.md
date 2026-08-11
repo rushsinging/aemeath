@@ -88,6 +88,8 @@ L4 验证用户可感知或业务可验收旅程。TUI 的 crossterm → update 
 
 L4 不替代 reducer、Buffer cell 和契约测试。跨层链路应在每个边界保留相邻测试，并由场景测试证明最终组合成立。
 
+对于 Provider-visible Context 链路，L0 **MUST** 以架构守卫禁止 Context window 生成后的 Runtime 文本装饰；L1 覆盖 reminder renderer、guidance 选择/扫描与 breakpoint 纯逻辑；L2 覆盖 Runtime typed intent → `ContextRequest` 及 Context window 组装；L3 覆盖 `ContextWindow → InvocationRequest` 机械映射、Provider wire 与 invocation-only 非持久化契约；L4 覆盖同 Session guidance source change、model switch、不同模型 Subagent 和 Task reminder 场景。Main/Sub 的每个相邻边界都必须有证据，**NEVER** 只测 intent 源头和最终 Provider payload。
+
 ### 2.6 L5 系统 smoke
 
 L5 只覆盖进程内 Harness 无法覆盖的职责：
@@ -428,7 +430,7 @@ cargo check --workspace
 | fast architecture guards | Agent Stop | 无 Cargo 的静态守卫，即时阻止架构债务 |
 | snapshot 草稿 | Git pre-commit | 只查 `.snap.new` / `.pending-snap`，不冷编译 |
 | workspace coverage | 现有 Coverage PR workflow | 约 2m54s，提供唯一 workspace/per-crate 全景 |
-| production reachability | Git pre-push + Release Gate | 热 4.97s、冷 54.58s，不新增在线 workflow |
+| production reachability | 本地合入前 + Release Gate | `cargo run -p xtask -- production-reachability .` 独立验证 production-only check/clippy；pre-push 的 `check-production-reachability.sh` 是 source-guard，不替代本门禁 |
 | TUI P0/snapshot | 本地合入前 | 热 0.97s、冷 82.75s，Coverage 会自然执行场景 |
 | workspace tests | Git pre-push/本地合入前 | 冷 101.22s、热 5.28s |
 | all-target clippy | 本地合入前 | 热 55.85s，在线收益不足以抵消重复编译 |
@@ -696,9 +698,9 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 最终结论：Storage 机制测试的 L0～L4 缺口已按最低充分层闭合，L5 不适用；公开面/list 契约漂移由 #1263 继续阻断 #1057，因此 #1057 与父项 #848 暂不满足关闭条件。
 
-#### 11.10 #1058 Task Management L0–L5 覆盖证据
+#### 11.10 #849 Task Management L0–L5 覆盖证据
 
-#849 创建时的直接执行叶子 #996、#885–#891 均已关闭；本审查只核验其组合后的 Task BC，不承载新的业务设计。审查基线为 Task-owned `domain + adapters`、`TaskAccess` / `TaskPersist` 两个窄 OHS，以及 Context Session 内嵌快照。
+#849 创建时的直接执行叶子 #996、#885–#891 与测试审查子项 #1058 均已关闭；本节核验其组合后的 Task BC 与已合入的结构化 Task-state 消费链路，不引入新的业务设计。审查基线为 Task-owned `domain + adapters`、`TaskAccess` / `TaskPersist` 两个窄 OHS、Context Session 内嵌快照，以及 Runtime → SDK → TUI 的完整结构化状态契约。
 
 | 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
 |---|---|---|---|
@@ -706,17 +708,42 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | TaskSnapshot V1→V2 codec、typed validation、未知字段、wire ID、候选安装与稳定快照顺序 | L1/L2 | `agent/features/task/src/domain/{snapshot,snapshot_validation}_tests.rs`；`agent/features/task/src/adapters/snapshot_store_tests.rs` | 已覆盖：codec 与 aggregate validation 分阶段；#1058 补 live snapshot 的 Task/Batch typed-ID 稳定排序，避免 HashMap 枚举顺序泄漏。 |
 | TaskAccess 单一事务 backing、同 backing Access/Persist view、失败/no-op 原子性 | L2/L3 | `agent/features/task/src/adapters/{contract/task_access.rs,store_tests.rs,wiring.rs}`；`agent/features/task/tests/task_persist_contract.rs` | 已覆盖：新增公共 `TaskPersist` integration contract，验证非空跨 view round-trip 与非法快照不修改 live view。 |
 | Tool wire → Task ACL：非零 ID、已删除任务隐藏、创建/更新/停止/列表的意图命令 | L2/L3 | `agent/features/tools/src/adapters/task_{create,get,list,stop,update}_tests.rs`；`agent/features/tools/src/domain/types/task_{get,list}_tests.rs` | 已覆盖：#1058 将 Tool 输入统一委托 Task-owned non-zero parser，拒绝 `0`；TaskGet 不发布 tombstone；TaskView wire 仍锁定既有 batch 数字兼容格式且不含 owner。 |
-| Runtime Task snapshot 渲染与 reminder 观察 | L1 | `agent/features/runtime/src/application/loop_engine/chat/{task_snapshot_tests.rs,task_reminder_tests.rs}` | 已覆盖：状态排序、依赖渲染、截断/hidden count、零行限制、全部 Task mutation 工具与跨 turn 保留均有确定性断言；TaskStop 与 TasksSnapshot 的 mutation 集保持一致。 |
+| Runtime Task state ACL 与 reminder 观察 | L1 | `agent/features/runtime/src/application/loop_engine/chat/{task_snapshot_tests.rs,task_reminder_tests.rs}` | 已覆盖：结构化字段、session/revision、状态排序、依赖 sequence、截断/hidden count、无 current Batch 清空语义与 reminder 文本均有确定性断言。 |
 | Context Session 的 captured empty/missing/non-empty Task snapshot、Task prepare 失败的联合恢复原子性 | L3/L4 | `agent/features/context/tests/main_session_wiring.rs` | 已覆盖：新增 captured non-empty snapshot → TaskAccess 可观察恢复；self dependency prepare 失败时 canonical session、memory 和 Task state 均保持旧值。 |
-| TaskCommandResult 事件到 Runtime/SDK/TUI 的唯一投影 | L4 | #879 | **实现缺口**：Task BC 已原子产出 `TaskEvent`，但当前 Runtime 仍按 Tool 名和结果文本推断 snapshot / hook，未消费事件建立权威 SDK 投影；由已开启的 #879 承接，#1058 / #849 因此保持开放。 |
+| TaskCommandResult 到 Runtime round-level publication / Hook 的 typed committed-change 门禁 | L2/L3 | `agent/features/tools/src/domain/{task_change,tool}_tests.rs`；`agent/features/runtime/src/application/loop_engine/chat/{non_agent,main_run_port_task_state}_tests.rs` | 已覆盖：真实 commit 生成内部 typed change；failed/no-op 或无 metadata 不触发 Task state / Hook；与 Task 无关的工具名和包含 `Status: Completed` 的 Tool Result 文本不能伪造 Task hook。当前契约以 Tool round 为发布粒度：一轮只要至少一个真实 Task commit，materialization 后读取一次权威状态并发布一个最终、完整 `TaskStateChanged`；无真实 commit 的轮次不发布。 |
+| Runtime → SDK → TUI 相邻结构化映射与 session/revision replacement | L2–L4 | `agent/features/runtime/src/adapters/sdk_event_mapper_task_state_tests.rs`；`packages/sdk/src/task_tests.rs`；`apps/cli/src/tui/adapter/event_mapping_tests.rs`；`apps/cli/src/tui/model/conversation/task_status_tests.rs` | 已覆盖：完整字段跨映射保持不丢失；TUI 本地渲染；同 Session 新 revision 替换、stale 拒绝、同 payload duplicate replay 幂等；新 Session 即使 revision 数值更低也开启新 epoch。 |
+| Live / successful Session Resume 的同契约发布 | L4 | `agent/features/runtime/src/application/loop_engine/chat/{main_run_port_task_state,resume_task_state}_tests.rs` | 已覆盖：Live mutation round 发布最终完整状态；成功 Resume 先发布 `SessionResumed`，再发布恢复后同一 session/revision 语义的完整 `TaskStateChanged`；新 Session 无 current Batch 时发布空状态，允许 TUI 清除旧展示。 |
 | L0：生产可达性、公开面、Task persistence authority、layout/dependency 守卫 | L0 | `cargo run -p xtask -- production-reachability .`；`cargo clippy --workspace --all-targets --all-features -- -D warnings`；`.agents/hooks/check-architecture-guards.sh --full` | 已覆盖：Task target layout 与 Access/Persist capability policy 无新增 migration exception。 |
 | 真进程、PTY、网络、平台、安装或发布资产 | L5 | 不适用说明 | Task BC 是进程内同步聚合、codec 和窄端口；真实外部边界不属于该能力，L1–L4 可完整覆盖，不新增 smoke。 |
 
-确定性与组织：Task codec/aggregate 测试只用固定 timestamp/ID；Context 场景使用独立临时目录与 gate；本次新增 Tool/Runtime 测试均按同级 `*_tests.rs` 外置，未新增 `mod.rs`、`include!`、万能 fixture 或生产 test-only API。`TaskId::new(0)` 保留给 Snapshot validator 构造非法持久化 fixture；外部 Tool wire 只可经 `TaskId::parse_tool_input` 取得非零 ID。
+确定性与组织：Task codec/aggregate 测试只用固定 timestamp/ID；Context/Resume 场景使用隔离 backing 与 gate；新增 Tool/Runtime/TUI 测试均按 owning module 的同级 `*_tests.rs` 外置，未新增 `mod.rs`、万能 fixture 或生产 test-only API。既有 session-driver 测试采用聚合测试模块，新增 Resume 场景作为该模块的独立子模块接入，不再拼接测试源码。`TaskId::new(0)` 保留给 Snapshot validator 构造非法持久化 fixture；外部 Tool wire 只可经 `TaskId::parse_tool_input` 取得非零 ID。
+
+范围边界：本次验收只承诺 **round-level authoritative publication**，不承诺同一 Tool round 内每个 commit 的连续可见性。per-tool committed-result observation seam 与 per-commit publication（方案 B）不在 #849 本次执行范围；因此本矩阵不会用 `1..N` 中间状态事件作为当前通过条件，也不会为此改写 Tool Result batching/order。
 
 覆盖率信号（2026-07-20，`./scripts/coverage.sh`）：Task regions **95.69%**、functions **93.85%**、lines **96.85%**。百分比只作风险信号；关键状态机、契约与跨 BC 恢复行为以本矩阵为验收依据。慢速矩阵的 PTY smoke 首次因未构建 CLI binary 失败，按 worktree-local Cargo build-dir 显式设置 `AEMEATH_PTY_BIN` 后通过；该 PTY 责任与 Task BC 无关，不影响 L5 不适用判断。
 
-#### 11.11 #1060 Memory / Reflection L0–L5 覆盖证据
+#### 11.11a #1053 Runtime / #649 L0–L5 覆盖证据
+
+父 Issue #649 的 14 个原生直接子项中，#995、#873–#879、#1275、#1272、#1396、#700、#1502 已关闭；#1053 是唯一剩余叶子。创建后新增的 #1277、#1278、#1246–#1248、#1280、#943–#945 等行为依赖也已关闭并纳入本矩阵。#947 是 TUI 后续清理项，不改变 Runtime 已交付语义；#1021/#1022 是 Guard 治理演进项，其开放状态不豁免本次完整守卫。
+
+| 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
+|---|---|---|---|
+| Runtime 单一 `agent_execution` 六边形、RuntimeContext 私有构造、RunFactory/RunLauncher 唯一路径、Main/Derived 只由 RunSpec/capability binding 区分 | L0-L4 | `application/run/{context_factory,creation,launcher}_tests.rs`、`application/loop_engine/engine_architecture_tests.rs`、`application/run/scenario_tests/{main_run,derived_run}.rs`、`check-runtime-capability-assembly.sh` | 已覆盖构造 owner、父 capability ceiling、Context assembly failure、Main/Derived 同 launcher 与禁用生产角色类型；Design 与实现一致。 |
+| Run/RunStep 状态机、非法转换、CancelRunStep、TerminateRun、deadline、terminal 抢占与 cleanup receipt | L1-L4 | `domain/agent_run/tests.rs`、`application/loop_engine/{engine_control,engine_scenarios}_tests.rs`、`application/run/scenario_tests/*`、`application/loop_engine/chat/session_driver_session_lifecycle_tests.rs` | 已覆盖状态不变量、阶段取消、terminate 抢占、timeout、exactly-one terminal 与真实 Session driver 路径；Activity 不驱动 lifecycle。 |
+| accepted input durable、finalized outcome/receipts、normal/control drain-or-seal 与 Resume | L1-L4 | `application/context/coordination_tests.rs`、`application/loop_engine/{engine_control,engine_input,engine_scenarios,llm_strategy}_tests.rs`、Context `session_recovery_scenarios.rs`、TUI resume/scenario tests | #1277/#1278/#1272/#1247/#1502 链已覆盖 save-before-next-phase、失败停止、结构化 outcome、幂等/conflict、live/resume typed terminal 等价。 |
+| model/context/tool coordinators 只经窄 Port 协作，Port failure、policy、schema、并发、取消、timeout、materialization 不绕过 | L1-L4 | `application/{model,context,tool}/**/*tests.rs`、`tests/{sdk_event_mapper_contract,tool_result_blob_contract,bootstrap_dependencies}.rs`、Main/Derived scenario tests | 已覆盖成功与失败 seam；Tools 保留 descriptor producer contract，Runtime 不取得 ToolRegistry/Tool concrete。 |
+| Interaction waiter、reply/cancel 竞争、duplicate/stale identity、continuation、Main/ParentMediated/Unavailable binding | L1-L4 | `application/interaction/{port_tests,coordinator_tests}.rs`、`application/session/ingress_tests.rs`、`application/client/from_args_tests.rs`、`application/run/{context_factory_tests,scenario_tests}.rs` | 已覆盖 exactly-once completion、duplicate/stale outcome、取消优先、父 capability 约束与恢复 continuation；TUI 不持 sender。 |
+| 领域事件唯一 SDK ACL、字段/identity/serialization 完整，Main/Derived observer 共享 terminal mapping | L1-L4 | `adapters/sdk_event_mapper_tests.rs`、`tests/sdk_event_mapper_contract.rs`、`application/loop_engine/event_strategy_tests.rs`、SDK/TUI mapping 与 scenario tests | mapper 是唯一生产 projection ACL；SDK compatibility 仅在第一层 TUI ACL。当前 terminal helper 有单元与场景邻接证据。 |
+| Activity logical-commit Snapshot、fixed heartbeat、business revision/heartbeat sequence、TUI 原子 mirror、root-only Spinner、有界 retained set | L1-L4 | `application/activity/{coordinator,run_events}_tests.rs`、SDK activity tests、TUI `activity_observation_tests.rs`、activity summary/live status/scenario tests、`check-runtime-activity-observation.sh` | 已覆盖 production snapshot-only、transaction batching、同 observation point timing、ordering、root/primary 解耦和 retained terminal history 上限。 |
+| ordinary/streaming Tool 并发语义一致；Bash 等 sequential-only 严格按提交顺序 FIFO，parallel-safe 仍并发 | L1-L4 | `application/tool/agent/runtime_tests.rs`、`application/loop_engine/chat/{non_agent,streaming_tool,session_driver_streaming_tools}_tests.rs`、Tools descriptor tests | 已覆盖 descriptor 分类、最大并发、FIFO 不重叠、parallel-safe 不受串行 lane 阻塞及 retry/reset cleanup。ToolCall ID 仅用于 identity。 |
+| L0：production-only reachability、test-only/public surface、format/check、all-targets clippy、schema、架构守卫与 workspace tests | L0 | `cargo run -p xtask -- production-reachability .`、`cargo run -p xtask -- source-guard .`、`cargo fmt --all -- --check`、`cargo check --workspace --all-targets`、`cargo clippy --workspace --all-targets -- -D warnings`、SDK schema、`.agents/hooks/check-architecture-guards.sh --full`、`cargo test --workspace --all-targets` | production reachability 与 coverage 独立判定；pre-push source-guard 不冒充 production-only 编译门禁。全部命令是本 Issue 退出条件。 |
+| L5 真实终端/平台边界 | L5 | `apps/cli/tests/pty_smoke.rs`、`scripts/check-slow-test-matrix.sh`、Coverage 与 Hook platform workflows | Runtime core 不要求每个内部分支都有 L5；真实 TUI 进程、non-Unix Hook contract 与 release 慢速矩阵承接系统/平台风险。 |
+| 确定性与 flaky debt | L0-L5 | `.agents/flaky-debt.json`、完整 workspace/slow matrix 的首次运行证据 | 本轮不新增墙钟 sleep、固定 `/tmp`、全局 env/cwd 或随机断言；现有登记债务继续由 owner 管理。当前无独立 debt scanner；首次失败不得用 rerun 掩盖，必须修复或登记 native owner 后阻断/延期。 |
+
+覆盖率百分比仅作为风险信号，不替代上述行为矩阵。Runtime 的父项验收要求：Runtime 与相邻 SDK/TUI/Context/Composition 门禁通过、coverage 报告成功、矩阵无未解释空白、Design Current/Target 与实现同步、独立审查无未承接 blocker。
+
+#### 11.11b #1060 Memory / Reflection L0–L5 覆盖证据
+
 
 父 Issue [#851](https://github.com/rushsinging/aemeath/issues/851) 创建时的执行叶子 #895–#900、#984 与 #997 均已关闭。审查后新增的 #1283、#1284、#1285 已分别由 PR #1287、#1290、#1291 合入 `main`；Manual Reflection 的用户命令与 SDK/TUI 投影属于交付层工作，已移至 #860 的子项 #1289，不阻断本父项测试审查。
 
@@ -748,11 +775,49 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | Tool private backing/adapter 不得由 Runtime 穿透 | L0 | `check-tool-catalog-execution-boundary.sh` 与 `-tests.sh` | Runtime 直引 adapters 或 ToolBacking/具体 adapter 的故意违规均 exit 2。 |
 | Skill descriptor、metadata revision、load query/error 与 typed Skill Tool schema | L1-L3 | `tools/src/domain/skill_pl_tests.rs`、`tools/src/adapters/{skill_filesystem_tests,skill_tool_tests}.rs`、`tools/src/adapters/skill_tool_contract_tests.rs` | metadata 不含正文；正文-only 修改不改变 catalog revision；按 identity 调用时加载单个正文，删除/损坏返回 typed failure；Main/Sub catalog 均只注册一个 schema 仅含 `skill` 的 Skill Tool。 |
 | Skill Catalog 到 Context metadata directory | L2-L3 | `context/tests/skill_prompt_pipeline.rs`、`context/tests/isolated_context_with_skill.rs` | Context 只消费 `SkillCatalogPort` descriptor，证明稳定排序、去重、预算、双语 header 与正文 sentinel 永不进入 system block。 |
-| SkillRequest 与 SkillsUpdated 跨 SDK/Runtime/TUI 字段完整性 | L3-L4 | `composition/tests/command_wiring.rs`、`packages/sdk/src/chat_event.rs`、`agent/features/runtime/src/application/main_loop/looping/loop_runner_tests.rs`、`apps/cli/src/tui/app/{slash_tests.rs,update/ui_event_tests.rs}` | canonical identity、raw arguments、InputId 不丢失；启动快照在首个 Runtime 刷新前即可路由 `/archify`；每个 Main Run 前刷新只发布变化 revision，删除 Skill 时以空缺后的全量快照同时撤销补全与 route，普通 Command 保持确定性。 |
+| SkillRequest 与 SkillsUpdated 跨 SDK/Runtime/TUI 字段完整性 | L2-L4 | `composition/tests/command_wiring.rs`、`packages/sdk/src/chat_view.rs`、`agent/features/runtime/src/application/loop_engine/chat/{input_gate_tests.rs,run_input_buffer_tests.rs,session_driver_input_adoption_tests.rs}`、`agent/features/runtime/src/adapters/sdk_event_mapper_tests.rs`、`apps/cli/src/tui/app/{slash_tests.rs,update/ui_event_tests.rs,scenario_tests/agent_progress.rs}` | canonical identity、arguments、raw_input、InputId 不丢失；InputGate 只产出 `AcceptedUserInput`，RunInputBuffer 与 freeze 保留 `MessageSource::SkillRequest + SkillRequestMetadata`，Runtime→SDK 无覆写；TUI framebuffer 只把 raw_input 恰好一次显示为普通 UserMessage，并排除 `<skill-request>`、metadata JSON 与合成 Skill notice。启动快照在首个 Runtime 刷新前即可路由 `/archify`；每个 Main Run 前刷新只发布变化 revision，删除 Skill 时以空缺后的全量快照同时撤销补全与 route，普通 Command 保持确定性。 |
 | Skill Tool 调用后正文交付与 TUI 隐藏 | L2-L4 | Tool execution contract、Context pipeline、CLI ToolDisplay/skill scenarios | 调用前模型上下文与 TUI 无正文；LLM 调用 Skill Tool 后正文只作为普通 ToolResult 进入后续模型上下文，TUI 只显示 header；删除竞态不使 Run 崩溃。 |
 | 真进程、PTY、网络、平台或发布资产 | L5 | 不适用说明 | Tool/Skill/Command catalog、prompt 与 router 均为进程内能力；不以 L5 替代 L1-L4。 |
 
 覆盖率信号以 `cargo llvm-cov --manifest-path agent/features/tools/Cargo.toml --all-targets --summary-only` 为准；补齐后 Tools regions/functions/lines 为 **62.34% / 67.93% / 65.63%**（审查前为 62.02% / 67.64% / 65.26%），仅作风险信号。完成条件是上述矩阵无未解释空白、适用 Guard/production reachability 与定向测试通过；#879/#947/MCP Ready 仍按各自 owner 跟踪。
+
+#### 11.13 Hook 类型化协议与受管进程 L0–L5 审查基线
+
+Hook 类型化协议、受管进程、Dispatcher、Runtime adapter、legacy 退役和目录调整均已完成。本审查以 `origin/main` 当前实现为准，并纳入初始交付之后改变 Hook 契约或消费链的能力：环境隔离、正常返回后的进程组残留回收、typed snapshot policies、统一 Main/Sub Loop、Stop feedback 的实时/恢复展示、AllowAll 下 PreToolUse 仍执行，以及 Windows/non-Unix typed unsupported/no-retry 契约。矩阵区分“已有证据”“文档漂移”“已闭合缺口”“剩余缺口”和“过期测试”；不以 Hook crate 测试数量或覆盖率百分比替代逐项行为证据。
+
+| 行为 / 风险 | 必要层 | 当前可追溯证据 | 审查结论 / 缺口 |
+|---|---|---|---|
+| 26 个 `HookPoint`、typed `HookInvocation` payload、Point→payload 不可非法组合 | L1 / L3 | `agent/features/hook/src/domain/tests.rs` 的 point/serde/payload 测试；`domain/invocation.rs` | Domain 值对象与 serde 基线已覆盖；生产调用点只实现其中一部分。尚未接线的 PL 变体是 Future surface，不得由 Domain 测试冒充生产可达，需在 public-surface/feature matrix 中持续显式说明。 |
+| 能力矩阵、非阻塞 point 禁止 Block/UpdatedInput/Context、Stop 只接受 Continue/Block | L1 / L3 | `domain/tests.rs` 的全 point metadata 表与协议错误等价类；`domain/metadata.rs`、`domain/protocol.rs` | 已覆盖关键有效类、边界与非法组合。 |
+| 任意非零 exit（1/2/127）= 主动 Block 且单次；非法 JSON/协议错误才是 ExecutionFailed | L1 / L2 | `domain/tests.rs` 的 directive 真值表；`adapters/dispatcher/tests.rs::{exit_code_1_blocks_once_without_retry,exit_code_2_blocks_once_without_retry,exit_code_127_blocks_once_without_retry,retry_invalid_json_up_to_three}` | 已覆盖，并证明 Runtime 不需要二次解析 stdout/exit code。 |
+| 只有 ExecutionFailed 重试；取消、业务 Block 与平台 Unsupported 不重试；普通/Block policy/Stop 耗尽语义不同 | L1 / L2 / L3 | `dispatcher/tests.rs` 的 spawn/wait/IO/timeout/invalid-json 重试、第三次成功、`cancellation_is_not_retried`、`unsupported_platform_failure_is_not_retried`、三种 failure policy、StopFailure 防递归测试；`config/domain/{hooks_tests,snapshot_tests}.rs`；`hook/src/adapters/config_tests.rs`；`composition/tests/main_session_wiring.rs` | 行为与配置链已覆盖；#1312 已将默认 3 次与显式值收敛为 `ConfigSnapshot` 产生的 `HookExecutionPolicy`，Dispatcher 仅捕获 committed snapshot，不在运行期读取 live config。 |
+| 多 subscription matcher、稳定排序、Block 短路、Context 合并、UpdatedInput 串联 | L1 / L2 | `domain/subscription_tests.rs`；`dispatcher/tests.rs::{matcher_*,order_*,block_short_circuits_remaining_subscriptions,context_merged_in_execution_order,updated_input_*}` | Hook 内聚合已覆盖；Runtime 对 Tool UpdatedInput 的 schema + Policy 复验由 `runtime/src/application/tool/coordination_tests.rs` 覆盖。Prompt 等尚未生产接线的 mutation 不宣称 L4 完成。 |
+| display message / block detail / execution attempt 的结构化字段完整性 | L2 / L3 | `dispatcher/tests.rs` 的 message kind/source/ordinal/attempt 与 block detail；`runtime/src/adapters/hook_acl_tests.rs`；`runtime/src/adapters/sdk_event_mapper_tests.rs` | Hook→Runtime→SDK ACL 已覆盖，禁止恢复 Debug/String/JSON 推断。 |
+| Hook 环境从空环境构造，只复制六项基础白名单并按 invocation 重建项目/event/payload 变量 | L1 / L2 / L3 | `adapters/environment_tests.rs`、`config_tests.rs`、`dispatcher/tests.rs::{consecutive_dispatches_use_only_current_workspace_and_payload_environment,stop_failure_rebuilds_environment_without_stop_only_variables}`、`process_tests.rs::child_sees_only_request_environment` | 已覆盖；Runtime 只传 cwd，未知父环境不可见。 |
+| stdout/stderr 有界但持续 drain；空 stdin 使用 `/dev/null`；timeout/cancel/正常退出后台后代都 TERM→KILL→wait；non-Unix 启动前拒绝 | L1 / L2 / L3 / L5 | Unix：`process_tests.rs::{large_stdout_and_stderr_are_drained_and_truncated_without_deadlock,empty_stdin_is_dev_null_not_pipe,timeout_reaps_shell_and_descendant_processes,cancellation_reaps_shell_and_descendant_processes,shell_exit_with_background_holder_returns_promptly_and_reaps_group,term_ignoring_process_is_escalated_to_kill_and_reaped}`；non-Unix：`unsupported_platform_returns_typed_failure_without_running_command`、`unsupported_platform_failure_is_not_retried` 与 `.github/workflows/hook-platform-contract.yml` | Unix 真实进程契约已覆盖；#1543 已在 `windows-latest` 首次真实通过 Hook crate all-targets check 与 typed unsupported contract。该证据只证明显式不支持边界，不表示 Windows 支持 Hook command execution 或进程树回收。 |
+| Stop Continue/Block/ExecutionFailed、可配置 continuation allowance、首个超限 typed failure、feedback 与同次用户输入 FIFO、取消优先 | L1 / L2 / L4 | `runtime/src/domain/agent_run/tests.rs::configured_stop_hook_block_limit_controls_retry_exhaustion`；`runtime/src/application/run/config_tests.rs`；`runtime/src/application/hook/stop_coordination_tests.rs`；`loop_engine/chat/session_driver_{stop_hook,session_lifecycle,support}_tests.rs`；`loop_engine/engine_control_tests.rs` | 当前共享 Loop 使用每个 Run 从 `RunConfigSnapshot` 冻结的 `StopHookPolicy`；默认允许 15 次 block、第 16 次产生 `StopHookBlockResult::RetryExhausted`，显式配置值具有同一边界语义。 |
+| Main/Sub 使用同一 Loop；Main Full、Sub BoundaryOnly 且普通 Stop 保持生产可达；每个 Run 的 Dispatcher/policy snapshot 独立冻结 | L0 / L2 / L4 | `runtime/src/application/hook/empty_tests.rs::boundary_binding_matches_the_complete_hook_point_classification_contract`；`application/run/context_factory_tests.rs::{main_run_uses_hooks_from_its_committed_config_snapshot,sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen}`；`loop_engine/engine_architecture_tests.rs` 与共享 Run/Loop scenario | metadata 分类契约全枚举测试固定每个 point 的期望并覆盖正负类，架构 Guard 防止 Runtime 复制 allow-list；Sub 场景测试从普通 `HookInvocation::Stop` 经生产 `dispatch_at` 进入 Sub 自己的 frozen Dispatcher，并同时证明 parent snapshot 未被 live config 覆写。 |
+| Stop feedback 作为 typed notice 实时显示、持久化后恢复同构，不伪装 UserMessage，且仍进入模型 continuation | L2 / L3 / L4 | Runtime `sdk_event_mapper_tests.rs` 与 session-driver tests；Context canonical-session tests；SDK mapping tests；TUI adapter/model/history/view-assembler Hook notice tests | 相邻边界证据已补齐；Hook Run Loop 文档中的已完成迁移前 legacy 段落在本审查修正。 |
+| AllowAll 只放行授权限制，PreToolUse/PostToolUse 等事件 Hook 仍执行；UpdatedInput 后再次 schema/Policy 校验 | L2 / L4 | `runtime/src/application/loop_engine/chat/tools.rs::{allow_all_bypasses_soft_block_and_blocking_pre_tool_hook,allow_all_still_runs_blocking_pre_tool_hook}`；`application/tool/coordination_tests.rs` | 事件 Hook 与 `specs/3.11-policy-hook-audit.md` 对齐。 |
+| production-only reachability、all-targets、crate façade、唯一进程创建点、旧 HookRunner/HookUi 不回流 | L0 / L3 | `agent/features/hook/tests/public_hook_contract.rs` 经 crate 公共 façade + committed `ConfigSnapshot` 覆盖 typed Port、非零 Block、仅故障重试、批准环境注入和正常退出后台进程组回收；production reachability、all-targets clippy、full architecture guards | crate-level 公共契约入口由本审查补齐；父环境清空由 owning adapter 的 `process_tests.rs::child_sees_only_request_environment` 验证，公共契约不重复修改进程全局环境。 |
+| fixture/Fake/测试文件归 owning layer，无万能 test_utils、生产 test-only API、短 sleep/flaky | L0–L3 | Hook fake 位于 `adapters/dispatcher/fake.rs` 且受 `cfg(test)`；Hook 测试均为同级 `*_tests.rs` | Hook crate 组织符合目标；跨 Runtime/TUI 的历史 `include!` 存量由全仓测试组织治理承接，本审查不扩大为全仓搬迁。`process_tests.rs` 修改父进程 env，虽使用 RAII+随机 key，仍须串行/隔离评估，首次失败不得靠重跑隐藏。 |
+| line/region/function coverage 与 production reachability 分开记录 | L0 | `./scripts/coverage.sh` 的 workspace/per-crate summary；production reachability 独立 gate | 本轮实测 Hook regions/functions/lines **83.26% / 95.19% / 88.39%**，Runtime **81.45% / 82.37% / 83.13%**，SDK **78.00% / 77.02% / 76.61%**，CLI **82.10% / 84.69% / 81.83%**，workspace **82.05% / 82.59% / 82.92%**。统一脚本没有 changed-lines 指标，百分比只作风险信号，不替代矩阵。 |
+
+##### 11.13.1 不符合项分类与处置
+
+- **文档错误 / 漂移（本审查修正）**：Migration Governance 与 Hook Run Loop 文档未反映 shared Loop、typed Stop exhaustion、Main/Sub 复用、mutation 调用点、legacy 发送点退役，以及 #1312 后的 frozen policy 来源。
+- **已闭合实现缺口**：#1312 已将 `hooks.max_attempts` 与 `hooks.max_stop_hook_blocks` 收敛为 `ConfigSnapshot` 的 typed policies；Dispatcher 捕获 `HookExecutionPolicy`，每个 Main/Sub Run 从 `RunConfigSnapshot` 冻结 `StopHookPolicy`。#1543 已将 non-Unix 平台能力缺失收敛为 terminal typed `Unsupported → ExecutionFailed` 且不重试。本轮确认旧 Boundary adapter 的变体 allow-list 静默过滤 Sub ordinary `Stop`；现已改为以 `HookPointMetadata.class` 为唯一过滤真相，Sub Stop 经本 Run frozen Dispatcher 执行。
+- **测试缺口（本审查补齐）**：Stop block counter 的 configurable boundary/饱和不变量，以及 Hook 公开 PL/Port 的 crate-level shared contract。Windows/non-Unix 的实际平台证据已由 PR #1554 的 `windows-latest` job 首次通过，仍严格表示 unsupported contract 而非功能支持。
+- **过期测试 / 组织债**：Hook crate 暂未发现断言旧 HookRunner/HookUi 语义的测试；Runtime/TUI 历史 `include!` 测试拼接属于全仓测试组织治理，不在本能力复制承接。
+
+##### 11.13.2 最低充分实施与验证结果
+
+1. Stop block counter 的初值、configured allowance、首个超限和后续饱和边界已补，并确认状态机使用 frozen per-Run policy。
+2. Hook crate 根 `tests/public_hook_contract.rs` 通过公开 façade + committed `ConfigSnapshot` 构造真实 Dispatcher，验证 typed Port、非零 Block、仅故障重试、批准环境注入和资源释放代表行为，不复制 adapter 内全部白盒断言。
+3. Hook Run Loop 与 Migration Governance 的 Current→Target 状态已修正；外部追踪关系只保留在实施计划与 Issue。
+4. 本轮最终本地 `cargo fmt --all -- --check`、`git diff --check`、Hook/Runtime/SDK/TUI 定向测试、`cargo test --workspace`、`cargo check --workspace`、all-targets Clippy、production reachability、full architecture guards 与 `./scripts/coverage.sh` 均真实通过；完整 Guard 曾先暴露旧 Boundary allow-list 守卫与修复冲突，按守卫阻断流程将守卫及负向元测试同步到 metadata-owned 契约后重新完整通过。`windows-latest` 的 non-Unix compile/typed unsupported/no-retry 证据来自 PR #1554，不能由 Unix 或本机 all-targets 替代。
+5. Coverage 本轮值：Hook regions/functions/lines **83.26% / 95.19% / 88.39%**，Runtime **81.45% / 82.37% / 83.13%**，SDK **78.00% / 77.02% / 76.61%**，CLI **82.10% / 84.69% / 81.83%**，workspace **82.05% / 82.59% / 82.92%**。
+6. 行为矩阵无未解释的关键实现或测试空白；Future HookPoint 生产接线与 Windows Hook command execution 均不在当前支持声明内。
 
 ## 12. 相关文档
 
@@ -760,10 +825,24 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 - [../02-modules/tui/05-e2e-scenario-testing.md](../02-modules/tui/05-e2e-scenario-testing.md)：TUI 进程内 E2E 场景测试
 - [../../superpowers/specs/2026-05-27-tui-model-view-architecture.md](../../superpowers/specs/2026-05-27-tui-model-view-architecture.md)：TUI Model/View 历史设计依据
 
+## 12. Hook 平台支持证据矩阵
+
+| 平台 / 风险 | 支持等级 | 测试层 | 持续证据 | 结论边界 |
+|---|---|---:|---|---|
+| Linux/macOS Hook command execution | 支持 | L3/L5 | `agent/features/hook/src/adapters/process_tests.rs` 的真实 shell、环境隔离、有界 drain、timeout/cancel、后台进程组与 TERM→KILL→wait 测试；`cargo test -p hook` | 证明 Unix 受管进程组执行与回收，不外推到 non-Unix。 |
+| Windows/non-Unix ProcessDriver fallback | 显式不支持 | L1/L3 | `unsupported_platform_returns_typed_failure_without_running_command`；`.github/workflows/hook-platform-contract.yml` 的 Windows `cargo check -p hook --all-targets` 与 non-Unix contract test | 只证明命令启动前返回 typed `Unsupported`，不代表 Windows 支持 Hook command。 |
+| Unsupported 跨 ProcessDriver→Executor→Dispatcher | 显式不支持 | L2/L3 | `unsupported_platform_failure_is_not_retried`；断言单次 `ExecutionFailed`、可诊断错误与无重试 | 平台能力缺失是永久失败，不消耗 execution retry policy。 |
+| Windows 进程树回收 / release artifact | 未实现、out of scope | L5 | 显式不适用 | 在具备 Job Object 或等价可证明回收方案前，禁止降级为仅杀直接 child，也禁止宣称支持。 |
+
+平台 job 不可调度或 GitHub Actions 不可用时，`#1543` 必须记录明确外部阻断；Unix/all-targets 本机结果不能替代 Windows job 的首次真实执行。
+
 ## 13. 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-09 | #1053 完成 #649 Runtime L0–L5 行为/风险审计：建立 RuntimeContext、Run/control、model/context/tool、Interaction、typed terminal、Activity Snapshot、streaming FIFO、live/resume 与 recovery 证据矩阵；纠正 production reachability 挂载表述；完整守卫、workspace/slow matrix 与 coverage 通过 | [#1053](https://github.com/rushsinging/aemeath/issues/1053)、[#649](https://github.com/rushsinging/aemeath/issues/649) |
+| 2026-08-08 | 完成 Hook 类型化协议、受管进程、Runtime→SDK→TUI 与治理门禁的 L0–L5 最终审查：补公共 HookPort L3 契约；修正文档漂移；纳入 typed snapshot policies 与 Windows typed unsupported/no-retry 证据；记录最终 coverage | Hook 测试治理审查 |
+| 2026-08-07 | #1543 明确 Windows/non-Unix 暂不支持 Hook command execution，登记 Windows compile/typed unsupported/no-retry 契约与 Unix 真实进程组回收证据边界 | [#1543](https://github.com/rushsinging/aemeath/issues/1543) |
 | 2026-07-28 | #1438 将 Tool/Skill/Command 证据矩阵更新为 metadata/load、Context metadata directory、SkillRequest/SkillsUpdated 字段完整性、启动快照路由、revision 去重、删除撤销与调用后正文隐藏交付 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) / [#1446](https://github.com/rushsinging/aemeath/pull/1446) |
 | 2026-07-21 | #1060 最终复采并验收：#1299 已由 #1308 合入、#1298 已由 #1303 合入；L0 守卫、workspace tests、默认慢速矩阵（含 PTY）与 coverage 全部通过，#851 / #1060 已满足测试审查完成定义，等待用户确认关闭 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#851](https://github.com/rushsinging/aemeath/issues/851)、[#1299](https://github.com/rushsinging/aemeath/issues/1299)、[#1308](https://github.com/rushsinging/aemeath/pull/1308)、[#1303](https://github.com/rushsinging/aemeath/pull/1303) |
 | 2026-07-20 | #1060 调整慢速矩阵缺陷归属：#1298 移至 #1050，L5 PTY 直接验证保留为通过；#1060 仅由能力内测试缺口 #1299 阻断 | [#1060](https://github.com/rushsinging/aemeath/issues/1060)、[#1050](https://github.com/rushsinging/aemeath/issues/1050)、[#1298](https://github.com/rushsinging/aemeath/issues/1298)、[#1299](https://github.com/rushsinging/aemeath/issues/1299) |
@@ -778,5 +857,6 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 | 2026-07-17 | 登记 #983 AtomicDataset 的 L0–L5 覆盖：纯规则、adapter 协作、公共 port contract、Prepared/roll-forward/corruption fault matrix 与真实进程 abort/OS lock；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-19 | 完成 #1062 Policy 测试审查：登记 Standard/AllowAll Config 映射、五维授权上下文、Runtime 单次评估与 fuse、Main/Sub 同实例注入、CLI ACL、L4 授权旅程及 L5 不适用理由 | [#1062](https://github.com/rushsinging/aemeath/issues/1062)、[#1221](https://github.com/rushsinging/aemeath/issues/1221) |
 | 2026-07-20 | 完成 #1057 Storage 根因级测试审查：补齐 SafeStorageRoot、Session 相邻映射、owning-layer 与锁确定性；记录 Storage 覆盖率和 workspace Runtime 卡住事实；公开面/list 契约漂移由 #1263 承接 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
-| 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；TaskEvent→Runtime/SDK/TUI 唯一投影缺口由 #879 原生依赖承接 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849)、[#879](https://github.com/rushsinging/aemeath/issues/879) |
+| 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；后续结构化 Task-state 投影已合入，当前 #849 收口证据见 §11.10 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849) |
+| 2026-08-05 | 补齐 #849 结构化 Task-state 的相邻边界与组合证据：typed committed-change Hook 门禁、round-level 最终权威发布、Runtime→SDK 完整映射、Live/Resume 同契约、TUI session/revision 幂等；明确 per-commit 连续可见性不在本次范围 | [#849](https://github.com/rushsinging/aemeath/issues/849) |
 | 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：按八个稳定行为单元建立 L0～L5 矩阵，优先修复 owning-layer、日志测试设施、墙钟锁断言与 SafeStorageRoot 契约根因，再复核 Blob/Dataset、消费方边界、公开面和 Guard | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |

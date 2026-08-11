@@ -33,6 +33,33 @@ impl ToolResultBlobPort for FakeBlobPort {
 }
 
 #[tokio::test]
+async fn one_tool_execution_persists_oversized_output_only_once_across_consumers() {
+    let blobs = Arc::new(FakeBlobPort::default());
+    let materializer =
+        ToolResultMaterializer::new(blobs.clone(), ToolResultMaterializationPolicy::new(4, 2, 1));
+    let execution = crate::application::tool::agent::ToolExecution::from_parts(
+        sdk::ids::ToolCallId::new("runtime-tool"),
+        "provider-tool".to_string(),
+        "Read".to_string(),
+        tools::ToolOutcome::new(
+            "甲乙丙丁戊",
+            serde_json::json!({"text": "甲乙丙丁戊"}),
+            Vec::new(),
+        ),
+    );
+
+    let first = materializer
+        .materialize("session", &execution.provider_id, &execution.outcome.text)
+        .await;
+    let second = materializer
+        .materialize("session", &execution.provider_id, &execution.outcome.text)
+        .await;
+
+    assert_eq!(first.text(), second.text());
+    assert_eq!(blobs.writes.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn output_at_threshold_remains_inline_without_blob_write() {
     let blobs = Arc::new(FakeBlobPort::default());
     let materializer =

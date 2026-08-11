@@ -60,6 +60,69 @@ impl OptionItem {
     }
 }
 
+/// Sub Run identity published with every structured activity event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SubRunIdentityView {
+    pub agent_id: crate::AgentId,
+    pub run_id: crate::RunId,
+    pub parent_chat_id: crate::ChatId,
+    pub parent_run_id: crate::RunId,
+    pub spawned_by_tool_call_id: crate::ToolCallId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SubRunActivityKindView {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolCall {
+        id: crate::ToolCallId,
+        name: String,
+        input: serde_json::Value,
+    },
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
+    ToolResult {
+        tool_call_id: crate::ToolCallId,
+        tool_name: String,
+        output: String,
+        content: serde_json::Value,
+        is_error: bool,
+    },
+    Terminal {
+        outcome: SubRunTerminalOutcomeView,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SubRunTerminalOutcomeView {
+    Completed,
+    Failed { error: String },
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SubRunStartedEventView {
+    pub identity: SubRunIdentityView,
+    pub sequence: u64,
+    pub role: Option<String>,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SubRunActivityEventView {
+    pub identity: SubRunIdentityView,
+    pub sequence: u64,
+    pub kind: SubRunActivityKindView,
+}
+
 /// Sub-agent 工具调用进度。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentToolCallProgressView {
@@ -96,6 +159,13 @@ pub enum AgentProgressKindView {
         tool_name: String,
         text: String,
     },
+}
+
+/// 工具 stdout 流式输出事件 view（与 [`AgentProgressEventView`] 平级但语义独立）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolProgressEventView {
+    /// stdout 文本片段。
+    pub text: String,
 }
 
 impl std::fmt::Display for AgentProgressKindView {
@@ -150,61 +220,42 @@ pub struct WorkspaceContextView {
     pub context_stack: Vec<WorkspaceStackEntryView>,
 }
 
-/// Hook 执行状态。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookEventStatus {
-    Running,
-    Succeeded,
-    Blocked,
-    Failed,
-}
-
-/// Hook 执行结果视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookExecutionResultView {
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub decision: Option<String>,
-    pub reason: Option<String>,
-    pub additional_context: Option<String>,
-}
-
-/// Hook 事件视图。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HookEventView {
-    pub hook_name: String,
-    pub status: HookEventStatus,
-    pub matcher: Option<String>,
-    pub command: Option<String>,
-    pub result: Option<HookExecutionResultView>,
-}
-
-/// Hook 面向展示层的消息类别。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HookMessageKindView {
-    AdditionalContext,
-    SystemMessage,
-}
-
-/// Hook 面向展示层的结构化消息。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct HookMessageView {
-    pub point: String,
-    pub source: String,
-    pub execution_ordinal: u32,
-    pub attempt: u8,
-    pub kind: HookMessageKindView,
-    pub text: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_progress_view_supports_message_tool_calls_and_tool_output() {
+    fn sub_run_activity_round_trips_without_field_loss() {
+        let event = SubRunActivityEventView {
+            identity: SubRunIdentityView {
+                agent_id: crate::AgentId::from_legacy_or_new("agent-sub-a"),
+                run_id: crate::RunId::from_legacy_or_new("run-sub-a"),
+                parent_chat_id: crate::ChatId::from_legacy_or_new("parent-chat"),
+                parent_run_id: crate::RunId::from_legacy_or_new("run-main"),
+                spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
+            },
+            sequence: 9,
+            kind: SubRunActivityKindView::ToolResult {
+                tool_call_id: crate::ToolCallId::from_legacy_or_new("skill-call"),
+                tool_name: "Skill".to_string(),
+                output: "SKILL_BODY_SENTINEL".to_string(),
+                content: serde_json::json!({"name": "using-superpowers"}),
+                is_error: false,
+            },
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: SubRunActivityEventView = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, event);
+        assert!(matches!(
+            restored.kind,
+            SubRunActivityKindView::ToolResult { ref tool_name, .. }
+                if tool_name == "Skill"
+        ));
+    }
+
+    #[test]
+    fn test_agent_progress_view_supports_message_and_tool_calls() {
         let message = AgentProgressEventView {
             sequence: 1,
             kind: AgentProgressKindView::Message {
@@ -237,7 +288,6 @@ mod tests {
         match tools.kind {
             AgentProgressKindView::ToolCalls { calls } => {
                 assert_eq!(calls[0].name, "Read");
-                // summary 已移除
             }
             other => panic!("unexpected kind: {other:?}"),
         }
@@ -283,15 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_progress_display_tool_output() {
-        let event = AgentProgressEventView {
-            sequence: 3,
-            kind: AgentProgressKindView::ToolOutput {
-                tool_name: "Bash".to_string(),
-                text: "stdout".to_string(),
-            },
+    fn test_tool_progress_event_view_carries_text() {
+        let view = ToolProgressEventView {
+            text: "checking…\n".to_string(),
         };
-        assert_eq!(format!("{event}"), "Bash: stdout");
+        assert_eq!(view.text, "checking…\n");
     }
 
     #[test]
@@ -308,30 +354,6 @@ mod tests {
         assert_eq!(view.path_base.to_string_lossy(), "/repo/sub");
         assert_eq!(view.workspace_root.to_string_lossy(), "/repo");
         assert_eq!(view.context_stack.len(), 1);
-    }
-
-    #[test]
-    fn hook_message_view_round_trips_with_attribution() {
-        let view = HookMessageView {
-            point: "PreToolUse".to_string(),
-            source: "Bash".to_string(),
-            execution_ordinal: 0,
-            attempt: 2,
-            kind: HookMessageKindView::AdditionalContext,
-            text: "extra context".to_string(),
-        };
-
-        let json = serde_json::to_value(&view).unwrap();
-        let restored: HookMessageView = serde_json::from_value(json).unwrap();
-        assert_eq!(restored, view);
-    }
-
-    #[test]
-    fn hook_message_kinds_remain_distinct() {
-        assert_ne!(
-            HookMessageKindView::AdditionalContext,
-            HookMessageKindView::SystemMessage
-        );
     }
 
     #[test]

@@ -207,7 +207,7 @@ enum InteractionContinuation {
     ContinueAfterHardPause,
 }
 
-/// #1248 Task 6: Stop Hook typed outcome — Run 拥有计数，第 16 次进入 Failed。
+/// Stop Hook typed outcome：Run 拥有计数并使用创建时冻结的 StopHookPolicy；首个超限 Block 进入 Failed。
 enum StopHookBlockResult {
     Blocked { count: usize },       // 1-15: 继续 Run，注入 feedback
     RetryExhausted { count: usize }, // ≥16: typed Failed，不伪造 Completed
@@ -245,13 +245,28 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 
 `RunStarted · RunDrainingInput · RunAwaitingInput/RunInputResumed · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunInteractionRequested{request_id}/RunInteractionResumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
-> **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。迁移期旧 `RunCancellationRequested/RunCancelled` 只用于现有生产兼容路径，必须由 #878/#879 与旧 `cancel_run` 一并退役。
+> **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。Run 级 cancellation 状态、事件与投影已经退役，**NEVER** 作为第二套终态语义恢复。
 
 > **终态事实与业务返回分离**：目标终态 `RunCompleted { result }` / `RunFailed { error }` / `RunTerminated { reason }` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 
 > SDK Event Mapping adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断事件映射，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
 
-## 5. RunSpec —— 声明式规格
+## 4.1 Activity 观测边界
+
+Activity 是 Runtime 应用层的观测实体集合，不是 Run 聚合的替代物，也不是新的聚合根。它的职责是把执行过程中跨多个协作器产生的可观察事实，以稳定 identity 和 typed detail 发布给交付层。
+
+| 事实 | Activity 观测 | 权威 owner |
+|---|---|---|
+| Run 生命周期 | `Run` Activity | Run 聚合；Activity 只镜像观测 |
+| Run Step / Model Invocation | Step / Model Activity | Run / Model 协作器；ActivityCoordinator 统一登记与变更 |
+| Tool Call | Tool Activity | ToolCall 实体与 ToolRoundCoordinator |
+| Hook / Compaction / Interaction | 对应 typed Activity | Hook、Context、Interaction 协作器产生事实，Runtime 统一观测 |
+| Sub Run | Sub Run Activity | 子 Run；父子关系由 `parent_activity_id` / `parent_run_id` 关联 |
+
+`ActivityCoordinator` 是完整 Activity 观测的唯一创建与变更入口。每次 mutation 生成新的 `ActivityObservation`，并在同一 Run revision 下发布 `ActivityChanged`；初始化、重连或 revision gap 修复使用 `ActivitySnapshot`。Activity 事件只描述事实，**NEVER** 直接决定下一 Run 状态、接受控制命令或写入 Session。
+
+Activity 的跨边界 Published Language 由 SDK 拥有的 `ActivityView`、`ActivitySnapshotView` 和 `ActivityChangeKind` 定义；TUI ACL 将其转换为 TUI-owned Activity DTO，root reducer 维护事实镜像，ViewAssembler 再派生低噪声 `ActivitySummary`。TUI 不展示所有 Activity 细节：只展示 `audience = User` 且经过摘要优先级筛选的当前主活动，诊断和 operational detail 仅进入诊断 / 调试通道。
+
 
 ```rust
 /// 一次 Run 的完整规格：声明"要什么"。可序列化、可复用（用户默认 / skill / role / 父 Run 派生）。

@@ -28,7 +28,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Terminal,
 };
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -44,6 +46,7 @@ pub use event::UiEvent;
 #[derive(Default)]
 pub(crate) struct OutputViewState {
     pub(crate) retained: crate::tui::view_assembler::retained_output_view::RetainedOutputView,
+    pub(crate) loading_history_window: Option<(String, u64, Vec<String>)>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -135,6 +138,8 @@ pub struct App {
     pub command_router: Option<Arc<dyn sdk::CommandRouterPort>>,
     pub(crate) skill_completion_catalog: SkillCompletionCatalog,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+    pub run_control_client: Option<Arc<dyn sdk::RunControlClient>>,
+    pub(crate) display_history_query: Option<Arc<dyn sdk::DisplayHistoryQuery>>,
     /// Session 初始化时固定的 HTTP User-Agent。
     pub user_agent: String,
     /// 缓存的配置视图（由 runtime 推送，TUI 只读）
@@ -149,6 +154,7 @@ pub(crate) fn display_working_dir(path: &Path) -> String {
         .map_or_else(|| path.display().to_string(), |name| name.to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn display_status_path(path: &Path) -> String {
     let raw = path.display().to_string();
     let Some(home) = dirs::home_dir() else {
@@ -250,6 +256,8 @@ impl App {
             skill_completion_catalog: SkillCompletionCatalog::default(),
             config_view: sdk::ConfigView::default(),
             agent_client: None,
+            run_control_client: None,
+            display_history_query: None,
             user_agent: composition::update::default_user_agent(),
         }
     }
@@ -370,7 +378,7 @@ impl App {
         #[cfg(test)]
         crate::tui::render::performance::record_terminal_draw(draw_duration);
         crate::tui::log_trace!(
-            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} spinner_active={} spinner_phase={:?} spinner_frame={} output_lines={}",
+            "tui.draw.complete elapsed_ms={} terminal={}x{} output_rect={:?} input_rect={:?} status_rect={:?} run_activity_active={} spinner_frame={} output_lines={}",
             draw_duration.as_millis(),
             self.layout
                 .last_terminal_size
@@ -383,8 +391,7 @@ impl App {
             output_rect,
             input_rect,
             status_rect,
-            self.model.conversation.runtime.spinner.chat_active,
-            self.model.conversation.runtime.spinner.phase,
+            self.view_state.run_activity.is_active(),
             self.view_state.animation.spinner_frame,
             self.output_area.document().total_lines()
         );

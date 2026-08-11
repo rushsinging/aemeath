@@ -1,8 +1,9 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::agent_calls::execute_agent_calls;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::non_agent::execute_non_agent;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::loop_engine::{ApprovalRequiredCall, SuspendedQuestion, SuspendedToolCall};
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
@@ -29,7 +30,7 @@ pub(crate) struct ToolRoundResult {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn policy::PolicyPort,
@@ -38,29 +39,33 @@ pub(crate) async fn execute_tool_round<S>(
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
-    workspace_root: &std::path::Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
 ) -> ToolRoundResult
 where
     S: ChatEventSink,
 {
+    let workspace_root = workspace_read.current_workspace_root();
     let prepared = prepare_tool_round(
         guarded_calls,
         catalog,
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let denied_results = deny_tool_calls(
         &prepared.denied,
         sink,
         context,
         hook_port,
+        activities,
+        step_id,
         cancel,
-        workspace_root,
+        &workspace_root,
         agent,
     )
     .await;
@@ -73,6 +78,17 @@ where
         .into_iter()
         .partition(|prepared| prepared.call.name == "Agent");
 
+    let step_tool_context = agent.ctx.with_cancellation(Arc::new(
+        crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
+    ));
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "tool round cancellation context bound: run_id={} step_id={} cancelled={}",
+        run_id,
+        step_id,
+        step_tool_context.cancellation().is_cancelled()
+    );
+
     // Execute AskUserQuestion calls through the tool execution port.
     // Suspensions are collected and returned to the caller — they are NOT
     // resolved inline. The caller routes them through the engine's
@@ -84,7 +100,7 @@ where
         .filter(|prepared| prepared.call.name == "AskUserQuestion")
     {
         let call = &prepared.call;
-        let tool_ctx = agent.ctx.with_authorization(prepared.authorization);
+        let tool_ctx = step_tool_context.with_authorization(prepared.authorization);
         match agent
             .execute_one_outcome_with_ctx(call, &tool_ctx, step_id)
             .await
@@ -117,25 +133,29 @@ where
         agent,
         sink,
         hook_port,
+        activities,
         &non_agent_approved,
         language,
-        workspace_root,
+        workspace_read,
         policy,
         run_id,
         step_id,
+        &step_tool_context,
+        cancel,
     )
     .await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
         agent,
-        &agent.ctx,
+        &step_tool_context,
         &agent.agent_semaphore,
         &agent.workspace_persist,
         sink,
         hook_port,
+        activities,
         cancel,
-        workspace_root,
+        workspace_read,
         catalog,
         policy,
         run_id,
@@ -173,7 +193,7 @@ async fn publish_guard_blocked<S>(
     blocked: Vec<ToolExecution>,
     calls: &[ToolCall],
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
 ) -> Vec<ToolExecution>
 where
@@ -197,11 +217,14 @@ where
     blocked
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn deny_tool_calls<S>(
     denied: &[crate::application::tool::coordination::DeniedToolCall],
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
+    step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
     workspace_root: &std::path::Path,
     agent: &Agent,
@@ -218,7 +241,8 @@ where
         );
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PermissionDenied(PermissionInput {
                 tool_name: call.call.name.clone(),
                 permission_rule: "deny".to_string(),
@@ -231,13 +255,12 @@ where
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
         let call_id = call.call.id.clone();
         let _ = sink
-            .send_event(RuntimeStreamEvent::ToolCallUpdate {
+            .send_event(RuntimeStreamEvent::ToolCallStateChanged {
                 context: context.clone(),
                 id: call_id.clone(),
                 provider_id: Some(call.call.provider_id.clone()),
                 name: call.call.name.clone(),
                 index: call.call.index,
-                arguments_delta: None,
                 arguments: None,
                 status: RuntimeToolCallStatus::Ready,
             })
@@ -251,6 +274,7 @@ where
             }),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         };
         let execution = ToolExecution::from_parts(
             call_id,
@@ -271,29 +295,30 @@ where
     denied_results
 }
 
-pub(crate) async fn run_post_tool_hooks<S>(
-    sink: &S,
+pub(crate) async fn run_post_tool_hooks(
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
+    step_id: &sdk::RunStepId,
     call: &ToolCall,
     execution: &ToolExecution,
     cancel: &CancellationToken,
-    workspace_root: &std::path::Path,
-) where
-    S: ChatEventSink,
-{
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
+) {
+    let workspace_root = workspace_read.current_workspace_root();
     let output = &execution.outcome.text;
     let is_error = execution.outcome.is_error;
 
     let _ = dispatch_hook(
         hook_port,
-        sink,
+        activities,
+        step_id,
         HookInvocation::PostToolUse(PostToolUseInput {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
             tool_output: output.to_string(),
             is_error,
         }),
-        workspace_root,
+        &workspace_root,
         cancel,
     )
     .await;
@@ -301,13 +326,14 @@ pub(crate) async fn run_post_tool_hooks<S>(
     if is_error {
         let _ = dispatch_hook(
             hook_port,
-            sink,
+            activities,
+            step_id,
             HookInvocation::PostToolUseFailure(PostToolUseFailureInput {
                 tool_name: call.name.clone(),
                 tool_input: call.input.clone(),
                 error: output.to_string(),
             }),
-            workspace_root,
+            &workspace_root,
             cancel,
         )
         .await;
@@ -316,20 +342,19 @@ pub(crate) async fn run_post_tool_hooks<S>(
 
 pub(crate) async fn send_tool_call_status<S>(
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     call: &ToolCall,
     status: RuntimeToolCallStatus,
 ) where
     S: ChatEventSink,
 {
     let _ = sink
-        .send_event(RuntimeStreamEvent::ToolCallUpdate {
+        .send_event(RuntimeStreamEvent::ToolCallStateChanged {
             context: context.clone(),
             id: call.id.clone(),
             provider_id: Some(call.provider_id.clone()),
             name: call.name.clone(),
             index: call.index,
-            arguments_delta: None,
             arguments: Some(call.input.clone()),
             status,
         })
@@ -338,7 +363,7 @@ pub(crate) async fn send_tool_call_status<S>(
 
 pub(crate) async fn send_tool_result<S>(
     sink: &S,
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     execution: &ToolExecution,
     materializer: &crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     session_id: &str,
@@ -382,16 +407,18 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 mod tests {
     use super::{execute_tool_round, send_tool_result};
     use crate::application::loop_engine::chat::{
-        ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
+        ChatEventSink, EventFuture, RuntimeRunContext, RuntimeStreamEvent,
     };
     use crate::application::loop_engine::ToolGuardDecision;
     use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
     use crate::application::tool::coordination::complete_cancelled_tool_round;
     use async_trait::async_trait;
     use hook::{HookInvocation, HookOutcome, HookPort};
-    use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+    use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
+    use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use share::message::ContentBlock;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
@@ -426,7 +453,7 @@ mod tests {
                 .unwrap()
                 .iter()
                 .filter_map(|event| match event {
-                    RuntimeStreamEvent::ToolCallUpdate { id, status, .. } => {
+                    RuntimeStreamEvent::ToolCallStateChanged { id, status, .. } => {
                         Some((id.to_string(), format!("{status:?}")))
                     }
                     RuntimeStreamEvent::ToolResult { id, .. } => {
@@ -451,6 +478,41 @@ mod tests {
     }
 
     struct UnsafeLifecycleTool;
+
+    struct BlockingAgentTool {
+        started: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl TypedTool for BlockingAgentTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "Agent"
+        }
+
+        fn description(&self) -> &str {
+            "blocking Agent cancellation test"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type":"object"})
+        }
+
+        fn cancellation(&self) -> tools::CancellationDeclaration {
+            tools::CancellationDeclaration::Cooperative
+        }
+
+        async fn call(
+            &self,
+            _input: Value,
+            ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            self.started.notify_one();
+            ctx.cancellation().cancelled().await;
+            TypedToolResult::error("Agent cancelled by current Step")
+        }
+    }
 
     #[async_trait]
     impl TypedTool for UnsafeLifecycleTool {
@@ -502,16 +564,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_round_step_cancellation_reaches_running_agent_context() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        let started = Arc::new(tokio::sync::Notify::new());
+        registry.register(BlockingAgentTool {
+            started: started.clone(),
+        });
+        let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
+        let agent = Arc::new(Agent::for_test(registry.as_ref(), ctx, 10));
+        let sink = RecordingSink::default();
+        let hook_port = noop_hook_port();
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let call = ToolCall {
+            id: ToolCallId::from_legacy_or_new("agent-cancel"),
+            provider_id: "provider-agent-cancel".to_string(),
+            name: "Agent".to_string(),
+            index: 0,
+            input: serde_json::json!({}),
+        };
+        let step_cancel = tokio_util::sync::CancellationToken::new();
+        let execution_agent = agent.clone();
+        let execution_context = context.clone();
+        let execution_sink = sink.clone();
+        let execution_hook_port = hook_port.clone();
+        let execution_workspace_read = workspace_read.clone();
+        let execution_call = call.clone();
+        let execution_cancel = step_cancel.clone();
+        let execution_activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
+        let handle = tokio::spawn(async move {
+            execute_tool_round(
+                &execution_context,
+                std::slice::from_ref(&execution_call),
+                &execution_agent.catalog,
+                &policy::AllowAllPolicy,
+                &sdk::RunId::new_v7(),
+                &sdk::RunStepId::new_v7(),
+                execution_agent.as_ref(),
+                &execution_sink,
+                &execution_hook_port,
+                &execution_activities,
+                &execution_cancel,
+                "en",
+                &execution_workspace_read,
+                &[(execution_call.clone(), ToolGuardDecision::Allow)],
+            )
+            .await
+        });
+        started.notified().await;
+
+        step_cancel.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("当前 Step 取消必须到达运行中的 Agent execution context")
+            .unwrap();
+
+        assert_eq!(result.results.len(), 1);
+        assert!(result.results[0].outcome.is_error);
+        assert!(result.results[0].outcome.text.contains("cancel"));
+    }
+
+    #[tokio::test]
     async fn allow_all_bypasses_soft_block_and_blocking_pre_tool_hook() {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let call = lifecycle_call(0);
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
 
         let result = execute_tool_round(
             &context,
@@ -523,9 +655,10 @@ mod tests {
             &agent,
             &sink,
             &hook_port,
+            &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
-            &workspace_root,
+            &workspace_read,
             &[(
                 call.clone(),
                 ToolGuardDecision::SoftBlock {
@@ -543,16 +676,94 @@ mod tests {
         );
     }
 
+    /// #1515: PreToolUse 事件 hook 必须无条件执行——AllowAll 只放行授权性
+    /// 限制，不得跳过事件 hook。修复前 PreToolUse 被错误门控跳过、工具正常
+    /// 执行；修复后 hook exit 2 阻断工具。
+    #[tokio::test]
+    async fn allow_all_still_runs_blocking_pre_tool_hook() {
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
+        let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
+        let agent = Agent::for_test(registry.as_ref(), ctx, 10);
+        let sink = RecordingSink::default();
+        let mut events = HashMap::new();
+        events.insert(
+            HookEvent::PreToolUse,
+            vec![HookEntry {
+                matcher: String::new(),
+                command: "exit 2".to_string(),
+                timeout: 5,
+            }],
+        );
+        let hook_port: Arc<dyn HookPort> = Arc::new(
+            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+                share::config::Config {
+                    hooks: HooksConfig {
+                        events,
+                        ..HooksConfig::default()
+                    },
+                    ..share::config::Config::default()
+                },
+            ))
+            .unwrap(),
+        );
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let call = lifecycle_call(0);
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
+
+        let result = execute_tool_round(
+            &context,
+            std::slice::from_ref(&call),
+            &agent.catalog,
+            &policy::AllowAllPolicy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
+            &agent,
+            &sink,
+            &hook_port,
+            &activities,
+            &tokio_util::sync::CancellationToken::new(),
+            "en",
+            &workspace_read,
+            &[(call.clone(), ToolGuardDecision::Allow)],
+        )
+        .await;
+
+        assert_eq!(result.results.len(), 1);
+        assert!(
+            result.results[0].outcome.is_error,
+            "AllowAll 不得跳过 PreToolUse 事件 hook：exit 2 应阻断工具"
+        );
+        assert!(
+            result.results[0]
+                .outcome
+                .text
+                .contains("Blocked by PreToolUse hook"),
+            "阻断消息应来自 PreToolUse hook，实际 = {:?}",
+            result.results[0].outcome.text
+        );
+    }
+
     #[tokio::test]
     async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
         let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
         registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
+        let workspace_read = ctx.workspace_read();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
         let hook_port = noop_hook_port();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
-        let workspace_root = std::env::current_dir().unwrap();
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let activities = crate::application::activity::ActivityCoordinator::new(
+            sdk::RunId::new_v7(),
+            Arc::new(crate::application::activity::SystemActivityClock),
+            Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+        );
         let calls = vec![lifecycle_call(0), lifecycle_call(1)];
         let guarded_calls = calls
             .iter()
@@ -570,9 +781,10 @@ mod tests {
             &agent,
             &sink,
             &hook_port,
+            &activities,
             &tokio_util::sync::CancellationToken::new(),
             "en",
-            &workspace_root,
+            &workspace_read,
             &guarded_calls,
         )
         .await;
@@ -608,7 +820,7 @@ mod tests {
             ),
         );
         let sink = RecordingSink::default();
-        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let materializer = crate::application::tool::test_support::test_tool_result_materializer();
 
         send_tool_result(
@@ -650,7 +862,7 @@ mod tests {
             &calls[0],
             ToolOutcome::new("finished", Value::Null, Vec::new()),
         );
-        let results = complete_cancelled_tool_round(&calls, vec![completed]);
+        let results = complete_cancelled_tool_round(&calls, vec![completed]).results;
         let materializer = crate::application::tool::test_support::test_tool_result_materializer();
 
         let message = crate::application::loop_engine::shared::materialize_tool_results(

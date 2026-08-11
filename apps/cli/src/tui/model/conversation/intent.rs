@@ -2,16 +2,15 @@
 //!
 //! struct 的 `impl ConversationUpdate` 逻辑在 `intent_impls.rs`。
 
-use super::block::{AskUserSlot, HookNoticeContent};
-use super::ids::{ChatId, ChatTurnId, ToolCallId};
+use super::block::AskUserSlot;
+use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::interaction::{
     InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
-    UiRunId,
 };
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
-use crate::tui::app::event::ModelStreamWaitingView;
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -32,9 +31,9 @@ pub struct ResumeConversation {
     pub steps: Vec<TuiResumedSessionStep>,
 }
 
-/// 仅追加一条用户消息回显块，不创建新的 chat/turn。
+/// 仅追加一条用户消息回显块，不创建新的 chat/run。
 ///
-/// 用于 ask_user 应答、队列输入冲刷等「在已激活的对话回合内回显用户输入」的场景。
+/// 用于 ask_user 应答、队列输入冲刷等「在已激活的对话run内回显用户输入」的场景。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendUserMessage {
     pub text: String,
@@ -43,27 +42,27 @@ pub struct AppendUserMessage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssistantText {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThinkingText {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteBlock {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCallStart {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: Option<String>,
     pub name: String,
@@ -73,7 +72,7 @@ pub struct ToolCallStart {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCallUpdate {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: Option<String>,
     pub name: String,
@@ -85,7 +84,7 @@ pub struct ToolCallUpdate {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolResult {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub id: ToolCallId,
     pub provider_id: String,
     pub tool_name: String,
@@ -102,21 +101,20 @@ pub struct TerminalNotice {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AppendSystemMessage {
-    pub text: String,
+pub struct PresentCancelledStep {
+    pub confirmed: bool,
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UpsertModelStreamPlaceholder {
-    pub placeholder: ModelStreamWaitingView,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClearModelStreamPlaceholder;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendHookNotice {
-    pub content: HookNoticeContent,
+    pub title: String,
+    pub text: String,
+    pub kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppendSystemMessage {
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,21 +136,43 @@ pub struct ClearQueuedSubmissionById {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClearAllQueuedSubmissions;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordSubRunActivity {
+    pub agent_id: String,
+    pub sub_run_id: String,
+    pub parent_run_id: String,
+    pub spawned_by_tool_call_id: ToolCallId,
+    pub sequence: u64,
+    pub sequence_index: u32,
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecordAgentProgress {
+pub struct RecordAgentActivities {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub tool_id: ToolCallId,
-    pub message: String,
+    pub activities: Vec<AgentActivityLine>,
+}
+
+/// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
+/// 由 TUI ACL 消费 `ToolOutputDelta` 后触发，直接写入 `ToolCall.streaming_preview`，
+/// 供 TUI 实时 tail 显示。与结构化 Sub Run activity 语义独立。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordToolStreamingOutput {
+    pub chat_id: ChatId,
+    pub run_id: ChatRunId,
+    pub tool_id: ToolCallId,
+    pub text: String,
 }
 
 /// 更新 Agent 工具的元数据（issue #499）。
-/// 由 `AgentProgressKind::Started` 事件触发，携带 sub-agent resolve 后的
+/// 由 compatibility ACL 翻译的 Started activity 触发，携带 sub-agent resolve 后的
 /// role/model，用于 header 渲染。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UpdateAgentMeta {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
     pub tool_id: ToolCallId,
     pub role: Option<String>,
     pub model: String,
@@ -271,60 +291,22 @@ pub struct InteractionCancelRejected {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompleteChat {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStarted {
-    pub run_id: UiRunId,
+pub struct ObserveActivityChange {
+    pub kind: crate::tui::adapter::tui_runtime_event::TuiActivityChangeKind,
+    pub activity: crate::tui::adapter::tui_runtime_event::TuiActivityObservation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunAwaitingUser {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunResumed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelling {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCancelled {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunCompleted {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunFailed {
-    pub run_id: UiRunId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepStarted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
-    pub tool_reference: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RunStepCompleted {
-    pub run_id: UiRunId,
-    pub step_id: super::interaction::UiRunStepId,
+pub struct ReplaceActivitySnapshot {
+    pub snapshot: crate::tui::adapter::tui_runtime_event::TuiActivitySnapshot,
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  Runtime intent structs（原 RuntimeIntent enum 的 14 个 variant，
-//  排除 SetSpinnerPhase / StopSpinner —— 它们的功能已被其他 intent 附带维护）
+//  Runtime intent structs
 // ════════════════════════════════════════════════════════════════════
 
 #[derive(Clone, Debug, PartialEq)]
@@ -332,7 +314,6 @@ pub struct RecordUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub last_input_tokens: u64,
-    pub cost_usd: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -363,6 +344,12 @@ pub struct FinishProcessingJob {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceRuntimeStatus(pub crate::tui::adapter::runtime_status::TuiRuntimeStatus);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct UpdateTaskLines(pub Vec<String>);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -376,21 +363,6 @@ pub struct SetTransientStatusNotice {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetGraphPhase(pub Option<String>);
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SetCompactProgress {
-    pub stage: String,
-    pub current: Option<u32>,
-    pub total: Option<u32>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SetSpinnerPhase {
-    pub phase: super::spinner::SpinnerPhase,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StopSpinner;
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
@@ -426,15 +398,16 @@ pub enum ConversationIntent {
     ToolCallUpdate(ToolCallUpdate),
     ToolResult(ToolResult),
     TerminalNotice(TerminalNotice),
-    AppendSystemMessage(AppendSystemMessage),
-    UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
-    ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
+    PresentCancelledStep(PresentCancelledStep),
     AppendHookNotice(AppendHookNotice),
+    AppendSystemMessage(AppendSystemMessage),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
-    RecordAgentProgress(RecordAgentProgress),
+    RecordSubRunActivity(RecordSubRunActivity),
+    RecordAgentActivities(RecordAgentActivities),
+    RecordToolStreamingOutput(RecordToolStreamingOutput),
     UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),
     AnswerCurrentAskUser(AnswerCurrentAskUser),
@@ -458,15 +431,8 @@ pub enum ConversationIntent {
     InteractionCancelAccepted(InteractionCancelAccepted),
     InteractionReplyRejected(InteractionReplyRejected),
     InteractionCancelRejected(InteractionCancelRejected),
-    RunStarted(RunStarted),
-    RunAwaitingUser(RunAwaitingUser),
-    RunResumed(RunResumed),
-    RunCancelling(RunCancelling),
-    RunCancelled(RunCancelled),
-    RunCompleted(RunCompleted),
-    RunFailed(RunFailed),
-    RunStepStarted(RunStepStarted),
-    RunStepCompleted(RunStepCompleted),
+    ObserveActivityChange(ObserveActivityChange),
+    ReplaceActivitySnapshot(ReplaceActivitySnapshot),
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),
@@ -475,13 +441,12 @@ pub enum ConversationIntent {
     UpdateTaskStatus(UpdateTaskStatus),
     StartProcessingJob(StartProcessingJob),
     FinishProcessingJob(FinishProcessingJob),
+    ReplaceRuntimeStatus(ReplaceRuntimeStatus),
+    ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
     SetGraphPhase(SetGraphPhase),
-    SetCompactProgress(SetCompactProgress),
-    SetSpinnerPhase(SetSpinnerPhase),
-    StopSpinner(StopSpinner),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

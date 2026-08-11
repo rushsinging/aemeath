@@ -14,19 +14,25 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use context::application::main_session::{
     MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
 };
-use context::domain::session::{CanonicalSession, SnapshotState};
+use context::domain::session::{
+    CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
+    FinalizedOutcomeProjection, SnapshotState,
+};
 use context::domain::{
-    AcceptedInputAppend, ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause,
-    RunStepId, SessionId, SessionRevision, StepReceipt, ToolOutcomeKind,
+    AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
+    ContextRequestId, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
+    SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind, ToolTerminalReceipt,
 };
 use context::ports::ContextPort;
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
 use project::wire_production_workspace;
+use provider::ReasoningLevel;
 use sdk::RunId;
-use share::config::domain::snapshot::ConfigRevision;
-use share::message::Message;
+use share::config::domain::snapshot::{ConfigRevision, ConfigSnapshot};
+use share::config::Config;
+use share::message::{ContentBlock, Message};
 use share::session_types::PersistedWorkspaceContext;
 use task::{
     BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot,
@@ -207,8 +213,8 @@ fn build_harness() -> Harness {
         workspace: SnapshotState::Captured(ws_ctx),
         revision: 0,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -251,7 +257,7 @@ fn session_with_workspace(
     tasks: SnapshotState<TaskSnapshot>,
 ) -> CanonicalSession {
     CanonicalSession {
-        id: "resume-target".to_string(),
+        id: SessionId::new("resume-target").as_ref().to_string(),
         chats: vec![],
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -260,9 +266,91 @@ fn session_with_workspace(
         workspace: SnapshotState::Captured(ws.clone()),
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
+    }
+}
+
+fn request(session_id: &str, run_id: &str) -> ContextRequest {
+    ContextRequest {
+        session_id: sdk::SessionId::from_legacy_or_new(session_id),
+        request_id: ContextRequestId::new("resume-window-request"),
+        run_id: RunId::new(run_id),
+        step_id: RunStepId::new("active-step"),
+        pending_messages: vec![],
+        invocation_reminders: vec![],
+        system_prompt: SystemPromptSpec::new("system"),
+        model_id: "fake/model".into(),
+        effective_reasoning: ReasoningLevel::Off,
+        language: Language::new("zh"),
+        agent_roles: Default::default(),
+        config_snapshot: ConfigSnapshot::new(Config::default()),
+        context_size: 128_000,
+        max_output_tokens: 8_192,
+        last_api_total_tokens: None,
+        tool_schemas: vec![],
+        tool_schema_tokens: 0,
+    }
+}
+
+fn finalized_tool_step(
+    run_id: &str,
+    step_id: &str,
+    call_id: &str,
+    tool_name: &str,
+    file_path: &str,
+    text: &str,
+) -> CommittedRunStep {
+    let input = serde_json::json!({"file_path": file_path});
+    let normalized_run_id = RunId::new(run_id);
+    let normalized_step_id = RunStepId::new(step_id);
+    CommittedRunStep {
+        step_id: normalized_step_id.as_str().to_string(),
+        accepted_input: None,
+        outcome: Some(FinalizedOutcomeProjection {
+            finalize_cause: FinalizeCause::Completed,
+            duration_ms: None,
+            messages: CommittedStepMessages::from(vec![Message {
+                role: share::message::Role::Assistant,
+                content: vec![
+                    ContentBlock::ToolUse {
+                        id: call_id.into(),
+                        name: tool_name.into(),
+                        input: input.clone(),
+                    },
+                    ContentBlock::ToolResult {
+                        tool_use_id: call_id.into(),
+                        content: serde_json::json!({"typed": text}),
+                        is_error: false,
+                        text: Some(text.into()),
+                    },
+                ],
+                metadata: None,
+            }]),
+            receipts: vec![],
+            api_input_tokens: None,
+            fingerprint: format!("fp-{step_id}"),
+            committed_revision: 1,
+        }),
+        tool_receipts: vec![ToolCallReceipt {
+            identity: ToolCallIdentity {
+                session_id: SessionId::new("resume-target"),
+                run_id: normalized_run_id,
+                step_id: normalized_step_id,
+                runtime_call_id: call_id.into(),
+                provider_call_id: Some(call_id.into()),
+                tool_name: tool_name.into(),
+                call_index: 0,
+                agent: false,
+            },
+            input_preview: input.to_string(),
+            state: context::domain::ToolCallState::Terminal(ToolTerminalReceipt::new(
+                ToolOutcomeKind::Success,
+                "terminal",
+                CleanupConfirmation::NotApplicable,
+            )),
+        }],
     }
 }
 
@@ -308,7 +396,8 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
     // Verify committed session changed.
     let post_session = h.wiring.committed_session();
     assert_eq!(
-        post_session.id, "resume-target",
+        post_session.id,
+        SessionId::new("resume-target").as_ref(),
         "committed session should be the resumed one"
     );
     assert_ne!(post_session.id, pre_session_id);
@@ -336,8 +425,132 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
 
     // Verify bind_main_run returns the new state.
     let bound = h.wiring.bind_main_run().await.expect("bind should succeed");
-    assert_eq!(bound.session().id, "resume-target");
+    assert_eq!(bound.session().id, SessionId::new("resume-target").as_ref());
     assert_eq!(bound.config().revision(), post_config_revision);
+}
+
+#[tokio::test]
+async fn resumed_main_run_builds_the_same_structured_l2_l3_window() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let workspace = h.workspace_persist.snapshot();
+    let mut session =
+        session_with_workspace(&workspace, SnapshotState::Captured(TaskSnapshot::empty()));
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            RunId::new("old-read").as_ref(),
+            vec![finalized_tool_step(
+                "old-read",
+                "old-read-step",
+                "old-read-call",
+                "Read",
+                "/repo/src/lib.rs",
+                "obsolete read",
+            )],
+        ),
+        CommittedRunSlice::new(
+            RunId::new("old-search").as_ref(),
+            vec![finalized_tool_step(
+                "old-search",
+                "old-search-step",
+                "old-search-call",
+                "WebSearch",
+                "/search",
+                "obsolete search",
+            )],
+        ),
+        CommittedRunSlice::new(
+            RunId::new("write-run").as_ref(),
+            vec![finalized_tool_step(
+                "write-run",
+                "write-step",
+                "write-call",
+                "Write",
+                "/repo/src/lib.rs",
+                "written",
+            )],
+        ),
+        CommittedRunSlice::new(
+            RunId::new("recent-1").as_ref(),
+            vec![finalized_tool_step(
+                "recent-1",
+                "recent-1-step",
+                "recent-1-call",
+                "Read",
+                "/repo/recent-1.rs",
+                "recent one",
+            )],
+        ),
+        CommittedRunSlice::new(
+            RunId::new("recent-2").as_ref(),
+            vec![finalized_tool_step(
+                "recent-2",
+                "recent-2-step",
+                "recent-2-call",
+                "Read",
+                "/repo/recent-2.rs",
+                "recent two",
+            )],
+        ),
+    ]
+    .into();
+    let canonical_before = serde_json::to_vec(&session.run_slices).unwrap();
+
+    h.wiring
+        .resume_prepared(session)
+        .await
+        .expect("resume structured session");
+    let bound = h.wiring.bind_main_run().await.expect("bind resumed run");
+    assert_eq!(bound.session().id, SessionId::new("resume-target").as_ref());
+    let resumed_session_id = bound.session().id.clone();
+    assert_eq!(
+        request(&resumed_session_id, "active-run")
+            .session_id
+            .as_ref(),
+        resumed_session_id
+    );
+    let first = bound
+        .context()
+        .build_window(&request(&resumed_session_id, "active-run"))
+        .await
+        .expect("build resumed window");
+    let second = bound
+        .context()
+        .build_window(&request(&resumed_session_id, "active-run"))
+        .await
+        .expect("repeat resumed window");
+
+    assert_eq!(
+        serde_json::to_vec(&first.messages).unwrap(),
+        serde_json::to_vec(&second.messages).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_vec(&bound.session().run_slices).unwrap(),
+        canonical_before
+    );
+    let result_text = |call_id: &str| {
+        first
+            .messages
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .find_map(|block| match block {
+                ContentBlock::ToolResult {
+                    tool_use_id, text, ..
+                } if tool_use_id == call_id => text.clone(),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(
+        result_text("old-read-call"),
+        "[Superseded tool result: Read /repo/src/lib.rs]"
+    );
+    assert_eq!(
+        result_text("old-search-call"),
+        "[Microcompacted tool result: WebSearch]"
+    );
+    assert_eq!(result_text("recent-1-call"), "recent one");
+    assert_eq!(result_text("recent-2-call"), "recent two");
 }
 
 #[tokio::test]
@@ -361,7 +574,7 @@ async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
         })
         .await
         .expect("append accepted input");
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
 
     let committed = h.wiring.committed_session();
     let step = &committed.run_slices[0].steps[0];
@@ -410,7 +623,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
     context
         .append_and_persist(&ContextAppend {
             session_id: SessionId::new(source_id.clone()),
-            expected_revision: SessionRevision::new(1),
+            expected_revision: SessionRevision::new(0),
             run_id: RunId::new("run-finalized"),
             step_id: RunStepId::new("step-finalized"),
             source_request_id: ContextRequestId::new("request-finalized"),
@@ -452,7 +665,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
         outcome.receipts[0].outcome(),
         ToolOutcomeKind::CancellationUnconfirmed
     );
-    assert_eq!(outcome.committed_revision, 2);
+    assert_eq!(outcome.committed_revision, 1);
 }
 
 #[tokio::test]
@@ -772,8 +985,8 @@ async fn workspace_missing_returns_typed_error() {
         workspace: SnapshotState::Missing,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -806,8 +1019,8 @@ async fn workspace_captured_empty_returns_typed_error() {
         workspace: SnapshotState::CapturedEmpty,
         revision: 1,
         compact: None,
-        run_slices: vec![],
-        committed_steps: vec![],
+        run_slices: vec![].into(),
+        committed_steps: Default::default(),
         skill_load_records: Vec::new(),
     };
 
@@ -868,7 +1081,10 @@ async fn bound_capture_is_consistent() {
 
     // New binding sees the updated session.
     let bound3 = h.wiring.bind_main_run().await.expect("bind 3");
-    assert_eq!(bound3.session().id, "resume-target");
+    assert_eq!(
+        bound3.session().id,
+        SessionId::new("resume-target").as_ref()
+    );
 }
 
 /// The exclusive permit held by `resume_prepared` blocks `bind_main_run`
@@ -889,7 +1105,7 @@ async fn resume_blocks_bind_until_complete() {
 
     // After resume completes, bind should succeed immediately.
     let bound = h.wiring.bind_main_run().await.expect("bind after resume");
-    assert_eq!(bound.session().id, "resume-target");
+    assert_eq!(bound.session().id, SessionId::new("resume-target").as_ref());
 }
 
 /// A memory opener failure (after Project/ACL/Config prepare succeeds) keeps
@@ -980,7 +1196,7 @@ async fn resume_publishes_only_canonical_committed_session_visible_after_bind() 
 
     // 1. The committed session is exactly the canonical one we resumed from.
     let committed = h.wiring.committed_session();
-    assert_eq!(committed.id, "resume-target");
+    assert_eq!(committed.id, SessionId::new("resume-target").as_ref());
     assert_ne!(committed.id, pre_session_id);
 
     // 2. resume publishes *only* the canonical committed session — a freshly

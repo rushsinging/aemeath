@@ -2,51 +2,24 @@
 
 use crate::ChatInputEventPort;
 
+pub use crate::activity::{
+    ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
+    ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
+    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
+    RunPurposeView,
+};
 pub use crate::chat_event::{
     ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
     ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
-    ResumedSessionStep, ResumedStepFinalizeCause, ToolCallStatusView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, ToolCallStatusView,
 };
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
-    HookEventView, HookExecutionResultView, HookMessageKindView, HookMessageView, OptionItem,
-    WorkspaceContextView, WorkspaceStackEntryView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, OptionItem,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolProgressEventView, WorkspaceContextView,
+    WorkspaceStackEntryView,
 };
-
-/// AskUserQuestion 批量事件中的单个问题项。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskUserQuestionItem {
-    /// 对应的 tool_call_id（用于 TUI 关联 ToolCall 状态）。
-    pub id: String,
-    /// 同一 tool call 内的问题序号，从 0 开始。
-    pub question_seq: usize,
-    /// 问题文本。
-    pub question: String,
-    /// 预设选项（LLM 选项，不含内建选项）。
-    pub options: Vec<OptionItem>,
-    /// 是否多选。
-    pub multi_select: bool,
-    /// 是否允许自由输入。
-    pub allow_free_input: bool,
-    /// 默认值（用户跳过时使用）。
-    pub default: Option<String>,
-}
-
-/// 带身份的 AskUserQuestion 回答。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskUserAnswer {
-    pub tool_call_id: String,
-    pub question_seq: usize,
-    pub answer: String,
-}
-
-/// AskUser 批量交互的显式终结结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AskUserReply {
-    Answers(Vec<AskUserAnswer>),
-    Cancelled,
-}
 
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]
@@ -68,7 +41,7 @@ pub struct SkillRequest {
 /// Chat 运行期间追加到 runtime 的输入事件。
 #[derive(Debug, Clone)]
 pub enum ChatInputEvent {
-    /// 普通用户消息，延展当前 Chat 为新的 Turn。
+    /// 普通用户消息，延展当前 Chat 为新的 Run。
     ///
     /// `id` 是唯一标识本次输入的 UUIDv7（#390 A2）。
     /// `images` 携带图片数据（`ChatInputImage` 含 `id` 占位符），使内联/粘贴/文件
@@ -86,18 +59,18 @@ pub enum ChatInputEvent {
     },
     /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
     ///
-    /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
-    /// **不打断当前回合**（NEVER 调 CancellationToken）。
+    /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前run自然结束回 idle gate 后执行），
+    /// **不打断当前run**（NEVER 调 CancellationToken）。
     Reset,
     /// 批量撤回所有 pending 输入：清空 PendingInputBuffer + 回传 texts 还原输入框。
     ///
     /// 由 busy 态 Up 键触发（#391 S3）。
     WithdrawAll,
-    /// 用户请求手动 compact：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求手动 compact：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/compact` 触发，走 runtime 事件流（#497），不再调 `compact_messages()` trait。
     Compact,
-    /// 用户请求切换模型：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求切换模型：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/model` 触发，走 runtime 事件流（#567）。`selection` 是用户输入的
     /// `Provider/Model` 字符串，由 runtime 侧 `resolve_model_selection` 解析。
@@ -105,7 +78,7 @@ pub enum ChatInputEvent {
     SwitchModel {
         selection: String,
     },
-    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
+    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
     /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScope 读取；

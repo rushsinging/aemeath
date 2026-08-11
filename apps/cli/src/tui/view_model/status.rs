@@ -50,7 +50,7 @@ pub struct StatusRuntimeViewModel {
     pub session_id: Option<String>,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub last_input_tokens: u64,
+    pub context_usage_permille: Option<u32>,
     pub api_calls: u64,
     pub context_size: u64,
     pub tps: f64,

@@ -120,42 +120,25 @@ fn estimate_message_tokens(msg: &Message) -> usize {
 | JSON 估算按字符 | 未考虑 key 压缩 | 按 JSON 结构估算（key 重叠率高时实际 token 更少） |
 | `bytes_per_token` 固定 4.0 | 模型差异未体现 | 按 model 调整 ratio |
 
-## 3. TokenBudgetConfig — 常量统一来源
+## 3. 预算常量与冻结输入的唯一来源
 
-```rust
-struct TokenBudgetConfig {
-    // reserved_context 不再在此 struct——改为 token_budget::reserved_context(context_size) 动态计算（context_size * 2%）
+Token Budget 不建立聚合全部配置的大型 struct。预算由两类单一真相组成：
 
-    /// 估算安全系数
-    estimation_safety_factor: f64,          // 1.33
+1. Context-owned 纯函数和局部常量负责稳定估算策略，例如 CJK/ASCII 估算、图像固定开销、summary 预留比例与 compact 分块边界；
+2. Run/Invocation 安全边界解析出的 `context_size` 与 `max_output_tokens` 作为冻结输入，经同一 `RuntimeContext`/`ProviderBinding` 同时进入 `ContextRequest` 与 `InvocationRequest`。
 
-    /// CJK 字符 token 比
-    cjk_token_ratio: f64,                   // 2.0
+`max_output_tokens` 不是全局常量，也不得在 Context 内第二次查询 Provider、Config 或模型目录。
 
-    /// 英文 bytes/token
-    bytes_per_token: f64,                   // 4.0
+### 3.1 来源说明
 
-    /// 图像固定 token 估算
-    image_tokens: usize,                    // 85
-
-    /// map-reduce 分块阈值
-    map_reduce_chunk_threshold: usize,      // 30_000
-
-    /// Snip / Microcompact 统一 Run 保护窗口
-    compact_family_protect_recent_runs: usize, // 2
-}
-```
-
-> **`max_output_tokens` 不在此 struct**——它从 `ProviderPort` 获取模型真实值，不是全局常量。见 §4。
-
-### 3.1 常量来源说明
-
-| 常量 | 值 | 依据 |
+| 输入或策略 | 值 / 来源 | 唯一所有者 |
 |---|---|---|
-| `reserved_context` | `context_size * 2%`（动态） | 为 guidance 与 compact summary 预留；按比例缩放，100K→2000 / 272K→5440 |
-| `estimation_safety_factor` | 1.33 | 4/3 保守系数，覆盖 JSON 结构和估算不确定性 |
-| `map_reduce_chunk_threshold` | 30,000 | 超过此值时分块 map-reduce，每块 ≤ 此值 |
-| `compact_family_protect_recent_runs` | 3 | Main / Sub 统一保护最近 3 个完整 Run；RunStep 不推进窗口 |
+| `context_size` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
+| `max_output_tokens` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
+| `reserved_context` | `context_size * 2%`（动态） | `token_budget::summary_budget` |
+| compact threshold ratio | 0.8 | `token_budget::autocompact_threshold` |
+| 文本 / JSON / 图像估算 | Context-owned 纯函数与局部常量 | `token_budget` |
+| compact family 最近窗口 | 最近 3 个完整 Run | compact 读模型策略 |
 
 ## 4. Effective Context Window
 
@@ -178,43 +161,28 @@ threshold        = 180,000 * 0.8 = 144,000
 
 ### 4.2 max_output_tokens 注入
 
-- Runtime 在每次 PreparingContext、且在 `build_window` 前调用 `ProviderPort.resolve_invocation_options`，把返回的真实上限写入 `ContextRequest.max_output_tokens`；同一个 `ResolvedInvocationOptions` 随后进入 `InvocationRequest`。
-- `compaction_decision` 计算和 `compaction_urgency` **MUST** 只使用 `req.max_output_tokens`，**NEVER** 以固定 `8192` 或另一个 provider lookup 形成第二真相。
+- Provider/Config resolver 在 Run 创建安全边界解析 `context_size` 与 `max_output_tokens`，并冻结到本 Run 的 `ProviderBinding` / `RuntimeContext`。
+- Main 与 Sub 在构造 `ContextRequest` 时从该冻结 binding 复制同一组值；随后 `InvocationRequest` 继续从同一个 binding 构造，禁止第二次 lookup。
+- `compaction_decision` 的 threshold 与 urgency **MUST** 只使用 `ContextRequest.context_size / max_output_tokens`，**NEVER** 使用固定 `8192` 或平行 legacy helper。
 
-### 4.3 compaction_urgency 分级
+### 4.3 urgency 分级
+
+urgency 是 `context_decision::calculate` 的内部结果，不发布第二个公共判断 API：
 
 ```rust
-fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urgency {
-    let effective = effective_context_window(req.context_size, req.max_output_tokens);
-    let (total, _) = decision_token_count(req, candidate);
-    let pct = total * 100 / effective.max(1);
-
-    match pct {
-        0..=69 => Urgency::None,
-        70..=79 => Urgency::Monitor,
-        80..=89 => Urgency::Should,
-        _ => Urgency::Must,
-    }
-}
+let effective = effective_context_window(req.context_size, req.max_output_tokens);
+let percentage = decision_token_count.saturating_mul(100) / effective.max(1);
+let urgency = match percentage {
+    0..=69 => Urgency::None,
+    70..=79 => Urgency::Monitor,
+    80..=89 => Urgency::Should,
+    _ => Urgency::Must,
+};
 ```
 
 ### 4.4 compaction_decision 决策（build_window 内部纯函数）
 
-> 以下纯函数是 `build_window` 内部计算 `compaction_decision` 的 helper。`build_window` 从自身稳定 backing 构造 `WindowCandidate` 后调用此函数，结果写入 `ContextWindow.compaction_decision`。
-
-```rust
-fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> CompactionDecision {
-    let threshold = autocompact_threshold(req.context_size, req.max_output_tokens);
-    let (decision_token_count, reason) = decision_token_count(req, candidate);
-    CompactionDecision {
-        needed: decision_token_count > threshold,
-        urgency: compaction_urgency(req, candidate),
-        decision_token_count,
-        threshold,
-        reason,
-    }
-}
-```
+`context_decision::calculate` 是唯一生产判断入口。它从 `ContextRequest` 和完整 candidate 计算 token budget，并同时返回 threshold、urgency、decision reason 与 `needed`；旧 `needs_compaction_*` / `compaction_urgency` 公共 helper 已退役。
 
 **确定性保证**：相同 Context backing revision + 相同 `ContextRequest` → 相同 `WindowCandidate` 与 `CompactionDecision`。`build_window` 在内部对稳定 backing + `pending_messages` 建 candidate，Runtime 不提供或修改历史。supplier revision 变化会形成新的 candidate/fingerprint，而不是在相同输入下产生漂移。
 
@@ -224,9 +192,8 @@ fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> Compac
 
 | 层 | 必须满足的约束 | 守护方式 |
 |---|---|---|
-| `needs_compaction` | 相同输入 → 相同输出 | 纯函数 |
-| `needs_compaction_actual` / `needs_compaction_full` | 相同输入 → 相同输出 | 纯函数 |
-| `compaction_urgency` | 相同输入 → 相同分级 | 纯函数 |
+| `context_decision::calculate` | 相同 ContextRequest + candidate → 相同完整 decision | 纯函数 |
+| actual / heuristic 分支 | 相同冻结预算与 usage baseline → 相同 token count / reason | 纯函数 |
 | `auto_compact` 外层 | fingerprint 不变时不重复触发 Hook / 扫描 | `CompactionFingerprint` |
 | `ChatChain::compact` | 同一 source revision 最多提交一次 | `compact_source_revision` + `compact_committed` marker |
 
@@ -294,7 +261,7 @@ async fn build_window(
 
 ### 5.4 Hook 去重
 
-- PreCompact hook **MUST** 只在 `compaction_decision.needed == true` 时触发
+- Target：Future PreCompact Hook 接线后 **MUST** 只在 `compaction_decision.needed == true` 时触发；当前 production 尚不 emit PreCompact
 - microcompact 只在 `fingerprint.pending_messages_hash` 变化时执行
 
 ### 5.5 Compact 提交幂等性
@@ -362,3 +329,4 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 | 2026-07-12 | 初稿：估算策略、effective window 公式、常量统一、幂等性设计、遗留清理 | #786 |
 | 2026-07-16 | summary_budget 改为动态计算（context_size * 2%），替代写死的 max_summary_output_tokens=20000；threshold 公式加 *0.8 系数 | #1110 |
 | 2026-07-17 | Provider ACL 标准化 total tokens（Anthropic 纳入 cache read/create）；自动 compact 只由 last_total_tokens 触发；明确 recent-tail 30% 与常驻 Snip/Microcompact 为 Deferred Target，Current tail 保持 message 10% | compact token reset design |
+| 2026-08-08 | 退役只被测试消费的 `needs_compaction_*` / `compaction_urgency` 平行 API；冻结后的 Run/Invocation budget inputs 成为 Context decision 与 Provider request 的唯一共同输入 | #832 |

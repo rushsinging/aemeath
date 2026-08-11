@@ -23,6 +23,8 @@ fn decision() -> CompactionDecision {
         urgency: Urgency::None,
         decision_token_count: 12,
         threshold: 100,
+        context_size: 200_000,
+        effective_window: 180_000,
         reason: DecisionReason::HeuristicFallback,
     }
 }
@@ -34,6 +36,7 @@ fn request() -> ContextRequest {
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
         pending_messages: vec![Message::user("hello")],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -77,6 +80,7 @@ impl ContextPort for FakeContextPort {
             summary: "summary".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -88,6 +92,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(5),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -153,6 +158,9 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             source_revision: SessionRevision::new(3),
             source: request.clone(),
             trigger: CompactTrigger::Automatic,
+            progress: None,
+            task_context: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap(),
@@ -165,6 +173,8 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
+            progress: None,
+            task_context: None,
         })
         .await
         .unwrap();

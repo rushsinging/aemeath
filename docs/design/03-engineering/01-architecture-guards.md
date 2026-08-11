@@ -27,7 +27,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试与 production reachability，并并行等待其余无 Cargo 静态守卫；`--full` 按固定顺序串行执行全部独立脚本守卫及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
+`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试、production reachability，以及会复制仓库或执行正反例测试的 `check-shared-run-loop-tests.sh`、`check-sdk-wire-schema.sh`、`check-runtime-capability-assembly-tests.sh`；其余无 Cargo 即时静态守卫并行执行。`--full` 按固定顺序串行执行全部独立脚本守卫、正反例测试及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
 
 ## 守卫索引
 
@@ -42,13 +42,15 @@
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块 |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
+| 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
 | 6d | `check-provider-retry-ownership.sh` | Provider 策略所有权 | Provider 生产 stream adapter 禁止恢复 retry loop、backoff sleep、`FallbackPlanned` 或 stream→non-stream fallback；跨 attempt 策略只属于 Runtime |
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
 | 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
-| 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Session AtomicBlob backing 与 `SessionManagementPort`；Context / Runtime 只消费同一注入 Port，禁止 Context filesystem 构造、legacy free-function façade 或 Runtime 直连 façade |
+| 6i | `check-provider-window-single-owner.sh` + `check-provider-window-single-owner-tests.sh` | Context / Runtime Provider 窗口所有权 | Main/Sub 必须经共享 `ContextRequestCoordinator → ContextPort::build_window → ContextWindow`；Runtime `extract_invocation_context` 后禁止修改 `messages_for_api`；typed reminder 必须进入 ContextRequest；正反 fixture 验证后置 push 与 Runtime reminder tag 渲染被阻断 |
+| 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Dataset Session backing、仅将 AtomicBlob 作为 legacy migration source 注入 Dataset-aware `SessionManagementPort`，并将同一 Port 交给 Context / Runtime；生产 writer 必须是 Dataset 增量 writer，禁止 Context filesystem 构造、legacy free-function façade、Runtime 直连 façade或 Composition 装配 legacy-only management |
 | 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
@@ -77,8 +79,11 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；RunKind 不驱动控制流；退役符号不存在；stop hook、Interaction、Hook、Reasoning 与 Main/Sub 统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名 |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent`、SDK mapper `map_lifecycle_event` 以及 Composition 接入 Audit worker 与失败降级所需的 Runtime-owned `UsageSink` / `UnavailableUsageSink` 出站端口；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；BoundaryOnly Hook adapter 必须从 `HookPointMetadata.class` 派生过滤并禁止变体 allow-list，从而保留 Stop 与生命周期 Boundary；Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名。配套正反例脚本验证未登记 façade 以 exit code 2 阻断，并验证登记的 lifecycle、SDK mapper 与 Usage façade clean pass |
 | 23f | `check-projection-naming.sh` | 命名约束 | Rust 生产源码禁止新增宽泛 `Projection` / `projection` 标识符；领域转换必须使用目标或用途明确的名称；测试文件、`*_tests.rs`、`tests/`、`scenario_tests/` 与 `#[cfg(test)]` 模块不扫描 |
+| 23g | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；Runtime production 只允许 logical-commit `ActivitySnapshot` 与 heartbeat，禁止 `RuntimeActivityEvent::Changed` / `publish_change` 回流；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
+| 23h | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress` / `TasksSnapshot` / `AskUserBatch`；不破坏仍登记的 SDK wire compatibility |
+| 23i | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -98,7 +103,7 @@
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
 - **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
-- **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
+- **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Task committed-change 链额外登记仅供 Tools/Runtime 协调的 `CommittedTaskChange` 与 `TaskChangeFact`；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Sub Run 事实链登记 `SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind` 与 `SubRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
 - **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。
 - **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
 - **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
@@ -233,13 +238,10 @@
 - **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
-- **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
+- **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**：无。tools 已完成迁移（`agent/features/tools/src/business/` 已不存在），历史 business→core 例外记录已清理。
+- **实现载体**：perl 单进程核心（`.agents/hooks/check-cola-layer-purity.sh` 内联，含与语义等价的 23 项启动自检）。原 `cargo run -p xtask -- cola-layer-purity` 实现因 Stop Hook 每次触发的编译/运行成本（实测 40~80s，占 fast 总耗时 96%+）于 #1521 退役，xtask 不再提供 `cola-layer-purity` 子命令；perl 版实测 0.22s，与 xtask 版在 clean 仓库及违规样本上输出逐字一致。
 
-| 路径 | 目标层 | 上下文 |
-|---|---|---|
-| `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
-
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：当前精确 `path + target layer` 例外中已删除不存在的 `application/interaction/ask_user.rs → adapters` 与已退役的 `ports/legacy.rs → application`；其余路径必须通过 stale 自检，禁止扩张。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：空集合。Runtime application 不得依赖 `crate::adapters`；旧容器、角色 adapter 与兼容参数袋由 `check-runtime-capability-assembly.sh` 同时禁止复活。
 
 - **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
 
@@ -262,7 +264,7 @@
   - `ROOT_ACCESS_ALLOW.workflow = {adaptive_reasoning}`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` 是 crate-root 发布的 composition façade（返回 `Arc<dyn api::ReasoningPort>`），graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime`：Composition 仅可消费登记的 crate-root façade，包括 Client/bootstrap、Provider factory PL、RuntimeContextFactory、Tool Result/ActiveRun，以及 P4 初始模型装配所需的 `InitialProviderAssembly`、`ModelRuntimeSettings`、`resolve_model_runtime_settings`；禁止穿透 `runtime::application`。`UsageSink` 供 #931 bridge，实现细节仍私有。
   - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、`SessionResumeView`、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
-  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Runtime 的 Agent progress 链路额外消费 crate-root 发布的 `AgentProgressSourceContext` 纯值身份，禁止穿透 Tools 内部模块；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
+  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Runtime 的 Agent execution 与 Sub Run activity 链路额外消费 crate-root 发布的 `AgentProgressSourceContext`、`SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind`、`SubRunTerminalOutcome` 纯值身份与活动 PL，禁止穿透 Tools 内部模块；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
   - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复
 - **检查方式**：
@@ -594,7 +596,7 @@
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
 - **#872 Context 边界 / #1397 公共 owner**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。独立 Run 与派生 Run 均委托 `application/loop_engine/step_persistence.rs` 的无角色 owner 接入唯一 `append_finalized`，Main/Sub adapter 禁止各自保留 finalized append 算法。Interaction completion 必须由 `application/interaction/coordinator.rs` 的 `InteractionCompletionContext` 与 `complete_tool_interaction` 统一拥有；禁止恢复 `InteractionCompletionPort` 或 Main/Sub 五组角色 completion 方法。消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。
-- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。总编排同时执行该正反例脚本。白名单预算保持不变，不新增 migration exception。
+- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。该正反例脚本只进入 `--full`，不进入 Stop `--fast`。白名单预算保持不变，不新增 migration exception。
 
 ## 23. check-run-control-boundary.sh
 
@@ -627,6 +629,25 @@
 - **白名单**：无；仅排除测试路径。
 - **故意违规证据**：在临时副本分别加入 SDK `builtin_commands()`、no-TUI 独立 parser 与 Runtime `CommandRoute`，单 Guard 和总编排均须 exit 2；恢复后 clean pass。
 - **失败模式**：输出命中路径后以 exit 2 阻断。
+
+## 23g. check-runtime-event-naming.sh
+
+- **位置**：`.agents/hooks/check-runtime-event-naming.sh`；结构化 catalog/baseline 为 `.agents/runtime-event-naming-baseline.json`；正反例脚本为 `check-runtime-event-naming-tests.sh`。
+- **功能**：解析 `RuntimeStreamEvent`、SDK `ChatEvent` 与 `TuiRuntimeEvent` 的 enum 结构，要求当前 variant 集合与 baseline 精确一致；新增、删除或跨层改名必须同时评审结构化 catalog 与 `09-event-index.md`，避免仅靠 grep 或 Markdown 表格解析治理事件语言。
+- **兼容边界**：`legacy_broad_names` 显式冻结仍在生产使用的 compatibility names，不进行 SDK wire breaking rename；`sdk_compatibility_variants` 允许旧 SDK variant 继续 dual-read，但 Guard 要求其不得恢复为 Runtime producer 或 TUI fact。当前明确登记 `Token`、legacy `Thinking`、`ToolCallStart`、`ToolCallUpdate`、`ToolProgress`、`MicrocompactDone`、`CompactRollback`、`CompactFinished` 与 `AgentProgress`，均由 TUI/CLI 第一边界归一化为 typed content/tool delta、tool call fact、operation result fact 或 `SubRunStarted` / `SubRunActivity`；`UiEvent::AgentProgress` 与 `sdk_event_to_ui_event` 第二兼容链已经退役，Guard 禁止恢复；新增宽泛 `*Updated`、`*Info`、`*Data`、`*Notification`、`*ProgressUpdated` 仍会被拒绝。
+- **语义边界**：`current_cross_layer_facts` 锁定 Runtime → SDK → TUI 同名事实；`ack_terminal_patterns` 以结构化模式禁止命令 ACK 借用 Lifecycle terminal 名称，确有现存 wire 兼容名时只能进入显式 `ack_terminal_compatibility_names`；`retired_symbols` 禁止恢复 `CompactProgress`、`TasksSnapshot` 与 `AskUserBatch`：Compact live display 只来自 typed Activity stage/work，Task state 只来自 revisioned `TaskStateChanged`，交互协议只来自纯值 `InteractionRequested` 与 command reply。
+- **索引登记**：除 `Noop`、`Error`、`Run`、`RunStep`、`GraphPhaseChanged` 五个 TUI 内部容器 variant 外，baseline 内每个事件名必须出现在 Runtime 事件索引中。容器例外不授权新增事实名，也不计 compatibility debt。
+- **故意违规证据**：隔离副本依次注入宽泛 `RuntimeDataUpdated`、未登记事件、跨层 fact 漂移、SDK-only compatibility event（`ToolCallUpdate`、`ToolCallStart`、`ToolProgress`、`MicrocompactDone`、`CompactRollback` / `CompactFinished`、`AgentProgress` 或 legacy `Text`/`Thinking`）恢复为 Runtime producer、TUI internal fact、`UiEvent::AgentProgress` 或 `sdk_event_to_ui_event` 第二兼容链，另注入 legacy `AgentProgress::ToolCalls` 首项截断、TUI Conversation intent/change 与 output timeline 恢复 `AgentProgress` 领域 surface、Sub Run ToolCall 在 Conversation reducer 以 `workspace_root=None` 提前压扁、ordering watermark 旁恢复无消费者的 `sub_run_activities` / `agent_progress` 完整镜像、已退役 `TasksSnapshot` / `AskUserBatch` transport、Lifecycle terminal 风格 ACK 和 stringly `CompactProgress`；每类均必须由单 Guard 拒绝，恢复后 clean pass。
+
+`check-runtime-capability-assembly-tests.sh`、`check-runtime-event-naming-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。事件命名主体 Guard 同样进入 `fast`，其结构化负例脚本只进入 `full`。
+
+## 23h. check-cost-tracker-retirement.sh
+
+- **位置**：`.agents/hooks/check-cost-tracker-retirement.sh`；正反例脚本为 `check-cost-tracker-retirement-tests.sh`。
+- **功能**：锁定 Usage-only Audit MVP 的退役边界：`agent/features/runtime/src/application/cost{.rs,/}` 与 Runtime 文件名含 `cost` / `pricing` 的实现不得恢复；`CostTracker`、`CostSummary`、`SessionCostSummary`、`ModelPricing`、`CostInfo`、`CostUpdate`、`cost_usd`、`COST_HISTORY_FILE`、`global_cost_history_path`、`StorageNamespace::Cost` 与 Rust 源码中的 `cost_history.json` 路径 literal 在 `agent/`、`apps/`、`packages/` 保持零引用。
+- **数据边界**：Guard 只扫描仓库源码，**NEVER** 读取、迁移、清空或删除用户磁盘上的 `~/.agents/cost_history.json`。旧文件是未迁移 artifact；当前生产查询只读 Audit Usage JSONL。
+- **编排**：静态主体进入 Stop `--fast`；复制仓库并注入 Runtime owner、Runtime pricing/cost 文件、旧 tracker、legacy path API/literal、SDK Cost DTO 与 Storage namespace 的八类负向探针只进入 `--full`。
+- **治理**：注册为 `policy.audit.cost-retirement` Target policy，不增加 migration exception、scope exclusion 或 inline allow。Future Cost/Pricing 若获批准，必须先建立 Audit-owned Published Language、定价来源和迁移语义，再以等价或更强 policy 替换，**NEVER** 直接删除 Guard。
 
 ## 24. check-config-reader-injection.sh
 
@@ -715,9 +736,16 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-09 | #932 新增 `check-cost-tracker-retirement.sh` Target policy 与八类负向探针，锁定 Runtime Pricing/Cost、legacy history path、SDK/Runtime/TUI Cost surface 和 Storage Cost namespace 零引用；不接触用户旧文件，迁移债务保持不变 | [#932](https://github.com/rushsinging/aemeath/issues/932) |
+| 2026-08-04 | #1521 cola-layer-purity 守卫从 xtask 移植为 perl 单进程核心（Stop Hook fast 瓶颈 40~80s → 0.22s）；退役 xtask `cola-layer-purity` / `run-test` / `changed-lines` 子命令与 `flaky.rs` / `changed_lines.rs`（净删 1042 行）；清理 §5 stale `LAYER_MIGRATION_EXCEPTIONS` 白名单表（tools business 目录已不存在） | [#1521](https://github.com/rushsinging/aemeath/issues/1521) |
+| 2026-08-04 | #1399 退役 Runtime 旧容器、`ChatLoopContext` 参数袋、Runtime-owned TUI launch adapter 与 Tokio cancellation adapter；具体 SDK ingress/egress 构造归 Runtime adapter façade并由 Composition 注入；`RUNTIME_LAYER_MIGRATION_EXCEPTIONS` 清零，registry migration debt 收敛为 repository 1 / Runtime 0 / TUI 1；Runtime capability Guard 新增旧符号与 application→adapters 反向依赖禁入 | [#1399](https://github.com/rushsinging/aemeath/issues/1399) |
 | 2026-07-17 | 登记 #983 的 AtomicDataset crate-root public façade；因跨 crate Memory 消费 deferred 至 #896，不提前修改 `ROOT_ACCESS_ALLOW.storage`，且 #983 无 Guard exception / allowlist 净增 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-17 | #903 收紧 `check-provider-pull-stream.sh`：Runtime/Context 的生产代码与测试替身统一禁止跨 crate 使用 legacy sink；同时为 Stop 单 crate 测试增加 180 秒默认超时、进程组回收与失败快速退出，避免单 crate 卡住整个 Hook | [#903](https://github.com/rushsinging/aemeath/issues/903) |
 | 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6c）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #1385 退役 `migration.runtime.shared-adapter-bridge`：删除 `agent/features/runtime/src/adapters/runtime.rs`（仅剩 4 行注释、零 `share::adapter` 引用）、移除 `adapters.rs` mod 声明、清退 `check-forbidden-imports.sh` 例外集合/stale 自检/`is_runtime_adapter_migration_path` 函数与 `guard-registry` stable-id 引用、从 registry 删除对应 entry；迁移债务预算 repository 5→4、Runtime 4→3；§8 白名单表移除，白名单预算归零 | [#1385](https://github.com/rushsinging/aemeath/issues/1385) |
+
+### Compact continuation checkpoint ownership
+
+`context.compact-continuation-checkpoint` 由 Context 拥有。Context 可在领域 normalizer 内按分区和行执行预算收敛，但不得通过 head/tail slicing 将 previous checkpoint 的任一端当作 authoritative continuation。Runtime 只能逐字消费 `ContextWindow`，不得持有 `active_summary`/continuation backing，也不得拼装 checkpoint 标题。Guard 提供 `--self-test`，以机械截断、Runtime 第二 owner、Runtime 标题拼装为负例，以 Context normalizer 与 Runtime `ContextWindow` 消费为正例；它与 shared-run-loop 的 owner 边界互补。

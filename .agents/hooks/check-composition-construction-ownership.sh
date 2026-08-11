@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.composition.cross-bc-construction-ownership
 set -euo pipefail
 

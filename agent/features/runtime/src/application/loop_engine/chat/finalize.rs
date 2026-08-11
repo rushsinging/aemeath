@@ -1,6 +1,4 @@
-use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext,
-};
+use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::run_finalization::{
     RunFinalizationObserver, RunFinalizationOutcome,
 };
@@ -8,7 +6,7 @@ use task::TaskAccess;
 
 pub(crate) struct MainRunFinalizationObserver<'a> {
     pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
-    pub context: &'a RuntimeTurnContext,
+    pub context: &'a RuntimeRunContext,
     pub access: &'a dyn TaskAccess,
     pub session_id: &'a str,
 }

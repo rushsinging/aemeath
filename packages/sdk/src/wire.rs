@@ -7,14 +7,15 @@ use schemars::{schema_for, JsonSchema};
 use serde_json::{json, Map, Value};
 
 use crate::{
-    CancelCurrentRunOutcome, CancelRunOutcome, CancelRunStepOutcome, ChatEventContext, ChatMessage,
-    ConfigChangedEvent, ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView,
-    ConnectCommand, ConnectErrorView, ConnectOutcome, ConnectView, ControlDeadline,
-    ElementSpacingView, HookMessageView, InteractionCancelReason, InteractionCommandOutcome,
-    InteractionReply, InteractionRequest, InteractionRequestBody, MarkdownSpacingModeView,
-    MarkdownSpacingOverridesView, ModelSummary, ProjectContext, ReflectionHistoryView,
-    RunTerminationReason, SessionResumeFailureKind, SessionSnapshot, SessionSummary,
-    TerminateRunOutcome, WorkspaceContextView,
+    ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, CancelCurrentRunOutcome,
+    CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent, ConfigReloadedEvent,
+    ConfigUpdate, ConfigUpdateResult, ConfigView, ConnectCommand, ConnectErrorView, ConnectOutcome,
+    ConnectView, ControlDeadline, ElementSpacingView, InteractionCancelReason,
+    InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
+    MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary, ProjectContext,
+    ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
+    SessionSummary, TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView,
+    TaskPriorityView, TaskStateView, TerminateRunOutcome, WorkspaceContextView,
 };
 
 /// 生成供未来 Server adapter 组装 OpenAPI components 的 JSON Schema 文档。
@@ -22,13 +23,16 @@ use crate::{
 /// 这里不冻结 `paths`、`servers` 或任意传输语义；这些属于 Server Future 设计。
 pub fn components_document() -> Value {
     let mut definitions = Map::new();
+    register::<ActivityId>(&mut definitions);
+    register::<ActivityView>(&mut definitions);
+    register::<ActivitySnapshotView>(&mut definitions);
+    register::<ActivityChangeKind>(&mut definitions);
     register::<InteractionRequest>(&mut definitions);
     register::<InteractionRequestBody>(&mut definitions);
     register::<InteractionReply>(&mut definitions);
     register::<InteractionCommandOutcome>(&mut definitions);
     register::<InteractionCancelReason>(&mut definitions);
     register::<CancelCurrentRunOutcome>(&mut definitions);
-    register::<CancelRunOutcome>(&mut definitions);
     register::<CancelRunStepOutcome>(&mut definitions);
     register::<TerminateRunOutcome>(&mut definitions);
     register::<RunTerminationReason>(&mut definitions);
@@ -53,8 +57,13 @@ pub fn components_document() -> Value {
     register::<SessionSnapshot>(&mut definitions);
     register::<ChatMessage>(&mut definitions);
     register::<WorkspaceContextView>(&mut definitions);
-    register::<HookMessageView>(&mut definitions);
     register::<SessionResumeFailureKind>(&mut definitions);
+    register::<TaskStateView>(&mut definitions);
+    register::<TaskBatchView>(&mut definitions);
+    register::<TaskBatchStatusView>(&mut definitions);
+    register::<TaskItemView>(&mut definitions);
+    register::<TaskItemStatusView>(&mut definitions);
+    register::<TaskPriorityView>(&mut definitions);
 
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",

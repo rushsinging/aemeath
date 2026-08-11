@@ -17,6 +17,8 @@ use async_trait::async_trait;
 use crate::domain::subscription::HookCommand;
 use crate::ports::CancellationSignal;
 
+#[cfg(any(not(unix), test))]
+use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
 };
@@ -35,31 +37,34 @@ pub(crate) struct RawExecution {
 /// 单次执行的协议级故障（ExecutionFailed 可重试路径）。
 ///
 /// 与业务 Block（`HookReason`）严格区分：业务 Block 永不重试，
-/// 本枚举（除 `Cancelled`）触发最多 `MAX_ATTEMPTS` 次重试。`Cancelled` 立即终止
-/// dispatch 且不重试，但仍记一次 ExecutionFailed 明细。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 本枚举中的可恢复执行故障按 Dispatcher 注入的 execution policy 重试。
+/// `Unsupported` 是永久性平台能力缺失，`Cancelled` 是调用方终止；二者均立即结束，
+/// 不进入重试循环，但仍保留一次 typed execution 明细。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ExecutionFault {
-    /// `spawn` 失败（无法启动子进程）。
+    #[cfg(test)]
     Spawn,
-    /// 读写 stdin/stdout/stderr 管道失败。
+    SpawnWithDetail(String),
     Io,
-    /// `wait` 子进程失败。
     Wait,
-    /// 执行超过 deadline（timeout）。
     Timeout,
-    /// 取消：不重试，立即终止 dispatch。
+    #[cfg(any(not(unix), test))]
+    Unsupported,
     Cancelled,
 }
 
 impl ExecutionFault {
-    /// 返回面向诊断 / `ExecutionFailed.error` 的中文摘要。
-    pub(crate) fn message(self) -> &'static str {
+    pub(crate) fn message(&self) -> String {
         match self {
-            ExecutionFault::Spawn => "hook 子进程启动失败",
-            ExecutionFault::Io => "hook 进程管道读写失败",
-            ExecutionFault::Wait => "等待 hook 子进程失败",
-            ExecutionFault::Timeout => "hook 执行超时",
-            ExecutionFault::Cancelled => "hook 执行被取消",
+            #[cfg(test)]
+            Self::Spawn => "hook 子进程启动失败".to_string(),
+            Self::SpawnWithDetail(detail) => format!("hook 子进程启动失败: {detail}"),
+            Self::Io => "hook 进程管道读写失败".to_string(),
+            Self::Wait => "等待 hook 子进程失败".to_string(),
+            Self::Timeout => "hook 执行超时".to_string(),
+            #[cfg(any(not(unix), test))]
+            Self::Unsupported => UNSUPPORTED_PLATFORM_MESSAGE.to_string(),
+            Self::Cancelled => "hook 执行被取消".to_string(),
         }
     }
 }
@@ -157,14 +162,31 @@ impl Executor for ProcessDriverExecutor {
 
 /// 将 `ProcessFailure` 映射到 dispatcher 的 `ExecutionFault`。
 fn map_process_failure(failure: ProcessFailure) -> ExecutionFault {
-    let _diagnostic_message = &failure.message;
     match failure.kind {
-        ProcessFailureKind::Spawn => ExecutionFault::Spawn,
+        ProcessFailureKind::Spawn => ExecutionFault::SpawnWithDetail(failure.message),
         ProcessFailureKind::Io => ExecutionFault::Io,
         ProcessFailureKind::Wait => ExecutionFault::Wait,
         ProcessFailureKind::Timeout => ExecutionFault::Timeout,
         ProcessFailureKind::Cancelled => ExecutionFault::Cancelled,
         #[cfg(not(unix))]
-        ProcessFailureKind::Unsupported => ExecutionFault::Spawn,
+        ProcessFailureKind::Unsupported => ExecutionFault::Unsupported,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_failure_preserves_os_detail_in_execution_message() {
+        let fault = map_process_failure(ProcessFailure {
+            kind: ProcessFailureKind::Spawn,
+            message: "启动 hook 命令失败: Too many open files (os error 24)".to_string(),
+        });
+
+        assert_eq!(
+            fault.message(),
+            "hook 子进程启动失败: 启动 hook 命令失败: Too many open files (os error 24)"
+        );
     }
 }

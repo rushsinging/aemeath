@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # guard-registry:policy.context.session-project-scope
 set -euo pipefail
 
@@ -25,7 +25,7 @@ required = [
     (ports, r"import_for_project\s*\(", "SessionManagementPort must require project-scoped import"),
     (ports, r"update_metadata_for_project\s*\(", "SessionManagementPort must require project-scoped metadata update"),
     (ports, r"delete_for_project\s*\(", "SessionManagementPort must require project-scoped delete"),
-    (resume, r"load_for_project\s*\(", "MainSessionWiring resume must use project-scoped session load"),
+    (resume, r"load_for_(?:project|resume)\s*\(", "MainSessionWiring resume must use project-scoped session load"),
     (runtime_list, r"list_for_project\s*\(", "Runtime session list must use project-scoped session list"),
     (runtime_commands, r"update_metadata_for_project\s*\(", "Runtime session rename must use project-scoped metadata update"),
     (runtime_commands, r"export_for_project\s*\(", "Runtime session export must use project-scoped export"),

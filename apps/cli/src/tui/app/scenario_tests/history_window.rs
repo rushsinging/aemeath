@@ -1,13 +1,16 @@
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
-use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus, TuiTurnContext};
+use crate::tui::adapter::runtime_view::{
+    TuiChatMessage, TuiDisplayHistoryIndex, TuiDisplayHistoryStepReference, TuiResumedSessionStep,
+};
+use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiRuntimeEvent, TuiToolCallStatus};
+use crate::tui::effect::effect::Effect;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::super::testing::{input, TuiScenarioHarness};
 
-fn context(index: usize) -> TuiTurnContext {
-    TuiTurnContext {
+fn context(index: usize) -> TuiRunContext {
+    TuiRunContext {
         chat_id: format!("history-chat-{index}"),
-        turn_id: format!("history-turn-{index}"),
+        run_id: format!("history-turn-{index}"),
     }
 }
 
@@ -15,9 +18,9 @@ fn seed_history(harness: &mut TuiScenarioHarness, count: usize) {
     for index in 0..count {
         let context = context(index);
         let text = format!("HISTORY-{index:04}");
-        harness.runtime_event(TuiRuntimeEvent::Text {
+        harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
             context: context.clone(),
-            text: text.clone(),
+            delta: text.clone(),
         });
         harness.runtime_event(TuiRuntimeEvent::BlockComplete { context, text });
     }
@@ -35,20 +38,19 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
         .map(|line| format!("new-{index}-{line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),
         name: "Edit".into(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),
         name: "Edit".into(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({
             "file_path": format!("src/edit-{index}.rs"),
             "old_string": old,
@@ -93,6 +95,8 @@ fn load_to_oldest_history(harness: &mut TuiScenarioHarness) {
         harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
         harness.render();
     }
+    harness.key(input::press(KeyCode::Home, KeyModifiers::SHIFT));
+    harness.render();
 }
 
 fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
@@ -127,6 +131,166 @@ fn assert_tool_groups_are_complete(harness: &TuiScenarioHarness) {
 }
 
 #[test]
+fn lazy_resume_loaded_window_renders_each_terminal_cause_on_real_framebuffer() {
+    use crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause;
+
+    let cases = [
+        (
+            "completed-with-duration",
+            TuiResumedStepFinalizeCause::Completed,
+            Some(125_000),
+            " for 2m 5s",
+            ["Completed", "Cancelled", "终止"].as_slice(),
+        ),
+        (
+            "completed-without-duration",
+            TuiResumedStepFinalizeCause::Completed,
+            None,
+            "✻ ",
+            ["Completed", "Cancelled", "终止", " for "].as_slice(),
+        ),
+        (
+            "cancelled-with-duration",
+            TuiResumedStepFinalizeCause::UserCancelledStep,
+            Some(125_000),
+            "✻ Cancelled, ran 2m 5s",
+            ["Completed", " for ", "终止"].as_slice(),
+        ),
+        (
+            "cancelled-without-duration",
+            TuiResumedStepFinalizeCause::UserCancelledStep,
+            None,
+            "✻ Cancelled",
+            ["Completed", " for ", "终止"].as_slice(),
+        ),
+        (
+            "terminated",
+            TuiResumedStepFinalizeCause::RunTerminated,
+            None,
+            "此 Run 已终止",
+            ["Completed", "Cancelled", " for "].as_slice(),
+        ),
+    ];
+
+    for (case_name, finalize_cause, duration_ms, expected, forbidden) in cases {
+        let mut harness = TuiScenarioHarness::new(100, 30);
+        let session_id = format!("resume-terminal-{case_name}");
+        let run_id = format!("run-{case_name}");
+        let step_id = format!("step-{case_name}");
+        let member_name = format!("steps/{case_name}.json");
+        harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+            display_history: Some(TuiDisplayHistoryIndex {
+                session_id: session_id.clone(),
+                generation_revision: 42,
+                steps: vec![TuiDisplayHistoryStepReference {
+                    run_id: run_id.clone(),
+                    step_id: step_id.clone(),
+                    member_name,
+                    estimated_lines: 3,
+                    user_input_history: Vec::new(),
+                    finalize_cause: Some(finalize_cause),
+                    duration_ms,
+                }],
+            }),
+            steps: Vec::new(),
+            session_id: session_id.clone(),
+            created_at: 0,
+            compacted: false,
+        });
+        harness.render();
+        harness.ui(
+            crate::tui::app::event::UiEvent::DisplayHistoryWindowLoaded {
+                window: sdk::DisplayHistoryWindow {
+                    session_id,
+                    generation_revision: 42,
+                    steps: vec![sdk::ResumedSessionStep {
+                        run_id,
+                        step_id,
+                        messages: vec![sdk::ChatMessage::assistant_text(format!(
+                            "answer-{case_name}"
+                        ))],
+                        finalize_cause: Some(match finalize_cause {
+                            TuiResumedStepFinalizeCause::Completed => {
+                                sdk::ResumedStepFinalizeCause::Completed
+                            }
+                            TuiResumedStepFinalizeCause::UserCancelledStep => {
+                                sdk::ResumedStepFinalizeCause::UserCancelledStep
+                            }
+                            TuiResumedStepFinalizeCause::RunTerminated => {
+                                sdk::ResumedStepFinalizeCause::RunTerminated
+                            }
+                        }),
+                        duration_ms,
+                    }],
+                },
+            },
+        );
+        harness.render();
+
+        let screen = harness.screen();
+        let compact_screen = screen.split_whitespace().collect::<String>();
+        let compact_expected = expected.split_whitespace().collect::<String>();
+        assert!(
+            compact_screen.contains(&format!("answer-{case_name}")),
+            "case={case_name}\n{screen}"
+        );
+        assert!(
+            compact_screen.contains(&compact_expected),
+            "case={case_name}\n{screen}"
+        );
+        assert_eq!(
+            compact_screen.matches(&compact_expected).count(),
+            1,
+            "case={case_name}\n{screen}"
+        );
+        for forbidden_text in forbidden {
+            let compact_forbidden = forbidden_text.split_whitespace().collect::<String>();
+            assert!(
+                !compact_screen.contains(&compact_forbidden),
+                "case={case_name}, forbidden={forbidden_text}\n{screen}"
+            );
+        }
+    }
+}
+
+#[test]
+fn resumed_history_initial_window_loads_through_display_query_effect() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: Some(TuiDisplayHistoryIndex {
+            session_id: "resume-query".into(),
+            generation_revision: 42,
+            steps: vec![TuiDisplayHistoryStepReference {
+                run_id: "resume-query-run".into(),
+                step_id: "resume-query-step".into(),
+                member_name: "steps/0001.json".into(),
+                estimated_lines: 12,
+                user_input_history: Vec::new(),
+                finalize_cause: None,
+                duration_ms: None,
+            }],
+        }),
+        steps: Vec::new(),
+        session_id: "resume-query".into(),
+        created_at: 0,
+        compacted: false,
+    });
+    harness.render();
+
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        Effect::LoadDisplayHistoryWindow { request }
+            if request.session_id == "resume-query"
+                && request.generation_revision == 42
+                && request.member_names == ["steps/0001.json"]
+    )));
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, Effect::SendChatInputEvent { .. })));
+}
+
+#[test]
 fn resumed_history_initial_window_keeps_newest_complete_groups() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let steps = (0..1_200)
@@ -142,9 +306,11 @@ fn resumed_history_initial_window_keeps_newest_complete_groups() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-tail".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 
@@ -204,9 +370,11 @@ fn resumed_history_initial_window_keeps_real_conclusion_tail_shape() {
     ];
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "019f9952-601d-7139-a936-fa5d1f366eb9".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 
@@ -280,9 +448,11 @@ fn resumed_history_window_reaches_oldest_history_without_folded_hint() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-oldest".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     assert!(harness.app.view_state.output.source_total_lines > 3_000);
@@ -321,9 +491,11 @@ fn resumed_history_scrolls_from_oldest_window_back_to_latest() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-round-trip".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
 
@@ -373,7 +545,16 @@ fn scrolling_to_top_loads_history_by_visible_height() {
     harness.render();
 
     assert_eq!(harness.app.view_state.output.render_line_limit(), 1_015);
-    assert!(harness.app.output_area.document().total_lines() <= 1_016);
+    assert!(
+        harness.app.output_area.document().total_lines()
+            <= harness
+                .app
+                .view_state
+                .output
+                .render_line_limit()
+                .saturating_add(3),
+        "完整 root group 允许跨过行预算边界，但只能保留一个小的 group 原子性余量"
+    );
 }
 
 #[test]
@@ -393,9 +574,11 @@ fn resumed_large_history_loads_after_first_render_and_continues_in_batches() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-large".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     assert!(harness.app.view_state.output.source_total_lines > 1_500);
@@ -426,9 +609,11 @@ fn resumed_history_window_can_continue_loading_older_blocks_after_cap() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-sliding".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     load_to_sliding_window(&mut harness);
@@ -456,9 +641,11 @@ fn resumed_history_window_stops_at_three_thousand_lines() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-capped".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     assert!(harness.app.view_state.output.source_total_lines > 3_000);
@@ -486,9 +673,11 @@ fn top_request_before_first_resume_render_loads_after_source_is_observed() {
         .collect();
 
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-early".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.app.view_state.output.request_load_older_at_top();
     harness.render();
@@ -514,9 +703,11 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-adopted".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     load_to_oldest_history(&mut harness);
@@ -531,7 +722,8 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
             )],
             input_id: Some("resume-adopted-input".into()),
             source: crate::tui::adapter::runtime_view::TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         }],
         queued: vec![],
     });
@@ -542,9 +734,9 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
     assert!(harness.screen().contains("RESUME-ADOPTED-NEW-USER"));
 
     let context = context(9_999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+        delta: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,
@@ -578,9 +770,11 @@ fn sliding_window_rebuild_keeps_visible_history_rows_fixed_in_same_frame() {
         })
         .collect();
     harness.runtime_event(TuiRuntimeEvent::SessionResumed {
+        display_history: None,
         steps,
         session_id: "resume-anchor".into(),
         created_at: 0,
+        compacted: false,
     });
     harness.render();
     load_to_sliding_window(&mut harness);
@@ -611,9 +805,9 @@ fn streaming_output_does_not_move_scrolled_viewport() {
     let before_offset = harness.app.view_state.output.scroll_offset;
 
     let context = context(9999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "STREAMING-NEW-CONTENT".into(),
+        delta: "STREAMING-NEW-CONTENT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,

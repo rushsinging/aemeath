@@ -23,18 +23,33 @@
 | **SubAgent** | 由 Main Agent（或另一 SubAgent）经工具派生的子执行主体，其执行是一个 **Sub Run**；共用同一状态机与 Loop，差异由 `ExecutionPolicy` 表达（受限交互、独立轮次 / timeout、结果回传父级）。 |
 | **ExecutionPolicy** | 表达 Main Agent / SubAgent 差异的策略：输入源、交互能力、轮次上限、timeout、结果出口。 |
 | **Interaction** | Run 执行中断、等待外部（人）决策、再恢复的**用例族**（非 BC）：ask_user / 权限审批 / plan mode / pause-resume。对应状态 `AwaitingUser` / `AwaitingToolApproval`。 |
+| **Activity** | Runtime 为观察执行过程而维护的**应用层观测实体集合**；每个 Activity 有稳定身份、父子关系、类型、状态、细节与计时，但不拥有 Run 的执行决策、不构成新的聚合根，也不替代 Run 状态机。 |
+| **Activity Observation** | 一次由 `ActivityCoordinator` 创建或变更的完整 typed 事实，描述一个 Activity 在某个 revision 的状态与 detail；是 Runtime → SDK 的发布输入，不是领域命令。 |
+| **Activity Snapshot** | 某个 Run 当前 Activity 事实集合及 revision 的一致性快照；用于 TUI 初始化、丢帧修复与重连，不是持久化的 Run checkpoint。 |
+| **Activity Change** | Activity 的增量变化（Started / Updated / Finished）；按 Run 维度单调递增 revision 发布，消费者遇到 gap 时必须等待 Snapshot 修复，不能猜测中间状态。 |
+| **Activity Summary** | TUI 从 Activity 事实镜像按用户受众和展示优先级派生的低噪声单行摘要；它是纯视图，不是 Runtime 事实或第二状态源。 |
 
 ### Run 状态机（内存态）
 
-```
-Created → PreparingContext → InvokingModel → ApplyingResponse
-        → AwaitingToolApproval → ExecutingTools → (下一 Run Step)
-        → AwaitingUser（可恢复暂停，内存存活，不落盘）→ 原 continuation
-        → Compacting → Finishing → Completed / Failed
-任意非终态（除 Cancelling）→ Cancelling → Cancelled
+```text
+Idle → DrainingInput ⇄ AwaitingInput
+              │ Ready / InternalContinuation
+              ▼
+      PreparingContext ⇄ Compacting
+              │
+              ▼
+        InvokingModel → ApplyingResponse
+                              ├─ tool calls → AwaitingToolApproval → ExecutingTools
+                              ├─ interaction → AwaitingInteraction → typed continuation
+                              └─ end turn → FinalizingStep → DrainingInput
+
+CancelRunStep: active Step → CancellingStep → FinalizingStep → DrainingInput
+TerminateRun: 任意非终态 → Terminating → Terminated
+失败: fatal invocation / unavailable interaction / finalization error → Failed
+唯一终态: Completed / Failed / Terminated
 ```
 
-> 崩溃后不恢复中间状态；用户重新发起即新建 Run。
+> 崩溃后不恢复中间状态；用户重新发起即新建 Run。迁移期 `Cancelling → Cancelled` 仅是兼容输入，不属于目标状态机；交付层可以无损接纳兼容状态事实，但不得据此复制另一套执行生命周期或用户可见终态。
 
 ## 2. Workflow（支撑域）
 
@@ -70,7 +85,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **Skill** | 由模型按名称调用、在调用时动态加载正文的特殊 Tool；具体 Skill 以廉价元数据被发现，但不各自注册 Tool schema。 |
 | **Skill Descriptor** | 可发现的 Skill 元数据：稳定 identity、描述、identity/slash aliases 与可选参数提示；**NEVER** 携带正文。 |
 | **Skill Catalog Snapshot** | 按稳定顺序发布的 Skill Descriptor 全量快照及确定性 revision；同一快照同时派生 slash route 与客户端补全。 |
-| **Skill Request** | 用户请求模型使用某个 Skill 的 typed 入站意图；携带 canonical identity 与原始参考参数，不构造 Tool Call。 |
+| **Skill Request** | 用户请求模型使用某个 Skill 的 typed 入站意图；携带 `InputId`、canonical identity、原始参考参数与 `raw_input`，不构造 Tool Call。Runtime 将它与普通 UserMessage 一起接纳为 `AcceptedUserInput`，但为模型生成内部 Skill 请求消息、为交付层保留 `raw_input`，二者不得互相替代或通过正文反向解析。 |
 | **Loaded Skill** | `SkillLoadPort` 在 Skill Tool 调用时按 identity 读取的单个 Skill 正文、来源与内容 revision。 |
 | **Slash Command** | 用户发起的 slash 输入；Skill 入口分类为 SkillRequest，普通 Command 按 SnapshotQuery / ApplicationControl 确定性路由。 |
 | **MCP Tool** | 经 MCP adapter 与 ACL 转换为统一 Tool 语义的外部工具；MCP 不是独立 BC。 |
@@ -105,10 +120,12 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 术语 | 定义 | 所属 BC |
 |---|---|---|
 | **Message** | 领域对话消息（role + content + tool calls）。**与 provider 线格式经 ACL 隔离**。 | Agent Runtime / Context Management（Shared Kernel） |
+| **Accepted User Input** | Runtime 在 Session gate 接纳后、绑定 Run Step 前的唯一 typed 用户输入事实；穷举 `UserMessage { input_id, text, images }` 与 `SkillRequest { input_id, skill, arguments, raw_input }`。它统一 admission、FIFO、drain、freeze、持久化与 adoption 生命周期；**NEVER** 并行维护 message/event 两套 adopted 数据，也 **NEVER** 从模型正文重建 typed intent。 | Agent Runtime |
 | **Provider** | LLM 供应商适配器，内部 ACL 吸收各家差异。 | Provider |
 | **Policy Decision** | 工具执行前的权限判断结果。 | Policy |
-| **Audit Event** | 审计事件（执行 / 成本 / 用量）。 | Audit |
-| **Cost / Usage** | 成本与 token 用量追踪，含 pricing。 | Audit |
+| **Audit Event** | 不可变审计事实；v0.1.0 仅发布 Model Usage metadata。 | Audit |
+| **Usage** | 成功 logical Model Invocation 的 provider-neutral token 用量事实，带 Session/Run/RunStep/Invocation 关联 ID。 | Audit |
+| **Cost / Pricing** | 从 Usage 派生的 Future 能力；v0.1.0 不定义 Price、Cost 或迁移语义。 | Audit（Future） |
 | **Hook** | 生命周期钩子脚本。 | Hook |
 | **Config Snapshot** | 只读配置快照（Config 的 Published Language）。 | Config |
 | **Domain ID** | 由所属 BC 发布的强类型标识；需要全局时间有序的新实体可采用 UUIDv7，但格式不是全域 Shared Kernel。TaskId / BatchId 在 v0.1.0 是单 Session 十进制标识，WorkspaceId 是 Project 派生的 opaque 标识。 | 各 BC Published Language |
@@ -122,6 +139,9 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **Main Agent** | **SubAgent** | 前者是用户输入直接触发的顶层执行主体（发起 Main Run）；后者是父级经工具派生的子执行主体（发起 Sub Run）。共用状态机与 Loop，差异在 ExecutionPolicy。 |
 | **领域 Message** | **provider 线格式消息** | 前者是领域内部模型；后者是各家 API 的传输格式。经 Provider 内部 ACL 转换，禁止跨界直用。 |
 | **Reasoning Node** | **Run 状态** | 前者是 effort 调节状态机（Workflow）；后者是执行生命周期状态机（Agent Runtime）。职责不同，不可混淆。 |
+| **Activity** | **Run** | Run 是唯一 Agent 执行生命周期状态机；Activity 是由 Runtime 从 Run、Step、Model、Tool、Hook、Compact 与 Interaction 事实派生的观测集合。Activity 可以表达父子拓扑和局部计时，但不能推进、暂停或终止 Run。 |
+| **Activity Observation** | **Activity Summary** | Observation 是 Runtime 发布的完整 typed 事实；Summary 是 TUI 按用户受众和优先级生成的低噪声展示行。前者跨边界传输，后者只存在于展示层。 |
+| **Activity Snapshot** | **Activity Change** | Snapshot 是按 revision 的全量修复 / 初始化事实；Change 是同一 revision 序列中的增量事实。消费者发现 revision gap 时必须请求或等待 Snapshot，禁止用增量猜测缺失事实。 |
 | **Memory Injection** | **Memory Entry** | 前者是"注入动作"（Context Management）；后者是"记忆数据"（Memory）。 |
 | **Tool** | **Skill** | Tool 是模型调用能力的通用协议；Skill 是其中唯一稳定注册、按 identity 动态加载正文的特殊 Tool，具体 Skill 不各自发布 schema。 |
 | **Registry Scope** | **Tool Profile** | Scope 决定本次 Run 装配了什么；Profile 决定其中哪些 capability 被允许。 |
@@ -147,3 +167,4 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
 | 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |
 | 2026-07-14 | 新增 Project Identity / Workspace ID，统一 Session resume、Memory 分区与 Tool Scope 的身份语言 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-08-01 | 增加 Activity、Activity Observation、Activity Snapshot、Activity Change 与 Activity Summary 统一语言，并明确其与 Run 的边界 | 统一 Activity 观测 |

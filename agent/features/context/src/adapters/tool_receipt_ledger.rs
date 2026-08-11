@@ -113,13 +113,7 @@ impl AtomicBlobToolReceiptLedger {
 
     pub(crate) async fn overlay(&self, session: &mut CanonicalSession) -> Result<(), String> {
         let ledger = self.read().await?;
-        let base_revision = session.revision;
-        let mut applied_revision = base_revision;
-        for entry in ledger
-            .receipts
-            .into_iter()
-            .filter(|entry| entry.revision > base_revision)
-        {
+        for entry in ledger.receipts {
             session
                 .advance_tool_receipt(crate::domain::ToolReceiptMutation {
                     identity: entry.receipt.identity.clone(),
@@ -127,9 +121,7 @@ impl AtomicBlobToolReceiptLedger {
                     next: entry.receipt.state.clone(),
                 })
                 .map_err(|error| error.to_string())?;
-            applied_revision = applied_revision.max(entry.revision);
         }
-        session.revision = applied_revision;
         Ok(())
     }
 
@@ -141,3 +133,7 @@ impl AtomicBlobToolReceiptLedger {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "tool_receipt_ledger_tests.rs"]
+mod tests;

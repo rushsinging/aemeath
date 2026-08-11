@@ -16,7 +16,7 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::creation::RunInstance;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::Agent;
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use crate::ports::StopReason;
 
 pub(super) type ProgressReporter = Arc<dyn Fn(Option<usize>, &str) + Send + Sync>;
@@ -32,7 +32,7 @@ pub(super) fn sub_run_log_context(
     parent.patched(logging::LogContextPatch {
         session_id: logging::FieldPatch::Set(session_id.to_string()),
         chat_id: logging::FieldPatch::Set(sub_run_id.to_string()),
-        turn: logging::FieldPatch::Clear,
+        run_step: logging::FieldPatch::Clear,
         request_id: logging::FieldPatch::Clear,
         model: logging::FieldPatch::Set(model.to_string()),
         provider: logging::FieldPatch::Set(provider.to_string()),
@@ -150,13 +150,13 @@ impl EventSinkPort for DerivedEventPort {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
-        let turn_count = execution.turn_count();
+        let step_count = execution.step_count();
         ProgressTerminalObserver {
             progress: self.progress.as_ref(),
             terminal: execution.terminal_mut(),
-            turn_count,
+            step_count,
         }
         .emit(events)
         .await
@@ -177,19 +177,19 @@ pub(super) struct DerivedModelObserver {
 impl DerivedModelObserver {
     fn progress_turn_start(&self, execution: &RunExecutionState) {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!(
-                "Agent turn {}, messages: {}, est_tokens: {}",
-                execution.turn_count(),
+                "Agent step {}, messages: {}, est_tokens: {}",
+                execution.step_count(),
                 execution.messages_len(),
                 execution.message_tokens(),
             ),
         );
     }
 
-    fn progress_api_ok(&self, turn: usize, response: &InvocationResponse) {
+    fn progress_api_ok(&self, run_step: usize, response: &InvocationResponse) {
         (self.progress)(
-            Some(turn),
+            Some(run_step),
             &format!(
                 "API ok: in={} out={} stop={:?}",
                 response.usage.input_tokens.unwrap_or(0),
@@ -199,25 +199,32 @@ impl DerivedModelObserver {
         );
     }
 
-    fn send_text_progress(&self, turn: usize, response: &InvocationResponse) {
+    fn send_response_progress(&self, run_step: usize, response: &InvocationResponse) {
         let Some(sink) = self.progress_sink.as_ref() else {
             return;
         };
-        let text = response.assistant_message.text_content();
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return;
+        let mut sequence = run_step.saturating_mul(1024);
+        for block in &response.assistant_message.content {
+            let kind = match block {
+                share::message::ContentBlock::Text { text } if !text.trim().is_empty() => {
+                    AgentProgressKind::Message { text: text.clone() }
+                }
+                share::message::ContentBlock::Thinking { thinking, .. }
+                    if !thinking.trim().is_empty() =>
+                {
+                    AgentProgressKind::Thinking {
+                        text: thinking.clone(),
+                    }
+                }
+                _ => continue,
+            };
+            sequence = sequence.saturating_add(1);
+            sink.emit(super::progress::build_progress_event(
+                self.source_context.clone(),
+                sequence,
+                kind,
+            ));
         }
-        let text = if trimmed.len() > 300 {
-            format!("{}...", slice_head(trimmed, 300))
-        } else {
-            trimmed.to_string()
-        };
-        sink.emit(super::progress::build_progress_event(
-            self.source_context.clone(),
-            turn,
-            AgentProgressKind::Message { text },
-        ));
     }
 }
 
@@ -290,8 +297,8 @@ impl ModelInvocationObserver for DerivedModelObserver {
         response: &InvocationResponse,
         _elapsed_secs: f64,
     ) {
-        self.progress_api_ok(execution.turn_count(), response);
-        self.send_text_progress(execution.turn_count(), response);
+        self.progress_api_ok(execution.step_count(), response);
+        self.send_response_progress(execution.step_count(), response);
     }
 
     async fn classify_terminal(
@@ -304,8 +311,8 @@ impl ModelInvocationObserver for DerivedModelObserver {
         if response.stop_reason == StopReason::MaxOutputTokens {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                execution.turn_count(),
+                "run step {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                execution.step_count(),
             );
             execution.append_message(Message::user(
                 "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
@@ -355,7 +362,7 @@ pub(super) struct ProgressToolRoundObserver {
 impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolRoundObserver {
     async fn execution_started(
         &mut self,
-        turn: usize,
+        run_step: usize,
         all_calls: &[crate::application::tool::agent::ToolCall],
         executable: &[crate::application::tool::agent::ToolCall],
     ) {
@@ -363,7 +370,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
         if let Some(sink) = self.progress_sink.as_ref() {
             sink.emit(build_tool_calls_progress_event(
                 self.source_context.clone(),
-                turn,
+                run_step,
                 executable,
             ));
         }
@@ -372,17 +379,32 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
     async fn execution_finished(
         &mut self,
         execution: &RunExecutionState,
-        turn: usize,
+        run_step: usize,
         results: &[crate::application::tool::agent::ToolExecution],
     ) {
         (self.progress)(
-            Some(turn),
+            Some(run_step),
             &format!(
                 "Tools done ({}s elapsed), {} results",
                 execution.elapsed().as_secs(),
                 results.len(),
             ),
         );
+        if let Some(sink) = self.progress_sink.as_ref() {
+            for (offset, result) in results.iter().enumerate() {
+                sink.emit(super::progress::build_progress_event(
+                    self.source_context.clone(),
+                    run_step.saturating_mul(1024).saturating_add(512 + offset),
+                    AgentProgressKind::ToolResult {
+                        tool_call_id: result.call_id.to_string(),
+                        tool_name: result.tool_name.clone(),
+                        output: result.outcome.text.clone(),
+                        content: result.outcome.data.clone(),
+                        is_error: result.outcome.is_error,
+                    },
+                ));
+            }
+        }
         for result in results {
             let output = &result.outcome.text;
             let label = if result.outcome.is_error { "ERR" } else { "OK" };
@@ -392,7 +414,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ProgressToolR
                 output.clone()
             };
             (self.progress)(
-                Some(turn),
+                Some(run_step),
                 &format!("  ← {}[{}]: {}", result.tool_name, label, output),
             );
         }
@@ -411,7 +433,7 @@ impl crate::application::loop_engine::StuckHandlingPort for DerivedStuckObserver
         decision: &crate::application::loop_engine::StuckDecision,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.turn_count()),
+            Some(execution.step_count()),
             &format!("StuckGuard: {decision:?}"),
         );
         Ok(())
@@ -442,6 +464,11 @@ impl SubRunFinalizer {
             self.model_name,
             super::finalize::SubRunFinalizationObserver {
                 hook_port: self.runtime_context.hooks(),
+                activities: self.runtime_context.activities(),
+                run_step_id: sdk::RunStepId::new(format!(
+                    "{}:sub-run-stop",
+                    self.runtime_context.activities().run_id().as_str()
+                )),
                 workspace_root: &self.workspace_root,
                 session_id: &self.session_id,
                 prompt: &self.prompt,
@@ -459,7 +486,7 @@ impl SubRunFinalizer {
 #[cfg(test)]
 mod tests {
     use crate::application::loop_engine::event_strategy::terminal_from_domain_event;
-    use crate::domain::agent_run::{RunDomainEvent, RunId};
+    use crate::domain::agent_run::{RunId, RuntimeLifecycleEvent};
 
     #[test]
     fn terminal_domain_events_project_to_all_agent_terminal_variants() {
@@ -467,7 +494,7 @@ mod tests {
         let parent_run_id = Some(RunId::new_v7());
         let cases = [
             (
-                RunDomainEvent::Completed {
+                RuntimeLifecycleEvent::Completed {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     result: "done".to_string(),
@@ -478,7 +505,7 @@ mod tests {
                 }),
             ),
             (
-                RunDomainEvent::Failed {
+                RuntimeLifecycleEvent::Failed {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     error: "boom".to_string(),
@@ -488,9 +515,10 @@ mod tests {
                 }),
             ),
             (
-                RunDomainEvent::Cancelled {
+                RuntimeLifecycleEvent::Terminated {
                     run_id,
                     parent_run_id,
+                    reason: sdk::RunTerminationReason::ParentStepCancelled,
                 },
                 Some(tools::AgentRunTerminal::Cancelled),
             ),
@@ -502,7 +530,7 @@ mod tests {
 
     #[test]
     fn nonterminal_domain_event_does_not_create_agent_terminal() {
-        let event = RunDomainEvent::Started {
+        let event = RuntimeLifecycleEvent::Started {
             run_id: RunId::new_v7(),
             parent_run_id: Some(RunId::new_v7()),
         };

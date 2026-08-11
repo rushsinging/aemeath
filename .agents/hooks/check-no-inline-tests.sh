@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # 检查源码文件中是否存在内嵌 #[cfg(test)] mod tests。
 #
 # 约定（specs/3.2-rust-coding.md）：测试文件 MUST 与源码分离（foo.rs ↔ foo_tests.rs），

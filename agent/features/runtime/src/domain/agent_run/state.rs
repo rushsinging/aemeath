@@ -39,20 +39,15 @@ pub enum RunStatus {
     Compacting,
     CancellingStep,
     FinalizingStep,
-    Cancelling,
     Terminating,
     Completed,
     Failed,
-    Cancelled,
     Terminated,
 }
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Terminated
-        )
+        matches!(self, Self::Completed | Self::Failed | Self::Terminated)
     }
 }
 
@@ -138,7 +133,6 @@ pub enum RunTransition {
     ToolsCompleted,
     StepCancelled,
     TerminationFinished,
-    CancellationFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,8 +158,6 @@ pub enum RunTransitionReason {
     StepCancelled,
     TerminationRequested,
     TerminationFinished,
-    InterruptRequested,
-    CancellationFinished,
     Failed,
 }
 
@@ -190,7 +182,6 @@ impl From<RunTransition> for RunTransitionReason {
             RunTransition::ToolsCompleted => Self::ToolsCompleted,
             RunTransition::StepCancelled => Self::StepCancelled,
             RunTransition::TerminationFinished => Self::TerminationFinished,
-            RunTransition::CancellationFinished => Self::CancellationFinished,
         }
     }
 }
@@ -255,25 +246,19 @@ pub enum RunTerminationRequest {
     AlreadyTerminal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunCancellationRequest {
-    Accepted,
-    AlreadyCancelling,
-    AlreadyTerminal,
-}
-
-/// #1248 Task 6: Typed outcome of recording a stop hook block.
+/// Typed outcome of recording a stop hook block.
 ///
-/// Count belongs to `Run` (not `StuckGuard`).  The shared Loop uses this
+/// Count belongs to `Run` (not `StuckGuard`). The shared Loop uses this
 /// to decide whether to continue with feedback or fail the Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopHookBlockResult {
-    /// Block recorded; count < 15.  Loop should inject feedback and
-    /// transition to DrainingInput for another attempt.
+    /// Block recorded; count is within the continuation allowance.
+    /// Loop should inject feedback and transition to DrainingInput.
     Blocked {
         /// Current block count (1-based after this record).
         count: usize,
     },
-    /// 16th block → retry exhausted.  Run must transition to Failed.
+    /// The first block beyond the continuation allowance, or any later block.
+    /// Run must transition to Failed.
     RetryExhausted { count: usize },
 }

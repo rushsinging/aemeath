@@ -1,0 +1,651 @@
+use super::model::{
+    ActivityDetail, ActivityKind, ActivityObservation, ActivitySource, ActivityState,
+    ActivityTiming,
+};
+use sdk::{
+    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivityKindView, ActivitySnapshotView,
+    ActivityStateView, ActivityTimingView, ActivityView, RunId, RunStepId,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+use thiserror::Error;
+
+pub(crate) trait ActivityClock: Send + Sync {
+    fn now_monotonic_ms(&self) -> u64;
+    fn now_unix_ms(&self) -> u64;
+}
+
+pub(crate) trait ActivityIdSource: Send + Sync {
+    fn next_activity_id(&self) -> ActivityId;
+}
+
+pub(crate) struct UuidV7ActivityIdSource;
+
+impl ActivityIdSource for UuidV7ActivityIdSource {
+    fn next_activity_id(&self) -> ActivityId {
+        ActivityId::new_v7()
+    }
+}
+
+pub(crate) struct SystemActivityClock;
+
+impl ActivityClock for SystemActivityClock {
+    fn now_monotonic_ms(&self) -> u64 {
+        use std::sync::OnceLock;
+        use std::time::Instant;
+        static START: OnceLock<Instant> = OnceLock::new();
+        START.get_or_init(Instant::now).elapsed().as_millis() as u64
+    }
+
+    fn now_unix_ms(&self) -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActivityTerminal {
+    Succeeded,
+    Failed,
+    Cancelled,
+    Terminated,
+}
+
+impl ActivityTerminal {
+    fn state(self) -> ActivityState {
+        match self {
+            Self::Succeeded => ActivityState::Succeeded,
+            Self::Failed => ActivityState::Failed,
+            Self::Cancelled => ActivityState::Cancelled,
+            Self::Terminated => ActivityState::Terminated,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct StartActivity {
+    pub(crate) run_step_id: Option<RunStepId>,
+    pub(crate) parent_activity_id: Option<ActivityId>,
+    pub(crate) source: ActivitySource,
+    pub(crate) kind: ActivityKind,
+    pub(crate) detail: ActivityDetail,
+    pub(crate) audience: ActivityAudienceView,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UpdateActivity {
+    pub(crate) activity_id: ActivityId,
+    pub(crate) detail: Option<ActivityDetail>,
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum ActivityError {
+    #[error("活动不存在，无法更新: {0}")]
+    UnknownActivity(ActivityId),
+    #[error("活动已处于终态，无法再次变更: {0}")]
+    TerminalActivity(ActivityId),
+    #[error("同一来源已有活动存在: {0}")]
+    DuplicateLiveSource(String),
+    #[error("活动父节点不存在: {0}")]
+    UnknownParent(ActivityId),
+    #[error("活动所属 Run 不匹配")]
+    RunMismatch,
+    #[error("ActivityCoordinator 尚未绑定到 RunLoop")]
+    CoordinatorNotBound,
+    #[error("活动来源与所属 RunStep 不匹配")]
+    RunStepMismatch,
+}
+
+#[derive(Default)]
+struct ActivityRegistry {
+    activities: HashMap<ActivityId, ActivityObservation>,
+}
+
+#[derive(Default)]
+struct ActivityPublicationState {
+    transaction_depth: usize,
+    dirty: bool,
+    published_revision: u64,
+    heartbeat_sequence: u64,
+}
+
+const MAX_RETAINED_TERMINAL_ACTIVITIES: usize = 64;
+
+#[allow(dead_code)]
+pub(crate) struct ActivitySnapshot {
+    pub(crate) run_id: RunId,
+    pub(crate) revision: u64,
+    pub(crate) heartbeat_sequence: u64,
+    pub(crate) activities: Vec<ActivityView>,
+}
+
+#[allow(dead_code)]
+impl ActivitySnapshot {
+    pub(crate) fn find(&self, activity_id: &ActivityId) -> Option<&ActivityView> {
+        self.activities
+            .iter()
+            .find(|activity| &activity.id == activity_id)
+    }
+}
+
+impl From<ActivitySnapshot> for ActivitySnapshotView {
+    fn from(snapshot: ActivitySnapshot) -> Self {
+        Self {
+            run_id: snapshot.run_id,
+            revision: snapshot.revision,
+            heartbeat_sequence: snapshot.heartbeat_sequence,
+            activities: snapshot.activities,
+        }
+    }
+}
+
+fn log_activity_change(kind: ActivityChangeKind, activity: &ActivityView) {
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "activity_change change={:?} run_id={} activity_id={} source={:?} kind={:?} state={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+        kind,
+        activity.run_id,
+        activity.id,
+        activity.source,
+        activity.kind,
+        activity.state,
+        activity.revision,
+        activity.timing.total_elapsed_ms,
+        activity.timing.active_elapsed_ms,
+        activity.timing.state_elapsed_ms,
+    );
+}
+
+fn log_activity_snapshot(snapshot: &ActivitySnapshotView) {
+    let root = snapshot.activities.iter().find(|activity| {
+        activity.kind == ActivityKindView::Run
+            && activity.parent_activity_id.is_none()
+            && matches!(
+                activity.state,
+                ActivityStateView::Running | ActivityStateView::Waiting
+            )
+    });
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} heartbeat_sequence={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
+        snapshot.run_id,
+        snapshot.revision,
+        snapshot.heartbeat_sequence,
+        snapshot.activities.len(),
+        root.map_or("-", |activity| activity.id.as_str()),
+        root.map_or(0, |activity| activity.revision),
+        root.map_or(0, |activity| activity.timing.total_elapsed_ms),
+    );
+}
+
+pub(crate) trait ActivityChangePublisher: Send + Sync {
+    fn publish_snapshot(&self, snapshot: ActivitySnapshotView);
+}
+
+#[cfg(test)]
+struct NoopActivityChangePublisher;
+
+#[cfg(test)]
+impl ActivityChangePublisher for NoopActivityChangePublisher {
+    fn publish_snapshot(&self, _snapshot: ActivitySnapshotView) {}
+}
+
+#[derive(Clone)]
+pub(crate) struct ActivityCoordinator {
+    run_id: RunId,
+    clock: Arc<dyn ActivityClock>,
+    ids: Arc<dyn ActivityIdSource>,
+    publisher: Arc<dyn ActivityChangePublisher>,
+    registry: Arc<parking_lot::Mutex<ActivityRegistry>>,
+    revision: Arc<parking_lot::Mutex<u64>>,
+    publication: Arc<parking_lot::Mutex<ActivityPublicationState>>,
+}
+
+impl ActivityCoordinator {
+    #[cfg(test)]
+    pub(crate) fn new(
+        run_id: RunId,
+        clock: Arc<dyn ActivityClock>,
+        ids: Arc<dyn ActivityIdSource>,
+    ) -> Self {
+        Self::new_with_publisher(run_id, clock, ids, Arc::new(NoopActivityChangePublisher))
+    }
+
+    pub(crate) fn new_with_publisher(
+        run_id: RunId,
+        clock: Arc<dyn ActivityClock>,
+        ids: Arc<dyn ActivityIdSource>,
+        publisher: Arc<dyn ActivityChangePublisher>,
+    ) -> Self {
+        Self {
+            run_id,
+            clock,
+            ids,
+            publisher,
+            registry: Arc::new(parking_lot::Mutex::new(ActivityRegistry::default())),
+            revision: Arc::new(parking_lot::Mutex::new(0)),
+            publication: Arc::new(parking_lot::Mutex::new(ActivityPublicationState::default())),
+        }
+    }
+
+    pub(crate) fn production(run_id: RunId, publisher: Arc<dyn ActivityChangePublisher>) -> Self {
+        Self::new_with_publisher(
+            run_id,
+            Arc::new(SystemActivityClock),
+            Arc::new(UuidV7ActivityIdSource),
+            publisher,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn production_without_publisher(run_id: RunId) -> Self {
+        Self::new(
+            run_id,
+            Arc::new(SystemActivityClock),
+            Arc::new(UuidV7ActivityIdSource),
+        )
+    }
+
+    pub(crate) fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+
+    pub(super) fn has_activity_source(
+        &self,
+        source: &ActivitySource,
+        run_step_id: Option<&RunStepId>,
+    ) -> bool {
+        self.registry.lock().activities.values().any(|activity| {
+            &activity.source == source && activity.run_step_id.as_ref() == run_step_id
+        })
+    }
+
+    pub(super) fn live_activity_id(
+        &self,
+        source: &ActivitySource,
+        run_step_id: Option<&RunStepId>,
+    ) -> Option<ActivityId> {
+        self.registry
+            .lock()
+            .activities
+            .values()
+            .find(|activity| {
+                !activity.state.is_terminal()
+                    && &activity.source == source
+                    && activity.run_step_id.as_ref() == run_step_id
+            })
+            .map(|activity| activity.id.clone())
+    }
+
+    pub(super) fn live_activity_id_for_source(
+        &self,
+        source: &ActivitySource,
+    ) -> Option<ActivityId> {
+        let registry = self.registry.lock();
+        registry
+            .activities
+            .values()
+            .find(|activity| !activity.state.is_terminal() && &activity.source == source)
+            .map(|activity| activity.id.clone())
+    }
+
+    pub(crate) fn ensure_run_observation_started(&self) -> Result<(), ActivityError> {
+        if self.live_run_root_id().is_some() {
+            return Ok(());
+        }
+        self.start(StartActivity {
+            run_step_id: None,
+            parent_activity_id: None,
+            source: ActivitySource::Run,
+            kind: ActivityKind::Run,
+            detail: ActivityDetail::Run,
+            audience: ActivityAudienceView::User,
+        })?;
+        Ok(())
+    }
+
+    pub(crate) fn live_run_root_id(&self) -> Option<ActivityId> {
+        self.live_activity_id(&ActivitySource::Run, None)
+    }
+
+    pub(crate) fn live_run_phase_id(&self) -> Option<ActivityId> {
+        self.registry
+            .lock()
+            .activities
+            .values()
+            .find(|activity| {
+                !activity.state.is_terminal() && matches!(activity.kind, ActivityKind::RunPhase(_))
+            })
+            .map(|activity| activity.id.clone())
+    }
+
+    pub(crate) fn live_hook_parent_id(&self) -> Result<ActivityId, ActivityError> {
+        self.ensure_run_observation_started()?;
+        self.live_run_phase_id()
+            .or_else(|| self.live_run_root_id())
+            .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-activity")))
+    }
+
+    pub(crate) fn start(&self, command: StartActivity) -> Result<ActivityId, ActivityError> {
+        validate_source_scope(&command)?;
+        let now = self.clock.now_monotonic_ms();
+        let mut registry = self.registry.lock();
+        if let Some(parent) = &command.parent_activity_id {
+            let parent_activity = registry
+                .activities
+                .get(parent)
+                .ok_or_else(|| ActivityError::UnknownParent(parent.clone()))?;
+            if parent_activity.state.is_terminal() {
+                return Err(ActivityError::TerminalActivity(parent.clone()));
+            }
+        }
+        let duplicate_source = registry.activities.values().any(|activity| {
+            !activity.state.is_terminal()
+                && activity.source == command.source
+                && activity.run_step_id == command.run_step_id
+        });
+        if duplicate_source {
+            return Err(ActivityError::DuplicateLiveSource(format!(
+                "{:?}",
+                command.source
+            )));
+        }
+        let activity_id = self.ids.next_activity_id();
+        let revision = self.next_revision();
+        let observation = ActivityObservation {
+            id: activity_id.clone(),
+            run_id: self.run_id.clone(),
+            run_step_id: command.run_step_id,
+            parent_activity_id: command.parent_activity_id,
+            source: command.source,
+            kind: command.kind,
+            state: ActivityState::Running,
+            detail: command.detail,
+            audience: command.audience,
+            revision,
+            timing: ActivityTiming {
+                started_at_unix_ms: Some(self.clock.now_unix_ms()),
+                ..ActivityTimingView::default().into()
+            },
+            started_at_monotonic_ms: now,
+            last_transition_monotonic_ms: now,
+            active_started_monotonic_ms: Some(now),
+        };
+        let published = observation.to_sdk(now);
+        registry.activities.insert(activity_id.clone(), observation);
+        prune_terminal_activities(&mut registry);
+        drop(registry);
+        log_activity_change(ActivityChangeKind::Started, &published);
+        self.publish_after_mutation();
+        Ok(activity_id)
+    }
+
+    pub(crate) fn update(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        let activity_id = command.activity_id;
+        let mut registry = self.registry.lock();
+        let activity = registry
+            .activities
+            .get_mut(&activity_id)
+            .ok_or_else(|| ActivityError::UnknownActivity(activity_id.clone()))?;
+        if activity.state.is_terminal() {
+            return Err(ActivityError::TerminalActivity(activity_id));
+        }
+        if let Some(detail) = command.detail {
+            activity.detail = detail;
+        }
+        activity.revision = self.next_revision();
+        let published = activity.to_sdk(self.clock.now_monotonic_ms());
+        drop(registry);
+        log_activity_change(ActivityChangeKind::Updated, &published);
+        self.publish_after_mutation();
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn wait(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        self.transition(command.activity_id, ActivityState::Waiting, command.detail)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn resume(&self, command: UpdateActivity) -> Result<(), ActivityError> {
+        self.transition(command.activity_id, ActivityState::Running, command.detail)
+    }
+
+    pub(crate) fn finish(
+        &self,
+        activity_id: ActivityId,
+        terminal: ActivityTerminal,
+    ) -> Result<(), ActivityError> {
+        let now = self.clock.now_monotonic_ms();
+        let mut registry = self.registry.lock();
+        let activity = registry
+            .activities
+            .get_mut(&activity_id)
+            .ok_or_else(|| ActivityError::UnknownActivity(activity_id.clone()))?;
+        if activity.state.is_terminal() {
+            if activity.state == terminal.state() {
+                return Ok(());
+            }
+            return Err(ActivityError::TerminalActivity(activity_id));
+        }
+        let active_elapsed_ms = current_active_elapsed(activity, now);
+        activity.timing = ActivityTiming {
+            total_elapsed_ms: now.saturating_sub(activity.started_at_monotonic_ms),
+            active_elapsed_ms,
+            state_elapsed_ms: now.saturating_sub(activity.last_transition_monotonic_ms),
+            started_at_unix_ms: activity.timing.started_at_unix_ms,
+            finished_at_unix_ms: Some(self.clock.now_unix_ms()),
+        };
+        activity.active_started_monotonic_ms = None;
+        activity.last_transition_monotonic_ms = now;
+        activity.state = terminal.state();
+        activity.revision = self.next_revision();
+        let published = activity.to_sdk(now);
+        prune_terminal_activities(&mut registry);
+        drop(registry);
+        log_activity_change(ActivityChangeKind::Finished, &published);
+        self.publish_after_mutation();
+        Ok(())
+    }
+
+    pub(crate) fn close_run(&self, terminal: ActivityTerminal) -> Result<(), ActivityError> {
+        let activity_ids = self
+            .registry
+            .lock()
+            .activities
+            .values()
+            .filter(|activity| !activity.state.is_terminal())
+            .map(|activity| activity.id.clone())
+            .collect::<Vec<_>>();
+        for activity_id in activity_ids {
+            self.finish(activity_id, terminal)?;
+        }
+        Ok(())
+    }
+
+    fn snapshot_with_ordering(&self, revision: u64, heartbeat_sequence: u64) -> ActivitySnapshot {
+        let now = self.clock.now_monotonic_ms();
+        let registry = self.registry.lock();
+        let mut activities = registry
+            .activities
+            .values()
+            .map(|activity| activity.to_sdk(now))
+            .collect::<Vec<_>>();
+        activities.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+        ActivitySnapshot {
+            run_id: self.run_id.clone(),
+            revision,
+            heartbeat_sequence,
+            activities,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn snapshot(&self) -> ActivitySnapshot {
+        let revision = *self.revision.lock();
+        let heartbeat_sequence = self.publication.lock().heartbeat_sequence;
+        self.snapshot_with_ordering(revision, heartbeat_sequence)
+    }
+
+    pub(crate) fn transaction<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, ActivityError>,
+    ) -> Result<T, ActivityError> {
+        self.publication.lock().transaction_depth += 1;
+        let result = operation();
+        let should_publish = {
+            let mut publication = self.publication.lock();
+            publication.transaction_depth = publication.transaction_depth.saturating_sub(1);
+            publication.transaction_depth == 0 && std::mem::take(&mut publication.dirty)
+        };
+        if should_publish {
+            self.publish_snapshot();
+        }
+        result
+    }
+
+    fn publish_after_mutation(&self) {
+        let should_publish = {
+            let mut publication = self.publication.lock();
+            if publication.transaction_depth > 0 {
+                publication.dirty = true;
+                false
+            } else {
+                true
+            }
+        };
+        if should_publish {
+            self.publish_snapshot();
+        }
+    }
+
+    pub(crate) fn heartbeat_snapshot(&self) -> ActivitySnapshotView {
+        let (revision, heartbeat_sequence) = {
+            let mut publication = self.publication.lock();
+            publication.heartbeat_sequence = publication.heartbeat_sequence.saturating_add(1);
+            (
+                publication.published_revision,
+                publication.heartbeat_sequence,
+            )
+        };
+        ActivitySnapshotView::from(self.snapshot_with_ordering(revision, heartbeat_sequence))
+    }
+
+    pub(crate) fn publish_heartbeat(&self) {
+        let snapshot = self.heartbeat_snapshot();
+        log_activity_snapshot(&snapshot);
+        self.publisher.publish_snapshot(snapshot);
+    }
+
+    pub(crate) fn publish_snapshot(&self) {
+        let revision = *self.revision.lock();
+        {
+            let mut publication = self.publication.lock();
+            publication.published_revision = revision;
+            publication.heartbeat_sequence = 0;
+        }
+        let snapshot = ActivitySnapshotView::from(self.snapshot_with_ordering(revision, 0));
+        log_activity_snapshot(&snapshot);
+        self.publisher.publish_snapshot(snapshot);
+    }
+
+    fn transition(
+        &self,
+        activity_id: ActivityId,
+        state: ActivityState,
+        detail: Option<ActivityDetail>,
+    ) -> Result<(), ActivityError> {
+        let now = self.clock.now_monotonic_ms();
+        let mut registry = self.registry.lock();
+        let activity = registry
+            .activities
+            .get_mut(&activity_id)
+            .ok_or_else(|| ActivityError::UnknownActivity(activity_id.clone()))?;
+        if activity.state.is_terminal() {
+            return Err(ActivityError::TerminalActivity(activity_id));
+        }
+        if activity.state == state && detail.is_none() {
+            return Ok(());
+        }
+        if let Some(detail) = detail {
+            activity.detail = detail;
+        }
+        if activity.state != state {
+            if state == ActivityState::Running {
+                activity.active_started_monotonic_ms = Some(now);
+            } else if activity.state == ActivityState::Running {
+                activity.timing.active_elapsed_ms += current_active_elapsed(activity, now)
+                    .saturating_sub(activity.timing.active_elapsed_ms);
+                activity.active_started_monotonic_ms = None;
+            }
+            activity.state = state;
+            activity.last_transition_monotonic_ms = now;
+        }
+        activity.revision = self.next_revision();
+        let published = activity.to_sdk(now);
+        drop(registry);
+        log_activity_change(ActivityChangeKind::Updated, &published);
+        self.publish_after_mutation();
+        Ok(())
+    }
+
+    fn next_revision(&self) -> u64 {
+        let mut revision = self.revision.lock();
+        *revision += 1;
+        *revision
+    }
+}
+
+fn prune_terminal_activities(registry: &mut ActivityRegistry) {
+    let terminal_count = registry
+        .activities
+        .values()
+        .filter(|activity| activity.state.is_terminal())
+        .count();
+    let remove_count = terminal_count.saturating_sub(MAX_RETAINED_TERMINAL_ACTIVITIES);
+    if remove_count == 0 {
+        return;
+    }
+    let mut terminal_ids = registry
+        .activities
+        .values()
+        .filter(|activity| activity.state.is_terminal())
+        .map(|activity| (activity.revision, activity.id.clone()))
+        .collect::<Vec<_>>();
+    terminal_ids.sort_by_key(|(revision, _)| *revision);
+    for (_, activity_id) in terminal_ids.into_iter().take(remove_count) {
+        registry.activities.remove(&activity_id);
+    }
+}
+
+fn validate_source_scope(command: &StartActivity) -> Result<(), ActivityError> {
+    if let ActivitySource::RunStep(source_step_id) = &command.source {
+        if command.run_step_id.as_ref() != Some(source_step_id) {
+            return Err(ActivityError::RunStepMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn current_active_elapsed(activity: &ActivityObservation, now: u64) -> u64 {
+    activity.timing.active_elapsed_ms
+        + activity
+            .active_started_monotonic_ms
+            .map(|started| now.saturating_sub(started))
+            .unwrap_or_default()
+}
+
+impl From<ActivityTimingView> for super::model::ActivityTiming {
+    fn from(timing: ActivityTimingView) -> Self {
+        Self {
+            total_elapsed_ms: timing.total_elapsed_ms,
+            active_elapsed_ms: timing.active_elapsed_ms,
+            state_elapsed_ms: timing.state_elapsed_ms,
+            started_at_unix_ms: timing.started_at_unix_ms,
+            finished_at_unix_ms: timing.finished_at_unix_ms,
+        }
+    }
+}

@@ -19,13 +19,12 @@ pub(super) async fn chat_impl(
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
-        crate::application::loop_engine::chat::process_chat_loop(
-            crate::application::loop_engine::chat::ChatLoopContext {
+        crate::application::loop_engine::chat::run_session_command_driver(
+            crate::application::loop_engine::chat::SessionCommandDriverInput {
                 sink,
                 input_events,
-                shell: shell.clone(),
-                read_files: Arc::new(Mutex::new(std::collections::HashSet::new())), // Task 7 debt: ChatLoopContext uses tools::SessionReminders type;
-                // shell holds share::memory::SessionReminders (different type).
+                session: shell.clone(),
+                read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
                 session_reminders: Arc::new(Mutex::new(Default::default())),
                 session_queries: Arc::new(AgentSessionQuery::new(Arc::new(AgentClientImpl {
                     inner: inner.clone(),

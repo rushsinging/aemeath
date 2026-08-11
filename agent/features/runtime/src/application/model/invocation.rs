@@ -16,6 +16,7 @@
 //!
 //! 实现由 #875 负责。
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -25,8 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
-    should_emit_model_stream_waiting, ChatEventSink, ChatEventSinkHandle, InvocationEventReducer,
-    InvocationResponse, RuntimeStreamEvent, RuntimeTurnContext,
+    ChatEventSinkHandle, InvocationEventReducer, InvocationResponse,
 };
 use crate::application::loop_engine::llm_strategy::{
     build_step_token_usage, extract_invocation_context,
@@ -41,14 +41,6 @@ use crate::ports::{InvocationOptions, InvocationRequest};
 const DEFAULT_MAX_ATTEMPTS: u32 = 11;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
 const MAX_BACKOFF: Duration = Duration::from_secs(120);
-
-struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
-
-impl Drop for AbortTaskOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryDecision {
@@ -117,7 +109,11 @@ pub(crate) trait ModelInvocationSource: Send {
     fn context_size(&self, execution: &RunExecutionState) -> usize;
     fn committed_delta(&self) -> bool;
     fn build_reducer(&self) -> InvocationEventReducer<ChatEventSinkHandle>;
-    fn waiting_event_context(&self) -> Option<(ChatEventSinkHandle, RuntimeTurnContext)> {
+    /// #1494：边流边执行句柄（默认无；Main observer 装配后提供）。
+    fn streaming_tool(
+        &self,
+    ) -> Option<&Arc<crate::application::loop_engine::chat::streaming_tool::StreamingToolExecutor>>
+    {
         None
     }
     fn extract_tool_calls(&self, response: &InvocationResponse) -> Vec<ToolCall>;
@@ -138,9 +134,20 @@ where
     pub(crate) async fn invoke(
         self,
         execution: &mut RunExecutionState,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+        invocation_id: &sdk::ModelInvocationId,
         cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-        invoke_model_impl(self.observer, execution, cancel).await
+        invoke_model_impl(
+            self.observer,
+            execution,
+            run_id,
+            step_id,
+            invocation_id,
+            cancel,
+        )
+        .await
     }
 }
 
@@ -174,18 +181,29 @@ pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
 pub(crate) async fn orchestrate_model_invocation(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
+    invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     ModelInvocationContext::new(observer)
-        .invoke(execution, cancel)
+        .invoke(execution, run_id, step_id, invocation_id, cancel)
         .await
 }
 
 async fn invoke_model_impl(
     observer: &mut impl ModelInvocationObserver,
     execution: &mut RunExecutionState,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
+    invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
+    // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
+    // 残留的旁路结果丢弃：异常时 step 作废，重试请求不带已执行工具结果。
+    if let Some(executor) = observer.streaming_tool() {
+        executor.reset_for_invocation(step_id, cancel.clone()).await;
+    }
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
             let coordinator = ContextCoordinator::new(observer.runtime_context().context());
@@ -202,6 +220,18 @@ async fn invoke_model_impl(
         .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
     observer.on_window(execution).await;
     let invocation_context = extract_invocation_context(&window);
+    let mapping_summary =
+        crate::application::loop_engine::llm_strategy::invocation_mapping_log_summary(
+            &invocation_context,
+        );
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "context_window_mapped_to_invocation messages={} system_blocks={} tool_schemas={} reminder_messages={}",
+        mapping_summary.messages,
+        mapping_summary.system_blocks,
+        mapping_summary.tool_schemas,
+        mapping_summary.reminder_messages,
+    );
     crate::application::loop_engine::llm_log::log_llm_input(
         &invocation_context.messages_for_api,
         window.messages.len(),
@@ -229,7 +259,6 @@ async fn invoke_model_impl(
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
-        let progress_handle = reducer.progress_handle();
         let invocation = async {
             let mut request = InvocationRequest::new(
                 model,
@@ -239,6 +268,14 @@ async fn invoke_model_impl(
             request.system = system;
             request.tools = tools;
             request.cancellation = stream_cancel.clone();
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "provider_invocation_request_ready model={} messages={} system_blocks={} tool_schemas={}",
+                request.model.model,
+                request.messages.len(),
+                request.system.len(),
+                request.tools.len(),
+            );
             let stream = provider
                 .invoke(request, &stream_cancel)
                 .await
@@ -249,36 +286,8 @@ async fn invoke_model_impl(
                 })
                 .await
         };
-        let waiting_event_context = observer.waiting_event_context();
-        let waiting_started_at = tokio::time::Instant::now();
-        let waiting_task = waiting_event_context.map(|(sink, context)| {
-            AbortTaskOnDrop(logging::spawn_instrumented(
-                request_context.clone(),
-                async move {
-                    let mut next = waiting_started_at + Duration::from_secs(10);
-                    let mut last_version = None;
-                    loop {
-                        tokio::time::sleep_until(next).await;
-                        let snapshot = progress_handle
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .snapshot();
-                        if should_emit_model_stream_waiting(last_version, &snapshot) {
-                            sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                                context: context.clone(),
-                                elapsed_secs: waiting_started_at.elapsed().as_secs(),
-                                phase: snapshot.phase.to_string(),
-                            });
-                        }
-                        last_version = Some(snapshot.visible_progress_version);
-                        next += Duration::from_secs(10);
-                    }
-                },
-            ))
-        });
         let result =
             logging::instrument(request_context, observer.pump_while_invoking(invocation)).await;
-        drop(waiting_task);
         match result {
             Ok((response, _)) => break response,
             Err((error, _)) if error.is_cancelled() || cancel.is_cancelled() => {
@@ -305,6 +314,19 @@ async fn invoke_model_impl(
         }
     };
     let elapsed_secs = started.elapsed().as_secs_f64();
+    let runtime_context = observer.runtime_context();
+    record_successful_usage(
+        runtime_context.usage_sink().as_ref(),
+        crate::application::model::usage::UsageRecordContext {
+            session_id: sdk::SessionId::new(runtime_context.skill_load_session_id()),
+            run_id: run_id.clone(),
+            run_step_id: step_id.clone(),
+            model_invocation_id: invocation_id.clone(),
+            model: binding.model.clone(),
+        },
+        &response,
+        unix_timestamp_millis,
+    );
     observer
         .runtime_context()
         .usage()
@@ -456,6 +478,29 @@ fn deterministic_jitter_millis(attempt: u32) -> u64 {
         u64::from(attempt.wrapping_mul(73) % 251)
     }
 }
+
+fn record_successful_usage(
+    sink: &dyn crate::ports::UsageSink,
+    context: crate::application::model::usage::UsageRecordContext,
+    response: &InvocationResponse,
+    clock: impl Fn() -> u64,
+) {
+    let factory = crate::application::model::usage::UsageRecordFactory::new(clock);
+    if let Some(record) = factory.build_from_raw_usage(context, response.usage.clone()) {
+        let _ = sink.try_record(record);
+    }
+}
+
+fn unix_timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+#[path = "invocation_usage_tests.rs"]
+mod usage_tests;
 
 #[cfg(test)]
 mod tests {
@@ -692,6 +737,59 @@ mod tests {
             reducer_events.borrow().as_slice(),
             [
                 InvocationEvent::Delta(InvocationDelta::Text(_)),
+                InvocationEvent::Failed(ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                })
+            ]
+        ));
+    }
+
+    #[tokio::test]
+    async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
+        let coordinator = ModelInvocationCoordinator::new();
+        let cancel = CancellationToken::new();
+        let events =
+            futures::stream::iter(vec![InvocationEvent::Delta(InvocationDelta::Thinking {
+                thinking: "partial thought".to_string(),
+                signature: None,
+            })])
+            .chain(futures::stream::pending());
+        let reducer_events = std::cell::RefCell::new(Vec::new());
+        let streaming_block_active = std::cell::Cell::new(false);
+
+        let outcome = coordinator
+            .pull_stream(events, &cancel, true, |event| {
+                match &event {
+                    InvocationEvent::Delta(InvocationDelta::Thinking { .. }) => {
+                        streaming_block_active.set(true);
+                        cancel.cancel();
+                    }
+                    InvocationEvent::Failed(error) if error.is_cancelled() => {
+                        streaming_block_active.set(false);
+                    }
+                    _ => {}
+                }
+                reducer_events.borrow_mut().push(event);
+                Ok::<Option<()>, ProviderError>(None)
+            })
+            .await;
+
+        assert!(matches!(
+            outcome,
+            Err((
+                ProviderError {
+                    kind: ProviderErrorKind::Cancelled,
+                    ..
+                },
+                true
+            ))
+        ));
+        assert!(!streaming_block_active.get());
+        assert!(matches!(
+            reducer_events.borrow().as_slice(),
+            [
+                InvocationEvent::Delta(InvocationDelta::Thinking { .. }),
                 InvocationEvent::Failed(ProviderError {
                     kind: ProviderErrorKind::Cancelled,
                     ..

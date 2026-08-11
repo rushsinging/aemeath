@@ -2,35 +2,25 @@ use super::*;
 use crate::tui::adapter::agent_event::sanitize::{
     TOOL_RESULT_PREVIEW_LIMIT, TOOL_STREAM_PREVIEW_LIMIT,
 };
-use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiMessageSource, TuiStopHookFeedback};
-use crate::tui::adapter::tui_runtime_event::{
-    TuiHookEvent, TuiHookMessage, TuiHookMessageKind, TuiHookStatus, TuiRuntimeEvent,
-};
 use crate::tui::app::event::UiTurnContext;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use serde_json::Value;
 
 fn ctx() -> UiTurnContext {
     UiTurnContext {
         chat_id: ChatId::new("chat-test"),
-        turn_id: ChatTurnId::new("turn-test"),
+        run_id: ChatRunId::new("turn-test"),
     }
 }
 
 fn first_observation(mapping: &AgentEventMapping) -> Option<&ConversationIntent> {
-    mapping
-        .conversation
-        .iter()
-        .find(|intent| !matches!(intent, ConversationIntent::ClearModelStreamPlaceholder(_)))
+    mapping.conversation.first()
 }
 
 fn assert_no_runtime_bind_prelude(mapping: &AgentEventMapping) {
     assert!(
-        matches!(
-            mapping.conversation.as_slice(),
-            [ConversationIntent::ClearModelStreamPlaceholder(_), _] | [_]
-        ),
-        "runtime observations must carry context inline and emit at most one placeholder clear plus one payload intent: {:?}",
+        mapping.conversation.len() <= 1,
+        "runtime observations must carry context inline and emit at most one payload intent: {:?}",
         mapping.conversation
     );
 }
@@ -183,23 +173,7 @@ fn test_map_agent_event_thinking_sets_thinking_phase_with_text_update() {
 }
 
 #[test]
-fn test_model_stream_waiting_maps_to_placeholder() {
-    let mapping = map_agent_event(&UiEvent::ModelStreamWaiting {
-        context: ctx(),
-        elapsed_secs: 10,
-        phase: "thinking".to_string(),
-    });
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder {
-            placeholder
-        })] if placeholder.elapsed_secs == 10 && placeholder.phase == "thinking"
-    ));
-}
-
-#[test]
-fn test_text_clears_model_stream_placeholder_before_payload() {
+fn test_text_maps_directly_to_payload() {
     let mapping = map_agent_event(&UiEvent::Text {
         context: ctx(),
         text: "hello".to_string(),
@@ -207,13 +181,12 @@ fn test_text_clears_model_stream_placeholder_before_payload() {
 
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::AssistantText(AssistantText { text, .. })]
-            if text == "hello"
+        [ConversationIntent::AssistantText(AssistantText { text, .. })] if text == "hello"
     ));
 }
 
 #[test]
-fn test_thinking_clears_model_stream_placeholder_before_payload() {
+fn test_thinking_maps_directly_to_payload() {
     let mapping = map_agent_event(&UiEvent::Thinking {
         context: ctx(),
         text: "reason".to_string(),
@@ -221,13 +194,12 @@ fn test_thinking_clears_model_stream_placeholder_before_payload() {
 
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::ThinkingText(ThinkingText { text, .. })]
-            if text == "reason"
+        [ConversationIntent::ThinkingText(ThinkingText { text, .. })] if text == "reason"
     ));
 }
 
 #[test]
-fn test_tool_call_start_clears_model_stream_placeholder_before_payload() {
+fn test_tool_call_start_maps_directly_to_payload() {
     let mapping = map_agent_event(&UiEvent::ToolCallStart {
         context: ctx(),
         id: sdk::ids::ToolCallId::new("tool-1"),
@@ -238,8 +210,7 @@ fn test_tool_call_start_clears_model_stream_placeholder_before_payload() {
 
     assert!(matches!(
         mapping.conversation.as_slice(),
-        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::ToolCallStart(ToolCallStart { name, .. })]
-            if name == "Write"
+        [ConversationIntent::ToolCallStart(ToolCallStart { name, .. })] if name == "Write"
     ));
 }
 
@@ -350,552 +321,4 @@ fn test_sanitize_partial_json_truncates() {
         sanitized.contains("omitted") || sanitized == partial,
         "partial JSON should be truncated, got: {sanitized}"
     );
-}
-
-mod started_tests {
-    use super::*;
-    use crate::tui::app::event::UiTurnContext;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId as TuiToolCallId};
-    use sdk::AgentProgressEventView;
-    use sdk::AgentProgressKindView;
-    use sdk::ToolCallId as SdkToolCallId;
-
-    fn ctx() -> UiTurnContext {
-        UiTurnContext {
-            chat_id: ChatId::new("chat-test"),
-            turn_id: ChatTurnId::new("turn-test"),
-        }
-    }
-
-    fn started_event(role: Option<&str>, model: &str) -> UiEvent {
-        UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("tool-1"),
-            event: AgentProgressEventView {
-                sequence: 0,
-                kind: AgentProgressKindView::Started {
-                    role: role.map(|s| s.to_string()),
-                    model: model.to_string(),
-                },
-            },
-        }
-    }
-
-    #[test]
-    fn agent_progress_uses_parent_attachment_context() {
-        let source_context = UiTurnContext {
-            chat_id: ChatId::new("child-chat"),
-            turn_id: ChatTurnId::new("child-turn"),
-        };
-        let attachment_context = UiTurnContext {
-            chat_id: ChatId::new("parent-chat"),
-            turn_id: ChatTurnId::new("parent-turn"),
-        };
-        let sdk_tool_id = SdkToolCallId::new("agent-tool");
-        let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
-        let ev = UiEvent::AgentProgress {
-            source_context,
-            attachment_context: attachment_context.clone(),
-            tool_id: sdk_tool_id,
-            event: AgentProgressEventView {
-                sequence: 1,
-                kind: AgentProgressKindView::Message {
-                    text: "working".to_string(),
-                },
-            },
-        };
-
-        let mapping = map_agent_event(&ev);
-
-        match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress {
-                chat_id,
-                turn_id,
-                tool_id,
-                ..
-            }) => {
-                assert_eq!(chat_id, &attachment_context.chat_id);
-                assert_eq!(turn_id, &attachment_context.turn_id);
-                assert_eq!(tool_id, &expected_tool_id);
-            }
-            other => panic!("expected RecordAgentProgress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_started_event_maps_to_update_agent_meta() {
-        let sdk_tool_id = SdkToolCallId::new("tool-1");
-        let expected_tool_id = TuiToolCallId::new(sdk_tool_id.as_str());
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: sdk_tool_id,
-            event: AgentProgressEventView {
-                sequence: 0,
-                kind: AgentProgressKindView::Started {
-                    role: Some("coder".to_string()),
-                    model: "Zhipu/glm-5.2".to_string(),
-                },
-            },
-        };
-        let mapping = map_agent_event(&ev);
-        assert_eq!(mapping.conversation.len(), 1);
-        match &mapping.conversation[0] {
-            ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                role,
-                model,
-                tool_id: got_id,
-                ..
-            }) => {
-                assert_eq!(role.as_deref(), Some("coder"));
-                assert_eq!(model, "Zhipu/glm-5.2");
-                assert_eq!(got_id, &expected_tool_id);
-            }
-            other => panic!("expected UpdateAgentMeta, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_started_event_without_role_maps_to_update_agent_meta() {
-        let ev = started_event(None, "fallback-model");
-        let mapping = map_agent_event(&ev);
-        match &mapping.conversation[0] {
-            ConversationIntent::UpdateAgentMeta(UpdateAgentMeta { role, model, .. }) => {
-                assert!(role.is_none());
-                assert_eq!(model, "fallback-model");
-            }
-            other => panic!("expected UpdateAgentMeta, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_agent_progress_tool_calls_use_tool_display_headers() {
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("agent-tool"),
-            event: AgentProgressEventView {
-                sequence: 1,
-                kind: AgentProgressKindView::ToolCalls {
-                    calls: vec![sdk::AgentToolCallProgressView {
-                        id: sdk::ids::ToolCallId::new("read-1"),
-                        name: "Read".to_string(),
-                        input: serde_json::json!({
-                            "file_path": "/repo/src/main.rs",
-                            "offset": 9,
-                            "limit": 3
-                        }),
-                    }],
-                },
-            },
-        };
-
-        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
-            crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
-        });
-        match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(message, "→ Read /repo/src/main.rs 10:12\n");
-                assert!(!message.contains("file_path"));
-                assert!(!message.contains('{'));
-            }
-            other => panic!("expected RecordAgentProgress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_agent_progress_tool_calls_keep_each_tool_on_separate_line() {
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("agent-tool"),
-            event: AgentProgressEventView {
-                sequence: 1,
-                kind: AgentProgressKindView::ToolCalls {
-                    calls: vec![
-                        sdk::AgentToolCallProgressView {
-                            id: sdk::ids::ToolCallId::new("glob-1"),
-                            name: "Glob".to_string(),
-                            input: serde_json::json!({"pattern":"apps/**/*.rs"}),
-                        },
-                        sdk::AgentToolCallProgressView {
-                            id: sdk::ids::ToolCallId::new("grep-1"),
-                            name: "Grep".to_string(),
-                            input: serde_json::json!({"pattern":"activity_lines","path":"apps/cli/src"}),
-                        },
-                    ],
-                },
-            },
-        };
-
-        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
-            crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
-        });
-        match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(
-                    message,
-                    "→ Find apps/**/*.rs\n→ Search /activity_lines/ in apps/cli/src\n"
-                );
-            }
-            other => panic!("expected RecordAgentProgress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_agent_progress_unknown_tool_fallback_truncates_json_and_ends_with_newline() {
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("agent-tool"),
-            event: AgentProgressEventView {
-                sequence: 1,
-                kind: AgentProgressKindView::ToolCalls {
-                    calls: vec![sdk::AgentToolCallProgressView {
-                        id: sdk::ids::ToolCallId::new("unknown-1"),
-                        name: "UnknownTool".to_string(),
-                        input: serde_json::json!({"very_long_key":"x".repeat(200)}),
-                    }],
-                },
-            },
-        };
-
-        let mapping = map_agent_event(&ev);
-        match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert!(message.starts_with("→ UnknownTool "));
-                assert!(message.ends_with("\n"));
-                assert!(message.contains("..."));
-                assert!(message.len() < 140);
-            }
-            other => panic!("expected RecordAgentProgress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_non_started_event_maps_to_record_agent_progress() {
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("tool-1"),
-            event: AgentProgressEventView {
-                sequence: 1,
-                kind: AgentProgressKindView::Message {
-                    text: "working".to_string(),
-                },
-            },
-        };
-        let mapping = map_agent_event(&ev);
-        match &mapping.conversation[0] {
-            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(message, "working\n");
-            }
-            other => panic!("expected RecordAgentProgress, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_agent_progress_tool_output_is_not_rendered_as_activity() {
-        let ev = UiEvent::AgentProgress {
-            source_context: ctx(),
-            attachment_context: ctx(),
-            tool_id: SdkToolCallId::new("tool-1"),
-            event: AgentProgressEventView {
-                sequence: 2,
-                kind: AgentProgressKindView::ToolOutput {
-                    tool_name: "Bash".to_string(),
-                    text: "stdout should stay hidden".to_string(),
-                },
-            },
-        };
-        let mapping = map_agent_event(&ev);
-        assert!(
-            mapping.conversation.is_empty(),
-            "ToolOutput 不应进入 conversation activity，实际: {:?}",
-            mapping.conversation
-        );
-    }
-}
-
-#[test]
-fn test_stop_hook_blocked_maps_to_blocked_hook_notice() {
-    let messages = vec![
-        TuiChatMessage::user_text("user input"),
-        TuiChatMessage {
-            role: "user".to_string(),
-            content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
-                "<system-reminder>Stop hook blocked stopping.</system-reminder>",
-            )],
-            input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: Some(TuiStopHookFeedback {
-                summary: "Stop hook blocked stopping.".to_string(),
-                command: ".agents/hooks/check-agent-stop.sh".to_string(),
-                exit_code: Some(2),
-                reason: "exit code 2: blocked".to_string(),
-                stdout_preview: "short stdout".to_string(),
-                stderr_preview: "short stderr".to_string(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                output_file: Some("/tmp/stop-hook-output.txt".to_string()),
-            }),
-        },
-    ];
-
-    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
-            if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Blocked
-                && content.title == "Hook blocked: Stop"
-                && content.body == "Stop hook blocked stopping."
-                && content.details.as_deref().is_some_and(|details|
-                    details.contains("Command: .agents/hooks/check-agent-stop.sh")
-                        && details.contains("Exit code: 2")
-                        && details.contains("Full output: /tmp/stop-hook-output.txt")
-                )
-    ));
-}
-
-#[test]
-fn stop_hook_notice_reports_line_preview_truncation_and_output_file() {
-    let messages = vec![TuiChatMessage {
-        role: "user".to_string(),
-        content: vec![crate::tui::adapter::runtime_view::TuiContentBlock::text(
-            "<system-reminder>blocked</system-reminder>",
-        )],
-        input_id: None,
-        source: TuiMessageSource::StopHook,
-        stop_hook: Some(TuiStopHookFeedback {
-            summary: "blocked".to_string(),
-            command: "check.sh".to_string(),
-            exit_code: Some(2),
-            reason: "exit code 2".to_string(),
-            stdout_preview: "one\ntwo\nthree".to_string(),
-            stderr_preview: "a\nb\nc\nd\ne".to_string(),
-            stdout_truncated: true,
-            stderr_truncated: true,
-            output_file: Some("/tmp/full-stop-hook.txt".to_string()),
-        }),
-    }];
-
-    let mapping = map_agent_event(&UiEvent::StopHookBlocked { messages });
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
-            if content.details.as_deref().is_some_and(|details|
-                details.contains("stdout preview truncated")
-                    && details.contains("stderr preview truncated")
-                    && details.contains("Full output: /tmp/full-stop-hook.txt")
-            )
-    ));
-}
-
-#[test]
-fn test_stop_hook_blocked_without_stop_hook_message_does_not_render_notice() {
-    let mapping = map_agent_event(&UiEvent::StopHookBlocked {
-        messages: vec![TuiChatMessage::user_text("user input")],
-    });
-
-    assert!(mapping.conversation.is_empty());
-    assert!(matches!(
-        mapping.session.as_slice(),
-        [
-            crate::tui::model::runtime::session_intent::SessionIntent::MessagesSynced {
-                message_count: 1
-            }
-        ]
-    ));
-}
-
-#[test]
-fn stop_hook_running_maps_to_hook_spinner_phase() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Running,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
-                    ..
-                } if event == "Stop"
-            )
-    ));
-}
-
-#[test]
-fn stop_hook_succeeded_maps_to_done_hook_spinner_phase() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Succeeded,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Done,
-                    ..
-                } if event == "Stop"
-            )
-    ));
-}
-
-#[test]
-fn stop_hook_failed_maps_to_failed_spinner_and_notice() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Failed,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [
-            ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase }),
-            ConversationIntent::AppendHookNotice(_),
-        ] if matches!(
-            phase,
-            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                event,
-                outcome: crate::tui::model::conversation::spinner::HookOutcome::Failed,
-                ..
-            } if event == "Stop"
-        )
-    ));
-}
-
-#[test]
-fn blocked_stop_hook_event_updates_spinner_without_duplicate_notice() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "Stop".to_string(),
-        status: TuiHookStatus::Blocked,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::SetSpinnerPhase(SetSpinnerPhase { phase })]
-            if matches!(
-                phase,
-                crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
-                    event,
-                    outcome: crate::tui::model::conversation::spinner::HookOutcome::Blocked,
-                    ..
-                } if event == "Stop"
-            )
-    ));
-    assert!(!mapping
-        .conversation
-        .iter()
-        .any(|intent| { matches!(intent, ConversationIntent::AppendHookNotice(_)) }));
-}
-
-#[test]
-fn post_compact_does_not_override_compact_spinner_with_hook_phase() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookEvent(TuiHookEvent {
-        hook_name: "PostCompact".to_string(),
-        status: TuiHookStatus::Succeeded,
-        matcher: None,
-        command: None,
-        result: None,
-    }));
-
-    assert!(mapping.conversation.is_empty());
-}
-
-#[test]
-fn test_hook_message_maps_to_info_notice_with_typed_metadata() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookMessage(TuiHookMessage {
-        point: "PreToolUse".to_string(),
-        source: "matcher:Bash".to_string(),
-        execution_ordinal: 2,
-        attempt: 3,
-        kind: TuiHookMessageKind::AdditionalContext,
-        text: "Use the checked-in formatter.".to_string(),
-    }));
-
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::AppendHookNotice(AppendHookNotice { content })]
-            if content.kind == crate::tui::model::conversation::block::HookNoticeKind::Info
-                && content.title == "Hook context: PreToolUse"
-                && content.body == "Use the checked-in formatter."
-                && content.details.as_deref() == Some("Source: matcher:Bash\nExecution: 2\nAttempt: 3")
-    ));
-}
-
-#[test]
-fn test_hook_message_with_empty_text_is_not_rendered() {
-    let mapping = map_runtime_event(&TuiRuntimeEvent::HookMessage(TuiHookMessage {
-        point: "PreToolUse".to_string(),
-        source: "matcher:Bash".to_string(),
-        execution_ordinal: 0,
-        attempt: 1,
-        kind: TuiHookMessageKind::SystemMessage,
-        text: " <system-reminder>\n</system-reminder> ".to_string(),
-    }));
-
-    assert!(mapping.conversation.is_empty());
-}
-
-// ── #1106：runtime 允许发空 SystemMessage，TUI（ACL 层）不渲染 ──
-
-#[test]
-fn test_empty_system_message_from_runtime_is_dropped() {
-    // runtime 侧 `if let Some(ctx) = json.additional_context` 只判 Option 不判空串，
-    // 允许发空消息；ACL 层负责丢弃，避免空 block 渲染成空行。
-    for payload in [
-        "",
-        "   ",
-        "\n\n",
-        "<system-reminder></system-reminder>",
-        "<system-reminder>\n  \n</system-reminder>",
-    ] {
-        let mapping = map_agent_event(&UiEvent::SystemMessage(payload.to_string()));
-        assert!(
-            mapping.conversation.is_empty(),
-            "空 SystemMessage 不应产生 intent: {payload:?}"
-        );
-    }
-}
-
-#[test]
-fn test_non_empty_system_message_is_mapped() {
-    let mapping = map_agent_event(&UiEvent::SystemMessage("hello".to_string()));
-    assert!(matches!(
-        mapping.conversation.as_slice(),
-        [ConversationIntent::AppendSystemMessage(AppendSystemMessage { text })] if text == "hello"
-    ));
-}
-
-#[test]
-fn test_system_reminder_envelope_with_content_is_kept() {
-    // 信封剥离后仍有内容 → 必须保留（剥离由 model 层做，ACL 只判空）。
-    let mapping = map_agent_event(&UiEvent::SystemMessage(
-        "<system-reminder>real content</system-reminder>".to_string(),
-    ));
-    assert_eq!(mapping.conversation.len(), 1, "非空信封应保留");
 }

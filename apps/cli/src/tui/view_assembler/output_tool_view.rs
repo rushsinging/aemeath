@@ -1,6 +1,7 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use crate::tui::view_model::output::{AgentActivityKindView, AgentActivityLineView};
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{AgentMetaView, SemanticStyle, ToolCallBlockView, ToolSemanticStatus};
 
@@ -9,10 +10,10 @@ use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
 pub(super) fn tool_result_is_embedded(
     index: &impl ToolCallLookup,
     chat_id: &ChatId,
-    turn_id: &ChatTurnId,
+    run_id: &ChatRunId,
     tool_id: &ToolCallId,
 ) -> bool {
-    find_tool_call(index, chat_id, turn_id, tool_id)
+    find_tool_call(index, chat_id, run_id, tool_id)
         .and_then(|call| call.result.as_ref())
         .is_some_and(|payload| !payload.output.is_empty())
 }
@@ -38,15 +39,15 @@ pub(super) fn summarize_non_embedded_result(
 pub(super) fn find_tool_view(
     index: &impl ToolCallLookup,
     chat_id: &ChatId,
-    turn_id: &ChatTurnId,
+    run_id: &ChatRunId,
     tool_id: &ToolCallId,
     workspace_root: Option<&std::path::Path>,
 ) -> Option<ToolCallBlockView> {
-    let call = find_tool_call(index, chat_id, turn_id, tool_id)?;
+    let call = find_tool_call(index, chat_id, run_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
     // 同时计算 result_summary（展示文本）与 result_payload（结构化 payload，
     // 供 TUI Display 走 typed 字段渲染 header）。
-    // A4.1/A4.5: 直接从 ChatTurn.tool_calls[i].result（ToolResultPayload）取字段，
+    // A4.1/A4.5: 直接从 ChatRun.tool_calls[i].result（ToolResultPayload）取字段，
     // 不读 blocks（blocks fallback 已在 A4.5 删除）。
     let (result_summary, result_payload) = match call
         .result
@@ -70,40 +71,59 @@ pub(super) fn find_tool_view(
         None => (None, None),
     };
     crate::tui::log_debug!(
-        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
+        "assemble tool_call_view chat_id={} run_id={} id={} name={} status={:?} args_len={} result_len={} activities={}",
         chat_id.as_ref(),
-        turn_id.as_ref(),
+        run_id.as_ref(),
         tool_id.as_ref(),
         call.name,
         call.status,
         call.args_preview.len(),
-                result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        result_summary
+            .as_ref()
+            .map(|value| value.len())
+            .unwrap_or(0),
         call.activities.len(),
     );
     Some(ToolCallBlockView {
         key: format!(
             "{}/{}/{}",
             chat_id.as_ref(),
-            turn_id.as_ref(),
+            run_id.as_ref(),
             tool_id.as_ref()
         ),
         chat_id: Some(chat_id.as_ref().to_string()),
-        turn_id: Some(turn_id.as_ref().to_string()),
+        run_id: Some(run_id.as_ref().to_string()),
         tool_call_id: Some(tool_id.as_ref().to_string()),
         title: call.name.clone(),
         icon: icon.to_string(),
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-        // 工具已完成时不再显示 activity_lines（结果已在 ToolResult 子块展示，
-        // 避免子代理最终输出同时出现在 activity 行和 result 子块中造成重复）。
-        activity_lines: if matches!(
+        streaming_preview: if matches!(
             call.status,
             ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
-        ) {
-            Vec::new()
+        ) || call.activities.is_empty()
+        {
+            None
         } else {
-            call.activities.clone()
+            Some(
+                call.activities
+                    .iter()
+                    .map(|activity| match &activity.content {
+                        crate::tui::model::conversation::agent_activity::AgentActivityContent::Text(content) => AgentActivityLineView {
+                            kind: AgentActivityKindView::Message,
+                            content: crate::tui::view_model::output::AgentActivityContentView::Text(content.clone()),
+                        },
+                        crate::tui::model::conversation::agent_activity::AgentActivityContent::ToolCall { name, input } => AgentActivityLineView {
+                            kind: AgentActivityKindView::ToolCall,
+                            content: crate::tui::view_model::output::AgentActivityContentView::ToolCall {
+                                name: name.clone(),
+                                input: input.clone(),
+                            },
+                        },
+                    })
+                    .collect(),
+            )
         },
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
@@ -123,10 +143,10 @@ pub(super) fn find_tool_view(
 pub(super) fn find_tool_call<'a>(
     index: &'a impl ToolCallLookup,
     chat_id: &ChatId,
-    turn_id: &ChatTurnId,
+    run_id: &ChatRunId,
     tool_id: &ToolCallId,
 ) -> Option<&'a ToolCall> {
-    index.call(chat_id, turn_id, tool_id)
+    index.call(chat_id, run_id, tool_id)
 }
 
 pub(super) fn display_text_for_tool_result(
@@ -196,7 +216,7 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
         ToolCallStatus::Running => ("●", ToolSemanticStatus::Running, SemanticStyle::Running),
         ToolCallStatus::Success => ("✓", ToolSemanticStatus::Success, SemanticStyle::Success),
         ToolCallStatus::Error => ("✗", ToolSemanticStatus::Error, SemanticStyle::Error),
-        ToolCallStatus::Cancelled => ("–", ToolSemanticStatus::Cancelled, SemanticStyle::Muted),
+        ToolCallStatus::Cancelled => ("✗", ToolSemanticStatus::Cancelled, SemanticStyle::Error),
         ToolCallStatus::Orphaned => ("?", ToolSemanticStatus::Orphaned, SemanticStyle::Warning),
     }
 }

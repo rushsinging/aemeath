@@ -3,8 +3,8 @@ use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::output::{
-    BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
-    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    BlockNode, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus,
 };
 use crate::tui::view_model::style::SemanticStyle;
 
@@ -45,37 +45,6 @@ fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
 
 fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
     OutputViewModel::from_roots(roots, 1, true)
-}
-
-fn placeholder_node() -> BlockNode {
-    let kind = OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
-        key: "model-stream-placeholder".into(),
-        elapsed_secs: 10,
-        phase: "waiting_first_model_delta".into(),
-    });
-    BlockNode {
-        block_id: "model-stream-placeholder".into(),
-        block_version: kind.cache_version(),
-        kind,
-        children: Vec::new(),
-    }
-}
-
-#[test]
-fn model_stream_placeholder_document_is_static_across_animation_frames() {
-    let vm = vm_with_roots(vec![placeholder_node()]);
-    let mut renderer = OutputDocumentRenderer::default();
-
-    let doc0 =
-        renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
-    let render_count = renderer.render_count();
-    let gutted_render_count = renderer.gutted_render_count();
-    let doc1 =
-        renderer.render_tree_with_animation_frame(&vm, 80, 4, MarkdownSpacingPolicy::normal());
-
-    assert_eq!(doc0, doc1, "动画帧不得固化进历史文档");
-    assert_eq!(renderer.render_count(), render_count);
-    assert_eq!(renderer.gutted_render_count(), gutted_render_count);
 }
 
 #[test]
@@ -126,14 +95,14 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "tool".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("tool".into()),
         title: "Bash".into(),
         icon: "✓".into(),
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Success,
         args_preview: None,
-        activity_lines: Vec::new(),
+        streaming_preview: None,
         result_summary: Some("```\ncode\n```".into()),
         result_payload: None,
         workspace_root: None,
@@ -146,6 +115,8 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         tool_title: "Bash".into(),
         args_preview: None,
         result_text: "```\ncode\n```".into(),
+        activity_lines: None,
+        workspace_root: None,
         data: None,
         style: SemanticStyle::Success,
     });
@@ -437,14 +408,14 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "tool".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("tool".into()),
         title: "Bash".into(),
         icon: "✓".into(),
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Normal,
         args_preview: None,
-        activity_lines: Vec::new(),
+        streaming_preview: None,
         result_summary: None,
         result_payload: None,
         workspace_root: None,
@@ -571,6 +542,8 @@ fn static_edit_root(id: &str, lines: usize) -> BlockNode {
         tool_title: "Edit".into(),
         args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
         result_text: result_text.clone(),
+        activity_lines: None,
+        workspace_root: None,
         data: Some(serde_json::json!({
             "old": old,
             "new": new_lines.join("\n"),
@@ -581,14 +554,14 @@ fn static_edit_root(id: &str, lines: usize) -> BlockNode {
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: id.into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some(id.into()),
         title: "Edit".into(),
         icon: "✓".into(),
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Success,
         args_preview: Some(format!(r#"{{"file_path":"src/{id}.rs"}}"#)),
-        activity_lines: Vec::new(),
+        streaming_preview: None,
         result_summary: Some(result_text),
         result_payload: None,
         workspace_root: None,
@@ -668,20 +641,22 @@ fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
         tool_title: "Edit".into(),
         args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
         result_text: result_text.clone(),
+        activity_lines: None,
+        workspace_root: None,
         data: Some(serde_json::json!({ "old": old, "new": new, "start_line": 1 })),
         style: SemanticStyle::Success,
     });
     let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
         key: "edit".into(),
         chat_id: None,
-        turn_id: None,
+        run_id: None,
         tool_call_id: Some("edit".into()),
         title: "Edit".into(),
         icon: "✓".into(),
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Success,
         args_preview: Some(r#"{"file_path":"src/lib.rs"}"#.into()),
-        activity_lines: Vec::new(),
+        streaming_preview: None,
         result_summary: Some(result_text),
         result_payload: None,
         workspace_root: None,
@@ -797,4 +772,175 @@ fn test_render_tree_various_widths_keep_every_line_within_outer_width() {
             }
         }
     }
+}
+
+#[test]
+fn test_streaming_and_final_tool_result_have_consistent_gutter() {
+    // #1547：streaming ToolResult 子块（`<tool-id>-streaming-result`）与最终
+    // ToolResult 子块（`<tool-id>-result`）的 gutter span、gutter_cols、续行内容
+    // 起始列必须完全一致——marker/缩进全部由 gutter 统一管理。两种子块都只出现
+    // 一个 ⎿ marker（gutter 首行注入）。
+    use crate::tui::render::display::safe_text::str_display_width;
+
+    fn build_tool_with_child(
+        tool_id: &str,
+        child_id: &str,
+        result_text: &str,
+        status: ToolSemanticStatus,
+    ) -> BlockNode {
+        let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+            key: tool_id.into(),
+            chat_id: None,
+            run_id: None,
+            tool_call_id: Some(tool_id.into()),
+            title: "Bash".into(),
+            icon: "●".into(),
+            semantic_status: status,
+            style: SemanticStyle::Running,
+            args_preview: Some(r#"{"command":"echo"}"#.into()),
+            streaming_preview: None,
+            result_summary: None,
+            result_payload: None,
+            workspace_root: None,
+            collapsible: false,
+            collapsed: false,
+            agent_meta: None,
+        });
+        let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+            key: child_id.into(),
+            tool_title: "Bash".into(),
+            args_preview: None,
+            result_text: result_text.into(),
+            activity_lines: None,
+            workspace_root: None,
+            data: None,
+            style: SemanticStyle::Running,
+        });
+        BlockNode {
+            block_id: tool_id.into(),
+            block_version: tool_kind.cache_version(),
+            kind: tool_kind,
+            children: vec![BlockNode {
+                block_id: child_id.into(),
+                block_version: result_kind.cache_version(),
+                kind: result_kind,
+                children: Vec::new(),
+            }],
+        }
+    }
+
+    // 多行内容（验证续行对齐）
+    let multi_line = "line one content\nline two content\nline three content";
+
+    // streaming 子块
+    let streaming_node = build_tool_with_child(
+        "tool-s",
+        "tool-s-streaming-result",
+        multi_line,
+        ToolSemanticStatus::Running,
+    );
+    // final 子块
+    let final_node = build_tool_with_child(
+        "tool-f",
+        "tool-f-result",
+        multi_line,
+        ToolSemanticStatus::Success,
+    );
+
+    let vm_streaming = vm_with_roots(vec![streaming_node]);
+    let vm_final = vm_with_roots(vec![final_node]);
+
+    let mut renderer = OutputDocumentRenderer::default();
+    let doc_streaming = renderer.render_tree(&vm_streaming, 80);
+    let doc_final = renderer.render_tree(&vm_final, 80);
+
+    // 找到各自的 ToolResult 子块
+    let streaming_result = doc_streaming
+        .blocks
+        .iter()
+        .find(|b| b.block_id == "tool-s-streaming-result")
+        .expect("streaming result block");
+    let final_result = doc_final
+        .blocks
+        .iter()
+        .find(|b| b.block_id == "tool-f-result")
+        .expect("final result block");
+
+    // 1. 首行 gutter span 一致
+    let s_first = &streaming_result.lines[0];
+    let f_first = &final_result.lines[0];
+    let s_gutter_span = s_first.spans.first().expect("gutter span");
+    let f_gutter_span = f_first.spans.first().expect("gutter span");
+    let s_gutter_text: String = s_gutter_span.content.to_string();
+    let f_gutter_text: String = f_gutter_span.content.to_string();
+    assert_eq!(
+        s_gutter_text, f_gutter_text,
+        "streaming/final 首行 gutter span 应一致"
+    );
+    // gutter 包含 ⎿ marker
+    assert!(
+        s_gutter_text.contains('⎿'),
+        "streaming 首行 gutter 应含 ⎿ marker: {s_gutter_text:?}"
+    );
+    assert!(
+        f_gutter_text.contains('⎿'),
+        "final 首行 gutter 应含 ⎿ marker: {f_gutter_text:?}"
+    );
+
+    // 2. gutter_cols 一致（depth=1 → gutter_cols=4）
+    assert_eq!(
+        s_first.gutter_cols, f_first.gutter_cols,
+        "streaming/final gutter_cols 应一致"
+    );
+
+    // 3. 续行 gutter_cols 也一致（gutter 等宽空白）
+    for i in 1..streaming_result.lines.len().min(final_result.lines.len()) {
+        assert_eq!(
+            streaming_result.lines[i].gutter_cols, final_result.lines[i].gutter_cols,
+            "续行 {i} gutter_cols 应一致"
+        );
+    }
+
+    // 4. 续行内容起始列一致：gutter 后第一个非 gutter span 的起始位置
+    let s_content_start: usize = streaming_result
+        .lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .take(1)
+                .map(|s| str_display_width(s.content.as_ref()))
+                .sum::<usize>()
+        })
+        .sum();
+    let f_content_start: usize = final_result
+        .lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .take(1)
+                .map(|s| str_display_width(s.content.as_ref()))
+                .sum::<usize>()
+        })
+        .sum();
+    assert_eq!(
+        s_content_start, f_content_start,
+        "streaming/final 续行内容起始列总宽应一致"
+    );
+
+    // 5. 各自仅出现一个 ⎿ marker（gutter 首行注入，续行为等宽空白）。
+    //    ⎿ 在 gutter span 中而非 plain（plain 只含内容文本）。
+    let s_marker_count = streaming_result
+        .lines
+        .iter()
+        .filter(|l| l.spans.iter().any(|s| s.content.contains('⎿')))
+        .count();
+    let f_marker_count = final_result
+        .lines
+        .iter()
+        .filter(|l| l.spans.iter().any(|s| s.content.contains('⎿')))
+        .count();
+    assert_eq!(s_marker_count, 1, "streaming 应仅出现一个 ⎿ marker");
+    assert_eq!(f_marker_count, 1, "final 应仅出现一个 ⎿ marker");
 }

@@ -38,7 +38,6 @@ mod tests {
                         input_tokens: 12_400,
                         output_tokens: 1_800,
                         last_input_tokens: 74_000,
-                        cost_usd: 0.0,
                     },
                 ),
             ),
@@ -86,7 +85,7 @@ mod tests {
         assert_eq!(view.runtime.model.as_deref(), Some("glm-5.1"));
         assert_eq!(view.runtime.input_tokens, 12_400);
         assert_eq!(view.runtime.output_tokens, 1_800);
-        assert_eq!(view.runtime.last_input_tokens, 74_000);
+        assert_eq!(view.runtime.context_usage_permille, None);
         assert_eq!(view.runtime.context_size, 200_000);
         assert_eq!(view.runtime.api_calls, 1);
         assert_eq!(view.runtime.session_id.as_deref(), Some("s-1"));

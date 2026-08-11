@@ -29,12 +29,31 @@ impl SessionRestoreStep {
 pub struct SessionRestore {
     pub active_messages: Vec<Message>,
     pub display_steps: Vec<SessionRestoreStep>,
+    pub compacted: bool,
     pub created_at: String,
     pub trimmed: usize,
     pub repaired: usize,
 }
 
 impl SessionRestore {
+    pub fn active_from_canonical(session: &CanonicalSession) -> Self {
+        let (active_steps, active_trimmed, active_repaired) =
+            clean_steps(session.restore_steps_from_marker());
+        let active_messages = active_steps
+            .iter()
+            .flat_map(SessionRestoreStep::messages)
+            .cloned()
+            .collect();
+        Self {
+            active_messages,
+            display_steps: Vec::new(),
+            compacted: session.compact.is_some(),
+            created_at: session.created_at.clone(),
+            trimmed: active_trimmed,
+            repaired: active_repaired,
+        }
+    }
+
     pub fn from_canonical(session: &CanonicalSession) -> Self {
         let (active_steps, active_trimmed, active_repaired) =
             clean_steps(session.restore_steps_from_marker());
@@ -47,6 +66,7 @@ impl SessionRestore {
         Self {
             active_messages,
             display_steps,
+            compacted: session.compact.is_some(),
             created_at: session.created_at.clone(),
             trimmed: active_trimmed,
             repaired: active_repaired,

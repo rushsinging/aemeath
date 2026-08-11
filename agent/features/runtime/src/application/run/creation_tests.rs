@@ -66,6 +66,7 @@ fn p6_12_run_creation_request_contains_only_value_inputs() {
         .and_then(|tail| tail.split("impl RunCreationRequest").next())
         .expect("RunCreationRequest definition");
 
+    assert!(request.contains("run_id: Option<RunId>"));
     assert!(request.contains("session: SessionSnapshot"));
     assert!(request.contains("parent: Option<ParentRunFacts>"));
     for forbidden in [

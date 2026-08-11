@@ -64,13 +64,18 @@ fn wire_runtime_tool_assembly(
     })
 }
 
+pub(crate) struct SessionRuntimeAssembly {
+    pub client: AgentClientImpl,
+    pub audit: Option<crate::audit::SessionAudit>,
+}
+
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
     agents_dir: &std::path::Path,
-) -> Result<AgentClientImpl, sdk::SdkError> {
+) -> Result<SessionRuntimeAssembly, sdk::SdkError> {
     let identity = workspace.read().project_identity();
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
@@ -92,70 +97,23 @@ pub(crate) async fn from_args_with_gateways(
 
     let task_wiring = task::wire_task();
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(config.reader().committed_snapshot().hooks())
+        hook::build_dispatcher(&config.reader().committed_snapshot())
             .map_err(|errors| sdk::SdkError::Init(format!("Hook 配置初始化失败：{errors:?}")))?,
     );
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
+    let session_dataset = Arc::new(
+        storage::FileSystemDatasetAdapter::new(agents_dir)
+            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+    );
     let session_blob = storage::api::file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
-    );
-    let agents_dir_buf = agents_dir.to_path_buf();
-    let deps = context::MainSessionDependencies {
-        workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
-        config_reader: config.reader(),
-        config_participant: config.participant(),
-        memory_opener: Box::new(memory::DatasetMemoryOpener::new(
-            Arc::new(
-                storage::FileSystemDatasetAdapter::new(agents_dir_buf)
-                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-            ),
-            Arc::new(memory::FileLegacyMemorySourceFactory::new(
-                agents_dir.join("memory"),
-            )),
-        )),
-        session_management: session_management.clone(),
-        context_factory: Arc::new(
-            context::adapters::ProductionMainContextFactory::new(Arc::new(
-                context::adapters::AtomicBlobCanonicalSessionWriter::new(session_blob),
-            ))
-            .with_skill_catalog(
-                skill_catalog.clone(),
-                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
-                    workspace.read(),
-                )),
-            ),
-        ),
-    };
-    let wiring = context::wire_main_session(deps)
-        .await
-        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-
-    let tool_assembly = wire_runtime_tool_assembly(
-        task_wiring.access(),
-        Arc::new(WiringMemoryPortSource {
-            wiring: wiring.clone(),
-        }),
-        workspace.control(),
-        skill_loader.clone(),
-        &config.reader().committed_snapshot(),
-        agents_dir,
-    )?;
-
-    // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
-    // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
-    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
-        tool_assembly.catalog.clone(),
-        tool_assembly.execution.clone(),
-        gateways.policy.clone(),
-        reflection_history.clone(),
-        task_wiring.access(),
-        hook_runner.clone(),
-    ));
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        Arc::new(context::adapters::DatasetSessionManagement::new(
+            session_dataset.clone(),
+            session_blob.clone(),
+        ));
 
     let snapshot = config.reader().committed_snapshot();
     let runtime_model = snapshot
@@ -209,6 +167,88 @@ pub(crate) async fn from_args_with_gateways(
     let initial_provider =
         runtime::InitialProviderAssembly::new(initial_binding, resolved_model, runtime_settings);
 
+    // #1486：compact 走 LLM 语义压缩 —— 注入 ProviderCompactGenerator
+    // （包装主 provider binding）。context_factory 依赖 initial_binding，
+    // 因此 MainSession 装配延后到 provider 构建之后。
+    let agents_dir_buf = agents_dir.to_path_buf();
+    let compact_generator = runtime::ProviderCompactGenerator::new(
+        initial_provider.binding().provider.clone(),
+        initial_provider.binding().model.clone(),
+    );
+    let deps = context::MainSessionDependencies {
+        workspace: workspace.clone(),
+        task_persist: task_wiring.persist(),
+        config_reader: config.reader(),
+        config_participant: config.participant(),
+        memory_opener: Box::new(memory::DatasetMemoryOpener::new(
+            Arc::new(
+                storage::FileSystemDatasetAdapter::new(agents_dir_buf)
+                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+            ),
+            Arc::new(memory::FileLegacyMemorySourceFactory::new(
+                agents_dir.join("memory"),
+            )),
+        )),
+        session_management: session_management.clone(),
+        context_factory: Arc::new(
+            context::adapters::ProductionMainContextFactory::new(Arc::new(
+                context::adapters::DatasetCanonicalSessionWriter::new(session_dataset),
+            ))
+            .with_accepted_input_writer(Arc::new(
+                context::adapters::AtomicBlobAcceptedInputWriter::new(session_blob.clone()),
+            ))
+            .with_tool_receipt_writer(Arc::new(
+                context::adapters::AtomicBlobToolReceiptWriter::new(session_blob),
+            ))
+            .with_skill_catalog(
+                skill_catalog.clone(),
+                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
+                    workspace.read(),
+                )),
+            )
+            .with_generator(Arc::new(compact_generator)),
+        ),
+    };
+    let wiring = context::wire_main_session(deps)
+        .await
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+
+    let tool_assembly = wire_runtime_tool_assembly(
+        task_wiring.access(),
+        Arc::new(WiringMemoryPortSource {
+            wiring: wiring.clone(),
+        }),
+        workspace.control(),
+        skill_loader.clone(),
+        &config.reader().committed_snapshot(),
+        agents_dir,
+    )?;
+
+    let (usage_sink, session_audit): (
+        Arc<dyn runtime::UsageSink>,
+        Option<crate::audit::SessionAudit>,
+    ) = match crate::audit::wire_session_audit(agents_dir, &snapshot) {
+        Ok(session_audit) => (session_audit.usage_sink(), Some(session_audit)),
+        Err(error) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "Audit Usage worker 初始化失败，已降级为 unavailable sink：{error}"
+            );
+            (Arc::new(runtime::UnavailableUsageSink), None)
+        }
+    };
+
+    // 构造一次基础 RuntimeContextFactory，并将同一 Arc 注入 Main bootstrap
+    // 与 Derived Agent Runner；Derived 仅追加受限 binding，不重建基础服务。
+    let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
+        tool_assembly.catalog.clone(),
+        tool_assembly.execution.clone(),
+        gateways.policy.clone(),
+        reflection_history.clone(),
+        task_wiring.access(),
+        hook_runner.clone(),
+        usage_sink,
+    ));
     context::guidance::init_guidance_dir();
     let cwd = args
         .cwd
@@ -250,6 +290,7 @@ pub(crate) async fn from_args_with_gateways(
         vec![provider::RequestSystemBlock::Cacheable(static_prompt)],
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
+        initial_provider.binding().model.model.clone(),
     );
 
     let available_tools = tool_assembly
@@ -303,13 +344,18 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         ),
+        runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         session_bootstrap,
         prompt,
         skills,
         agent_runner,
     );
-    runtime::from_args_with_workspace(args, dependencies).await
+    let client = runtime::from_args_with_workspace(args, dependencies).await?;
+    Ok(SessionRuntimeAssembly {
+        client,
+        audit: session_audit,
+    })
 }
 
 #[cfg(test)]

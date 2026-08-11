@@ -40,6 +40,66 @@ impl SessionSnapshotStore for JourneyStore {
 }
 
 #[tokio::test]
+async fn persisted_tool_result_bytes_survive_save_resume_and_llm_view() {
+    let store = Arc::new(JourneyStore::default());
+    let preview = "<persisted-output>bounded persisted preview</persisted-output>";
+    let projection = serde_json::json!({
+        "text": preview,
+        "truncated": true,
+        "original_chars": 50_001,
+        "original_bytes": 50_001,
+        "omitted_chars": 47_501,
+        "blob": {
+            "status": "persisted",
+            "locator": "tool-result://session/tool"
+        }
+    });
+    let original_message = Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "tool".to_string(),
+            content: projection,
+            is_error: false,
+            text: Some(preview.to_string()),
+        }],
+        metadata: None,
+    };
+    let original_bytes = serde_json::to_vec(&original_message).unwrap();
+    let original_llm_bytes = serde_json::to_vec(&original_message.to_llm_view()).unwrap();
+    let mut session = CanonicalSession::fixture("resume-persisted-tool-result");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run",
+        vec![CommittedRunStep::compatibility_outcome_only(
+            "step",
+            vec![original_message],
+        )],
+    )]
+    .into();
+    let service = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder));
+
+    service.save(&session).await.unwrap();
+    *store.primary.lock().unwrap() = Some(store.writes.lock().unwrap()[0].clone());
+    let resumed = service.load().await.unwrap();
+    let resumed_message = &resumed.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .unwrap()
+        .messages[0];
+
+    assert_eq!(serde_json::to_vec(resumed_message).unwrap(), original_bytes);
+    assert_eq!(
+        serde_json::to_vec(&resumed_message.to_llm_view()).unwrap(),
+        original_llm_bytes
+    );
+    let llm_view = resumed_message.content[0].to_llm_view();
+    let ContentBlock::ToolResult { content, text, .. } = llm_view else {
+        panic!("expected provider tool result view");
+    };
+    assert_eq!(content.as_str(), Some(preview));
+    assert!(text.is_none());
+}
+
+#[tokio::test]
 async fn unavailable_tool_result_projection_survives_save_and_resume() {
     let store = Arc::new(JourneyStore::default());
     let preview = "<persisted-output>bounded unavailable preview</persisted-output>";
@@ -70,7 +130,8 @@ async fn unavailable_tool_result_projection_survives_save_and_resume() {
                 metadata: None,
             }],
         )],
-    )];
+    )]
+    .into();
     let service = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder));
 
     service.save(&session).await.unwrap();

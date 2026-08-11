@@ -1,7 +1,7 @@
 //! Stop Hook coordination —— 共享 Loop 触发的 typed decision。
 //!
-//! #1248 Task 6: 将 Stop Hook outcome 从 adapter 预解释 (ModelStep::StopHookBlocked)
-//! 迁入共享 Loop 与 Run 状态机。Coordinator 只消费 HookPort / Hook PL，返回
+//! Stop Hook outcome 已从 adapter 的专用阻断投影迁入共享 Loop 与 Run 状态机。
+//! Coordinator 只消费 HookPort / Hook PL，返回
 //! Runtime-owned typed decision；保留 block detail/messages，禁止用 reason 字符串
 //! 区分主动 Block 与 ExecutionFailed。Hook 内部三次 retry 仍归 Hook BC。
 //!
@@ -15,13 +15,16 @@
 //!   使用同一语言、预览截断和长输出落盘规则。
 
 use crate::application::hook::outcome_mapper::{
-    map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch, RuntimeHookReason,
+    map_hook_outcome, RuntimeHookDirective, RuntimeHookReason,
 };
 use crate::application::loop_engine::LoopEngineError;
 use crate::application::run::execution_state::RunExecutionState;
 use async_trait::async_trait;
-use hook::{HookDispatchContext, HookInvocation, HookPoint, HookPort, StopInput};
-use share::message::{Message, StopHookFeedback};
+use hook::{
+    HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionObserver,
+    StopInput,
+};
+use share::message::{HookNotice, HookNoticeKind, Message};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -34,8 +37,10 @@ use tokio_util::sync::CancellationToken;
 pub enum StopHookDecision {
     /// Stop hook 放行，Run 可以正常完成。
     Proceed,
+    /// Stop Hook 执行已被当前 Step 取消，不应向 LLM 注入取消反馈。
+    Cancelled,
     /// Stop hook 阻断。携带完整的 typed reason、block detail、feedback 材料。
-    /// 第 1-15 次 Block 走 continue-with-feedback；第 16 次 Block 触发 Run Failed。
+    /// Block allowance 来自本 Run 冻结的 StopHookPolicy；限额内 continue-with-feedback，首个超限 Block 触发 Run Failed。
     Block(Box<StopHookBlock>),
 }
 
@@ -49,17 +54,17 @@ pub struct StopHookBlock {
     /// BC 保留的展示消息（按源顺序 1:1 投影，用于 UI 展示）。
     pub messages: Vec<super::outcome_mapper::RuntimeHookDisplayMessage>,
     /// Feedback materialization 所需材料；adapter 在 seam 实现中完成构造。
-    pub feedback: StopHookFeedbackMaterial,
+    pub feedback: HookNoticeMaterial,
 }
 
 /// Feedback 材料：由 adapter 层的 `evaluate_stop_hook` 实现消费，
-/// 构造 `Message::stop_hook_feedback` 并注入消息流。
+/// 构造通用 `Message::hook_notice` 并注入消息流。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StopHookFeedbackMaterial {
+pub struct HookNoticeMaterial {
     /// LLM 可见的提示文本（含 command/exit_code/reason/stdout/stderr 摘要）。
     pub llm_text: String,
-    /// 结构化 feedback payload（TUI 展示用）。
-    pub payload: StopHookFeedback,
+    /// 结构化 Hook notice（TUI 展示与 Session 恢复共用）。
+    pub notice: HookNotice,
 }
 
 /// Block detail（与 RuntimeHookBlockDetail 语义一致，但作为 StopHookDecision 内嵌类型重新导出）。
@@ -69,24 +74,34 @@ pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
 #[derive(Clone)]
 pub struct StopHookExecutionContext {
     hook_port: Arc<dyn HookPort>,
-    workspace_root: PathBuf,
+    workspace_read: Arc<dyn project::WorkspaceRead>,
     session_id: String,
     language: String,
+    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl StopHookExecutionContext {
     pub fn new(
         hook_port: Arc<dyn HookPort>,
-        workspace_root: PathBuf,
+        workspace_read: Arc<dyn project::WorkspaceRead>,
         session_id: String,
         language: String,
     ) -> Self {
         Self {
             hook_port,
-            workspace_root,
+            workspace_read,
             session_id,
             language,
+            subscription_execution_observer: None,
         }
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
     }
 }
 
@@ -95,10 +110,6 @@ impl StopHookExecutionContext {
 pub trait StopHookObserver: Send {
     fn stop_hook_execution_context(&self) -> Option<StopHookExecutionContext> {
         None
-    }
-
-    async fn begin_stop_hook_status(&mut self) -> Result<(), LoopEngineError> {
-        Ok(())
     }
 
     fn install_stop_hook_feedback(&mut self, _message: Message) {}
@@ -120,22 +131,14 @@ impl StopHookObserver for NoopStopHookObserver {}
 pub async fn coordinate_stop_hook<O>(
     observer: &mut O,
     execution: &mut RunExecutionState,
-    turns: usize,
+    run_steps: usize,
     cancellation: &CancellationToken,
 ) -> Result<StopHookOutcome, LoopEngineError>
 where
     O: StopHookObserver + ?Sized,
 {
-    observer.begin_stop_hook_status().await?;
     let Some(context) = observer.stop_hook_execution_context() else {
         return Ok(StopHookOutcome {
-            point: HookPoint::Stop,
-            dispatch: RuntimeHookDispatch {
-                directive: RuntimeHookDirective::Continue,
-                executions: Vec::new(),
-                messages: Vec::new(),
-                block_detail: None,
-            },
             decision: StopHookDecision::Proceed,
             feedback_message: None,
         });
@@ -143,10 +146,11 @@ where
     let outcome = orchestrate_stop_hook(
         &context.hook_port,
         StopHookContext {
-            turns,
-            workspace_root: context.workspace_root,
+            run_steps,
+            workspace_root: context.workspace_read.current_workspace_root(),
             session_id: context.session_id,
             language: context.language,
+            subscription_execution_observer: context.subscription_execution_observer,
         },
         cancellation,
     )
@@ -163,20 +167,49 @@ where
     Ok(outcome)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StopHookContext {
-    pub turns: usize,
+    pub run_steps: usize,
     pub workspace_root: PathBuf,
     pub session_id: String,
     pub language: String,
+    pub subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StopHookOutcome {
-    pub point: HookPoint,
-    pub dispatch: RuntimeHookDispatch,
     pub decision: StopHookDecision,
     pub feedback_message: Option<Message>,
+}
+
+pub(crate) fn hook_point_view(point: HookPoint) -> sdk::HookPointView {
+    match point {
+        HookPoint::PreToolUse => sdk::HookPointView::PreToolUse,
+        HookPoint::UserPromptSubmit => sdk::HookPointView::UserPromptSubmit,
+        HookPoint::PreCompact => sdk::HookPointView::PreCompact,
+        HookPoint::PermissionRequest => sdk::HookPointView::PermissionRequest,
+        HookPoint::Elicitation => sdk::HookPointView::Elicitation,
+        HookPoint::UserPromptExpansion => sdk::HookPointView::UserPromptExpansion,
+        HookPoint::Stop => sdk::HookPointView::Stop,
+        HookPoint::PostToolUse => sdk::HookPointView::PostToolUse,
+        HookPoint::PostToolUseFailure => sdk::HookPointView::PostToolUseFailure,
+        HookPoint::PostCompact => sdk::HookPointView::PostCompact,
+        HookPoint::PostToolBatch => sdk::HookPointView::PostToolBatch,
+        HookPoint::ElicitationResult => sdk::HookPointView::ElicitationResult,
+        HookPoint::SessionStart => sdk::HookPointView::SessionStart,
+        HookPoint::SessionEnd => sdk::HookPointView::SessionEnd,
+        HookPoint::SubRunStart => sdk::HookPointView::SubRunStart,
+        HookPoint::SubRunStop => sdk::HookPointView::SubRunStop,
+        HookPoint::TaskCreated => sdk::HookPointView::TaskCreated,
+        HookPoint::TaskCompleted => sdk::HookPointView::TaskCompleted,
+        HookPoint::Notification => sdk::HookPointView::Notification,
+        HookPoint::InstructionsLoaded => sdk::HookPointView::InstructionsLoaded,
+        HookPoint::StopFailure => sdk::HookPointView::StopFailure,
+        HookPoint::PermissionDenied => sdk::HookPointView::PermissionDenied,
+        HookPoint::ConfigChange => sdk::HookPointView::ConfigChange,
+        HookPoint::CwdChanged => sdk::HookPointView::CwdChanged,
+        HookPoint::FileChanged => sdk::HookPointView::FileChanged,
+        HookPoint::TeammateIdle => sdk::HookPointView::TeammateIdle,
+    }
 }
 
 pub async fn orchestrate_stop_hook(
@@ -185,16 +218,27 @@ pub async fn orchestrate_stop_hook(
     cancellation: &CancellationToken,
 ) -> StopHookOutcome {
     let invocation = HookInvocation::Stop(StopInput {
-        turns: context.turns,
+        run_steps: context.run_steps,
     });
-    let point = invocation.point();
+    let mut hook_dispatch_context = HookDispatchContext::new(&context.workspace_root);
+    if let Some(observer) = context.subscription_execution_observer {
+        hook_dispatch_context =
+            hook_dispatch_context.with_subscription_execution_observer(observer);
+    }
     let hook_outcome = hook_port
-        .dispatch_at(
-            invocation,
-            HookDispatchContext::new(&context.workspace_root),
-            cancellation,
-        )
+        .dispatch_at(invocation, hook_dispatch_context, cancellation)
         .await;
+    if cancellation.is_cancelled()
+        || hook_outcome
+            .executions
+            .iter()
+            .any(|execution| matches!(execution.status, hook::HookExecutionStatus::Cancelled))
+    {
+        return StopHookOutcome {
+            decision: StopHookDecision::Cancelled,
+            feedback_message: None,
+        };
+    }
     let dispatch = map_hook_outcome(&hook_outcome);
 
     let (decision, feedback_message) = match &dispatch.directive {
@@ -210,12 +254,12 @@ pub async fn orchestrate_stop_hook(
                 &context.language,
             )
             .await;
-            let message = Message::stop_hook_feedback(
+            let message = Message::hook_notice(
                 format!(
                     "<system-reminder>\n{}\n</system-reminder>",
                     feedback.llm_text
                 ),
-                feedback.payload.clone(),
+                feedback.notice.clone(),
             );
             (
                 StopHookDecision::Block(Box::new(StopHookBlock {
@@ -231,8 +275,6 @@ pub async fn orchestrate_stop_hook(
     };
 
     StopHookOutcome {
-        point,
-        dispatch,
         decision,
         feedback_message,
     }
@@ -252,7 +294,7 @@ pub(crate) async fn materialize_stop_hook_feedback(
     reason: &RuntimeHookReason,
     session_id: &str,
     language: &str,
-) -> StopHookFeedbackMaterial {
+) -> HookNoticeMaterial {
     let output = full_hook_output(detail, reason);
     let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
         write_long_hook_feedback(session_id, &detail.command, &output)
@@ -269,7 +311,7 @@ fn build_stop_hook_feedback(
     reason: &RuntimeHookReason,
     language: &str,
     output_file: Option<String>,
-) -> StopHookFeedbackMaterial {
+) -> HookNoticeMaterial {
     let summary = match language {
         "zh" => "Stop hook 阻止了停止。".to_string(),
         _ => "Stop hook prevented stopping.".to_string(),
@@ -280,7 +322,9 @@ fn build_stop_hook_feedback(
         truncate_lines(&detail.execution.stdout, TUI_STDOUT_PREVIEW_LINES);
     let (stderr_preview, stderr_truncated) =
         truncate_lines(&detail.execution.stderr, TUI_STDERR_PREVIEW_LINES);
-    let payload = StopHookFeedback {
+    let notice = HookNotice {
+        point: "Stop".to_string(),
+        kind: HookNoticeKind::Blocked,
         summary,
         command,
         exit_code: detail.execution.exit_code,
@@ -292,11 +336,11 @@ fn build_stop_hook_feedback(
         output_file,
     };
 
-    let mut llm_text = stop_hook_llm_text_english(&payload);
+    let mut llm_text = stop_hook_llm_text_english(&notice);
     if language == "zh" {
         llm_text = llm_text.replace("Stop hook prevented stopping.", "Stop hook 阻止了停止。");
     }
-    StopHookFeedbackMaterial { llm_text, payload }
+    HookNoticeMaterial { llm_text, notice }
 }
 
 fn full_hook_output(detail: &RuntimeHookBlockDetail, reason: &RuntimeHookReason) -> String {
@@ -351,26 +395,26 @@ fn format_reason(reason: &RuntimeHookReason) -> String {
     }
 }
 
-fn stop_hook_llm_text_english(payload: &StopHookFeedback) -> String {
+fn stop_hook_llm_text_english(notice: &HookNotice) -> String {
     let mut text = format!(
         "{}\nCommand: {}\nExit code: {}\nReason: {}",
-        payload.summary,
-        payload.command,
-        payload
+        notice.summary,
+        notice.command,
+        notice
             .exit_code
             .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
-        payload.reason
+        notice.reason
     );
-    if let Some(path) = &payload.output_file {
+    if let Some(path) = &notice.output_file {
         text.push_str(&format!(
             "\nFull hook output is saved to {path}; use the Read tool to inspect it."
         ));
     } else {
-        if !payload.stderr_preview.trim().is_empty() {
-            text.push_str(&format!("\nstderr:\n{}", payload.stderr_preview));
+        if !notice.stderr_preview.trim().is_empty() {
+            text.push_str(&format!("\nstderr:\n{}", notice.stderr_preview));
         }
-        if !payload.stdout_preview.trim().is_empty() {
-            text.push_str(&format!("\nstdout:\n{}", payload.stdout_preview));
+        if !notice.stdout_preview.trim().is_empty() {
+            text.push_str(&format!("\nstdout:\n{}", notice.stdout_preview));
         }
     }
     text

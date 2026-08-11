@@ -25,9 +25,12 @@ mod helpers;
 mod tests;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+
+use share::config::domain::snapshot::HookExecutionPolicy;
 
 use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
 use crate::domain::outcome::{
@@ -37,7 +40,10 @@ use crate::domain::outcome::{
 use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
-use crate::ports::{CancellationSignal, HookDispatchContext, HookPort};
+use crate::ports::{
+    CancellationSignal, HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
+};
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
 #[cfg(test)]
@@ -47,17 +53,6 @@ use helpers::{
     synthesize_cancelled_directive, synthesize_exhausted_directive,
 };
 
-/// 单 Hook 执行重试上限（含第一次）。
-///
-/// 设计 §6：`hook.max_attempts = 3`。任意 ExecutionFailed（spawn / wait / IO /
-/// timeout / 非法 JSON / 能力矩阵违规）连续发生时最多重试到本上限；业务 Block
-/// （非零 exit / JSON `decision:block` / `continue:false`）不重试。
-pub const MAX_ATTEMPTS: u8 = 3;
-
-// ════════════════════════════════════════════════════════════
-// Dispatcher
-// ════════════════════════════════════════════════════════════
-
 /// Hook dispatcher：按 point 匹配 subscription、串行执行、重试与聚合。
 ///
 /// 内部以 `Box<dyn Executor>` 持有执行端口，对外只暴露稳定构造入口
@@ -66,6 +61,8 @@ pub const MAX_ATTEMPTS: u8 = 3;
 pub struct Dispatcher {
     subscriptions: Vec<HookSubscription>,
     executor: Box<dyn Executor>,
+    execution_policy: HookExecutionPolicy,
+    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
 impl Dispatcher {
@@ -75,12 +72,16 @@ impl Dispatcher {
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
-    pub fn try_new(subscriptions: Vec<HookSubscription>) -> Result<Self, Vec<SubscriptionError>> {
+    pub fn try_new(
+        subscriptions: Vec<HookSubscription>,
+        execution_policy: HookExecutionPolicy,
+    ) -> Result<Self, Vec<SubscriptionError>> {
         Self::build(
             subscriptions,
             Box::new(ProcessDriverExecutor::new(
                 crate::adapters::environment::capture_basic_environment(),
             )),
+            execution_policy,
         )
     }
 
@@ -88,6 +89,7 @@ impl Dispatcher {
     fn build(
         subscriptions: Vec<HookSubscription>,
         executor: Box<dyn Executor>,
+        execution_policy: HookExecutionPolicy,
     ) -> Result<Self, Vec<SubscriptionError>> {
         let mut errors = Vec::new();
         for sub in &subscriptions {
@@ -101,14 +103,37 @@ impl Dispatcher {
         Ok(Self {
             subscriptions,
             executor,
+            execution_policy,
+            subscription_execution_observer: None,
         })
+    }
+
+    pub fn with_subscription_execution_observer(
+        mut self,
+        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+    ) -> Self {
+        self.subscription_execution_observer = Some(observer);
+        self
     }
 
     /// 测试专用：注入脚本化执行器，subscription 必须全部合法（否则 panic）。
     #[cfg(test)]
     fn with_scripted(subscriptions: Vec<HookSubscription>, executor: Scripted) -> Self {
-        Self::build(subscriptions, Box::new(executor))
-            .expect("测试用 HookSubscription 必须全部合法")
+        Self::with_scripted_and_attempt_limit(subscriptions, executor, 3)
+    }
+
+    #[cfg(test)]
+    fn with_scripted_and_attempt_limit(
+        subscriptions: Vec<HookSubscription>,
+        executor: Scripted,
+        max_attempts: u8,
+    ) -> Self {
+        Self::build(
+            subscriptions,
+            Box::new(executor),
+            HookExecutionPolicy::new(max_attempts),
+        )
+        .expect("测试用 HookSubscription 必须全部合法")
     }
 }
 
@@ -124,7 +149,7 @@ enum AttemptOutcome {
         directive: HookDirective,
         system_message: Option<String>,
     },
-    /// 重试耗尽（ExecutionFailed 达到 MAX_ATTEMPTS）。
+    /// 重试耗尽（ExecutionFailed 达到注入的 execution policy 上限）。
     Exhausted { executions: Vec<HookExecution> },
     /// 被 cancellation 终止（不重试，但仍保留这一次 attempt 的 ExecutionFailed 明细）。
     Cancelled { executions: Vec<HookExecution> },
@@ -149,6 +174,9 @@ impl HookPort for Dispatcher {
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let point = invocation.point();
+        let subscription_execution_observer = context
+            .subscription_execution_observer()
+            .or(self.subscription_execution_observer.as_ref());
 
         // matcher 过滤 + order + 声明顺序（sort_by_key 稳定，同 order 按声明顺序）。
         let mut matching: Vec<&HookSubscription> = self
@@ -179,6 +207,7 @@ impl HookPort for Dispatcher {
                     &current_input,
                     context.cwd(),
                     &invocation_env,
+                    subscription_execution_observer,
                     cancellation,
                 )
                 .await;
@@ -340,6 +369,49 @@ impl HookPort for Dispatcher {
     }
 }
 
+fn hook_script_file_name(command: &str) -> String {
+    let executable = first_shell_command_word(command);
+    std::path::Path::new(&executable)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("hook")
+        .to_string()
+}
+
+fn first_shell_command_word(command: &str) -> String {
+    let mut word = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for character in command.trim_start().chars() {
+        if escaped {
+            word.push(character);
+            escaped = false;
+            continue;
+        }
+        match (quote, character) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('\''), _) => word.push(character),
+            (Some('"'), '\\') => escaped = true,
+            (Some('"'), _) => word.push(character),
+            (Some(_), _) => word.push(character),
+            (None, '\'') | (None, '"') => quote = Some(character),
+            (None, '\\') => escaped = true,
+            (None, character) if character.is_whitespace() => break,
+            (None, _) => word.push(character),
+        }
+    }
+    if escaped {
+        word.push('\\');
+    }
+    if word.is_empty() {
+        "hook".to_string()
+    } else {
+        word
+    }
+}
+
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
@@ -381,7 +453,10 @@ fn invocation_environment(
             env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), "true".to_string());
         }
         HookInvocation::Stop(input) => {
-            env.insert("AEMEATH_STOP_TURNS".to_string(), input.turns.to_string());
+            env.insert(
+                "AEMEATH_STOP_RUN_STEPS".to_string(),
+                input.run_steps.to_string(),
+            );
         }
         HookInvocation::PermissionRequest(input) | HookInvocation::PermissionDenied(input) => {
             env.insert(
@@ -425,19 +500,36 @@ impl Dispatcher {
         current_input: &serde_json::Value,
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
+        subscription_execution_observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
         cancellation: &dyn CancellationSignal,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
         let mut executions: Vec<HookExecution> = Vec::new();
-        let cwd_text = cwd.display().to_string();
-        let command = HookCommand::new(
-            sub.command
-                .command
-                .replace("{AEMEATH_PROJECT_DIR}", &cwd_text)
-                .replace("{CLAUDE_PROJECT_DIR}", &cwd_text),
+        // 命令原样透传：项目目录只经 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`
+        // 环境变量注入（`invocation_environment`），shell 内用 `${AEMEATH_PROJECT_DIR}`
+        // 展开；`{AEMEATH_PROJECT_DIR}` 占位符写法已移除，不再替换。
+        let command = HookCommand::new(sub.command.command.clone());
+        let script = hook_script_file_name(&command.command);
+        Self::observe_subscription_execution(
+            subscription_execution_observer,
+            HookSubscriptionExecutionEvent::Started {
+                point: sub.point,
+                script: script.clone(),
+                attempt: 1,
+            },
         );
         loop {
             attempts += 1;
+            if attempts > 1 {
+                Self::observe_subscription_execution(
+                    subscription_execution_observer,
+                    HookSubscriptionExecutionEvent::AttemptChanged {
+                        point: sub.point,
+                        script: script.clone(),
+                        attempt: attempts,
+                    },
+                );
+            }
             let start = Instant::now();
             let result = self
                 .executor
@@ -453,6 +545,16 @@ impl Dispatcher {
                                 HookDirective::Block { .. } => HookExecutionStatus::Blocked,
                                 _ => HookExecutionStatus::Success,
                             };
+                            let terminal = match status {
+                                HookExecutionStatus::Success => {
+                                    HookSubscriptionExecutionTerminal::Succeeded
+                                }
+                                HookExecutionStatus::Blocked
+                                | HookExecutionStatus::Cancelled
+                                | HookExecutionStatus::ExecutionFailed { .. } => {
+                                    HookSubscriptionExecutionTerminal::Failed
+                                }
+                            };
                             let execution = HookExecution {
                                 status,
                                 attempts,
@@ -464,6 +566,14 @@ impl Dispatcher {
                             // 成功也必须保留 prior executions（此前失败的 attempt 明细），
                             // 使 HookOutcome.executions 完整反映全部重试轨迹。
                             executions.push(execution);
+                            Self::observe_subscription_execution(
+                                subscription_execution_observer,
+                                HookSubscriptionExecutionEvent::Finished {
+                                    point: sub.point,
+                                    script,
+                                    terminal,
+                                },
+                            );
                             return AttemptOutcome::Success {
                                 executions,
                                 directive,
@@ -483,7 +593,15 @@ impl Dispatcher {
                                 duration,
                             };
                             executions.push(execution);
-                            if attempts >= MAX_ATTEMPTS {
+                            if attempts >= self.execution_policy.max_attempts() {
+                                Self::observe_subscription_execution(
+                                    subscription_execution_observer,
+                                    HookSubscriptionExecutionEvent::Finished {
+                                        point: sub.point,
+                                        script,
+                                        terminal: HookSubscriptionExecutionTerminal::Failed,
+                                    },
+                                );
                                 return AttemptOutcome::Exhausted { executions };
                             }
                         }
@@ -491,8 +609,29 @@ impl Dispatcher {
                 }
                 Err(ExecutionFault::Cancelled) => {
                     let execution = HookExecution {
+                        status: HookExecutionStatus::Cancelled,
+                        attempts,
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        duration,
+                    };
+                    executions.push(execution);
+                    Self::observe_subscription_execution(
+                        subscription_execution_observer,
+                        HookSubscriptionExecutionEvent::Finished {
+                            point: sub.point,
+                            script,
+                            terminal: HookSubscriptionExecutionTerminal::Cancelled,
+                        },
+                    );
+                    return AttemptOutcome::Cancelled { executions };
+                }
+                #[cfg(any(not(unix), test))]
+                Err(ExecutionFault::Unsupported) => {
+                    let execution = HookExecution {
                         status: HookExecutionStatus::ExecutionFailed {
-                            error: ExecutionFault::Cancelled.message().to_string(),
+                            error: ExecutionFault::Unsupported.message(),
                         },
                         attempts,
                         exit_code: None,
@@ -501,12 +640,20 @@ impl Dispatcher {
                         duration,
                     };
                     executions.push(execution);
-                    return AttemptOutcome::Cancelled { executions };
+                    Self::observe_subscription_execution(
+                        subscription_execution_observer,
+                        HookSubscriptionExecutionEvent::Finished {
+                            point: sub.point,
+                            script,
+                            terminal: HookSubscriptionExecutionTerminal::Failed,
+                        },
+                    );
+                    return AttemptOutcome::Exhausted { executions };
                 }
                 Err(fault) => {
                     let execution = HookExecution {
                         status: HookExecutionStatus::ExecutionFailed {
-                            error: fault.message().to_string(),
+                            error: fault.message(),
                         },
                         attempts,
                         exit_code: None,
@@ -515,11 +662,28 @@ impl Dispatcher {
                         duration,
                     };
                     executions.push(execution);
-                    if attempts >= MAX_ATTEMPTS {
+                    if attempts >= self.execution_policy.max_attempts() {
+                        Self::observe_subscription_execution(
+                            subscription_execution_observer,
+                            HookSubscriptionExecutionEvent::Finished {
+                                point: sub.point,
+                                script,
+                                terminal: HookSubscriptionExecutionTerminal::Failed,
+                            },
+                        );
                         return AttemptOutcome::Exhausted { executions };
                     }
                 }
             }
+        }
+    }
+
+    fn observe_subscription_execution(
+        observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
+        event: HookSubscriptionExecutionEvent,
+    ) {
+        if let Some(observer) = observer {
+            observer.observe(event);
         }
     }
 
@@ -540,11 +704,11 @@ impl Dispatcher {
         cwd: &std::path::Path,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
-        let turns = match stop_invocation {
-            HookInvocation::Stop(input) => input.turns,
+        let run_steps = match stop_invocation {
+            HookInvocation::Stop(input) => input.run_steps,
             _ => 0,
         };
-        let invocation = HookInvocation::StopFailure(StopFailureInput { turns, error });
+        let invocation = HookInvocation::StopFailure(StopFailureInput { run_steps, error });
 
         // 复用主 dispatch 的 enabled + matcher + order 稳定规则（不再触发新的 StopFailure）。
         let mut matching: Vec<&HookSubscription> = self
@@ -563,7 +727,14 @@ impl Dispatcher {
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self
-                .execute_subscription(sub, &current_input, cwd, &invocation_env, cancellation)
+                .execute_subscription(
+                    sub,
+                    &current_input,
+                    cwd,
+                    &invocation_env,
+                    None,
+                    cancellation,
+                )
                 .await
             {
                 AttemptOutcome::Success { executions, .. } => {

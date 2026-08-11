@@ -5,7 +5,7 @@ mod tests;
 use crate::domain::CatalogQuery;
 use crate::domain::{
     AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillLoadScope,
-    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName,
+    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName, ToolProgressEvent,
 };
 use async_trait::async_trait;
 use project::{WorkspaceId, WorkspaceRead};
@@ -110,6 +110,7 @@ pub trait CancellationSignal: Send + Sync {
 }
 pub trait ProgressSink: Send + Sync {
     fn emit(&self, event: AgentProgressEvent);
+    fn emit_tool_stream(&self, event: ToolProgressEvent);
 }
 pub trait ReadSet: Send + Sync {
     fn record(&self, path: &str);
@@ -128,7 +129,6 @@ pub struct AuthorizationContext {
     pub require_read_before_write: bool,
     pub enforce_bash_safety: bool,
     pub enforce_tool_fuse: bool,
-    pub enforce_permission_hooks: bool,
 }
 
 impl AuthorizationContext {
@@ -137,7 +137,6 @@ impl AuthorizationContext {
         require_read_before_write: true,
         enforce_bash_safety: true,
         enforce_tool_fuse: true,
-        enforce_permission_hooks: true,
     };
 
     pub const ALLOW_ALL: Self = Self {
@@ -145,7 +144,6 @@ impl AuthorizationContext {
         require_read_before_write: false,
         enforce_bash_safety: false,
         enforce_tool_fuse: false,
-        enforce_permission_hooks: false,
     };
 }
 /// Read-only workspace capability available to every tool invocation.

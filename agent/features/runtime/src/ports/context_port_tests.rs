@@ -16,6 +16,7 @@ fn request() -> ContextRequest {
         run_id: sdk::RunId::new("run"),
         step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -55,6 +56,8 @@ impl ContextPort for FakeContextPort {
             urgency: Urgency::None,
             decision_token_count: 0,
             threshold: 1,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         })
     }
@@ -71,6 +74,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -103,6 +107,8 @@ async fn runtime_fake_compiles_against_context_owned_port() {
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
+            progress: None,
+            task_context: None,
         })
         .await
         .unwrap();

@@ -2,14 +2,18 @@ use std::time::{Duration, Instant};
 
 use crate::domain::agent_run::ToolCall;
 
-use super::event::{RunDomainEvent, RunId};
+use super::event::{RunId, RunTimingSnapshot, RuntimeLifecycleEvent};
 use super::spec::RunSpec;
 use super::state::{
-    DrainDecision, InteractionContinuation, PendingInteraction, RunCancellationRequest, RunStatus,
-    RunStep, RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest,
-    RunTransition, RunTransitionError, RunTransitionReason, StopHookBlockResult,
+    DrainDecision, InteractionContinuation, PendingInteraction, RunStatus, RunStep,
+    RunStepCancellationRequest, RunStepId, RunStepStatus, RunTerminationRequest, RunTransition,
+    RunTransitionError, RunTransitionReason, StopHookBlockResult,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
+
+fn duration_millis(now: Instant, started_at: Instant) -> u64 {
+    u64::try_from(now.saturating_duration_since(started_at).as_millis()).unwrap_or(u64::MAX)
+}
 
 #[derive(Debug)]
 pub struct Run {
@@ -23,28 +27,67 @@ pub struct Run {
     /// `apply_drain_decision(EmptyAndSealed, …)`.  Set via
     /// `set_pending_completion_result` before sealing.
     pending_completion_result: Option<String>,
-    /// #1272: next expected drain epoch for per-turn linearization.
+    /// #1272: next expected drain epoch for per-run linearization.
     /// Persisted across `run_loop` calls so that AwaitUser→re-enter
     /// does not reset the epoch.  Each successful drain increments it.
     next_drain_epoch: u64,
-    /// #1248 Task 6: Stop hook block count owned by Run (not StuckGuard).
-    /// Incremented each time the stop hook blocks completion.
-    /// After 15 blocks the 16th triggers RetryExhausted → Run Failed.
+    /// Stop hook block count owned by this Run.
+    /// Incremented each time the Stop hook blocks completion; the frozen
+    /// per-Run policy decides when the first excess block is exhausted.
     stop_hook_block_count: usize,
+    /// Frozen per-Run Stop hook exhaustion policy.
+    stop_hook_policy: share::config::domain::snapshot::StopHookPolicy,
     /// 当前 Run 是否有由用户取消并完成持久化收口的 Step。
     /// Run 可以随后 drain/seal 为 Completed，但对外终态必须保持 UserCancelled。
     user_cancelled_step: bool,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
-    events: Vec<RunDomainEvent>,
+    phase_started_at: Option<Instant>,
+    timing_observation_revision: u64,
+    events: Vec<RuntimeLifecycleEvent>,
 }
 
 impl Run {
+    #[allow(dead_code)]
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
-        Self::with_id(RunId::new_v7(), spec, parent_id)
+        Self::with_id_and_stop_hook_policy(
+            RunId::new_v7(),
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(15),
+        )
     }
 
+    #[cfg(test)]
+    pub fn new_with_stop_hook_block_limit(
+        spec: RunSpec,
+        parent_id: Option<RunId>,
+        max_blocks: usize,
+    ) -> Self {
+        Self::with_id_and_stop_hook_policy(
+            RunId::new_v7(),
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(max_blocks),
+        )
+    }
+
+    #[allow(dead_code)]
     pub fn with_id(id: RunId, spec: RunSpec, parent_id: Option<RunId>) -> Self {
+        Self::with_id_and_stop_hook_policy(
+            id,
+            spec,
+            parent_id,
+            share::config::domain::snapshot::StopHookPolicy::new(15),
+        )
+    }
+
+    pub fn with_id_and_stop_hook_policy(
+        id: RunId,
+        spec: RunSpec,
+        parent_id: Option<RunId>,
+        stop_hook_policy: share::config::domain::snapshot::StopHookPolicy,
+    ) -> Self {
         Self {
             id,
             spec,
@@ -55,9 +98,12 @@ impl Run {
             pending_completion_result: None,
             next_drain_epoch: 0,
             stop_hook_block_count: 0,
+            stop_hook_policy,
             user_cancelled_step: false,
             steps: Vec::new(),
             started_at: None,
+            phase_started_at: None,
+            timing_observation_revision: 0,
             events: Vec::new(),
         }
     }
@@ -122,7 +168,7 @@ impl Run {
             continuation,
         });
         self.apply_state_transition(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser);
-        self.events.push(RunDomainEvent::AwaitingUser {
+        self.events.push(RuntimeLifecycleEvent::AwaitingUser {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             request_id,
@@ -149,7 +195,7 @@ impl Run {
             pending.continuation.resume_status(),
             RunTransitionReason::UserResumed,
         );
-        self.events.push(RunDomainEvent::Resumed {
+        self.events.push(RuntimeLifecycleEvent::Resumed {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             request_id: request_id.clone(),
@@ -171,23 +217,24 @@ impl Run {
                 received: request_id.clone(),
             });
         }
-        Ok(self
-            .pending_interaction
-            .take()
-            .expect("checked above")
-            .continuation)
+        let pending = self.pending_interaction.take().expect("checked above");
+        self.apply_state_transition(
+            pending.continuation.resume_status(),
+            RunTransitionReason::UserResumed,
+        );
+        Ok(pending.continuation)
     }
 
     #[cfg(test)]
-    pub fn events(&self) -> &[RunDomainEvent] {
+    pub fn events(&self) -> &[RuntimeLifecycleEvent] {
         &self.events
     }
 
-    pub fn drain_events(&mut self) -> Vec<RunDomainEvent> {
+    pub fn drain_events(&mut self) -> Vec<RuntimeLifecycleEvent> {
         std::mem::take(&mut self.events)
     }
 
-    pub fn restore_events(&mut self, mut events: Vec<RunDomainEvent>) {
+    pub fn restore_events(&mut self, mut events: Vec<RuntimeLifecycleEvent>) {
         events.append(&mut self.events);
         self.events = events;
     }
@@ -264,7 +311,6 @@ impl Run {
             }
             (RunStatus::FinalizingStep, RunTransition::StepCancelled) => RunStatus::DrainingInput,
             (RunStatus::Terminating, RunTransition::TerminationFinished) => RunStatus::Terminated,
-            (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
             (from, transition) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
@@ -289,14 +335,25 @@ impl Run {
     }
 
     fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
+        let now = Instant::now();
         let from = self.status;
+        self.timing_observation_revision = self.timing_observation_revision.wrapping_add(1);
+        let timing = RunTimingSnapshot {
+            observation_revision: self.timing_observation_revision,
+            total_elapsed_ms: self
+                .started_at
+                .map_or(0, |started_at| duration_millis(now, started_at)),
+            phase_elapsed_ms: 0,
+        };
         self.status = to;
-        self.events.push(RunDomainEvent::Transitioned {
+        self.phase_started_at = Some(now);
+        self.events.push(RuntimeLifecycleEvent::Transitioned {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             from,
             to,
             reason,
+            timing,
         });
         log::debug!(
             target: crate::LOG_TARGET,
@@ -334,7 +391,7 @@ impl Run {
             invocation: None,
             tool_calls: Vec::new(),
         });
-        self.events.push(RunDomainEvent::StepStarted {
+        self.events.push(RuntimeLifecycleEvent::StepStarted {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             step_id: step_id.clone(),
@@ -392,10 +449,7 @@ impl Run {
     fn rejects_controlled_work(&self) -> bool {
         matches!(
             self.status,
-            RunStatus::Cancelling
-                | RunStatus::CancellingStep
-                | RunStatus::FinalizingStep
-                | RunStatus::Terminating
+            RunStatus::CancellingStep | RunStatus::FinalizingStep | RunStatus::Terminating
         ) || self.status.is_terminal()
     }
 
@@ -440,7 +494,7 @@ impl Run {
             return Err(RunTransitionError::StepIncomplete);
         }
         step.status = RunStepStatus::Done;
-        self.events.push(RunDomainEvent::StepCompleted {
+        self.events.push(RuntimeLifecycleEvent::StepCompleted {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             step_id: step_id.clone(),
@@ -452,7 +506,7 @@ impl Run {
         if self.rejects_controlled_work() {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
-        self.events.push(RunDomainEvent::StuckDetected {
+        self.events.push(RuntimeLifecycleEvent::StuckDetected {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             reason: reason.into(),
@@ -461,13 +515,15 @@ impl Run {
     }
 
     pub fn start_draining(&mut self) -> Result<(), RunTransitionError> {
+        let now = Instant::now();
+        self.started_at = Some(now);
+        self.phase_started_at = Some(now);
         self.transition(RunTransition::StartDraining)?;
-        self.started_at = Some(Instant::now());
-        self.events.push(RunDomainEvent::Started {
+        self.events.push(RuntimeLifecycleEvent::Started {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
         });
-        self.events.push(RunDomainEvent::DrainingInput {
+        self.events.push(RuntimeLifecycleEvent::DrainingInput {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
         });
@@ -497,19 +553,17 @@ impl Run {
         self.next_drain_epoch += 1;
     }
 
-    /// #1248 Task 6: Current stop hook block count for this Run.
+    /// Current stop hook block count for this Run.
     pub fn stop_hook_block_count(&self) -> usize {
         self.stop_hook_block_count
     }
 
-    /// #1248 Task 6: Record a stop hook block and return the typed result.
-    ///
-    /// Increments the count.  Blocks 1-15 return `Blocked` (continue with
-    /// feedback).  The 16th block returns `RetryExhausted` (transition to Failed).
+    /// Record a Stop hook block using this Run's frozen policy.
+    /// The first block beyond `max_blocks` returns `RetryExhausted`.
     pub fn record_stop_hook_block(&mut self) -> StopHookBlockResult {
         self.stop_hook_block_count = self.stop_hook_block_count.saturating_add(1);
         let count = self.stop_hook_block_count;
-        if count >= 16 {
+        if count > self.stop_hook_policy.max_blocks() {
             StopHookBlockResult::RetryExhausted { count }
         } else {
             StopHookBlockResult::Blocked { count }
@@ -553,7 +607,7 @@ impl Run {
         };
         self.transition(transition)?;
         if let Some(result) = result {
-            self.events.push(RunDomainEvent::Completed {
+            self.events.push(RuntimeLifecycleEvent::Completed {
                 run_id: self.id.clone(),
                 parent_run_id: self.parent_id.clone(),
                 result,
@@ -588,11 +642,12 @@ impl Run {
             RunStatus::CancellingStep,
             RunTransitionReason::StepCancellationRequested,
         );
-        self.events.push(RunDomainEvent::StepCancellationRequested {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-            step_id: step_id.clone(),
-        });
+        self.events
+            .push(RuntimeLifecycleEvent::StepCancellationRequested {
+                run_id: self.id.clone(),
+                parent_run_id: self.parent_id.clone(),
+                step_id: step_id.clone(),
+            });
         RunStepCancellationRequest::Accepted
     }
 
@@ -609,16 +664,32 @@ impl Run {
             RunStatus::FinalizingStep,
             RunTransitionReason::StepFinalizationStarted,
         );
-        self.events.push(RunDomainEvent::StepFinalizationStarted {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-            step_id: step_id.clone(),
-        });
+        self.events
+            .push(RuntimeLifecycleEvent::StepFinalizationStarted {
+                run_id: self.id.clone(),
+                parent_run_id: self.parent_id.clone(),
+                step_id: step_id.clone(),
+            });
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn finish_cancelled_step(&mut self, step_id: &RunStepId) -> Result<(), RunTransitionError> {
         self.finish_controlled_step(step_id, RunStepStatus::Cancelled)
+    }
+
+    pub fn finish_step_cancellation(
+        &mut self,
+        step_id: &RunStepId,
+        status: RunStepStatus,
+    ) -> Result<(), RunTransitionError> {
+        if !matches!(
+            status,
+            RunStepStatus::Cancelled | RunStepStatus::CancellationUnconfirmed
+        ) {
+            return Err(RunTransitionError::StepNotActive);
+        }
+        self.finish_controlled_step(step_id, status)
     }
 
     #[cfg(test)]
@@ -644,13 +715,17 @@ impl Run {
             self.user_cancelled_step = true;
         }
         self.transition(RunTransition::StepCancelled)?;
-        self.events.push(RunDomainEvent::StepCancelled {
+        self.events.push(RuntimeLifecycleEvent::StepCancelled {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             step_id: step_id.clone(),
-            confirmed,
+            terminal: if confirmed {
+                sdk::RunStepCancellationTerminal::Cancelled
+            } else {
+                sdk::RunStepCancellationTerminal::CancellationUnconfirmed
+            },
         });
-        self.events.push(RunDomainEvent::DrainingInput {
+        self.events.push(RuntimeLifecycleEvent::DrainingInput {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
         });
@@ -674,12 +749,13 @@ impl Run {
             RunStatus::Terminating,
             RunTransitionReason::TerminationRequested,
         );
-        self.events.push(RunDomainEvent::TerminationRequested {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-            reason: run_reason,
-            deadline,
-        });
+        self.events
+            .push(RuntimeLifecycleEvent::TerminationRequested {
+                run_id: self.id.clone(),
+                parent_run_id: self.parent_id.clone(),
+                reason: run_reason,
+                deadline,
+            });
         RunTerminationRequest::Accepted
     }
 
@@ -689,48 +765,10 @@ impl Run {
             .ok_or(RunTransitionError::RunNotActive(self.status))?;
         self.transition(RunTransition::TerminationFinished)?;
         self.close_active_steps(RunStepStatus::CancellationUnconfirmed);
-        self.events.push(RunDomainEvent::Terminated {
+        self.events.push(RuntimeLifecycleEvent::Terminated {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             reason,
-        });
-        Ok(())
-    }
-
-    pub fn request_cancellation(&mut self) -> RunCancellationRequest {
-        if self.status.is_terminal() {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",
-                self.id,
-                self.parent_id_display(),
-                self.status,
-                RunStatus::Cancelling,
-                RunTransitionReason::InterruptRequested,
-            );
-            return RunCancellationRequest::AlreadyTerminal;
-        }
-        if self.status == RunStatus::Cancelling {
-            return RunCancellationRequest::AlreadyCancelling;
-        }
-        self.pending_interaction = None;
-        self.apply_state_transition(
-            RunStatus::Cancelling,
-            RunTransitionReason::InterruptRequested,
-        );
-        self.events.push(RunDomainEvent::CancellationRequested {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
-        });
-        RunCancellationRequest::Accepted
-    }
-
-    pub fn finish_cancellation(&mut self) -> Result<(), RunTransitionError> {
-        self.transition(RunTransition::CancellationFinished)?;
-        self.close_active_steps(RunStepStatus::Cancelled);
-        self.events.push(RunDomainEvent::Cancelled {
-            run_id: self.id.clone(),
-            parent_run_id: self.parent_id.clone(),
         });
         Ok(())
     }
@@ -764,7 +802,7 @@ impl Run {
         }
         self.apply_state_transition(RunStatus::Failed, RunTransitionReason::Failed);
         self.close_active_steps(RunStepStatus::Failed);
-        self.events.push(RunDomainEvent::Failed {
+        self.events.push(RuntimeLifecycleEvent::Failed {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             error: error.into(),

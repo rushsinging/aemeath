@@ -6,9 +6,41 @@ fn bash_tool(ctx: &ToolExecutionContext) -> BashTool {
         control: crate::domain::test_support::workspace_control(ctx),
     }
 }
-use crate::domain::{AgentProgressEvent, AgentProgressKind};
+use crate::domain::ToolProgressEvent;
 use serde_json::json;
 use tempfile::tempdir;
+
+#[tokio::test]
+async fn abort_reader_tasks_waits_until_pipe_futures_are_dropped() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    struct DropMarker(Arc<AtomicBool>);
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let stdout_dropped = Arc::new(AtomicBool::new(false));
+    let stderr_dropped = Arc::new(AtomicBool::new(false));
+    let stdout_marker = DropMarker(stdout_dropped.clone());
+    let stderr_marker = DropMarker(stderr_dropped.clone());
+    let stdout_handle = tokio::spawn(async move {
+        let _marker = stdout_marker;
+        std::future::pending::<Vec<u8>>().await
+    });
+    let stderr_handle = tokio::spawn(async move {
+        let _marker = stderr_marker;
+        std::future::pending::<Vec<u8>>().await
+    });
+    tokio::task::yield_now().await;
+
+    abort_reader_tasks(stdout_handle, stderr_handle).await;
+
+    assert!(stdout_dropped.load(Ordering::SeqCst));
+    assert!(stderr_dropped.load(Ordering::SeqCst));
+}
 
 #[tokio::test]
 async fn bash_allow_all_bypasses_shell_injection_guard() {
@@ -206,15 +238,16 @@ async fn test_bash_result_cwd_on_empty_output() {
 async fn test_bash_streams_stdout_via_progress_tx() {
     use tokio::sync::mpsc;
 
-    struct ChannelProgressSink(mpsc::Sender<AgentProgressEvent>);
+    struct ChannelProgressSink(mpsc::Sender<ToolProgressEvent>);
     impl crate::domain::ProgressSink for ChannelProgressSink {
-        fn emit(&self, event: AgentProgressEvent) {
+        fn emit(&self, _event: crate::domain::AgentProgressEvent) {}
+        fn emit_tool_stream(&self, event: ToolProgressEvent) {
             let _ = self.0.try_send(event);
         }
     }
 
     let workspace = tempdir().unwrap();
-    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
+    let (tx, mut rx) = mpsc::channel::<ToolProgressEvent>(256);
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
     )
@@ -248,15 +281,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
     );
 
     // All collected text fragments concatenated should contain the echoed marker
-    let all_text: String = events
-        .iter()
-        .filter_map(|ev| match &ev.kind {
-            AgentProgressKind::ToolOutput { tool_name, text } if tool_name == "Bash" => {
-                Some(text.as_str())
-            }
-            _ => None,
-        })
-        .collect();
+    let all_text: String = events.iter().map(|ev| ev.text.as_str()).collect();
 
     assert!(
         all_text.contains("progress_stream_test_marker"),
@@ -266,24 +291,119 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 
     // No event should contain the internal CWD marker
     for ev in &events {
-        if let AgentProgressKind::ToolOutput { tool_name, text } = &ev.kind {
-            assert_eq!(tool_name, "Bash");
-            assert!(
-                !text.contains("__AEMEATH_CWD__"),
-                "progress event must not contain __AEMEATH_CWD__ marker: {}",
-                text
-            );
+        assert!(
+            !ev.text.contains("__AEMEATH_CWD__"),
+            "progress event must not contain __AEMEATH_CWD__ marker: {}",
+            ev.text
+        );
+    }
+
+    // 拼接后的输出应恰好出现一次 marker 文本（无重复行/空行注入）。
+    // 回归：suffix_carry 重复处理曾导致短输出产生重复行与空行事件。
+    assert_eq!(
+        all_text.matches("progress_stream_test_marker").count(),
+        1,
+        "marker 文本应恰好出现一次（无重复行），got: {:?}",
+        events
+    );
+    assert!(
+        !events.iter().any(|ev| ev.text.trim().is_empty()),
+        "不应产生空行事件（marker 前缀 \\n 已被剥离），got: {:?}",
+        events
+    );
+}
+
+#[tokio::test]
+#[ignore = "spawn 真实 bash（sleep 60）+ 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
+async fn bash_cancellation_returns_visible_command_cancelled_result() {
+    struct Cancelled;
+
+    #[async_trait::async_trait]
+    impl crate::domain::CancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+
+        async fn cancelled(&self) {}
+
+        fn child_signal(&self) -> std::sync::Arc<dyn crate::domain::CancellationSignal> {
+            std::sync::Arc::new(Self)
         }
     }
 
-    // Sequence must be monotonically increasing and > 0
-    for ev in &events {
-        assert!(
-            ev.sequence > 0,
-            "progress event sequence must be > 0, got {}",
-            ev.sequence
-        );
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_cancellation(std::sync::Arc::new(Cancelled));
+
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "sleep 60" }), &ctx)
+        .await;
+
+    assert!(result.is_error);
+    assert_eq!(result.text, "Command cancelled by user");
+}
+
+#[tokio::test]
+#[ignore = "spawn 真实 bash（sleep 60）+ 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
+async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
+    struct SharedCancellation {
+        cancelled: std::sync::atomic::AtomicBool,
+        notify: tokio::sync::Notify,
     }
+
+    #[async_trait::async_trait]
+    impl crate::domain::CancellationSignal for SharedCancellation {
+        fn is_cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        async fn cancelled(&self) {
+            if self.is_cancelled() {
+                return;
+            }
+            self.notify.notified().await;
+        }
+
+        fn child_signal(&self) -> std::sync::Arc<dyn crate::domain::CancellationSignal> {
+            std::sync::Arc::new(Self {
+                cancelled: std::sync::atomic::AtomicBool::new(self.is_cancelled()),
+                notify: tokio::sync::Notify::new(),
+            })
+        }
+    }
+
+    let workspace = tempdir().unwrap();
+    let cancellation = std::sync::Arc::new(SharedCancellation {
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+        notify: tokio::sync::Notify::new(),
+    });
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_cancellation(cancellation.clone());
+    let tool = bash_tool(&ctx);
+
+    let execution = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
+        let call = tool.call(json!({ "command": "sleep 60", "timeout": 600_000 }), &ctx);
+        tokio::pin!(call);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        cancellation
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        cancellation.notify.notify_waiters();
+        call.await
+    })
+    .await
+    .expect("running Bash must observe the Step cancellation before its command timeout");
+
+    assert!(execution.is_error);
+    assert_eq!(execution.text, "Command cancelled by user");
 }
 
 #[tokio::test]
@@ -413,8 +533,41 @@ fn test_preview_respects_utf8_char_boundary() {
     );
 }
 
+// ---- BashInput goal 字段：反序列化兼容 + schema required ----
+
+#[test]
+fn bash_input_goal_required_and_deserialization() {
+    use crate::domain::types::ToolSchema;
+
+    // 1. 老 session 缺 goal 字段时反序列化仍成功（serde default 兼容）
+    let old_json = json!({"command": "ls -la", "timeout": 5000});
+    let input: BashInput = serde_json::from_value(old_json).unwrap();
+    assert_eq!(input.command, "ls -la");
+    assert!(input.goal.is_empty(), "老 session 缺 goal 应反序列化为空串");
+
+    // 2. goal 字段正常解析
+    let new_json = json!({"goal": "列出文件", "command": "ls -la"});
+    let input: BashInput = serde_json::from_value(new_json).unwrap();
+    assert_eq!(input.goal, "列出文件");
+    assert_eq!(input.command, "ls -la");
+
+    // 3. schema 中 goal 和 command 均在 required 列表
+    let schema = BashInput::data_schema();
+    let required = schema.get("required").expect("schema 应有 required 字段");
+    let required_str = required.to_string();
+    assert!(
+        required_str.contains("\"goal\""),
+        "goal 应在 required 中，实际: {required_str}"
+    );
+    assert!(
+        required_str.contains("\"command\""),
+        "command 应在 required 中，实际: {required_str}"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
+#[ignore = "spawn 真实 bash（process_group + kill -9）与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
@@ -440,5 +593,35 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
         result.text.contains("SIGKILL"),
         "error message should contain signal name, got: {}",
         result.text
+    );
+}
+
+#[test]
+fn bash_tool_timeout_secs_allows_up_to_one_hour() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    // Outer override must cover the full 3600s schema max so the outer
+    // guard does not kill a command before its internal timeout fires.
+    assert_eq!(tool.timeout_secs(), 3600);
+}
+
+#[test]
+fn bash_tool_description_advertises_60_minute_max() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+    let tool = bash_tool(&ctx);
+    assert!(
+        tool.description().contains("max 3600s"),
+        "description should advertise 60-minute max, got: {}",
+        tool.description()
     );
 }

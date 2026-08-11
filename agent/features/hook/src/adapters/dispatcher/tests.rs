@@ -8,6 +8,8 @@
 
 #![cfg(test)]
 
+use std::sync::{Arc, Mutex};
+
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{
@@ -17,7 +19,10 @@ use crate::domain::outcome::{
     HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecutionStatus, HookReason,
 };
 use crate::domain::subscription::{HookFailurePolicy, HookMatcher, HookSubscription};
-use crate::ports::{HookDispatchContext, HookPort};
+use crate::ports::{
+    HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookSubscriptionExecutionObserver,
+};
 
 use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
 
@@ -32,12 +37,23 @@ fn pre_tool_use(tool_name: &str) -> HookInvocation {
     })
 }
 
-fn stop(turns: usize) -> HookInvocation {
-    HookInvocation::Stop(StopInput { turns })
+fn stop(run_steps: usize) -> HookInvocation {
+    HookInvocation::Stop(StopInput { run_steps })
 }
 
 fn sub(point: HookPoint, command: &str) -> HookSubscription {
     HookSubscription::new(point, command)
+}
+
+#[derive(Default)]
+struct RecordingSubscriptionObserver {
+    events: Mutex<Vec<HookSubscriptionExecutionEvent>>,
+}
+
+impl HookSubscriptionExecutionObserver for RecordingSubscriptionObserver {
+    fn observe(&self, event: HookSubscriptionExecutionEvent) {
+        self.events.lock().expect("observer lock").push(event);
+    }
 }
 
 #[tokio::test]
@@ -78,7 +94,7 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
         "/tmp/aemeath-workspace-a"
     );
     assert_eq!(calls[0].env["AEMEATH_TOOL_NAME"], "Bash");
-    assert!(!calls[0].env.contains_key("AEMEATH_STOP_TURNS"));
+    assert!(!calls[0].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
 
     assert_eq!(calls[1].cwd, second_workspace);
     assert_eq!(calls[1].env["AEMEATH_HOOK_EVENT"], "\"Stop\"");
@@ -86,7 +102,7 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
         calls[1].env["AEMEATH_PROJECT_DIR"],
         "/tmp/aemeath-workspace-b"
     );
-    assert_eq!(calls[1].env["AEMEATH_STOP_TURNS"], "7");
+    assert_eq!(calls[1].env["AEMEATH_STOP_RUN_STEPS"], "7");
     assert!(!calls[1].env.contains_key("AEMEATH_TOOL_NAME"));
     assert!(!calls[1].env.contains_key("AEMEATH_TOOL_INPUT"));
 }
@@ -120,8 +136,8 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
         calls[3].env["AEMEATH_PROJECT_DIR"],
         "/tmp/aemeath-stop-workspace"
     );
-    assert!(!calls[3].env.contains_key("AEMEATH_STOP_TURNS"));
-    assert_eq!(calls[3].stdin["StopFailure"]["turns"], 9);
+    assert!(!calls[3].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
+    assert_eq!(calls[3].stdin["StopFailure"]["run_steps"], 9);
 }
 
 // 各测试直接内联构造 Dispatcher + Scripted，以保持调用顺序与步骤入队的可读性。
@@ -399,13 +415,54 @@ async fn updated_input_replaces_user_prompt_at_payload_location() {
 // 6. ExecutionFailed 各类最多重试 3 次
 // ════════════════════════════════════════════════════════════
 
-/// 参数化：每种协议级故障连续发生时，最多重试 MAX_ATTEMPTS(3) 次。
+#[tokio::test]
+async fn configured_execution_attempt_limit_controls_failure_retries() {
+    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::fault(ExecutionFault::Spawn),
+    ]);
+    let dispatcher =
+        Dispatcher::with_scripted_and_attempt_limit(subscriptions, scripted.clone(), 2);
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(scripted.call_count(), 2);
+    assert_eq!(outcome.executions.len(), 2);
+}
+
+#[tokio::test]
+async fn unsupported_platform_failure_is_not_retried() {
+    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Unsupported),
+        ScriptStep::fault(ExecutionFault::Unsupported),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(pre_tool_use("X"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(scripted.call_count(), 1);
+    assert_eq!(outcome.executions.len(), 1);
+    assert!(matches!(
+        outcome.executions[0].status,
+        HookExecutionStatus::ExecutionFailed { ref error }
+            if error == "当前平台不支持 Hook 命令执行"
+    ));
+}
+
+/// 参数化：每种可恢复协议级故障连续发生时，最多执行默认策略的 3 次尝试。
 async fn assert_fault_retries_three_times(kind: ExecutionFault) {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
-        ScriptStep::fault(kind),
-        ScriptStep::fault(kind),
-        ScriptStep::fault(kind),
+        ScriptStep::fault(kind.clone()),
+        ScriptStep::fault(kind.clone()),
+        ScriptStep::fault(kind.clone()),
     ]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -1123,13 +1180,13 @@ async fn block_policy_exhausted_short_circuits_remaining_subscriptions() {
 }
 
 // ════════════════════════════════════════════════════════════
-// 14. Cancelled 也是一次 attempt：保留 ExecutionFailed / 取消明细
+// 14. Cancelled 也是一次 attempt：保留 typed 取消明细
 // ════════════════════════════════════════════════════════════
 
-/// 执行返回 Cancelled 视作一次 attempt，必须在 executions 中保留一条
-/// ExecutionFailed 明细（错误文本为中文），而非静默丢弃。
+/// 执行返回 Cancelled 视作一次 attempt，必须在 executions 中保留 typed
+/// Cancelled 明细，而非压入 ExecutionFailed 文本或静默丢弃。
 #[tokio::test]
-async fn cancelled_records_execution_failed_with_chinese_detail() {
+async fn cancelled_records_typed_execution_status() {
     let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::fault(ExecutionFault::Cancelled)]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -1149,15 +1206,10 @@ async fn cancelled_records_execution_failed_with_chinese_detail() {
         "Cancelled 这一次 attempt 的明细必须保留，实际 = {:?}",
         outcome.executions
     );
-    match &outcome.executions[0].status {
-        HookExecutionStatus::ExecutionFailed { error } => {
-            assert!(
-                error.contains('取') && error.contains('消'),
-                "Cancelled 的 ExecutionFailed 错误文本应为非空中文（含「取消」），实际 = {error:?}"
-            );
-        }
-        other => panic!("Cancelled 这一次 attempt 应记为 ExecutionFailed，实际 status = {other:?}"),
-    }
+    assert!(matches!(
+        outcome.executions[0].status,
+        HookExecutionStatus::Cancelled
+    ));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1318,6 +1370,158 @@ async fn display_message_attempt_and_ordinal_after_retries() {
     assert_eq!(stable_msg.execution_ordinal, 4);
     // ordinal 单调递增。
     assert!(flaky_msg.execution_ordinal < stable_msg.execution_ordinal);
+}
+
+#[test]
+fn script_file_name_reconstructs_adjacent_quoted_and_unquoted_command_segments() {
+    assert_eq!(
+        super::hook_script_file_name("\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-verify.sh --fast"),
+        "stop-verify.sh"
+    );
+    assert_eq!(
+        super::hook_script_file_name(
+            "'$AEMEATH_PROJECT_DIR'/.agents/hooks/check-architecture-guards.sh"
+        ),
+        "check-architecture-guards.sh"
+    );
+}
+
+#[tokio::test]
+async fn subscription_execution_events_follow_order_and_expose_only_script_file_name() {
+    let subs = vec![
+        sub(
+            HookPoint::PreToolUse,
+            "${AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh --secret value",
+        )
+        .with_order(20),
+        sub(
+            HookPoint::PreToolUse,
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+        )
+        .with_order(10),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let observer = Arc::new(RecordingSubscriptionObserver::default());
+    let dispatcher = Dispatcher::with_scripted(subs, scripted)
+        .with_subscription_execution_observer(observer.clone());
+
+    dispatcher
+        .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        observer.events.lock().expect("observer events").as_slice(),
+        [
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::PreToolUse,
+                script: "check-first.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::PreToolUse,
+                script: "check-first.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::PreToolUse,
+                script: "check-second.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::PreToolUse,
+                script: "check-second.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+        ]
+    );
+}
+
+/// `{AEMEATH_PROJECT_DIR}` / `{CLAUDE_PROJECT_DIR}` 占位符写法已移除：
+/// 命令原样传给执行器，项目目录只经 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`
+/// 环境变量注入（shell 内用 `${AEMEATH_PROJECT_DIR}` 展开）。
+#[tokio::test]
+async fn commands_pass_through_verbatim_and_project_dir_reaches_env_only() {
+    let subs = vec![
+        sub(
+            HookPoint::PreToolUse,
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+        ),
+        sub(
+            HookPoint::PreToolUse,
+            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh",
+        ),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+    let workspace = std::path::PathBuf::from("/tmp/aemeath-project-dir-env");
+
+    dispatcher
+        .dispatch_at(
+            pre_tool_use("Bash"),
+            HookDispatchContext::new(&workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    // 命令不再做 `{}` 占位符替换，原样传给执行器（含历史 `{}` 写法也不改写）。
+    assert_eq!(
+        scripted.commands(),
+        [
+            "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
+            "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh",
+        ]
+    );
+    // 项目目录只经环境变量注入，供 shell 展开。
+    let calls = scripted.calls();
+    assert_eq!(calls.len(), 2);
+    for call in &calls {
+        assert_eq!(call.cwd, workspace);
+        assert_eq!(
+            call.env["AEMEATH_PROJECT_DIR"],
+            "/tmp/aemeath-project-dir-env"
+        );
+        assert_eq!(
+            call.env["CLAUDE_PROJECT_DIR"],
+            "/tmp/aemeath-project-dir-env"
+        );
+    }
+}
+
+#[tokio::test]
+async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Spawn),
+        ScriptStep::ok_exit(0, ""),
+    ]);
+    let observer = Arc::new(RecordingSubscriptionObserver::default());
+    let dispatcher =
+        Dispatcher::with_scripted(vec![sub(HookPoint::Stop, "/hooks/check-stop.sh")], scripted)
+            .with_subscription_execution_observer(observer.clone());
+
+    dispatcher
+        .dispatch(stop(1), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        observer.events.lock().expect("observer events").as_slice(),
+        [
+            HookSubscriptionExecutionEvent::Started {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                attempt: 1,
+            },
+            HookSubscriptionExecutionEvent::AttemptChanged {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                attempt: 2,
+            },
+            HookSubscriptionExecutionEvent::Finished {
+                point: HookPoint::Stop,
+                script: "check-stop.sh".to_string(),
+                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+            },
+        ]
+    );
 }
 
 /// 没有 additionalContext / systemMessage 的成功执行不应产生展示消息。

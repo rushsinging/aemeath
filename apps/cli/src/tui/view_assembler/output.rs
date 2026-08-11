@@ -1,16 +1,16 @@
-use crate::tui::model::conversation::block::HookNoticeKind;
 #[cfg(test)]
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
+#[cfg(test)]
 use crate::tui::model::conversation::model::ConversationModel;
 #[cfg(test)]
 use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_model::output::HookNoticeBlockView;
 #[cfg(test)]
 use crate::tui::view_model::OutputViewModel;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
-    SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    OutputBlockKind, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
 #[cfg(test)]
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use super::output_tool_view::{
 #[cfg(test)]
 /// 测试参考装配使用的完整工具索引。
 pub(super) struct ToolIndex<'a> {
-    calls: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), &'a ToolCall>,
+    calls: HashMap<(&'a ChatId, &'a ChatRunId, &'a ToolCallId), &'a ToolCall>,
 }
 
 #[cfg(test)]
@@ -32,7 +32,7 @@ impl<'a> ToolIndex<'a> {
     pub(super) fn build(conversation: &'a ConversationModel) -> Self {
         let mut calls = HashMap::new();
         for chat in &conversation.chats {
-            for turn in &chat.turns {
+            for turn in &chat.runs {
                 for call in &turn.tool_calls {
                     if let Some(id) = call.id.as_ref() {
                         calls.insert((&chat.id, &turn.id, id), call);
@@ -47,10 +47,10 @@ impl<'a> ToolIndex<'a> {
     pub(super) fn call(
         &self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+        self.calls.get(&(chat_id, run_id, tool_id)).copied()
     }
 }
 
@@ -59,10 +59,10 @@ impl ToolCallLookup for ToolIndex<'_> {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+        self.calls.get(&(chat_id, run_id, tool_id)).copied()
     }
 }
 
@@ -103,11 +103,15 @@ impl OutputViewAssembler {
                 let tool = find_tool_view(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                     workspace_root,
                 )?;
                 let mut parent = leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
+                // #1547：有最终 result_summary 时装配权威最终 `<tool-id>-result`；
+                // 没有最终结果但有 streaming preview 时装配临时
+                // `<tool-id>-streaming-result`。二者都用 OutputBlockKind::ToolResult、
+                // depth=1，且不会同时存在。
                 if let Some(result_text) = tool.result_summary.clone() {
                     let result_id = format!("{}-result", reference.tool_call_id.as_ref());
                     let child = leaf(
@@ -117,10 +121,36 @@ impl OutputViewAssembler {
                             tool_title: tool.title.clone(),
                             args_preview: tool.args_preview.clone(),
                             result_text,
+                            activity_lines: None,
+                            workspace_root: None,
                             data: tool
                                 .result_payload
                                 .as_ref()
                                 .map(|payload| payload.content.clone()),
+                            style: tool.style,
+                        }),
+                    );
+                    push_child_checked(&mut parent, child, 1);
+                } else if let Some(activities) = tool.streaming_preview.clone() {
+                    let result_id = format!("{}-streaming-result", reference.tool_call_id.as_ref());
+                    let result_text = activities
+                        .iter()
+                        .filter_map(|activity| match &activity.content {
+                            crate::tui::view_model::output::AgentActivityContentView::Text(content) => Some(content.as_str()),
+                            crate::tui::view_model::output::AgentActivityContentView::ToolCall { .. } => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let child = leaf(
+                        result_id.clone(),
+                        OutputBlockKind::ToolResult(ToolResultBlockView {
+                            key: result_id,
+                            tool_title: tool.title.clone(),
+                            args_preview: tool.args_preview.clone(),
+                            result_text,
+                            activity_lines: Some(activities),
+                            workspace_root: workspace_root.map(std::path::Path::to_path_buf),
+                            data: None,
                             style: tool.style,
                         }),
                     );
@@ -132,7 +162,7 @@ impl OutputViewAssembler {
                 if tool_result_is_embedded(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                 ) {
                     return None;
@@ -140,7 +170,7 @@ impl OutputViewAssembler {
                 let call = find_tool_call(
                     tool_lookup,
                     &reference.context.chat_id,
-                    &reference.context.turn_id,
+                    &reference.context.run_id,
                     &reference.tool_call_id,
                 )?;
                 let payload = call.result.as_ref()?;
@@ -168,6 +198,20 @@ impl OutputViewAssembler {
                     }),
                 ))
             }
+            OutputTimelineItem::HookNotice {
+                id,
+                title,
+                text,
+                kind,
+            } => Some(leaf(
+                id.clone(),
+                OutputBlockKind::HookNotice(HookNoticeBlockView {
+                    key: id.clone(),
+                    title: title.clone(),
+                    body: text.clone(),
+                    kind: kind.clone(),
+                }),
+            )),
             OutputTimelineItem::System { id, text } => Some(leaf(
                 id.clone(),
                 OutputBlockKind::SystemNotice(TextBlockView {
@@ -176,28 +220,6 @@ impl OutputViewAssembler {
                     style: SemanticStyle::Muted,
                 }),
             )),
-            OutputTimelineItem::HookNotice { id, content } => {
-                let (kind, style) = match content.kind {
-                    HookNoticeKind::Blocked => {
-                        (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
-                    }
-                    HookNoticeKind::Failed => {
-                        (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
-                    }
-                    HookNoticeKind::Info => (HookNoticeSemanticKind::Info, SemanticStyle::Muted),
-                };
-                Some(leaf(
-                    id.clone(),
-                    OutputBlockKind::HookNotice(HookNoticeBlockView {
-                        key: id.clone(),
-                        kind,
-                        title: content.title.clone(),
-                        body: content.body.clone(),
-                        details: content.details.clone(),
-                        style,
-                    }),
-                ))
-            }
             OutputTimelineItem::Error { id, text } => Some(leaf(
                 id.clone(),
                 OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -207,14 +229,6 @@ impl OutputViewAssembler {
                 }),
             )),
             OutputTimelineItem::QueuedUserMessage { .. } => None,
-            OutputTimelineItem::AgentProgress { id, message, .. } => Some(leaf(
-                id.clone(),
-                OutputBlockKind::DiagnosticNotice(TextBlockView {
-                    key: id.clone(),
-                    text: message.clone(),
-                    style: SemanticStyle::Running,
-                }),
-            )),
             OutputTimelineItem::AskUserBatch {
                 id,
                 slots,
@@ -226,7 +240,7 @@ impl OutputViewAssembler {
                 chat_input_text,
                 chat_input_cursor,
                 confirm_cursor,
-                confirmed,
+                completion,
                 ..
             } => {
                 use crate::tui::model::conversation::block::AskUserPhase as MPhase;
@@ -259,7 +273,23 @@ impl OutputViewAssembler {
                         chat_input_text: chat_input_text.clone(),
                         chat_input_cursor: *chat_input_cursor,
                         confirm_cursor: *confirm_cursor,
-                        confirmed: *confirmed,
+                        completion: match completion {
+                            crate::tui::model::conversation::block::AskUserCompletion::Active => {
+                                crate::tui::view_model::output::AskUserCompletionView::Active
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::ReplyPending => {
+                                crate::tui::view_model::output::AskUserCompletionView::ReplyPending
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::CancelPending => {
+                                crate::tui::view_model::output::AskUserCompletionView::CancelPending
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::Answered => {
+                                crate::tui::view_model::output::AskUserCompletionView::Answered
+                            }
+                            crate::tui::model::conversation::block::AskUserCompletion::Cancelled => {
+                                crate::tui::view_model::output::AskUserCompletionView::Cancelled
+                            }
+                        },
                     }),
                 ))
             }
@@ -291,18 +321,6 @@ impl OutputViewAssembler {
                 ))
             }
         }
-    }
-
-    pub(super) fn assemble_placeholder(conversation: &ConversationModel) -> Option<BlockNode> {
-        let placeholder = conversation.model_stream_placeholder.as_ref()?;
-        Some(leaf(
-            "model-stream-placeholder".to_string(),
-            OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
-                key: "model-stream-placeholder".to_string(),
-                elapsed_secs: placeholder.elapsed_secs,
-                phase: placeholder.phase.clone(),
-            }),
-        ))
     }
 }
 
@@ -338,7 +356,12 @@ fn assemble_output_window(
     window: crate::tui::view_model::OutputRenderWindow,
 ) -> OutputViewModel {
     super::retained_output_view::RetainedOutputView::default()
-        .materialize_window(conversation, workspace_root, window)
+        .materialize_window(
+            conversation,
+            &crate::tui::model::display_history::DisplayHistoryModel::default(),
+            workspace_root,
+            window,
+        )
         .view_model
 }
 

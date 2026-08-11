@@ -55,8 +55,8 @@ pub(crate) fn convert_messages(messages: &[Message]) -> Vec<serde_json::Value> {
 /// `cache_control: {"type": "ephemeral"}` 断点，让 Anthropic 缓存
 /// 整个对话历史前缀。
 ///
-/// Agentic loop 每 turn 新增 2 条消息，penultimate 消息不断前移，
-/// 使前一 turn 的缓存前缀与当前 turn 的请求前缀匹配 → cache hit。
+/// Agentic loop 每 run step 新增 2 条消息，penultimate 消息不断前移，
+/// 使前一 run 的缓存前缀与当前 run 的请求前缀匹配 → cache hit。
 ///
 /// 配合 system static block（断点①）和 tools 数组（断点②），
 /// 共使用 3/4 个 Anthropic 允许的 cache_control 断点。
@@ -245,7 +245,8 @@ mod tests {
             }],
             metadata: Some(MessageMetadata {
                 source: MessageSource::SystemGenerated,
-                stop_hook: None,
+                hook_notice: None,
+                skill_request: None,
             }),
         };
         let result = convert_messages(&[msg]);

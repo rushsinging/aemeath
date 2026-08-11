@@ -1,0 +1,294 @@
+use super::resumed_history::{ResumedHistoryBacking, ResumedHistoryItemKind};
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
+use crate::tui::view_model::OutputBlockKind;
+
+fn index(session_id: &str, revision: u64, count: usize) -> sdk::DisplayHistoryIndex {
+    sdk::DisplayHistoryIndex {
+        session_id: session_id.to_string(),
+        generation_revision: revision,
+        steps: (0..count)
+            .map(|step_index| sdk::DisplayHistoryStepReference {
+                run_id: format!("run-{step_index}"),
+                step_id: format!("step-{step_index}"),
+                member_name: format!("step-{step_index}.json"),
+                estimated_lines: 10,
+                user_input_history: Vec::new(),
+                finalize_cause: None,
+                duration_ms: None,
+            })
+            .collect(),
+    }
+}
+
+fn window(
+    session_id: &str,
+    revision: u64,
+    step_index: usize,
+) -> crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow {
+    crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow {
+        session_id: session_id.to_string(),
+        generation_revision: revision,
+        steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
+            run_id: format!("run-{step_index}"),
+            step_id: format!("step-{step_index}"),
+            messages: vec![
+                crate::tui::adapter::runtime_view::TuiChatMessage::user_text(format!(
+                    "body-{step_index}"
+                )),
+            ],
+            finalize_cause: None,
+            duration_ms: None,
+        }],
+    }
+}
+
+#[test]
+fn index_requests_only_missing_selected_members() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 3));
+    let ids = vec!["history-step-1".to_string(), "history-step-2".to_string()];
+
+    let first = backing
+        .history_window_request(&ids)
+        .expect("window request");
+    assert_eq!(first.session_id, "session");
+    assert_eq!(first.generation_revision, 7);
+    assert_eq!(first.member_names, ["step-1.json", "step-2.json"]);
+
+    assert!(backing.apply_window(window("session", 7, 1)));
+    let second = backing
+        .history_window_request(&ids)
+        .expect("remaining request");
+    assert_eq!(second.member_names, ["step-2.json"]);
+}
+
+#[test]
+fn loaded_window_replaces_step_placeholder_with_renderable_items() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 2));
+    assert_eq!(backing.items().len(), 2);
+
+    assert!(backing.apply_window(window("session", 7, 1)));
+
+    assert_eq!(backing.items().len(), 2);
+    assert_eq!(backing.items()[0].id, "history-step-0");
+    assert_eq!(backing.items()[1].id, "history-1-message-0");
+}
+
+#[test]
+fn loaded_window_excludes_llm_only_user_role_messages() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut hook_notice = TuiChatMessage::system_generated_user_text(
+        "<system-reminder>blocked by hook</system-reminder>",
+    );
+    hook_notice.source = TuiMessageSource::Hook;
+    hook_notice.hook_notice = None;
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage::user_text("visible user input"),
+        hook_notice,
+        TuiChatMessage::system_generated_user_text(
+            "<system-reminder>Skill loaded</system-reminder>",
+        ),
+        TuiChatMessage {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::text("assistant reply")],
+            source: TuiMessageSource::User,
+            hook_notice: None,
+            skill_request: None,
+            input_id: None,
+        },
+    ];
+
+    assert!(backing.apply_window(loaded));
+
+    assert_eq!(
+        backing
+            .items()
+            .iter()
+            .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
+            .count(),
+        1
+    );
+    assert!(backing.user_input_history().is_empty());
+}
+
+#[test]
+fn loaded_hook_window_assembles_dedicated_notice_block() {
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(index("session", 7, 1)));
+    let feedback = crate::tui::adapter::runtime_view::TuiHookNotice {
+        point: "Stop".to_string(),
+        kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
+        summary: "Stop hook prevented stopping.".to_string(),
+        command: "check-agent-stop.sh".to_string(),
+        exit_code: Some(1),
+        reason: "exit code 1".to_string(),
+        stdout_preview: "stdout".to_string(),
+        stderr_preview: "stderr".to_string(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        output_file: None,
+    };
+    let expected_body = feedback.display_text();
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![TuiChatMessage::hook_notice("model feedback", feedback)];
+    assert!(display_history.apply_window(loaded));
+
+    let item = display_history
+        .items()
+        .iter()
+        .find(|item| matches!(item.kind, ResumedHistoryItemKind::HookNotice { .. }))
+        .expect("Stop Hook history item");
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        item,
+    )
+    .expect("Stop Hook block");
+
+    let OutputBlockKind::HookNotice(feedback_block) = block.kind else {
+        panic!("expected dedicated Stop Hook feedback block");
+    };
+    assert_eq!(feedback_block.body, expected_body);
+}
+
+#[test]
+fn loaded_window_projects_skill_as_user_message_and_hook_as_notice() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage::user_text("visible user input"),
+        TuiChatMessage::skill_request(
+            "LLM skill prompt",
+            crate::tui::adapter::runtime_view::TuiSkillRequestMetadata {
+                skill: "superpowers:brainstorming".to_string(),
+                arguments: "feature scope".to_string(),
+                raw_input: "/superpowers:brainstorming feature scope".to_string(),
+            },
+        ),
+        TuiChatMessage::hook_notice(
+            "LLM hook prompt",
+            crate::tui::adapter::runtime_view::TuiHookNotice {
+                point: "Stop".to_string(),
+                kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked,
+                summary: "Stop hook prevented stopping.".to_string(),
+                command: ".agents/hooks/check-agent-stop.sh".to_string(),
+                exit_code: Some(2),
+                reason: "guard failed".to_string(),
+                stdout_preview: "details".to_string(),
+                stderr_preview: "blocked".to_string(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                output_file: None,
+            },
+        ),
+    ];
+
+    assert!(backing.apply_window(loaded));
+
+    assert_eq!(
+        backing
+            .items()
+            .iter()
+            .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
+            .count(),
+        2
+    );
+    let skill_item = backing
+        .items()
+        .iter()
+        .find(|item| item.id.ends_with("-skill-request"))
+        .expect("Skill 用户消息");
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(backing.clone());
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        skill_item,
+    )
+    .expect("Skill 用户消息 block");
+    let OutputBlockKind::UserMessage(skill_message) = block.kind else {
+        panic!("expected Skill user message");
+    };
+    assert_eq!(
+        skill_message.text,
+        "/superpowers:brainstorming feature scope"
+    );
+    assert!(backing
+        .items()
+        .iter()
+        .any(|item| matches!(item.kind, ResumedHistoryItemKind::HookNotice { .. })));
+}
+
+fn terminal_block(
+    cause: crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause,
+    duration_ms: Option<u64>,
+) -> String {
+    let mut display_history = crate::tui::model::display_history::DisplayHistoryModel::default();
+    display_history.replace(ResumedHistoryBacking::from_index(index("session", 7, 1)));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].finalize_cause = Some(cause);
+    loaded.steps[0].duration_ms = duration_ms;
+    assert!(display_history.apply_window(loaded));
+    let terminal_item = display_history
+        .items()
+        .iter()
+        .find(|item| matches!(item.kind, ResumedHistoryItemKind::TerminalNotice))
+        .expect("terminal history item");
+    let block = crate::tui::view_assembler::resumed_history::assemble_resumed_history_item(
+        &display_history,
+        terminal_item,
+    )
+    .expect("terminal block");
+    let OutputBlockKind::SystemNotice(notice) = block.kind else {
+        panic!("expected terminal system notice");
+    };
+    notice.text
+}
+
+#[test]
+fn lazy_loaded_terminal_blocks_share_live_semantics_for_completed_cancelled_and_terminated() {
+    let completed = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+        Some(125_000),
+    );
+    assert!(completed.starts_with("✻ "));
+    assert!(completed.ends_with(" for 2m 5s"));
+    assert!(!completed.contains("Completed"));
+    assert!(!completed.contains("Cancelled"));
+
+    let cancelled = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+        Some(125_000),
+    );
+    assert_eq!(cancelled, "✻ Cancelled, ran 2m 5s");
+    assert!(!cancelled.contains("Completed"));
+    assert!(!cancelled.contains(" for "));
+
+    let terminated = terminal_block(
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+        None,
+    );
+    assert_eq!(terminated, "此 Run 已终止");
+    assert!(!terminated.contains("Completed"));
+    assert!(!terminated.contains("Cancelled"));
+}
+
+#[test]
+fn stale_window_cannot_pollute_replaced_session() {
+    let mut backing = ResumedHistoryBacking::from_index(index("new-session", 11, 2));
+
+    assert!(!backing.apply_window(window("old-session", 10, 0)));
+    assert!(!backing.apply_window(window("new-session", 10, 0)));
+    assert_eq!(backing.loaded_step_count(), 0);
+}
+
+#[test]
+fn loaded_step_cache_is_bounded() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 9, 160));
+    for step_index in 0..160 {
+        assert!(backing.apply_window(window("session", 9, step_index)));
+    }
+
+    assert!(backing.loaded_step_count() <= 128);
+    assert!(backing.step(0).is_none());
+    assert!(backing.step(159).is_some());
+    assert_eq!(backing.items()[0].id, "history-step-0");
+}

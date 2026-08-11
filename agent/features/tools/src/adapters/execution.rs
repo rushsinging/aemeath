@@ -125,6 +125,7 @@ pub fn map_legacy_result(result: crate::domain::ToolResult) -> ToolExecutionOutc
             )],
             data: (!result.data.is_null()).then_some(result.data),
             metadata: Default::default(),
+            task_change: result.task_change,
         })
     }
 }

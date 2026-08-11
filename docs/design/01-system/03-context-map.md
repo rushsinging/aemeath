@@ -69,7 +69,7 @@
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
-| Hook | C/S | Hook-owned `HookPort` OHS | Composition 从 committed ConfigSnapshot 唯一构造 Hook dispatcher，仅注入 Runtime 的 Full Hook capability；Sub Run 由 Runtime 装配独立 `EmptyHookPort`，不执行或转发任何 Hook invocation |
+| Hook | C/S | Hook-owned `HookPort` OHS | Composition 从 committed ConfigSnapshot 唯一构造 Hook dispatcher；每个 Run 再从自己的 frozen `RunConfigSnapshot` 构造 run-scoped Dispatcher。Main 使用 Full capability；Sub 使用 Runtime-owned `BoundaryHookPort`，按 Hook-owned `HookPointMetadata.class` 只转发 Boundary point（含 Stop 与 SubRun 生命周期），过滤 Tool/Notification point |
 | Application Version Control | C/S | Runtime-owned outbound `ApplicationVersionPort` | 该 seam 隔离 Runtime 的 Application Control policy 与版本模块的 source/cache/installer detail；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime。**v0.1.0 范围：仅 Usage metadata 持久化与查询**；Cost / Pricing 聚合属 **Future** |
 
@@ -79,10 +79,11 @@
 
 Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 TUI / Server / parent-mediated request-reply detail。AskUser Tool 只返回 Tool-owned typed suspension，由 Runtime ACL 映射为 `InteractionRequest`、保存 continuation 并独占 `AwaitingUser` / resume 状态转换；Tool BC **NEVER** 再发布同义 `UserInteraction` port。
 
-**Runtime IoC 终态**：Runtime 定义唯一 `RuntimeContextFactory` 及其消费的窄 factory/port contracts，Composition 注入实现；该 factory 的产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunCreationRequest`，由 Runtime-owned `RunFactory` 调用 factory，并按 `RunSpec` 的 `InteractionBindingMode`（Client / ParentMediated / Unavailable）、Hook capability（Full / Empty）与 `ReasoningBindingMode`（Adaptive / Fixed / Inherit / NoOp）及父 capability ceiling 生成 `RunInstance`。ParentMediated 使用 child-scoped adapter 隔离 request ownership，NEVER 复用父 `InteractionPort` Arc；Sub Hook 使用 `EmptyHookPort`，不继承、执行或转发任何 Hook invocation。Main/Sub 不是生产类型，Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
+**Runtime IoC 终态**：Runtime 定义唯一 `RuntimeContextFactory` 及其消费的窄 factory/port contracts，Composition 注入实现；该 factory 的产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunCreationRequest`，由 Runtime-owned `RunFactory` 调用 factory，并按 `RunSpec` 的 `InteractionBindingMode`（Client / ParentMediated / Unavailable）、`HookBindingMode`（Full / BoundaryOnly）与 `ReasoningBindingMode`（Adaptive / Fixed / Inherit / NoOp）及父 capability ceiling 生成 `RunInstance`。ParentMediated 使用 child-scoped adapter 隔离 request ownership，NEVER 复用父 `InteractionPort` Arc；Sub 的 BoundaryOnly Hook capability 按 Hook metadata 转发 Stop 与生命周期 boundary，过滤 Tool/Notification point。Main/Sub 不是生产类型，Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
 
 `WorkspaceMode` 是 `RunSpec` 的装配策略，不形成 Runtime → Project 出站边。Composition 在 active-main-session-slot scope 中保留 Project wiring：Main agent 启动时只选择一次 production wiring，同一 Session 的全部 Main Run 复用；运行期 resume 在排他 gate 内替换完整 state。Sub 由 composition-provided AgentDispatch 对父 scope 执行 isolated derivation；Runtime **NEVER** 持有 Project 端口或 wiring。
 
+Activity 不构成独立 BC，也不成为 Runtime 之外的对等领域实体。Runtime 作为 Activity 事实的 Supplier，通过 SDK Published Language 发布 `ActivityChanged` 增量和 `ActivitySnapshot` 快照；TUI 是 Customer，经 ACL 转为 TUI-owned Activity 事实镜像，再由 root reducer 维护。Activity 只描述执行观测，不拥有 Run 控制权、Session 持久化权、Audit Usage 所有权或用户交互 reply 权限。TUI 的 Activity Summary 是展示层派生视图，**NEVER** 作为新的 Runtime 状态源回流。
 ### 4.1 支撑 BC 之间的直接能力边
 
 | 消费方 | 供应方 | 模式 | 端口 / 契约 | 说明 |

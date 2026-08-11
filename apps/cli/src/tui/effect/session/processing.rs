@@ -1,9 +1,8 @@
-mod event_mapping;
 mod handle;
 mod input_port;
 mod logging;
 
-use crate::tui::adapter::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
+use crate::tui::adapter::event_mapping::sdk_event_to_tui_event;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use std::sync::Arc;
 
@@ -41,17 +40,15 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             };
             while let Some(event) = stream.recv().await {
                 log_sdk_event(&event, "sdk->tui.recv");
-                match sdk_event_to_tui_event(event) {
-                    SdkEventMapping::Runtime(runtime_event) => {
-                        log_tui_runtime_delivery(&runtime_event, "forwarding");
-                        if ctx.runtime_tx.send(runtime_event).await.is_err() {
-                            crate::tui::log_warn!(
-                                "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
-                            );
-                            return;
-                        }
+                let runtime_events = sdk_event_to_tui_event(event).into_runtime_events();
+                for runtime_event in runtime_events {
+                    log_tui_runtime_delivery(&runtime_event, "forwarding");
+                    if ctx.runtime_tx.send(runtime_event).await.is_err() {
+                        crate::tui::log_warn!(
+                            "event_delivery boundary=sdk_to_tui kind=runtime_event outcome=receiver_closed"
+                        );
+                        break;
                     }
-                    SdkEventMapping::Nop => {}
                 }
             }
         },
@@ -62,7 +59,8 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::tui_runtime_event::TuiTurnContext;
+    use crate::tui::adapter::event_mapping::SdkEventMapping;
+    use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiSubRunActivityKind};
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -70,7 +68,7 @@ mod tests {
     fn test_sdk_event_context() -> sdk::ChatEventContext {
         sdk::ChatEventContext::new(
             sdk::ids::ChatId::new("chat-test"),
-            sdk::ids::ChatTurnId::new("turn-test"),
+            sdk::ids::ChatRunId::new("run_step-test"),
         )
     }
 
@@ -124,21 +122,21 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::Text { text, .. }) if text == "hello"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "hello"
         ));
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_agent_progress_identity() {
+    fn legacy_sdk_agent_progress_normalizes_to_sub_run_activity() {
         let expected_tool_id = sdk::ids::ToolCallId::new("tool-1");
         let event = sdk_event_to_tui_event(sdk::ChatEvent::AgentProgress {
             source_context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("child-chat"),
-                sdk::ids::ChatTurnId::new("child-turn"),
+                sdk::ids::ChatRunId::new("child-run_step"),
             ),
             attachment_context: sdk::ChatEventContext::new(
                 sdk::ids::ChatId::new("parent-chat"),
-                sdk::ids::ChatTurnId::new("parent-turn"),
+                sdk::ids::ChatRunId::new("parent-run_step"),
             ),
             tool_id: expected_tool_id.clone(),
             event: sdk::AgentProgressEventView {
@@ -151,34 +149,42 @@ mod tests {
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::AgentProgress {
-                source_context,
-                attachment_context,
-                tool_id,
-                ..
-            }) if source_context.chat_id == sdk::ids::ChatId::new("child-chat").as_str()
-                && source_context.turn_id == sdk::ids::ChatTurnId::new("child-turn").as_str()
-                && attachment_context.chat_id == sdk::ids::ChatId::new("parent-chat").as_str()
-                && attachment_context.turn_id == sdk::ids::ChatTurnId::new("parent-turn").as_str()
-                && tool_id == expected_tool_id.as_str()
+            SdkEventMapping::Runtime(TuiRuntimeEvent::SubRunActivity(activity))
+                if activity.identity.agent_id == sdk::ids::ChatId::new("child-chat").as_str()
+                    && activity.identity.run_id.as_str()
+                        == sdk::ids::ChatRunId::new("child-run_step").as_str()
+                    && activity.identity.parent_chat_id
+                        == sdk::ids::ChatId::new("parent-chat").as_str()
+                    && activity.identity.parent_run_id.as_str()
+                        == sdk::ids::ChatRunId::new("parent-run_step").as_str()
+                    && activity.identity.spawned_by_tool_call_id == expected_tool_id.as_str()
+                    && matches!(activity.kind, TuiSubRunActivityKind::Text { ref text } if text == "working")
         ));
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_preserves_hook_message() {
-        let event = sdk_event_to_tui_event(sdk::ChatEvent::HookMessage(sdk::HookMessageView {
-            point: "PreToolUse".to_string(),
-            source: "matcher:Bash".to_string(),
-            execution_ordinal: 2,
-            attempt: 3,
-            kind: sdk::HookMessageKindView::AdditionalContext,
-            text: "Use formatter".to_string(),
-        }));
+    fn sdk_event_to_tui_runtime_event_normalizes_legacy_tool_progress_identity() {
+        let expected_chat = sdk::ids::ChatId::new("chat-1");
+        let expected_run = sdk::ids::ChatRunId::new("run-1");
+        let expected_tool_id = sdk::ids::ToolCallId::new("bash-1");
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::ToolProgress {
+            context: sdk::ChatEventContext::new(expected_chat.clone(), expected_run.clone()),
+            tool_id: expected_tool_id.clone(),
+            event: sdk::ToolProgressEventView {
+                text: "stdout line\n".to_string(),
+            },
+        });
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::HookMessage(message))
-                if message.point == "PreToolUse" && message.text == "Use formatter"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::ToolOutputDelta {
+                context,
+                tool_id,
+                delta,
+            }) if context.chat_id == expected_chat.as_str()
+                && context.run_id == expected_run.as_str()
+                && tool_id == expected_tool_id.as_str()
+                && delta == "stdout line\n"
         ));
     }
 
@@ -186,12 +192,13 @@ mod tests {
     fn sdk_event_to_tui_runtime_event_maps_compact_finished() {
         let event = sdk_event_to_tui_event(sdk::ChatEvent::CompactFinished {
             messages: vec![sdk::ChatMessage::user_text("hello")],
+            notice: "✓ 上下文压缩完成".to_string(),
         });
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactFinished { messages })
-                if messages[0].text_content() == "hello"
+            SdkEventMapping::Runtime(TuiRuntimeEvent::CompactOperationCompleted { messages, notice })
+                if messages[0].text_content() == "hello" && notice == "✓ 上下文压缩完成"
         ));
     }
 
@@ -215,17 +222,15 @@ mod tests {
     }
 
     #[test]
-    fn sdk_event_to_tui_runtime_event_maps_tasks_snapshot() {
-        let event = sdk_event_to_tui_event(sdk::ChatEvent::TasksSnapshot {
-            tasks: Box::new(sdk::TaskStatusView {
-                lines: vec!["[ ] #1 task".to_string()],
-            }),
+    fn sdk_event_to_tui_runtime_event_maps_task_state() {
+        let event = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {
+            state: Box::new(sdk::TaskStateView::empty("session-a", 1)),
         });
 
         assert!(matches!(
             event,
-            SdkEventMapping::Runtime(TuiRuntimeEvent::TasksSnapshot { lines })
-                if lines == vec!["[ ] #1 task".to_string()]
+            SdkEventMapping::Runtime(TuiRuntimeEvent::TaskStateChanged { state })
+                if state.session_id == "session-a" && state.revision == 1
         ));
     }
 
@@ -300,9 +305,9 @@ mod tests {
                 local_tx,
                 input_event_port: input_port,
                 agent_client: client,
-                fallback_context: TuiTurnContext {
+                fallback_context: TuiRunContext {
                     chat_id: "fallback-chat".to_string(),
-                    turn_id: "fallback-turn".to_string(),
+                    run_id: "fallback-run_step".to_string(),
                 },
             });
         })
@@ -350,9 +355,9 @@ mod tests {
             local_tx,
             input_event_port: input_port,
             agent_client: client.clone(),
-            fallback_context: TuiTurnContext {
+            fallback_context: TuiRunContext {
                 chat_id: "fallback-chat".to_string(),
-                turn_id: "fallback-turn".to_string(),
+                run_id: "fallback-run_step".to_string(),
             },
         });
 
@@ -364,7 +369,7 @@ mod tests {
             event,
             TuiRuntimeEvent::Done { context, .. }
                 if context.chat_id == sdk::ids::ChatId::new("chat-test").as_str()
-                    && context.turn_id == sdk::ids::ChatTurnId::new("turn-test").as_str()
+                    && context.run_id == sdk::ids::ChatRunId::new("run_step-test").as_str()
         ));
         assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
     }

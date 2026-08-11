@@ -22,8 +22,6 @@ pub(super) enum CtrlCAction {
     Quit,
     /// 请求取消当前处理
     RequestCancel,
-    /// 取消中再次按下时强制退出
-    ForceQuit,
 }
 
 /// Ctrl+C 两段式退出超时（秒）
@@ -34,11 +32,9 @@ fn ctrlc_action(
     input_empty: bool,
     last_ctrlc: Option<std::time::Instant>,
     is_processing: bool,
-    is_cancelling: bool,
+    _is_cancelling: bool,
 ) -> CtrlCAction {
-    if is_processing && is_cancelling {
-        CtrlCAction::ForceQuit
-    } else if is_processing {
+    if is_processing {
         CtrlCAction::RequestCancel
     } else if !input_empty {
         CtrlCAction::ClearInput
@@ -57,6 +53,17 @@ fn ctrlc_action(
 }
 
 impl App {
+    fn cancel_active_step_effect(&self) -> Effect {
+        self.chat
+            .active_run_step
+            .as_ref()
+            .map(|(run_id, step_id)| Effect::CancelRunStep {
+                run_id: run_id.clone(),
+                step_id: step_id.clone(),
+            })
+            .unwrap_or(Effect::CancelCurrentRun)
+    }
+
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
         self.apply_agent_intent(AgentIntent::Input(intent));
     }
@@ -116,10 +123,7 @@ impl App {
                             self.chat.processing_handle.is_some()
                         );
                         self.layout.mark_ctrlc_now();
-                        return UpdateResult::one(Effect::CancelCurrentRun);
-                    }
-                    CtrlCAction::ForceQuit => {
-                        return UpdateResult::one(Effect::QuitApplication);
+                        return UpdateResult::one(self.cancel_active_step_effect());
                     }
                     CtrlCAction::ClearInput => {
                         self.handle_input_intent(InputIntent::Clear);
@@ -166,7 +170,7 @@ impl App {
                     self.chat.is_cancelling,
                     self.chat.processing_handle.is_some()
                 );
-                return UpdateResult::one(Effect::CancelCurrentRun);
+                return UpdateResult::one(self.cancel_active_step_effect());
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if completion_visible {
@@ -190,18 +194,17 @@ impl App {
                     crate::tui::log_debug!(
                         "mid_turn.enter is_slash={} text_preview={:?}",
                         is_slash,
-                        &submission.text[..submission.text.len().min(60)]
+                        &submission.text[..submission.text.floor_char_boundary(60)]
                     );
-                    // 忙时 slash/control command 保持现有 mid-turn 行为：作为
-                    // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
-                    // slash 命令是控制命令、无 UserMessagesAdopted 归宿，剥离 MessagesSync
-                    // 全清后建占位会残留——故不建占位、不入文本队列（A3 Task 5）。
+                    // slash 命令无论 idle/busy 都由统一 CommandRouter 解析，再由各 owner
+                    // 产生 typed ChatInputEvent。直接压成 ControlCommand 会丢失 `/compact`
+                    // 等应用命令的业务语义，导致 busy 后静默无动作。
                     if submission.text.starts_with('/') {
-                        let event = sdk::ChatInputEvent::ControlCommand {
-                            raw: submission.text.clone(),
+                        return UpdateResult {
+                            effects: Vec::new(),
+                            spawn_effect: None,
+                            pending_slash: Some(submission.text),
                         };
-                        self.set_transient_notice(StatusNotice::warning("message event queued"));
-                        return UpdateResult::one(Effect::SendChatInputEvent { event });
                     }
                     // 忙时普通消息：与首条提交统一经事件通道发 UserMessage。
                     self.set_transient_notice(StatusNotice::warning("message event queued"));

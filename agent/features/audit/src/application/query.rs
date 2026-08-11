@@ -153,7 +153,7 @@ fn hex_decode(value: &str) -> Option<String> {
     }
     let bytes = (0..value.len())
         .step_by(2)
-        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
+        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok()) // allow unsafe_text_op: hex is ASCII fixed 2-byte window
         .collect::<Option<Vec<_>>>()?;
     String::from_utf8(bytes).ok()
 }

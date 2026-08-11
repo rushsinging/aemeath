@@ -1,5 +1,5 @@
 use crate::application::loop_engine::chat::events::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::RawUsageSnapshot;
@@ -27,41 +27,10 @@ enum StreamingBlockKind {
     Thinking,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StreamProgressSnapshot {
-    pub first_visible_event_seen: bool,
-    pub visible_progress_version: u64,
-    pub phase: &'static str,
-}
-
 #[derive(Debug, Default)]
 pub struct StreamProgressState {
     first_visible_event_seen: bool,
-    visible_progress_version: u64,
     active_streaming_block: Option<StreamingBlockKind>,
-}
-
-impl StreamProgressState {
-    pub fn snapshot(&self) -> StreamProgressSnapshot {
-        StreamProgressSnapshot {
-            first_visible_event_seen: self.first_visible_event_seen,
-            visible_progress_version: self.visible_progress_version,
-            phase: match self.active_streaming_block {
-                Some(StreamingBlockKind::Text) => "writing",
-                Some(StreamingBlockKind::Thinking) => "thinking",
-                None if self.first_visible_event_seen => "waiting_model_output",
-                None => "waiting_model_response",
-            },
-        }
-    }
-}
-
-pub fn should_emit_model_stream_waiting(
-    previous_visible_progress_version: Option<u64>,
-    snapshot: &StreamProgressSnapshot,
-) -> bool {
-    previous_visible_progress_version
-        .is_none_or(|previous| previous == snapshot.visible_progress_version)
 }
 
 pub struct InvocationEventReducer<S: ChatEventSink> {
@@ -95,7 +64,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
     pub fn with_tool_identity(
         sink: S,
         tool_identity: ToolIdentityRegistry,
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     ) -> Self {
         Self {
             handler: RuntimeEventProjector::with_tool_identity(sink, tool_identity, context),
@@ -103,8 +72,15 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
         }
     }
 
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.handler.progress_handle()
+    /// #1494：挂载边流边执行句柄（流中 `ToolCallCompleted` → 立即执行）。
+    pub fn with_streaming_tool(
+        mut self,
+        streaming_tool: Arc<
+            dyn crate::application::loop_engine::chat::streaming_tool::StreamingToolSubmitPort,
+        >,
+    ) -> Self {
+        self.handler.streaming_tool = Some(streaming_tool);
+        self
     }
 
     pub fn apply(
@@ -147,8 +123,11 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             &partial_json,
                         )
                     }
-                    InvocationDelta::ToolCallCompleted { .. }
-                    | InvocationDelta::UsageSnapshot(_) => {}
+                    InvocationDelta::ToolCallCompleted { index, call } => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_tool_call_completed(index, &call);
+                    }
+                    InvocationDelta::UsageSnapshot(_) => {}
                 }
                 Ok(None)
             }
@@ -218,8 +197,12 @@ struct RuntimeEventProjector<S: ChatEventSink> {
     pub total_chars: usize,
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
-    pub context: RuntimeTurnContext,
+    pub context: RuntimeRunContext,
     progress: Arc<Mutex<StreamProgressState>>,
+    /// #1494：边流边执行句柄；`Some` 时流中 `ToolCallCompleted` 立即触发执行。
+    streaming_tool: Option<
+        Arc<dyn crate::application::loop_engine::chat::streaming_tool::StreamingToolSubmitPort>,
+    >,
 }
 
 impl<S: ChatEventSink> RuntimeEventProjector<S> {
@@ -227,14 +210,14 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         Self::with_tool_identity(
             sink,
             ToolIdentityRegistry::new(),
-            RuntimeTurnContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatTurnId::new_v7()),
+            RuntimeRunContext::new(sdk::ids::ChatId::new_v7(), sdk::ids::ChatRunId::new_v7()),
         )
     }
 
     pub fn with_tool_identity(
         sink: S,
         tool_identity: ToolIdentityRegistry,
-        context: RuntimeTurnContext,
+        context: RuntimeRunContext,
     ) -> Self {
         Self {
             sink,
@@ -244,11 +227,8 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             tool_identity,
             context,
             progress: Arc::new(Mutex::new(StreamProgressState::default())),
+            streaming_tool: None,
         }
-    }
-
-    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
-        self.progress.clone()
     }
 
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
@@ -277,15 +257,14 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             let mut progress = self.progress.lock().unwrap();
             let first = !progress.first_visible_event_seen;
             progress.first_visible_event_seen = true;
-            progress.visible_progress_version = progress.visible_progress_version.wrapping_add(1);
             first
         };
         if first {
             log::debug!(target: crate::LOG_TARGET,
-                "model stream first visible event: kind={} {} turn_id={}",
+                "model stream first visible event: kind={} {} run_id={}",
                 kind,
                 detail(),
-                self.context.turn_id,
+                self.context.run_id,
             );
         }
     }
@@ -305,10 +284,11 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     fn on_text(&mut self, text: &str) {
         self.mark_visible_event("text", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Text);
-        self.sink.try_send_event(RuntimeStreamEvent::Text {
-            context: self.context.clone(),
-            text: text.to_string(),
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::AssistantTextDelta {
+                context: self.context.clone(),
+                delta: text.to_string(),
+            });
         let now = std::time::Instant::now();
         if self.first_text_time.is_none() {
             self.first_text_time = Some(now);
@@ -336,25 +316,26 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             )
         });
         log::debug!(target: crate::LOG_TARGET,
-            "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
-            name, provider_id, index, self.context.turn_id,
+            "on_tool_use_start: name={} provider_id={:?} index={} run_id={}",
+            name, provider_id, index, self.context.run_id,
         );
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
-        self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
-            context: self.context.clone(),
-            id,
-            provider_id: provider_id.map(str::to_string),
-            name: name.to_string(),
-            index,
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::ToolCallStarted {
+                context: self.context.clone(),
+                id,
+                provider_id: provider_id.map(str::to_string),
+                name: name.to_string(),
+                index,
+            });
     }
     fn on_thinking(&mut self, text: &str) {
         self.mark_visible_event("thinking", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Thinking);
-        self.sink.try_send_event(RuntimeStreamEvent::Thinking {
+        self.sink.try_send_event(RuntimeStreamEvent::ThinkingDelta {
             context: self.context.clone(),
-            text: text.to_string(),
+            delta: text.to_string(),
         });
     }
 
@@ -377,16 +358,29 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
-            .try_send_event(RuntimeStreamEvent::ToolCallUpdate {
+            .try_send_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
                 context: self.context.clone(),
                 id,
                 provider_id: provider_id.map(str::to_string),
                 name: name.to_string(),
                 index,
-                arguments_delta: Some(partial_args.to_string()),
-                arguments: None,
-                status: RuntimeToolCallStatus::PendingArgs,
+                delta: partial_args.to_string(),
             });
+    }
+
+    /// #1494：provider 已给出完整验证过的 tool call → 立即旁路执行（边流边执行）。
+    fn on_tool_call_completed(&mut self, index: usize, call: &provider::ProviderToolCall) {
+        let Some(executor) = &self.streaming_tool else {
+            return;
+        };
+        let id = self.runtime_tool_id(index, Some(&call.id.0));
+        executor.submit(crate::application::tool::agent::ToolCall {
+            id,
+            provider_id: call.id.0.clone(),
+            name: call.name.clone(),
+            index,
+            input: call.arguments.clone(),
+        });
     }
 }
 
@@ -398,6 +392,7 @@ mod invocation_reducer_tests {
         InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError,
         ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
     };
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct RecordingSink(Arc<Mutex<Vec<RuntimeStreamEvent>>>);
@@ -441,7 +436,7 @@ mod invocation_reducer_tests {
         assert_eq!(response.usage.input_tokens, Some(2));
         assert!(matches!(
             events.lock().unwrap().first(),
-            Some(RuntimeStreamEvent::Text { text, .. }) if text == "hi"
+            Some(RuntimeStreamEvent::AssistantTextDelta { delta, .. }) if delta == "hi"
         ));
     }
 

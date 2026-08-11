@@ -721,28 +721,20 @@ async fn exit_worktree_with_path_switches_without_pushing_stack() {
     assert_eq!(data.branch, read_branch);
     assert_eq!(data.branch, "main");
 
-    // 不压栈：栈长仍=1（Enter 推入的那一帧保留）
+    // switch 清空残留栈帧：栈长=0。switch_to 不参与 enter/exit 栈管理，
+    // 切换后 MUST 清空 stack 以维护「stack 非空 ⟺ Linked」不变量。
     let snapshot =
         crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
     assert_eq!(
         snapshot.context_stack.len(),
-        1,
-        "switch 不应压栈，栈长应保持 Enter 后的 1"
+        0,
+        "switch_to MUST 清空残留栈帧，不应保留 Enter 推入的旧帧"
     );
     // 切回 primary，path_base 落到 other-subdir，workspace_root 仍是主仓库根
     assert_eq!(snapshot.worktree_kind, WorktreeKind::Primary);
     assert_eq!(snapshot.path_base, other_canonical.display().to_string());
     assert_eq!(
         snapshot.workspace_root,
-        main_canonical.display().to_string()
-    );
-    // 栈帧依旧指向被 Enter 推入时的 primary 状态
-    assert_eq!(
-        snapshot.context_stack[0].worktree_kind,
-        WorktreeKind::Primary
-    );
-    assert_eq!(
-        snapshot.context_stack[0].workspace_root,
         main_canonical.display().to_string()
     );
 }
@@ -847,19 +839,10 @@ async fn exit_worktree_switch_to_another_linked_worktree_does_not_push_stack() {
         "switch 到 linked worktree 后顶层 kind 应为 Linked"
     );
 
-    // switch 不压栈：context_stack 仍为 1（Enter 推入的 primary 帧）
+    // switch 清空残留栈帧：context_stack 为 0。switch_to 不压新帧也不保留旧帧。
     assert_eq!(
         snapshot.context_stack.len(),
-        1,
-        "switch 不应压栈，栈长应保持 Enter 后的 1"
-    );
-    // 栈帧依旧是 Enter 推入的 primary 状态
-    assert_eq!(
-        snapshot.context_stack[0].worktree_kind,
-        WorktreeKind::Primary
-    );
-    assert_eq!(
-        snapshot.context_stack[0].workspace_root,
-        main_canonical.display().to_string()
+        0,
+        "switch_to MUST 清空残留栈帧，不应保留 Enter 推入的旧帧"
     );
 }

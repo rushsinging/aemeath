@@ -2,6 +2,60 @@ use sdk::{ChatMessage, ResumedSessionStep};
 use std::sync::Arc;
 
 #[test]
+fn display_history_window_round_trip_preserves_requested_steps() {
+    let window = sdk::DisplayHistoryWindow {
+        session_id: "session-window".to_string(),
+        generation_revision: 21,
+        steps: vec![ResumedSessionStep {
+            run_id: "run-window".to_string(),
+            step_id: "step-window".to_string(),
+            messages: vec![ChatMessage::user_text("window body")],
+            finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
+            duration_ms: Some(77),
+        }],
+    };
+
+    let encoded = serde_json::to_value(&window).expect("serialize display history window");
+    let decoded: sdk::DisplayHistoryWindow =
+        serde_json::from_value(encoded).expect("deserialize display history window");
+
+    assert_eq!(decoded.session_id, "session-window");
+    assert_eq!(decoded.generation_revision, 21);
+    assert_eq!(decoded.steps[0].messages[0].text_content(), "window body");
+    assert_eq!(decoded.steps[0].duration_ms, Some(77));
+}
+
+#[test]
+fn display_history_index_round_trip_contains_no_message_bodies() {
+    let index = sdk::DisplayHistoryIndex {
+        session_id: "session-index".to_string(),
+        generation_revision: 17,
+        steps: vec![sdk::DisplayHistoryStepReference {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            member_name: "step-run-step.json".to_string(),
+            estimated_lines: 23,
+            user_input_history: vec!["historical input".to_string()],
+            finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
+            duration_ms: Some(42),
+        }],
+    };
+
+    let encoded = serde_json::to_value(&index).expect("serialize history index");
+    let decoded: sdk::DisplayHistoryIndex =
+        serde_json::from_value(encoded.clone()).expect("deserialize history index");
+
+    assert_eq!(decoded.session_id, "session-index");
+    assert_eq!(decoded.generation_revision, 17);
+    assert_eq!(decoded.steps[0].estimated_lines, 23);
+    assert_eq!(decoded.steps[0].duration_ms, Some(42));
+    let json = encoded.to_string();
+    assert!(!json.contains("messages"));
+    assert!(!json.contains("message_segments"));
+    assert!(!json.contains("tool_receipts"));
+}
+
+#[test]
 fn local_resume_backing_clone_reuses_shared_step_messages() {
     let shared_messages: Arc<[share::message::Message]> =
         vec![share::message::Message::user("large history")].into();
@@ -14,8 +68,10 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
     };
     let backing = sdk::LocalSessionResumeBacking {
         steps: vec![step],
+        display_history: None,
         session_id: "session-shared".to_string(),
         created_at: 42,
+        compacted: true,
     };
 
     let cloned = backing.clone();
@@ -25,30 +81,75 @@ fn local_resume_backing_clone_reuses_shared_step_messages() {
         &cloned.steps[0].message_segments[0]
     ));
     assert_eq!(cloned.steps[0].messages().count(), 1);
+    assert!(cloned.compacted);
 }
 
 #[test]
-fn resumed_session_step_round_trip_preserves_run_step_boundaries() {
+fn resumed_session_step_round_trip_preserves_typed_skill_request_display_metadata() {
     let step = ResumedSessionStep {
-        run_id: "run-1".to_string(),
-        step_id: "step-1".to_string(),
-        messages: vec![ChatMessage::user_text("hello")],
-        finalize_cause: Some(sdk::ResumedStepFinalizeCause::UserCancelledStep),
-        duration_ms: Some(7_325_000),
+        run_id: "run-skill".to_string(),
+        step_id: "step-skill".to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::text("LLM skill prompt")],
+            metadata: Some(sdk::ChatMessageMetadata {
+                source: sdk::ChatMessageSource::SkillRequest,
+                hook_notice: None,
+                skill_request: Some(sdk::SkillRequestMetadataView {
+                    skill: "superpowers:brainstorming".to_string(),
+                    arguments: "feature scope".to_string(),
+                    raw_input: "/superpowers:brainstorming feature scope".to_string(),
+                }),
+            }),
+            input_id: None,
+        }],
+        finalize_cause: None,
+        duration_ms: None,
     };
 
-    let encoded = serde_json::to_value(&step).expect("serialize resume step");
+    let encoded = serde_json::to_value(&step).expect("serialize skill resume step");
     let decoded: ResumedSessionStep =
-        serde_json::from_value(encoded).expect("deserialize resume step");
+        serde_json::from_value(encoded).expect("deserialize skill resume step");
+    let metadata = decoded.messages[0]
+        .metadata
+        .as_ref()
+        .expect("typed skill metadata");
 
-    assert_eq!(decoded.run_id, "run-1");
-    assert_eq!(decoded.step_id, "step-1");
-    assert_eq!(decoded.messages[0].text_content(), "hello");
+    assert_eq!(metadata.source, sdk::ChatMessageSource::SkillRequest);
     assert_eq!(
-        decoded.finalize_cause,
-        Some(sdk::ResumedStepFinalizeCause::UserCancelledStep)
+        metadata
+            .skill_request
+            .as_ref()
+            .map(|request| request.raw_input.as_str()),
+        Some("/superpowers:brainstorming feature scope")
     );
-    assert_eq!(decoded.duration_ms, Some(7_325_000));
+}
+
+#[test]
+fn resumed_session_step_round_trip_preserves_all_terminal_causes_and_duration() {
+    for finalize_cause in [
+        sdk::ResumedStepFinalizeCause::Completed,
+        sdk::ResumedStepFinalizeCause::UserCancelledStep,
+        sdk::ResumedStepFinalizeCause::RunTerminated,
+    ] {
+        let step = ResumedSessionStep {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            messages: vec![ChatMessage::user_text("hello")],
+            finalize_cause: Some(finalize_cause),
+            duration_ms: Some(7_325_000),
+        };
+
+        let encoded = serde_json::to_value(&step).expect("serialize resume step");
+        let decoded: ResumedSessionStep =
+            serde_json::from_value(encoded).expect("deserialize resume step");
+
+        assert_eq!(decoded.run_id, "run-1");
+        assert_eq!(decoded.step_id, "step-1");
+        assert_eq!(decoded.messages[0].text_content(), "hello");
+        assert_eq!(decoded.finalize_cause, Some(finalize_cause));
+        assert_eq!(decoded.duration_ms, Some(7_325_000));
+    }
 }
 
 #[test]

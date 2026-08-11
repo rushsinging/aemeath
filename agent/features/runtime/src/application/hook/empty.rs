@@ -1,7 +1,13 @@
 use async_trait::async_trait;
-use hook::{CancellationSignal, HookDispatchContext, HookInvocation, HookOutcome, HookPort};
+use hook::{
+    CancellationSignal, HookClass, HookDispatchContext, HookInvocation, HookOutcome, HookPort,
+};
 
 #[derive(Clone)]
+/// Sub Run 的 BoundaryOnly Hook adapter。
+///
+/// Hook-owned metadata 是过滤的唯一真相：Boundary point（含 Stop）转发到本 Run 的
+/// frozen Dispatcher，Tool/Notification point 无副作用返回 Proceed。
 pub struct BoundaryHookPort {
     inner: std::sync::Arc<dyn HookPort>,
 }
@@ -11,14 +17,8 @@ impl BoundaryHookPort {
         Self { inner }
     }
 
-    fn allows(invocation: &HookInvocation) -> bool {
-        matches!(
-            invocation,
-            HookInvocation::SessionStart(_)
-                | HookInvocation::SessionEnd(_)
-                | HookInvocation::SubRunStart(_)
-                | HookInvocation::SubRunStop(_)
-        )
+    fn allows(point: hook::HookPoint) -> bool {
+        point.metadata().class == HookClass::Boundary
     }
 }
 
@@ -29,7 +29,7 @@ impl HookPort for BoundaryHookPort {
         invocation: HookInvocation,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
-        if Self::allows(&invocation) {
+        if Self::allows(invocation.point()) {
             self.inner.dispatch(invocation, cancellation).await
         } else {
             HookOutcome::proceed()
@@ -42,7 +42,7 @@ impl HookPort for BoundaryHookPort {
         context: HookDispatchContext,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
-        if Self::allows(&invocation) {
+        if Self::allows(invocation.point()) {
             self.inner
                 .dispatch_at(invocation, context, cancellation)
                 .await
@@ -51,3 +51,7 @@ impl HookPort for BoundaryHookPort {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "empty_tests.rs"]
+mod tests;

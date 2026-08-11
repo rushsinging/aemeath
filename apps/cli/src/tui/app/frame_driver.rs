@@ -32,13 +32,13 @@ impl App {
         }
     }
 
-    pub(crate) fn prepare_frame(&mut self) {
+    pub(crate) fn prepare_frame(&mut self) -> Vec<Effect> {
         let frame_started_at = Instant::now();
         let output_dirty = self.view_state.dirty.output;
         self.check_ctrlc_timeout();
         let before_assemble_count = self.assemble_count_for_diagnostics();
         let flush_started_at = Instant::now();
-        self.flush_dirty_view_models();
+        let effects = self.flush_dirty_view_models();
         self.pending_flush_duration = flush_started_at.elapsed();
         self.refresh_live_status_from_model();
         self.refresh_output_scroll_from_view_state();
@@ -49,5 +49,6 @@ impl App {
             .assemble_count_for_diagnostics()
             .saturating_sub(before_assemble_count);
         self.pending_frame_context = Some(context);
+        effects
     }
 }

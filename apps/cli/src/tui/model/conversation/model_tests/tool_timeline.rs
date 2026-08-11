@@ -6,7 +6,7 @@ fn test_conversation_keeps_tool_args_preview() {
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -14,7 +14,7 @@ fn test_conversation_keeps_tool_args_preview() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Read".to_string(),
@@ -24,7 +24,7 @@ fn test_conversation_keeps_tool_args_preview() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -34,11 +34,11 @@ fn test_conversation_keeps_tool_args_preview() {
     });
 
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let read_call = tool_call(
         &model,
         &chat_id,
-        &turn_id,
+        &run_id,
         &super::ids::ToolCallId::new("tool-1"),
     )
     .expect("Read tool call should exist");
@@ -53,7 +53,7 @@ fn test_tool_call_timeline_item_stores_reference_not_copied_payload() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
@@ -70,17 +70,17 @@ fn test_tool_call_timeline_item_stores_reference_not_copied_payload() {
         .expect("timeline should contain tool call ref");
 
     let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
+    let run_id = super::ids::ChatRunId::new("turn-1");
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
     match timeline_item {
         OutputTimelineItem::ToolCall { reference } => {
             assert_eq!(reference.context.chat_id, chat_id);
-            assert_eq!(reference.context.turn_id, turn_id);
+            assert_eq!(reference.context.run_id, run_id);
             assert_eq!(reference.tool_call_id, tool_1_id);
         }
         _ => unreachable!(),
     }
-    let call = tool_call(&model, &chat_id, &turn_id, &tool_1_id)
+    let call = tool_call(&model, &chat_id, &run_id, &tool_1_id)
         .expect("tool payload should live in chat turn model");
     assert_eq!(call.name, "Read");
     assert!(call.args_preview.contains("src/main.rs"));
@@ -97,17 +97,17 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     // LLM 先输出 assistant text（content_block 0）
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "让我来审查".to_string(),
     });
     model.apply(CompleteBlock {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
     });
     // ToolCallStart 用纯 tool 序号 index=0
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Agent".to_string(),
@@ -116,7 +116,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     // ToolCall 用 content_block index=1（因为 text 占了 block 0）
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("call_agent_1"),
         name: "Agent".to_string(),
@@ -125,16 +125,16 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         status: ToolCallStatus::Ready,
     });
     // Agent progress（不影响绑定）
-    model.apply(RecordAgentProgress {
+    model.apply(RecordAgentActivities {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         tool_id: super::ids::ToolCallId::new("call_agent_1"),
-        message: "reading files...".to_string(),
+        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files...".to_string())],
     });
     // Agent tool result
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("call_agent_1"),
         tool_name: "Agent".to_string(),
@@ -171,13 +171,13 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         text: "让我".to_string(),
     });
     // 不调 CompleteBlock — text 还在 streaming
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         id: super::ids::ToolCallId::new("tool-1"),
         provider_id: None,
         name: "Agent".to_string(),
@@ -185,7 +185,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("call_abc"),
         name: "Agent".to_string(),
@@ -195,7 +195,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     });
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("call_abc"),
         tool_name: "Agent".to_string(),
@@ -225,7 +225,7 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     // 不发送 ToolCallStart
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
         id: super::ids::ToolCallId::new("call_agent_no_start"),
         name: "Agent".to_string(),
@@ -235,7 +235,7 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     });
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
+        run_id: super::ids::ChatRunId::new("turn-1"),
         provider_id: "provider-1".to_string(),
         id: super::ids::ToolCallId::new("call_agent_no_start"),
         tool_name: "Agent".to_string(),

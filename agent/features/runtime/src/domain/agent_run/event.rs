@@ -2,14 +2,22 @@ use super::state::{RunStatus, RunStepId, RunTransitionReason};
 
 pub use sdk::RunId;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunTimingSnapshot {
+    pub observation_revision: u64,
+    pub total_elapsed_ms: u64,
+    pub phase_elapsed_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunDomainEvent {
+pub enum RuntimeLifecycleEvent {
     Transitioned {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         from: RunStatus,
         to: RunStatus,
         reason: RunTransitionReason,
+        timing: RunTimingSnapshot,
     },
     Started {
         run_id: RunId,
@@ -39,7 +47,7 @@ pub enum RunDomainEvent {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         step_id: RunStepId,
-        confirmed: bool,
+        terminal: sdk::RunStepCancellationTerminal,
     },
     DrainingInput {
         run_id: RunId,
@@ -55,10 +63,6 @@ pub enum RunDomainEvent {
         run_id: RunId,
         parent_run_id: Option<RunId>,
         reason: sdk::RunTerminationReason,
-    },
-    CancellationRequested {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
     },
     AwaitingUser {
         run_id: RunId,
@@ -88,13 +92,9 @@ pub enum RunDomainEvent {
         parent_run_id: Option<RunId>,
         error: String,
     },
-    Cancelled {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
 }
 
-impl RunDomainEvent {
+impl RuntimeLifecycleEvent {
     pub fn parent_run_id(&self) -> Option<&RunId> {
         match self {
             Self::Transitioned { parent_run_id, .. }
@@ -107,13 +107,11 @@ impl RunDomainEvent {
             | Self::DrainingInput { parent_run_id, .. }
             | Self::TerminationRequested { parent_run_id, .. }
             | Self::Terminated { parent_run_id, .. }
-            | Self::CancellationRequested { parent_run_id, .. }
             | Self::AwaitingUser { parent_run_id, .. }
             | Self::Resumed { parent_run_id, .. }
             | Self::StuckDetected { parent_run_id, .. }
             | Self::Completed { parent_run_id, .. }
-            | Self::Failed { parent_run_id, .. }
-            | Self::Cancelled { parent_run_id, .. } => parent_run_id.as_ref(),
+            | Self::Failed { parent_run_id, .. } => parent_run_id.as_ref(),
         }
     }
 }

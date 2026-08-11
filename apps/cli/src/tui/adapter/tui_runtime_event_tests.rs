@@ -1,23 +1,5 @@
 use super::super::event_mapping::{sdk_event_to_tui_event, SdkEventMapping};
-use super::{TuiRunEvent, TuiRuntimeEvent};
-
-#[test]
-fn run_cancelling_keeps_identity_instead_of_becoming_empty_message() {
-    let run_id = sdk::RunId::new("run-1");
-
-    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RunCancelling {
-        run_id: run_id.clone(),
-    });
-
-    assert!(matches!(
-        mapped,
-        SdkEventMapping::Runtime(TuiRuntimeEvent::Run {
-            run_id: actual,
-            parent_run_id: None,
-            event: TuiRunEvent::Cancelling,
-        }) if actual.as_str() == run_id.as_str()
-    ));
-}
+use super::TuiRuntimeEvent;
 
 #[test]
 fn interaction_request_maps_all_body_fields_without_sdk_payload() {
@@ -47,6 +29,25 @@ fn interaction_request_maps_all_body_fields_without_sdk_payload() {
 }
 
 #[test]
+fn activity_acl_types_are_tui_owned_and_preserve_identifiers_as_values() {
+    let source = include_str!("tui_runtime_event.rs");
+    for required in [
+        "struct UiActivityId",
+        "struct TuiActivityObservation",
+        "struct TuiActivitySnapshot",
+        "enum TuiActivitySource",
+        "enum TuiActivityKind",
+        "enum TuiActivityDetail",
+        "enum TuiActivityAudience",
+    ] {
+        assert!(
+            source.contains(required),
+            "missing TUI Activity ACL type: {required}"
+        );
+    }
+}
+
+#[test]
 fn runtime_event_source_does_not_reference_sdk_or_sender() {
     let source = include_str!("tui_runtime_event.rs");
     for forbidden in ["sdk::", "oneshot::Sender", "mpsc::Sender", "AgentClient"] {
@@ -69,6 +70,44 @@ fn event_mapping_is_the_only_sdk_chat_event_match_point() {
     assert_eq!(
         oneshot_count, 0,
         "event_mapping.rs must have zero oneshot::Sender after #944 5B; found {oneshot_count}"
+    );
+}
+
+#[test]
+fn tui_internal_domains_exclude_sdk_compatibility_progress_naming() {
+    let cli_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    for relative_path in [
+        "model/conversation/intent.rs",
+        "model/conversation/change.rs",
+        "model/conversation/block.rs",
+        "model/output_timeline/item.rs",
+    ] {
+        let source = std::fs::read_to_string(cli_src.join(relative_path))
+            .unwrap_or_else(|error| panic!("read {relative_path}: {error}"));
+        assert!(
+            !source.contains("AgentProgress"),
+            "{relative_path} must use presentation-owned AgentActivities naming"
+        );
+    }
+}
+
+#[test]
+fn sdk_compatibility_progress_stops_at_the_first_tui_acl() {
+    let app_event_source = include_str!("../app/event.rs");
+    let second_layer_source = include_str!("agent_event.rs");
+    let processing_source = include_str!("../effect/session/processing.rs");
+
+    assert!(
+        !app_event_source.contains("AgentProgress"),
+        "UiEvent must not recreate the SDK compatibility event"
+    );
+    assert!(
+        !second_layer_source.contains("AgentProgress"),
+        "the TUI second-layer mapper must consume only canonical Sub Run facts"
+    );
+    assert!(
+        !processing_source.contains("sdk_event_to_ui_event"),
+        "session processing must use the sole sdk_event_to_tui_event ACL"
     );
 }
 

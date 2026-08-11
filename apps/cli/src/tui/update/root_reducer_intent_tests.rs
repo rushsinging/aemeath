@@ -2,15 +2,13 @@ use super::*;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::{
-    ClearCompactRuntime, ConfirmInteraction, ConversationIntent, RunAwaitingUser, RunStarted,
-    SetSpinnerPhase, ShowInteraction, StartChat, StopSpinner, SyncQueuedSubmissions,
+    ConfirmInteraction, ConversationIntent, ShowInteraction, StartChat, SyncQueuedSubmissions,
     UpdateInteractionDraft,
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionDraftAction, InteractionRequest, UiInteractionRequestId, UiRunId,
     UiStuckDiagnostic,
 };
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::input::intent::InputIntent;
@@ -209,55 +207,6 @@ fn matching_workspace_metadata_marks_status_without_triggering_metadata_effect()
 }
 
 #[test]
-fn agent_run_lifecycle_marks_output_dirty_without_command_effect() {
-    let mut model = TuiModel::default();
-    let run_id = UiRunId::from("run-1");
-
-    let started = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunStarted(RunStarted {
-            run_id: run_id.clone(),
-        })),
-    );
-    let awaiting = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-            run_id,
-        })),
-    );
-
-    for result in [started, awaiting] {
-        assert!(result.dirty.output);
-        assert!(result.dirty.status);
-        assert_eq!(
-            result
-                .effects
-                .iter()
-                .filter(|effect| matches!(effect, Effect::RequestRender))
-                .count(),
-            1
-        );
-        assert_eq!(result.effects.len(), 1);
-    }
-}
-
-#[test]
-fn ignored_agent_run_transition_is_not_dirty_or_rendered() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::RunAwaitingUser(RunAwaitingUser {
-            run_id: UiRunId::from("unknown-run"),
-        })),
-    );
-
-    assert!(!result.dirty.output);
-    assert!(!result.dirty.status);
-    assert!(result.effects.is_empty());
-}
-
-#[test]
 fn diagnostic_intent_marks_status_and_dialog_dirty() {
     let mut model = TuiModel::default();
 
@@ -272,43 +221,6 @@ fn diagnostic_intent_marks_status_and_dialog_dirty() {
     assert_eq!(model.diagnostic.notices.len(), 1);
     assert!(result.dirty.status);
     assert!(result.dirty.dialog);
-}
-
-#[test]
-fn spinner_phase_intent_activates_spinner_and_marks_status_dirty() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::SetSpinnerPhase(SetSpinnerPhase {
-            phase: SpinnerPhase::Compacting,
-        })),
-    );
-
-    assert!(model.conversation.runtime.spinner.chat_active);
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::Compacting)
-    );
-    assert!(result.dirty.status);
-}
-
-#[test]
-fn stop_spinner_intent_clears_spinner_state_and_marks_status_dirty() {
-    let mut model = TuiModel::default();
-    model.conversation.runtime.spinner.chat_active = true;
-    model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Compacting);
-    model.conversation.runtime.spinner.running_tool_count = 2;
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::StopSpinner(StopSpinner)),
-    );
-
-    assert!(!model.conversation.runtime.spinner.chat_active);
-    assert_eq!(model.conversation.runtime.spinner.phase, None);
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
-    assert!(result.dirty.status);
 }
 
 #[test]
@@ -328,7 +240,8 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
                     }],
                     input_id: Some(input_id.clone()),
                     source: TuiMessageSource::User,
-                    stop_hook: None,
+                    hook_notice: None,
+                    skill_request: None,
                 }],
             },
         )),
@@ -340,24 +253,6 @@ fn queued_snapshot_intent_replaces_queue_bumps_revision_and_marks_output_dirty()
     assert!(result.dirty.output);
 }
 
-#[test]
-fn clear_compact_runtime_intent_clears_progress_and_marks_output_dirty() {
-    let mut model = TuiModel::default();
-    model
-        .conversation
-        .runtime
-        .set_compact_progress("summarizing".to_string(), Some(1), Some(2));
-    model.conversation.runtime.spinner.running_tool_count = 2;
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::ClearCompactRuntime(ClearCompactRuntime)),
-    );
-
-    assert!(model.conversation.runtime.compact_progress.is_none());
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
-    assert!(result.dirty.output);
-}
 #[test]
 fn session_intent_marks_status_dirty() {
     let mut model = TuiModel::default();

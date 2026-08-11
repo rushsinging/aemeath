@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord};
+use crate::domain::session::{AcceptedInputProjection, FinalizedOutcomeProjection, SessionHistory};
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextMessage,
@@ -16,9 +16,10 @@ use crate::ports::{SessionRepository, SessionSnapshot};
 struct SessionState {
     revision: u64,
     messages: Vec<ContextMessage>,
+    history: SessionHistory,
     active_summary: Option<String>,
-    accepted_steps: HashMap<(String, String), AcceptedInputRecord>,
-    committed_steps: HashMap<(String, String), FinalizedOutcomeRecord>,
+    accepted_steps: HashMap<(String, String), AcceptedInputProjection>,
+    committed_steps: HashMap<(String, String), FinalizedOutcomeProjection>,
     tool_receipts: HashMap<String, ToolCallReceipt>,
     skill_load_records: HashMap<(tools::SkillLoadScope, String), String>,
 }
@@ -49,6 +50,7 @@ impl InMemorySessionRepository {
                 SessionState {
                     revision: revision.get(),
                     messages,
+                    history: SessionHistory::default(),
                     active_summary,
                     accepted_steps: HashMap::new(),
                     committed_steps: HashMap::new(),
@@ -90,6 +92,7 @@ impl SessionRepository for InMemorySessionRepository {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(state.revision),
             messages: state.messages.clone().into(),
+            structured_history: Some(state.history.clone()),
             active_summary: state.active_summary.clone(),
         })
     }
@@ -121,17 +124,20 @@ impl SessionRepository for InMemorySessionRepository {
                 step_id: append.step_id.clone(),
             });
         }
+        let accepted_input = AcceptedInputProjection::new(
+            append.messages.clone(),
+            append.fingerprint.as_str(),
+            state.revision + 1,
+        );
         state.messages.extend(append.messages.clone());
+        state.history = state.history.append_accepted_input(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            accepted_input.clone(),
+        );
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
-        state.accepted_steps.insert(
-            key,
-            AcceptedInputRecord::new(
-                append.messages.clone(),
-                append.fingerprint.as_str(),
-                committed_revision.get(),
-            ),
-        );
+        state.accepted_steps.insert(key, accepted_input);
         Ok(Self::accepted_receipt(append, committed_revision))
     }
 
@@ -150,7 +156,7 @@ impl SessionRepository for InMemorySessionRepository {
             })?;
         let key = mutation.identity.runtime_call_id.clone();
         let advanced = if let Some(receipt) = state.tool_receipts.get(&key) {
-            receipt.clone().advance(mutation)?
+            receipt.clone().advance(mutation.clone())?
         } else {
             let preview = mutation.input_preview.clone().unwrap_or_default();
             let receipt = ToolCallReceipt::pending(mutation.identity.clone(), preview);
@@ -160,14 +166,44 @@ impl SessionRepository for InMemorySessionRepository {
                     changed: true,
                 }
             } else {
-                receipt.advance(mutation)?
+                receipt.advance(mutation.clone())?
             }
         };
         if advanced.changed {
             state.revision += 1;
+            state.history = state
+                .history
+                .advance_tool_receipt(mutation)
+                .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+                .0;
             state.tool_receipts.insert(key, advanced.receipt.clone());
         }
         Ok(advanced)
+    }
+
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?;
+        let state = sessions
+            .get(session_id.as_str())
+            .ok_or_else(|| ToolReceiptMutationError::SessionNotFound(session_id.clone()))?;
+        let mut receipts = state
+            .tool_receipts
+            .values()
+            .filter(|receipt| {
+                receipt.identity.run_id == *run_id && receipt.identity.step_id == *step_id
+            })
+            .filter_map(ToolCallReceipt::to_step_receipt)
+            .collect::<Vec<_>>();
+        receipts.sort_by_key(crate::domain::StepReceipt::index);
+        Ok(receipts)
     }
 
     async fn compare_and_record_skill_load(
@@ -245,18 +281,21 @@ impl SessionRepository for InMemorySessionRepository {
         state.messages.extend(append.messages.clone());
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
-        state.committed_steps.insert(
-            key,
-            FinalizedOutcomeRecord {
-                finalize_cause: append.finalize_cause,
-                duration_ms: append.duration_ms,
-                messages: append.messages.clone().into(),
-                receipts: append.receipts.clone(),
-                api_input_tokens: append.api_input_tokens,
-                fingerprint: append.fingerprint.as_str().to_string(),
-                committed_revision: committed_revision.get(),
-            },
+        let outcome = FinalizedOutcomeProjection {
+            finalize_cause: append.finalize_cause,
+            duration_ms: append.duration_ms,
+            messages: append.messages.clone().into(),
+            receipts: append.receipts.clone(),
+            api_input_tokens: append.api_input_tokens,
+            fingerprint: append.fingerprint.as_str().to_string(),
+            committed_revision: committed_revision.get(),
+        };
+        state.history = state.history.append_finalized_outcome(
+            append.run_id.as_ref(),
+            append.step_id.as_str(),
+            outcome.clone(),
         );
+        state.committed_steps.insert(key, outcome);
         Ok(Self::receipt(append, committed_revision))
     }
 
@@ -283,6 +322,7 @@ impl SessionRepository for InMemorySessionRepository {
             .get_mut(session_id.as_str())
             .ok_or_else(|| ContextPortError::SessionNotFound(session_id.clone()))?;
         state.messages.clear();
+        state.history = state.history.cleared();
         state.active_summary = None;
         state.accepted_steps.clear();
         state.committed_steps.clear();

@@ -65,27 +65,63 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequest,
     ) -> Result<ContextWindow, ContextPortError> {
-        self.port.build_window(request).await
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "context_request_forwarded request_id={} reminders={} run_id={} step_id={}",
+            request.request_id.as_str(),
+            request.invocation_reminders.len(),
+            request.run_id,
+            request.step_id.as_str(),
+        );
+        let window = self.port.build_window(request).await?;
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "context_window_received request_id={} revision={} messages={} system_blocks={} tool_schemas={}",
+            request.request_id.as_str(),
+            window.backing_revision.get(),
+            window.messages.len(),
+            window.system_blocks.len(),
+            window.tool_schemas.len(),
+        );
+        Ok(window)
     }
 
+    pub(crate) async fn compaction_decision(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<context::domain::CompactionDecision, ContextPortError> {
+        self.port.needs_compaction(request).await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn needs_compaction(
         &self,
         request: &ContextRequest,
     ) -> Result<bool, ContextPortError> {
-        Ok(self.port.needs_compaction(request).await?.needed)
+        Ok(self.compaction_decision(request).await?.needed)
     }
 
     pub(crate) async fn compact(
         &self,
         request: &ContextRequest,
         source_revision: SessionRevision,
+        progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
+        task_context: Option<String>,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
+        let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
+            Some(std::sync::Arc::new(
+                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
+            ));
         self.port
             .compact(&CompactRequest {
                 run_id: request.run_id.clone(),
                 source_revision,
                 source: request.clone(),
                 trigger: CompactTrigger::Automatic,
+                progress,
+                task_context,
+                cancellation,
             })
             .await
     }
@@ -127,6 +163,15 @@ impl ContextCoordinator {
         mutation: ToolReceiptMutation,
     ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
         self.port.advance_tool_receipt(mutation).await
+    }
+
+    pub(crate) async fn step_receipts(
+        &self,
+        request: &ContextRequest,
+    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+        self.port
+            .step_receipts(&request.session_id, &request.run_id, &request.step_id)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]

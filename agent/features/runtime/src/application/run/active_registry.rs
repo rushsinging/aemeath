@@ -9,8 +9,6 @@ struct MainStepScope {
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRun {
     pub cancel: CancellationToken,
-    pub cancelling: bool,
-    pub terminal: bool,
     main_step: Option<MainStepScope>,
     control: Option<crate::domain::agent_run::RunControl>,
     control_delivered: bool,
@@ -28,7 +26,7 @@ struct ActiveRunState {
 }
 
 impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
-    fn activate(&self, run_id: sdk::RunId, cancel: CancellationToken) {
+    fn activate_child(&self, run_id: sdk::RunId, cancel: CancellationToken) {
         let mut guard = self
             .active
             .lock()
@@ -37,8 +35,6 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             run_id.clone(),
             ActiveRun {
                 cancel,
-                cancelling: false,
-                terminal: false,
                 main_step: None,
                 control: None,
                 control_delivered: false,
@@ -56,8 +52,6 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             run_id.clone(),
             ActiveRun {
                 cancel,
-                cancelling: false,
-                terminal: false,
                 main_step: None,
                 control: None,
                 control_delivered: false,
@@ -83,6 +77,17 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        if guard.current_main_run_id.as_ref() != Some(run_id) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "active run main step ignored: run_id={} step_id={} reason=not_current_main current_main_run_id={:?} active_run_count={}",
+                run_id,
+                step_id,
+                guard.current_main_run_id,
+                guard.runs.len()
+            );
+            return;
+        }
         if let Some(active) = guard.runs.get_mut(run_id) {
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -97,8 +102,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
                 cancel,
             });
         } else {
-            log::debug!(
-                target: crate::LOG_TARGET,
+            log::debug!(                target: crate::LOG_TARGET,
                 "active run main step ignored: run_id={} step_id={} reason=run_not_found current_main_run_id={:?} active_run_count={}",
                 run_id,
                 step_id,
@@ -108,38 +112,39 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
         }
     }
 
+    fn clear_main_active_step(&self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let cleared = guard.runs.get_mut(run_id).is_some_and(|active| {
+            if active.main_step.as_ref().map(|step| &step.id) != Some(step_id) {
+                return false;
+            }
+            active.main_step = None;
+            if matches!(
+                active.control,
+                Some(crate::domain::agent_run::RunControl::CancelStep {
+                    step_id: ref control_step_id,
+                    ..
+                }) if control_step_id == step_id
+            ) {
+                active.control = None;
+                active.control_delivered = false;
+            }
+            true
+        });
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "active run main step cleared: run_id={} step_id={} cleared={}",
+            run_id,
+            step_id,
+            cleared
+        );
+    }
+
     fn take_control(&self, run_id: &sdk::RunId) -> Option<crate::domain::agent_run::RunControl> {
         ActiveRunRegistry::take_control(self, run_id)
-    }
-
-    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
-        let mut guard = self
-            .active
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.runs.get_mut(run_id) else {
-            return false;
-        };
-        if active.cancelling || active.terminal {
-            return false;
-        }
-        active.terminal = true;
-        true
-    }
-
-    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
-        let mut guard = self
-            .active
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.runs.get_mut(run_id) else {
-            return false;
-        };
-        if active.terminal {
-            return false;
-        }
-        active.cancelling = true;
-        true
     }
 
     fn clear(&self, run_id: &sdk::RunId) {
@@ -173,44 +178,53 @@ impl ActiveRunRegistry {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let Some(run_id) = guard.current_main_run_id.clone() else {
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "cancel current main rejected: outcome=NoActiveRun active_run_count={} deadline_unix_ms={}",
-                guard.runs.len(),
-                deadline.unix_millis()
-            );
+            let active_run_count = guard.runs.len();
+            if active_run_count > 0 {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "cancel current main invariant violation: outcome=NoActiveRun active_run_count={} deadline_unix_ms={}",
+                    active_run_count,
+                    deadline.unix_millis()
+                );
+            } else {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "cancel current main rejected: outcome=NoActiveRun active_run_count=0 deadline_unix_ms={}",
+                    deadline.unix_millis()
+                );
+            }
             return sdk::CancelCurrentRunOutcome::NoActiveRun;
         };
         let Some(active) = guard.runs.get_mut(&run_id) else {
             guard.current_main_run_id = None;
-            log::debug!(
+            log::warn!(
                 target: crate::LOG_TARGET,
-                "cancel current main rejected: run_id={} outcome=NoActiveRun reason=registry_entry_missing deadline_unix_ms={}",
+                "cancel current main invariant violation: run_id={} outcome=NoActiveRun reason=registry_entry_missing active_run_count={} deadline_unix_ms={}",
                 run_id,
+                guard.runs.len(),
                 deadline.unix_millis()
             );
             return sdk::CancelCurrentRunOutcome::NoActiveRun;
         };
         log::debug!(
             target: crate::LOG_TARGET,
-            "cancel current main evaluating: run_id={} step_id={:?} terminal={} cancelling={} control={:?} root_cancelled={} step_cancelled={} deadline_unix_ms={}",
+            "cancel current main evaluating: run_id={} step_id={:?} control={:?} root_cancelled={} step_cancelled={} deadline_unix_ms={}",
             run_id,
             active.main_step.as_ref().map(|step| &step.id),
-            active.terminal,
-            active.cancelling,
             active.control,
             active.cancel.is_cancelled(),
-            active.main_step.as_ref().is_some_and(|step| step.cancel.is_cancelled()),
+            active
+                .main_step
+                .as_ref()
+                .is_some_and(|step| step.cancel.is_cancelled()),
             deadline.unix_millis()
         );
-        let outcome = if active.terminal {
-            sdk::CancelCurrentRunOutcome::RunTerminal
-        } else if matches!(
+        let outcome = if matches!(
             active.control,
             Some(crate::domain::agent_run::RunControl::Terminate { .. })
         ) {
             sdk::CancelCurrentRunOutcome::RunTerminating
-        } else if active.control.is_some() || active.cancelling {
+        } else if active.control.is_some() {
             sdk::CancelCurrentRunOutcome::AlreadyCancelling
         } else if let Some(current_step) = active.main_step.as_ref() {
             let step_id = current_step.id.clone();
@@ -220,23 +234,28 @@ impl ActiveRunRegistry {
             active.control_delivered = false;
             sdk::CancelCurrentRunOutcome::Accepted
         } else {
-            active.cancelling = true;
             active.cancel.cancel();
+            active.control = Some(crate::domain::agent_run::RunControl::Terminate {
+                reason: sdk::RunTerminationReason::UserExit,
+                deadline,
+            });
+            active.control_delivered = false;
             sdk::CancelCurrentRunOutcome::Accepted
         };
-        log::debug!(
-            target: crate::LOG_TARGET,
+        log::debug!(            target: crate::LOG_TARGET,
             "cancel current main completed: run_id={} step_id={:?} outcome={:?} root_cancelled={} step_cancelled={} control={:?}",
             run_id,
             active.main_step.as_ref().map(|step| &step.id),
             outcome,
             active.cancel.is_cancelled(),
-            active.main_step.as_ref().is_some_and(|step| step.cancel.is_cancelled()),
+            active
+                .main_step
+                .as_ref()
+                .is_some_and(|step| step.cancel.is_cancelled()),
             active.control
         );
         outcome
     }
-
     pub fn cancel_step(
         &self,
         run_id: &sdk::RunId,
@@ -250,16 +269,13 @@ impl ActiveRunRegistry {
         let Some(active) = guard.runs.get_mut(run_id) else {
             return sdk::CancelRunStepOutcome::NotFound;
         };
-        if active.terminal {
-            return sdk::CancelRunStepOutcome::RunTerminal;
-        }
         if matches!(
             active.control,
             Some(crate::domain::agent_run::RunControl::Terminate { .. })
         ) {
             return sdk::CancelRunStepOutcome::RunTerminating;
         }
-        if active.control.is_some() || active.cancelling {
+        if active.control.is_some() {
             return sdk::CancelRunStepOutcome::AlreadyCancelling;
         }
         let Some(current_step) = active.main_step.as_ref() else {
@@ -289,9 +305,6 @@ impl ActiveRunRegistry {
         let Some(active) = guard.runs.get_mut(run_id) else {
             return sdk::TerminateRunOutcome::NotFound;
         };
-        if active.terminal {
-            return sdk::TerminateRunOutcome::AlreadyTerminal;
-        }
         if matches!(
             active.control,
             Some(crate::domain::agent_run::RunControl::Terminate { .. })
@@ -322,25 +335,6 @@ impl ActiveRunRegistry {
         let control = active.control.clone()?;
         active.control_delivered = true;
         Some(control)
-    }
-
-    pub fn cancel(&self, run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
-        let mut guard = self
-            .active
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.runs.get_mut(run_id) else {
-            return sdk::CancelRunOutcome::NotFound;
-        };
-        if active.terminal {
-            return sdk::CancelRunOutcome::AlreadyTerminal;
-        }
-        if active.cancelling {
-            return sdk::CancelRunOutcome::AlreadyCancelling;
-        }
-        active.cancelling = true;
-        active.cancel.cancel();
-        sdk::CancelRunOutcome::Accepted
     }
 
     #[cfg(test)]

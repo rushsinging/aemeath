@@ -94,7 +94,7 @@ impl tools::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssembly {
-    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new())
+    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model")
 }
 
 fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBootstrapAssembly {
@@ -107,10 +107,12 @@ fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
 
 fn test_agent_runner_assembly(
     runtime_context_factory: Arc<runtime::RuntimeContextFactory>,
+    active_run: Arc<runtime::ActiveRunRegistry>,
 ) -> runtime::AgentRunnerAssembly {
     runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopAgentRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
+        active_run,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -250,8 +252,12 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::ActiveRunRegistry::default());
-    let hook_runner: Arc<dyn hook::HookPort> =
-        Arc::new(hook::build_dispatcher(&share::config::hooks::HooksConfig::default()).unwrap());
+    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ))
+        .unwrap(),
+    );
 
     let wiring_clone = wiring.clone();
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
@@ -261,6 +267,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         history.clone(),
         access.clone(),
         hook_runner.clone(),
+        Arc::new(runtime::UnavailableUsageSink),
     ));
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
@@ -275,11 +282,12 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             tool_result_materializer.clone(),
             active_run.clone(),
         ),
+        runtime::composition::wire_sdk_chat_ingress(),
         initial_provider_assembly(),
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),
         test_skill_bootstrap_assembly(),
-        test_agent_runner_assembly(runtime_context_factory.clone()),
+        test_agent_runner_assembly(runtime_context_factory.clone(), active_run.clone()),
     );
 
     assert!(Arc::ptr_eq(

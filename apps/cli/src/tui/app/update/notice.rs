@@ -16,15 +16,27 @@ impl App {
 
     /// 将一条用户输入回显写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
-    /// 用于 ask_user 应答、队列输入冲刷等「在已激活回合内回显用户输入」的场景：
+    /// 用于 ask_user 应答、队列输入冲刷等「在已激活run内回显用户输入」的场景：
     /// 走 `AppendUserMessage` 而非 `StartChat`，不新开 chat、不破坏在途工具绑定。
     /// 回显经 `ConversationBlock::UserMessage -> UserMessage view -> "> ..."` 渲染。
     pub(crate) fn append_user_echo(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        crate::tui::log_debug!(
+            "skill_request boundary=tui_append_user_echo text_len={} text_preview={:?} timeline_before={} revision_before={}",
+            text.len(),
+            text.chars().take(120).collect::<String>(),
+            self.model.conversation.timeline.items().len(),
+            self.model.conversation.revision()
+        );
         self.apply_agent_intent(AgentIntent::Conversation(
-            ConversationIntent::AppendUserMessage(AppendUserMessage { text: text.into() }),
+            ConversationIntent::AppendUserMessage(AppendUserMessage { text }),
         ));
+        crate::tui::log_debug!(
+            "skill_request boundary=tui_append_user_echo outcome=appended timeline_after={} revision_after={}",
+            self.model.conversation.timeline.items().len(),
+            self.model.conversation.revision()
+        );
     }
-
     /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新 live-status 投影。
     ///
     /// 用于「agent 处理期间用户提交输入」场景：派发 `QueueSubmission` 写入

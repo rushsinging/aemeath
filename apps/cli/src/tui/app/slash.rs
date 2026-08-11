@@ -61,6 +61,12 @@ impl super::App {
                 let sdk::CommandRoute::SkillRequest(request) = route else {
                     unreachable!("matched SkillRequest route")
                 };
+                crate::tui::log_debug!(                    "skill_request boundary=tui_slash_to_runtime skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                    request.skill,
+                    args.len(),
+                    input.len(),
+                    input.chars().take(120).collect::<String>()
+                );
                 self.chat
                     .push_input_event(sdk::ChatInputEvent::SkillRequest(sdk::SkillRequest {
                         input_id: sdk::InputId::new_v7(),
@@ -76,18 +82,20 @@ impl super::App {
                 self.append_system_notice("[conversation cleared]");
             }
             "compact" => {
-                // #497 子 issue 0：走 runtime 事件流（ChatInputEvent::Compact →
-                // manual_compact），不再直接调 compact_messages().await。
-                // spinner / 进度 Gauge / 结果回显全部由 runtime 的
-                // PreCompact → CompactProgress → PostCompact → SystemMessage 事件驱动。
+                // 走 Runtime typed 事件流（ChatInputEvent::Compact → manual_compact），
+                // 不在 TUI 直接压缩；进度与结果仅由 Runtime Activity/结果事件驱动。
                 if self.chat.input_event_tx.is_some() {
-                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                    let queued = self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                    crate::tui::log_debug!("slash compact queued={} tx_available=true", queued);
+                    if queued == 0 {
+                        self.append_error_notice("/compact 未能送达 Runtime 输入通道");
+                    }
                 } else {
                     self.append_system_notice("[compact skipped: chat loop not running]");
                 }
             }
             "help" => self.show_slash_help(),
-            "usage" => {
+            "usage" | "cost" => {
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
@@ -198,18 +206,6 @@ Build info:
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 }
-            }
-            "cost" => {
-                // #567: QueryCost 变体已删除，改为本地从 model 状态渲染。
-                let usage = &self.model.conversation.runtime.usage;
-                let total = usage.input_tokens + usage.output_tokens;
-                self.append_system_notice(format!(
-                    "API calls: {} | Tokens: {} in / {} out / {} total",
-                    usage.api_calls,
-                    sdk::format_tokens(usage.input_tokens),
-                    sdk::format_tokens(usage.output_tokens),
-                    sdk::format_tokens(total)
-                ));
             }
             "status" => {
                 // #567: QueryStatus 变体已删除，改为本地渲染状态信息。

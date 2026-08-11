@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
+use crate::application::loop_engine::input_strategy::SessionInputPort;
 use crate::application::run::context::ParentRunContextSource;
 use crate::application::run::context_factory::RuntimeContextFactory;
 use sdk::ChatEvent;
@@ -10,12 +11,78 @@ use share::config::models::ResolvedModel;
 use share::config::MemoryConfig;
 use tools::AgentRunner;
 
+trait DynSessionInput: Send + Sync {
+    fn defer(&self, event: sdk::ChatInputEvent);
+    fn drain_input_events<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventFuture<'a>;
+    fn recv_next_input<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventOptFuture<'a>;
+}
+
+impl<T> DynSessionInput for T
+where
+    T: SessionInputPort + Send + Sync,
+{
+    fn defer(&self, event: sdk::ChatInputEvent) {
+        SessionInputPort::defer(self, event);
+    }
+
+    fn drain_input_events<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventFuture<'a> {
+        crate::application::loop_engine::chat::InputEventDrainPort::drain_input_events(self)
+    }
+
+    fn recv_next_input<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventOptFuture<'a> {
+        crate::application::loop_engine::chat::InputEventDrainPort::recv_next_input(self)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionInputHandle {
+    inner: Arc<dyn DynSessionInput>,
+}
+
+impl SessionInputHandle {
+    pub(crate) fn new<T>(input: T) -> Self
+    where
+        T: SessionInputPort + Send + Sync,
+    {
+        Self {
+            inner: Arc::new(input),
+        }
+    }
+}
+
+impl crate::application::loop_engine::chat::InputEventDrainPort for SessionInputHandle {
+    fn drain_input_events<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventFuture<'a> {
+        self.inner.drain_input_events()
+    }
+
+    fn recv_next_input<'a>(
+        &'a self,
+    ) -> crate::application::loop_engine::chat::InputEventOptFuture<'a> {
+        self.inner.recv_next_input()
+    }
+}
+
+impl SessionInputPort for SessionInputHandle {
+    fn defer(&self, event: sdk::ChatInputEvent) {
+        self.inner.defer(event);
+    }
+}
+
 pub(crate) type InputPortFactory =
-    dyn Fn(
-            Arc<dyn sdk::ChatInputEventPort>,
-        ) -> crate::adapters::input_buffer::RuntimeInputEventDrainPort
-        + Send
-        + Sync;
+    dyn Fn(Arc<dyn sdk::ChatInputEventPort>) -> SessionInputHandle + Send + Sync;
+
+pub(crate) type EventSinkFactory =
+    dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync;
 
 #[derive(Clone)]
 pub struct SessionModelState {
@@ -90,6 +157,7 @@ pub struct SessionRuntime {
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
+    pub prompt_model_id: String,
 
     // ── Skills ──
     pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
@@ -100,9 +168,9 @@ pub struct SessionRuntime {
     pub context_size: usize,
     pub language: String,
     pub allow_all: bool,
-    /// #1385 Task 7: verbose 标记，从 `ChatRuntimeContext` 迁移至 shell。
+    /// Session-owned verbose flag.
     pub verbose: bool,
-    /// #1385 Task 7: resume session-id，从 `ChatRuntimeContext` 迁移至 shell。
+    /// Session resume identifier.
     pub resume: Option<String>,
     /// 启动 `--resume` 已完成的单次恢复投影；供 Composition/TUI 初始化历史。
     pub startup_resume: Option<sdk::LocalSessionResumeBacking>,
@@ -119,9 +187,7 @@ pub struct SessionRuntime {
     pub(crate) session_ingress: Arc<crate::application::session::ingress::SessionIngress>,
 
     // ── Event/Input factories ──
-    pub(crate) event_sink_factory: Arc<
-        dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
-    >,
+    pub(crate) event_sink_factory: Arc<EventSinkFactory>,
     pub(crate) input_port_factory: Arc<InputPortFactory>,
 
     // ── Session reminders ──
@@ -132,8 +198,8 @@ pub struct SessionRuntime {
     // Access them via shell.runtime_context_factory.services() rather than
     // duplicating the Arc references here.
     //
-    // tool_catalog, tool_execution, and hook_runner are still exposed through
-    // tui_launch_context via factory services accessors.
+    // Tool, Hook and other per-Run services remain accessible only through
+    // RuntimeContextFactory during Run creation.
 
     // ── #1248 Task 3: RuntimeContextFactory (constructed once from static ports) ──
     pub(crate) runtime_context_factory: Arc<RuntimeContextFactory>,
@@ -157,6 +223,7 @@ impl SessionRuntime {
         system_prompt_text: String,
         initial_git_context: String,
         user_context: String,
+        prompt_model_id: String,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         initial_skill_snapshot: tools::SkillCatalogSnapshot,
         memory_config: MemoryConfig,
@@ -172,6 +239,8 @@ impl SessionRuntime {
             crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         >,
         active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
+        event_sink_factory: Arc<EventSinkFactory>,
+        input_port_factory: Arc<InputPortFactory>,
         runtime_context_factory: Arc<RuntimeContextFactory>,
     ) -> Self {
         let interaction_bridge =
@@ -195,6 +264,7 @@ impl SessionRuntime {
             system_prompt_text,
             initial_git_context,
             user_context,
+            prompt_model_id,
             skill_catalog,
             initial_skill_snapshot,
             memory_config,
@@ -210,14 +280,8 @@ impl SessionRuntime {
             active_run,
             interaction_bridge,
             session_ingress,
-            event_sink_factory: Arc::new(|tx| {
-                crate::application::loop_engine::chat::ChatEventSinkHandle::new(
-                    crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
-                )
-            }),
-            input_port_factory: Arc::new(|ingress| {
-                crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress)
-            }),
+            event_sink_factory,
+            input_port_factory,
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),
             )),
@@ -297,41 +361,39 @@ impl AgentClientImpl {
         self.inner.shell.max_agent_concurrency
     }
 
-    pub fn tui_launch_context(&self) -> crate::adapters::tui_launch::TuiLaunchContext {
+    pub fn startup_snapshot(&self) -> sdk::TuiLaunchContext {
         let shell = &self.inner.shell;
-        let services = shell.runtime_context_factory.services();
         let session_snapshot = shell.session_snapshot();
         let resolved_model = shell.model_state.resolved();
-        crate::adapters::tui_launch::TuiLaunchContext {
+        sdk::TuiLaunchContext {
             session_id: session_snapshot.session_id().to_string(),
-            startup_resume: shell.startup_resume.clone(),
+            cwd: session_snapshot.workspace_root().to_path_buf(),
             model_display: super::mapping::model_display(
                 &resolved_model.source_key,
                 &resolved_model.model.name,
                 &resolved_model.model.id,
             ),
-            binding: shell.model_state.binding(),
-            tool_catalog: services.tool_catalog.clone(),
-            tool_execution: services.tool_execution.clone(),
-            system_blocks: shell.system_blocks.clone(),
-            system_prompt_text: shell.system_prompt_text.clone(),
-            initial_git_context: shell.initial_git_context.clone(),
-            user_context: shell.user_context.clone(),
-            context_size: shell.context_size,
-            verbose: shell.verbose,
-            config_view: super::mapping::config_snapshot_to_sdk(session_snapshot.config()),
-            agent_runner: shell.agent_runner.clone(),
-            allow_all: shell.allow_all,
-            max_tool_concurrency: shell.max_tool_concurrency,
-            max_agent_concurrency: shell.max_agent_concurrency,
-            agent_semaphore: shell.agent_semaphore.clone(),
             memory_config: super::mapping::memory_config_to_sdk(shell.memory_config.clone()),
             skill_snapshot: super::mapping::skill_snapshot_to_sdk(
                 shell.initial_skill_snapshot.clone(),
             ),
-            hook_runner: services.hooks.clone(),
-            session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
-            workspace_root: session_snapshot.workspace_root().to_path_buf(),
+            initial_resume_id: shell.resume.clone(),
         }
+    }
+
+    pub fn startup_resume(&self) -> Option<sdk::LocalSessionResumeBacking> {
+        self.inner.shell.startup_resume.clone()
+    }
+
+    pub fn allow_all(&self) -> bool {
+        self.inner.shell.allow_all
+    }
+
+    pub fn context_size(&self) -> usize {
+        self.inner.shell.context_size
+    }
+
+    pub fn requested_reasoning(&self) -> provider::ReasoningLevel {
+        self.inner.shell.model_state.binding().requested_reasoning
     }
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -15,12 +15,13 @@ cp "$TMP/repo/agent/features/runtime/src/application/run/creation.rs" "$BASELINE
 cp "$TMP/repo/agent/features/runtime/src/application/run/launcher.rs" "$BASELINE/launcher.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/engine.rs" "$BASELINE/engine.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/tests.rs" "$BASELINE/loop_engine_tests.rs"
-cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs" "$BASELINE/loop_runner.rs"
+cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs" "$BASELINE/loop_runner.rs"
+cp "$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs" "$BASELINE/run_preparation.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/run/derived/setup.rs" "$BASELINE/derived_setup.rs"
 cp "$TMP/repo/agent/features/runtime/src/application/run/derived/loop_run.rs" "$BASELINE/derived_loop_run.rs"
 
 run_guard() {
-  AEMEATH_PROJECT_DIR="$TMP/repo" bash "$GUARD"
+  AEMEATH_PROJECT_DIR="$TMP/repo" /bin/bash "$GUARD"
 }
 
 expect_failure() {
@@ -37,6 +38,13 @@ expect_failure() {
 }
 
 run_guard >/dev/null
+
+# --fast-only：Stop 场景只做主检查；15 个变异回归（每个重跑 guard ~1.3s）
+# 只在 full 门禁执行——fast 全量 wall 从 22s 降到 ~8s。
+if [ "${1:-}" = "--fast-only" ]; then
+  echo "Runtime Capability Assembly fast probe passed."
+  exit 0
+fi
 
 CONTEXT_FACTORY="$TMP/repo/agent/features/runtime/src/application/run/context_factory.rs"
 cat >>"$CONTEXT_FACTORY" <<'RUST'
@@ -65,18 +73,19 @@ printf '%s\n' 'fn unapproved_run_instance_creator() { let _ = RunInstance::new(u
 expect_failure unapproved-run-instance-creator "RunInstance::new has an unapproved caller"
 
 cp "$BASELINE/launcher.rs" "$LAUNCHER"
-MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/loop_runner.rs"
+MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs"
 python3 - "$MAIN_CALLER" <<'PY'
 from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 source = path.read_text()
-source = source.replace("run_factory.create(request)", "bypass_main_run_factory(request)", 1)
+source = source.replace("run_factory.create(preparation.request)", "bypass_main_run_factory(preparation.request)", 1)
 path.write_text(source)
 PY
 expect_failure main-factory-bypass "Main Run must use RunFactory::create and RunLauncher::launch"
 
-cp "$BASELINE/loop_runner.rs" "$MAIN_CALLER"
+cp "$BASELINE/run_preparation.rs" "$MAIN_CALLER"
+MAIN_CALLER="$TMP/repo/agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs"
 python3 - "$MAIN_CALLER" <<'PY'
 from pathlib import Path
 import sys
@@ -151,6 +160,13 @@ PY
 expect_failure unapproved-root-export "Runtime crate root exposes unapproved façade symbol: RunInstance"
 
 cp "$BASELINE/lib.rs" "$TMP/repo/agent/features/runtime/src/lib.rs"
+grep -Fq 'UsageSink' "$LIB" || {
+  echo "[runtime-capability-assembly] approved UsageSink façade is missing from runtime crate root" >&2
+  exit 1
+}
+run_guard >/dev/null
+
+cp "$BASELINE/lib.rs" "$TMP/repo/agent/features/runtime/src/lib.rs"
 CREATION="$TMP/repo/agent/features/runtime/src/application/run/creation.rs"
 python3 - "$CREATION" <<'PY'
 from pathlib import Path
@@ -195,6 +211,25 @@ printf '%s\n' 'struct RenamedFatFake;' 'impl InputPort for RenamedFatFake {}' 'i
 expect_failure fat-test-double "Runtime type RenamedFatFake implements multiple Loop capability categories"
 
 cp "$BASELINE/loop_engine_tests.rs" "$TMP/repo/agent/features/runtime/src/application/loop_engine/tests.rs"
+run_guard >/dev/null
+
+BOUNDARY_HOOK="$TMP/repo/agent/features/runtime/src/application/hook/empty.rs"
+cp "$BOUNDARY_HOOK" "$BASELINE/empty.rs"
+python3 - "$BOUNDARY_HOOK" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+source = source.replace(
+    "point.metadata().class == HookClass::Boundary",
+    "matches!(point, HookPoint::SessionStart | HookPoint::SessionEnd | HookPoint::SubRunStart | HookPoint::SubRunStop)",
+    1,
+)
+path.write_text(source)
+PY
+expect_failure boundary-hook-variant-allow-list "BoundaryHookPort must derive filtering from HookPointMetadata.class"
+
+cp "$BASELINE/empty.rs" "$BOUNDARY_HOOK"
 run_guard >/dev/null
 
 echo "Runtime Capability Assembly terminal boundary probes passed."

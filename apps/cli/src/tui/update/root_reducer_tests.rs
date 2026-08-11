@@ -1,19 +1,17 @@
 use super::*;
 use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ResumeConversation, SetCompactProgress, StartChat, ToolCallStart,
-    ToolCallUpdate,
+    ConversationIntent, ResumeConversation, StartChat, ToolCallStart, ToolCallUpdate,
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
-use crate::tui::model::conversation::spinner::SpinnerPhase;
 
 fn tool_update(
     status: crate::tui::model::conversation::tool_call::ToolCallStatus,
 ) -> ConversationIntent {
     ConversationIntent::ToolCallUpdate(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-lifecycle"),
-        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-lifecycle"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-lifecycle"),
         id: crate::tui::model::conversation::ids::ToolCallId::new("tool-lifecycle"),
         provider_id: Some("provider-lifecycle".to_string()),
         name: "Bash".to_string(),
@@ -24,7 +22,7 @@ fn tool_update(
 }
 
 #[test]
-fn session_history_restore_does_not_activate_runtime_spinner() {
+fn session_history_restore_keeps_run_snapshot_inactive() {
     let mut model = TuiModel::default();
 
     reduce_intent(
@@ -43,12 +41,11 @@ fn session_history_restore_does_not_activate_runtime_spinner() {
         })),
     );
 
-    assert!(
-        !model.conversation.runtime.spinner.chat_active,
-        "SessionResumed 的历史投影不能表示 Runtime 正在执行"
-    );
-    assert_eq!(model.conversation.runtime.spinner.phase, None);
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 0);
+    assert!(model
+        .conversation
+        .activity_observations()
+        .activities()
+        .is_empty());
 }
 #[test]
 fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
@@ -72,8 +69,9 @@ fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
 }
 
 #[test]
-fn test_running_tool_update_starts_runtime_tool_spinner() {
+fn running_tool_update_does_not_mutate_runtime_presentation_state() {
     let mut model = TuiModel::default();
+    let runtime_before = model.conversation.runtime.clone();
 
     reduce_agent_event(
         &mut model,
@@ -85,11 +83,7 @@ fn test_running_tool_update_starts_runtime_tool_spinner() {
         },
     );
 
-    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 1);
-    assert_eq!(
-        model.conversation.runtime.spinner.phase,
-        Some(SpinnerPhase::CallingTool("Bash".to_string()))
-    );
+    assert_eq!(model.conversation.runtime, runtime_before);
 }
 
 #[test]
@@ -99,16 +93,16 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
         submission: "read".to_string(),
     });
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
-    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-1");
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-1");
     model
         .conversation
-        .ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+        .ensure_runtime_turn(chat_id.clone(), run_id.clone());
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
@@ -122,7 +116,7 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
@@ -145,14 +139,14 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
 fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_request() {
     let mut model = TuiModel::default();
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("chat-atomic");
-    let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-atomic");
+    let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-atomic");
 
     let result = reduce_agent_event(
         &mut model,
         AgentEventMapping {
             conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
+                run_id: run_id.clone(),
                 id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
                 provider_id: Some("provider-atomic".to_string()),
                 name: "Read".to_string(),
@@ -183,7 +177,7 @@ fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_requ
             item,
             crate::tui::model::output_timeline::OutputTimelineItem::ToolCall { reference }
                 if reference.context.chat_id == chat_id
-                    && reference.context.turn_id == turn_id
+                    && reference.context.run_id == run_id
                     && reference.tool_call_id == expected_tool_id
         )));
 }
@@ -208,33 +202,4 @@ fn error_change_requests_hook_effect_through_coordinator() {
         effect,
         Effect::RunHook { name, message } if name == "error" && message == "坏了"
     )));
-}
-#[test]
-fn set_compact_progress_marks_output_dirty_not_status_only() {
-    let mut model = TuiModel::default();
-    let result = reduce_agent_event(
-        &mut model,
-        AgentEventMapping {
-            conversation: vec![ConversationIntent::SetCompactProgress(SetCompactProgress {
-                stage: "summarizing".into(),
-                current: Some(2),
-                total: Some(10),
-            })],
-            ..Default::default()
-        },
-    );
-    assert!(
-        result.dirty.output,
-        "SetCompactProgress 必须 mark output_dirty（进度条嵌在 spinner 行）"
-    );
-    assert_eq!(
-        model
-            .conversation
-            .runtime
-            .compact_progress
-            .as_ref()
-            .map(|p| p.stage.as_str()),
-        Some("summarizing"),
-        "apply 后 model 应保存 progress 状态"
-    );
 }

@@ -2,42 +2,101 @@ use crate::tui::app::event::UiEvent;
 
 pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
     match event {
-        sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(
-            "{} token chat_id={} turn_id={} text_len={}",
+        sdk::ChatEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "{} assistant_text_delta chat_id={} run_id={} delta_len={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
+            delta.len()
+        ),
+        sdk::ChatEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "{} thinking_delta chat_id={} run_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            delta.len()
+        ),
+        sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(
+            "{} token chat_id={} run_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
             text.len()
         ),
         sdk::ChatEvent::Thinking { context, text } => crate::tui::log_trace!(
-            "{} thinking chat_id={} turn_id={} text_len={}",
+            "{} thinking chat_id={} run_id={} text_len={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             text.len()
         ),
         sdk::ChatEvent::BlockComplete { context, text } => crate::tui::log_trace!(
-            "{} block_complete chat_id={} turn_id={} text_len={}",
+            "{} block_complete chat_id={} run_id={} text_len={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             text.len()
         ),
-        sdk::ChatEvent::ToolCallStart {
+        sdk::ChatEvent::ToolCallStarted {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        }
+        | sdk::ChatEvent::ToolCallStart {
             context,
             id,
             provider_id,
             name,
             index,
         } => crate::tui::log_trace!(
-            "{} tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+            "{} tool_call_start chat_id={} run_id={} id={} provider_id={:?} name={} index={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             name,
             index
+        ),
+        sdk::ChatEvent::ToolCallArgumentsDelta {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            delta,
+        } => crate::tui::log_trace!(
+            "{} tool_call_arguments_delta chat_id={} run_id={} id={} provider_id={:?} name={} index={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            id,
+            provider_id,
+            name,
+            index,
+            delta.len(),
+        ),
+        sdk::ChatEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments,
+            status,
+        } => crate::tui::log_trace!(
+            "{} tool_call_state_changed chat_id={} run_id={} id={} provider_id={:?} name={} index={} status={:?} args_present={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            id,
+            provider_id,
+            name,
+            index,
+            status,
+            arguments.is_some(),
         ),
         sdk::ChatEvent::ToolCallUpdate {
             context,
@@ -49,10 +108,10 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             arguments,
             status,
         } => crate::tui::log_trace!(
-            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
+            "{} tool_call_update chat_id={} run_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             name,
@@ -72,10 +131,10 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             images,
             ..
         } => crate::tui::log_trace!(
-            "{} tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+            "{} tool_result chat_id={} run_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             tool_name,
@@ -87,27 +146,15 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::SystemMessage(message) => {
             crate::tui::log_trace!("{} system_message len={}", stage, message.len())
         }
-        sdk::ChatEvent::ModelStreamWaiting {
-            context,
-            elapsed_secs,
-            phase,
-        } => crate::tui::log_trace!(
-            "{} model_stream_waiting chat_id={} turn_id={} elapsed_secs={} phase={}",
-            stage,
-            context.chat_id,
-            context.turn_id,
-            elapsed_secs,
-            phase
-        ),
         sdk::ChatEvent::ModelInvocationRetrying {
             context,
             attempt,
             delay,
         } => crate::tui::log_trace!(
-            "{} model_invocation_retrying chat_id={} turn_id={} attempt={} delay_ms={}",
+            "{} model_invocation_retrying chat_id={} run_id={} attempt={} delay_ms={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             attempt,
             delay.as_millis()
         ),
@@ -125,13 +172,31 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             elapsed_secs
         ),
         sdk::ChatEvent::TurnStarted { messages }
+        | sdk::ChatEvent::MicrocompactCompleted { messages, .. }
         | sdk::ChatEvent::MicrocompactDone { messages, .. }
-        | sdk::ChatEvent::StopHookBlocked { messages }
-        | sdk::ChatEvent::PostToolExecutionSync { messages }
+        | sdk::ChatEvent::CompactOperationRolledBack { messages }
+        | sdk::ChatEvent::CompactOperationCompleted { messages, .. }
         | sdk::ChatEvent::CompactRollback { messages }
-        | sdk::ChatEvent::CompactFinished { messages } => {
+        | sdk::ChatEvent::CompactFinished { messages, .. } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
         }
+        sdk::ChatEvent::SessionMessageStateChanged {
+            message_count,
+            revision,
+        } => crate::tui::log_trace!(
+            "{} message_state_changed count={} revision={}",
+            stage,
+            message_count,
+            revision
+        ),
+        sdk::ChatEvent::HookNotice { notice } => crate::tui::log_trace!(
+            "{} hook_notice point={} command={} exit_code={:?} has_output_file={}",
+            stage,
+            notice.point,
+            notice.command,
+            notice.exit_code,
+            notice.output_file.is_some()
+        ),
         sdk::ChatEvent::ApiError { messages, error } => {
             crate::tui::log_trace!("{} api_error count={} err={}", stage, messages.len(), error)
         }
@@ -151,19 +216,19 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             )
         }
         sdk::ChatEvent::Done { context } => crate::tui::log_trace!(
-            "{} done chat_id={} turn_id={}",
+            "{} done chat_id={} run_id={}",
             stage,
             context.chat_id,
-            context.turn_id
+            context.run_id
         ),
         sdk::ChatEvent::DoneWithDurationMs {
             context,
             duration_ms,
         } => crate::tui::log_trace!(
-            "{} done_with_duration_ms chat_id={} turn_id={} duration_ms={}",
+            "{} done_with_duration_ms chat_id={} run_id={} duration_ms={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             duration_ms
         ),
         sdk::ChatEvent::RunStarted {
@@ -183,53 +248,28 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         }
         sdk::ChatEvent::RunStepCancellationRequested { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_cancellation_requested run_id={} step_id={}", stage, run_id, step_id),
         sdk::ChatEvent::RunStepFinalizationStarted { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_finalization_started run_id={} step_id={}", stage, run_id, step_id),
-        sdk::ChatEvent::RunStepCancelled { run_id, step_id, confirmed, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} confirmed={}", stage, run_id, step_id, confirmed),
+        sdk::ChatEvent::RunStepCancelled { run_id, step_id, terminal, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} terminal={:?}", stage, run_id, step_id, terminal),
         sdk::ChatEvent::RunDrainingInput { run_id, .. } => crate::tui::log_trace!("{} run_draining_input run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminationRequested { run_id, .. } => crate::tui::log_trace!("{} run_termination_requested run_id={}", stage, run_id),
         sdk::ChatEvent::RunTerminated { run_id, .. } => crate::tui::log_trace!("{} run_terminated run_id={}", stage, run_id),
         sdk::ChatEvent::RunCompleted { run_id, .. } => crate::tui::log_trace!("{} run_completed run_id={}", stage, run_id),
         sdk::ChatEvent::RunFailed { run_id, .. } => crate::tui::log_trace!("{} run_failed run_id={}", stage, run_id),
         sdk::ChatEvent::RunStuckDetected { run_id, .. } => crate::tui::log_trace!("{} run_stuck_detected run_id={}", stage, run_id),
-        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={}", stage, run_id, status),
+        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={:?}", stage, run_id, status),
         sdk::ChatEvent::RunAwaitingUser { run_id, .. } => crate::tui::log_trace!("{} run_awaiting_user run_id={}", stage, run_id),
         sdk::ChatEvent::RunResumed { run_id, .. } => crate::tui::log_trace!("{} run_resumed run_id={}", stage, run_id),
         sdk::ChatEvent::InteractionRequested { request } => crate::tui::log_trace!("{} interaction_requested request_id={} run_id={}", stage, request.id, request.run_id),
-        sdk::ChatEvent::RunCancelling { run_id } => {
-            crate::tui::log_trace!("{} run_cancelling run_id={}", stage, run_id)
-        }
-        sdk::ChatEvent::RunCancelled { run_id } => {
-            crate::tui::log_trace!("{} run_cancelled run_id={}", stage, run_id)
-        }
-        sdk::ChatEvent::Cancelled { context, .. } => crate::tui::log_trace!(
-            "{} cancelled chat_id={} turn_id={}",
+        sdk::ChatEvent::Cancelled { context, .. } => crate::tui::log_trace!(            "{} cancelled chat_id={} run_id={}",
             stage,
             context.chat_id,
-            context.turn_id
+            context.run_id
         ),
         sdk::ChatEvent::LiveTps(tps) => crate::tui::log_trace!("{} live_tps={:.2}", stage, tps),
-        sdk::ChatEvent::TurnChanged(turn) => {
-            crate::tui::log_trace!("{} turn_changed turn={}", stage, turn)
+        sdk::ChatEvent::RunChanged(run_step) => {
+            crate::tui::log_trace!("{} run_changed run_step={}", stage, run_step)
         }
-        sdk::ChatEvent::CurrentTurnChanged(turn) => {
-            crate::tui::log_trace!("{} current_turn_changed turn={}", stage, turn)
-        }
-        sdk::ChatEvent::HookEvent(event) => crate::tui::log_trace!(
-            "{} hook_event name={} status={:?}",
-            stage,
-            event.hook_name,
-            event.status
-        ),
-        sdk::ChatEvent::HookMessage(message) => crate::tui::log_trace!(
-            "{} hook_message point={} source={} ordinal={} attempt={} kind={:?}",
-            stage,
-            message.point,
-            message.source,
-            message.execution_ordinal,
-            message.attempt,
-            message.kind
-        ),
-        sdk::ChatEvent::AskUserBatch { items, .. } => {
-            crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
+        sdk::ChatEvent::CurrentRunChanged(run_step) => {
+            crate::tui::log_trace!("{} current_run_changed run_step={}", stage, run_step)
         }
         sdk::ChatEvent::AgentProgress {
             source_context,
@@ -237,15 +277,58 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             tool_id,
             event,
         } => crate::tui::log_trace!(
-            "{} agent_progress source_chat_id={} source_turn_id={} attachment_chat_id={} attachment_turn_id={} tool_id={} seq={} kind={}",
+            "{} agent_progress source_chat_id={} source_run_id={} attachment_chat_id={} attachment_run_id={} tool_id={} seq={} kind={}",
             stage,
             source_context.chat_id,
-            source_context.turn_id,
+            source_context.run_id,
             attachment_context.chat_id,
-            attachment_context.turn_id,
+            attachment_context.run_id,
             tool_id,
             event.sequence,
             event
+        ),
+        sdk::ChatEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => crate::tui::log_trace!(
+            "{} tool_output_delta chat_id={} run_id={} tool_id={} delta_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            delta.len(),
+        ),
+        sdk::ChatEvent::ToolProgress {
+            context,
+            tool_id,
+            event,
+        } => crate::tui::log_trace!(
+            "{} tool_progress chat_id={} run_id={} tool_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            event.text.len(),
+        ),
+        sdk::ChatEvent::SubRunStarted { event } => crate::tui::log_trace!(
+            "{} sub_run_started agent_id={} run_id={} parent_run_id={} tool_id={} seq={} model={}",
+            stage,
+            event.identity.agent_id,
+            event.identity.run_id,
+            event.identity.parent_run_id,
+            event.identity.spawned_by_tool_call_id,
+            event.sequence,
+            event.model,
+        ),
+        sdk::ChatEvent::SubRunActivity { event } => crate::tui::log_trace!(
+            "{} sub_run_activity agent_id={} run_id={} parent_run_id={} tool_id={} seq={}",
+            stage,
+            event.identity.agent_id,
+            event.identity.run_id,
+            event.identity.parent_run_id,
+            event.identity.spawned_by_tool_call_id,
+            event.sequence
         ),
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
@@ -258,9 +341,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             workspace_root,
             workspace.context_stack.len()
         ),
-        sdk::ChatEvent::TasksSnapshot { tasks } => {
-            crate::tui::log_trace!("{} tasks_snapshot lines={}", stage, tasks.lines.len())
-        }
+        sdk::ChatEvent::TaskStateChanged { state } => crate::tui::log_trace!(
+            "{} task_state_changed session_id={} revision={} items={}",
+            stage,
+            state.session_id,
+            state.revision,
+            state.items.len()
+        ),
         sdk::ChatEvent::ConfigChanged { event } => crate::tui::log_trace!(
             "{} config_changed fields={:?}",
             stage,
@@ -279,16 +366,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             "{} user_messages_withdrawn count={}",
             stage,
             texts.len()
-        ),
-        sdk::ChatEvent::CompactProgress {
-            stage: _,
-            current,
-            total,
-        } => crate::tui::log_trace!(
-            "{} compact_progress current={:?} total={:?}",
-            stage,
-            current,
-            total,
         ),
         sdk::ChatEvent::ModelSwitched { result } => crate::tui::log_trace!(
             "{} model_switched display={} context_window={} reasoning={:?}",
@@ -334,15 +411,48 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             records.len()
         ),
+        sdk::ChatEvent::ActivityChanged { kind, activity } => crate::tui::log_debug!(
+            "{} activity_changed run_id={} activity_id={} source={:?} kind={:?} state={:?} change={:?} revision={} total_elapsed_ms={} active_elapsed_ms={} state_elapsed_ms={}",
+            stage,
+            activity.run_id,
+            activity.id,
+            activity.source,
+            activity.kind,
+            activity.state,
+            kind,
+            activity.revision,
+            activity.timing.total_elapsed_ms,
+            activity.timing.active_elapsed_ms,
+            activity.timing.state_elapsed_ms,
+        ),
+        sdk::ChatEvent::ActivitySnapshot(snapshot) => {
+            let root = snapshot.activities.iter().find(|activity| {
+                activity.kind == sdk::ActivityKindView::Run
+                    && activity.parent_activity_id.is_none()
+                    && matches!(
+                        activity.state,
+                        sdk::ActivityStateView::Running | sdk::ActivityStateView::Waiting
+                    )
+            });
+            crate::tui::log_debug!(
+                "[ACTIVITY_TIMING] sdk_ingress stage={} run_id={} snapshot_revision={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
+                stage,
+                snapshot.run_id,
+                snapshot.revision,
+                snapshot.activities.len(),
+                root.map_or("-", |activity| activity.id.as_str()),
+                root.map_or(0, |activity| activity.revision),
+                root.map_or(0, |activity| activity.timing.total_elapsed_ms),
+            )
+        }
         // These metadata/list events are intentionally omitted from trace logging.
         sdk::ChatEvent::SkillsUpdated { .. }
         | sdk::ChatEvent::ModelList { .. }
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
-         | sdk::ChatEvent::CostUpdate { .. }
-         | sdk::ChatEvent::SessionResumeFailed { .. } => {}
-    }
+         | sdk::ChatEvent::RuntimeStatusChanged { .. }
+         | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }
 }
 
 pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
@@ -354,10 +464,10 @@ pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             name,
             index,
         } => crate::tui::log_trace!(
-            "{} tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+            "{} tool_call_start chat_id={} run_id={} id={} provider_id={:?} name={} index={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             name,
@@ -373,10 +483,10 @@ pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             arguments,
             status,
         } => crate::tui::log_trace!(
-            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
+            "{} tool_call_update chat_id={} run_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             name,
@@ -395,10 +505,10 @@ pub(super) fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             is_error,
             images,
         } => crate::tui::log_trace!(
-            "{} tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+            "{} tool_result chat_id={} run_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
             stage,
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             id,
             provider_id,
             tool_name,
@@ -418,17 +528,24 @@ pub(crate) fn log_tui_runtime_delivery(
     use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 
     match event {
-        TuiRuntimeEvent::Text { context, text } => crate::tui::log_trace!(
-            "event_delivery boundary=sdk_to_tui kind=Text chat_id={} turn_id={} size={} outcome={}",
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=AssistantTextDelta chat_id={} run_id={} size={} outcome={}",
             context.chat_id,
-            context.turn_id,
-            text.len(),
+            context.run_id,
+            delta.len(),
+            outcome
+        ),
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => crate::tui::log_trace!(
+            "event_delivery boundary=sdk_to_tui kind=ThinkingDelta chat_id={} run_id={} size={} outcome={}",
+            context.chat_id,
+            context.run_id,
+            delta.len(),
             outcome
         ),
         TuiRuntimeEvent::BlockComplete { context, text } => crate::tui::log_debug!(
-            "event_delivery boundary=sdk_to_tui kind=BlockComplete chat_id={} turn_id={} size={} outcome={}",
+            "event_delivery boundary=sdk_to_tui kind=BlockComplete chat_id={} run_id={} size={} outcome={}",
             context.chat_id,
-            context.turn_id,
+            context.run_id,
             text.len(),
             outcome
         ),
@@ -439,9 +556,21 @@ pub(crate) fn log_tui_runtime_delivery(
             outcome
         ),
         TuiRuntimeEvent::Done { context, .. } => crate::tui::log_debug!(
-            "event_delivery boundary=sdk_to_tui kind=Done chat_id={} turn_id={} size=0 outcome={}",
+            "event_delivery boundary=sdk_to_tui kind=Done chat_id={} run_id={} size=0 outcome={}",
             context.chat_id,
-            context.turn_id,
+            context.run_id,
+            outcome
+        ),
+        TuiRuntimeEvent::ToolOutputDelta {
+            context,
+            tool_id,
+            delta,
+        } => crate::tui::log_debug!(
+            "event_delivery boundary=sdk_to_tui kind=ToolOutputDelta chat_id={} run_id={} tool_id={} delta_len={} outcome={}",
+            context.chat_id,
+            context.run_id,
+            tool_id,
+            delta.len(),
             outcome
         ),
         _ => {}

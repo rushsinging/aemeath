@@ -4,7 +4,7 @@
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{HookNoticeSemanticKind, OutputBlockKind, ToolSemanticStatus};
+use crate::tui::view_model::output::{OutputBlockKind, ToolSemanticStatus};
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -61,7 +61,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             ToolSemanticStatus::Pending => "○",
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
-            ToolSemanticStatus::Cancelled => "–",
+            ToolSemanticStatus::Cancelled => "✗",
             ToolSemanticStatus::Orphaned => "?",
             ToolSemanticStatus::Running => {
                 let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
@@ -75,12 +75,13 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::UserMessage(_) => ">",
         OutputBlockKind::AssistantMessage(_) => "●",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
-        OutputBlockKind::ThinkingMessage(_) | OutputBlockKind::ModelStreamPlaceholder(_) => "💭",
+        OutputBlockKind::ThinkingMessage(_) => "💭",
         // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "⎿",
-        OutputBlockKind::HookNotice(h) => match h.kind {
-            HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => "⊘",
-            HookNoticeSemanticKind::Info => "ℹ",
+        OutputBlockKind::HookNotice(notice) => match notice.kind {
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+            | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => "⊘",
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info => "ℹ",
         },
         _ => " ",
     }
@@ -94,18 +95,17 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
             ToolSemanticStatus::Success => theme::SUCCESS,
             ToolSemanticStatus::Error => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
-            ToolSemanticStatus::Cancelled => theme::TEXT_MUTED,
+            ToolSemanticStatus::Cancelled => theme::ERROR,
             ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
-        OutputBlockKind::ThinkingMessage(_) | OutputBlockKind::ModelStreamPlaceholder(_) => {
-            theme::THINKING
-        }
+        OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
-        OutputBlockKind::HookNotice(h) => match h.kind {
-            HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => theme::ERROR,
-            HookNoticeSemanticKind::Info => theme::TEXT_MUTED,
+        OutputBlockKind::HookNotice(notice) => match notice.kind {
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Blocked
+            | crate::tui::adapter::runtime_view::TuiHookNoticeKind::Failed => theme::ERROR,
+            crate::tui::adapter::runtime_view::TuiHookNoticeKind::Info => theme::TEXT_MUTED,
         },
         _ => theme::TEXT_MUTED,
     }
@@ -213,14 +213,14 @@ mod tests {
         OutputBlockKind::ToolCall(ToolCallBlockView {
             key: "t".into(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             tool_call_id: None,
             title: "Grep".into(),
             icon: "●".into(),
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: None,
-            activity_lines: Vec::new(),
+            streaming_preview: None,
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -235,6 +235,7 @@ mod tests {
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Pending)), "○");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
+        assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Cancelled)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");
     }
 
@@ -257,6 +258,8 @@ mod tests {
             tool_title: "Bash".into(),
             args_preview: None,
             result_text: "done".into(),
+            activity_lines: None,
+            workspace_root: None,
             data: None,
             style: SemanticStyle::Success,
         });

@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::{
     audit::AuditConfig,
+    context::ContextConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -37,6 +38,8 @@ pub struct ConfigPatch {
     pub model: Option<ModelConfigPatch>,
     #[serde(default)]
     pub models: Option<ModelsConfigPatch>,
+    #[serde(default)]
+    pub context: Option<ContextConfigPatch>,
     #[serde(default)]
     pub tools: Option<ToolsConfigPatch>,
     #[serde(default)]
@@ -75,6 +78,7 @@ impl ConfigPatch {
         self.api.is_none()
             && self.model.is_none()
             && self.models.is_none()
+            && self.context.is_none()
             && self.tools.is_none()
             && self.agents.is_none()
             && self.ui.is_none()
@@ -137,6 +141,17 @@ pub struct ModelsConfigPatch {
     pub fallback_api_key: Option<String>,
     #[serde(default)]
     pub guidance: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextConfigPatch {
+    #[serde(default)]
+    pub snip_enabled: Option<bool>,
+    #[serde(default)]
+    pub microcompact_enabled: Option<bool>,
+    #[serde(default)]
+    pub auto_compact_failure_limit: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -241,7 +256,7 @@ pub struct TaskLifecycleConfigPatch {
     #[serde(default)]
     pub interrupt_default_action: Option<String>,
     #[serde(default)]
-    pub stale_remind_after_turns: Option<usize>,
+    pub stale_remind_after_run_steps: Option<usize>,
     #[serde(default)]
     pub stale_remind_repeat_interval: Option<usize>,
 }
@@ -303,7 +318,7 @@ pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
-    pub interval_turns: Option<usize>,
+    pub interval_run_steps: Option<usize>,
     #[serde(default)]
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
@@ -363,6 +378,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(models) = patch.models {
         base.models = apply_models_patch(base.models, models);
+    }
+    if let Some(context) = patch.context {
+        base.context = apply_context_patch(base.context, context);
     }
     if let Some(tools) = patch.tools {
         base.tools = apply_tools_patch(base.tools, tools);
@@ -483,6 +501,22 @@ pub(crate) fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatc
         for (k, v) in guidance {
             base.guidance.insert(k, v);
         }
+    }
+    base
+}
+
+pub(crate) fn apply_context_patch(
+    mut base: ContextConfig,
+    patch: ContextConfigPatch,
+) -> ContextConfig {
+    if let Some(value) = patch.snip_enabled {
+        base.snip_enabled = value;
+    }
+    if let Some(value) = patch.microcompact_enabled {
+        base.microcompact_enabled = value;
+    }
+    if let Some(value) = patch.auto_compact_failure_limit {
+        base.auto_compact_failure_limit = value;
     }
     base
 }
@@ -637,8 +671,8 @@ pub(crate) fn apply_task_lifecycle_patch(
     if let Some(v) = patch.interrupt_default_action {
         base.interrupt_default_action = v;
     }
-    if let Some(v) = patch.stale_remind_after_turns {
-        base.stale_remind_after_turns = v;
+    if let Some(v) = patch.stale_remind_after_run_steps {
+        base.stale_remind_after_run_steps = v;
     }
     if let Some(v) = patch.stale_remind_repeat_interval {
         base.stale_remind_repeat_interval = v;
@@ -703,10 +737,14 @@ pub(crate) fn apply_storage_patch(
 
 pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfig {
     let mut events = base.events;
-    for (k, v) in overlay.events {
-        events.insert(k, v);
+    for (event, entries) in overlay.events {
+        events.insert(event, entries);
     }
-    HooksConfig { events }
+    HooksConfig {
+        max_attempts: overlay.max_attempts.or(base.max_attempts),
+        max_stop_hook_blocks: overlay.max_stop_hook_blocks.or(base.max_stop_hook_blocks),
+        events,
+    }
 }
 
 pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatch) -> MemoryConfig {
@@ -735,8 +773,8 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.enabled {
         base.enabled = v;
     }
-    if let Some(v) = patch.interval_turns {
-        base.interval_turns = v;
+    if let Some(v) = patch.interval_run_steps {
+        base.interval_run_steps = v;
     }
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;
@@ -854,6 +892,38 @@ mod tests {
     use crate::config::ui::MarkdownSpacingMode;
 
     #[test]
+    fn hook_runtime_limit_patch_preserves_unspecified_lower_layer_values() {
+        let global: ConfigPatch = serde_json::from_str(
+            r#"{
+                "hooks": {
+                    "max_attempts": 2,
+                    "max_stop_hook_blocks": 4
+                }
+            }"#,
+        )
+        .unwrap();
+        let project: ConfigPatch = serde_json::from_str(
+            r#"{
+                "hooks": {
+                    "max_attempts": 5,
+                    "PreToolUse": []
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = apply_patch(apply_patch(Config::default(), global), project);
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(snapshot.hook_execution_policy().max_attempts(), 5);
+        assert_eq!(snapshot.stop_hook_policy().max_blocks(), 4);
+        assert!(snapshot
+            .hooks()
+            .events
+            .contains_key(&crate::config::hooks::HookEvent::PreToolUse));
+    }
+
+    #[test]
     fn test_config_patch_snake_case_concurrency_reaches_snapshot() {
         let patch: ConfigPatch = serde_json::from_str(
             r#"{
@@ -913,6 +983,31 @@ mod tests {
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    #[test]
+    fn auto_compact_failure_limit_patch_preserves_unspecified_context_values() {
+        let base = Config {
+            context: ContextConfig {
+                snip_enabled: false,
+                auto_compact_failure_limit: 7,
+                ..ContextConfig::default()
+            },
+            ..Config::default()
+        };
+        let merged = apply_patch(
+            base,
+            ConfigPatch {
+                context: Some(ContextConfigPatch {
+                    auto_compact_failure_limit: Some(2),
+                    ..ContextConfigPatch::default()
+                }),
+                ..ConfigPatch::default()
+            },
+        );
+
+        assert!(!merged.context.snip_enabled);
+        assert_eq!(merged.context.auto_compact_failure_limit, 2);
     }
 
     #[test]

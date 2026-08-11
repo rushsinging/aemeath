@@ -13,7 +13,104 @@ fn test_messages_to_responses_input_user() {
     assert_eq!(input.len(), 1);
     assert_eq!(input[0]["type"], "message");
     assert_eq!(input[0]["role"], "user");
-    assert_eq!(input[0]["content"], "hello");
+    assert_eq!(
+        input[0]["content"],
+        serde_json::json!([{"type": "input_text", "text": "hello"}])
+    );
+}
+
+#[test]
+fn messages_to_responses_input_keeps_text_and_images_in_one_ordered_message() {
+    let messages = vec![Message {
+        role: share::message::Role::User,
+        content: vec![
+            share::message::ContentBlock::Text {
+                text: "first".to_string(),
+            },
+            share::message::ContentBlock::Image {
+                source: share::message::ImageSource::Base64 {
+                    media_type: "image/png".to_string(),
+                    data: "cG5n".to_string(),
+                },
+                placeholder: Some("[Image #1]".to_string()),
+            },
+            share::message::ContentBlock::Text {
+                text: "between".to_string(),
+            },
+            share::message::ContentBlock::Image {
+                source: share::message::ImageSource::Base64 {
+                    media_type: "image/jpeg".to_string(),
+                    data: "anBlZw==".to_string(),
+                },
+                placeholder: Some("[Image #2]".to_string()),
+            },
+        ],
+        metadata: None,
+    }];
+
+    let input = messages_to_responses_input(&messages);
+
+    assert_eq!(input.len(), 1);
+    assert_eq!(
+        input[0],
+        serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "first"},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,cG5n"
+                },
+                {"type": "input_text", "text": "between"},
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/jpeg;base64,anBlZw=="
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn responses_request_body_keeps_typed_image_input() {
+    use crate::adapters::client::OpenAIProviderConfig;
+    use crate::ProviderDriverKind;
+
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "test");
+    let provider = super::super::OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://example.com".to_string()),
+        Some("test-model".to_string()),
+        8192,
+        false,
+        None,
+        60,
+    );
+    let scope = InvocationScope::new(
+        "test-model",
+        8192,
+        crate::ports::ReasoningLevel::Off,
+        crate::ports::ReasoningLevel::Off,
+    )
+    .expect("valid scope");
+    let messages = vec![Message::user_with_image(
+        "describe".to_string(),
+        "cG5n".to_string(),
+        "image/png".to_string(),
+    )];
+
+    let body = provider.build_responses_request_body(&scope, &[], &messages, &[], false);
+
+    assert_eq!(body["input"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        body["input"][0]["content"],
+        serde_json::json!([
+            {"type": "input_image", "image_url": "data:image/png;base64,cG5n"},
+            {"type": "input_text", "text": "describe"}
+        ])
+    );
 }
 
 #[test]

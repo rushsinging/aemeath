@@ -2,7 +2,7 @@ use crate::domain::types::task_update::{
     TaskProgressItemResult, TaskProgressLifecycleResult, TaskProgressListResult,
     TaskProgressOmittedResult, TaskProgressResult, TaskUpdateInput, TaskUpdateResult,
 };
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -289,10 +289,12 @@ impl TypedTool for TaskUpdateTool {
             } else {
                 self.access.transition_with_progress(id, target, timestamp)
             };
-            let snapshot = match snapshot {
-                Ok(result) => result.value,
+            let command_result = match snapshot {
+                Ok(result) => result,
                 Err(error) => return TypedToolResult::error(error.to_string()),
             };
+            let task_change = CommittedTaskChange::from_command_result(&command_result);
+            let snapshot = command_result.value;
             let updated = self
                 .access
                 .get(id)
@@ -321,7 +323,8 @@ impl TypedTool for TaskUpdateTool {
                         .collect(),
                     progress: Some(progress_result(&snapshot)),
                 },
-            );
+            )
+            .with_task_change(task_change);
         }
         let result = match args.key.as_str() {
             "subject" => self.access.set_subject(id, value.to_owned(), timestamp),
@@ -341,10 +344,12 @@ impl TypedTool for TaskUpdateTool {
                 ))
             }
         };
-        let updated = match result {
-            Ok(result) => result.value,
+        let command_result = match result {
+            Ok(result) => result,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
+        let task_change = CommittedTaskChange::from_command_result(&command_result);
+        let updated = command_result.value;
         let task_id = updated.seq().to_string();
         let status = status_label(updated.status()).to_owned();
         let blocked_by = updated
@@ -363,6 +368,7 @@ impl TypedTool for TaskUpdateTool {
                 progress: None,
             },
         )
+        .with_task_change(task_change)
     }
 }
 

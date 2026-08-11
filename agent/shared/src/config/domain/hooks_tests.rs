@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::Config;
 
 #[test]
 fn test_hooks_config_deserialize() {
@@ -25,6 +26,48 @@ fn test_hooks_config_deserialize() {
 fn test_hooks_config_default() {
     let config = HooksConfig::default();
     assert!(config.events.is_empty());
+}
+
+#[test]
+fn hooks_runtime_limits_have_stable_defaults_and_accept_explicit_values() {
+    let defaults = crate::config::domain::snapshot::ConfigSnapshot::new(Config::default());
+    assert_eq!(defaults.hook_execution_policy().max_attempts(), 3);
+    assert_eq!(defaults.stop_hook_policy().max_blocks(), 15);
+
+    let config = Config {
+        hooks: serde_json::from_str(
+            r#"{
+                "max_attempts": 2,
+                "max_stop_hook_blocks": 4,
+                "PreToolUse": []
+            }"#,
+        )
+        .unwrap(),
+        ..Config::default()
+    };
+    let snapshot = crate::config::domain::snapshot::ConfigSnapshot::new(config);
+
+    assert_eq!(snapshot.hook_execution_policy().max_attempts(), 2);
+    assert_eq!(snapshot.stop_hook_policy().max_blocks(), 4);
+    assert!(snapshot.hooks().events.contains_key(&HookEvent::PreToolUse));
+}
+
+#[test]
+fn hook_runtime_limits_reject_zero_values() {
+    let config: HooksConfig = serde_json::from_str(
+        r#"{
+            "max_attempts": 0,
+            "max_stop_hook_blocks": 0
+        }"#,
+    )
+    .unwrap();
+    let snapshot = crate::config::domain::snapshot::ConfigSnapshot::new(Config {
+        hooks: config,
+        ..Config::default()
+    });
+
+    assert_eq!(snapshot.hook_execution_policy().max_attempts(), 3);
+    assert_eq!(snapshot.stop_hook_policy().max_blocks(), 15);
 }
 
 #[test]

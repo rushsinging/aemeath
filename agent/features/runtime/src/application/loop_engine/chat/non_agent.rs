@@ -1,14 +1,14 @@
+use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::hook_ui::dispatch_hook;
 use crate::application::loop_engine::chat::{
-    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
 };
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PermissionInput, PreToolUseInput, TaskInput};
+use hook::{HookInvocation, HookPort, PreToolUseInput};
 use policy::PolicyPort;
-use std::path::Path;
 use std::sync::Arc;
 use tools::ToolOutcome;
 
@@ -16,16 +16,19 @@ use super::tools::{log_tool_result, run_post_tool_hooks, send_tool_call_status, 
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     non_agent_calls: &[PreparedToolCall],
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -40,7 +43,7 @@ where
     }
 
     if other_calls.len() == 1 {
-        if agent.ctx.cancellation().is_cancelled() {
+        if cancel.is_cancelled() {
             return vec![cancelled_result(other_calls[0], language)];
         }
         return execute_one_non_agent(
@@ -48,12 +51,15 @@ where
             agent,
             sink,
             hook_port,
+            activities,
             other_calls[0],
             language,
-            workspace_root,
+            workspace_read,
             policy,
             run_id,
             step_id,
+            tool_context,
+            cancel,
         )
         .await;
     }
@@ -63,28 +69,34 @@ where
         agent,
         sink,
         hook_port,
+        activities,
         &other_calls,
         language,
-        workspace_root,
+        workspace_read,
         policy,
         run_id,
         step_id,
+        tool_context,
+        cancel,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_multiple_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     other_calls: &[&PreparedToolCall],
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -103,9 +115,9 @@ where
                 let hook_port = hook_port.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
-                let workspace_root = workspace_root.to_path_buf();
+                let workspace_read = workspace_read.clone();
                 async move {
-                    if agent.ctx.cancellation().is_cancelled() {
+                    if cancel.is_cancelled() {
                         return (pos, Vec::new());
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
@@ -114,12 +126,15 @@ where
                         agent,
                         &sink,
                         &hook_port,
+                        activities,
                         call,
                         language,
-                        &workspace_root,
+                        &workspace_read,
                         policy,
                         run_id,
                         step_id,
+                        tool_context,
+                        cancel,
                     )
                     .await;
                     (pos, result)
@@ -137,7 +152,7 @@ where
 
     for &pos in &sequential_positions {
         let call = other_calls[pos];
-        let result_vec = if agent.ctx.cancellation().is_cancelled() {
+        let result_vec = if cancel.is_cancelled() {
             Vec::new()
         } else {
             execute_one_non_agent(
@@ -145,12 +160,15 @@ where
                 agent,
                 sink,
                 hook_port,
+                activities,
                 call,
                 language,
-                workspace_root,
+                workspace_read,
                 policy,
                 run_id,
                 step_id,
+                tool_context,
+                cancel,
             )
             .await
         };
@@ -200,35 +218,27 @@ fn cancelled_result(prepared: &PreparedToolCall, language: &str) -> ToolExecutio
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_one_non_agent<S>(
-    context: &RuntimeTurnContext,
+    context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
+    activities: &ActivityCoordinator,
     prepared: &PreparedToolCall,
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
+    tool_context: &tools::ToolExecutionContext,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
     let call = &prepared.call;
-    let authorization = prepared.authorization;
-    if authorization.enforce_permission_hooks {
-        let _ = dispatch_hook(
-            hook_port,
-            sink,
-            HookInvocation::PermissionRequest(PermissionInput {
-                tool_name: call.name.clone(),
-                permission_rule: "auto".to_string(),
-            }),
-            workspace_root,
-            &agent.runtime_cancellation,
-        )
-        .await;
-    }
+    let workspace_root = workspace_read.current_workspace_root();
+    // #1515: 不再构造 PermissionRequest 伪事件——permission hook 的触发
+    // 由授权决策流自然产生（allow_all 下无决策 → 无事件），无需授权开关。
     let owned_call = ToolCall {
         id: call.id.clone(),
         provider_id: call.provider_id.clone(),
@@ -244,26 +254,20 @@ where
         owned_call.index,
         owned_call.input.to_string().len(),
     );
-    let pre_dispatch = if authorization.enforce_permission_hooks {
-        dispatch_hook(
-            hook_port,
-            sink,
-            HookInvocation::PreToolUse(PreToolUseInput {
-                tool_name: owned_call.name.clone(),
-                tool_input: owned_call.input.clone(),
-            }),
-            workspace_root,
-            &agent.runtime_cancellation,
-        )
-        .await
-    } else {
-        crate::application::hook::outcome_mapper::RuntimeHookDispatch {
-            directive: crate::application::hook::outcome_mapper::RuntimeHookDirective::Continue,
-            executions: Vec::new(),
-            messages: Vec::new(),
-            block_detail: None,
-        }
-    };
+    // #1515: PreToolUse 是事件 hook（项目守卫/观测），必须无条件执行；
+    // 授权上下文不含 hook 开关（permission hook 由授权决策流触发）。
+    let pre_dispatch = dispatch_hook(
+        hook_port,
+        activities,
+        step_id,
+        HookInvocation::PreToolUse(PreToolUseInput {
+            tool_name: owned_call.name.clone(),
+            tool_input: owned_call.input.clone(),
+        }),
+        &workspace_root,
+        cancel,
+    )
+    .await;
     if crate::application::loop_engine::chat::hook_ui::dispatch_is_blocking(&pre_dispatch) {
         let last_exec = pre_dispatch.executions.last();
         let exit_code = last_exec.and_then(|e| e.exit_code);
@@ -306,10 +310,10 @@ where
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
-        HookDirectiveOutcome::Continue { call, context } => (call, authorization, context),
+        HookDirectiveOutcome::Continue { call, context } => (call, prepared.authorization, context),
         HookDirectiveOutcome::Ready {
             call,
             authorization,
@@ -405,12 +409,23 @@ where
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = effective_call.name == "Bash";
 
-    let tool_ctx = agent.ctx.with_authorization(effective_authorization);
+    let tool_ctx = tool_context.with_authorization(effective_authorization);
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "non-agent tool cancellation context bound: run_id={} step_id={} call_id={} tool={} cancelled={}",
+        run_id,
+        step_id,
+        effective_call.id,
+        effective_call.name,
+        tool_ctx.cancellation().is_cancelled()
+    );
     let exec_results = if is_bash {
-        // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+        // Set up tool stream channel for stdout streaming.
+        // Uses ToolProgressEvent (not AgentProgressEvent) since Bash stdout
+        // is tool output, not sub-agent progress.
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::ToolProgressEvent>(32);
         let streaming_ctx = tool_ctx.with_progress(Some(
-            crate::application::run::context::tool_progress_sink(prog_tx),
+            crate::application::run::context::tool_stream_progress_sink(prog_tx),
         ));
         let call_id = effective_call.id.clone();
         let stream_sink = sink.clone();
@@ -419,11 +434,10 @@ where
         let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
             while let Some(event) = prog_rx.recv().await {
                 let _ = stream_sink
-                    .send_event(RuntimeStreamEvent::AgentProgress {
-                        source_context: stream_context.clone(),
-                        attachment_context: stream_context.clone(),
+                    .send_event(RuntimeStreamEvent::ToolOutputDelta {
+                        context: stream_context.clone(),
                         tool_id: call_id.clone(),
-                        event,
+                        delta: event.text,
                     })
                     .await;
             }
@@ -477,26 +491,19 @@ where
             &ex.outcome.text,
         );
         run_post_tool_hooks(
-            sink,
             hook_port,
+            activities,
+            step_id,
             &effective_call,
             &ex,
-            &agent.runtime_cancellation,
-            workspace_root,
+            cancel,
+            workspace_read,
         )
         .await;
-        run_task_hooks(
-            sink,
-            hook_port,
-            &effective_call,
-            &ex.outcome.text,
-            is_error,
-            workspace_root,
-            &agent.runtime_cancellation,
-        )
-        .await;
-        // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），
-        // 不再在此处发 TasksChanged 通知。
+        agent
+            .committed_side_effects
+            .observe(&effective_call, &ex, step_id, cancel)
+            .await;
         send_tool_result(
             sink,
             context,
@@ -510,204 +517,6 @@ where
     out
 }
 
-async fn run_task_hooks<S>(
-    sink: &S,
-    hook_port: &Arc<dyn HookPort>,
-    call: &ToolCall,
-    output: &str,
-    is_error: bool,
-    workspace_root: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
-) where
-    S: ChatEventSink,
-{
-    if !is_error && call.name == "TaskCreate" {
-        let _ = dispatch_hook(
-            hook_port,
-            sink,
-            HookInvocation::TaskCreated(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: output.to_string(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
-    if !is_error && call.name == "TaskUpdate" && output.contains("Status: Completed") {
-        let _ = dispatch_hook(
-            hook_port,
-            sink,
-            HookInvocation::TaskCompleted(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: output.to_string(),
-            }),
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use serde_json::Value;
-    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
-
-    struct ConcurrencyFlagTool {
-        name: &'static str,
-        safe: bool,
-    }
-
-    #[async_trait]
-    impl TypedTool for ConcurrencyFlagTool {
-        type Output = Value;
-
-        fn name(&self) -> &str {
-            self.name
-        }
-
-        fn description(&self) -> &str {
-            "concurrency classification test tool"
-        }
-
-        fn input_schema(&self) -> Value {
-            serde_json::json!({"type": "object"})
-        }
-
-        fn is_concurrency_safe(&self) -> bool {
-            self.safe
-        }
-
-        async fn call(
-            &self,
-            _input: Value,
-            _ctx: &ToolExecutionContext,
-        ) -> TypedToolResult<Self::Output> {
-            TypedToolResult::success("ok", Value::Null)
-        }
-    }
-
-    fn test_ctx() -> ToolExecutionContext {
-        crate::application::run::workspace_test_support::test_tool_execution_context(
-            std::env::current_dir().unwrap(),
-            tokio_util::sync::CancellationToken::new(),
-        )
-    }
-
-    fn call(name: &str, index: usize) -> ToolCall {
-        ToolCall {
-            provider_id: "provider-test".to_string(),
-            id: sdk::ids::ToolCallId::from_legacy_or_new(&format!("call-{index}")),
-            name: name.to_string(),
-            index,
-            input: serde_json::json!({}),
-        }
-    }
-
-    #[test]
-    fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
-        let registry = tools::composition::TestCatalogExecutionFactory::new();
-        registry.register(ConcurrencyFlagTool {
-            name: "safe_a",
-            safe: true,
-        });
-        registry.register(ConcurrencyFlagTool {
-            name: "safe_b",
-            safe: true,
-        });
-        let agent = Agent::for_test(&registry, test_ctx(), 10);
-        let calls = [call("safe_a", 0), call("safe_b", 1)];
-        let prepared = calls
-            .into_iter()
-            .map(|call| PreparedToolCall {
-                call,
-                authorization: tools::AuthorizationContext::STANDARD,
-            })
-            .collect::<Vec<_>>();
-        let refs = prepared.iter().collect::<Vec<_>>();
-
-        let (concurrent, sequential) = partition_calls(&agent, &refs);
-
-        assert_eq!(concurrent, vec![0, 1]);
-        assert!(sequential.is_empty());
-    }
-
-    #[test]
-    fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
-        let registry = tools::composition::TestCatalogExecutionFactory::new();
-        registry.register(ConcurrencyFlagTool {
-            name: "unsafe_a",
-            safe: false,
-        });
-        registry.register(ConcurrencyFlagTool {
-            name: "unsafe_b",
-            safe: false,
-        });
-        let agent = Agent::for_test(&registry, test_ctx(), 10);
-        let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
-        let prepared = calls
-            .into_iter()
-            .map(|call| PreparedToolCall {
-                call,
-                authorization: tools::AuthorizationContext::STANDARD,
-            })
-            .collect::<Vec<_>>();
-        let refs = prepared.iter().collect::<Vec<_>>();
-
-        let (concurrent, sequential) = partition_calls(&agent, &refs);
-
-        assert!(concurrent.is_empty());
-        assert_eq!(sequential, vec![0, 1]);
-    }
-
-    #[test]
-    fn test_partition_calls_preserves_mixed_positions() {
-        let registry = tools::composition::TestCatalogExecutionFactory::new();
-        registry.register(ConcurrencyFlagTool {
-            name: "safe",
-            safe: true,
-        });
-        registry.register(ConcurrencyFlagTool {
-            name: "unsafe",
-            safe: false,
-        });
-        let agent = Agent::for_test(&registry, test_ctx(), 10);
-        let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
-        let prepared = calls
-            .into_iter()
-            .map(|call| PreparedToolCall {
-                call,
-                authorization: tools::AuthorizationContext::STANDARD,
-            })
-            .collect::<Vec<_>>();
-        let refs = prepared.iter().collect::<Vec<_>>();
-
-        let (concurrent, sequential) = partition_calls(&agent, &refs);
-
-        assert_eq!(concurrent, vec![0, 2]);
-        assert_eq!(sequential, vec![1]);
-    }
-
-    #[test]
-    fn test_partition_calls_routes_unknown_tools_to_sequential() {
-        let registry = tools::composition::TestCatalogExecutionFactory::new();
-        let agent = Agent::for_test(&registry, test_ctx(), 10);
-        let calls = [call("missing", 0)];
-        let prepared = calls
-            .into_iter()
-            .map(|call| PreparedToolCall {
-                call,
-                authorization: tools::AuthorizationContext::STANDARD,
-            })
-            .collect::<Vec<_>>();
-        let refs = prepared.iter().collect::<Vec<_>>();
-
-        let (concurrent, sequential) = partition_calls(&agent, &refs);
-
-        assert!(concurrent.is_empty());
-        assert_eq!(sequential, vec![0]);
-    }
-}
+#[path = "non_agent_tests.rs"]
+mod tests;

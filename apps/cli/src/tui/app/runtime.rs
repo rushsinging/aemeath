@@ -10,7 +10,8 @@ impl App {
         self.chat.reset_runtime_state();
         // 单一真相源：清空 ConversationModel，使输出文档随之回到空状态。
         self.model.conversation.reset();
-        // 清空 retained output view；下一帧按 ConversationModel 当前真相重建。
+        self.model.display_history.clear();
+        // reset 后 revision 会归零；同时重置 retained cursor/window index，避免复用旧窗口。
         self.output_view = super::OutputViewState::default();
         self.mark_output_dirty();
         self.output_area.reset_runtime_state();

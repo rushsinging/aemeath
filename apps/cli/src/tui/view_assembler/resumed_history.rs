@@ -1,28 +1,42 @@
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId, ToolStreamKey};
-use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 use crate::tui::model::conversation::resumed_history::{
     ResumedHistoryItem, ResumedHistoryItemKind, ResumedHistoryStep,
 };
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
+use crate::tui::model::display_history::DisplayHistoryModel;
 use crate::tui::view_assembler::output_tool_lookup::ToolCallLookup;
+use crate::tui::view_model::output::HookNoticeBlockView;
 use crate::tui::view_model::{BlockNode, OutputBlockKind, SemanticStyle, TextBlockView};
 use sdk::LocalResumeContentBlock as ContentBlock;
 
 pub(crate) fn assemble_resumed_history_item(
-    conversation: &ConversationModel,
+    display_history: &DisplayHistoryModel,
     item: &ResumedHistoryItem,
 ) -> Option<BlockNode> {
-    let step = conversation.resumed_history_step(item.step_index)?;
+    let step = display_history.step(item.step_index)?;
     match item.kind {
-        ResumedHistoryItemKind::UserMessage { message_index } => text_leaf(
-            item.id.clone(),
-            OutputBlockKind::UserMessage(TextBlockView {
-                key: item.id.clone(),
-                text: step.message(message_index)?.text_content(),
-                style: SemanticStyle::Normal,
-            }),
-        ),
+        ResumedHistoryItemKind::UserMessage { message_index } => {
+            let message = step.message(message_index)?;
+            let text = if message.source() == sdk::LocalResumeMessageSource::SkillRequest {
+                message
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.skill_request.as_ref())?
+                    .raw_input
+                    .clone()
+            } else {
+                message.text_content()
+            };
+            text_leaf(
+                item.id.clone(),
+                OutputBlockKind::UserMessage(TextBlockView {
+                    key: item.id.clone(),
+                    text,
+                    style: SemanticStyle::Normal,
+                }),
+            )
+        }
         ResumedHistoryItemKind::AssistantText {
             message_index,
             block_index,
@@ -54,6 +68,20 @@ pub(crate) fn assemble_resumed_history_item(
         ResumedHistoryItemKind::ToolCall { .. } | ResumedHistoryItemKind::ToolResult { .. } => {
             materialize_tool_item(step, item)
         }
+        ResumedHistoryItemKind::HookNotice {
+            ref title,
+            ref text,
+            ref kind,
+        } => text_leaf(
+            item.id.clone(),
+            OutputBlockKind::HookNotice(HookNoticeBlockView {
+                key: item.id.clone(),
+                title: title.clone(),
+                body: text.clone(),
+                kind: kind.clone(),
+            }),
+        ),
+        ResumedHistoryItemKind::StepPlaceholder => None,
         ResumedHistoryItemKind::TerminalNotice => {
             let text = terminal_text(step.finalize_cause?, step.duration_ms);
             text_leaf(
@@ -98,7 +126,7 @@ fn materialize_tool_item(
         tool_id.clone(),
         ToolStreamKey::new(
             ChatId::from_legacy_or_new(&step.run_id),
-            ChatTurnId::from_legacy_or_new(&step.step_id),
+            ChatRunId::from_legacy_or_new(&step.step_id),
             tool_name,
             block_index,
         ),
@@ -129,7 +157,7 @@ fn materialize_tool_item(
     };
     let lookup = ResumedToolLookup {
         chat_id: &call.stream_key.chat_id,
-        turn_id: &call.stream_key.turn_id,
+        run_id: &call.stream_key.run_id,
         tool_id: &tool_id,
         call: &call,
     };
@@ -137,7 +165,7 @@ fn materialize_tool_item(
         crate::tui::model::output_timeline::OutputTimelineItem::ToolResult {
             reference: crate::tui::model::output_timeline::TimelineToolCallRef::new(
                 call.stream_key.chat_id.clone(),
-                call.stream_key.turn_id.clone(),
+                call.stream_key.run_id.clone(),
                 tool_id.clone(),
             ),
         }
@@ -145,7 +173,7 @@ fn materialize_tool_item(
         crate::tui::model::output_timeline::OutputTimelineItem::ToolCall {
             reference: crate::tui::model::output_timeline::TimelineToolCallRef::new(
                 call.stream_key.chat_id.clone(),
-                call.stream_key.turn_id.clone(),
+                call.stream_key.run_id.clone(),
                 tool_id.clone(),
             ),
         }
@@ -186,7 +214,7 @@ fn find_tool_result<'a>(
 
 struct ResumedToolLookup<'a> {
     chat_id: &'a ChatId,
-    turn_id: &'a ChatTurnId,
+    run_id: &'a ChatRunId,
     tool_id: &'a ToolCallId,
     call: &'a ToolCall,
 }
@@ -195,10 +223,10 @@ impl ToolCallLookup for ResumedToolLookup<'_> {
     fn call<'a>(
         &'a self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
-        (self.chat_id == chat_id && self.turn_id == turn_id && self.tool_id == tool_id)
+        (self.chat_id == chat_id && self.run_id == run_id && self.tool_id == tool_id)
             .then_some(self.call)
     }
 }
@@ -207,19 +235,20 @@ fn terminal_text(
     cause: crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause,
     duration_ms: Option<u64>,
 ) -> String {
-    let status = match cause {
-        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => "✓ Completed",
+    use crate::tui::model::conversation::terminal::{terminal_notice, TerminalCause};
+
+    let cause = match cause {
+        crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed => {
+            TerminalCause::Completed
+        }
         crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep => {
-            "已取消"
+            TerminalCause::UserCancelled
         }
         crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated => {
-            "此 Run 已终止"
+            TerminalCause::RunTerminated
         }
     };
-    match duration_ms {
-        Some(duration_ms) => format!("{status} ({:.1}s)", duration_ms as f64 / 1000.0),
-        None => status.to_string(),
-    }
+    terminal_notice(cause, duration_ms.map(std::time::Duration::from_millis)).unwrap_or_default()
 }
 
 fn text_leaf(block_id: String, kind: OutputBlockKind) -> Option<BlockNode> {

@@ -51,7 +51,7 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
     assert!(
-        outcome.adopted_messages.is_empty(),
+        outcome.accepted_inputs.is_empty(),
         "idle Reset 清空后不应有 adopted 消息"
     );
     assert!(
@@ -85,7 +85,7 @@ async fn test_busy_gate_reset_defers_to_buffer() {
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert!(!outcome.reset_requested, "busy gate 不应请求 reset");
     assert!(
-        outcome.adopted_messages.is_empty(),
+        outcome.accepted_inputs.is_empty(),
         "busy gate 不应 adopt 消息"
     );
     let has_reset = sink
@@ -136,7 +136,7 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
     assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
     assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
     assert!(
-        outcome.adopted_messages.is_empty(),
+        outcome.accepted_inputs.is_empty(),
         "Reset 清空后不应 adopt 后续消息"
     );
 }
@@ -189,7 +189,7 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         "应收集所有 UserMessage text（含已 append 的）"
     );
     assert!(
-        outcome.adopted_messages.is_empty(),
+        outcome.accepted_inputs.is_empty(),
         "WithdrawAll 应回滚已 adopt 的消息"
     );
     assert!(buffer.is_empty(), "buffer 应为空");
@@ -221,7 +221,7 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
         .any(|e| matches!(e, RuntimeStreamEvent::UserMessagesWithdrawn { .. }));
     assert!(!has_withdrawn, "无 UserMessage 时不应发 Withdrawn");
     assert_eq!(outcome.appended_user_messages, 0);
-    assert!(outcome.adopted_messages.is_empty());
+    assert!(outcome.accepted_inputs.is_empty());
 }
 
 /// #391 S3-3：busy gate 也立即处理 WithdrawAll（回滚 + 收集，不延迟）。
@@ -256,7 +256,7 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
     );
     // queued 被回滚，无 adopted 消息
     assert!(
-        outcome.adopted_messages.is_empty(),
+        outcome.accepted_inputs.is_empty(),
         "queued 应被回滚，无 adopted 消息"
     );
     assert_eq!(outcome.appended_user_messages, 0);

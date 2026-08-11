@@ -61,13 +61,9 @@ impl TuiScenarioHarness {
     pub fn sdk_runtime_batch(&mut self, events: impl IntoIterator<Item = sdk::ChatEvent>) {
         let events = events
             .into_iter()
-            .filter_map(|event| {
-                match crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event) {
-                    crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) => {
-                        Some(event)
-                    }
-                    crate::tui::adapter::event_mapping::SdkEventMapping::Nop => None,
-                }
+            .flat_map(|event| {
+                crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event)
+                    .into_runtime_events()
             })
             .collect();
         self.messages.push_back(TuiMsg::RuntimeBatch(events));
@@ -134,7 +130,15 @@ impl TuiScenarioHarness {
 
     pub fn render(&mut self) {
         self.app.view_state.spinner.verb = "Brewing".to_owned();
-        self.app.prepare_frame();
+        let effects = self.app.prepare_frame();
+        self.messages.extend(
+            self.effects
+                .record(crate::tui::app::frame_driver::FrameOutcome {
+                    effects,
+                    spawn_effect: None,
+                    pending_slash: None,
+                }),
+        );
         self.app.draw(&mut self.terminal).expect("TestBackend draw");
     }
     pub fn screen(&self) -> String {
@@ -162,6 +166,15 @@ impl TuiScenarioHarness {
     }
     pub fn effects(&self) -> &[crate::tui::effect::effect::Effect] {
         &self.effects.effects
+    }
+    pub async fn execute_last_effect(&mut self) {
+        let effect = self
+            .effects
+            .effects
+            .last()
+            .cloned()
+            .expect("scenario must record an effect before execution");
+        self.app.execute_effect(effect, &self.ui_tx).await; // allow tea_side_effect: scenario drives the production effect executor
     }
     pub fn assert_idle(&self) {
         assert!(self.messages.is_empty(), "pending messages remain");

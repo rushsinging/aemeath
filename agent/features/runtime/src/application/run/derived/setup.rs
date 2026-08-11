@@ -8,7 +8,6 @@ use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::application::tool::agent::Agent;
 use crate::domain::agent_run::RunSpec;
 use async_trait::async_trait;
-use hook::HookDispatchContext;
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{AgentProgressKind, AgentProgressSourceContext};
@@ -302,8 +301,8 @@ impl AgentRunner for CliAgentRunner {
             };
 
             let source_context = AgentProgressSourceContext::new(
-                derived.session_id.clone(),
-                sdk::ChatTurnId::new_v7().to_string(),
+                role_name_for_log.clone(),
+                derived.instance.run().id().to_string(),
             );
             // Call SubagentStart hook — workspace root from derived workspace.
             let workspace_root = derived
@@ -313,19 +312,24 @@ impl AgentRunner for CliAgentRunner {
                 .views()
                 .read()
                 .current_workspace_root();
-            let hook_outcome = hook_port
-                .dispatch_at(
-                    hook::HookInvocation::SubRunStart(hook::SubRunInput {
-                        prompt: prompt.to_string(),
-                        system: system.clone(),
-                        model_spec: Some(model_display.clone()),
-                    }),
-                    HookDispatchContext::new(&workspace_root),
-                    &tokio_util::sync::CancellationToken::new(),
-                )
-                .await;
-            for msg in &hook_outcome.messages {
-                if let hook::HookDisplayMessageKind::SystemMessage = msg.kind {
+            let hook_dispatch = crate::application::loop_engine::chat::hook_ui::dispatch_hook(
+                &hook_port,
+                derived.instance.context().activities(),
+                &sdk::RunStepId::new(format!(
+                    "{}:sub-run-start",
+                    derived.instance.run().id().as_ref()
+                )),
+                hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                    prompt: prompt.to_string(),
+                    system: system.clone(),
+                    model_spec: Some(model_display.clone()),
+                }),
+                &workspace_root,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await;
+            for msg in &hook_dispatch.messages {
+                if let crate::application::hook::outcome_mapper::RuntimeHookDisplayMessageKind::SystemMessage = msg.kind {
                     if let Some(ref sink) = progress_sink {
                         sink.emit(super::progress::build_progress_event(
                             source_context.clone(),
@@ -341,13 +345,13 @@ impl AgentRunner for CliAgentRunner {
             // Helper to emit progress
             let progress_role = role_name_for_log.clone();
             let progress_model = model_display.clone();
-            let progress = move |turn: Option<usize>, msg: &str| {
-                let turn_str = turn
+            let progress = move |run_step: Option<usize>, msg: &str| {
+                let turn_str = run_step
                     .map(|t| t.to_string())
                     .unwrap_or_else(|| "-".to_string());
                 log::debug!(
                     target: crate::LOG_TARGET,
-                    "[role:{} model:{} turn:{}] {}",
+                    "[role:{} model:{} step:{}] {}",
                     progress_role,
                     progress_model,
                     turn_str,
@@ -437,6 +441,18 @@ impl AgentRunner for CliAgentRunner {
                     .expect("DerivedRun must retain workspace")
                     .persist(),
                 tool_result_materializer: self.tool_result_materializer.clone(),
+                committed_side_effects:
+                    crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                        derived.instance.context(),
+                        derived.session_id.clone(),
+                        derived
+                            .instance
+                            .workspace()
+                            .expect("DerivedRun must retain workspace")
+                            .views()
+                            .read()
+                            .current_workspace_root(),
+                    ),
                 runtime_cancellation: runtime_token.clone(),
             };
 
@@ -476,10 +492,10 @@ impl AgentRunner for CliAgentRunner {
             let session_id = derived.session_id;
             let runtime_context = derived.instance.context().clone();
             let tool_execution_context = agent.ctx.clone();
-            let tool_workspace_root = agent.ctx.workspace_read().current_workspace_root();
-            let turn_context = crate::application::loop_engine::chat::RuntimeTurnContext::new(
+            let workspace_read = agent.ctx.workspace_read();
+            let turn_context = crate::application::loop_engine::chat::RuntimeRunContext::new(
                 sdk::ChatId::from_legacy_or_new(&session_id),
-                sdk::ChatTurnId::new_v7(),
+                sdk::ChatRunId::new_v7(),
             );
             let input =
                 crate::application::loop_engine::input_strategy::FixedInputAdapter::new(prompt);
@@ -513,6 +529,29 @@ impl AgentRunner for CliAgentRunner {
                         context_size,
                         max_output_tokens: max_tokens as usize,
                         raw_tool_schemas: tool_schemas,
+                        invocation_reminders: {
+                            let mut reminders = crate::application::loop_engine::chat::task_snapshot::build_task_reminder_intent(
+                                runtime_context.task().as_ref(),
+                                share::config::TaskListConfig::default().max_lines,
+                            )
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                            if model_name != parent_frame.context.provider_ref().model.model {
+                                let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
+                                    parent_frame.context.provider_ref().model.model.clone(),
+                                    model_name.clone(),
+                                );
+                                log::debug!(
+                                    target: crate::LOG_TARGET,
+                                    "invocation_reminder_created kind={} session_model={} run_model={} scope=derived",
+                                    reminder.kind(),
+                                    parent_frame.context.provider_ref().model.model,
+                                    model_name,
+                                );
+                                reminders.push(reminder);
+                            }
+                            reminders
+                        },
                     },
                     None,
                     crate::application::loop_engine::step_persistence::NoopAcceptedInputObserver,
@@ -534,7 +573,7 @@ impl AgentRunner for CliAgentRunner {
             let stop_hook = crate::application::loop_engine::run_services::RuntimeStopHook::new(
                 crate::application::hook::stop_coordination::StopHookExecutionContext::new(
                     runtime_context.hooks(),
-                    workspace_root.clone(),
+                    workspace_read.clone(),
                     session_id.clone(),
                     language.clone(),
                 ),
@@ -545,7 +584,7 @@ impl AgentRunner for CliAgentRunner {
                 agent,
                 turn_context,
                 language: &language,
-                workspace_root: tool_workspace_root,
+                workspace_read,
                 session_id: &session_id,
                 materializer: self.tool_result_materializer.as_ref(),
                 log_patch: logging::LogContextPatch::default(),

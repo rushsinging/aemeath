@@ -50,12 +50,34 @@ pub enum Role {
 pub struct MessageMetadata {
     #[serde(default)]
     pub source: MessageSource,
+    #[serde(default, alias = "stop_hook", skip_serializing_if = "Option::is_none")]
+    pub hook_notice: Option<HookNotice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stop_hook: Option<StopHookFeedback>,
+    pub skill_request: Option<SkillRequestMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct StopHookFeedback {
+pub struct SkillRequestMetadata {
+    pub skill: String,
+    pub arguments: String,
+    pub raw_input: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HookNoticeKind {
+    #[default]
+    Blocked,
+    Failed,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct HookNotice {
+    #[serde(default = "default_stop_hook_point")]
+    pub point: String,
+    #[serde(default)]
+    pub kind: HookNoticeKind,
     pub summary: String,
     pub command: String,
     pub exit_code: Option<i32>,
@@ -68,13 +90,19 @@ pub struct StopHookFeedback {
     pub output_file: Option<String>,
 }
 
+fn default_stop_hook_point() -> String {
+    "Stop".to_string()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageSource {
     #[default]
     User,
     SystemGenerated,
-    StopHook,
+    #[serde(alias = "stop_hook")]
+    Hook,
+    SkillRequest,
 }
 
 impl Role {

@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use sdk::ChatInputEvent;
 use tokio_util::sync::CancellationToken;
 
+use crate::application::activity::ActivityCoordinator;
 use crate::application::interaction::port::InteractionPort;
 use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
@@ -99,18 +100,41 @@ impl Default for RunCancellationScope {
     }
 }
 
-struct ToolProgressSink(tokio::sync::mpsc::Sender<tools::AgentProgressEvent>);
+struct ToolProgressSink {
+    agent_tx: Option<tokio::sync::mpsc::Sender<tools::AgentProgressEvent>>,
+    tool_tx: Option<tokio::sync::mpsc::Sender<tools::ToolProgressEvent>>,
+}
 
 impl tools::ProgressSink for ToolProgressSink {
     fn emit(&self, event: tools::AgentProgressEvent) {
-        let _ = self.0.try_send(event);
+        if let Some(tx) = &self.agent_tx {
+            let _ = tx.try_send(event);
+        }
+    }
+    fn emit_tool_stream(&self, event: tools::ToolProgressEvent) {
+        if let Some(tx) = &self.tool_tx {
+            let _ = tx.try_send(event);
+        }
     }
 }
 
 pub(crate) fn tool_progress_sink(
     tx: tokio::sync::mpsc::Sender<tools::AgentProgressEvent>,
 ) -> Arc<dyn tools::ProgressSink> {
-    Arc::new(ToolProgressSink(tx))
+    Arc::new(ToolProgressSink {
+        agent_tx: Some(tx),
+        tool_tx: None,
+    })
+}
+
+/// 为 Bash 等长输出工具构造 progress sink，仅转发 [`ToolProgressEvent`]。
+pub(crate) fn tool_stream_progress_sink(
+    tx: tokio::sync::mpsc::Sender<tools::ToolProgressEvent>,
+) -> Arc<dyn tools::ProgressSink> {
+    Arc::new(ToolProgressSink {
+        agent_tx: None,
+        tool_tx: Some(tx),
+    })
 }
 
 // ── I/O seams (#1385 Task 11) ──
@@ -277,10 +301,13 @@ pub struct RuntimeServices {
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
     /// Task BC 低权限访问端口（会话级）。
     pub task: Arc<dyn TaskAccess>,
+    /// Runtime Published State（会话级，跨 Run 复用）。
+    pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookPort>,
+    /// Audit Usage 事实的非阻塞出站端口。
+    pub usage_sink: Arc<dyn crate::ports::UsageSink>,
 }
-
 #[derive(Clone)]
 pub struct RunCapabilityBindings {
     pub model: ModelBindings,
@@ -347,6 +374,7 @@ pub struct RuntimeContext {
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookPort>,
+    usage_sink: Arc<dyn crate::ports::UsageSink>,
     skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
     skill_load_session_id: String,
     reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
@@ -358,6 +386,10 @@ pub struct RuntimeContext {
     usage: RunUsageTracker,
     /// per-Run 输入缓冲 handle（推入侧）。
     input: RunInputBufferHandle,
+    /// per-Run Activity 观察注册表唯一 owner。
+    activities: Arc<ActivityCoordinator>,
+    /// SDK-facing full-state delivery registry；不拥有业务决策。
+    published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
 }
@@ -381,6 +413,7 @@ impl RuntimeContext {
         services: RuntimeServices,
         bindings: impl Into<RunCapabilityBindings>,
         skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+        activities: Arc<ActivityCoordinator>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
         let bindings = bindings.into();
@@ -395,6 +428,7 @@ impl RuntimeContext {
             reflection_history: services.reflection_history,
             task: services.task,
             hooks: services.hooks,
+            usage_sink: services.usage_sink,
             skill_load_state,
             skill_load_session_id: bindings.skill_load_session_id,
             reasoning: bindings.model.reasoning,
@@ -403,6 +437,8 @@ impl RuntimeContext {
             event_sink: bindings.io.event_sink,
             usage: bindings.lifecycle.usage,
             input: bindings.io.input,
+            activities,
+            published_state: services.published_state.clone(),
             session_lease: None,
         }
     }
@@ -454,6 +490,10 @@ impl RuntimeContext {
     pub fn hooks(&self) -> Arc<dyn HookPort> {
         self.hooks.clone()
     }
+    /// Audit Usage 事实的非阻塞出站端口，`Arc` clone。
+    pub fn usage_sink(&self) -> Arc<dyn crate::ports::UsageSink> {
+        self.usage_sink.clone()
+    }
     /// Skill 加载状态端口，Sub-run 继承父级的 Context-owned durable backing。
     pub fn skill_load_state(&self) -> Arc<dyn tools::SkillLoadStatePort> {
         self.skill_load_state.clone()
@@ -470,6 +510,16 @@ impl RuntimeContext {
     /// Run 级配置快照。
     pub fn config(&self) -> &RunConfigSnapshot {
         &self.config
+    }
+    /// per-Run ActivityCoordinator，只读共享引用。
+    pub(crate) fn published_state(
+        &self,
+    ) -> crate::application::published_state::PublishedStateRegistry {
+        self.published_state.clone()
+    }
+
+    pub(crate) fn activities(&self) -> &Arc<ActivityCoordinator> {
+        &self.activities
     }
     /// per-Run 取消作用域。
     pub fn cancel(&self) -> &RunCancellationScope {

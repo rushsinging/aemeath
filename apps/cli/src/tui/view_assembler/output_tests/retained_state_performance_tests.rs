@@ -1,10 +1,8 @@
 use super::super::assemble_output_view;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AppendUserMessage, AssistantText, ConversationIntent, RecordAgentProgress, RunCompleted,
-    RunStarted, RunStepCompleted, RunStepStarted, ToolCallStart, ToolResult,
+    AppendUserMessage, AssistantText, RecordAgentActivities, ToolCallStart, ToolResult,
 };
-use crate::tui::model::conversation::interaction::{UiRunId, UiRunStepId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::render::output::spacing::MarkdownSpacingPolicy;
@@ -13,38 +11,38 @@ fn build_retained_state_workload(scale: usize) -> ConversationModel {
     let mut model = ConversationModel::default();
     for index in 0..scale {
         let chat_id = ChatId::new(format!("chat-{index}"));
-        let turn_id = ChatTurnId::new(format!("turn-{index}"));
+        let run_id = ChatRunId::new(format!("turn-{index}"));
         let tool_id = ToolCallId::new(format!("tool-{index}"));
-        let run_id_text = format!("run-{index}");
-        let step_id_text = format!("step-{index}");
-        let run_id = UiRunId::from(run_id_text.as_str());
-        let step_id = UiRunStepId::from(step_id_text.as_str());
 
         model.apply(AppendUserMessage {
             text: format!("user-{index}"),
         });
         model.apply(AssistantText {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             text: format!("assistant-{index}"),
         });
         model.apply(ToolCallStart {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id: tool_id.clone(),
             provider_id: None,
             name: "Agent".to_string(),
             index: 0,
         });
-        model.apply(RecordAgentProgress {
+        model.apply(RecordAgentActivities {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             tool_id: tool_id.clone(),
-            message: format!("progress-{index}"),
+            activities: vec![
+                crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
+                    format!("progress-{index}"),
+                ),
+            ],
         });
         model.apply(ToolResult {
             chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
+            run_id: run_id.clone(),
             id: tool_id.clone(),
             provider_id: format!("provider-{index}"),
             tool_name: "Agent".to_string(),
@@ -53,19 +51,6 @@ fn build_retained_state_workload(scale: usize) -> ConversationModel {
             is_error: false,
             image_count: 0,
         });
-        model.apply(ConversationIntent::RunStarted(RunStarted {
-            run_id: run_id.clone(),
-        }));
-        model.apply(ConversationIntent::RunStepStarted(RunStepStarted {
-            run_id: run_id.clone(),
-            step_id: step_id.clone(),
-            tool_reference: Some(tool_id.to_string()),
-        }));
-        model.apply(ConversationIntent::RunStepCompleted(RunStepCompleted {
-            run_id: run_id.clone(),
-            step_id,
-        }));
-        model.apply(ConversationIntent::RunCompleted(RunCompleted { run_id }));
     }
     model
 }
@@ -84,12 +69,10 @@ fn retained_state_workload_is_deterministic_at_representative_scales() {
         let warm_resized = renderer.retained_cache_capacity();
 
         assert_eq!(retained.chats, scale);
-        assert_eq!(retained.turns, scale);
+        assert_eq!(retained.runs, scale);
         assert_eq!(retained.tool_calls, scale);
-        assert_eq!(retained.agent_progress_entries, scale);
-        assert_eq!(retained.agent_runs, scale);
-        assert_eq!(retained.agent_run_steps, scale);
-        assert_eq!(retained.terminal_agent_runs, scale);
+        assert_eq!(retained.sub_run_watermarks, 0);
+        assert!(!retained.has_legacy_activity_history);
         assert_eq!(retained.timeline_items, scale * 4);
         assert!(retained.output_view_journal_entries <= 256);
         assert!(retained.output_view_journal_item_id_bytes <= 256 * 64);
@@ -121,13 +104,10 @@ fn retained_state_release_workload() {
         let cache = renderer.retained_cache_capacity();
 
         println!(
-            "scale={scale:>4} timeline={} progress={} progress_bytes={} runs={} steps={} terminal_runs={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
+            "scale={scale:>4} timeline={} sub_run_watermarks={} has_legacy_activity_history={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
             retained.timeline_items,
-            retained.agent_progress_entries,
-            retained.agent_progress_bytes,
-            retained.agent_runs,
-            retained.agent_run_steps,
-            retained.terminal_agent_runs,
+            retained.sub_run_watermarks,
+            retained.has_legacy_activity_history,
             retained.output_view_journal_entries,
             retained.output_view_journal_item_id_bytes,
             vm.roots.len(),

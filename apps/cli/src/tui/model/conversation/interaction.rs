@@ -347,129 +347,6 @@ impl UiRunStepId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentRunStepPhase {
-    Running,
-    Completed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentRunStepState {
-    step_id: UiRunStepId,
-    phase: AgentRunStepPhase,
-    tool_reference: Option<String>,
-}
-
-impl AgentRunStepState {
-    fn new(step_id: UiRunStepId, tool_reference: Option<String>) -> Self {
-        Self {
-            step_id,
-            phase: AgentRunStepPhase::Running,
-            tool_reference,
-        }
-    }
-
-    pub(crate) fn step_id(&self) -> &UiRunStepId {
-        &self.step_id
-    }
-
-    pub(crate) fn phase(&self) -> AgentRunStepPhase {
-        self.phase
-    }
-
-    pub(crate) fn tool_reference(&self) -> Option<&str> {
-        self.tool_reference.as_deref()
-    }
-
-    fn complete(&mut self) -> bool {
-        if self.phase != AgentRunStepPhase::Running {
-            return false;
-        }
-        self.phase = AgentRunStepPhase::Completed;
-        true
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentRunPhase {
-    Running,
-    AwaitingUser,
-    Cancelling,
-    Cancelled,
-    Completed,
-    Failed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AgentRunState {
-    run_id: UiRunId,
-    phase: AgentRunPhase,
-    steps: Vec<AgentRunStepState>,
-}
-
-impl AgentRunState {
-    pub(super) fn new(run_id: UiRunId) -> Self {
-        Self {
-            run_id,
-            phase: AgentRunPhase::Running,
-            steps: Vec::new(),
-        }
-    }
-
-    pub(crate) fn run_id(&self) -> &UiRunId {
-        &self.run_id
-    }
-
-    pub(crate) fn phase(&self) -> AgentRunPhase {
-        self.phase
-    }
-
-    pub(crate) fn steps(&self) -> &[AgentRunStepState] {
-        &self.steps
-    }
-
-    pub(super) fn start_step(
-        &mut self,
-        step_id: UiRunStepId,
-        tool_reference: Option<String>,
-    ) -> bool {
-        if self.steps.iter().any(|step| step.step_id == step_id) {
-            return false;
-        }
-        self.steps
-            .push(AgentRunStepState::new(step_id, tool_reference));
-        true
-    }
-
-    pub(super) fn complete_step(&mut self, step_id: &UiRunStepId) -> bool {
-        self.steps
-            .iter_mut()
-            .find(|step| &step.step_id == step_id)
-            .is_some_and(AgentRunStepState::complete)
-    }
-
-    pub(super) fn transition_to(&mut self, phase: AgentRunPhase) -> bool {
-        let allowed = matches!(
-            (self.phase, phase),
-            (AgentRunPhase::Running, AgentRunPhase::AwaitingUser)
-                | (AgentRunPhase::AwaitingUser, AgentRunPhase::Running)
-                | (
-                    AgentRunPhase::Running | AgentRunPhase::AwaitingUser,
-                    AgentRunPhase::Cancelling
-                )
-                | (AgentRunPhase::Cancelling, AgentRunPhase::Cancelled)
-                | (
-                    AgentRunPhase::Running,
-                    AgentRunPhase::Completed | AgentRunPhase::Failed
-                )
-        );
-        if allowed {
-            self.phase = phase;
-        }
-        allowed
-    }
-}
-
 impl ConversationModel {
     pub(crate) fn active_interaction(&self) -> Option<&InteractionState> {
         self.active_interaction.as_ref()
@@ -519,10 +396,15 @@ impl ConversationModel {
         let Some(reply) = interaction.confirm() else {
             return Vec::new();
         };
-        vec![ConversationChange::InteractionReplyRequested {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::ReplyPending,
+        );
+        changes.push(ConversationChange::InteractionReplyRequested {
             request_id: request_id.clone(),
             reply,
-        }]
+        });
+        changes
     }
 
     pub(super) fn cancel_interaction(
@@ -535,12 +417,17 @@ impl ConversationModel {
         if interaction.request_id() != request_id || !interaction.cancel() {
             return Vec::new();
         }
-        vec![ConversationChange::InteractionCancelRequested {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::CancelPending,
+        );
+        changes.push(ConversationChange::InteractionCancelRequested {
             request_id: request_id.clone(),
-        }]
+        });
+        changes
     }
 
-    pub(super) fn accept_interaction(
+    pub(super) fn accept_interaction_reply(
         &mut self,
         request_id: &UiInteractionRequestId,
     ) -> Vec<ConversationChange> {
@@ -556,46 +443,107 @@ impl ConversationModel {
             return Vec::new();
         }
         self.active_interaction = None;
-        self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref());
-        vec![ConversationChange::InteractionCompleted {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Answered,
+        );
+        changes
+            .extend(self.complete_ask_user_tool_for_request(request_id, tool_call_id.as_deref()));
+        changes.push(ConversationChange::InteractionCompleted {
             request_id: request_id.clone(),
-        }]
+        });
+        changes
+    }
+
+    pub(super) fn accept_interaction_cancel(
+        &mut self,
+        request_id: &UiInteractionRequestId,
+    ) -> Vec<ConversationChange> {
+        let tool_call_id = self
+            .active_interaction
+            .as_ref()
+            .filter(|interaction| interaction.request_id() == request_id)
+            .and_then(|interaction| interaction.request.tool_call_id.clone());
+        let Some(interaction) = self.active_interaction.as_ref() else {
+            return Vec::new();
+        };
+        if interaction.request_id() != request_id {
+            return Vec::new();
+        }
+        self.active_interaction = None;
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Cancelled,
+        );
+        changes.extend(self.cancel_ask_user_tool_for_request(request_id, tool_call_id.as_deref()));
+        changes.push(ConversationChange::InteractionCompleted {
+            request_id: request_id.clone(),
+        });
+        changes
+    }
+
+    fn ask_user_tool_call_ids_for_request(
+        &self,
+        request_id: &UiInteractionRequestId,
+        interaction_tool_call_id: Option<&str>,
+    ) -> Vec<String> {
+        let mut tool_call_ids = self
+            .timeline
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch {
+                    request_id: Some(batch_request_id),
+                    slots,
+                    ..
+                } if batch_request_id == request_id => {
+                    Some(slots.iter().map(|slot| slot.id.clone()).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        if let Some(tool_call_id) = interaction_tool_call_id {
+            tool_call_ids.push(tool_call_id.to_string());
+        }
+        tool_call_ids
+    }
+
+    fn ask_user_reply_payload(&self, request_id: &UiInteractionRequestId) -> ToolResultPayload {
+        let answers = self.ask_user_batch_answers(request_id).unwrap_or_default();
+        let output = answers
+            .iter()
+            .enumerate()
+            .map(|(index, answer)| format!("Q{}: {answer}", index + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        ToolResultPayload::new(
+            output,
+            serde_json::json!({"status": "ok", "answers": answers}),
+            false,
+            0,
+        )
     }
 
     fn complete_ask_user_tool_for_request(
         &mut self,
         request_id: &UiInteractionRequestId,
         interaction_tool_call_id: Option<&str>,
-    ) -> bool {
-        let timeline_tool_call_ids = self.timeline.items().iter().find_map(|item| match item {
-            crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch {
-                request_id: Some(batch_request_id),
-                slots,
-                ..
-            } if batch_request_id == request_id => Some(
-                slots
-                    .iter()
-                    .map(|slot| slot.id.as_str())
-                    .collect::<Vec<_>>(),
-            ),
-            _ => None,
-        });
-        let mut tool_call_ids = timeline_tool_call_ids.unwrap_or_default();
-        if let Some(tool_call_id) = interaction_tool_call_id {
-            tool_call_ids.push(tool_call_id);
-        }
+    ) -> Vec<ConversationChange> {
+        let tool_call_ids =
+            self.ask_user_tool_call_ids_for_request(request_id, interaction_tool_call_id);
         if tool_call_ids.is_empty() {
-            return false;
+            return Vec::new();
         }
-        let mut completed = false;
+        let result = self.ask_user_reply_payload(request_id);
+        let mut changes = Vec::new();
         for chat in &mut self.chats {
-            for turn in &mut chat.turns {
+            for turn in &mut chat.runs {
                 for call in &mut turn.tool_calls {
                     if call.name == "AskUserQuestion"
                         && call
                             .id
                             .as_ref()
-                            .is_some_and(|id| tool_call_ids.contains(&id.as_str()))
+                            .is_some_and(|id| tool_call_ids.contains(&id.to_string()))
                         && !matches!(
                             call.status,
                             ToolCallStatus::Success
@@ -604,20 +552,61 @@ impl ConversationModel {
                                 | ToolCallStatus::Orphaned
                         )
                     {
-                        call.complete(ToolResultPayload::new(
-                            String::new(),
-                            serde_json::Value::Null,
-                            false,
-                            0,
-                        ));
-                        completed = true;
+                        call.complete(result.clone());
+                        changes.push(ConversationChange::ToolCallCompleted {
+                            chat_id: chat.id.to_string(),
+                            run_id: turn.id.to_string(),
+                            id: call
+                                .id
+                                .as_ref()
+                                .expect("completed tool call has id")
+                                .to_string(),
+                            status: ToolCallStatus::Success,
+                        });
                     }
                 }
             }
         }
-        completed
+        changes
     }
 
+    fn cancel_ask_user_tool_for_request(
+        &mut self,
+        request_id: &UiInteractionRequestId,
+        interaction_tool_call_id: Option<&str>,
+    ) -> Vec<ConversationChange> {
+        let tool_call_ids =
+            self.ask_user_tool_call_ids_for_request(request_id, interaction_tool_call_id);
+        if tool_call_ids.is_empty() {
+            return Vec::new();
+        }
+        let mut changes = Vec::new();
+        for chat in &mut self.chats {
+            for turn in &mut chat.runs {
+                for call in &mut turn.tool_calls {
+                    if call.name == "AskUserQuestion"
+                        && call
+                            .id
+                            .as_ref()
+                            .is_some_and(|id| tool_call_ids.contains(&id.to_string()))
+                        && call.cancel()
+                    {
+                        changes.push(ConversationChange::ToolCallCompleted {
+                            chat_id: chat.id.to_string(),
+                            run_id: turn.id.to_string(),
+                            id: call
+                                .id
+                                .as_ref()
+                                .expect("cancelled tool call has id")
+                                .to_string(),
+                            status: ToolCallStatus::Cancelled,
+                        });
+                    }
+                }
+            }
+        }
+        changes
+    }
     pub(super) fn reject_interaction_reply(
         &mut self,
         request_id: &UiInteractionRequestId,
@@ -630,10 +619,15 @@ impl ConversationModel {
             return Vec::new();
         }
         interaction.restore_collecting();
-        vec![ConversationChange::InteractionCommandRejected {
+        let mut changes = self.set_ask_user_completion_for_request(
+            request_id,
+            super::block::AskUserCompletion::Active,
+        );
+        changes.push(ConversationChange::InteractionCommandRejected {
             request_id: request_id.clone(),
             failure,
-        }]
+        });
+        changes
     }
 
     pub(super) fn reject_interaction_cancel(

@@ -1,13 +1,13 @@
-pub mod agent_progress;
+pub mod activity_observation;
 #[cfg(test)]
-#[path = "conversation/agent_run_state_tests.rs"]
-mod agent_run_state_tests;
+#[path = "conversation/activity_observation_tests.rs"]
+mod activity_observation_tests;
+pub mod agent_activity;
 pub mod ask_user;
 pub mod block;
 pub mod change;
 pub mod chat;
 pub mod chat_turn;
-pub mod compact_progress;
 pub mod history_parse;
 pub mod ids;
 pub mod intent;
@@ -30,12 +30,13 @@ pub mod queued_submission;
 mod resume_performance_tests;
 pub(crate) mod resumed_history;
 #[cfg(test)]
+#[path = "conversation/resumed_history_tests.rs"]
+mod resumed_history_tests;
+#[cfg(test)]
 #[path = "conversation/retained_state_tests.rs"]
 mod retained_state_tests;
 pub mod runtime_state;
-pub mod spinner;
 pub mod status_notice;
-pub mod stop_hook_notice;
 pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;

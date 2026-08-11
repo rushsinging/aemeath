@@ -4,6 +4,7 @@ use std::sync::Arc;
 use share::config::domain::snapshot::ConfigSnapshot;
 
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
+use crate::application::run::context::RunUsageTracker;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{Run, RunId, RunSpec, RunSpecError};
@@ -16,6 +17,10 @@ pub(crate) struct SessionRunBindings {
     interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: ChatEventSinkHandle,
+    /// Per-Session usage tracker — shared across all Main Runs in the same
+    /// session so a new Run inherits the last known API total tokens instead
+    /// of falling back to a heuristic estimate on its first step.
+    usage: RunUsageTracker,
 }
 
 impl SessionRunBindings {
@@ -25,6 +30,7 @@ impl SessionRunBindings {
         interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
         reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
         event_sink: ChatEventSinkHandle,
+        usage: RunUsageTracker,
     ) -> Self {
         Self {
             wiring,
@@ -32,6 +38,7 @@ impl SessionRunBindings {
             interaction,
             reasoning,
             event_sink,
+            usage,
         }
     }
 
@@ -55,6 +62,10 @@ impl SessionRunBindings {
 
     pub(crate) fn event_sink(&self) -> &ChatEventSinkHandle {
         &self.event_sink
+    }
+
+    pub(crate) fn usage(&self) -> &RunUsageTracker {
+        &self.usage
     }
 }
 
@@ -270,6 +281,7 @@ impl From<RunSpecError> for RunCreationError {
 /// 输入消息不属于装配契约；首次和后续输入都必须经 InputPort 激活 Run。
 #[derive(Clone)]
 pub struct RunCreationRequest {
+    run_id: Option<RunId>,
     spec: RunSpec,
     session: SessionSnapshot,
     parent: Option<ParentRunFacts>,
@@ -285,10 +297,20 @@ impl RunCreationRequest {
             spec.validate_against(parent.spec())?;
         }
         Ok(Self {
+            run_id: None,
             spec,
             session,
             parent,
         })
+    }
+
+    pub(crate) fn run_id(&self) -> Option<&RunId> {
+        self.run_id.as_ref()
+    }
+
+    pub(crate) fn with_run_id(mut self, run_id: RunId) -> Self {
+        self.run_id = Some(run_id);
+        self
     }
 
     pub fn spec(&self) -> &RunSpec {
@@ -323,6 +345,7 @@ pub struct RunInstance {
 
 impl RunInstance {
     pub(crate) fn new(
+        run_id: RunId,
         spec: RunSpec,
         parent_run_id: Option<RunId>,
         session: SessionSnapshot,
@@ -330,7 +353,12 @@ impl RunInstance {
         workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) -> Self {
         Self {
-            run: Run::new(spec, parent_run_id),
+            run: Run::with_id_and_stop_hook_policy(
+                run_id,
+                spec,
+                parent_run_id,
+                context.config().stop_hook_policy(),
+            ),
             execution: RunExecutionState::new(),
             session,
             context,
@@ -354,8 +382,8 @@ impl RunInstance {
         self.workspace.as_ref()
     }
 
-    pub fn initialize(&mut self, messages: Vec<share::message::Message>, turn_count: usize) {
-        self.execution.initialize_for_launch(messages, turn_count);
+    pub fn initialize(&mut self, messages: Vec<share::message::Message>, step_count: usize) {
+        self.execution.initialize_for_launch(messages, step_count);
     }
 
     pub(crate) fn execution_parts_mut(

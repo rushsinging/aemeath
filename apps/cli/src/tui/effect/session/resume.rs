@@ -20,7 +20,8 @@ impl App {
             id: session_id.clone(),
         }));
         self.handle_input_intent(InputIntent::Clear);
-        self.model.conversation.replace_resumed_history(backing);
+        self.model.conversation.reset();
+        self.model.display_history.replace(backing);
         self.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(
             input_history,
         )));
@@ -32,19 +33,66 @@ impl App {
     }
 
     pub(crate) fn restore_startup_session(&mut self, resume: sdk::SessionResumeView) {
-        self.restore_startup_backing(sdk::LocalSessionResumeBacking::from_wire(resume));
+        crate::tui::log_debug!(
+            "resume_lifecycle boundary=tui_startup stage=view_received session_id={} steps={} messages={}",
+            resume.session_id,
+            resume.steps.len(),
+            resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
+        );
+        let steps = resume
+            .steps
+            .into_iter()
+            .map(|step| TuiResumedSessionStep {
+                run_id: step.run_id,
+                step_id: step.step_id,
+                messages: step
+                    .messages
+                    .into_iter()
+                    .map(crate::tui::adapter::event_mapping::chat_message)
+                    .collect(),
+                finalize_cause: step.finalize_cause.map(|cause| match cause {
+                    sdk::ResumedStepFinalizeCause::Completed => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
+                    sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
+                    sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
+                }),
+                duration_ms: step.duration_ms,
+            })
+            .collect();
+        self.resume_session_messages(
+            &resume.session_id,
+            steps,
+            None,
+            resume.created_at.to_string(),
+            resume.compacted,
+        );
     }
 
     pub(crate) fn resume_session_messages(
         &mut self,
         session_id: &str,
         steps: Vec<TuiResumedSessionStep>,
+        display_history: Option<crate::tui::adapter::runtime_view::TuiDisplayHistoryIndex>,
         created_at: String,
+        compacted: bool,
     ) {
         let messages = steps
             .iter()
             .flat_map(|step| step.messages.iter().cloned())
             .collect::<Vec<_>>();
+        let input_history = if display_history.is_some() {
+            display_history
+                .as_ref()
+                .map(|index| {
+                    index
+                        .steps
+                        .iter()
+                        .flat_map(|step| step.user_input_history.iter().cloned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            extract_user_input_history(&messages)
+        };
         let msg_count = messages.len();
         let last_role = messages
             .last()
@@ -69,13 +117,27 @@ impl App {
             id: session_id.to_string(),
         }));
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-        // 走 ResumeConversation intent，不触发 spinner 副作用
-        self.apply_agent_intent(AgentIntent::Conversation(
-            crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
-                crate::tui::model::conversation::intent::ResumeConversation { steps },
-            ),
-        ));
-        apply_resume_input_history(self, &messages);
+        if let Some(index) = display_history {
+            self.model.conversation.reset();
+            self.model.display_history.replace(
+                crate::tui::model::conversation::resumed_history::ResumedHistoryBacking::from_tui_index(
+                    index,
+                ),
+            );
+        } else {
+            // 走 ResumeConversation intent，不触发 spinner 副作用
+            self.apply_agent_intent(AgentIntent::Conversation(
+                crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                    crate::tui::model::conversation::intent::ResumeConversation { steps },
+                ),
+            ));
+        }
+        if compacted {
+            self.append_system_notice("✓ 上下文压缩完成");
+        }
+        self.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(
+            input_history,
+        )));
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count
@@ -147,17 +209,19 @@ mod tests {
                 finalize_cause: Some(sdk::ResumedStepFinalizeCause::Completed),
                 duration_ms: Some(10),
             }],
+            display_history: None,
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(app.model.conversation.chats.len(), 0);
-        assert_eq!(app.model.conversation.resumed_history_steps(), 1);
+        assert_eq!(app.model.display_history.steps().len(), 1);
         assert!(std::sync::Arc::ptr_eq(
             &shared_messages,
             &app.model
-                .conversation
-                .resumed_history_step(0)
+                .display_history
+                .step(0)
                 .expect("history step")
                 .message_segments[0]
         ));
@@ -180,12 +244,58 @@ mod tests {
             }],
             session_id: "session-resumed".to_string(),
             created_at: 42,
+            compacted: false,
         });
 
         assert_eq!(app.session.session_id(), "session-resumed");
-        assert_eq!(app.model.conversation.timeline.items().len(), 1);
-        assert_eq!(app.model.conversation.resumed_history_steps(), 1);
+        assert_eq!(app.model.conversation.timeline.items().len(), 2);
         assert!(app.model.conversation.revision() > 0);
+    }
+
+    #[test]
+    fn startup_index_restores_input_history_from_all_display_steps() {
+        let mut app = App::new(
+            "session-bootstrap".to_string(),
+            PathBuf::from("/tmp"),
+            "model".to_string(),
+        );
+        app.restore_startup_backing(sdk::LocalSessionResumeBacking {
+            steps: Vec::new(),
+            display_history: Some(sdk::DisplayHistoryIndex {
+                session_id: "session-resumed".to_string(),
+                generation_revision: 42,
+                steps: vec![
+                    sdk::DisplayHistoryStepReference {
+                        run_id: "run-1".to_string(),
+                        step_id: "step-1".to_string(),
+                        member_name: "step-1.json".to_string(),
+                        estimated_lines: 1,
+                        user_input_history: vec!["older input".to_string()],
+                        finalize_cause: None,
+                        duration_ms: None,
+                    },
+                    sdk::DisplayHistoryStepReference {
+                        run_id: "run-2".to_string(),
+                        step_id: "step-2".to_string(),
+                        member_name: "step-2.json".to_string(),
+                        estimated_lines: 1,
+                        user_input_history: vec!["latest input".to_string()],
+                        finalize_cause: None,
+                        duration_ms: None,
+                    },
+                ],
+            }),
+            session_id: "session-resumed".to_string(),
+            created_at: 42,
+            compacted: false,
+        });
+
+        assert_eq!(
+            app.model.input.history.entries,
+            vec!["older input".to_string(), "latest input".to_string()]
+        );
+        assert_eq!(app.model.input.history.selected_index, None);
+        assert_eq!(app.model.input.history.saved_input, "");
     }
 
     #[test]
@@ -228,7 +338,8 @@ mod tests {
                 TuiContentBlock::text("world"),
             ],
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
             input_id: None,
         }];
 
@@ -257,15 +368,16 @@ mod tests {
                 finalize_cause: None,
                 duration_ms: None,
             }],
+            None,
             "2026-01-01T00:00:00Z".to_string(),
+            false,
         );
-
-        assert!(
-            !app.model.conversation.runtime.spinner.chat_active,
-            "SessionResumed 仅恢复历史，不能表示 Runtime 正在执行"
-        );
-        assert_eq!(app.model.conversation.runtime.spinner.phase, None);
-        assert_eq!(app.model.conversation.runtime.spinner.running_tool_count, 0);
+        assert!(app
+            .model
+            .conversation
+            .activity_observations()
+            .activities()
+            .is_empty());
     }
     #[test]
     fn test_apply_resume_input_history_populates_app_history() {

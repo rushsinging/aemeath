@@ -22,7 +22,7 @@ use share::config::Config;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use super::loop_runner::main_run_port::ChatCompactionObserver;
+use super::main_run_port::ChatCompactionObserver;
 use crate::application::loop_engine::chat::reflection::{
     maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
 };
@@ -56,6 +56,7 @@ fn frozen_request() -> ContextRequest {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("seed")],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: provider::ReasoningLevel::Off,
@@ -87,6 +88,8 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             urgency: Urgency::Must,
             decision_token_count: 0,
             threshold: 0,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
     }
@@ -366,6 +369,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     });
     let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
 
@@ -518,6 +522,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     })));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
@@ -526,7 +531,8 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
         "compact should succeed on Committed: {result:?}"
@@ -565,7 +571,8 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
         "automatic compact skip must continue the current Run: {result:?}"
@@ -599,7 +606,8 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let result = port.compact(&mut execution, &cancel).await;
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
+    let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_err(),
         "compact must propagate context port errors"

@@ -12,6 +12,7 @@ pub use adapters::{isolated_context, isolated_context_with_skill};
 #[cfg(any(test, feature = "dev"))]
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{
+    DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
     SessionListEntry, SessionManagementError, SessionMetadataUpdate, SessionRestoreStep,
     SessionResumeView,
 };
@@ -28,6 +29,9 @@ pub use application::{
 
 pub mod api {
     pub use crate::adapters::MemoryRetrieveAdapter;
+    pub use crate::domain::session::{
+        DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
+    };
     pub use crate::ports::MemoryMaterialization;
 }
 

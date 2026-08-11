@@ -95,7 +95,7 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
         similarity_threshold: config.similarity_threshold as f32,
         reflection: ReflectionConfigView {
             enabled: config.reflection.enabled,
-            interval_turns: config.reflection.interval_turns,
+            interval_run_steps: config.reflection.interval_run_steps,
             auto_apply_suggestions: config.reflection.auto_apply_suggestions,
         },
     }
@@ -161,23 +161,77 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 share::message::MessageSource::SystemGenerated => {
                     sdk::ChatMessageSource::SystemGenerated
                 }
-                share::message::MessageSource::StopHook => sdk::ChatMessageSource::StopHook,
+                share::message::MessageSource::Hook => sdk::ChatMessageSource::Hook,
+                share::message::MessageSource::SkillRequest => sdk::ChatMessageSource::SkillRequest,
             },
-            stop_hook: metadata.stop_hook.map(|payload| sdk::StopHookFeedbackView {
-                summary: payload.summary,
-                command: payload.command,
-                exit_code: payload.exit_code,
-                reason: payload.reason,
-                stdout_preview: payload.stdout_preview,
-                stderr_preview: payload.stderr_preview,
-                stdout_truncated: payload.stdout_truncated,
-                stderr_truncated: payload.stderr_truncated,
-                output_file: payload.output_file,
+            hook_notice: metadata.hook_notice.map(|notice| sdk::HookNoticeView {
+                point: notice.point,
+                kind: match notice.kind {
+                    share::message::HookNoticeKind::Blocked => sdk::HookNoticeKindView::Blocked,
+                    share::message::HookNoticeKind::Failed => sdk::HookNoticeKindView::Failed,
+                    share::message::HookNoticeKind::Info => sdk::HookNoticeKindView::Info,
+                },
+                summary: notice.summary,
+                command: notice.command,
+                exit_code: notice.exit_code,
+                reason: notice.reason,
+                stdout_preview: notice.stdout_preview,
+                stderr_preview: notice.stderr_preview,
+                stdout_truncated: notice.stdout_truncated,
+                stderr_truncated: notice.stderr_truncated,
+                output_file: notice.output_file,
             }),
+            skill_request: metadata
+                .skill_request
+                .map(|payload| sdk::SkillRequestMetadataView {
+                    skill: payload.skill,
+                    arguments: payload.arguments,
+                    raw_input: payload.raw_input,
+                }),
         }),
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
         // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
         input_id: None,
+    }
+}
+
+pub(crate) fn display_history_window_to_sdk(
+    window: context::api::DisplayHistoryStepWindow,
+) -> sdk::DisplayHistoryWindow {
+    sdk::DisplayHistoryWindow {
+        session_id: window.session_id().to_string(),
+        generation_revision: window.generation_revision(),
+        steps: window
+            .steps()
+            .iter()
+            .map(|member| {
+                let step = member.step();
+                sdk::ResumedSessionStep {
+                    run_id: member.cursor().run_id.clone(),
+                    step_id: member.cursor().step_id.clone(),
+                    messages: step
+                        .accepted_input
+                        .iter()
+                        .flat_map(|input| input.messages.iter())
+                        .chain(
+                            step.outcome
+                                .iter()
+                                .flat_map(|outcome| outcome.messages.iter()),
+                        )
+                        .cloned()
+                        .map(message_to_sdk)
+                        .collect(),
+                    finalize_cause: step
+                        .outcome
+                        .as_ref()
+                        .map(|outcome| map_finalize_cause_to_sdk(outcome.finalize_cause)),
+                    duration_ms: step
+                        .outcome
+                        .as_ref()
+                        .and_then(|outcome| outcome.duration_ms),
+                }
+            })
+            .collect(),
     }
 }
 
@@ -195,10 +249,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn message_mapping_preserves_stop_hook_payload() {
-        let message = share::message::Message::stop_hook_feedback(
+    fn message_mapping_preserves_hook_notice() {
+        let message = share::message::Message::hook_notice(
             "<system-reminder>blocked</system-reminder>",
-            share::message::StopHookFeedback {
+            share::message::HookNotice {
+                point: "Stop".to_string(),
+                kind: share::message::HookNoticeKind::Blocked,
                 summary: "blocked".to_string(),
                 command: "check-agent-stop.sh".to_string(),
                 exit_code: Some(2),
@@ -212,12 +268,13 @@ mod tests {
         );
 
         let mapped = message_to_sdk(message);
-        let payload = mapped.metadata.unwrap().stop_hook.unwrap();
+        let notice = mapped.metadata.unwrap().hook_notice.unwrap();
 
-        assert_eq!(payload.command, "check-agent-stop.sh");
-        assert_eq!(payload.exit_code, Some(2));
-        assert!(payload.stderr_truncated);
-        assert_eq!(payload.output_file.as_deref(), Some("/tmp/hook.txt"));
+        assert_eq!(notice.point, "Stop");
+        assert_eq!(notice.command, "check-agent-stop.sh");
+        assert_eq!(notice.exit_code, Some(2));
+        assert!(notice.stderr_truncated);
+        assert_eq!(notice.output_file.as_deref(), Some("/tmp/hook.txt"));
     }
 
     #[test]

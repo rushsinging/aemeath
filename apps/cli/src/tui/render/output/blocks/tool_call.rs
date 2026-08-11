@@ -8,10 +8,11 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::rc::Rc;
 
-/// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
+/// 渲染工具调用块：仅 header（标题）+ args detail 行。
 ///
-/// 工具结果已升为独立子块（`ToolResult` 变体，见 `blocks/tool_result.rs`，#60），
-/// 由 assembler 作为本块的 depth-1 子节点附加，此处不再渲染结果。
+/// streaming preview 与最终结果均升为独立 ToolResult 子块（#1547），
+/// 由 assembler 作为 depth-1 子节点附加，marker/缩进/续行由 gutter 统一管理。
+/// 此处不再渲染任何 activity 内联行。
 pub fn render_tool_call(
     block_id: &str,
     view: &ToolCallBlockView,
@@ -44,19 +45,19 @@ pub fn render_tool_call(
             )
         });
     crate::tui::log_debug!(
-        "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
+        "render tool_call block_id={} title={} status={:?} args_len={} result_len={} detail_lines={} streaming_preview={}",
         block_id,
         view.title,
         view.semantic_status,
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
-                view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+        view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
-        view.activity_lines.len(),
+        // streaming preview 已升为独立 ToolResult 子块，此处只记录是否存在预览。
+        view.streaming_preview.is_some(),
     );
-    // issue #361：header / detail / activity 三部分均消费 ctx.text_width 做 wrap（Word
-    // 模式），避免窄终端下行宽超出 output_document_width 被 ratatui 截断。marker 由 gutter
-    // 注入，header 只渲染去掉前导 ● 的标题文本。line base style（TEXT / TEXT_MUTED）让未
-    // 显式着色的 span 继承主题色，已有显式颜色的 span（如 display_name 的 ACCENT_BRIGHT）保留。
+    // header / detail 两部分消费 ctx.text_width 做 wrap（Word 模式），避免窄终端下行宽
+    // 超出 output_document_width 被 ratatui 截断。marker 由 gutter 注入，header 只渲染
+    // 去掉前导 ● 的标题文本。
     let header_style = Style::default().fg(theme::TEXT);
     let detail_style = Style::default().fg(theme::TEXT_MUTED);
     let width = ctx.text_width as usize;
@@ -80,21 +81,7 @@ pub fn render_tool_call(
             .map(|line| line.with_style(detail_style)),
         );
     }
-    // 渲染 activity_lines：Bash/Agent 等长时间工具执行过程中显示当前进度，
-    // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
-    for activity in &view.activity_lines {
-        lines.extend(
-            wrap_spans_with_prefix(
-                vec![Span::styled(activity.clone(), detail_style)],
-                width,
-                None,
-                WrapMode::Word,
-            )
-            .into_iter()
-            .map(|line| line.with_style(detail_style)),
-        );
-    }
-
+    // streaming preview 已升为独立 ToolResult 子块；ToolCall 只渲染 header/detail。
     RenderedBlock {
         block_id: block_id.to_string(),
         lines: Rc::new(lines),
@@ -140,6 +127,7 @@ fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMetaView>) -> String {
 mod tests {
     use super::*;
     use crate::tui::view_model::output::ToolSemanticStatus;
+    use crate::tui::view_model::output::{AgentActivityKindView, AgentActivityLineView};
     use crate::tui::view_model::style::SemanticStyle;
     use unicode_width::UnicodeWidthStr;
 
@@ -147,14 +135,14 @@ mod tests {
         ToolCallBlockView {
             key: "t1".into(),
             chat_id: None,
-            turn_id: None,
+            run_id: None,
             tool_call_id: Some("t1".into()),
             title: "Grep".into(),
             icon: "●".into(),
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: Some("/foo/".into()),
-            activity_lines: Vec::new(),
+            streaming_preview: None,
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -306,42 +294,57 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_wraps_long_activity_summary_to_text_width() {
-        // Agent 等长任务的 activity 行在窄终端应 wrap 而非溢出。
+    fn test_tool_call_does_not_render_streaming_preview_inline() {
+        // #1547：streaming preview 由 gutter 管理的 ToolResult 子块渲染，
+        // ToolCall 自身只渲染 header/detail，不含预览内容或 ⎿ marker。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{"command":"ls"}"#.into());
-        view.activity_lines = vec![
-            "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为".into(),
-        ];
+        view.streaming_preview = Some(vec![AgentActivityLineView {
+            kind: AgentActivityKindView::Message,
+            content: "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为"
+                .into(),
+        }]);
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(30));
 
         for (i, line) in block.lines.iter().enumerate() {
             assert!(
-                line.plain.width() <= 30,
-                "activity 行 #{i} 宽度 {} 超 30: {:?}",
-                line.plain.width(),
+                !line.plain.contains('⎿'),
+                "ToolCall 行 #{i} 不应内联渲染 ⎿ marker: {:?}",
+                line.plain
+            );
+            assert!(
+                !line.plain.contains("子任务正在执行"),
+                "ToolCall 行 #{i} 不应内联渲染 streaming_preview 内容: {:?}",
                 line.plain
             );
         }
     }
 
     #[test]
-    fn test_tool_call_renders_multiple_activity_lines() {
+    fn test_tool_call_does_not_render_inline_streaming_marker() {
+        // #1547：running activity 已升为独立 ToolResult 子块，ToolCall 仅保留 header/detail。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
-        view.activity_lines = vec!["2".into(), "3".into(), "4".into(), "5".into(), "6".into()];
+        view.streaming_preview = Some(vec![
+            AgentActivityLineView {
+                kind: AgentActivityKindView::ToolCall,
+                content: "2".into(),
+            },
+            AgentActivityLineView {
+                kind: AgentActivityKindView::Message,
+                content: "still running".into(),
+            },
+        ]);
 
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
         let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
 
-        assert!(rendered.contains(&"2"));
-        assert!(rendered.contains(&"3"));
-        assert!(rendered.contains(&"4"));
-        assert!(rendered.contains(&"5"));
-        assert!(rendered.contains(&"6"));
+        assert!(rendered.iter().all(|line| !line.contains("→ 2")));
+        assert!(rendered.iter().all(|line| !line.contains("still running")));
+        assert!(rendered.iter().all(|line| !line.contains('⎿')));
     }
 
     #[test]
@@ -350,7 +353,6 @@ mod tests {
         let raw = r#"{"prompt":"do something","description":"task"}"#;
         assert_eq!(merge_agent_meta(raw, None), raw);
     }
-
     #[test]
     fn test_merge_agent_meta_fills_role_and_model() {
         // case 2（input 只有 role 无 model）：agent_meta 补上 runtime resolve 的 model

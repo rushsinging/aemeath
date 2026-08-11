@@ -69,11 +69,10 @@ pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
-    ModelStreamPlaceholder(ModelStreamPlaceholderBlockView),
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
-    HookNotice(HookNoticeBlockView),
     DiagnosticNotice(TextBlockView),
+    HookNotice(HookNoticeBlockView),
     SystemNotice(TextBlockView),
     AskUserBatch(AskUserBatchBlockView),
 }
@@ -91,7 +90,16 @@ pub struct AskUserBatchBlockView {
     pub chat_input_text: String,
     pub chat_input_cursor: usize,
     pub confirm_cursor: usize,
-    pub confirmed: bool,
+    pub completion: AskUserCompletionView,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserCompletionView {
+    Active,
+    ReplyPending,
+    CancelPending,
+    Answered,
+    Cancelled,
 }
 
 /// AskUserBatch 单问槽位视图（投影自 model 层，不依赖 model internals）。
@@ -113,48 +121,87 @@ pub enum AskUserPhaseView {
     Confirming,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct HookNoticeBlockView {
+    pub key: String,
+    pub title: String,
+    pub body: String,
+    pub kind: crate::tui::adapter::runtime_view::TuiHookNoticeKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TextBlockView {
     pub key: String,
     pub text: String,
     pub style: SemanticStyle,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ModelStreamPlaceholderBlockView {
-    pub key: String,
-    pub elapsed_secs: u64,
-    pub phase: String,
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AgentActivityKindView {
+    Message,
+    ToolCall,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum HookNoticeSemanticKind {
-    Blocked,
-    Failed,
-    Info,
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum AgentActivityContentView {
+    Text(String),
+    ToolCall {
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HookNoticeBlockView {
-    pub key: String,
-    pub kind: HookNoticeSemanticKind,
-    pub title: String,
-    pub body: String,
-    pub details: Option<String>,
-    pub style: SemanticStyle,
+impl From<String> for AgentActivityContentView {
+    fn from(content: String) -> Self {
+        Self::Text(content)
+    }
+}
+
+impl From<&str> for AgentActivityContentView {
+    fn from(content: &str) -> Self {
+        Self::Text(content.to_string())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct AgentActivityLineView {
+    pub kind: AgentActivityKindView,
+    pub content: AgentActivityContentView,
+}
+
+impl AgentActivityLineView {
+    pub fn message(content: impl Into<String>) -> Self {
+        Self {
+            kind: AgentActivityKindView::Message,
+            content: AgentActivityContentView::Text(content.into()),
+        }
+    }
+}
+
+impl From<&str> for AgentActivityLineView {
+    fn from(content: &str) -> Self {
+        Self::message(content)
+    }
+}
+
+impl PartialEq<&str> for AgentActivityLineView {
+    fn eq(&self, other: &&str) -> bool {
+        matches!(&self.content, AgentActivityContentView::Text(content) if content == *other)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ToolCallBlockView {
     pub key: String,
     pub chat_id: Option<String>,
-    pub turn_id: Option<String>,
+    pub run_id: Option<String>,
     pub tool_call_id: Option<String>,
     pub title: String,
     pub icon: String,
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
-    pub activity_lines: Vec<String>,
+    /// 运行中工具的结构化流式 activity；由 assembler 装配为独立 ToolResult 子块。
+    pub streaming_preview: Option<Vec<AgentActivityLineView>>,
     pub result_summary: Option<String>,
     /// Owned structured payload of the tool result (output/content/is_error/image_count).
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
@@ -187,7 +234,8 @@ pub struct AgentMetaView {
 ///
 /// - `args_preview`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断）。
 /// - `summary`：人类可读摘要（如 `"L12-L34 (23 lines)"`）。
-/// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+/// - `result_text`：最终结果摘要文本（源同 assembler 的 `tool_result_summary`）。
+/// - `activity_lines`：仅 running streaming 子块携带的 typed activity；最终结果为 `None`。
 /// - `data`：结构化 typed result JSON（如 `EditResult`），供 diff 等富渲染直接读取（#546）。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolResultBlockView {
@@ -195,18 +243,22 @@ pub struct ToolResultBlockView {
     pub tool_title: String,
     pub args_preview: Option<String>,
     pub result_text: String,
+    pub activity_lines: Option<Vec<AgentActivityLineView>>,
+    pub workspace_root: Option<std::path::PathBuf>,
     pub data: Option<serde_json::Value>,
     pub style: SemanticStyle,
 }
 
-// 手写 Hash：serde_json::Value 不 impl Hash，只 hash 标识字段（key/tool_title/result_text/
-// args_preview/style），data 不参与缓存指纹（同 ToolResultPayload 的处理方式）。
+// 手写 Hash：serde_json::Value 不 impl Hash；typed activity 参与缓存指纹，data 不参与
+// （同 ToolResultPayload 的处理方式）。
 impl std::hash::Hash for ToolResultBlockView {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.key.hash(state);
         self.tool_title.hash(state);
         self.args_preview.hash(state);
         self.result_text.hash(state);
+        self.activity_lines.hash(state);
+        self.workspace_root.hash(state);
         self.style.hash(state);
     }
 }

@@ -52,6 +52,7 @@ fn assemble_test_context(
         Arc::new(sub_context_derivation_tests::FakeReflHist),
         crate::application::run::test_task_access(),
         Arc::new(sub_context_derivation_tests::FakeHookPort),
+        Arc::new(crate::ports::UnavailableUsageSink),
     ));
     let fixture = SessionRunFixture::builder()
         .with_context_factory(factory.clone())

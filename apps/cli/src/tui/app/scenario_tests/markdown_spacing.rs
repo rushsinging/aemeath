@@ -3,7 +3,7 @@ use super::super::testing::TuiScenarioHarness;
 fn assistant_events(text: &str) -> Vec<sdk::ChatEvent> {
     let context = sdk::ChatEventContext::new(
         sdk::ChatId::new("chat-spacing"),
-        sdk::ChatTurnId::new("turn-spacing"),
+        sdk::ChatRunId::new("turn-spacing"),
     );
     vec![
         sdk::ChatEvent::Token {

@@ -23,6 +23,7 @@ impl SessionRepository for Session {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(0),
             messages: vec![].into(),
+            structured_history: None,
             active_summary: None,
         })
     }
@@ -50,6 +51,7 @@ impl SessionRepository for Session {
                 summary: "manual".into(),
                 recent_messages: vec![],
                 source_revision: SessionRevision::new(1),
+                quality: context::domain::CompactSummaryQuality::LocalOnly,
             },
         ))
     }
@@ -97,6 +99,7 @@ fn request() -> ContextRequest {
         run_id: RunId::new("run"),
         step_id: context::domain::RunStepId::new("step"),
         pending_messages: vec![],
+        invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,

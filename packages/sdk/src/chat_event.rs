@@ -26,15 +26,72 @@ mod skills_updated_tests {
     }
 }
 
-use crate::chat::AskUserQuestionItem;
+use crate::activity::{ActivityChangeKind, ActivitySnapshotView, ActivityView};
 use crate::chat_result::{ChatResult, ToolResultImage};
 use crate::chat_view::{
-    AgentProgressEventView, HookEventView, HookMessageView, WorkspaceContextView,
+    AgentProgressEventView, SubRunActivityEventView, SubRunStartedEventView, WorkspaceContextView,
 };
 use crate::ChatMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(test)]
+mod run_status_view_tests {
+    use super::{ChatEvent, RunStatusView};
+    use serde_json::json;
+
+    #[test]
+    fn run_status_view_serializes_all_variants() {
+        let statuses = [
+            (RunStatusView::Created, "created"),
+            (RunStatusView::DrainingInput, "draining_input"),
+            (RunStatusView::PreparingContext, "preparing_context"),
+            (RunStatusView::InvokingModel, "invoking_model"),
+            (RunStatusView::ApplyingResponse, "applying_response"),
+            (
+                RunStatusView::AwaitingToolApproval,
+                "awaiting_tool_approval",
+            ),
+            (RunStatusView::ExecutingTools, "executing_tools"),
+            (RunStatusView::AwaitingUser, "awaiting_user"),
+            (RunStatusView::Compacting, "compacting"),
+            (RunStatusView::CancellingStep, "cancelling_step"),
+            (RunStatusView::FinalizingStep, "finalizing_step"),
+            (RunStatusView::Cancelling, "cancelling"),
+            (RunStatusView::Terminating, "terminating"),
+            (RunStatusView::Completed, "completed"),
+            (RunStatusView::Failed, "failed"),
+            (RunStatusView::Cancelled, "cancelled"),
+            (RunStatusView::Terminated, "terminated"),
+        ];
+
+        for (status, expected) in statuses {
+            assert_eq!(serde_json::to_value(status).unwrap(), json!(expected));
+        }
+    }
+
+    #[test]
+    fn run_transitioned_uses_typed_status() {
+        let event = ChatEvent::RunTransitioned {
+            run_id: crate::RunId::new_v7(),
+            parent_run_id: None,
+            status: RunStatusView::InvokingModel,
+            timing: super::RunTimingView {
+                observation_revision: 1,
+                total_elapsed_ms: 12_345,
+                phase_elapsed_ms: 678,
+            },
+        };
+
+        match event {
+            ChatEvent::RunTransitioned { status, .. } => {
+                assert_eq!(status, RunStatusView::InvokingModel);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ResumedStepFinalizeCause {
@@ -102,21 +159,41 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
                     crate::ChatMessageSource::SystemGenerated => {
                         share::message::MessageSource::SystemGenerated
                     }
-                    crate::ChatMessageSource::StopHook => share::message::MessageSource::StopHook,
+                    crate::ChatMessageSource::Hook => share::message::MessageSource::Hook,
+                    crate::ChatMessageSource::SkillRequest => {
+                        share::message::MessageSource::SkillRequest
+                    }
                 },
-                stop_hook: metadata
-                    .stop_hook
-                    .map(|payload| share::message::StopHookFeedback {
-                        summary: payload.summary,
-                        command: payload.command,
-                        exit_code: payload.exit_code,
-                        reason: payload.reason,
-                        stdout_preview: payload.stdout_preview,
-                        stderr_preview: payload.stderr_preview,
-                        stdout_truncated: payload.stdout_truncated,
-                        stderr_truncated: payload.stderr_truncated,
-                        output_file: payload.output_file,
+                hook_notice: metadata
+                    .hook_notice
+                    .map(|notice| share::message::HookNotice {
+                        point: notice.point,
+                        kind: match notice.kind {
+                            crate::HookNoticeKindView::Blocked => {
+                                share::message::HookNoticeKind::Blocked
+                            }
+                            crate::HookNoticeKindView::Failed => {
+                                share::message::HookNoticeKind::Failed
+                            }
+                            crate::HookNoticeKindView::Info => share::message::HookNoticeKind::Info,
+                        },
+                        summary: notice.summary,
+                        command: notice.command,
+                        exit_code: notice.exit_code,
+                        reason: notice.reason,
+                        stdout_preview: notice.stdout_preview,
+                        stderr_preview: notice.stderr_preview,
+                        stdout_truncated: notice.stdout_truncated,
+                        stderr_truncated: notice.stderr_truncated,
+                        output_file: notice.output_file,
                     }),
+                skill_request: metadata.skill_request.map(|payload| {
+                    share::message::SkillRequestMetadata {
+                        skill: payload.skill,
+                        arguments: payload.arguments,
+                        raw_input: payload.raw_input,
+                    }
+                }),
             }),
     }
 }
@@ -138,22 +215,42 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
                     share::message::MessageSource::SystemGenerated => {
                         crate::ChatMessageSource::SystemGenerated
                     }
-                    share::message::MessageSource::StopHook => crate::ChatMessageSource::StopHook,
+                    share::message::MessageSource::Hook => crate::ChatMessageSource::Hook,
+                    share::message::MessageSource::SkillRequest => {
+                        crate::ChatMessageSource::SkillRequest
+                    }
                 },
-                stop_hook: metadata
-                    .stop_hook
+                hook_notice: metadata
+                    .hook_notice
                     .as_ref()
-                    .map(|payload| crate::StopHookFeedbackView {
-                        summary: payload.summary.clone(),
-                        command: payload.command.clone(),
-                        exit_code: payload.exit_code,
-                        reason: payload.reason.clone(),
-                        stdout_preview: payload.stdout_preview.clone(),
-                        stderr_preview: payload.stderr_preview.clone(),
-                        stdout_truncated: payload.stdout_truncated,
-                        stderr_truncated: payload.stderr_truncated,
-                        output_file: payload.output_file.clone(),
+                    .map(|notice| crate::HookNoticeView {
+                        point: notice.point.clone(),
+                        kind: match notice.kind {
+                            share::message::HookNoticeKind::Blocked => {
+                                crate::HookNoticeKindView::Blocked
+                            }
+                            share::message::HookNoticeKind::Failed => {
+                                crate::HookNoticeKindView::Failed
+                            }
+                            share::message::HookNoticeKind::Info => crate::HookNoticeKindView::Info,
+                        },
+                        summary: notice.summary.clone(),
+                        command: notice.command.clone(),
+                        exit_code: notice.exit_code,
+                        reason: notice.reason.clone(),
+                        stdout_preview: notice.stdout_preview.clone(),
+                        stderr_preview: notice.stderr_preview.clone(),
+                        stdout_truncated: notice.stdout_truncated,
+                        stderr_truncated: notice.stderr_truncated,
+                        output_file: notice.output_file.clone(),
                     }),
+                skill_request: metadata.skill_request.as_ref().map(|payload| {
+                    crate::SkillRequestMetadataView {
+                        skill: payload.skill.clone(),
+                        arguments: payload.arguments.clone(),
+                        raw_input: payload.raw_input.clone(),
+                    }
+                }),
             }),
         input_id: None,
     }
@@ -162,8 +259,10 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
 #[derive(Debug, Clone)]
 pub struct LocalSessionResumeBacking {
     pub steps: Vec<LocalResumedSessionStep>,
+    pub display_history: Option<DisplayHistoryIndex>,
     pub session_id: String,
     pub created_at: u64,
+    pub compacted: bool,
 }
 
 impl LocalSessionResumeBacking {
@@ -174,8 +273,10 @@ impl LocalSessionResumeBacking {
                 .into_iter()
                 .map(LocalResumedSessionStep::from_wire)
                 .collect(),
+            display_history: None,
             session_id: view.session_id,
             created_at: view.created_at,
+            compacted: view.compacted,
         }
     }
 
@@ -188,8 +289,44 @@ impl LocalSessionResumeBacking {
                 .collect(),
             session_id: self.session_id.clone(),
             created_at: self.created_at,
+            compacted: self.compacted,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryWindowRequest {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub member_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryWindow {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub steps: Vec<ResumedSessionStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryStepReference {
+    pub run_id: String,
+    pub step_id: String,
+    pub member_name: String,
+    pub estimated_lines: usize,
+    #[serde(default)]
+    pub user_input_history: Vec<String>,
+    #[serde(default)]
+    pub finalize_cause: Option<ResumedStepFinalizeCause>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHistoryIndex {
+    pub session_id: String,
+    pub generation_revision: u64,
+    pub steps: Vec<DisplayHistoryStepReference>,
 }
 
 /// 会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。
@@ -211,19 +348,50 @@ pub struct SessionResumeView {
     pub steps: Vec<ResumedSessionStep>,
     pub session_id: String,
     pub created_at: u64,
+    #[serde(default)]
+    pub compacted: bool,
 }
 
-/// Runtime stream context used to bind UI events to the authoritative chat/turn.
+/// Runtime stream context used to bind UI events to the authoritative chat/run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatEventContext {
     pub chat_id: crate::ids::ChatId,
-    pub turn_id: crate::ids::ChatTurnId,
+    pub run_id: crate::ids::ChatRunId,
 }
 
 impl ChatEventContext {
-    pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+    pub fn new(chat_id: crate::ids::ChatId, run_id: crate::ids::ChatRunId) -> Self {
+        Self { chat_id, run_id }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RunTimingView {
+    pub observation_revision: u64,
+    pub total_elapsed_ms: u64,
+    pub phase_elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatusView {
+    Created,
+    DrainingInput,
+    PreparingContext,
+    InvokingModel,
+    ApplyingResponse,
+    AwaitingToolApproval,
+    ExecutingTools,
+    AwaitingUser,
+    Compacting,
+    CancellingStep,
+    FinalizingStep,
+    Cancelling,
+    Terminating,
+    Completed,
+    Failed,
+    Cancelled,
+    Terminated,
 }
 
 /// 工具调用的中间状态。
@@ -297,15 +465,32 @@ pub struct ReflectionHistoryView {
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
+    /// Public wire compatibility：旧消费者仍可反序列化完整增量观测；生产 mapper 不再发布。
+    ActivityChanged {
+        kind: ActivityChangeKind,
+        activity: ActivityView,
+    },
+    /// 单个 Run 在同一 revision 下的完整 Activity 快照。
+    ActivitySnapshot(ActivitySnapshotView),
     SkillsUpdated {
         event: crate::tui::SkillsUpdatedEvent,
     },
-    /// LLM 返回的文本 token。
+    /// Assistant 文本增量。生产 mapper 只发布该显式 Subject + Delivery 事件。
+    AssistantTextDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Thinking 文本增量。生产 mapper 只发布该显式 Delivery 事件。
+    ThinkingDelta {
+        context: ChatEventContext,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Token {
         context: ChatEventContext,
         text: String,
     },
-    /// LLM reasoning / thinking token。
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     Thinking {
         context: ChatEventContext,
         text: String,
@@ -315,7 +500,15 @@ pub enum ChatEvent {
         context: ChatEventContext,
         text: String,
     },
-    /// 工具调用开始。
+    /// 工具调用已开始。生产 mapper 只发布该显式 fact。
+    ToolCallStarted {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallStart {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,
@@ -323,7 +516,26 @@ pub enum ChatEvent {
         name: String,
         index: usize,
     },
-    /// 工具调用属性/状态更新。
+    /// 工具参数流增量。与状态事实分离，按 Provider stream order 拼接。
+    ToolCallArgumentsDelta {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        delta: String,
+    },
+    /// 工具调用完整状态事实。arguments 是当前已验证的完整参数快照。
+    ToolCallStateChanged {
+        context: ChatEventContext,
+        id: crate::ids::ToolCallId,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+        arguments: Option<serde_json::Value>,
+        status: ToolCallStatusView,
+    },
+    /// Public wire compatibility：旧消费者仍可反序列化；生产 mapper 不再发布。
     ToolCallUpdate {
         context: ChatEventContext,
         id: crate::ids::ToolCallId,
@@ -347,12 +559,6 @@ pub enum ChatEvent {
     },
     /// 系统消息。
     SystemMessage(String),
-    /// Stream is alive but no user-visible model delta has arrived yet.
-    ModelStreamWaiting {
-        context: ChatEventContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// Runtime 将在延迟后发起新的模型调用 attempt。
     ModelInvocationRetrying {
         context: ChatEventContext,
@@ -366,35 +572,51 @@ pub enum ChatEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    /// Turn 启动，首次同步全量消息。TUI 据此启动 spinner(Thinking)。
+    /// Run 启动，首次同步全量消息。TUI 据此启动 spinner(Thinking)。
     TurnStarted {
         messages: Vec<ChatMessage>,
     },
-    /// Microcompact 清理了陈旧 tool result，turn 仍在进行。TUI 只同步消息，不动 spinner。
+    /// Microcompact 已完成并清理陈旧 tool result；run 仍在进行。
+    MicrocompactCompleted {
+        messages: Vec<ChatMessage>,
+        cleared_count: usize,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     MicrocompactDone {
         messages: Vec<ChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止了 turn 结束，追加 system-reminder 后继续。TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<ChatMessage>,
+    /// Runtime 已提交消息状态的轻量有序投影。
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
-    /// Tool 执行完成后的消息同步（AwaitUser gate）。TUI 只同步消息。
-    PostToolExecutionSync {
-        messages: Vec<ChatMessage>,
+    /// Hook 用户可见 typed notice。
+    HookNotice {
+        notice: crate::HookNoticeView,
     },
     /// Provider API 调用失败。TUI 据此 stop spinner + 显示错误。
     ApiError {
         messages: Vec<ChatMessage>,
         error: String,
     },
-    /// Compact 失败后回滚消息。TUI 只同步消息。
+    /// Compact operation 失败并回滚消息。
+    CompactOperationRolledBack {
+        messages: Vec<ChatMessage>,
+    },
+    /// Compact operation 成功完成；notice 是 Runtime-owned 的用户可见持久提示。
+    CompactOperationCompleted {
+        messages: Vec<ChatMessage>,
+        notice: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactRollback {
         messages: Vec<ChatMessage>,
     },
-    /// Compact（LLM 摘要）成功完成，替换消息列表。TUI 同步消息 + 清 compact 状态。
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
     CompactFinished {
         messages: Vec<ChatMessage>,
+        notice: String,
     },
     /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
     /// items = 本批接纳的消息；queued = gate 处理后仍留在 buffer 中的排队消息快照（一般空）。
@@ -448,7 +670,7 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
         step_id: crate::RunStepId,
-        confirmed: bool,
+        terminal: crate::RunStepCancellationTerminal,
     },
     RunDrainingInput {
         run_id: crate::RunId,
@@ -483,7 +705,8 @@ pub enum ChatEvent {
     RunTransitioned {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
-        status: String,
+        status: RunStatusView,
+        timing: RunTimingView,
     },
     RunAwaitingUser {
         run_id: crate::RunId,
@@ -493,39 +716,21 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
     },
-    /// 同步打断请求已接受，Run 已进入 Cancelling。
-    RunCancelling {
-        run_id: crate::RunId,
-    },
-    /// Run 取消收口完成 ACK。
-    RunCancelled {
-        run_id: crate::RunId,
-    },
-    /// Chat 被取消（兼容旧 TUI 投影）。
+    /// Chat 被取消；由 Runtime 的 typed Run termination 投影。
     Cancelled {
         context: ChatEventContext,
-        /// 取消前该回合已经运行的耗时。
+        /// 取消前该run已经运行的耗时。
         duration_ms: u64,
     },
     /// 实时 TPS。
     LiveTps(f64),
-    /// 当前 turn 变化。
-    TurnChanged(usize),
-    /// 记录当前 turn 变化的端口事件。
-    CurrentTurnChanged(usize),
-    /// Hook 事件。
-    HookEvent(HookEventView),
-    /// 结构化 hook 执行消息（typed projection）。
-    HookMessage(HookMessageView),
+    /// 当前 run 变化。
+    RunChanged(usize),
+    /// 记录当前 run 变化的端口事件。
+    CurrentRunChanged(usize),
     /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
     InteractionRequested {
         request: crate::InteractionRequest,
-    },
-    /// Legacy AskUser transport bridge. It remains reachable only until #878 switches production.
-    AskUserBatch {
-        items: Vec<AskUserQuestionItem>,
-        /// 回传回答或显式取消。
-        reply_tx: tokio::sync::oneshot::Sender<crate::AskUserReply>,
     },
     /// Agent progress 事件，分别保留派生 Run 来源身份与父 ToolCall 挂载身份。
     AgentProgress {
@@ -533,6 +738,25 @@ pub enum ChatEvent {
         attachment_context: ChatEventContext,
         tool_id: crate::ids::ToolCallId,
         event: AgentProgressEventView,
+    },
+    /// 工具 stdout 流式输出增量（如 Bash 长输出命令）。
+    ToolOutputDelta {
+        context: ChatEventContext,
+        tool_id: crate::ids::ToolCallId,
+        delta: String,
+    },
+    /// Public wire compatibility：旧消费者仍可读取；生产 mapper 不再发布。
+    ToolProgress {
+        context: ChatEventContext,
+        tool_id: crate::ids::ToolCallId,
+        event: crate::chat_view::ToolProgressEventView,
+    },
+    SubRunStarted {
+        event: SubRunStartedEventView,
+    },
+    /// Structured activity emitted by one Sub Run spawned from a Main Agent ToolCall.
+    SubRunActivity {
+        event: SubRunActivityEventView,
     },
     /// 工作目录变化。
     WorkingDirectoryChanged {
@@ -553,12 +777,6 @@ pub enum ChatEvent {
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
-    /// Compact 进度通知。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     /// 模型切换完成通知（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {
         result: crate::ModelSwitchResult,
@@ -581,11 +799,12 @@ pub enum ChatEvent {
     /// 会话恢复完成通知（#497）。TUI 据此更新 messages 和状态。
     SessionResumed {
         steps: Vec<ResumedSessionStep>,
+        display_history: Option<DisplayHistoryIndex>,
         session_id: String,
         created_at: u64,
+        compacted: bool,
     },
-    /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，
-    /// TUI 据此显示对应错误并恢复到空 session。
+    /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，    /// TUI 据此显示对应错误并恢复到空 session。
     SessionResumeFailed {
         kind: SessionResumeFailureKind,
         id: String,
@@ -611,13 +830,11 @@ pub enum ChatEvent {
     ProjectInfo {
         project: crate::ProjectContext,
     },
-    /// #567：任务状态快照回传（携带数据，替代轮询）。
-    TasksSnapshot {
-        tasks: Box<crate::TaskStatusView>,
+    TaskStateChanged {
+        state: Box<crate::TaskStateView>,
     },
-    /// #567：成本信息回传。
-    CostUpdate {
-        cost: crate::CostInfo,
+    RuntimeStatusChanged {
+        status: Box<crate::RuntimeStatusView>,
     },
 }
 

@@ -1,5 +1,5 @@
 use crate::domain::types::task_block_by::{TaskBlockByInput, TaskBlockByResult};
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -82,14 +82,16 @@ impl TypedTool for TaskBlockByTool {
             dependencies.push(dependency);
         }
 
-        let updated = match self.access.replace_dependencies(
+        let command_result = match self.access.replace_dependencies(
             id,
             dependencies,
             chrono::Utc::now().timestamp_millis() as u64,
         ) {
-            Ok(result) => result.value,
+            Ok(result) => result,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
+        let task_change = CommittedTaskChange::from_command_result(&command_result);
+        let updated = command_result.value;
         let blocked_by_ids = updated
             .blocked_by()
             .iter()
@@ -120,6 +122,7 @@ impl TypedTool for TaskBlockByTool {
                 blocked_by_ids,
             },
         )
+        .with_task_change(task_change)
     }
 }
 

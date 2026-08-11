@@ -1,6 +1,8 @@
 use sdk::{ChangeSet, ChatEvent};
 
-use crate::adapters::sdk_event_mapper::map_stream_event;
+use crate::application::loop_engine::chat::ChatEventSink;
+
+use crate::adapters::sdk_event_mapper::{map_activity_event, map_stream_event};
 
 #[derive(Clone)]
 pub struct SdkChatEventSink {
@@ -27,6 +29,16 @@ impl SdkChatEventSink {
     }
 }
 
+impl crate::application::activity::ActivityChangePublisher
+    for crate::application::loop_engine::chat::ChatEventSinkHandle
+{
+    fn publish_snapshot(&self, snapshot: sdk::ActivitySnapshotView) {
+        self.send_activity_event(
+            crate::application::loop_engine::chat::RuntimeActivityEvent::Snapshot(snapshot),
+        );
+    }
+}
+
 impl crate::application::loop_engine::chat::ChatEventSink for SdkChatEventSink {
     fn send_event<'a>(
         &'a self,
@@ -41,14 +53,23 @@ impl crate::application::loop_engine::chat::ChatEventSink for SdkChatEventSink {
         let _ = self.tx.send(self.project_and_mark(event));
     }
 
-    fn send_domain_event<'a>(
+    fn send_activity_event(
+        &self,
+        event: crate::application::loop_engine::chat::RuntimeActivityEvent,
+    ) {
+        let _ = self.tx.send(map_activity_event(event));
+    }
+
+    fn send_lifecycle_event<'a>(
         &'a self,
-        event: crate::domain::agent_run::RunDomainEvent,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
     ) -> crate::application::loop_engine::chat::EventFuture<'a> {
         Box::pin(async move {
             let _ = self
                 .tx
-                .send(crate::adapters::sdk_event_mapper::map_domain_event(event));
+                .send(crate::adapters::sdk_event_mapper::map_lifecycle_event(
+                    event,
+                ));
         })
     }
 }

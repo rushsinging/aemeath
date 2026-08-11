@@ -57,6 +57,12 @@ impl SessionRunFixture {
         self.context_factory.clone()
     }
 
+    pub(crate) fn use_snapshot_hooks(&mut self) {
+        Arc::get_mut(&mut self.context_factory)
+            .expect("fixture owns its context factory")
+            .use_snapshot_hooks_for_test();
+    }
+
     pub(crate) fn session_revision(&self) -> u64 {
         self.session_state.snapshot_for_run().revision()
     }
@@ -137,6 +143,8 @@ pub(crate) struct SessionRunFixtureBuilder {
     config: share::config::domain::snapshot::ConfigSnapshot,
     session_id: String,
     workspace_root: PathBuf,
+    usage: crate::application::run::context::RunUsageTracker,
+    usage_sink: Arc<dyn crate::ports::UsageSink>,
 }
 
 impl SessionRunFixtureBuilder {
@@ -164,6 +172,8 @@ impl SessionRunFixtureBuilder {
                 "aemeath-session-run-fixture-{}",
                 uuid::Uuid::now_v7()
             )),
+            usage: crate::application::run::context::RunUsageTracker::new(),
+            usage_sink: Arc::new(crate::ports::UnavailableUsageSink),
         }
     }
 
@@ -221,6 +231,11 @@ impl SessionRunFixtureBuilder {
 
     pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::PolicyPort>) -> Self {
         self.policy = policy;
+        self
+    }
+
+    pub(crate) fn with_usage_sink(mut self, usage_sink: Arc<dyn crate::ports::UsageSink>) -> Self {
+        self.usage_sink = usage_sink;
         self
     }
 
@@ -287,8 +302,8 @@ impl SessionRunFixtureBuilder {
                     ),
                     revision: session_snapshot.revision(),
                     compact: None,
-                    run_slices: Vec::new(),
-                    committed_steps: Vec::new(),
+                    run_slices: Vec::new().into(),
+                    committed_steps: Default::default(),
                     skill_load_records: Vec::new(),
                 },
                 initial_memory: memory.clone(),
@@ -308,6 +323,7 @@ impl SessionRunFixtureBuilder {
             self.interaction.clone(),
             self.reasoning.clone(),
             event_sink_handle,
+            self.usage.clone(),
         );
         let tool_catalog = self.tool_catalog;
         let tool_execution = self.tool_execution;
@@ -320,6 +336,7 @@ impl SessionRunFixtureBuilder {
                 Arc::new(FakeReflectionHistory),
                 task_store,
                 self.hooks.clone(),
+                self.usage_sink.clone(),
             ))
         });
         SessionRunFixture {

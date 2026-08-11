@@ -7,7 +7,6 @@ use super::intent::*;
 use super::model::ConversationModel;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::runtime_state::RuntimeState;
-use super::stop_hook_notice::stop_hook_notice_content;
 use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
@@ -29,7 +28,7 @@ impl ConversationUpdate for ResumeConversation {
             tool_result_display_text, tool_result_image_count, HistoryAssistantBlock,
             HistoryDisplayMessage,
         };
-        use super::ids::{ChatId, ChatTurnId, ToolCallId};
+        use super::ids::{ChatId, ChatRunId, ToolCallId};
         use super::terminal::TerminalCause;
         use super::tool_call::ToolCallStatus;
 
@@ -40,18 +39,16 @@ impl ConversationUpdate for ResumeConversation {
 
         for step in &self.steps {
             let chat_id = ChatId::from_legacy_or_new(&step.run_id);
-            let turn_id = ChatTurnId::from_legacy_or_new(&step.step_id);
-            model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+            let run_id = ChatRunId::from_legacy_or_new(&step.step_id);
+            model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
             for (index, msg) in step.messages.iter().enumerate() {
                 let subsequent = step.messages.get(index + 1);
                 match HistoryDisplayMessage::parse(msg) {
                     Ok(HistoryDisplayMessage::User { text }) => {
                         all_changes.extend(model.apply(AppendUserMessage { text }));
                     }
-                    Ok(HistoryDisplayMessage::StopHookNotice { .. }) => {
-                        all_changes.extend(model.apply(AppendHookNotice {
-                            content: stop_hook_notice_content(msg),
-                        }));
+                    Ok(HistoryDisplayMessage::HookNotice { title, text, kind }) => {
+                        all_changes.extend(model.apply(AppendHookNotice { title, text, kind }));
                     }
                     Ok(HistoryDisplayMessage::ToolResults) => {}
                     Ok(HistoryDisplayMessage::Assistant { blocks }) => {
@@ -62,23 +59,23 @@ impl ConversationUpdate for ResumeConversation {
                                 HistoryAssistantBlock::Text(text) => {
                                     all_changes.extend(model.apply(AssistantText {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         text,
                                     }));
                                     all_changes.extend(model.apply(CompleteBlock {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                     }));
                                 }
                                 HistoryAssistantBlock::Thinking(text) => {
                                     all_changes.extend(model.apply(ThinkingText {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         text,
                                     }));
                                     all_changes.extend(model.apply(CompleteBlock {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                     }));
                                 }
                                 HistoryAssistantBlock::ToolUse { id, name, input } => {
@@ -97,7 +94,7 @@ impl ConversationUpdate for ResumeConversation {
                                     let tool_call_id = ToolCallId::from_legacy_or_new(&id);
                                     all_changes.extend(model.apply(ToolCallStart {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         id: tool_call_id.clone(),
                                         provider_id: None,
                                         name: name.clone(),
@@ -105,7 +102,7 @@ impl ConversationUpdate for ResumeConversation {
                                     }));
                                     all_changes.extend(model.apply(ToolCallUpdate {
                                         chat_id: chat_id.clone(),
-                                        turn_id: turn_id.clone(),
+                                        run_id: run_id.clone(),
                                         id: tool_call_id.clone(),
                                         provider_id: Some(id.clone()),
                                         name: name.clone(),
@@ -130,7 +127,7 @@ impl ConversationUpdate for ResumeConversation {
                                     if let Some(result) = tool_results.get(id.as_str()) {
                                         all_changes.extend(model.apply(ToolResult {
                                             chat_id: chat_id.clone(),
-                                            turn_id: turn_id.clone(),
+                                            run_id: run_id.clone(),
                                             id: tool_call_id.clone(),
                                             provider_id: id.clone(),
                                             tool_name: name,
@@ -145,7 +142,7 @@ impl ConversationUpdate for ResumeConversation {
                                         // Mark as Cancelled so it doesn't stay in Ready/Running.
                                         all_changes.extend(model.apply(ToolCallUpdate {
                                             chat_id: chat_id.clone(),
-                                            turn_id: turn_id.clone(),
+                                            run_id: run_id.clone(),
                                             id: tool_call_id.clone(),
                                             provider_id: Some(id.clone()),
                                             name: name.clone(),
@@ -162,6 +159,7 @@ impl ConversationUpdate for ResumeConversation {
                                 .extend(model.restore_answered_ask_user_batch(restored_ask_slots));
                         }
                     }
+                    Err(super::history_parse::HistoryDisplayParseError::NonUserVisibleMessage) => {}
                     Err(error) => {
                         crate::tui::log_warn!(
                             "skip invalid history message during resume: {error}"
@@ -202,19 +200,19 @@ impl ConversationUpdate for AppendUserMessage {
 
 impl ConversationUpdate for AssistantText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_assistant_text(self.chat_id, self.turn_id, self.text)
+        model.append_assistant_text(self.chat_id, self.run_id, self.text)
     }
 }
 
 impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_thinking_text(self.chat_id, self.turn_id, self.text)
+        model.append_thinking_text(self.chat_id, self.run_id, self.text)
     }
 }
 
 impl ConversationUpdate for CompleteBlock {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.complete_block(self.chat_id, self.turn_id)
+        model.complete_block(self.chat_id, self.run_id)
     }
 }
 
@@ -222,7 +220,7 @@ impl ConversationUpdate for ToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.start_tool_call(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.id,
             self.provider_id,
             self.name.clone(),
@@ -235,7 +233,7 @@ impl ConversationUpdate for ToolCallUpdate {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_tool_call(ToolCallUpdateObservation {
             chat_id: self.chat_id,
-            turn_id: self.turn_id,
+            run_id: self.run_id,
             id: self.id,
             provider_id: self.provider_id,
             name: self.name,
@@ -250,7 +248,7 @@ impl ConversationUpdate for ToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.complete_tool_call(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.id,
             self.provider_id,
             self.tool_name,
@@ -269,27 +267,21 @@ impl ConversationUpdate for TerminalNotice {
     }
 }
 
-impl ConversationUpdate for AppendSystemMessage {
+impl ConversationUpdate for PresentCancelledStep {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_system_message(self.text)
-    }
-}
-
-impl ConversationUpdate for UpsertModelStreamPlaceholder {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.upsert_model_stream_placeholder(self.placeholder)
-    }
-}
-
-impl ConversationUpdate for ClearModelStreamPlaceholder {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.clear_model_stream_placeholder()
+        model.present_cancelled_step(self.confirmed)
     }
 }
 
 impl ConversationUpdate for AppendHookNotice {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.append_hook_notice(self.content)
+        model.append_hook_notice(self.title, self.text, self.kind)
+    }
+}
+
+impl ConversationUpdate for AppendSystemMessage {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.append_system_message(self.text)
     }
 }
 
@@ -316,9 +308,20 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
     }
 }
 
-impl ConversationUpdate for RecordAgentProgress {
+impl ConversationUpdate for RecordSubRunActivity {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_progress(self.chat_id, self.turn_id, self.tool_id, self.message)
+        model.record_sub_run_activity(self)
+    }
+}
+
+impl ConversationUpdate for RecordAgentActivities {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
+    }
+}
+impl ConversationUpdate for RecordToolStreamingOutput {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
     }
 }
 
@@ -326,7 +329,7 @@ impl ConversationUpdate for UpdateAgentMeta {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_agent_meta(
             self.chat_id,
-            self.turn_id,
+            self.run_id,
             self.tool_id,
             self.role,
             self.model,
@@ -444,13 +447,13 @@ impl ConversationUpdate for CancelInteraction {
 
 impl ConversationUpdate for InteractionReplyAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_reply(&self.request_id)
     }
 }
 
 impl ConversationUpdate for InteractionCancelAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.accept_interaction(&self.request_id)
+        model.accept_interaction_cancel(&self.request_id)
     }
 }
 
@@ -468,7 +471,7 @@ impl ConversationUpdate for InteractionCancelRejected {
 
 impl ConversationUpdate for CompleteChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.complete_chat(self.chat_id, self.turn_id)
+        model.complete_chat(self.chat_id, self.run_id)
     }
 }
 
@@ -483,11 +486,9 @@ impl ConversationUpdate for RecordUsage {
         model.runtime.usage.output_tokens += self.output_tokens;
         model.runtime.usage.last_input_tokens = self.last_input_tokens;
         model.runtime.usage.api_calls += 1;
-        model.runtime.usage.cost_usd += self.cost_usd;
         vec![ConversationChange::UsageChanged {
             input_tokens: model.runtime.usage.input_tokens,
             output_tokens: model.runtime.usage.output_tokens,
-            cost_usd: model.runtime.usage.cost_usd,
         }]
     }
 }
@@ -498,7 +499,6 @@ impl ConversationUpdate for UpdateLastInputTokens {
         vec![ConversationChange::UsageChanged {
             input_tokens: model.runtime.usage.input_tokens,
             output_tokens: model.runtime.usage.output_tokens,
-            cost_usd: model.runtime.usage.cost_usd,
         }]
     }
 }
@@ -517,6 +517,7 @@ impl ConversationUpdate for UpdateTaskStatus {
             completed: self.completed,
             in_progress: self.in_progress,
             lines: std::mem::take(&mut model.runtime.task_status.lines),
+            ..TaskStatusSnapshot::default()
         };
         vec![ConversationChange::TaskStatusChanged {
             total: self.total,
@@ -555,6 +556,31 @@ impl ConversationUpdate for FinishProcessingJob {
     }
 }
 
+impl ConversationUpdate for ReplaceRuntimeStatus {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        let accepts = model.runtime.runtime_status.as_ref().is_none_or(|current| {
+            current.session_id != self.0.session_id
+                || self.0.revision > current.revision
+                || (self.0.revision == current.revision
+                    && self.0.heartbeat_sequence > current.heartbeat_sequence)
+        });
+        if accepts {
+            model.runtime.runtime_status = Some(self.0);
+        }
+        Vec::new()
+    }
+}
+
+impl ConversationUpdate for ReplaceTaskState {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.runtime.task_status.replace(self.0) {
+            vec![ConversationChange::TaskLinesChanged]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 impl ConversationUpdate for UpdateTaskLines {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.runtime.task_status.lines = self.0;
@@ -589,31 +615,6 @@ impl ConversationUpdate for SetGraphPhase {
     }
 }
 
-impl ConversationUpdate for SetCompactProgress {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model
-            .runtime
-            .set_compact_progress(self.stage, self.current, self.total);
-        // 进度条嵌入 spinner 行（output 区），单独归类为 output_dirty 而非 status_dirty；
-        // 见 `ConversationChange::CompactProgressChanged`（#540）。
-        vec![ConversationChange::CompactProgressChanged]
-    }
-}
-
-impl ConversationUpdate for SetSpinnerPhase {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.set_spinner_phase(self.phase);
-        vec![ConversationChange::SpinnerPhaseChanged]
-    }
-}
-
-impl ConversationUpdate for StopSpinner {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.stop_spinner();
-        vec![ConversationChange::SpinnerStopped]
-    }
-}
-
 impl ConversationUpdate for SyncQueuedSubmissions {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.sync_queued_submissions(self.queued)
@@ -626,71 +627,15 @@ impl ConversationUpdate for ClearCompactRuntime {
     }
 }
 
-impl ConversationUpdate for RunStarted {
+impl ConversationUpdate for ObserveActivityChange {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run(self.run_id.clone()) {
-            vec![ConversationChange::AgentRunChanged {
-                run_id: self.run_id,
-                phase: super::interaction::AgentRunPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
+        model.observe_activity_change(self.activity)
     }
 }
 
-macro_rules! impl_run_transition {
-    ($intent:ident, $phase:expr) => {
-        impl ConversationUpdate for $intent {
-            fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-                if model.transition_agent_run(&self.run_id, $phase) {
-                    vec![ConversationChange::AgentRunChanged {
-                        run_id: self.run_id,
-                        phase: $phase,
-                    }]
-                } else {
-                    Vec::new()
-                }
-            }
-        }
-    };
-}
-
-impl_run_transition!(
-    RunAwaitingUser,
-    super::interaction::AgentRunPhase::AwaitingUser
-);
-impl_run_transition!(RunResumed, super::interaction::AgentRunPhase::Running);
-impl_run_transition!(RunCancelling, super::interaction::AgentRunPhase::Cancelling);
-impl_run_transition!(RunCancelled, super::interaction::AgentRunPhase::Cancelled);
-impl_run_transition!(RunCompleted, super::interaction::AgentRunPhase::Completed);
-impl_run_transition!(RunFailed, super::interaction::AgentRunPhase::Failed);
-
-impl ConversationUpdate for RunStepStarted {
+impl ConversationUpdate for ReplaceActivitySnapshot {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.start_agent_run_step(&self.run_id, self.step_id.clone(), self.tool_reference) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Running,
-            }]
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-impl ConversationUpdate for RunStepCompleted {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if model.complete_agent_run_step(&self.run_id, &self.step_id) {
-            vec![ConversationChange::AgentRunStepChanged {
-                run_id: self.run_id,
-                step_id: self.step_id,
-                phase: super::interaction::AgentRunStepPhase::Completed,
-            }]
-        } else {
-            Vec::new()
-        }
+        model.replace_activity_snapshot(self.snapshot)
     }
 }
 
@@ -710,15 +655,16 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolCallUpdate(s) => s.update(model),
             Self::ToolResult(s) => s.update(model),
             Self::TerminalNotice(s) => s.update(model),
-            Self::AppendSystemMessage(s) => s.update(model),
-            Self::UpsertModelStreamPlaceholder(s) => s.update(model),
-            Self::ClearModelStreamPlaceholder(s) => s.update(model),
+            Self::PresentCancelledStep(s) => s.update(model),
             Self::AppendHookNotice(s) => s.update(model),
+            Self::AppendSystemMessage(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
-            Self::RecordAgentProgress(s) => s.update(model),
+            Self::RecordSubRunActivity(s) => s.update(model),
+            Self::RecordAgentActivities(s) => s.update(model),
+            Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
             Self::AnswerCurrentAskUser(s) => s.update(model),
@@ -742,15 +688,8 @@ impl ConversationUpdate for ConversationIntent {
             Self::InteractionCancelAccepted(s) => s.update(model),
             Self::InteractionReplyRejected(s) => s.update(model),
             Self::InteractionCancelRejected(s) => s.update(model),
-            Self::RunStarted(s) => s.update(model),
-            Self::RunAwaitingUser(s) => s.update(model),
-            Self::RunResumed(s) => s.update(model),
-            Self::RunCancelling(s) => s.update(model),
-            Self::RunCancelled(s) => s.update(model),
-            Self::RunCompleted(s) => s.update(model),
-            Self::RunFailed(s) => s.update(model),
-            Self::RunStepStarted(s) => s.update(model),
-            Self::RunStepCompleted(s) => s.update(model),
+            Self::ObserveActivityChange(s) => s.update(model),
+            Self::ReplaceActivitySnapshot(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
             Self::UpdateLastInputTokens(s) => s.update(model),
@@ -758,13 +697,12 @@ impl ConversationUpdate for ConversationIntent {
             Self::UpdateTaskStatus(s) => s.update(model),
             Self::StartProcessingJob(s) => s.update(model),
             Self::FinishProcessingJob(s) => s.update(model),
-            Self::UpdateTaskLines(s) => s.update(model),
+            Self::ReplaceRuntimeStatus(status) => status.update(model),
+            Self::ReplaceTaskState(state) => state.update(model),
+            Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
             Self::SetGraphPhase(s) => s.update(model),
-            Self::SetCompactProgress(s) => s.update(model),
-            Self::SetSpinnerPhase(s) => s.update(model),
-            Self::StopSpinner(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }
@@ -774,12 +712,48 @@ impl ConversationUpdate for ConversationIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::adapter::runtime_view::{
-        TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiStopHookFeedback,
-    };
-    use crate::tui::model::conversation::block::HookNoticeKind;
+    use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
     use crate::tui::model::output_timeline::OutputTimelineItem;
+
+    fn runtime_status(
+        revision: u64,
+        heartbeat_sequence: u64,
+    ) -> crate::tui::adapter::runtime_status::TuiRuntimeStatus {
+        crate::tui::adapter::runtime_status::TuiRuntimeStatus {
+            session_id: "session-1".to_string(),
+            revision,
+            heartbeat_sequence,
+            context_budget: crate::tui::adapter::runtime_status::TuiContextBudget {
+                context_size: 200_000,
+                effective_window: 180_000,
+                decision_token_count: revision,
+                threshold: 144_000,
+                usage_permille: revision as u32,
+                compaction_needed: false,
+                source: crate::tui::adapter::runtime_status::TuiContextDecisionSource::ActualProviderUsage,
+            },
+        }
+    }
+
+    #[test]
+    fn runtime_status_rejects_stale_revision_and_accepts_newer_heartbeat() {
+        let mut model = ConversationModel::default();
+        ReplaceRuntimeStatus(runtime_status(5, 0)).update(&mut model);
+        ReplaceRuntimeStatus(runtime_status(3, 0)).update(&mut model);
+        assert_eq!(model.runtime.runtime_status.as_ref().unwrap().revision, 5);
+
+        ReplaceRuntimeStatus(runtime_status(5, 1)).update(&mut model);
+        assert_eq!(
+            model
+                .runtime
+                .runtime_status
+                .as_ref()
+                .unwrap()
+                .heartbeat_sequence,
+            1
+        );
+    }
 
     fn ask_tool_use(id: &str, question: &str) -> TuiContentBlock {
         TuiContentBlock::ToolUse {
@@ -800,7 +774,8 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         }
     }
 
@@ -821,15 +796,28 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text.starts_with('✻') && text.ends_with("for 2m 5s")
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains("终止")
         )));
     }
 
     #[test]
-    fn resume_legacy_completed_step_without_duration_has_no_terminal_notice() {
+    fn resume_legacy_completed_step_without_duration_still_has_terminal_notice() {
         let mut model = ConversationModel::default();
 
         ResumeConversation {
@@ -845,10 +833,21 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(!model.timeline.items().iter().any(|item| matches!(
-            item,
-            OutputTimelineItem::System { text, .. } if text.starts_with('✻')
-        )));
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text.starts_with("✻ ")
+                            && !text.contains(" for ")
+                            && !text.contains("Completed")
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -868,10 +867,23 @@ mod tests {
         }
         .update(&mut model);
 
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. }
+                        if text == "✻ Cancelled, ran 2m 5s"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
             OutputTimelineItem::System { text, .. }
-                if text == "✻ Cancelled, ran 2m 5s"
+                if text.contains("Completed") || text.contains(" for ") || text.contains("终止")
         )));
     }
 
@@ -887,7 +899,8 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         };
         let result = TuiChatMessage {
             role: "user".to_string(),
@@ -899,7 +912,8 @@ mod tests {
             }],
             input_id: None,
             source: TuiMessageSource::SystemGenerated,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         };
 
         ResumeConversation {
@@ -917,14 +931,14 @@ mod tests {
 
         let chat_id =
             crate::tui::model::conversation::ids::ChatId::from_legacy_or_new("terminated-run");
-        let turn_id = crate::tui::model::conversation::ids::ChatTurnId::from_legacy_or_new(
+        let run_id = crate::tui::model::conversation::ids::ChatRunId::from_legacy_or_new(
             "running-tool-step",
         );
         let turn = model
             .chats
             .iter()
             .find(|chat| chat.id == chat_id)
-            .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+            .and_then(|chat| chat.runs.iter().find(|turn| turn.id == run_id))
             .expect("恢复后应存在终止 Step");
         let call = turn.tool_calls.first().expect("恢复后应存在 Bash ToolCall");
         assert_eq!(call.name, "Bash");
@@ -939,9 +953,22 @@ mod tests {
             .items()
             .iter()
             .any(|item| matches!(item, OutputTimelineItem::ToolResult { .. })));
-        assert!(model.timeline.items().iter().any(|item| matches!(
+        assert_eq!(
+            model
+                .timeline
+                .items()
+                .iter()
+                .filter(|item| matches!(
+                    item,
+                    OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+                ))
+                .count(),
+            1
+        );
+        assert!(!model.timeline.items().iter().any(|item| matches!(
             item,
-            OutputTimelineItem::System { text, .. } if text == "此 Run 已终止"
+            OutputTimelineItem::System { text, .. }
+                if text.contains("Completed") || text.contains("Cancelled") || text.contains(" for ")
         )));
     }
 
@@ -976,14 +1003,16 @@ mod tests {
             content: vec![ask_tool_use("ask-1", "第一问")],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         };
         let assistant_two = TuiChatMessage {
             role: "assistant".to_string(),
             content: vec![ask_tool_use("ask-2", "第二问")],
             input_id: None,
             source: TuiMessageSource::User,
-            stop_hook: None,
+            hook_notice: None,
+            skill_request: None,
         };
         let mut model = ConversationModel::default();
 
@@ -1009,8 +1038,10 @@ mod tests {
             .iter()
             .filter_map(|item| match item {
                 OutputTimelineItem::AskUserBatch {
-                    slots, confirmed, ..
-                } if *confirmed => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
+                    slots,
+                    completion: crate::tui::model::conversation::block::AskUserCompletion::Answered,
+                    ..
+                } => Some((slots[0].question.as_str(), slots[0].answer.as_deref())),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1020,67 +1051,21 @@ mod tests {
         );
     }
     #[test]
-    fn resume_projects_stop_hook_feedback_as_hook_notice() {
-        let mut model = ConversationModel::default();
-        let message = TuiChatMessage {
-            role: "user".to_string(),
-            content: vec![TuiContentBlock::text(
-                "<system-reminder>blocked by hook</system-reminder>",
-            )],
-            input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: Some(TuiStopHookFeedback {
-                summary: "blocked by hook".to_string(),
-                command: "check-agent-stop.sh".to_string(),
-                exit_code: Some(2),
-                reason: "exit code 2".to_string(),
-                stdout_preview: String::new(),
-                stderr_preview: "blocked".to_string(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                output_file: None,
-            }),
-        };
-
-        ResumeConversation {
-            steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
-                run_id: "history-run".into(),
-                step_id: "history-step".into(),
-                messages: vec![message],
-                finalize_cause: None,
-                duration_ms: None,
-            }],
-        }
-        .update(&mut model);
-
-        assert!(matches!(
-            model.timeline.items().last(),
-            Some(OutputTimelineItem::HookNotice { content, .. })
-                if content.kind == HookNoticeKind::Blocked
-                    && content.title == "Hook blocked: Stop"
-                    && content.body == "blocked by hook"
-                    && content.details.as_deref().is_some_and(|details|
-                        details.contains("Command: check-agent-stop.sh")
-                            && details.contains("Exit code: 2")
-                    )
-        ));
-        assert!(model.timeline.items().iter().all(|item| {
-            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text == "<system-reminder>blocked by hook</system-reminder>")
-        }));
-    }
-
-    #[test]
-    fn resume_interleaves_stop_hook_notice_without_user_message_projection() {
+    fn resume_excludes_llm_only_messages_from_user_history() {
         let user = TuiChatMessage::user_text("user question");
-        let stop_hook = TuiChatMessage {
+        let hook_notice = TuiChatMessage {
             role: "user".to_string(),
             content: vec![TuiContentBlock::text(
                 "<system-reminder>blocked by hook</system-reminder>",
             )],
             input_id: None,
-            source: TuiMessageSource::StopHook,
-            stop_hook: None,
+            source: TuiMessageSource::Hook,
+            hook_notice: None,
+            skill_request: None,
         };
+        let system_generated = TuiChatMessage::system_generated_user_text(
+            "<system-reminder>Skill loaded</system-reminder>",
+        );
         let assistant = TuiChatMessage::assistant_text("assistant reply");
         let mut model = ConversationModel::default();
 
@@ -1088,20 +1073,26 @@ mod tests {
             steps: vec![crate::tui::adapter::runtime_view::TuiResumedSessionStep {
                 run_id: "history-run".into(),
                 step_id: "history-step".into(),
-                messages: vec![user, stop_hook, assistant],
+                messages: vec![user, hook_notice, system_generated, assistant],
                 finalize_cause: None,
                 duration_ms: None,
             }],
         }
         .update(&mut model);
 
-        assert!(matches!(
-            model.timeline.items().get(1),
-            Some(OutputTimelineItem::HookNotice { content, .. })
-                if content.kind == HookNoticeKind::Blocked && content.body == "blocked by hook"
-        ));
-        assert!(model.timeline.items().iter().all(|item| {
-            !matches!(item, OutputTimelineItem::UserMessage { text, .. } if text.contains("blocked by hook"))
+        let user_messages = model
+            .timeline
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                OutputTimelineItem::UserMessage { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, ["user question"]);
+        assert!(!model.timeline.items().iter().any(|item| match item {
+            OutputTimelineItem::UserMessage { text, .. } => text.contains("system-reminder"),
+            _ => false,
         }));
     }
 }

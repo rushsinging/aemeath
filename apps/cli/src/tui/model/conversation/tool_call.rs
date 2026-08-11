@@ -1,6 +1,7 @@
 use super::ids::{ToolCallId, ToolStreamKey};
 use super::streaming_preview::ToolStreamingPreviewBuffer;
 use super::tool_result_payload::ToolResultPayload;
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCall {
@@ -12,17 +13,17 @@ pub struct ToolCall {
     /// 工具执行结果（含 output/content/is_error/image_count 四字段）。
     /// None = 尚未收到结果；Some = 已完成（成功或失败）。
     pub result: Option<ToolResultPayload>,
-    pub activities: Vec<String>,
+    pub activities: Vec<AgentActivityLine>,
     pub streaming_preview: Option<ToolStreamingPreviewBuffer>,
     /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时由
-    /// `AgentProgressKind::Started` 事件填充，用于 header 渲染
+    /// `Started activity` 事件填充，用于 header 渲染
     /// `Agent - [role] - Provider/model`。prompt 不在此处重复存储，
     /// 渲染时从 `args_preview` 取（已在 ToolCallUpdate status=Ready 时填充）。
     pub agent_meta: Option<AgentMeta>,
 }
 
 /// Agent 工具的元数据（issue #499）。
-/// 由 runtime 的 `AgentProgressKind::Started` 事件携带，
+/// 由 runtime 的 `Started activity` 事件携带，
 /// 携带 sub-agent 实际 resolve 后的 role/model（而非 args 原始值）。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AgentMeta {
@@ -91,6 +92,20 @@ impl ToolCall {
         };
     }
 
+    pub fn cancel(&mut self) -> bool {
+        if matches!(
+            self.status,
+            ToolCallStatus::Success
+                | ToolCallStatus::Error
+                | ToolCallStatus::Cancelled
+                | ToolCallStatus::Orphaned
+        ) {
+            return false;
+        }
+        self.status = ToolCallStatus::Cancelled;
+        true
+    }
+
     pub fn orphan(&mut self) {
         self.status = ToolCallStatus::Orphaned;
     }
@@ -116,10 +131,10 @@ pub enum ToolCallChange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId, ToolStreamKey};
+    use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId, ToolStreamKey};
 
     fn stream_key() -> ToolStreamKey {
-        ToolStreamKey::new(ChatId::new("chat-1"), ChatTurnId::new("turn-1"), "Read", 0)
+        ToolStreamKey::new(ChatId::new("chat-1"), ChatRunId::new("turn-1"), "Read", 0)
     }
 
     use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;

@@ -1,6 +1,5 @@
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
 use sdk::ChatInputEvent;
-use share::message::Message;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -123,11 +122,9 @@ pub struct GateOutcome {
     pub appended_user_messages: usize,
     #[cfg(test)]
     pub dropped_events: usize,
-    /// 本次 gate 采用的用户消息；调用方把它们绑定到下一 RunStep。
-    pub adopted_messages: Vec<(sdk::InputId, Message)>,
-    /// 本次 gate 采用的原始 UserMessage 事件（保留 InputId / text / images 三元组）。
-    /// 供 RunPort 在 Run 首 step 的 accept_step_input 成功后 emit Adopted 时反查用。
-    pub adopted_events: Vec<ChatInputEvent>,
+    /// 本次 gate 接纳的 typed 用户输入。它是后续模型消息、持久化与
+    /// UserMessagesAdopted 的唯一真相，禁止并行维护 event/message 双轨。
+    pub accepted_inputs: Vec<crate::application::loop_engine::AcceptedUserInput>,
     /// idle reset 已完成 Task 清理，请求 Context owner 清空 durable Session。
     pub reset_requested: bool,
     /// idle 时收到的待执行命令（替代 compact_requested + model_switch_requested）。
@@ -229,8 +226,7 @@ where
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
     let mut pending_command: Option<PendingCommand> = None;
-    let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
-    let mut added_events: Vec<ChatInputEvent> = Vec::new();
+    let mut accepted_inputs = Vec::new();
     let mut reset_requested = false;
 
     let events = buffer.drain_all();
@@ -265,7 +261,7 @@ where
                 if kind == ControlCommandKind::Abort {
                     dropped_events = iter.count();
                     appended_user_messages = 0;
-                    added.clear();
+                    accepted_inputs.clear();
                     decision = GateDecision::AbortCurrentLoop;
                     break;
                 }
@@ -280,21 +276,28 @@ where
                     text_len,
                     image_count
                 );
-                added_events.push(ChatInputEvent::UserMessage {
-                    id: id.clone(),
-                    text: text.clone(),
-                    images: images.clone(),
-                });
-                added.push(build_user_message(id, text, images));
+                accepted_inputs.push(
+                    crate::application::loop_engine::AcceptedUserInput::UserMessage {
+                        input_id: id,
+                        text,
+                        images,
+                    },
+                );
                 appended_user_messages += 1;
             }
             ChatInputEvent::SkillRequest(request) => {
-                added_events.push(ChatInputEvent::SkillRequest(request.clone()));
-                added.push(build_user_message(
-                    request.input_id.clone(),
-                    crate::application::loop_engine::input::format_skill_request(&request, "en"),
-                    Vec::new(),
-                ));
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "skill_request boundary=runtime_input_gate input_id={} skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                    request.input_id,
+                    request.skill,
+                    request.arguments.len(),
+                    request.raw_input.len(),
+                    request.raw_input.chars().take(120).collect::<String>()
+                );
+                accepted_inputs.push(
+                    crate::application::loop_engine::AcceptedUserInput::SkillRequest(request),
+                );
                 appended_user_messages += 1;
             }
             ChatInputEvent::Reset => {
@@ -318,7 +321,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Reset);
                 }
             }
@@ -330,16 +333,16 @@ where
                         _ => None,
                     })
                     .collect();
-                // 回滚本批已 append 的 UserMessage（与 added 顺序一致）。
-                if !added.is_empty() || !texts.is_empty() {
-                    // added 逆序 = append 逆序，拼到 texts 前面保持原始提交顺序。
-                    // 用 message.text_content() 还原用户视角文本（含 image placeholder）。
-                    let mut all_texts: Vec<String> =
-                        added.iter().map(|(_, m)| m.text_content()).collect();
+                // 回滚本批已接纳的 typed 用户输入。
+                if !accepted_inputs.is_empty() || !texts.is_empty() {
+                    let mut all_texts: Vec<String> = accepted_inputs
+                        .iter()
+                        .map(crate::application::loop_engine::AcceptedUserInput::withdraw_text)
+                        .collect();
                     all_texts.append(&mut texts);
                     // 本批消息尚未提交给 Context，清空 adopted 即完成回滚。
                     appended_user_messages = 0;
-                    added.clear();
+                    accepted_inputs.clear();
                     sink.send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts: all_texts })
                         .await;
                 }
@@ -354,7 +357,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Compact);
                 }
             }
@@ -365,7 +368,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::SwitchModel { selection });
                 }
             }
@@ -376,7 +379,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::SetThinking { desired });
                 }
             }
@@ -499,27 +502,10 @@ where
         appended_user_messages,
         #[cfg(test)]
         dropped_events,
-        adopted_messages: added,
-        adopted_events: added_events,
+        accepted_inputs,
         reset_requested,
         pending_command,
     }
-}
-
-fn build_user_message(
-    id: sdk::InputId,
-    text: String,
-    images: Vec<sdk::ChatInputImage>,
-) -> (sdk::InputId, Message) {
-    log::debug!(
-        target: crate::LOG_TARGET,
-        "[loop_debug] build_user_message id={} text_len={} image_count={}",
-        id,
-        text.len(),
-        images.len()
-    );
-    let message = user_message_with_images(text, images);
-    (id, message)
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {
@@ -529,21 +515,4 @@ fn classify_control_command(raw: &str) -> ControlCommandKind {
         "/model" | "/provider" => ControlCommandKind::Reconfigure,
         _ => ControlCommandKind::SideEffect,
     }
-}
-
-pub(crate) fn user_message_with_images(text: String, images: Vec<sdk::ChatInputImage>) -> Message {
-    if images.is_empty() {
-        return Message::user(text);
-    }
-    // 事件携带的 (placeholder, base64, media_type) 三元组：
-    // - placeholder 为 TUI 端 ImageSpan::placeholder() 生成的 `[Image #N]`
-    // - Message::user_with_images 按 text 中 `[Image #N]` 出现顺序穿插拆块
-    // - provider adapter 拿拆好的 Vec<ContentBlock>，无需再做拆分（#fix-tui-image-input-output）
-    Message::user_with_images(
-        text,
-        images
-            .into_iter()
-            .map(|img| (img.id, img.base64, img.media_type))
-            .collect(),
-    )
 }

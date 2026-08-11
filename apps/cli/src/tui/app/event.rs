@@ -3,21 +3,21 @@
 //! remaining Runtime variants in UiEvent are dead code pending #944 5B.
 #![allow(dead_code)]
 use crate::tui::adapter::runtime_view::TuiChatMessage;
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 use crate::tui::model::conversation::workspace::WorktreeKind;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UiTurnContext {
     pub chat_id: ChatId,
-    pub turn_id: ChatTurnId,
+    pub run_id: ChatRunId,
 }
 
 impl From<sdk::ChatEventContext> for UiTurnContext {
     fn from(context: sdk::ChatEventContext) -> Self {
         Self {
             chat_id: ChatId::new(context.chat_id.as_str()),
-            turn_id: ChatTurnId::new(context.turn_id.as_str()),
+            run_id: ChatRunId::new(context.run_id.as_str()),
         }
     }
 }
@@ -37,13 +37,6 @@ pub struct WorkspaceMetadataResolved {
     pub revision: u64,
     pub branch: Option<String>,
     pub kind: WorktreeKind,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ModelStreamWaitingView {
-    pub context: UiTurnContext,
-    pub elapsed_secs: u64,
-    pub phase: String,
 }
 
 /// Events sent from background task to UI
@@ -96,12 +89,11 @@ pub enum AppEvent {
         elapsed_secs: f64,
     },
     Error(String),
-    RunCancelled,
     Cancelled {
         context: UiTurnContext,
         duration: std::time::Duration,
     },
-    /// Turn 启动，TUI 据此启动 spinner(Thinking)。
+    /// Run 启动，TUI 据此启动 spinner(Thinking)。
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },
@@ -110,26 +102,25 @@ pub enum AppEvent {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
-    /// Stop hook 阻止 turn 结束，TUI 只同步消息。
-    StopHookBlocked {
-        messages: Vec<TuiChatMessage>,
+    /// Runtime 已提交消息状态的轻量有序投影。
+    SessionMessageStateChanged {
+        message_count: usize,
+        revision: u64,
     },
-    /// Tool 执行完成后同步，TUI 只同步消息。
-    PostToolExecutionSync {
-        messages: Vec<TuiChatMessage>,
-    },
+    HookNotice(crate::tui::adapter::runtime_view::TuiHookNotice),
     /// Provider API 调用失败，TUI stop spinner + 显示错误。
     ApiError {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    /// Compact 失败回滚，TUI 只同步消息。
-    CompactRollback {
+    /// Compact operation 失败回滚，TUI 只同步消息。
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    /// Compact 成功完成，TUI 同步消息 + 清 compact 状态。
-    CompactFinished {
+    /// Compact operation 成功完成，TUI 同步消息并显示 Runtime-owned 提示。
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
+        notice: String,
     },
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
@@ -155,11 +146,6 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
-    ModelStreamWaiting {
-        context: UiTurnContext,
-        elapsed_secs: u64,
-        phase: String,
-    },
     /// /save 命令保存成功后回传（携带 session id），用于推送 `[session saved: id]` 反馈行。
     SessionSaved {
         id: String,
@@ -173,24 +159,13 @@ pub enum AppEvent {
     InteractionRequested {
         request: sdk::InteractionRequest,
     },
-    /// Sub-agent progress update (streams per-turn output to TUI)
-    AgentProgress {
-        source_context: UiTurnContext,
-        attachment_context: UiTurnContext,
-        tool_id: sdk::ids::ToolCallId,
-        event: sdk::AgentProgressEventView,
-    },
-    /// Unified lifecycle hook event.
-    HookEvent(sdk::HookEventView),
-    /// Hook-produced context or system message for structured conversation display.
-    HookMessage(sdk::HookMessageView),
-    /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
-    CurrentTurnChanged(usize),
+    /// 当前 run 变化，需要由 CLI 边界记录到 runtime bootstrap。
+    CurrentRunChanged(usize),
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
     WorkspaceMetadataResolved(WorkspaceMetadataResolved),
     /// Runtime task store changed; refresh TUI task list window.
-    TaskStatusChanged(sdk::TaskStatusView),
+    TaskStateChanged(sdk::TaskStateView),
     /// 版本检查结果（后台 spawn 完成后回送）。
     UpdateAvailable {
         current: String,
@@ -204,12 +179,6 @@ pub enum AppEvent {
     /// Reasoning Graph 阶段变化（Phase 2）。更新 status bar 的阶段展示。
     GraphPhaseChanged {
         node: String,
-    },
-    /// Compact 进度更新。TUI 渲染 Gauge 进度条。
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
     },
     /// 模型切换完成（#497）。TUI 据此更新 5 个本地状态 + 回显。
     ModelSwitched {
@@ -232,9 +201,18 @@ pub enum AppEvent {
     /// 会话恢复完成（#497）。TUI 据此更新 messages。
     SessionResumed {
         steps: Vec<crate::tui::adapter::runtime_view::TuiResumedSessionStep>,
+        display_history: Option<sdk::DisplayHistoryIndex>,
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,
+        compacted: bool,
+    },
+    DisplayHistoryWindowLoaded {
+        window: sdk::DisplayHistoryWindow,
+    },
+    DisplayHistoryWindowLoadFailed {
+        request: sdk::DisplayHistoryWindowRequest,
+        message: String,
     },
     /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
     SessionResumeFailed {

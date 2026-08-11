@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::item::{OutputTimelineItem, TimelineToolCallRef};
-use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::output_view_change::OutputViewChange;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -98,19 +98,19 @@ impl OutputTimelineModel {
         }
     }
 
-    pub fn contains_tool_call(&self, chat_id: &ChatId, turn_id: &ChatTurnId, id: &str) -> bool {
+    pub fn contains_tool_call(&self, chat_id: &ChatId, run_id: &ChatRunId, id: &str) -> bool {
         let reference = TimelineToolCallRef::new(
             chat_id.clone(),
-            turn_id.clone(),
+            run_id.clone(),
             ToolCallId::from_legacy_or_new(id),
         );
         self.tool_call_index.contains(&reference)
     }
 
-    pub fn contains_tool_result(&self, chat_id: &ChatId, turn_id: &ChatTurnId, id: &str) -> bool {
+    pub fn contains_tool_result(&self, chat_id: &ChatId, run_id: &ChatRunId, id: &str) -> bool {
         let reference = TimelineToolCallRef::new(
             chat_id.clone(),
-            turn_id.clone(),
+            run_id.clone(),
             ToolCallId::from_legacy_or_new(id),
         );
         self.tool_result_index.contains(&reference)
@@ -124,10 +124,10 @@ impl OutputTimelineModel {
     pub fn push_tool_call_ref(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         tool_call_id: ToolCallId,
     ) {
-        let reference = TimelineToolCallRef::new(chat_id, turn_id, tool_call_id);
+        let reference = TimelineToolCallRef::new(chat_id, run_id, tool_call_id);
         if !self.tool_call_index.contains(&reference) {
             self.push(OutputTimelineItem::ToolCall { reference });
         }
@@ -136,10 +136,10 @@ impl OutputTimelineModel {
     pub fn push_tool_result_ref(
         &mut self,
         chat_id: ChatId,
-        turn_id: ChatTurnId,
+        run_id: ChatRunId,
         tool_call_id: ToolCallId,
     ) {
-        let reference = TimelineToolCallRef::new(chat_id, turn_id, tool_call_id);
+        let reference = TimelineToolCallRef::new(chat_id, run_id, tool_call_id);
         if !self.tool_result_index.contains(&reference) {
             self.push(OutputTimelineItem::ToolResult { reference });
         }
@@ -148,12 +148,12 @@ impl OutputTimelineModel {
     pub fn move_tool_result_after_tool_call(
         &mut self,
         chat_id: &ChatId,
-        turn_id: &ChatTurnId,
+        run_id: &ChatRunId,
         tool_call_id: &ToolCallId,
     ) {
         if !self.tool_result_index.contains(&TimelineToolCallRef::new(
             chat_id.clone(),
-            turn_id.clone(),
+            run_id.clone(),
             tool_call_id.clone(),
         )) {
             return;
@@ -163,7 +163,7 @@ impl OutputTimelineModel {
                 item,
                 OutputTimelineItem::ToolResult { reference }
                     if &reference.context.chat_id == chat_id
-                        && &reference.context.turn_id == turn_id
+                        && &reference.context.run_id == run_id
                         && &reference.tool_call_id == tool_call_id
             )
         }) else {
@@ -176,7 +176,7 @@ impl OutputTimelineModel {
                 item,
                 OutputTimelineItem::ToolCall { reference }
                     if &reference.context.chat_id == chat_id
-                        && &reference.context.turn_id == turn_id
+                        && &reference.context.run_id == run_id
                         && &reference.tool_call_id == tool_call_id
             )
         }) else {
@@ -220,8 +220,8 @@ mod tests {
         ChatId::new("chat-1")
     }
 
-    fn turn() -> ChatTurnId {
-        ChatTurnId::new("turn-1")
+    fn turn() -> ChatRunId {
+        ChatRunId::new("turn-1")
     }
 
     #[test]
@@ -235,8 +235,8 @@ mod tests {
     #[test]
     fn test_push_tool_call_ref_allows_same_id_different_turn() {
         let mut model = OutputTimelineModel::default();
-        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-a"), ToolCallId::new("tool-1"));
-        model.push_tool_call_ref(chat(), ChatTurnId::new("turn-b"), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), ChatRunId::new("turn-a"), ToolCallId::new("tool-1"));
+        model.push_tool_call_ref(chat(), ChatRunId::new("turn-b"), ToolCallId::new("tool-1"));
         assert_eq!(model.items().len(), 2);
     }
 
@@ -262,7 +262,7 @@ mod tests {
     fn tool_ref_index_stays_consistent_across_push_and_move() {
         let mut model = OutputTimelineModel::default();
         let chat = ChatId::new("chat-1");
-        let turn = ChatTurnId::new("turn-1");
+        let turn = ChatRunId::new("turn-1");
         let tool = ToolCallId::new("tool-1");
 
         model.push_tool_call_ref(chat.clone(), turn.clone(), tool.clone());
@@ -283,7 +283,7 @@ mod tests {
     fn tool_ref_index_rebuilds_after_retain() {
         let mut model = OutputTimelineModel::default();
         let chat = ChatId::new("chat-1");
-        let turn = ChatTurnId::new("turn-1");
+        let turn = ChatRunId::new("turn-1");
         let keep_tool = ToolCallId::new("tool-keep");
         let drop_tool = ToolCallId::new("tool-drop");
 

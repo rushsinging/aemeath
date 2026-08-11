@@ -141,9 +141,8 @@ fn production_runtime_has_no_direct_active_memory_construction() {
         .collect::<Vec<_>>();
     assert_eq!(
         reflection_adapter_new.len(),
-        2,
-        "production runtime must construct exactly 2 dataset adapters: \
-         one for reflection (agents_dir), one for MemoryOpener (agents_dir)"
+        3,
+        "production runtime must construct exactly 3 dataset adapters: one for reflection, one for Session, and one for MemoryOpener"
     );
     // Verify neither uses `join("memory")` for FileSystemDatasetAdapter.
     // Legacy memory uses `agents_dir.join("memory")` via
@@ -267,11 +266,17 @@ async fn production_context_append_reopens_from_atomic_blob() {
         )),
     ));
     let session_blob = storage::api::file_system_blob(&agents_dir).expect("create session blob");
-    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(session_blob.clone()),
+    let session_dataset = Arc::new(
+        storage::FileSystemDatasetAdapter::new(agents_dir.clone())
+            .expect("create session dataset adapter"),
     );
-    let writer = Arc::new(context::adapters::AtomicBlobCanonicalSessionWriter::new(
-        session_blob,
+    let session_management: Arc<dyn SessionManagementPort> =
+        Arc::new(context::adapters::DatasetSessionManagement::new(
+            session_dataset.clone(),
+            session_blob.clone(),
+        ));
+    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
+        session_dataset,
     ));
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
@@ -416,8 +421,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     ));
     let active_run = Arc::new(runtime::ActiveRunRegistry::default());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::hooks::HooksConfig::default())
-            .expect("test hook dispatcher"),
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config::default(),
+        ))
+        .expect("test hook dispatcher"),
     );
 
     let provider_factory = composition::provider::provider_factory();
@@ -475,10 +482,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         reflection_history,
         task_access,
         hook_runner,
+        Arc::new(runtime::UnavailableUsageSink),
     ));
     let agent_runner = runtime::AgentRunnerAssembly {
         runner: Arc::new(NoopRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
+        active_run: active_run.clone(),
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
@@ -498,9 +507,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             tool_result_materializer,
             active_run,
         ),
+        runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         runtime::SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
-        runtime::PromptAssembly::new(Vec::new(), String::new(), String::new()),
+        runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
         runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(
             Vec::new(),
         )),
@@ -600,4 +610,26 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
 
     // config_writer() returns a gate-aware façade (just verify it exists).
     let _writer = wiring.config_writer();
+}
+
+#[test]
+fn production_session_wiring_uses_dataset_writer_instead_of_blob_writer() {
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/runtime.rs"))
+        .expect("read composition runtime wiring");
+    assert!(
+        source.contains("DatasetSessionManagement::new"),
+        "production Session wiring must construct Dataset-aware management"
+    );
+    assert!(
+        !source.contains("AtomicBlobSessionManagement::new"),
+        "production Session wiring must not construct legacy-only management"
+    );
+    assert!(
+        source.contains("DatasetCanonicalSessionWriter::new"),
+        "production Session wiring must construct the incremental Dataset writer"
+    );
+    assert!(
+        !source.contains("AtomicBlobCanonicalSessionWriter::new"),
+        "production Session wiring must not construct the retired full-blob writer"
+    );
 }

@@ -6,7 +6,11 @@
 //! interaction waiter 仍由各自 adapter 处理；typed continuation 由 #878 收口。
 
 use crate::application::hook::outcome_mapper::{RuntimeHookDirective, RuntimeHookReason};
-use crate::application::loop_engine::ToolGuardDecision;
+use crate::application::loop_engine::chat::streaming_tool::StreamingToolRoundResult;
+use crate::application::loop_engine::{
+    ApprovalRequiredCall, LoopEngineError, SuspendedToolCall, ToolGuardDecision, ToolStep,
+};
+use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use async_trait::async_trait;
 use policy::{PolicyDecision, PolicyPort, PolicyRequest};
@@ -18,9 +22,9 @@ use tools::{ToolCatalogSnapshot, ToolName};
 pub(crate) struct ToolRoundContext<'a> {
     pub runtime_context: &'a crate::application::run::context::RuntimeContext,
     pub agent: crate::application::tool::agent::Agent,
-    pub turn_context: crate::application::loop_engine::chat::RuntimeTurnContext,
+    pub turn_context: crate::application::loop_engine::chat::RuntimeRunContext,
     pub language: &'a str,
-    pub workspace_root: std::path::PathBuf,
+    pub workspace_read: std::sync::Arc<dyn project::WorkspaceRead>,
     pub session_id: &'a str,
     pub materializer:
         &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
@@ -74,6 +78,21 @@ where
         )
         .await
     }
+
+    /// #1494：汇总边流边执行的旁路结果（不执行工具，只统一收尾）。
+    pub(crate) async fn finalize_streaming(
+        &mut self,
+        execution: &mut crate::application::run::execution_state::RunExecutionState,
+        step_id: &sdk::RunStepId,
+        rounds: Vec<StreamingToolRoundResult>,
+        cancel: &CancellationToken,
+    ) -> Result<ToolRoundOutcome, crate::application::loop_engine::LoopEngineError> {
+        logging::within(
+            self.context.log_patch.clone(),
+            finalize_streaming_rounds(self, execution, step_id, rounds, cancel),
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -92,14 +111,15 @@ pub(crate) trait ToolRoundObserver: Send {
         _results: &[ToolExecution],
     ) {
     }
+    async fn cancelled_results_completed(&mut self, _results: &[ToolExecution]) {}
     async fn results_materialized(
         &mut self,
         _execution: &crate::application::run::execution_state::RunExecutionState,
-        _has_task_mutation: bool,
     ) {
     }
     async fn round_finished(
         &mut self,
+        _step_id: &sdk::RunStepId,
         _call_count: usize,
         _turn: usize,
         _cancel: &CancellationToken,
@@ -124,6 +144,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         });
     }
     let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+    let workspace_root = context.workspace_read.current_workspace_root();
     let agent = &context.agent;
     let executable = prepare_tool_round(
         calls,
@@ -131,14 +152,14 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         context.runtime_context.policy_ref().as_ref(),
         run_id,
         step_id,
-        &context.workspace_root,
+        &workspace_root,
     )
     .executable
     .into_iter()
     .map(|call| call.call)
     .collect::<Vec<_>>();
     observer
-        .execution_started(execution.turn_count(), &raw_calls, &executable)
+        .execution_started(execution.step_count(), &raw_calls, &executable)
         .await;
     let sink = context.runtime_context.event_sink();
     let round = crate::application::loop_engine::chat::tools::execute_tool_round(
@@ -151,14 +172,15 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         agent,
         &sink,
         context.runtime_context.hooks_ref(),
+        context.runtime_context.activities().as_ref(),
         cancel,
         context.language,
-        &context.workspace_root,
+        &context.workspace_read,
         calls,
     )
     .await;
     observer
-        .execution_finished(execution, execution.turn_count(), &round.results)
+        .execution_finished(execution, execution.step_count(), &round.results)
         .await;
     let interaction_ids: std::collections::HashSet<_> = round
         .suspensions
@@ -178,29 +200,14 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     };
     let cancelled = cancel.is_cancelled();
     let results = if cancelled && interaction_ids.is_empty() {
-        complete_cancelled_tool_round(&raw_calls, selected)
+        let convergence = complete_cancelled_tool_round(&raw_calls, selected);
+        observer
+            .cancelled_results_completed(&convergence.results)
+            .await;
+        convergence.results
     } else {
         selected
     };
-    if !results.is_empty() {
-        let has_task_mutation = results.iter().any(|result| {
-            crate::application::loop_engine::chat::events::is_task_store_mutation(&result.tool_name)
-        });
-        let message = crate::application::loop_engine::shared::materialize_tool_results(
-            context.materializer,
-            results,
-            context.session_id,
-        )
-        .await;
-        execution.append_message(message.clone());
-        execution.record_step_message(message);
-        observer
-            .results_materialized(execution, has_task_mutation)
-            .await;
-    }
-    if cancelled {
-        return Err(crate::application::loop_engine::LoopEngineError::Cancelled);
-    }
     let completed_results = calls
         .iter()
         .filter(|(call, _)| !interaction_ids.contains(&call.id))
@@ -214,37 +221,154 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
             (call.id.clone(), status)
         })
         .collect();
-    if !round.suspensions.is_empty() {
+    finalize_tool_round_results(
+        context,
+        observer,
+        execution,
+        step_id,
+        results,
+        round.suspensions,
+        round.approvals,
+        round.fuse_bypassed,
+        completed_results,
+        &agent.runtime_cancellation,
+        cancel,
+    )
+    .await
+}
+
+/// #1494：边流边执行结果汇总——旁路轮次已执行完工具，这里只做统一收尾：
+/// materialize + 写入消息历史 + 状态登记 + suspensions / approvals 路由。
+/// 与普通工具轮次 `execute_tools_impl` 尾部共享同一收尾逻辑。
+pub(crate) async fn finalize_streaming_rounds<O: ToolRoundObserver>(
+    coordinator: &mut ToolRoundCoordinator<'_, O>,
+    execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
+    rounds: Vec<StreamingToolRoundResult>,
+    cancel: &CancellationToken,
+) -> Result<ToolRoundOutcome, LoopEngineError> {
+    let mut results = Vec::new();
+    let mut suspensions = Vec::new();
+    let mut approvals = Vec::new();
+    let mut fuse_bypassed = Vec::new();
+    for round in rounds {
+        results.extend(round.results);
+        suspensions.extend(round.suspensions);
+        approvals.extend(round.approvals);
+        fuse_bypassed.extend(round.fuse_bypassed);
+    }
+    let interaction_ids: std::collections::HashSet<_> = suspensions
+        .iter()
+        .map(|s| s.call.id.clone())
+        .chain(approvals.iter().map(|a| a.call.id.clone()))
+        .collect();
+    let selected: Vec<ToolExecution> = results
+        .iter()
+        .filter(|result| !interaction_ids.contains(&result.call_id))
+        .cloned()
+        .collect();
+    let results = if cancel.is_cancelled() && interaction_ids.is_empty() {
+        let calls = selected
+            .iter()
+            .enumerate()
+            .map(|(index, result)| ToolCall {
+                id: result.call_id.clone(),
+                provider_id: result.provider_id.clone(),
+                name: result.tool_name.clone(),
+                index,
+                input: serde_json::Value::Null,
+            })
+            .collect::<Vec<_>>();
+        let convergence = converge_cancelled_tool_round(&calls, selected);
+        coordinator
+            .observer
+            .cancelled_results_completed(&convergence.results)
+            .await;
+        convergence.results
+    } else {
+        selected
+    };
+    let completed_results: Vec<_> = results
+        .iter()
+        .map(|result| {
+            (
+                result.call_id.clone(),
+                crate::domain::agent_run::ToolCallStatus::Success,
+            )
+        })
+        .collect();
+    finalize_tool_round_results(
+        &coordinator.context,
+        &mut coordinator.observer,
+        execution,
+        step_id,
+        results,
+        suspensions,
+        approvals,
+        fuse_bypassed,
+        completed_results,
+        &coordinator.context.agent.runtime_cancellation,
+        cancel,
+    )
+    .await
+}
+
+/// 工具轮次统一收尾（普通轮次与 #1494 旁路汇总共用）：
+/// materialize 结果 → 写入消息历史 → 状态登记 → suspensions / approvals 路由。
+#[allow(clippy::too_many_arguments)]
+async fn finalize_tool_round_results<O: ToolRoundObserver>(
+    context: &ToolRoundContext<'_>,
+    observer: &mut O,
+    execution: &mut RunExecutionState,
+    step_id: &sdk::RunStepId,
+    results: Vec<ToolExecution>,
+    suspensions: Vec<SuspendedToolCall>,
+    approvals: Vec<ApprovalRequiredCall>,
+    fuse_bypassed: Vec<sdk::ToolCallId>,
+    completed_results: Vec<(sdk::ToolCallId, crate::domain::agent_run::ToolCallStatus)>,
+    run_cancel: &CancellationToken,
+    cancel: &CancellationToken,
+) -> Result<ToolRoundOutcome, LoopEngineError> {
+    let result_count = results.len();
+    if !results.is_empty() {
+        let message = crate::application::loop_engine::shared::materialize_tool_results(
+            context.materializer,
+            results,
+            context.session_id,
+        )
+        .await;
+        execution.append_message(message.clone());
+        execution.record_step_message(message);
+        observer.results_materialized(execution).await;
+    }
+    if cancel.is_cancelled() {
+        return Err(crate::application::loop_engine::LoopEngineError::Cancelled);
+    }
+    if !suspensions.is_empty() {
         return Ok(ToolRoundOutcome {
             step: ToolStep::InteractionSuspended {
-                suspended: round.suspensions,
+                suspended: suspensions,
                 completed_results,
-                fuse_bypassed: round.fuse_bypassed,
+                fuse_bypassed,
             },
             continuation: ToolRoundContinuation::None,
         });
     }
-    if !round.approvals.is_empty() {
+    if !approvals.is_empty() {
         return Ok(ToolRoundOutcome {
             step: ToolStep::AwaitingToolApproval {
-                calls_needing_approval: round.approvals,
+                calls_needing_approval: approvals,
                 completed_results,
-                fuse_bypassed: round.fuse_bypassed,
+                fuse_bypassed,
             },
             continuation: ToolRoundContinuation::None,
         });
     }
     observer
-        .round_finished(
-            raw_calls.len(),
-            execution.turn_count(),
-            &agent.runtime_cancellation,
-        )
+        .round_finished(step_id, result_count, execution.step_count(), run_cancel)
         .await;
     Ok(ToolRoundOutcome {
-        step: crate::application::loop_engine::tool_strategy::step_from_fuse_bypass(
-            round.fuse_bypassed,
-        ),
+        step: crate::application::loop_engine::tool_strategy::step_from_fuse_bypass(fuse_bypassed),
         continuation: ToolRoundContinuation::ToolResults,
     })
 }
@@ -359,25 +483,49 @@ pub(crate) fn prepare_tool_round(
     prepared
 }
 
-pub(crate) fn complete_cancelled_tool_round(
+#[derive(Debug)]
+pub struct CancelledToolRoundConvergence {
+    pub results: Vec<ToolExecution>,
+}
+
+pub(crate) fn converge_cancelled_tool_round(
     calls: &[ToolCall],
     results: Vec<ToolExecution>,
-) -> Vec<ToolExecution> {
+) -> CancelledToolRoundConvergence {
     let mut by_id: HashMap<_, _> = results
         .into_iter()
         .map(|result| (result.call_id.clone(), result))
         .collect();
-    calls
+    let results = calls
         .iter()
         .map(|call| {
             by_id.remove(&call.id).unwrap_or_else(|| {
-                ToolExecution::new(
+                ToolExecution::new_typed(
                     call,
-                    tools::ToolOutcome::error("tool execution cancelled by user"),
+                    tools::ToolExecutionOutcome::cancelled("Command cancelled by user"),
                 )
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for result in &results {
+        debug_assert!(matches!(
+            result.typed_outcome,
+            tools::ToolExecutionOutcome::Success(_)
+                | tools::ToolExecutionOutcome::Failure(_)
+                | tools::ToolExecutionOutcome::Cancelled(_)
+                | tools::ToolExecutionOutcome::TimedOut(_)
+                | tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
+                | tools::ToolExecutionOutcome::Suspended(_)
+        ));
+    }
+    CancelledToolRoundConvergence { results }
+}
+
+pub(crate) fn complete_cancelled_tool_round(
+    calls: &[ToolCall],
+    results: Vec<ToolExecution>,
+) -> CancelledToolRoundConvergence {
+    converge_cancelled_tool_round(calls, results)
 }
 
 /// Restores original model call order after concurrent execution and gate paths.
@@ -411,6 +559,7 @@ pub(crate) fn blocked_tool_execution(call: &ToolCall, reason: &str) -> ToolExecu
             }),
             is_error: true,
             images: Vec::new(),
+            task_change: None,
         },
     )
 }
