@@ -171,7 +171,7 @@ ROOT_ACCESS_ALLOW = {
         "CURRENT_USAGE_SCHEMA_VERSION",
         "file_usage_append_store",
         "start_usage_worker",
-    },
+        "usage_query_service",    },
     "runtime": {
         "AgentClientImpl",
         "ProviderBinding",
