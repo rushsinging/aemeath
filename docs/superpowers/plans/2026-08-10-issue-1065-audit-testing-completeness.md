@@ -43,7 +43,7 @@ cargo test -p runtime invocation_usage
 cargo test -p runtime usage_tests
 cargo test -p runtime session_and_sub_runs_share_the_factory_usage_sink
 cargo test -p composition --test audit_worker_assembly
-cargo test -p aemeath-cli chat::tests::frontend_preserves_original_result_when_audit_drain_is_absent
+cargo test -p cli chat::tests::frontend_preserves_original_result_when_audit_drain_is_absent
 ```
 
 Expected: each command exits 0. If any command fails, record its first output before diagnosis; do not hide it with a rerun.
@@ -416,7 +416,7 @@ async fn frontend_failure_ignores_audit_timeout_and_preserves_original_error() {
 Run:
 
 ```bash
-cargo test -p aemeath-cli chat_tests -- --nocapture
+cargo test -p cli chat_tests -- --nocapture
 ```
 
 Expected: compile failure because `run_frontend_with_audit_drain` currently accepts only `Option<&composition::audit::SessionAudit>`.
@@ -456,7 +456,7 @@ Move all existing chat tests unchanged into `chat_tests.rs` and add the four dra
 Run:
 
 ```bash
-cargo test -p aemeath-cli chat_tests
+cargo test -p cli chat_tests
 .agents/hooks/check-no-inline-tests.sh
 .agents/hooks/check-unit-tests.sh
 ```
@@ -557,7 +557,7 @@ cargo test -p runtime invocation_usage
 cargo test -p runtime usage_tests
 cargo test -p runtime session_and_sub_runs_share_the_factory_usage_sink
 cargo test -p composition --test audit_worker_assembly
-cargo test -p aemeath-cli chat_tests
+cargo test -p cli chat_tests
 ```
 
 Expected: all pass on first final-gate run.
@@ -570,11 +570,11 @@ Run:
 cargo check -p audit --lib
 cargo check -p runtime --lib
 cargo check -p composition --lib
-cargo check -p aemeath-cli --bin aemeath
+cargo check -p cli --bin aemeath
 cargo clippy -p audit --lib -- -D warnings
 cargo clippy -p runtime --lib -- -D warnings
 cargo clippy -p composition --lib -- -D warnings
-cargo clippy -p aemeath-cli --bin aemeath -- -D warnings
+cargo clippy -p cli --bin aemeath -- -D warnings
 ```
 
 Expected: all pass, proving production reachability independent from tests.
@@ -584,7 +584,7 @@ Expected: all pass, proving production reachability independent from tests.
 Run:
 
 ```bash
-cargo clippy -p audit -p runtime -p composition -p aemeath-cli --all-targets -- -D warnings
+cargo clippy -p audit -p runtime -p composition -p cli --all-targets -- -D warnings
 ```
 
 Expected: exits 0.
