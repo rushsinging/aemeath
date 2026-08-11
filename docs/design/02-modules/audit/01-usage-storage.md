@@ -184,11 +184,23 @@ L5 对本 MVP 判定为 **N/A**：真实文件系统、并发 append 和 shutdow
 
 ### 10.5 验证与覆盖率
 
-最终命令、首次失败和 line/region/function coverage 数值在完整门禁执行后回写。coverage 只作风险信号，production reachability 由独立 source guard 与 production-only check/clippy 证明。
+完整门禁实测：
+
+- `cargo fmt --all --check`：通过。
+- `cargo test -p audit --all-targets` 及 Runtime Usage、Main/Sub sink、Composition assembly、CLI drain 定向测试：通过；Audit 合计 33 个测试通过。
+- 受影响 crate production-only `cargo check` / `cargo clippy --lib|--bin -D warnings`：通过。
+- 受影响 crate 与 workspace `cargo clippy --all-targets -- -D warnings`：通过。
+- `.agents/hooks/check-architecture-guards.sh --full`：通过；首次运行发现 Composition 消费的 `usage_query_service` 未登记在 Audit crate-root façade，补齐 Guard 白名单及人类可读索引后复验通过。
+- `cargo test --workspace`：通过。
+- `scripts/coverage.sh`：通过；workspace 为 regions **82.62%**、functions **83.38%**、lines **83.60%**。
+- Audit 聚焦覆盖率：regions **91.42%**（650/711）、functions **98.89%**（89/90）、lines **95.09%**（503/529）。生产文件中 query adapter lines 100%、query policy lines 99.24%、Usage domain lines 100%；worker lines 90.12%、append adapter lines 97.14%。未覆盖主要为互斥锁 poison/JoinError/序列化失败等防御分支及只读 getter，不构成矩阵关键行为缺口。
+- 仓库当前没有独立自动化 changed-lines 百分比阈值；本变更的生产代码仅调整 CLI 私有 drain Future seam，其成功/失败分支均由 `chat_tests.rs` 覆盖。其余 Rust changed lines 为测试与测试模块登记。
+
+coverage 只作风险信号，production reachability 由独立 source guard 与 production-only check/clippy 证明。首次失败均保留并修正，未以重跑覆盖：基线计划中的 CLI package 名误写、测试对 opaque SessionId 文本的错误假设、跨 crate Fake 构造私有类型、`SdkError` 无 `PartialEq`、以及 Audit façade 漏登记。
 
 ## 11. 验收结论
 
-十二个稳定行为单元已有 L0～L4 的必要证据，L5 有明确不适用理由；业务实现、测试、文档和旧路径退役边界一致。最终完成状态以 §10.5 全部门禁及覆盖率实测通过为准。
+十二个稳定行为单元已有 L0～L4 的必要证据，L5 有明确不适用理由；业务实现、测试、文档和旧路径退役边界一致。全部格式、定向测试、production reachability、all-targets clippy、完整架构守卫、workspace 测试和 coverage gate 均已通过，本能力达到父项级测试验收标准。
 
 ## 修改历史
 
