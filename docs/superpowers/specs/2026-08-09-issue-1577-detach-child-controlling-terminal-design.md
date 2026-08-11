@@ -1,7 +1,7 @@
 # 非交互外部进程控制终端隔离设计
 
-> 对应 Issue：[#1577](https://github.com/rushsinging/aemeath/issues/1577)  
-> Milestone：v0.1.0 — Context Engineering + 架构重构  
+> 对应 Issue：[#1577](https://github.com/rushsinging/aemeath/issues/1577)
+> Milestone：v0.1.0 — Context Engineering + 架构重构
 > 状态：已批准
 
 ## 1. 问题与根因
