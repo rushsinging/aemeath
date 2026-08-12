@@ -8,6 +8,7 @@ mod continuation_checkpoint;
 mod microcompact;
 mod restore;
 mod snip;
+mod structured_facts;
 
 // 显式 re-export token_budget 的预算/估算函数（#1486：排除
 // FALLBACK_PREVIOUS_SUMMARY_CAP，避免与 compact_summary 的 glob
@@ -25,6 +26,7 @@ pub use continuation_checkpoint::*;
 pub use microcompact::microcompact_exploration;
 pub use restore::*;
 pub use snip::snip_superseded_exploration;
+pub use structured_facts::*;
 
 /// Compact 操作阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
