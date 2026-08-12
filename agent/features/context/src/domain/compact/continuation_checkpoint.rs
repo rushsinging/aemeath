@@ -160,6 +160,61 @@ pub struct ContinuationCheckpoint {
 }
 
 impl ContinuationCheckpoint {
+    pub fn to_wire(&self) -> ContinuationCheckpointWire {
+        let status_line = self.sections[8]
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .cloned()
+            .unwrap_or_default();
+        let status_word = match self.status {
+            ContinuationStatus::Continue => "Continue",
+            ContinuationStatus::WaitingForUser => "Waiting for User",
+            ContinuationStatus::Completed => "Completed",
+        };
+        let continuation_reason = status_line
+            .strip_prefix(status_word)
+            .unwrap_or(&status_line)
+            .trim_start_matches(" —")
+            .trim()
+            .to_string();
+        let resume_context = self.sections[5]
+            .iter()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                !trimmed.starts_with("- Next action:") && !trimmed.starts_with("- Prohibited:")
+            })
+            .map(|line| without_bullet(line).to_string())
+            .collect();
+        let prohibited_actions = prohibited_lines(&self.sections[5])
+            .into_iter()
+            .map(|line| {
+                line.trim_start()
+                    .trim_start_matches("- Prohibited:")
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        ContinuationCheckpointWire {
+            immutable_constraints: section_without_bullets(&self.sections[0]),
+            current_objective: self.sections[1]
+                .first()
+                .map(|line| without_bullet(line).to_string())
+                .unwrap_or_default(),
+            committed_facts: section_without_bullets(&self.sections[2]),
+            uncommitted_working_set: section_without_bullets(&self.sections[3]),
+            open_decisions_and_risks: section_without_bullets(&self.sections[4]),
+            resume_cursor: ResumeCursorWire {
+                context: resume_context,
+                next_action: self.resume_cursor.next_action.clone(),
+                prohibited_actions,
+            },
+            required_revalidation: section_without_bullets(&self.sections[6]),
+            archived_milestones: section_without_bullets(&self.sections[7]),
+            continuation_status: self.status,
+            continuation_reason,
+        }
+    }
+
     pub fn from_sections(parts: CheckpointSections) -> Result<Self, CheckpointError> {
         let next_action = normalize_control_text(&parts.next_action);
         if next_action.is_empty() {
@@ -478,6 +533,17 @@ fn decode_content_line(line: &str) -> String {
         .filter(|content| content.starts_with("## ") || content.starts_with(CONTENT_ESCAPE_PREFIX))
         .unwrap_or(line)
         .to_string()
+}
+
+fn section_without_bullets(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| without_bullet(line).to_string())
+        .collect()
+}
+
+fn without_bullet(line: &str) -> &str {
+    line.trim().strip_prefix("- ").unwrap_or(line.trim())
 }
 
 fn prohibited_lines(lines: &[String]) -> Vec<&str> {

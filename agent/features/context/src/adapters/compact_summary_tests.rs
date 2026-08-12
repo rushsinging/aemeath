@@ -1,6 +1,34 @@
 use super::*;
 use std::sync::Arc;
 
+const VALID_MAP_FACTS: &str = r#"{
+  "facts": [
+    {
+      "sequence": 1,
+      "source": "main_user",
+      "kind": "constraint",
+      "text": "NEVER widen the requested action level.",
+      "constraint": {
+        "scope": "session",
+        "lifecycle": "persistent",
+        "action": "restrict"
+      }
+    },
+    {
+      "sequence": 2,
+      "source": "main_user",
+      "kind": "objective",
+      "text": "Continue the compact checkpoint work."
+    },
+    {
+      "sequence": 3,
+      "source": "main_user",
+      "kind": "resume_candidate",
+      "text": "Validate the generated checkpoint."
+    }
+  ]
+}"#;
+
 const VALID_CHECKPOINT: &str = r#"## Immutable Constraints
 - NEVER widen the requested action level.
 
@@ -622,19 +650,26 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
     );
 }
 
-/// Mock `CompactGenerator` that returns a canned response regardless of input.
+/// Generator that returns a canned typed map response regardless of input.
 struct MockGenerator {
     text: String,
+    requests: std::sync::Mutex<Vec<String>>,
 }
 
 #[async_trait::async_trait]
 impl CompactGenerator for MockGenerator {
     async fn generate(
         &self,
-        _request: Vec<Message>,
+        request: Vec<Message>,
         _cancel: &CancellationToken,
     ) -> Result<String, crate::domain::CompactGenerationFailure> {
-        Ok(format!("<summary>{}</summary>", self.text))
+        self.requests.lock().unwrap().push(
+            request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default(),
+        );
+        Ok(self.text.clone())
     }
 }
 
@@ -646,7 +681,8 @@ async fn compact_with_generator_uses_llm_summary() {
     let cancel = CancellationToken::new();
 
     let generator = MockGenerator {
-        text: VALID_CHECKPOINT.to_string(),
+        text: VALID_MAP_FACTS.to_string(),
+        requests: std::sync::Mutex::new(Vec::new()),
     };
 
     let result =
@@ -654,10 +690,20 @@ async fn compact_with_generator_uses_llm_summary() {
             .await
             .expect("compact should run");
 
-    // The summary should come from the generator, not the fallback text.
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("typed facts must be rendered by the local checkpoint renderer");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(result
+        .summary
+        .contains("## Current Objective\n- Continue the compact checkpoint work."));
     assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
     assert!(!result.summary.contains("Local text-compaction path"));
+
+    let request = generator.requests.lock().unwrap().join("\n");
+    assert!(request.contains("JSON only"));
+    assert!(request.contains("\"facts\""));
+    assert!(!request.contains("<summary>"));
+    assert!(!request.contains("## Immutable Constraints"));
 }
 
 #[tokio::test]
