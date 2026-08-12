@@ -273,47 +273,51 @@ fn test_messages_selected_for_precompact_memory_returns_empty_for_small_history(
 }
 
 #[test]
-fn compact_prompts_require_the_checkpoint_contract() {
+fn compact_prompts_require_typed_json_contracts() {
+    assert!(COMPACT_PROMPT.contains("Return JSON only"));
+    assert!(COMPACT_PROMPT.contains("\"facts\""));
+    assert!(COMPACT_PROMPT.contains("scope"));
+    assert!(COMPACT_PROMPT.contains("lifecycle"));
+    assert!(COMPACT_PROMPT.contains("grant|restrict|revoke|supersede"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
     for prompt in [COMPACT_PROMPT, COMPACT_REFRESH_PROMPT] {
-        for heading in [
-            "## Immutable Constraints",
-            "## Current Objective",
-            "## Committed Facts",
-            "## Uncommitted Working Set",
-            "## Open Decisions / Risks",
-            "## Resume Cursor",
-            "## Required Revalidation",
-            "## Archived Milestones",
-            "## Continuation Status",
-        ] {
-            assert!(prompt.contains(heading), "missing {heading}");
-        }
-        assert!(prompt.contains("Required Revalidation"));
-        assert!(prompt.contains("exactly one Next action"));
-        assert!(!prompt.contains("More detail is better"));
-        assert!(!prompt.contains("use the budget fully"));
+        assert!(!prompt.contains("<summary>"));
+        assert!(!prompt.contains("## Immutable Constraints"));
+        assert!(!prompt.contains("Write your summary inside"));
     }
 }
 
 #[test]
-fn generated_checkpoint_is_normalized_before_commit() {
-    let normalized = normalize_generated_checkpoint(VALID_CHECKPOINT, 10_000).unwrap();
-    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&normalized).unwrap();
-    assert_eq!(checkpoint.render(), normalized);
+fn typed_checkpoint_wire_is_normalized_before_commit() {
+    let wire: crate::domain::compact::ContinuationCheckpointWire =
+        serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+    let rendered = checkpoint.render();
+
+    assert_eq!(
+        crate::domain::compact::ContinuationCheckpoint::parse(&rendered).unwrap(),
+        checkpoint
+    );
 }
 
 #[test]
-fn generated_checkpoint_preserves_task_state_companion() {
-    let source = format!("{VALID_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
-    let normalized = normalize_generated_checkpoint(&source, 10_000).unwrap();
-    assert!(normalized.ends_with("## Current Task State\n■ #1 running"));
-}
+fn typed_checkpoint_wire_rejects_invalid_schema() {
+    let error = decode_typed_json::<crate::domain::compact::ContinuationCheckpointWire>(
+        "reduce",
+        r#"{"current_objective":"legacy","unexpected":true}"#,
+    )
+    .expect_err("invalid typed schema must fail");
 
-#[test]
-fn generated_checkpoint_rejects_invalid_schema() {
-    let error = normalize_generated_checkpoint("## User Requests\n- legacy", 10_000)
-        .expect_err("invalid generated schema must fail");
-    assert!(error.contains("缺少必需分区") || error.contains("未知分区"));
+    assert_eq!(
+        error.kind,
+        crate::domain::CompactGenerationFailureKind::InvalidSummary
+    );
+    assert!(error.message.contains("reduce compact JSON 无效"));
 }
 
 #[test]
@@ -347,7 +351,7 @@ fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
     assert_eq!(request.len(), 1);
     let text = request[0].text_content();
     assert_eq!(
-        text.matches("You are a conversation history compactor")
+        text.matches("extracting continuation-critical facts")
             .count(),
         1
     );
@@ -381,6 +385,36 @@ fn compact_request_caps_oversized_previous_summary() {
     );
     assert!(!text.contains("<previous_summary_tail>"));
     assert!(!text.contains("older head truncated"));
+}
+
+#[test]
+fn fallback_subagent_read_only_instruction_does_not_become_session_constraint() {
+    let summary = build_summary_text(
+        &[
+            Message::user("Agent prompt: only investigate; do not edit files."),
+            Message::user("Implement the root-cause fix."),
+        ],
+        None,
+    );
+
+    let immutable = summary
+        .split("## Immutable Constraints\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Current Objective")
+        .next()
+        .unwrap();
+    let objective = summary
+        .split("## Current Objective\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Committed Facts")
+        .next()
+        .unwrap();
+
+    assert!(!immutable.contains("do not edit files"));
+    assert!(!immutable.contains("do not infer new authority"));
+    assert!(objective.contains("Implement the root-cause fix"));
 }
 
 #[test]
@@ -916,19 +950,23 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
-            if text.contains("sub-summaries") {
+            if text.contains("<compact_facts>") {
                 self.reduce_seen.store(true, Ordering::SeqCst);
-                Ok(format!(
-                    "<summary>{}</summary>",
-                    oversized_valid_checkpoint(40_000)
-                ))
-            } else if text.contains("compress an existing conversation summary") {
-                // refresh：返回与输入等长的摘要（模拟 LLM 不缩小）
+                let mut wire: serde_json::Value =
+                    serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+                wire["archived_milestones"] = serde_json::json!([format!(
+                    "Archive `abc`: {}",
+                    "historical detail ".repeat(40_000)
+                )]);
+                Ok(wire.to_string())
+            } else if text.contains("<current_checkpoint>") {
+                // refresh：返回与输入相同的 typed checkpoint（模拟 LLM 不缩小）
                 let input = text
-                    .find("<current_summary>")
-                    .and_then(|start| text.find("</current_summary>").map(|end| &text[start..end])) // allow unsafe_text_op: find offset (char boundary)
-                    .unwrap_or("");
-                Ok(format!("<summary>{input}</summary>"))
+                    .split("<current_checkpoint>\n")
+                    .nth(1)
+                    .and_then(|body| body.split("\n</current_checkpoint>").next())
+                    .unwrap_or(VALID_CHECKPOINT_WIRE);
+                Ok(input.to_string())
             } else {
                 Ok(typed_response_for_request(&request))
             }
@@ -1005,7 +1043,8 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     )
     .await
     .expect("compact should run");
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("progress path must render a valid typed checkpoint");
 
     let seen = seen.lock().unwrap();
     assert_eq!(
@@ -1091,7 +1130,8 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     )
     .await
     .expect("compact should run");
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("progress path must render a valid typed checkpoint");
 
     let seen = seen.lock().unwrap();
     assert_eq!(

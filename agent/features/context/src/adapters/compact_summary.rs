@@ -157,26 +157,7 @@ pub(crate) fn build_refresh_prompt(
     .replace("{BUDGET}", &prompt_budget.to_string())
 }
 
-pub(crate) fn normalize_generated_checkpoint(
-    summary: &str,
-    budget: usize,
-) -> Result<String, String> {
-    let (checkpoint_text, task_state) =
-        crate::domain::compact::split_checkpoint_and_task_state(summary);
-    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
-        .map_err(|error| error.to_string())?;
-    let mut normalized = checkpoint
-        .normalize_to_budget(budget)
-        .map_err(|error| error.to_string())?
-        .render();
-    if let Some(task_state) = task_state.filter(|state| !state.is_empty()) {
-        normalized.push_str("\n\n## Current Task State\n");
-        normalized.push_str(task_state);
-    }
-    Ok(normalized)
-}
-
-/// 调用 LLM 对当前 summary 再压一次（#1490）。
+/// 调用 LLM 对当前 typed checkpoint 再压一次。
 async fn llm_refresh(
     generator: &dyn CompactGenerator,
     checkpoint: &crate::domain::compact::ContinuationCheckpoint,
@@ -360,21 +341,6 @@ pub fn build_compact_request(
     vec![Message::user(prompt)]
 }
 
-/// 解析 LLM 的压缩响应，提取摘要文本。
-pub fn parse_compact_response(response_text: &str) -> String {
-    // 提取 <summary> 标签之间的内容
-    if let Some(start) = response_text.find("<summary>") {
-        if let Some(end) = response_text.find("</summary>") {
-            let start = start + "<summary>".len();
-            if start < end {
-                return response_text[start..end].trim().to_string(); // allow unsafe_text_op: find offset (char boundary)
-            }
-        }
-    }
-    // 回退：使用整个响应
-    response_text.trim().to_string()
-}
-
 /// 从早期消息构建本地文本摘要（回退方案，无 LLM 调用）。
 pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) -> String {
     let mut user_requests = Vec::new();
@@ -454,17 +420,14 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
         .to_string();
     let current_checkpoint = crate::domain::compact::ContinuationCheckpoint::from_sections(
         crate::domain::compact::CheckpointSections {
-            immutable_constraints: vec![
-                "- Preserve the user's requested action level; do not infer new authority."
-                    .to_string(),
-            ],
+            immutable_constraints: Vec::new(),
             current_objective: vec![current_objective],
             committed_facts: vec![
                 "- No completed work could be established from the fallback input.".to_string(),
             ],
             uncommitted_working_set: user_requests.lines().map(str::to_string).collect(),
             open_decisions_and_risks: std::iter::once(
-                "- Local text-compaction path used; all reports below are unverified."
+                "- Local text-compaction path used; all reports and instruction scopes below are unverified."
                     .to_string(),
             )
             .chain(work_completed.lines().map(str::to_string))
@@ -652,27 +615,7 @@ pub async fn compact_messages_with_llm(
                 .await
             };
             match result {
-                Ok(text) => match normalize_generated_checkpoint(
-                    &text,
-                    crate::domain::token_budget::summary_budget(context_size),
-                ) {
-                    Ok(checkpoint) => (checkpoint, CompactSummaryQuality::Llm),
-                    Err(error) => {
-                        let failure = CompactGenerationFailure::new(
-                            CompactGenerationFailureKind::InvalidSummary,
-                            error,
-                        );
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "[compact] LLM checkpoint 不合规，回退本地路径：{}",
-                            failure.message,
-                        );
-                        (
-                            build_summary_text(early_messages, previous_summary),
-                            CompactSummaryQuality::LocalFallback(failure.kind),
-                        )
-                    }
-                },
+                Ok(checkpoint) => (checkpoint, CompactSummaryQuality::Llm),
                 Err(error) if error.permits_local_fallback() => {
                     log::warn!(
                         target: crate::LOG_TARGET,
