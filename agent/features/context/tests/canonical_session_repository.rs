@@ -1808,9 +1808,11 @@ async fn second_compact_advances_single_marker() {
         "second compact marker must contain a valid continuation checkpoint: {}",
         marker.summary
     );
-    assert!(marker
-        .summary
-        .contains("Preserve the user's requested action level"));
+    assert!(
+        marker.summary.contains("newly-visible-0") && marker.summary.contains("newly-visible-1"),
+        "second compact must preserve prior and newly compacted context: {}",
+        marker.summary
+    );
     assert!(session
         .structured_messages()
         .iter()
