@@ -29,6 +29,23 @@ const VALID_MAP_FACTS: &str = r#"{
   ]
 }"#;
 
+const SHORTER_CHECKPOINT_WIRE: &str = r#"{
+  "immutable_constraints": ["NEVER widen the requested action level."],
+  "current_objective": "Continue the compact checkpoint work.",
+  "committed_facts": [],
+  "uncommitted_working_set": [],
+  "open_decisions_and_risks": [],
+  "resume_cursor": {
+    "context": [],
+    "next_action": "validate the generated checkpoint.",
+    "prohibited_actions": ["do not merge without user approval."]
+  },
+  "required_revalidation": ["Recheck worktree and CI state before delivery."],
+  "archived_milestones": [],
+  "continuation_status": "continue",
+  "continuation_reason": "checkpoint normalization remains."
+}"#;
+
 const VALID_CHECKPOINT_WIRE: &str = r#"{
   "immutable_constraints": ["NEVER widen the requested action level."],
   "current_objective": "Continue the compact checkpoint work.",
@@ -53,8 +70,8 @@ fn typed_response_for_request(request: &[Message]) -> String {
         .unwrap_or_default();
     if text.contains("<compact_facts>") {
         VALID_CHECKPOINT_WIRE.to_string()
-    } else if text.contains("compressing an existing conversation summary") {
-        format!("<summary>{VALID_CHECKPOINT}</summary>")
+    } else if text.contains("<current_checkpoint>") {
+        SHORTER_CHECKPOINT_WIRE.to_string()
     } else {
         VALID_MAP_FACTS.to_string()
     }
@@ -655,13 +672,15 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
-            if text.contains("sub-summaries") {
+            if text.contains("<compact_facts>") {
                 self.seen_reduce.store(true, Ordering::SeqCst);
-                // reduce：返回超长摘要（模拟 LLM 不听预算）
-                Ok(format!(
-                    "<summary>{}</summary>",
-                    oversized_valid_checkpoint(80_000)
-                ))
+                let mut wire: serde_json::Value =
+                    serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+                wire["archived_milestones"] = serde_json::json!([format!(
+                    "Archive `abc`: {}",
+                    "historical detail ".repeat(80_000)
+                )]);
+                Ok(wire.to_string())
             } else {
                 Ok(typed_response_for_request(&request))
             }
@@ -678,7 +697,10 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
             .await
             .expect("compact should run");
 
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("refresh must leave a valid typed checkpoint");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(!result.summary.contains("historical detail"));
     assert!(
         generator.seen_reduce.load(Ordering::SeqCst),
         "reduce 阶段必须发生"
@@ -837,10 +859,9 @@ fn refresh_prompt_enforces_shrunk_budget() {
     use crate::domain::token_budget::summary_budget;
 
     let budget = summary_budget(272_000); // 5440
-    let prompt = crate::adapters::compact_summary::build_refresh_prompt(
-        "## User Requests\n- 继续 issue",
-        budget,
-    );
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(VALID_CHECKPOINT)
+        .expect("fixture must be valid");
+    let prompt = crate::adapters::compact_summary::build_refresh_prompt(&checkpoint, budget);
 
     assert!(
         prompt.contains("MUST NOT exceed"),
@@ -851,11 +872,11 @@ fn refresh_prompt_enforces_shrunk_budget() {
         prompt.contains(&expected_prompt_budget.to_string()),
         "提示预算应为 summary_budget×0.8（{expected_prompt_budget}）: {prompt}"
     );
-    assert!(
-        !prompt.contains("More detail is better"),
-        "再压不应使用通用模板的鼓励细节措辞"
-    );
-    assert!(prompt.contains("## User Requests"));
+    assert!(prompt.contains("JSON only"));
+    assert!(prompt.contains("<current_checkpoint>"));
+    assert!(prompt.contains("\"immutable_constraints\""));
+    assert!(!prompt.contains("## Immutable Constraints"));
+    assert!(!prompt.contains("<summary>"));
 }
 
 /// #1490：收敛判定容忍一轮噪音——第一轮未缩小继续，第二轮才停；

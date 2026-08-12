@@ -133,45 +133,26 @@ const REFRESH_BUDGET_RATIO: usize = 8; // × 0.8
 /// 只保留决策/状态实质；预算为硬约束（MUST NOT exceed），且按
 /// `summary_budget × 0.8` 提示，为 LLM 实际输出超出提示预算留余量，
 /// 保证真实输出落在 summary_budget 内。
-const COMPACT_REFRESH_PROMPT: &str = r#"You are compressing an existing conversation summary. The summary below is TOO LONG and must be reduced.
+const COMPACT_REFRESH_PROMPT: &str = r#"You are compressing an existing typed conversation checkpoint. Return JSON only. Do not use Markdown fences, XML, headings, or prose outside the JSON object.
 
-CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. If you cannot fit everything, drop details — the summary is context, not a transcript.
+CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. Drop only unprotected details when needed.
 
-<instructions>
-Produce a compressed summary using the EXACT structure below inside <summary> tags.
-
-## Immutable Constraints
-## Current Objective
-## Committed Facts
-## Uncommitted Working Set
-## Open Decisions / Risks
-## Resume Cursor
-## Required Revalidation
-## Archived Milestones
-## Continuation Status
-
-Rules:
-- Compress by semantic priority, not by truncating the head or tail of the whole checkpoint.
-- Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
-- State each detailed fact once in its authoritative section.
-- Put dynamic GitHub, CI, remote branch, and worktree state under Required Revalidation.
-- Resume Cursor MUST contain exactly one Next action and explicit prohibited actions.
-- Archived Milestones contain one-line stable references, not process transcripts.
-- Each section can be empty if not applicable, but include the heading.
-- The output MUST be shorter than the input and MUST NOT exceed {BUDGET} tokens.
-</instructions>
-
-Here is the summary to compress:
+Preserve these fields exactly: immutable_constraints, current_objective, resume_cursor.next_action, resume_cursor.prohibited_actions, continuation_status, and continuation_reason. You may shorten committed_facts, uncommitted_working_set, open_decisions_and_risks, required_revalidation, archived_milestones, and resume_cursor.context.
 "#;
 
 /// 构建再压提示词（#1490）：硬预算 + 激进压缩指令。
 ///
 /// `budget` 为真实 summary 预算；提示词内按 `× REFRESH_BUDGET_RATIO` 缩减，
 /// 为 LLM 实际输出超出提示预算留余量，保证真实输出落在 `budget` 内。
-pub(crate) fn build_refresh_prompt(summary: &str, budget: usize) -> String {
+pub(crate) fn build_refresh_prompt(
+    checkpoint: &crate::domain::compact::ContinuationCheckpoint,
+    budget: usize,
+) -> String {
     let prompt_budget = budget * REFRESH_BUDGET_RATIO / 10;
+    let checkpoint_json = serde_json::to_string(&checkpoint.to_wire())
+        .expect("typed continuation checkpoint must serialize");
     format!(
-        "{COMPACT_REFRESH_PROMPT}\n<current_summary>\n{summary}\n</current_summary>\n\nWrite your summary inside <summary> tags."
+        "{COMPACT_REFRESH_PROMPT}\n<current_checkpoint>\n{checkpoint_json}\n</current_checkpoint>"
     )
     .replace("{BUDGET}", &prompt_budget.to_string())
 }
@@ -198,12 +179,30 @@ pub(crate) fn normalize_generated_checkpoint(
 /// 调用 LLM 对当前 summary 再压一次（#1490）。
 async fn llm_refresh(
     generator: &dyn CompactGenerator,
-    summary: &str,
+    checkpoint: &crate::domain::compact::ContinuationCheckpoint,
     budget: usize,
     cancel: &CancellationToken,
-) -> Result<String, CompactGenerationFailure> {
-    let prompt = build_refresh_prompt(summary, budget);
-    llm_generate(generator, vec![Message::user(prompt)], cancel).await
+) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactGenerationFailure> {
+    let prompt = build_refresh_prompt(checkpoint, budget);
+    let response = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
+    let wire: crate::domain::compact::ContinuationCheckpointWire =
+        decode_typed_json("refresh", &response)?;
+    let refreshed =
+        crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
+            CompactGenerationFailure::new(
+                CompactGenerationFailureKind::InvalidSummary,
+                format!("refresh compact checkpoint 无效：{error}"),
+            )
+        })?;
+    refreshed
+        .validate_refresh_from(checkpoint)
+        .map_err(|error| {
+            CompactGenerationFailure::new(
+                CompactGenerationFailureKind::InvalidSummary,
+                format!("refresh compact checkpoint 违反保护语义：{error}"),
+            )
+        })?;
+    Ok(refreshed)
 }
 
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
@@ -944,14 +943,14 @@ async fn compact_messages_map_reduce(
     let response = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
     let wire: crate::domain::compact::ContinuationCheckpointWire =
         decode_typed_json("reduce", &response)?;
-    let checkpoint =
-        crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
+    let mut final_checkpoint = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
+        .map_err(|error| {
             CompactGenerationFailure::new(
                 CompactGenerationFailureKind::InvalidSummary,
                 format!("reduce compact checkpoint 无效：{error}"),
             )
         })?;
-    let mut final_summary = checkpoint.render();
+    let mut final_summary = final_checkpoint.render();
     log::info!(
         target: crate::LOG_TARGET,
         "[compact] reduce 合并完成：{} chars（预算 {} tokens）",
@@ -976,14 +975,27 @@ async fn compact_messages_map_reduce(
             MAX_REDUCE_REFRESH_ROUNDS,
         );
         let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
-        let refreshed = llm_refresh(generator, &final_summary, budget, cancel).await?;
+        let refreshed_checkpoint =
+            match llm_refresh(generator, &final_checkpoint, budget, cancel).await {
+                Ok(checkpoint) => checkpoint,
+                Err(error) if error.permits_local_fallback() => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[compact] refresh 结果无效，保留当前 typed checkpoint：{}",
+                        error.message,
+                    );
+                    break;
+                }
+                Err(error) => return Err(error),
+            };
         emit_progress_completed(
             progress,
             CompactStage::Refreshing,
             round,
             MAX_REDUCE_REFRESH_ROUNDS,
         );
-        let tokens_after = crate::domain::token_budget::estimate_tokens(&refreshed);
+        let refreshed_summary = refreshed_checkpoint.render();
+        let tokens_after = crate::domain::token_budget::estimate_tokens(&refreshed_summary);
         log::info!(
             target: crate::LOG_TARGET,
             "[compact] 汇总超预算，再压 round {round}：{tokens_before} -> {tokens_after} tokens（预算 {budget}）",
@@ -1006,7 +1018,8 @@ async fn compact_messages_map_reduce(
             continue;
         }
         rounds_without_shrink = 0;
-        final_summary = refreshed;
+        final_checkpoint = refreshed_checkpoint;
+        final_summary = refreshed_summary;
     }
     Ok(final_summary)
 }
