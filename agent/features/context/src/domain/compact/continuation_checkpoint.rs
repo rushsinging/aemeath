@@ -432,6 +432,20 @@ impl ContinuationCheckpoint {
         });
     }
 
+    pub fn validate_refresh_from(&self, previous: &Self) -> Result<(), CheckpointError> {
+        let protected_sections_match = self.sections[0] == previous.sections[0]
+            && self.sections[1] == previous.sections[1]
+            && prohibited_lines(&self.sections[5]) == prohibited_lines(&previous.sections[5])
+            && self.resume_cursor == previous.resume_cursor
+            && self.status == previous.status
+            && self.sections[8] == previous.sections[8];
+        if protected_sections_match {
+            Ok(())
+        } else {
+            Err(CheckpointError::ProtectedRefreshChanged)
+        }
+    }
+
     pub fn render(&self) -> String {
         SECTION_HEADINGS
             .iter()
@@ -464,6 +478,14 @@ fn decode_content_line(line: &str) -> String {
         .filter(|content| content.starts_with("## ") || content.starts_with(CONTENT_ESCAPE_PREFIX))
         .unwrap_or(line)
         .to_string()
+}
+
+fn prohibited_lines(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| line.trim_start().starts_with("- Prohibited:"))
+        .collect()
 }
 
 fn as_bullet(source: &str) -> String {
@@ -558,6 +580,7 @@ pub enum CheckpointError {
         estimated_tokens: usize,
         budget: usize,
     },
+    ProtectedRefreshChanged,
     MissingCurrentObjective,
     ContentBeforeFirstSection,
 }
@@ -587,6 +610,9 @@ impl fmt::Display for CheckpointError {
                 formatter,
                 "checkpoint 保护分区超过预算：估算 {estimated_tokens} tokens，预算 {budget} tokens"
             ),
+            Self::ProtectedRefreshChanged => {
+                write!(formatter, "refresh 修改了受保护的 continuation 语义")
+            }
             Self::MissingCurrentObjective => write!(formatter, "Current Objective 不得为空"),
             Self::ContentBeforeFirstSection => {
                 write!(formatter, "首个 checkpoint 分区前存在非法内容")

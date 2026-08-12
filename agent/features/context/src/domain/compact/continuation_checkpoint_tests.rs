@@ -86,6 +86,50 @@ fn typed_checkpoint_wire_rejects_unknown_fields() {
 }
 
 #[test]
+fn refresh_rejects_any_protected_semantic_change() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+
+    for changed in [
+        COMPLETE_CHECKPOINT.replace("- NEVER merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue the content-stream migration without widening scope.",
+            "Implement and merge the content-stream migration.",
+        ),
+        COMPLETE_CHECKPOINT.replace(
+            "inspect all legacy Token/Thinking consumers.",
+            "edit all legacy consumers.",
+        ),
+        COMPLETE_CHECKPOINT.replace("- Prohibited: do not merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue — TUI consumption remains.",
+            "Waiting for User — approval required.",
+        ),
+    ] {
+        let refreshed = ContinuationCheckpoint::parse(&changed).unwrap();
+        let error = refreshed
+            .validate_refresh_from(&original)
+            .expect_err("protected compact semantics must not change during refresh");
+        assert!(matches!(error, CheckpointError::ProtectedRefreshChanged));
+    }
+}
+
+#[test]
+fn refresh_allows_shortening_unprotected_sections() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+    let shortened_source = COMPLETE_CHECKPOINT
+        .replace("- Commit `5e42c9aa` passed Runtime and CLI tests.", "")
+        .replace("- Runtime and SDK are migrated; TUI remains.", "")
+        .replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            "",
+        )
+        .replace("- ToolCall split completed in `5e42c9aa`.", "");
+    let shortened = ContinuationCheckpoint::parse(&shortened_source).unwrap();
+
+    shortened.validate_refresh_from(&original).unwrap();
+}
+
+#[test]
 fn parses_complete_checkpoint_with_one_resume_cursor() {
     let checkpoint =
         ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).expect("checkpoint must parse");
