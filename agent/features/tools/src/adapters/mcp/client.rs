@@ -93,6 +93,8 @@ impl McpClient {
             cmd.env(k, v);
         }
 
+        utils::configure_tokio_noninteractive(&mut cmd)
+            .map_err(|error| format!("failed to isolate MCP server '{}': {error}", command))?;
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("failed to start MCP server '{}': {e}", command))?;

@@ -225,19 +225,22 @@ fn resize_with_external_tool(
     let input_str = input_path
         .to_str()
         .ok_or_else(|| ImageError::ResizeError("input path is not valid UTF-8".to_string()))?;
-    let status = std::process::Command::new("sips")
-        .args([
-            "-s",
-            "format",
-            "jpeg",
-            "-Z",
-            &IMAGE_MAX_WIDTH.to_string(),
-            "--out",
-            output_str,
-            input_str,
-        ])
+    let mut command = std::process::Command::new("sips");
+    command.args([
+        "-s",
+        "format",
+        "jpeg",
+        "-Z",
+        &IMAGE_MAX_WIDTH.to_string(),
+        "--out",
+        output_str,
+        input_str,
+    ]);
+    utils::configure_std_noninteractive(&mut command)
+        .map_err(|error| ImageError::ResizeError(error.to_string()))?;
+    let status = command
         .status()
-        .map_err(|e| ImageError::ResizeError(e.to_string()))?;
+        .map_err(|error| ImageError::ResizeError(error.to_string()))?;
 
     if !status.success() {
         return Err(ImageError::ResizeError("sips failed".to_string()));
@@ -256,17 +259,20 @@ fn resize_with_external_tool(
     let output_str = output_path
         .to_str()
         .ok_or_else(|| ImageError::ResizeError("output path is not valid UTF-8".to_string()))?;
-    let status = std::process::Command::new("convert")
-        .args([
-            input_str,
-            "-resize",
-            &format!("{}x{}>", IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT),
-            "-quality",
-            "80",
-            output_str,
-        ])
+    let mut command = std::process::Command::new("convert");
+    command.args([
+        input_str,
+        "-resize",
+        &format!("{}x{}>", IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT),
+        "-quality",
+        "80",
+        output_str,
+    ]);
+    utils::configure_std_noninteractive(&mut command)
+        .map_err(|error| ImageError::ResizeError(error.to_string()))?;
+    let status = command
         .status()
-        .map_err(|e| ImageError::ResizeError(e.to_string()))?;
+        .map_err(|error| ImageError::ResizeError(error.to_string()))?;
 
     if !status.success() {
         return Err(ImageError::ResizeError("convert failed".to_string()));

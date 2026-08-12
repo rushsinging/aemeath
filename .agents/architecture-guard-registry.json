@@ -759,6 +759,22 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while tests lock verbatim Runtime consumption",
       "status": "active"
+    },
+    {
+      "id": "policy.process.noninteractive-child-session",
+      "guard": "check-noninteractive-child-session.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "path",
+        "value": "packages/global/utils/src/process.rs"
+      },
+      "classification": "target_capability_policy",
+      "owner": "architecture",
+      "reason": "All production noninteractive external processes must enter a detached Unix session through the single utils boundary",
+      "tracking_issue": 1577,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent cross-platform controlling-terminal isolation policy",
+      "status": "active"
     }
   ]
 }
