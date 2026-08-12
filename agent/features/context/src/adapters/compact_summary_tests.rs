@@ -815,7 +815,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
     impl CompactGenerator for CancelledGenerator {
         async fn generate(
             &self,
-            request: Vec<Message>,
+            _request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Err(crate::domain::CompactGenerationFailure::new(
@@ -853,7 +853,7 @@ async fn compact_falls_back_when_generator_errors() {
     impl CompactGenerator for FailingGenerator {
         async fn generate(
             &self,
-            request: Vec<Message>,
+            _request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Err(crate::domain::CompactGenerationFailure::new(
@@ -983,10 +983,12 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
             .expect("compact should run");
 
     assert!(reduce_seen.load(Ordering::SeqCst), "reduce 阶段必须发生");
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("未缩小轮次必须保留有效 typed checkpoint");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
     assert!(
-        result.summary.len() < 41_000,
-        "未缩小轮次不应采用更差输出（保持原 reduce 结果）: {} chars",
-        result.summary.len()
+        result.summary.contains("historical detail"),
+        "未缩小轮次应保持原 reduce 结果"
     );
     assert!(
         calls.load(Ordering::SeqCst) >= 3,
