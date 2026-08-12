@@ -29,6 +29,37 @@ const VALID_MAP_FACTS: &str = r#"{
   ]
 }"#;
 
+const VALID_CHECKPOINT_WIRE: &str = r#"{
+  "immutable_constraints": ["NEVER widen the requested action level."],
+  "current_objective": "Continue the compact checkpoint work.",
+  "committed_facts": ["Existing compact tests passed before this change."],
+  "uncommitted_working_set": ["Checkpoint normalization is in progress."],
+  "open_decisions_and_risks": ["Provider output may violate the schema."],
+  "resume_cursor": {
+    "context": [],
+    "next_action": "validate the generated checkpoint.",
+    "prohibited_actions": ["do not merge without user approval."]
+  },
+  "required_revalidation": ["Recheck worktree and CI state before delivery."],
+  "archived_milestones": ["Previous summary contract completed in `#671`."],
+  "continuation_status": "continue",
+  "continuation_reason": "checkpoint normalization remains."
+}"#;
+
+fn typed_response_for_request(request: &[Message]) -> String {
+    let text = request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+    if text.contains("<compact_facts>") {
+        VALID_CHECKPOINT_WIRE.to_string()
+    } else if text.contains("compressing an existing conversation summary") {
+        format!("<summary>{VALID_CHECKPOINT}</summary>")
+    } else {
+        VALID_MAP_FACTS.to_string()
+    }
+}
+
 const VALID_CHECKPOINT: &str = r#"## Immutable Constraints
 - NEVER widen the requested action level.
 
@@ -112,7 +143,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _ = request;
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -543,7 +574,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
                 .unwrap_or_default();
             self.current.fetch_sub(1, Ordering::SeqCst);
             let _ = text;
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -573,7 +604,16 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         "map 阶段并发不得超过 5，实际 {}",
         generator.max_concurrent.load(Ordering::SeqCst)
     );
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("map-reduce must render a valid typed checkpoint");
+    assert_eq!(
+        checkpoint.status(),
+        crate::domain::compact::ContinuationStatus::Continue
+    );
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(result
+        .summary
+        .contains("## Current Objective\n- Continue the compact checkpoint work."));
 }
 
 /// 汇总后的最终摘要若超过预算，必须再压一次（收敛迭代，#1486）。
@@ -623,7 +663,7 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
                     oversized_valid_checkpoint(80_000)
                 ))
             } else {
-                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+                Ok(typed_response_for_request(&request))
             }
         }
     }
@@ -719,7 +759,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
     impl CompactGenerator for CancelledGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Err(crate::domain::CompactGenerationFailure::new(
@@ -757,7 +797,7 @@ async fn compact_falls_back_when_generator_errors() {
     impl CompactGenerator for FailingGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             Err(crate::domain::CompactGenerationFailure::new(
@@ -869,7 +909,7 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                     .unwrap_or("");
                 Ok(format!("<summary>{input}</summary>"))
             } else {
-                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+                Ok(typed_response_for_request(&request))
             }
         }
     }
@@ -918,10 +958,10 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     impl CompactGenerator for EchoGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -1004,10 +1044,10 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     impl CompactGenerator for EchoGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 

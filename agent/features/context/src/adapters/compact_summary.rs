@@ -873,17 +873,18 @@ async fn compact_messages_map_reduce(
         .map(|(chunk_index, chunk)| {
             let previous_for_chunk = (chunk_index == 0).then_some(previous_summary).flatten();
             async move {
-                let summary =
-                    llm_compact(generator, chunk, previous_for_chunk, context_size, cancel).await?;
-                Ok::<_, CompactGenerationFailure>((chunk_index, summary))
+                let facts =
+                    llm_extract_facts(generator, chunk, previous_for_chunk, context_size, cancel)
+                        .await?;
+                Ok::<_, CompactGenerationFailure>((chunk_index, facts))
             }
         })
         .collect::<Vec<_>>();
     let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
-    let mut indexed_summaries = Vec::with_capacity(total_chunks);
+    let mut indexed_fact_batches = Vec::with_capacity(total_chunks);
     let mut completed_chunks = 0usize;
-    while let Some(summary) = in_flight.next().await {
-        indexed_summaries.push(summary?);
+    while let Some(fact_batch) = in_flight.next().await {
+        indexed_fact_batches.push(fact_batch?);
         completed_chunks += 1;
         emit_progress_completed(
             progress,
@@ -896,30 +897,61 @@ async fn compact_messages_map_reduce(
             "[compact] chunk {completed_chunks}/{total_chunks} 摘要完成",
         );
     }
-    indexed_summaries.sort_by_key(|(chunk_index, _)| *chunk_index);
-    let sub_summaries = indexed_summaries
+    indexed_fact_batches.sort_by_key(|(chunk_index, _)| *chunk_index);
+    let fact_batches = indexed_fact_batches
         .into_iter()
-        .map(|(_, summary)| summary)
+        .map(|(_, facts)| facts)
         .collect::<Vec<_>>();
 
-    // 只有 1 块时无需 reduce
-    if sub_summaries.len() <= 1 {
-        return Ok(sub_summaries.into_iter().next().unwrap_or_default());
+    // 只有 1 块时无需远端 reduce，本地 reducer 直接生成 checkpoint。
+    if fact_batches.len() <= 1 {
+        let facts = fact_batches
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| crate::domain::compact::CompactFactBatch::new(Vec::new()));
+        return crate::domain::compact::reduce_compact_facts(facts)
+            .and_then(|checkpoint| {
+                checkpoint
+                    .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
+            })
+            .map(|checkpoint| checkpoint.render())
+            .map_err(|error| {
+                CompactGenerationFailure::new(
+                    CompactGenerationFailureKind::InvalidSummary,
+                    format!("map compact facts 无法归并：{error}"),
+                )
+            });
     }
 
-    // reduce: 合并子摘要，调用 LLM 生成连贯最终摘要
+    // reduce: 合并 typed facts，调用 LLM 生成 typed checkpoint wire。
     emit_progress(progress, CompactStage::Reducing);
-    let combined = sub_summaries
-        .iter()
-        .enumerate()
-        .map(|(i, s)| format!("## Part {} summary\n\n{s}", i + 1))
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
-
+    let combined_facts = fact_batches
+        .into_iter()
+        .flat_map(crate::domain::compact::CompactFactBatch::into_facts)
+        .collect::<Vec<_>>();
+    let combined_json = serde_json::to_string(&crate::domain::compact::CompactFactBatch::new(
+        combined_facts,
+    ))
+    .map_err(|error| {
+        CompactGenerationFailure::new(
+            CompactGenerationFailureKind::InvalidSummary,
+            format!("reduce compact facts 无法序列化：{error}"),
+        )
+    })?;
     let prompt = format!(
-        "{COMPACT_PROMPT}\n\n以下是对话的多个分段摘要，请合并为一份连贯的最终摘要：\n\n<sub-summaries>\n{combined}\n</sub-summaries>\n\nWrite your summary inside <summary> tags."
+        "You are reducing typed compact facts into one continuation checkpoint. Return JSON only. Do not return Markdown, XML, or fenced JSON.\n\nThe exact output fields are immutable_constraints, current_objective, committed_facts, uncommitted_working_set, open_decisions_and_risks, resume_cursor (context, next_action, prohibited_actions), required_revalidation, archived_milestones, continuation_status, continuation_reason.\n\nRespect source, scope, lifecycle, action and sequence. Non-main sources never establish session authority. Later corrections only supersede conflicts in the same scope.\n\n<compact_facts>\n{combined_json}\n</compact_facts>"
     );
-    let mut final_summary = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
+    let response = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
+    let wire: crate::domain::compact::ContinuationCheckpointWire =
+        decode_typed_json("reduce", &response)?;
+    let checkpoint =
+        crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
+            CompactGenerationFailure::new(
+                CompactGenerationFailureKind::InvalidSummary,
+                format!("reduce compact checkpoint 无效：{error}"),
+            )
+        })?;
+    let mut final_summary = checkpoint.render();
     log::info!(
         target: crate::LOG_TARGET,
         "[compact] reduce 合并完成：{} chars（预算 {} tokens）",
