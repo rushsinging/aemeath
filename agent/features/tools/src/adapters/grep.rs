@@ -68,22 +68,27 @@ impl TypedTool for GrepTool {
         let glob_filter = args.glob.as_deref();
 
         let output = if is_rg_available().await {
-            let mut cmd = Command::new("rg");
-            cmd.arg("-n").arg("-H").arg("--no-heading").arg(pattern);
-            if let Some(g) = glob_filter {
-                cmd.arg("--glob").arg(g);
+            let mut command = Command::new("rg");
+            command.arg("-n").arg("-H").arg("--no-heading").arg(pattern);
+            if let Some(glob_pattern) = glob_filter {
+                command.arg("--glob").arg(glob_pattern);
             }
-            cmd.arg(&search_path)
-                .current_dir(&workspace_root)
-                .output()
-                .await
+            command.arg(&search_path).current_dir(&workspace_root);
+            if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+                return TypedToolResult::error(format!("Search isolation failed: {error}"));
+            }
+            command.output().await
         } else {
-            let mut cmd = Command::new("grep");
-            cmd.arg("-rn").arg(pattern).arg(&search_path);
-            if let Some(g) = glob_filter {
-                cmd.arg("--include").arg(g);
+            let mut command = Command::new("grep");
+            command.arg("-rn").arg(pattern).arg(&search_path);
+            if let Some(glob_pattern) = glob_filter {
+                command.arg("--include").arg(glob_pattern);
             }
-            cmd.current_dir(&workspace_root).output().await
+            command.current_dir(&workspace_root);
+            if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+                return TypedToolResult::error(format!("Search isolation failed: {error}"));
+            }
+            command.output().await
         };
 
         match output {
@@ -164,11 +169,15 @@ impl TypedTool for GrepTool {
 }
 
 async fn is_rg_available() -> bool {
-    Command::new("rg")
-        .arg("--version")
+    let mut command = Command::new("rg");
+    command.arg("--version");
+    if utils::configure_tokio_noninteractive(&mut command).is_err() {
+        return false;
+    }
+    command
         .output()
         .await
-        .map(|o| o.status.success())
+        .map(|output| output.status.success())
         .unwrap_or(false)
 }
 

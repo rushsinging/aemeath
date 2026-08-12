@@ -152,7 +152,7 @@ trait CancellationSignal: Send + Sync {
 - Tool 协作停止子进程、blocking worker、网络请求或 child Run，并通过真实返回让 Runtime 判断 cleanup；**NEVER** 把 future drop 本身当作底层停止确认；
 - ToolDescriptor 声明协作取消能力；cancellation 不承载 timeout 或重试配置。
 
-当前 adapter 基线：Glob 在 blocking pool 中运行并逐项检查 cancellation；Bash 在内部 timeout 或 cancellation 时终止进程组；Agent 向 child Run 传播 cancellation 与自身 wall-clock timeout。Read/Grep 等短同步文件调用当前依赖统一 supervisor 的前台 hard deadline，但执行 future 被 drop 后不等同于底层 OS 工作已中止；MCP remote cancellation confirmation 尚未成为独立协议。因此这些路径只有获得实际 cleanup confirmation 才能声称 `TimedOut`/`Cancelled`，否则必须保持 `CancellationUnconfirmed`。
+当前 adapter 基线：Glob 在 blocking pool 中运行并逐项检查 cancellation；Bash 在独立 Unix session 中运行（直接 child 的 `PID = PGID = SID`，无父控制终端），并在内部 timeout 或 cancellation 时按该进程组终止；Agent 向 child Run 传播 cancellation 与自身 wall-clock timeout。Read/Grep 等短同步文件调用当前依赖统一 supervisor 的前台 hard deadline，但执行 future 被 drop 后不等同于底层 OS 工作已中止；MCP remote cancellation confirmation 尚未成为独立协议。因此这些路径只有获得实际 cleanup confirmation 才能声称 `TimedOut`/`Cancelled`，否则必须保持 `CancellationUnconfirmed`。
 
 ## 5. Catalog Snapshot 与变化通知
 

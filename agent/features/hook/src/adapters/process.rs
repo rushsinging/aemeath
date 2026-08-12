@@ -78,8 +78,6 @@ impl ProcessDriver {
         request: ProcessRequest,
         cancellation: &dyn CancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
-        use std::os::unix::process::CommandExt;
-
         let mut command = Command::new("sh");
         command
             .arg("-c")
@@ -98,7 +96,12 @@ impl ProcessDriver {
             .envs(&request.env)
             // 仅作为 runtime/task 被强制丢弃时的直接 child 兜底；正常路径必须按进程组回收。
             .kill_on_drop(true);
-        command.as_std_mut().process_group(0);
+        utils::configure_tokio_noninteractive(&mut command).map_err(|error| {
+            ProcessFailure::new(
+                ProcessFailureKind::Spawn,
+                format!("隔离 hook 命令进程失败: {error}"),
+            )
+        })?;
 
         let mut child = command.spawn().map_err(|error| {
             ProcessFailure::new(
