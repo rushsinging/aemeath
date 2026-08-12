@@ -119,6 +119,9 @@ Here is the PAST conversation history to extract:
 pub const FALLBACK_PREVIOUS_SUMMARY_CAP: usize =
     crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP;
 
+/// 单个 typed compact 阶段格式无效时，最多额外请求一次 LLM 修复结构。
+const MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS: usize = 1;
+
 /// 汇总后的最终摘要超过预算时，最多再压的迭代次数（#1486 收敛迭代）。
 const MAX_REDUCE_REFRESH_ROUNDS: usize = 3;
 
@@ -165,24 +168,33 @@ async fn llm_refresh(
     cancel: &CancellationToken,
 ) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactGenerationFailure> {
     let prompt = build_refresh_prompt(checkpoint, budget);
-    let response = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
-    let wire: crate::domain::compact::ContinuationCheckpointWire =
-        decode_typed_json("refresh", &response)?;
-    let refreshed =
-        crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
-            CompactGenerationFailure::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("refresh compact checkpoint 无效：{error}"),
-            )
-        })?;
-    refreshed
-        .validate_refresh_from(checkpoint)
-        .map_err(|error| {
-            CompactGenerationFailure::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("refresh compact checkpoint 违反保护语义：{error}"),
-            )
-        })?;
+    let refreshed = generate_and_validate_typed(
+        generator,
+        "refresh",
+        vec![Message::user(prompt)],
+        cancel,
+        |response| {
+            let wire: crate::domain::compact::ContinuationCheckpointWire =
+                decode_typed_json("refresh", response)?;
+            let refreshed = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
+                .map_err(|error| {
+                    CompactGenerationFailure::new(
+                        CompactGenerationFailureKind::InvalidSummary,
+                        format!("refresh compact checkpoint 无效：{error}"),
+                    )
+                })?;
+            refreshed
+                .validate_refresh_from(checkpoint)
+                .map_err(|error| {
+                    CompactGenerationFailure::new(
+                        CompactGenerationFailureKind::InvalidSummary,
+                        format!("refresh compact checkpoint 违反保护语义：{error}"),
+                    )
+                })?;
+            Ok(refreshed)
+        },
+    )
+    .await?;
     Ok(refreshed)
 }
 
@@ -345,7 +357,8 @@ pub fn build_compact_request(
 pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) -> String {
     let mut user_requests = Vec::new();
     let mut assistant_reports = Vec::new();
-    let mut observed_tool_invocations = Vec::new();
+    let mut tool_result_facts = Vec::new();
+    let mut working_set = Vec::new();
     let mut last_text: Option<(Role, String)> = None;
 
     for msg in messages {
@@ -366,18 +379,38 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
                         "Unverified assistant report"
                     };
                     assistant_reports.push(format!("- {label}: {truncated}"));
+                    if indicates_working_set(&truncated) {
+                        working_set.push(format!("- {truncated}"));
+                    }
                 }
             }
         }
 
-        // 工具调用只证明发起过调用，不能证明结果成功或工作已完成。
-        let tool_uses = msg.extract_tool_uses();
-        if !tool_uses.is_empty() {
-            let tool_names: Vec<&str> = tool_uses.iter().map(|(_, name, _)| *name).collect();
-            observed_tool_invocations.push(format!(
-                "- Observed tool invocation (outcome not established): {}",
-                tool_names.join(", ")
-            ));
+        for block in &msg.content {
+            if let ContentBlock::ToolResult {
+                content,
+                text,
+                is_error,
+                ..
+            } = block
+            {
+                let result_text = text.clone().unwrap_or_else(|| match content {
+                    serde_json::Value::String(value) => value.clone(),
+                    other => other.to_string(),
+                });
+                if !result_text.trim().is_empty() {
+                    let result_text = if result_text.len() > 500 {
+                        format!("{}...", slice_head(&result_text, 500))
+                    } else {
+                        result_text
+                    };
+                    if *is_error {
+                        assistant_reports.push(format!("- Tool result error: {result_text}"));
+                    } else {
+                        tool_result_facts.push(format!("- {result_text}"));
+                    }
+                }
+            }
         }
     }
 
@@ -386,8 +419,7 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
     } else {
         user_requests.join("\n")
     };
-    let mut reported_context = assistant_reports;
-    reported_context.extend(observed_tool_invocations);
+    let reported_context = assistant_reports;
     let work_completed = if reported_context.is_empty() {
         "- No completed work could be established from the fallback input.".to_string()
     } else {
@@ -422,10 +454,17 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
         crate::domain::compact::CheckpointSections {
             immutable_constraints: Vec::new(),
             current_objective: vec![current_objective],
-            committed_facts: vec![
-                "- No completed work could be established from the fallback input.".to_string(),
-            ],
-            uncommitted_working_set: user_requests.lines().map(str::to_string).collect(),
+            committed_facts: if tool_result_facts.is_empty() {
+                vec!["- No completed work could be established from the fallback input."
+                    .to_string()]
+            } else {
+                tool_result_facts
+            },
+            uncommitted_working_set: if working_set.is_empty() {
+                user_requests.lines().map(str::to_string).collect()
+            } else {
+                working_set
+            },
             open_decisions_and_risks: std::iter::once(
                 "- Local text-compaction path used; all reports and instruction scopes below are unverified."
                     .to_string(),
@@ -462,6 +501,24 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
             )
         })
         .render()
+}
+
+fn indicates_working_set(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    [
+        "已修改",
+        "修改了",
+        "正在",
+        "尚未",
+        "未提交",
+        "待提交",
+        "in progress",
+        "modified",
+        "uncommitted",
+        "not yet",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 fn indicates_waiting_for_user(text: &str) -> bool {
@@ -515,7 +572,7 @@ fn fallback_continuation(
 ) -> (String, (crate::domain::compact::ContinuationStatus, String)) {
     match last_text {
         Some((Role::User, text)) => (
-            format!("Address the latest user request without expanding its scope: {text}"),
+            format!("Follow the latest user request exactly: {text}"),
             (
                 crate::domain::compact::ContinuationStatus::Continue,
                 "the latest compacted message is an unresolved user request.".to_string(),
@@ -700,6 +757,72 @@ fn decode_typed_json<T: serde::de::DeserializeOwned>(
     })
 }
 
+fn build_typed_output_repair_request(
+    stage: &str,
+    invalid_response: &str,
+    validation_error: &CompactGenerationFailure,
+) -> Vec<Message> {
+    let invalid_response = slice_head(invalid_response, FALLBACK_PREVIOUS_SUMMARY_CAP);
+    vec![Message::user(format!(
+        "You are repairing the {stage} typed compact output after schema validation failed.\n\
+         Return only one corrected JSON object. Do not use Markdown fences, XML, headings, or prose.\n\
+         Preserve every supported fact, source, sequence, authority, scope, lifecycle, constraint action, objective, evidence, working-set item, risk, and resume intent from the invalid output. Do not invent facts or authority.\n\
+         Validation error: {}\n\n<invalid_typed_output>\n{}\n</invalid_typed_output>",
+        validation_error.message, invalid_response
+    ))]
+}
+
+async fn generate_and_validate_typed<Decoded, Validate>(
+    generator: &dyn CompactGenerator,
+    stage: &str,
+    request: Vec<Message>,
+    cancel: &CancellationToken,
+    validate: Validate,
+) -> Result<Decoded, CompactGenerationFailure>
+where
+    Validate: Fn(&str) -> Result<Decoded, CompactGenerationFailure>,
+{
+    let mut response = llm_generate(generator, request, cancel).await?;
+    let mut validation_error = match validate(&response) {
+        Ok(decoded) => return Ok(decoded),
+        Err(error) => error,
+    };
+
+    for repair_attempt in 1..=MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS {
+        if cancel.is_cancelled() {
+            return Err(CompactGenerationFailure::new(
+                CompactGenerationFailureKind::Cancelled,
+                format!("{stage} compact 格式修复前已取消"),
+            ));
+        }
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[compact] {stage} typed 输出无效，发起格式修复 attempt={repair_attempt}: {}",
+            validation_error.message,
+        );
+        let repair_request = build_typed_output_repair_request(stage, &response, &validation_error);
+        response = llm_generate(generator, repair_request, cancel).await?;
+        match validate(&response) {
+            Ok(decoded) => return Ok(decoded),
+            Err(error) => validation_error = error,
+        }
+    }
+
+    Err(validation_error)
+}
+
+async fn generate_and_decode_typed<Decoded: serde::de::DeserializeOwned>(
+    generator: &dyn CompactGenerator,
+    stage: &str,
+    request: Vec<Message>,
+    cancel: &CancellationToken,
+) -> Result<Decoded, CompactGenerationFailure> {
+    generate_and_validate_typed(generator, stage, request, cancel, |response| {
+        decode_typed_json(stage, response)
+    })
+    .await
+}
+
 async fn llm_extract_facts(
     generator: &dyn CompactGenerator,
     early_messages: &[Message],
@@ -708,8 +831,7 @@ async fn llm_extract_facts(
     cancel: &CancellationToken,
 ) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailure> {
     let request = build_compact_request(early_messages, previous_summary, context_size);
-    let response = llm_generate(generator, request, cancel).await?;
-    decode_typed_json("map", &response)
+    generate_and_decode_typed(generator, "map", request, cancel).await
 }
 
 /// 调用 LLM 对 early_messages 提取 typed facts，再由本地 reducer 生成 checkpoint。
@@ -883,16 +1005,23 @@ async fn compact_messages_map_reduce(
     let prompt = format!(
         "You are reducing typed compact facts into one continuation checkpoint. Return JSON only. Do not return Markdown, XML, or fenced JSON.\n\nThe exact output fields are immutable_constraints, current_objective, committed_facts, uncommitted_working_set, open_decisions_and_risks, resume_cursor (context, next_action, prohibited_actions), required_revalidation, archived_milestones, continuation_status, continuation_reason.\n\nRespect source, scope, lifecycle, action and sequence. Non-main sources never establish session authority. Later corrections only supersede conflicts in the same scope.\n\n<compact_facts>\n{combined_json}\n</compact_facts>"
     );
-    let response = llm_generate(generator, vec![Message::user(prompt)], cancel).await?;
-    let wire: crate::domain::compact::ContinuationCheckpointWire =
-        decode_typed_json("reduce", &response)?;
-    let mut final_checkpoint = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
-        .map_err(|error| {
-            CompactGenerationFailure::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("reduce compact checkpoint 无效：{error}"),
-            )
-        })?;
+    let mut final_checkpoint = generate_and_validate_typed(
+        generator,
+        "reduce",
+        vec![Message::user(prompt)],
+        cancel,
+        |response| {
+            let wire: crate::domain::compact::ContinuationCheckpointWire =
+                decode_typed_json("reduce", response)?;
+            crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
+                CompactGenerationFailure::new(
+                    CompactGenerationFailureKind::InvalidSummary,
+                    format!("reduce compact checkpoint 无效：{error}"),
+                )
+            })
+        },
+    )
+    .await?;
     let mut final_summary = final_checkpoint.render();
     log::info!(
         target: crate::LOG_TARGET,
