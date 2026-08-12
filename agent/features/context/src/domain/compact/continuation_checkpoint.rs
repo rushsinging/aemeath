@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 const SECTION_HEADINGS: [&str; 9] = [
@@ -12,7 +13,8 @@ const SECTION_HEADINGS: [&str; 9] = [
     "Continuation Status",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContinuationStatus {
     Continue,
     WaitingForUser,
@@ -49,6 +51,89 @@ impl ResumeCursor {
 
     pub fn next_action_count(&self) -> usize {
         usize::from(!self.next_action.is_empty())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeCursorWire {
+    pub context: Vec<String>,
+    pub next_action: String,
+    pub prohibited_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContinuationCheckpointWire {
+    pub immutable_constraints: Vec<String>,
+    pub current_objective: String,
+    pub committed_facts: Vec<String>,
+    pub uncommitted_working_set: Vec<String>,
+    pub open_decisions_and_risks: Vec<String>,
+    pub resume_cursor: ResumeCursorWire,
+    pub required_revalidation: Vec<String>,
+    pub archived_milestones: Vec<String>,
+    pub continuation_status: ContinuationStatus,
+    pub continuation_reason: String,
+}
+
+impl TryFrom<ContinuationCheckpointWire> for ContinuationCheckpoint {
+    type Error = CheckpointError;
+
+    fn try_from(wire: ContinuationCheckpointWire) -> Result<Self, Self::Error> {
+        let current_objective = normalize_control_text(&wire.current_objective);
+        if current_objective.is_empty() {
+            return Err(CheckpointError::MissingCurrentObjective);
+        }
+        let mut resume_cursor_lines = wire
+            .resume_cursor
+            .context
+            .into_iter()
+            .map(|line| as_bullet(&line))
+            .collect::<Vec<_>>();
+        resume_cursor_lines.extend(
+            wire.resume_cursor
+                .prohibited_actions
+                .into_iter()
+                .map(|line| format!("- Prohibited: {}", normalize_control_text(&line))),
+        );
+        Self::from_sections(CheckpointSections {
+            immutable_constraints: wire
+                .immutable_constraints
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            current_objective: vec![as_bullet(&current_objective)],
+            committed_facts: wire
+                .committed_facts
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            uncommitted_working_set: wire
+                .uncommitted_working_set
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            open_decisions_and_risks: wire
+                .open_decisions_and_risks
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            resume_cursor_lines,
+            next_action: wire.resume_cursor.next_action,
+            required_revalidation: wire
+                .required_revalidation
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            archived_milestones: wire
+                .archived_milestones
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            status: wire.continuation_status,
+            status_reason: Some(wire.continuation_reason),
+        })
     }
 }
 
@@ -381,6 +466,15 @@ fn decode_content_line(line: &str) -> String {
         .to_string()
 }
 
+fn as_bullet(source: &str) -> String {
+    let normalized = normalize_control_text(source);
+    if normalized.starts_with("- ") {
+        normalized
+    } else {
+        format!("- {normalized}")
+    }
+}
+
 fn normalize_control_text(source: &str) -> String {
     source.lines().map(str::trim).collect::<Vec<_>>().join(" ")
 }
@@ -464,6 +558,7 @@ pub enum CheckpointError {
         estimated_tokens: usize,
         budget: usize,
     },
+    MissingCurrentObjective,
     ContentBeforeFirstSection,
 }
 
@@ -492,6 +587,7 @@ impl fmt::Display for CheckpointError {
                 formatter,
                 "checkpoint 保护分区超过预算：估算 {estimated_tokens} tokens，预算 {budget} tokens"
             ),
+            Self::MissingCurrentObjective => write!(formatter, "Current Objective 不得为空"),
             Self::ContentBeforeFirstSection => {
                 write!(formatter, "首个 checkpoint 分区前存在非法内容")
             }

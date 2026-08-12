@@ -1,3 +1,4 @@
+use super::{CheckpointError, CheckpointSections, ContinuationCheckpoint, ContinuationStatus};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
@@ -223,6 +224,120 @@ impl CompactFactBatch {
 
     pub fn into_facts(self) -> Vec<CompactFact> {
         self.facts
+    }
+}
+
+pub fn reduce_compact_facts(
+    batch: CompactFactBatch,
+) -> Result<ContinuationCheckpoint, CheckpointError> {
+    let mut indexed_facts = batch
+        .into_facts()
+        .into_iter()
+        .enumerate()
+        .collect::<Vec<_>>();
+    indexed_facts.sort_by_key(|(original_index, fact)| (fact.sequence(), *original_index));
+
+    let mut immutable_constraints = Vec::new();
+    let mut current_objective = None;
+    let mut committed_facts = Vec::new();
+    let mut working_set = Vec::new();
+    let mut risks = Vec::new();
+    let mut next_action = None;
+    let mut revalidation = Vec::new();
+    let mut milestones = Vec::new();
+
+    for (_, fact) in indexed_facts {
+        let fact = fact.normalize_scope();
+        match fact.kind() {
+            CompactFactKind::Constraint => {
+                let metadata = fact
+                    .constraint_metadata()
+                    .expect("validated constraint fact must have metadata");
+                if fact.source() == CompactFactSource::MainUser
+                    && metadata.scope() == ConstraintScope::Session
+                    && metadata.lifecycle() == ConstraintLifecycle::Persistent
+                {
+                    match metadata.action() {
+                        ConstraintAction::Grant
+                        | ConstraintAction::Restrict
+                        | ConstraintAction::Supersede => {
+                            if metadata.action() == ConstraintAction::Supersede {
+                                immutable_constraints.clear();
+                            }
+                            immutable_constraints.push(as_fact_bullet(fact.text()));
+                        }
+                        ConstraintAction::Revoke => immutable_constraints.clear(),
+                    }
+                } else {
+                    risks.push(format!(
+                        "- scope unverified ({:?}/{:?}): {}",
+                        metadata.scope(),
+                        metadata.lifecycle(),
+                        fact.text()
+                    ));
+                }
+            }
+            CompactFactKind::Objective if fact.source() == CompactFactSource::MainUser => {
+                current_objective = Some(as_fact_bullet(fact.text()));
+            }
+            CompactFactKind::Objective => {
+                risks.push(format!("- unverified objective: {}", fact.text()));
+            }
+            CompactFactKind::CommittedFact if fact.source() == CompactFactSource::ToolResult => {
+                committed_facts.push(as_fact_bullet(fact.text()));
+            }
+            CompactFactKind::CommittedFact => {
+                risks.push(format!("- unverified fact: {}", fact.text()));
+            }
+            CompactFactKind::WorkingSet => working_set.push(as_fact_bullet(fact.text())),
+            CompactFactKind::Risk => risks.push(as_fact_bullet(fact.text())),
+            CompactFactKind::ResumeCandidate if fact.source() == CompactFactSource::MainUser => {
+                next_action = Some(fact.text().to_string());
+            }
+            CompactFactKind::ResumeCandidate => {
+                risks.push(format!("- unverified next action: {}", fact.text()));
+            }
+            CompactFactKind::Revalidation => revalidation.push(as_fact_bullet(fact.text())),
+            CompactFactKind::Milestone => milestones.push(as_fact_bullet(fact.text())),
+        }
+    }
+
+    let current_objective = current_objective
+        .unwrap_or_else(|| "- Revalidate the latest user objective before continuing.".to_string());
+    let next_action = next_action
+        .unwrap_or_else(|| "Revalidate the latest user objective before continuing.".to_string());
+    let status = if current_objective.contains("Revalidate the latest user objective") {
+        ContinuationStatus::WaitingForUser
+    } else {
+        ContinuationStatus::Continue
+    };
+
+    ContinuationCheckpoint::from_sections(CheckpointSections {
+        immutable_constraints,
+        current_objective: vec![current_objective],
+        committed_facts,
+        uncommitted_working_set: working_set,
+        open_decisions_and_risks: risks,
+        resume_cursor_lines: Vec::new(),
+        next_action,
+        required_revalidation: revalidation,
+        archived_milestones: milestones,
+        status,
+        status_reason: Some(match status {
+            ContinuationStatus::Continue => "a main-user objective remains active.".to_string(),
+            ContinuationStatus::WaitingForUser => {
+                "no active main-user objective could be established.".to_string()
+            }
+            ContinuationStatus::Completed => unreachable!("fact reducer never infers completion"),
+        }),
+    })
+}
+
+fn as_fact_bullet(source: &str) -> String {
+    if source.trim_start().starts_with("- ") {
+        source.trim().to_string()
+    } else {
+        format!("- {}", source.trim())
     }
 }
 
