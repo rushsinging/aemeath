@@ -32,6 +32,72 @@ const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 Continue — TUI consumption remains."#;
 
 #[test]
+fn compression_patch_changes_only_unprotected_sections() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+    let protected_wire = original.to_wire();
+    let patch = CheckpointCompressionPatch {
+        committed_facts: vec!["Commit `5e42c9aa` passed tests.".to_string()],
+        uncommitted_working_set: vec!["TUI remains.".to_string()],
+        open_decisions_and_risks: vec!["Compatibility ownership remains open.".to_string()],
+        resume_context: vec!["Worktree: structured compact".to_string()],
+        required_revalidation: vec!["Recheck PR state.".to_string()],
+        archived_milestones: vec!["Baseline `5e42c9aa`.".to_string()],
+    };
+
+    let compressed = original.apply_compression_patch(patch).unwrap();
+    let compressed_wire = compressed.to_wire();
+
+    assert_eq!(
+        compressed_wire.immutable_constraints,
+        protected_wire.immutable_constraints
+    );
+    assert_eq!(
+        compressed_wire.current_objective,
+        protected_wire.current_objective
+    );
+    assert_eq!(
+        compressed_wire.resume_cursor.next_action,
+        protected_wire.resume_cursor.next_action
+    );
+    assert_eq!(
+        compressed_wire.resume_cursor.prohibited_actions,
+        protected_wire.resume_cursor.prohibited_actions
+    );
+    assert_eq!(
+        compressed_wire.continuation_status,
+        protected_wire.continuation_status
+    );
+    assert_eq!(
+        compressed_wire.continuation_reason,
+        protected_wire.continuation_reason
+    );
+    assert_eq!(
+        compressed_wire.committed_facts,
+        vec!["Commit `5e42c9aa` passed tests."]
+    );
+    assert_eq!(
+        compressed_wire.uncommitted_working_set,
+        vec!["TUI remains."]
+    );
+}
+
+#[test]
+fn compression_patch_rejects_unknown_fields() {
+    let source = r#"{
+      "committed_facts": [],
+      "uncommitted_working_set": [],
+      "open_decisions_and_risks": [],
+      "resume_context": [],
+      "required_revalidation": [],
+      "archived_milestones": [],
+      "current_objective": "must not be writable"
+    }"#;
+
+    let error = serde_json::from_str::<CheckpointCompressionPatch>(source).unwrap_err();
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
 fn typed_checkpoint_wire_renders_the_compatible_nine_sections() {
     let source = r#"{
       "immutable_constraints": ["Do not merge without approval."],

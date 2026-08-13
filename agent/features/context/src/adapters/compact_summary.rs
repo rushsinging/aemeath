@@ -136,11 +136,14 @@ const REFRESH_BUDGET_RATIO: usize = 8; // × 0.8
 /// 只保留决策/状态实质；预算为硬约束（MUST NOT exceed），且按
 /// `summary_budget × 0.8` 提示，为 LLM 实际输出超出提示预算留余量，
 /// 保证真实输出落在 summary_budget 内。
-const COMPACT_REFRESH_PROMPT: &str = r#"You are compressing an existing typed conversation checkpoint. Return JSON only. Do not use Markdown fences, XML, headings, or prose outside the JSON object.
+const COMPACT_REFRESH_PROMPT: &str = r#"You are compressing only the unprotected detail fields of an existing conversation checkpoint. Return JSON only. Do not use Markdown fences, XML, headings, or prose outside the JSON object.
 
-CRITICAL BUDGET: The compressed output MUST NOT exceed {BUDGET} tokens. Drop only unprotected details when needed.
+CRITICAL BUDGET: The compressed patch MUST help the rendered checkpoint fit within {BUDGET} tokens. Drop low-value or duplicated details aggressively.
 
-Preserve these fields exactly: immutable_constraints, current_objective, resume_cursor.next_action, resume_cursor.prohibited_actions, continuation_status, and continuation_reason. You may shorten committed_facts, uncommitted_working_set, open_decisions_and_risks, required_revalidation, archived_milestones, and resume_cursor.context.
+The exact output shape is:
+{"committed_facts":["string"],"uncommitted_working_set":["string"],"open_decisions_and_risks":["string"],"resume_context":["string"],"required_revalidation":["string"],"archived_milestones":["string"]}
+
+All six fields are required string arrays. Use [] when a field has no retained items. Do not return null, scalar strings, nested objects, or unknown fields. The protected immutable_constraints, current_objective, resume_cursor.next_action, resume_cursor.prohibited_actions, continuation_status, and continuation_reason fields are intentionally absent and cannot be changed by this patch.
 "#;
 
 /// 构建再压提示词（#1490）：硬预算 + 激进压缩指令。
@@ -152,10 +155,18 @@ pub(crate) fn build_refresh_prompt(
     budget: usize,
 ) -> String {
     let prompt_budget = budget * REFRESH_BUDGET_RATIO / 10;
-    let checkpoint_json = serde_json::to_string(&checkpoint.to_wire())
-        .expect("typed continuation checkpoint must serialize");
+    let wire = checkpoint.to_wire();
+    let patch_json = serde_json::to_string(&crate::domain::compact::CheckpointCompressionPatch {
+        committed_facts: wire.committed_facts,
+        uncommitted_working_set: wire.uncommitted_working_set,
+        open_decisions_and_risks: wire.open_decisions_and_risks,
+        resume_context: wire.resume_cursor.context,
+        required_revalidation: wire.required_revalidation,
+        archived_milestones: wire.archived_milestones,
+    })
+    .expect("typed checkpoint compression patch must serialize");
     format!(
-        "{COMPACT_REFRESH_PROMPT}\n<current_checkpoint>\n{checkpoint_json}\n</current_checkpoint>"
+        "{COMPACT_REFRESH_PROMPT}\n<unprotected_checkpoint_details>\n{patch_json}\n</unprotected_checkpoint_details>"
     )
     .replace("{BUDGET}", &prompt_budget.to_string())
 }
@@ -174,24 +185,17 @@ async fn llm_refresh(
         vec![Message::user(prompt)],
         cancel,
         |response| {
-            let wire: crate::domain::compact::ContinuationCheckpointWire =
+            let patch: crate::domain::compact::CheckpointCompressionPatch =
                 decode_typed_json("refresh", response)?;
-            let refreshed = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
+            checkpoint
+                .clone()
+                .apply_compression_patch(patch)
                 .map_err(|error| {
                     CompactGenerationFailure::new(
                         CompactGenerationFailureKind::InvalidSummary,
-                        format!("refresh compact checkpoint 无效：{error}"),
+                        format!("refresh compact patch 无效：{error}"),
                     )
-                })?;
-            refreshed
-                .validate_refresh_from(checkpoint)
-                .map_err(|error| {
-                    CompactGenerationFailure::new(
-                        CompactGenerationFailureKind::InvalidSummary,
-                        format!("refresh compact checkpoint 违反保护语义：{error}"),
-                    )
-                })?;
-            Ok(refreshed)
+                })
         },
     )
     .await?;
@@ -987,41 +991,21 @@ async fn compact_messages_map_reduce(
             });
     }
 
-    // reduce: 合并 typed facts，调用 LLM 生成 typed checkpoint wire。
+    // reduce: Context 按 chunk index 与 fact sequence 确定性归并，LLM 不再构造权威 checkpoint。
     emit_progress(progress, CompactStage::Reducing);
     let combined_facts = fact_batches
         .into_iter()
         .flat_map(crate::domain::compact::CompactFactBatch::into_facts)
         .collect::<Vec<_>>();
-    let combined_json = serde_json::to_string(&crate::domain::compact::CompactFactBatch::new(
-        combined_facts,
-    ))
+    let mut final_checkpoint = crate::domain::compact::reduce_compact_facts(
+        crate::domain::compact::CompactFactBatch::new(combined_facts),
+    )
     .map_err(|error| {
         CompactGenerationFailure::new(
             CompactGenerationFailureKind::InvalidSummary,
-            format!("reduce compact facts 无法序列化：{error}"),
+            format!("reduce compact facts 无法归并：{error}"),
         )
     })?;
-    let prompt = format!(
-        "You are reducing typed compact facts into one continuation checkpoint. Return JSON only. Do not return Markdown, XML, or fenced JSON.\n\nThe exact output fields are immutable_constraints, current_objective, committed_facts, uncommitted_working_set, open_decisions_and_risks, resume_cursor (context, next_action, prohibited_actions), required_revalidation, archived_milestones, continuation_status, continuation_reason.\n\nRespect source, scope, lifecycle, action and sequence. Non-main sources never establish session authority. Later corrections only supersede conflicts in the same scope.\n\n<compact_facts>\n{combined_json}\n</compact_facts>"
-    );
-    let mut final_checkpoint = generate_and_validate_typed(
-        generator,
-        "reduce",
-        vec![Message::user(prompt)],
-        cancel,
-        |response| {
-            let wire: crate::domain::compact::ContinuationCheckpointWire =
-                decode_typed_json("reduce", response)?;
-            crate::domain::compact::ContinuationCheckpoint::try_from(wire).map_err(|error| {
-                CompactGenerationFailure::new(
-                    CompactGenerationFailureKind::InvalidSummary,
-                    format!("reduce compact checkpoint 无效：{error}"),
-                )
-            })
-        },
-    )
-    .await?;
     let mut final_summary = final_checkpoint.render();
     log::info!(
         target: crate::LOG_TARGET,

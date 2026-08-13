@@ -426,3 +426,24 @@ PR body 必须包含：根因、typed map/reduce/refresh、scope 防升级、leg
 Run: `gh pr view <PR编号> --repo rushsinging/aemeath --json url,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,headRefOid`
 
 Expected: PR OPEN、非 Draft；报告真实 required checks 状态，未经当前 head 的具体授权不合并。
+
+## 根因收敛补充：Rust-owned Reduce
+
+真实运行证明，要求 LLM 输出完整 `ContinuationCheckpointWire` 即使经过格式修复仍会把 string、string array 与 object 混淆。根因方案调整为：
+
+1. 所有 Map chunk 只输出 `CompactFactBatch`。
+2. Context 按 chunk index 与 fact sequence 合并 fact batch，并由 `reduce_compact_facts` 确定性构造完整 `ContinuationCheckpoint`。
+3. LLM 不再生成完整 checkpoint wire，也不能写入 immutable constraints、current objective、resume cursor、continuation status 或 continuation reason。
+4. checkpoint 超预算时，LLM 只返回 `CheckpointCompressionPatch`，字段限定为 committed facts、working set、risks、required revalidation、archived milestones 与 resume context。
+5. Context 将 patch 应用到原 checkpoint，同时保留全部 protected semantics；非法 patch 先进行一次格式修复，仍失败则保留当前 checkpoint。
+6. 删除旧的 LLM checkpoint Reduce prompt、wire decode 和相关兼容测试，避免形成第二条 authoritative construction path。
+
+执行步骤：
+
+1. 添加多块 Map 本地归并失败测试，证明 Reduce 阶段不再请求完整 checkpoint。
+2. 添加 typed compression patch schema、repair 和 protected-field 测试。
+3. 实现 Rust-owned multi-chunk fact reduction。
+4. 实现并应用非保护字段 compression patch。
+5. 清理 LLM full-wire Reduce 路径并同步 durable contract。
+6. 运行 Context、Clippy、架构守卫与 pre-push 等价验证。
+7. 创建本地提交，不推送。

@@ -64,6 +64,17 @@ pub struct ResumeCursorWire {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CheckpointCompressionPatch {
+    pub committed_facts: Vec<String>,
+    pub uncommitted_working_set: Vec<String>,
+    pub open_decisions_and_risks: Vec<String>,
+    pub resume_context: Vec<String>,
+    pub required_revalidation: Vec<String>,
+    pub archived_milestones: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContinuationCheckpointWire {
     pub immutable_constraints: Vec<String>,
     pub current_objective: String,
@@ -401,6 +412,31 @@ impl ContinuationCheckpoint {
             resume_cursor,
             status,
         })
+    }
+
+    pub fn apply_compression_patch(
+        self,
+        patch: CheckpointCompressionPatch,
+    ) -> Result<Self, CheckpointError> {
+        let protected_wire = self.to_wire();
+        let patched = Self::try_from(ContinuationCheckpointWire {
+            immutable_constraints: protected_wire.immutable_constraints,
+            current_objective: protected_wire.current_objective,
+            committed_facts: patch.committed_facts,
+            uncommitted_working_set: patch.uncommitted_working_set,
+            open_decisions_and_risks: patch.open_decisions_and_risks,
+            resume_cursor: ResumeCursorWire {
+                context: patch.resume_context,
+                next_action: protected_wire.resume_cursor.next_action,
+                prohibited_actions: protected_wire.resume_cursor.prohibited_actions,
+            },
+            required_revalidation: patch.required_revalidation,
+            archived_milestones: patch.archived_milestones,
+            continuation_status: protected_wire.continuation_status,
+            continuation_reason: protected_wire.continuation_reason,
+        })?;
+        patched.validate_refresh_from(&self)?;
+        Ok(patched)
     }
 
     pub fn status(&self) -> ContinuationStatus {
