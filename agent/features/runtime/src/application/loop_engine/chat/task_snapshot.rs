@@ -194,73 +194,58 @@ pub(crate) fn build_task_reminder_intent(
     Some(reminder)
 }
 
-/// #1537：渲染当前 Task 状态为纯文本（无标签包装），供 compact summary 拼接。
-///
-/// 与 TUI/reminder 路径不同：compact summary 给 LLM 读，**MUST** 携带完整标识
-///（batch id、task id、seq），使 LLM 能在压缩后精确引用 task。无活跃 batch
-/// 或无任务时返回 `None`。
-pub(crate) fn build_task_snapshot_text(access: &dyn TaskAccess) -> Option<String> {
+/// 将当前 Task aggregate 冻结为 Context-owned typed compact snapshot。
+pub(crate) fn build_compact_task_snapshot(
+    access: &dyn TaskAccess,
+) -> Option<context::compact::CompactTaskSnapshot> {
     let batch_id = access.current_batch()?;
-    let mut tasks: Vec<Task> = access
-        .list()
-        .into_iter()
-        .filter(|task| task.batch() == batch_id && task.status() != TaskStatus::Deleted)
-        .collect();
-    if tasks.is_empty() {
+    let batch_snapshot = access.batch_snapshot(batch_id)?;
+    let batch = batch_snapshot.batch();
+    let batch_summary = batch.summary()?.trim();
+    if batch_summary.is_empty() {
         return None;
     }
-
-    let total = tasks.len();
-    let completed_count = tasks
-        .iter()
-        .filter(|t| t.status() == TaskStatus::Completed)
-        .count();
-
-    // 排序：Completed → InProgress → Pending，组内按 updated_at 升序。
-    tasks.sort_by(|a, b| {
-        let rank = |t: &Task| match t.status() {
-            TaskStatus::Completed => 0,
-            TaskStatus::InProgress => 1,
-            TaskStatus::Pending => 2,
-            TaskStatus::Deleted => 3,
-        };
-        rank(a)
-            .cmp(&rank(b))
-            .then_with(|| a.updated_at().cmp(&b.updated_at()))
-    });
-
-    let display_map: HashMap<TaskId, u64> =
-        tasks.iter().map(|task| (task.id(), task.seq())).collect();
-
-    let mut lines = vec![format!(
-        "Batch #{batch_id} — Tasks: {completed_count}/{total}"
-    )];
-    for task in &tasks {
-        lines.push(format_compact_task_line(task, &display_map));
-    }
-    Some(lines.join("\n"))
-}
-
-/// compact summary 专用渲染：携带完整标识（batch id / task id / seq）。
-///
-/// 与 TUI 的 `format_task_status_line`（隐藏持久化 ID）互补——compact 后
-/// Agent 需要精确引用 task，标识不能丢失。
-fn format_compact_task_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> String {
-    let icon = match task.status() {
-        TaskStatus::Completed => "✓",
-        TaskStatus::InProgress => "■",
-        TaskStatus::Pending => "□",
-        TaskStatus::Deleted => "?",
+    let status = match batch.status() {
+        BatchStatus::Active => context::compact::CompactTaskBatchStatus::Active,
+        BatchStatus::Paused => context::compact::CompactTaskBatchStatus::Paused,
+        BatchStatus::Archived => context::compact::CompactTaskBatchStatus::Archived,
     };
-    let blocked_by = format_blocked_by(task.blocked_by(), display_map);
-    format!(
-        "{} [task:{} seq:{}] {}{}",
-        icon,
-        task.id().get(),
-        task.seq(),
-        task.subject(),
-        blocked_by,
-    )
+    let sequence_by_id = batch_snapshot
+        .tasks()
+        .iter()
+        .map(|task| (task.id(), task.seq()))
+        .collect::<HashMap<_, _>>();
+    let items = batch_snapshot
+        .tasks()
+        .iter()
+        .filter(|task| task.status() != TaskStatus::Deleted)
+        .map(|task| {
+            context::compact::CompactTaskItem::new(
+                task.seq(),
+                task.subject(),
+                match task.status() {
+                    TaskStatus::Pending => context::compact::CompactTaskStatus::Pending,
+                    TaskStatus::InProgress => context::compact::CompactTaskStatus::InProgress,
+                    TaskStatus::Completed => context::compact::CompactTaskStatus::Completed,
+                    TaskStatus::Deleted => unreachable!("deleted tasks were filtered"),
+                },
+                task.blocked_by()
+                    .iter()
+                    .filter_map(|task_id| sequence_by_id.get(task_id).copied())
+                    .collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return None;
+    }
+    Some(context::compact::CompactTaskSnapshot::new(
+        access.revision().get(),
+        batch.id().get(),
+        batch_summary,
+        status,
+        items,
+    ))
 }
 
 #[cfg(test)]
@@ -363,6 +348,7 @@ fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> S
     format!("{} #{} {}{}", icon, task.seq(), task.subject(), blocked_by)
 }
 
+#[cfg(test)]
 fn format_blocked_by(blocked_by: &[TaskId], display_map: &HashMap<TaskId, u64>) -> String {
     let deps = blocked_by
         .iter()

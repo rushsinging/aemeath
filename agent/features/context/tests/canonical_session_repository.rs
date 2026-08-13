@@ -390,7 +390,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -535,7 +535,7 @@ async fn compaction_preserves_skill_load_records() {
             source: compact_request(SessionId::new(&session_id)),
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -752,7 +752,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         }),
     )
@@ -1414,7 +1414,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
                     source: request,
                     trigger: CompactTrigger::Automatic,
                     progress: None,
-                    task_context: None,
+                    task_snapshot: None,
                     cancellation: tokio_util::sync::CancellationToken::new(),
                 })
                 .await
@@ -1492,7 +1492,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation,
         })
         .await
@@ -1573,7 +1573,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
                 source: request.clone(),
                 trigger: CompactTrigger::Automatic,
                 progress: None,
-                task_context: None,
+                task_snapshot: None,
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -1586,7 +1586,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: CancellationToken::new(),
         })
         .await
@@ -1666,7 +1666,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
         source: automatic_source,
         trigger: CompactTrigger::Automatic,
         progress: None,
-        task_context: None,
+        task_snapshot: None,
         cancellation: CancellationToken::new(),
     };
     let _ = repository.commit_compaction(&automatic).await;
@@ -1679,7 +1679,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 200_000,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -1708,7 +1708,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -1733,7 +1733,7 @@ async fn manual_compaction_bypasses_automatic_threshold() {
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 1_000_000,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -1834,7 +1834,7 @@ async fn compaction_rejects_stale_source_revision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await;
@@ -1922,7 +1922,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             source: generated_request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -1959,7 +1959,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
 
 /// #1537：compact summary 出口拼接当前 Task 状态，防止递进压缩后上下文丢失。
 #[tokio::test]
-async fn commit_compaction_appends_task_context_to_summary() {
+async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
@@ -1973,15 +1973,24 @@ async fn commit_compaction_appends_task_context_to_summary() {
             source: request,
             trigger: context::domain::CompactTrigger::Automatic,
             progress: None,
-            task_context: Some("■ #1 实现压缩拼接".to_string()),
+            task_snapshot: Some(context::compact::CompactTaskSnapshot::active(
+                1,
+                1,
+                "实现压缩拼接",
+                vec![context::compact::CompactTaskItem::in_progress(
+                    1,
+                    "实现压缩拼接",
+                )],
+            )),
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(ref result)
-            if result.summary.matches("## Current Task State").count() == 1
-            && result.summary.contains("■ #1 实现压缩拼接")
-    ));
+    let context::domain::CompactOutcome::Committed(result) = &outcome else {
+        panic!("expected committed compact: {outcome:?}");
+    };
+    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
+    assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
+    assert!(result.summary.contains("- Next action: 实现压缩拼接"));
+    assert!(result.summary.contains("## Current Objective"));
 }

@@ -627,6 +627,7 @@ pub async fn compact_messages_with_llm(
     context_size: usize,
     generator: Option<&dyn CompactGenerator>,
     progress: Option<&dyn CompactProgressFn>,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
     // should_compact 判定已在调用方（状态机 needs_compaction）完成。
@@ -661,6 +662,7 @@ pub async fn compact_messages_with_llm(
                     previous_summary,
                     progress,
                     context_size,
+                    task_snapshot,
                     cancel,
                 )
                 .await
@@ -671,6 +673,7 @@ pub async fn compact_messages_with_llm(
                     early_messages,
                     previous_summary,
                     context_size,
+                    task_snapshot,
                     cancel,
                 )
                 .await
@@ -844,6 +847,7 @@ async fn llm_compact(
     early_messages: &[Message],
     previous_summary: Option<&str>,
     context_size: usize,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Result<String, CompactGenerationFailure> {
     let facts = llm_extract_facts(
@@ -854,12 +858,14 @@ async fn llm_compact(
         cancel,
     )
     .await?;
-    let checkpoint = crate::domain::compact::reduce_compact_facts(facts).map_err(|error| {
-        CompactGenerationFailure::new(
-            CompactGenerationFailureKind::InvalidSummary,
-            format!("map compact facts 无法归并：{error}"),
-        )
-    })?;
+    let checkpoint =
+        crate::domain::compact::reduce_compact_facts_with_task_snapshot(facts, task_snapshot)
+            .map_err(|error| {
+                CompactGenerationFailure::new(
+                    CompactGenerationFailureKind::InvalidSummary,
+                    format!("map compact facts 无法归并：{error}"),
+                )
+            })?;
     checkpoint
         .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
         .map(|checkpoint| checkpoint.render())
@@ -913,6 +919,7 @@ async fn compact_messages_map_reduce(
     previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
     context_size: usize,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Result<String, CompactGenerationFailure> {
     use crate::domain::token_budget::estimate_messages_tokens;
@@ -977,18 +984,21 @@ async fn compact_messages_map_reduce(
             .into_iter()
             .next()
             .unwrap_or_else(|| crate::domain::compact::CompactFactBatch::new(Vec::new()));
-        return crate::domain::compact::reduce_compact_facts(facts)
-            .and_then(|checkpoint| {
-                checkpoint
-                    .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
-            })
-            .map(|checkpoint| checkpoint.render())
-            .map_err(|error| {
-                CompactGenerationFailure::new(
-                    CompactGenerationFailureKind::InvalidSummary,
-                    format!("map compact facts 无法归并：{error}"),
-                )
-            });
+        return crate::domain::compact::reduce_compact_facts_with_task_snapshot(
+            facts,
+            task_snapshot,
+        )
+        .and_then(|checkpoint| {
+            checkpoint
+                .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
+        })
+        .map(|checkpoint| checkpoint.render())
+        .map_err(|error| {
+            CompactGenerationFailure::new(
+                CompactGenerationFailureKind::InvalidSummary,
+                format!("map compact facts 无法归并：{error}"),
+            )
+        });
     }
 
     // reduce: Context 按 chunk index 与 fact sequence 确定性归并，LLM 不再构造权威 checkpoint。
@@ -997,8 +1007,9 @@ async fn compact_messages_map_reduce(
         .into_iter()
         .flat_map(crate::domain::compact::CompactFactBatch::into_facts)
         .collect::<Vec<_>>();
-    let mut final_checkpoint = crate::domain::compact::reduce_compact_facts(
+    let mut final_checkpoint = crate::domain::compact::reduce_compact_facts_with_task_snapshot(
         crate::domain::compact::CompactFactBatch::new(combined_facts),
+        task_snapshot,
     )
     .map_err(|error| {
         CompactGenerationFailure::new(

@@ -208,6 +208,200 @@ impl CompactFact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactTaskBatchStatus {
+    Active,
+    Paused,
+    Archived,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactTaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactTaskItem {
+    sequence: u64,
+    subject: String,
+    status: CompactTaskStatus,
+    blocked_by_sequences: Vec<u64>,
+}
+
+impl CompactTaskItem {
+    pub fn pending(
+        sequence: u64,
+        subject: impl Into<String>,
+        blocked_by_sequences: Vec<u64>,
+    ) -> Self {
+        Self::new(
+            sequence,
+            subject,
+            CompactTaskStatus::Pending,
+            blocked_by_sequences,
+        )
+    }
+
+    pub fn in_progress(sequence: u64, subject: impl Into<String>) -> Self {
+        Self::new(sequence, subject, CompactTaskStatus::InProgress, Vec::new())
+    }
+
+    pub fn completed(sequence: u64, subject: impl Into<String>) -> Self {
+        Self::new(sequence, subject, CompactTaskStatus::Completed, Vec::new())
+    }
+
+    pub fn new(
+        sequence: u64,
+        subject: impl Into<String>,
+        status: CompactTaskStatus,
+        blocked_by_sequences: Vec<u64>,
+    ) -> Self {
+        Self {
+            sequence,
+            subject: subject.into(),
+            status,
+            blocked_by_sequences,
+        }
+    }
+
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    pub const fn status(&self) -> &CompactTaskStatus {
+        &self.status
+    }
+
+    pub fn blocked_by_sequences(&self) -> &[u64] {
+        &self.blocked_by_sequences
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactTaskSnapshot {
+    revision: u64,
+    batch_id: u64,
+    batch_summary: String,
+    batch_status: CompactTaskBatchStatus,
+    items: Vec<CompactTaskItem>,
+}
+
+impl CompactTaskSnapshot {
+    pub fn active(
+        revision: u64,
+        batch_id: u64,
+        batch_summary: impl Into<String>,
+        items: Vec<CompactTaskItem>,
+    ) -> Self {
+        Self::new(
+            revision,
+            batch_id,
+            batch_summary,
+            CompactTaskBatchStatus::Active,
+            items,
+        )
+    }
+
+    pub fn paused(
+        revision: u64,
+        batch_id: u64,
+        batch_summary: impl Into<String>,
+        items: Vec<CompactTaskItem>,
+    ) -> Self {
+        Self::new(
+            revision,
+            batch_id,
+            batch_summary,
+            CompactTaskBatchStatus::Paused,
+            items,
+        )
+    }
+
+    pub fn new(
+        revision: u64,
+        batch_id: u64,
+        batch_summary: impl Into<String>,
+        batch_status: CompactTaskBatchStatus,
+        mut items: Vec<CompactTaskItem>,
+    ) -> Self {
+        items.sort_by_key(CompactTaskItem::sequence);
+        Self {
+            revision,
+            batch_id,
+            batch_summary: batch_summary.into(),
+            batch_status,
+            items,
+        }
+    }
+
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub const fn batch_id(&self) -> u64 {
+        self.batch_id
+    }
+
+    pub fn batch_summary(&self) -> &str {
+        &self.batch_summary
+    }
+
+    pub const fn batch_status(&self) -> &CompactTaskBatchStatus {
+        &self.batch_status
+    }
+
+    pub fn items(&self) -> &[CompactTaskItem] {
+        &self.items
+    }
+
+    pub fn render_companion(&self) -> String {
+        let completed = self
+            .items
+            .iter()
+            .filter(|item| item.status == CompactTaskStatus::Completed)
+            .count();
+        let mut lines = vec![format!(
+            "Batch #{} — Tasks: {completed}/{}",
+            self.batch_id,
+            self.items.len()
+        )];
+        for item in &self.items {
+            let icon = match item.status {
+                CompactTaskStatus::Pending => "□",
+                CompactTaskStatus::InProgress => "■",
+                CompactTaskStatus::Completed => "✓",
+            };
+            let blocked_by = if item.blocked_by_sequences.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (blocked by {})",
+                    item.blocked_by_sequences
+                        .iter()
+                        .map(|sequence| format!("#{sequence}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            lines.push(format!(
+                "{icon} [task:{} seq:{}] {}{blocked_by}",
+                item.sequence, item.sequence, item.subject
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompactFactBatch {
     facts: Vec<CompactFact>,
@@ -227,8 +421,81 @@ impl CompactFactBatch {
     }
 }
 
+pub fn reconcile_checkpoint_with_task_snapshot(
+    checkpoint: ContinuationCheckpoint,
+    task_snapshot: Option<&CompactTaskSnapshot>,
+) -> Result<ContinuationCheckpoint, CheckpointError> {
+    let Some(task_snapshot) =
+        task_snapshot.filter(|snapshot| task_snapshot_is_authoritative(snapshot))
+    else {
+        return Ok(checkpoint);
+    };
+    let mut wire = checkpoint.to_wire();
+    let in_progress = task_snapshot
+        .items
+        .iter()
+        .find(|item| item.status == CompactTaskStatus::InProgress)
+        .expect("authoritative task snapshot requires exactly one in-progress item");
+    let completed_subjects = task_snapshot
+        .items
+        .iter()
+        .filter(|item| item.status == CompactTaskStatus::Completed)
+        .map(|item| normalize_for_comparison(item.subject()))
+        .collect::<Vec<_>>();
+
+    wire.resume_cursor.next_action = in_progress.subject().to_string();
+    wire.uncommitted_working_set
+        .retain(|line| !contradicts_completed_work(line, &completed_subjects));
+    wire.open_decisions_and_risks
+        .retain(|line| !contradicts_completed_work(line, &completed_subjects));
+    wire.required_revalidation
+        .retain(|line| !contradicts_completed_work(line, &completed_subjects));
+    for item in task_snapshot
+        .items
+        .iter()
+        .filter(|item| item.status == CompactTaskStatus::Pending)
+    {
+        let dependency = if item.blocked_by_sequences().is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (blocked by {})",
+                item.blocked_by_sequences()
+                    .iter()
+                    .map(|sequence| format!("task {sequence}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        wire.uncommitted_working_set.push(format!(
+            "Pending task {}: {}{dependency}",
+            item.sequence(),
+            item.subject()
+        ));
+    }
+    ContinuationCheckpoint::try_from(wire)
+}
+
+fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshot) -> bool {
+    snapshot.batch_status == CompactTaskBatchStatus::Active
+        && !snapshot.batch_summary.trim().is_empty()
+        && snapshot
+            .items
+            .iter()
+            .filter(|item| item.status == CompactTaskStatus::InProgress)
+            .count()
+            == 1
+}
+
 pub fn reduce_compact_facts(
     batch: CompactFactBatch,
+) -> Result<ContinuationCheckpoint, CheckpointError> {
+    reduce_compact_facts_with_task_snapshot(batch, None)
+}
+
+pub fn reduce_compact_facts_with_task_snapshot(
+    batch: CompactFactBatch,
+    task_snapshot: Option<&CompactTaskSnapshot>,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     let mut indexed_facts = batch
         .into_facts()
@@ -302,6 +569,51 @@ pub fn reduce_compact_facts(
         }
     }
 
+    if let Some(task_snapshot) =
+        task_snapshot.filter(|snapshot| task_snapshot_is_authoritative(snapshot))
+    {
+        let in_progress = task_snapshot
+            .items
+            .iter()
+            .find(|item| item.status == CompactTaskStatus::InProgress)
+            .expect("active task reconciliation requires exactly one in-progress item");
+        next_action = Some(in_progress.subject().to_string());
+
+        let completed_subjects = task_snapshot
+            .items
+            .iter()
+            .filter(|item| item.status == CompactTaskStatus::Completed)
+            .map(|item| normalize_for_comparison(item.subject()))
+            .collect::<Vec<_>>();
+        working_set.retain(|line| !contradicts_completed_work(line, &completed_subjects));
+        risks.retain(|line| !contradicts_completed_work(line, &completed_subjects));
+        revalidation.retain(|line| !contradicts_completed_work(line, &completed_subjects));
+
+        for item in task_snapshot
+            .items
+            .iter()
+            .filter(|item| item.status == CompactTaskStatus::Pending)
+        {
+            let dependency = if item.blocked_by_sequences().is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (blocked by {})",
+                    item.blocked_by_sequences()
+                        .iter()
+                        .map(|sequence| format!("task {sequence}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            working_set.push(format!(
+                "- Pending task {}: {}{dependency}",
+                item.sequence(),
+                item.subject()
+            ));
+        }
+    }
+
     let current_objective = current_objective
         .unwrap_or_else(|| "- Revalidate the latest user objective before continuing.".to_string());
     let next_action = next_action
@@ -331,6 +643,38 @@ pub fn reduce_compact_facts(
             ContinuationStatus::Completed => unreachable!("fact reducer never infers completion"),
         }),
     })
+}
+
+fn contradicts_completed_work(line: &str, completed_subjects: &[String]) -> bool {
+    let normalized_line = normalize_for_comparison(line);
+    let reports_missing_evidence = [
+        "no reliable evidence",
+        "no evidence",
+        "not completed",
+        "未完成",
+        "无可靠证据",
+        "没有可靠证据",
+        "尚无证据",
+    ]
+    .iter()
+    .any(|marker| normalized_line.contains(marker));
+    reports_missing_evidence
+        && (!completed_subjects.is_empty()
+            && (normalized_line.contains("completed")
+                || normalized_line.contains("完成")
+                || completed_subjects.iter().any(|subject| {
+                    subject
+                        .split_whitespace()
+                        .filter(|word| word.len() >= 4)
+                        .any(|word| normalized_line.contains(word))
+                })))
+}
+
+fn normalize_for_comparison(source: &str) -> String {
+    source
+        .trim_start_matches("- ")
+        .to_lowercase()
+        .replace(['`', '.', ',', ':', ';', '(', ')'], " ")
 }
 
 fn as_fact_bullet(source: &str) -> String {

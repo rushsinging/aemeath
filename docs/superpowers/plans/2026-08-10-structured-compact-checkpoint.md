@@ -447,3 +447,25 @@ Expected: PR OPEN、非 Draft；报告真实 required checks 状态，未经当�
 5. 清理 LLM full-wire Reduce 路径并同步 durable contract。
 6. 运行 Context、Clippy、架构守卫与 pre-push 等价验证。
 7. 创建本地提交，不推送。
+
+## 语义新鲜度补充：typed Task snapshot 参与 Reduce
+
+真实运行证明 Rust-owned Reduce 和 typed Refresh 已消除完整 checkpoint schema fallback，但权威 checkpoint 与压缩后追加的 `Current Task State` companion 仍会冲突：消息 facts 可能声称修复尚无证据，而较新的 Task aggregate 已记录实现与验证完成。根因是 Task 状态仅以 Markdown 在 checkpoint 定稿后追加，未参与领域归并。
+
+领域与数据流约束：
+
+1. Runtime 从 `TaskAccess` 构造 Context-owned `CompactTaskSnapshot`，携带 Task revision、active batch summary/status、按 sequence 排序的 typed task items，以及每项 subject/status/blocking dependency；Markdown 不作为输入协议。
+2. `CompactRequest` 与 `ManualCompactRequest` 传递同一个 typed snapshot；展示用 `Current Task State` 由该 snapshot 确定性渲染，避免 typed state 与 companion 双源漂移。
+3. Context 在 Rust-owned Reduce 完成后、预算归一化前协调 task snapshot：唯一 in-progress task 成为唯一 Next action；其余未完成 task 只进入 resume context；completed task 只作为状态证据用于移除与其 subject 对应的陈旧 working-set/risk/revalidation 项，不自动升级为 committed fact，也不覆盖 main-user objective。
+4. Task snapshot 不是用户授权来源，不能建立、删除或改变 immutable constraints、prohibited actions、continuation status/reason，也不能在缺少 active batch 或唯一 executable task 时覆盖 main-user objective/Next action。
+5. Task snapshot revision 只证明同一 Task aggregate 内的新鲜度，不与消息 fact sequence 混用；只有 `Active` batch 参与 authoritative reconciliation，paused/archived snapshot 仅供 companion 展示。
+6. 最终 checkpoint 仍由 `ContinuationCheckpoint::render` 生成兼容九段；task companion 仍为非权威附录。
+
+TDD 与跨层证据：
+
+1. Domain 失败测试：active snapshot 校正 objective、完成项清除陈旧 working set、唯一 in-progress task 成为唯一 Next action，且 protected semantics 不变。
+2. Domain 失败测试：paused/archived、多个 in-progress、全部 completed 或无可执行 pending 时 fail closed，不覆盖 main-user objective/Next action。
+3. Runtime adapter 失败测试：`TaskAccess` 生成 typed snapshot，并由同一 snapshot 渲染 companion。
+4. Context repository 失败测试：typed snapshot 穿透 request → generation → commit，checkpoint 与 companion 状态一致。
+5. 运行 focused tests、`cargo fmt --all -- --check`、`cargo test -p context`、`cargo build -p context`、严格 Clippy、`git diff --check` 和完整架构守卫。
+6. 创建本地提交，不推送。

@@ -166,6 +166,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
             calls: small_calls.clone(),
         }),
         None,
+        None,
         &cancel,
     )
     .await
@@ -181,6 +182,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         Some(&CountingGenerator {
             calls: large_calls.clone(),
         }),
+        None,
         None,
         &cancel,
     )
@@ -512,6 +514,7 @@ async fn second_compact_fallback_preserves_previous_summary() {
         100_000,
         None,
         None,
+        None,
         &cancel,
     )
     .await
@@ -543,6 +546,7 @@ async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
         &messages,
         Some(huge_previous.as_str()),
         100_000,
+        None,
         None,
         None,
         &cancel,
@@ -622,6 +626,7 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
             forbidden_full_checkpoint_calls: forbidden_full_checkpoint_calls.clone(),
         }),
         None,
+        None,
         &CancellationToken::new(),
     )
     .await
@@ -692,10 +697,17 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         call_count,
     };
 
-    let result =
-        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
-            .await
-            .expect("map-reduce compact should run");
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&generator),
+        None,
+        None,
+        &cancel,
+    )
+    .await
+    .expect("map-reduce compact should run");
 
     let chunks = generator.call_count.load(Ordering::SeqCst);
     assert!(
@@ -778,10 +790,17 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
 
     let generator = ShrinkingGenerator { call_count };
 
-    let result =
-        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
-            .await
-            .expect("compact should run");
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&generator),
+        None,
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
 
     let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
         .expect("refresh must leave a valid typed checkpoint");
@@ -829,10 +848,17 @@ async fn compact_with_generator_uses_llm_summary() {
         requests: std::sync::Mutex::new(Vec::new()),
     };
 
-    let result =
-        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
-            .await
-            .expect("compact should run");
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&generator),
+        None,
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
 
     let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
         .expect("typed facts must be rendered by the local checkpoint renderer");
@@ -879,6 +905,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
         100_000,
         Some(&CancelledGenerator),
         None,
+        None,
         &cancel,
     )
     .await;
@@ -916,6 +943,7 @@ async fn compact_falls_back_when_generator_errors() {
         None,
         100_000,
         Some(&FailingGenerator),
+        None,
         None,
         &cancel,
     )
@@ -1024,10 +1052,17 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
     let generator = NeverShrinkingGenerator {
         calls: calls.clone(),
     };
-    let result =
-        compact_messages_with_llm(&messages, None, 100_000, Some(&generator), None, &cancel)
-            .await
-            .expect("compact should run");
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&generator),
+        None,
+        None,
+        &cancel,
+    )
+    .await
+    .expect("compact should run");
 
     let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
         .expect("local normalization must leave a valid typed checkpoint");
@@ -1080,6 +1115,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         100_000,
         Some(&EchoGenerator),
         Some(&progress),
+        None,
         &cancel,
     )
     .await
@@ -1167,6 +1203,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         100_000,
         Some(&EchoGenerator),
         Some(&progress),
+        None,
         &cancel,
     )
     .await
@@ -1231,6 +1268,7 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
             requests: requests.clone(),
         }),
         None,
+        None,
         &CancellationToken::new(),
     )
     .await
@@ -1288,6 +1326,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         None,
         100_000,
         Some(&MapOnlyGenerator(full_checkpoint_calls.clone())),
+        None,
         None,
         &CancellationToken::new(),
     )
@@ -1367,6 +1406,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
             repair_seen: repair_seen.clone(),
         }),
         None,
+        None,
         &CancellationToken::new(),
     )
     .await
@@ -1415,6 +1455,7 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
             cancel: cancel.clone(),
         }),
         None,
+        None,
         &cancel,
     )
     .await;
@@ -1451,6 +1492,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         None,
         100_000,
         Some(&AlwaysInvalidGenerator(calls.clone())),
+        None,
         None,
         &CancellationToken::new(),
     )

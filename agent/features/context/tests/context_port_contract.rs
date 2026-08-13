@@ -159,7 +159,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             source: request.clone(),
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -174,7 +174,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();

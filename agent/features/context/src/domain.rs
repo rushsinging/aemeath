@@ -353,9 +353,9 @@ pub struct CompactRequest {
     /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 Task 状态文本（#1537）：compact summary 定稿后拼接到末尾，
-    /// 防止递进压缩后 task 上下文丢失。`None` 表示无活跃 task。
-    pub task_context: Option<String>,
+    /// 当前 typed Task 快照：参与 Rust-owned checkpoint 协调，并由同一快照
+    /// 确定性渲染非权威 `Current Task State` companion。
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
     /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
     pub cancellation: tokio_util::sync::CancellationToken,
 }
@@ -369,8 +369,14 @@ impl std::fmt::Debug for CompactRequest {
             .field("trigger", &self.trigger)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
             .field(
-                "task_context",
-                &self.task_context.as_ref().map(|_| "<text>"),
+                "task_snapshot",
+                &self.task_snapshot.as_ref().map(|snapshot| {
+                    (
+                        snapshot.revision(),
+                        snapshot.batch_id(),
+                        snapshot.items().len(),
+                    )
+                }),
             )
             .field("cancelled", &self.cancellation.is_cancelled())
             .finish()
@@ -385,8 +391,8 @@ pub struct ManualCompactRequest {
     pub context_size: usize,
     /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 Task 状态文本（#1537），语义同 [`CompactRequest::task_context`]。
-    pub task_context: Option<String>,
+    /// 当前 typed Task 快照，语义同 [`CompactRequest::task_snapshot`]。
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
 }
 
 impl std::fmt::Debug for ManualCompactRequest {
@@ -398,8 +404,14 @@ impl std::fmt::Debug for ManualCompactRequest {
             .field("context_size", &self.context_size)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
             .field(
-                "task_context",
-                &self.task_context.as_ref().map(|_| "<text>"),
+                "task_snapshot",
+                &self.task_snapshot.as_ref().map(|snapshot| {
+                    (
+                        snapshot.revision(),
+                        snapshot.batch_id(),
+                        snapshot.items().len(),
+                    )
+                }),
             )
             .finish()
     }
