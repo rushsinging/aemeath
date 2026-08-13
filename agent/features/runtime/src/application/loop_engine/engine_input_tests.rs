@@ -645,7 +645,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -699,7 +702,7 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "approve now")],
                 allow_multi: false,
             }],
         };
@@ -734,13 +737,23 @@ mod interaction_routing {
             InteractionContinuation::CompleteToolCall(call_id)
         );
 
-        // Verify published interaction has UserQuestions body
+        // Verify published interaction has UserQuestions body and the option
+        // description survives the engine boundary (issue: description must
+        // flow tools → runtime → sdk without loss).
         let published = port.published_interactions.lock().unwrap();
         assert_eq!(published.len(), 1);
-        assert!(matches!(
-            published[0].body,
-            sdk::InteractionRequestBody::UserQuestions(_)
-        ));
+        match &published[0].body {
+            sdk::InteractionRequestBody::UserQuestions(questions) => {
+                assert_eq!(questions.len(), 1);
+                assert_eq!(questions[0].options.len(), 1);
+                assert_eq!(questions[0].options[0].title, "a");
+                assert_eq!(
+                    questions[0].options[0].description.as_deref(),
+                    Some("approve now")
+                );
+            }
+            other => panic!("expected UserQuestions body, got {other:?}"),
+        }
     }
 
     // ── L2: ToolApproval: AwaitingToolApproval → coordinator ──
@@ -799,7 +812,7 @@ mod interaction_routing {
             call: call1.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q1".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "first")],
                 allow_multi: false,
             }],
         };
@@ -807,7 +820,7 @@ mod interaction_routing {
             call: call2.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q2".to_string(),
-                options: vec!["b".to_string()],
+                options: vec![sdk::OptionItem::new("b", "second")],
                 allow_multi: false,
             }],
         };
@@ -1070,7 +1083,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1148,7 +1164,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1241,7 +1260,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1336,7 +1358,7 @@ mod interaction_routing {
             call: call1.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q1".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "first")],
                 allow_multi: false,
             }],
         };
@@ -1344,7 +1366,7 @@ mod interaction_routing {
             call: call2.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q2".to_string(),
-                options: vec!["b".to_string()],
+                options: vec![sdk::OptionItem::new("b", "second")],
                 allow_multi: false,
             }],
         };
@@ -1500,7 +1522,7 @@ mod interaction_routing {
             call: question_call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "go?".to_string(),
-                options: vec!["yes".to_string()],
+                options: vec![sdk::OptionItem::new("yes", "approve")],
                 allow_multi: false,
             }],
         };
