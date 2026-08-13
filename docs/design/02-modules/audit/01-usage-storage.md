@@ -1,7 +1,7 @@
 # Audit · Usage 持久化与恢复
 
 > 层级：02-modules / audit（机制集成）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#790（S2）
+> 状态：Current（已实现并通过分层测试审查）｜Milestone：v0.1.0｜对应 Issue：#790（S2）
 > Usage 是独立 Audit 事实流；SessionId 只是分区键，不改变 BC 所有权。
 
 ## 1. 文件布局
@@ -123,21 +123,90 @@ Future retention 必须由 Audit Config 定义，并通过 Audit 的 File Append
 
 ## 10. 验收场景
 
-- [ ] 两个 Session 写入不同文件。
-- [ ] Session 删除后 Usage 仍可查询。
-- [ ] 同一 Session 的多 Run/RunStep/Invocation 可分别过滤。
-- [ ] 每次 append 后调用 flush。
-- [ ] queue full 返回 Dropped，不阻塞 Runtime。
-- [ ] worker 写失败增加指标，不改变 Run。
-- [ ] 单行损坏不影响其余记录查询。
-- [ ] 截断尾行报告 warning。
-- [ ] 查询不返回 prompt/response/tool/hook 原文。
-- [ ] 查询结果不含 Cost/Price。
+- [x] 两个 Session 写入不同文件。
+- [x] Session 删除后 Usage 仍可查询。
+- [x] 同一 Session 的多 Run/RunStep/Invocation 可分别过滤。
+- [x] 每次 append 后调用 flush。
+- [x] queue full 返回 Dropped，不阻塞 Runtime。
+- [x] worker 写失败增加指标，不改变 Run。
+- [x] 单行损坏不影响其余记录查询。
+- [x] 截断尾行报告 warning。
+- [x] 查询不返回 prompt/response/tool/hook 原文。
+- [x] 查询结果不含 Cost/Price。
+
+## 10. 测试完整性验收
+
+### 10.1 行为—测试矩阵
+
+| 行为 / 风险 | L0 | L1 | L2 | L3 | L4 | L5 | 最终证据 | 结论 |
+|---|---|---|---|---|---|---|---|---|
+| Usage PL、统一关联 ID、V1 envelope、敏感内容禁入 | crate/API/Cost 退役守卫 | summary 无 cost/price | Runtime factory 映射 | `tests/usage_contract.rs` | Runtime→Composition 落盘查询 | N/A | Usage contract；Runtime usage tests | 通过 |
+| Session 分区与单行 framing | production reachability | decoder 终结行边界 | worker stream 映射 | append store 分区/payload | sender→worker→file→query | N/A | Audit application/adapter tests | 通过 |
+| append、flush、reopen、no-follow | storage/架构守卫 | payload 边界 | append→flush 编排 | reopen、symlink、并发完整行 | 真实临时目录落盘查询 | N/A | `append_store_contract.rs` | 通过 |
+| bounded sender、QueueFull、WorkerUnavailable | all-targets clippy | config 下界 | event-driven full queue/late reject | worker 公开契约 | Composition sink 透传 | N/A | `ingest_tests.rs`；worker contract | 通过 |
+| worker FIFO、失败隔离、指标、drain | production-only check | config/metrics 边界 | ControlledStore append/flush 失败、FIFO、精确 timeout | worker API | worker→query、frontend drain | N/A | `ingest_tests.rs`；`chat_tests.rs` | 通过，无短 sleep |
+| query 全字段过滤、半开范围 | production reachability | `validate_query_*`、`matches_*` | query service + store | 全关联字段契约 | 落盘后过滤查询 | N/A | query unit/contract tests | 通过 |
+| cursor、跨分区续页、失效 | clippy/serde | round-trip、坏版本/hex/offset、fingerprint | query service 跨 stream | pagination contract | 文件分区续页 | N/A | query unit/contract tests | 通过 |
+| 损坏 JSON、未知 schema、截断尾行、storage error | production reachability | decoder 精确 warning | adapter failing store | 坏行/未知版本契约 | 有效邻居保持可见 | N/A | adapter/query tests | 通过 |
+| token summary、Cost/Price 禁入 | Cost retirement guard | optional token 累加 | query summarize | PL golden | worker→query summary | N/A | query tests；Cost guard | 通过 |
+| Runtime logical invocation 只记录成功且 Dropped 不改写结果 | provider usage/Cost guards | UsageRecordFactory | 全字段与 Dropped | Runtime `UsageSink` | Composition 落盘 | N/A | Runtime usage tests | 通过 |
+| Composition session worker、Main/Sub 共用 sink、canonical Session 分区 | construction/reachability guards | config snapshot 冻结 | context factory 共用 sink | sink outcome 透传 | shutdown 后完整 PL 查询 | N/A | Runtime factory；Composition assembly | 通过 |
+| frontend drain 不覆盖结果；legacy Cost surface 不回流 | full guards | helper 结果正交 | 前端成功/失败均 drain 一次 | 私有 Future seam | CLI→SessionAudit shutdown | N/A | `chat_tests.rs`；Cost guards | 通过 |
+
+L5 对本 MVP 判定为 **N/A**：真实文件系统、并发 append 和 shutdown 已由临时目录 adapter 契约及 L4 场景稳定覆盖；能力不依赖网络、PTY、安装资产、发布包或仅真实进程可触发的平台语义。CLI 既有 PTY smoke 不承担 Audit 行为断言。
+
+### 10.2 执行叶子追溯
+
+| 执行叶子 | 交付行为 |
+|---|---|
+| Usage contracts 与统一 ID | PL、关联 ID、V1 envelope、敏感内容边界 |
+| Storage AppendLog | Session 分区、framing、append/flush/read/list、no-follow |
+| bounded worker 与 shutdown drain | sender、worker、指标、失败隔离、drain |
+| query/pagination/summary | filter、range、cursor、坏行、summary |
+| Runtime/Composition 接线 | logical invocation、共享 sink、session worker、frontend drain |
+| CostTracker 退役 | Runtime Cost/Pricing/DTO/history 不可达与 Guard |
+| 目录收敛 | capability-oriented 目录和 owning-layer 测试归位 |
+
+### 10.3 不符合项分类
+
+- **文档错误**：页首仍标记 Target，但生产链路已完成；本节以实际代码与测试矩阵明确 Current 验收状态。
+- **实现缺口**：未发现违反已批准 MVP 的业务实现缺口；CLI 仅增加私有 drain Future seam 以测试既有行为，不改变结果。
+- **测试缺口**：已补 query L1、worker 事件驱动 L1/L2、storage error、unknown schema、落盘查询 L4、Runtime 全字段、Composition 完整 PL 和 frontend 结果正交测试。
+- **过期测试**：已移除 worker contract 中依赖短 `sleep`、`>=` 和碰运气填满队列的测试；CLI inline tests 已迁至同层 `chat_tests.rs`。
+
+### 10.4 确定性与组织结论
+
+- Audit 测试不调用 `tokio::time::sleep` 或 `std::thread::sleep`。
+- worker 使用 channel、Notify/Semaphore 等事件同步与 Tokio 虚拟时间。
+- 文件测试使用独立 `tempfile::TempDir`，不修改 cwd 或进程环境。
+- L1/L2 测试归 owning module 的 `*_tests.rs`；公开契约留在 crate `tests/`，没有万能 `test_utils`、`mod.rs`、inline tests 或 `include!`。
+- Runtime、Composition、CLI 分别保留相邻边界测试，L4 不替代中间层证据。
+
+### 10.5 验证与覆盖率
+
+完整门禁实测：
+
+- `cargo fmt --all --check`：通过。
+- `cargo test -p audit --all-targets` 及 Runtime Usage、Main/Sub sink、Composition assembly、CLI drain 定向测试：通过；Audit 合计 33 个测试通过。
+- 受影响 crate production-only `cargo check` / `cargo clippy --lib|--bin -D warnings`：通过。
+- 受影响 crate 与 workspace `cargo clippy --all-targets -- -D warnings`：通过。
+- `.agents/hooks/check-architecture-guards.sh --full`：通过；首次运行发现 Composition 消费的 `usage_query_service` 未登记在 Audit crate-root façade，补齐 Guard 白名单及人类可读索引后复验通过。
+- `cargo test --workspace`：通过。
+- `scripts/coverage.sh`：通过；workspace 为 regions **82.62%**、functions **83.38%**、lines **83.60%**。
+- Audit 聚焦覆盖率：regions **91.42%**（650/711）、functions **98.89%**（89/90）、lines **95.09%**（503/529）。生产文件中 query adapter lines 100%、query policy lines 99.24%、Usage domain lines 100%；worker lines 90.12%、append adapter lines 97.14%。未覆盖主要为互斥锁 poison/JoinError/序列化失败等防御分支及只读 getter，不构成矩阵关键行为缺口。
+- 仓库当前没有独立自动化 changed-lines 百分比阈值；本变更的生产代码仅调整 CLI 私有 drain Future seam，其成功/失败分支均由 `chat_tests.rs` 覆盖。其余 Rust changed lines 为测试与测试模块登记。
+
+coverage 只作风险信号，production reachability 由独立 source guard 与 production-only check/clippy 证明。首次失败均保留并修正，未以重跑覆盖：基线计划中的 CLI package 名误写、测试对 opaque SessionId 文本的错误假设、跨 crate Fake 构造私有类型、`SdkError` 无 `PartialEq`、以及 Audit façade 漏登记。
+
+## 11. 验收结论
+
+十二个稳定行为单元已有 L0～L4 的必要证据，L5 有明确不适用理由；业务实现、测试、文档和旧路径退役边界一致。全部格式、定向测试、production reachability、all-targets clippy、完整架构守卫、workspace 测试和 coverage gate 均已通过，本能力达到父项级测试验收标准。
 
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-10 | 完成 Usage-only MVP 的 L0～L5 测试完整性审查：补齐 owning-layer 单元/协作、公开契约、真实落盘查询和 Runtime→Composition→CLI 相邻边界；L5 判定不适用 | 测试治理记录 |
 | 2026-08-09 | #932 退役旧 Cost history 读写/path surface；既有 `cost_history.json` 保持用户 artifact，不自动导入、不覆盖、不删除，查询只读取 Audit Usage JSONL | [#932](https://github.com/rushsinging/aemeath/issues/932) |
 | 2026-08-09 | #931 完成真实 Main/Sub logical invocation 写入同一 canonical Session Usage 分区与 SessionAudit drain | [#931](https://github.com/rushsinging/aemeath/issues/931) |
 | 2026-07-21 | #930 完成版本化 V1 decoder、坏行/截断尾行 warning、关联字段与时间 filter、opaque cursor 续页和纯 token summary；缺失 Session 分区安全返回空 | [#930](https://github.com/rushsinging/aemeath/issues/930) |

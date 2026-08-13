@@ -7,8 +7,8 @@ use crate::tui::model::conversation::intent::{
 };
 use crate::tui::model::conversation::interaction::{
     InteractionBody, InteractionCommandFailure, InteractionDraftAction, InteractionRequest,
-    UiInteractionCancelReason, UiInteractionReply, UiInteractionRequestId, UiPlanApprovalPrompt,
-    UiRunId, UiStuckDiagnostic,
+    UiInteractionCancelReason, UiInteractionReply, UiInteractionRequestId, UiOptionItem,
+    UiPlanApprovalPrompt, UiRunId, UiStuckDiagnostic,
 };
 use crate::tui::model::conversation::update::ConversationUpdate;
 use async_trait::async_trait;
@@ -249,7 +249,10 @@ fn install_ask_user_interaction(
             body: InteractionBody::UserQuestions(vec![
                 crate::tui::model::conversation::interaction::UiUserQuestion {
                     prompt: "确认取消？".to_string(),
-                    options: vec!["继续".to_string()],
+                    options: vec![UiOptionItem {
+                        title: "继续".to_string(),
+                        description: Some("继续当前运行".to_string()),
+                    }],
                     allow_multi: false,
                 },
             ]),
