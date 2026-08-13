@@ -191,7 +191,7 @@ pub struct SuspendedToolCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuspendedQuestion {
     pub prompt: String,
-    pub options: Vec<String>,
+    pub options: Vec<sdk::OptionItem>,
     pub allow_multi: bool,
 }
 

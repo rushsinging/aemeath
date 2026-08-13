@@ -273,8 +273,8 @@ pub fn map_agent_event_for_ui(event: &UiEvent) -> AgentEventMapping {
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
-        InteractionBody, InteractionRequest, UiApprovalPrompt, UiPlanApprovalPrompt, UiRiskLevel,
-        UiStuckDiagnostic, UiUserQuestion,
+        InteractionBody, InteractionRequest, UiApprovalPrompt, UiOptionItem, UiPlanApprovalPrompt,
+        UiRiskLevel, UiStuckDiagnostic, UiUserQuestion,
     };
 
     match event {
@@ -659,7 +659,14 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                         .iter()
                         .map(|question| UiUserQuestion {
                             prompt: question.prompt.clone(),
-                            options: question.options.clone(),
+                            options: question
+                                .options
+                                .iter()
+                                .map(|option| UiOptionItem {
+                                    title: option.title.clone(),
+                                    description: option.description.clone(),
+                                })
+                                .collect(),
                             allow_multi: question.allow_multi,
                         })
                         .collect(),

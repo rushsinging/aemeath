@@ -273,7 +273,14 @@ fn sdk_interaction_to_tui(
                         .iter()
                         .map(|q| UiUserQuestion {
                             prompt: q.prompt.clone(),
-                            options: q.options.clone(),
+                            options: q
+                                .options
+                                .iter()
+                                .map(|option| UiOptionItem {
+                                    title: option.title.clone(),
+                                    description: option.description.clone(),
+                                })
+                                .collect(),
                             allow_multi: q.allow_multi,
                         })
                         .collect(),

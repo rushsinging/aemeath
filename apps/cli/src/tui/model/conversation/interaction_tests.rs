@@ -4,8 +4,8 @@ use super::intent::{
 };
 use super::interaction::{
     InteractionBody, InteractionCommandFailure, InteractionDraftAction, InteractionPhase,
-    InteractionRequest, UiApprovalPrompt, UiInteractionRequestId, UiPlanApprovalPrompt,
-    UiRiskLevel, UiRunId, UiStuckDiagnostic, UiUserQuestion,
+    InteractionRequest, UiApprovalPrompt, UiInteractionRequestId, UiOptionItem,
+    UiPlanApprovalPrompt, UiRiskLevel, UiRunId, UiStuckDiagnostic, UiUserQuestion,
 };
 use super::model::ConversationModel;
 use super::update::ConversationUpdate;
@@ -45,7 +45,7 @@ fn ask_user_slot(id: &str, question: &str) -> AskUserSlot {
         id: id.to_string(),
         question_seq: 0,
         question: question.to_string(),
-        options: vec![sdk::OptionItem::title_only("日料".to_string())],
+        options: vec![sdk::OptionItem::new("日料", "日料的描述")],
         llm_option_count: 1,
         multi_select: false,
         default: None,
@@ -123,7 +123,10 @@ fn show_interaction_initializes_typed_drafts_for_all_bodies() {
     let bodies = vec![
         InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "继续？".to_string(),
-            options: vec!["是".to_string()],
+            options: vec![UiOptionItem {
+                title: "是".to_string(),
+                description: Some("是的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
         InteractionBody::ToolApproval(UiApprovalPrompt {
@@ -234,7 +237,10 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
         tool_call_id: Some(completed_tool_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
@@ -311,7 +317,10 @@ fn accepted_cancel_cancels_only_the_ask_tool_bound_to_the_matching_request() {
         tool_call_id: Some(cancelled_tool_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
@@ -358,7 +367,10 @@ fn rejected_reply_keeps_the_ask_tool_running() {
         tool_call_id: Some(tool_call_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
@@ -408,7 +420,10 @@ fn rejected_cancel_restores_the_ask_batch_for_retry() {
         tool_call_id: Some(tool_call_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
