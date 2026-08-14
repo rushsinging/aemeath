@@ -25,6 +25,34 @@ impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
     ) -> Result<(), String> {
         self.commit_plan(session_id, expected_revision, plan).await
     }
+
+    /// 数据集为空集时以内存全量快照重建：磁盘是空集、内存是唯一真相源，
+    /// 全量重建不丢任何数据。数据集非空时 fail-closed（防覆盖并发写者）。
+    ///
+    /// 重建后磁盘 manifest 修订号 = session.revision，后续增量提交自然对齐。
+    async fn rebuild_empty_dataset(
+        &self,
+        session_id: &str,
+        session: &CanonicalSession,
+    ) -> Result<(), String> {
+        let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
+        let manifest = self
+            .dataset
+            .read_manifest(&dataset_key)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !manifest.members().is_empty() {
+            return Err("Session 数据集非空，拒绝全量重建".to_string());
+        }
+        if session.revision == 0 {
+            return Err("Session 修订号为 0，无需全量重建".to_string());
+        }
+        let plan =
+            SessionCommitPlan::complete_snapshot(session).map_err(|error| error.to_string())?;
+        plan.validate_rebuild_boundary(session_id, session.revision - 1)
+            .map_err(|error| error.to_string())?;
+        self.commit(session_id, plan).await
+    }
 }
 
 impl DatasetCanonicalSessionWriter {
