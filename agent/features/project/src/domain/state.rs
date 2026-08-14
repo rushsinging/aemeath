@@ -381,7 +381,24 @@ pub fn prepare_restore(
 
     let initial_cwd = restore_path(&dto.project_identity.initial_cwd)?;
     let workspace_root = restore_path(&dto.workspace_root)?;
-    let path_base = restore_path(&dto.path_base)?;
+    // path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部替换为
+    // 嵌套仓库、删除或移动后，对无 worktree 历史的普通会话（Primary + 空栈）
+    // 回退 workspace_root，与「shell cwd 被删回退 HOME」同语义，不丢任何会话
+    // 数据；worktree 上下文损坏必须走显式 exit 协议，保持 fail-closed。
+    let path_base_fallback_eligible =
+        dto.worktree_kind == WorktreeKind::Primary && dto.context_stack.is_empty();
+    let path_base = match restore_path(&dto.path_base) {
+        Ok(path) => path,
+        Err(WorkspaceRestoreError::PathNotFound { path }) if path_base_fallback_eligible => {
+            log::warn!(
+                target: "aemeath:agent:project",
+                "workspace restore path_base fallback: persisted path_base={path} 不存在，回退 workspace_root={}",
+                workspace_root.display()
+            );
+            workspace_root.clone()
+        }
+        Err(restore_error) => return Err(restore_error),
+    };
     validate_containment(&path_base, &workspace_root)?;
 
     let mut stack = Vec::with_capacity(dto.context_stack.len());
@@ -396,6 +413,7 @@ pub fn prepare_restore(
         });
     }
 
+    let mut restored_path_base = path_base.clone();
     let canonical_identity = match dto.project_identity.git_common_dir.as_deref() {
         Some(common) if !common.is_empty() => {
             let common = PathBuf::from(common);
@@ -418,13 +436,30 @@ pub fn prepare_restore(
                 &common,
                 Some(dto.worktree_kind),
             )?;
-            validate_git_location(
+            // path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部
+            // 替换为嵌套仓库、删除或移动后，回退 workspace_root 与「shell cwd
+            // 被删回退 HOME」同语义，不丢任何会话数据。仅对无 worktree 历史
+            // 的普通会话（Primary + 空栈）放行回退；worktree 上下文损坏必须
+            // 走显式 exit 协议，保持 fail-closed。
+            if let Err(restore_error) = validate_git_location(
                 git,
                 &path_base,
                 Some(&workspace_root),
                 &common,
                 Some(dto.worktree_kind),
-            )?;
+            ) {
+                if path_base_fallback_eligible {
+                    log::warn!(
+                        target: "aemeath:agent:project",
+                        "workspace restore path_base fallback: persisted path_base={} 校验失败（{restore_error}），回退 workspace_root={}",
+                        path_base.display(),
+                        workspace_root.display()
+                    );
+                    restored_path_base = workspace_root.clone();
+                } else {
+                    return Err(restore_error);
+                }
+            }
             for frame in &stack {
                 validate_git_location(
                     git,
@@ -475,7 +510,7 @@ pub fn prepare_restore(
         candidate: WorkspaceState {
             project_identity: canonical_identity,
             workspace_root,
-            path_base,
+            path_base: restored_path_base,
             worktree_kind: dto.worktree_kind,
             stack,
         },
