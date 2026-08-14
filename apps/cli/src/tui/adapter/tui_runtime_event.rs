@@ -6,8 +6,6 @@
 //! Some structs are not yet exercised by production; retained as DTO reserves
 //! for #1246 / #944 5B.
 
-#![allow(dead_code)]
-
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
@@ -234,12 +232,6 @@ pub(crate) enum TuiToolCallStatus {
     PendingArgs,
     Ready,
     Running,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiToolCallImage {
-    pub(crate) base64: String,
-    pub(crate) media_type: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

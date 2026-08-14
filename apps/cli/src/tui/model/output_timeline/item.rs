@@ -120,11 +120,4 @@ impl OutputTimelineItem {
             )),
         }
     }
-
-    pub fn is_tool_owned_payload_free(&self) -> bool {
-        matches!(
-            self,
-            OutputTimelineItem::ToolCall { .. } | OutputTimelineItem::ToolResult { .. }
-        )
-    }
 }

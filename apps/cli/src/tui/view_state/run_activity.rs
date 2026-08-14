@@ -198,6 +198,7 @@ impl RunActivityState {
             / 1000
     }
 
+    #[cfg(test)]
     pub fn silence_block_id(&self) -> Option<String> {
         let run_id = self.main_run_id.as_ref()?;
         self.invoking_model_silence_started_at?;

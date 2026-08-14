@@ -1,5 +1,4 @@
 mod ask_user_key;
-pub(crate) mod done;
 mod enter;
 mod key;
 mod key_nav;
@@ -12,7 +11,7 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::{map_agent_event_for_ui, map_runtime_event};
+use crate::tui::adapter::agent_event::map_runtime_event;
 use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRuntimeEvent};
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -23,7 +22,7 @@ use crate::tui::render::output::rendered::RenderedLineAnchor;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::intent::AgentIntent;
 use crate::tui::update::msg::TuiMsg;
-use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
+use crate::tui::update::root_reducer::reduce_agent_event;
 use crate::tui::view_model::LiveStatusViewModel;
 use tokio::sync::mpsc;
 
@@ -49,52 +48,33 @@ fn markdown_spacing_overrides_to_sdk(
     }
 }
 
-fn ui_event_name(event: &UiEvent) -> &'static str {
-    match event {
-        UiEvent::SkillsUpdated(_) => "SkillsUpdated",
-        UiEvent::Text { .. } => "Text",
-        UiEvent::Thinking { .. } => "Thinking",
-        UiEvent::BlockComplete { .. } => "BlockComplete",
-        UiEvent::ToolCallStart { .. } => "ToolCallStart",
-        UiEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
-        UiEvent::ToolResult { .. } => "ToolResult",
-        UiEvent::Usage { .. } => "Usage",
-        UiEvent::Error(_) => "Error",
-        UiEvent::Cancelled { .. } => "Cancelled",
-        UiEvent::TurnStarted { .. } => "TurnStarted",
-        UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
-        UiEvent::SessionMessageStateChanged { .. } => "SessionMessageStateChanged",
-        UiEvent::HookNotice(_) => "HookNotice",
-        UiEvent::ApiError { .. } => "ApiError",
-        UiEvent::CompactOperationRolledBack { .. } => "CompactRollback",
-        UiEvent::CompactOperationCompleted { .. } => "CompactFinished",
-        UiEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted",
-        UiEvent::UserMessagesQueued { .. } => "UserMessagesQueued",
-        UiEvent::Done { .. } => "Done",
-        UiEvent::DoneWithDuration { .. } => "DoneWithDuration",
-        UiEvent::LiveTps(_) => "LiveTps",
-        UiEvent::ClipboardImage(_) => "ClipboardImage",
-        UiEvent::SystemMessage(_) => "SystemMessage",
-        UiEvent::SessionSaved { .. } => "SessionSaved",
-        UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
-        UiEvent::InteractionRequested { .. } => "InteractionRequested",
-        UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
-        UiEvent::WorkspaceMetadataResolved(_) => "WorkspaceMetadataResolved",
-        UiEvent::TaskStateChanged(_) => "TaskStateChanged",
-        UiEvent::CurrentRunChanged(_) => "CurrentRunChanged",
-        UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
-        UiEvent::SessionReset => "SessionReset",
-        UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
-        UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
-        UiEvent::ModelSwitched { .. } => "ModelSwitched",
-        UiEvent::ThinkingChanged { .. } => "ThinkingChanged",
-        UiEvent::ContextEstimated { .. } => "ContextEstimated",
-        UiEvent::CommandResultText { .. } => "CommandResultText",
-        UiEvent::SessionResumed { .. } => "SessionResumed",
-        UiEvent::DisplayHistoryWindowLoaded { .. } => "DisplayHistoryWindowLoaded",
-        UiEvent::DisplayHistoryWindowLoadFailed { .. } => "DisplayHistoryWindowLoadFailed",
-        UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
+fn format_reflection_history(
+    records: &[crate::tui::adapter::tui_runtime_event::TuiReflectionRecord],
+) -> String {
+    let mut lines = vec![format!("Reflection history ({}):", records.len())];
+    for record in records {
+        let tokens = record.token_usage.map_or_else(
+            || "n/a".to_string(),
+            |(input_tokens, output_tokens)| format!("{input_tokens}/{output_tokens}"),
+        );
+        let error = record
+            .error_category
+            .map_or_else(|| "none".to_string(), |category| format!("{category:?}"));
+        lines.push(format!(
+            "- timestamp={} trigger={:?} status={:?} counts(deviations/suggestions/outdated)={}/{}/{} apply={:?} error={} tokens(in/out)={} duration={}ms",
+            record.timestamp,
+            record.trigger,
+            record.status,
+            record.deviations,
+            record.suggestions,
+            record.outdated,
+            record.apply_status,
+            error,
+            tokens,
+            record.duration_ms,
+        ));
     }
+    lines.join("\n")
 }
 
 pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusViewModel) -> usize {
@@ -175,7 +155,7 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         match msg {
-            TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
+            TuiMsg::Ui(ev) => self.update_ui(ev, ui_tx, spawn_refs),
             TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
             TuiMsg::RuntimeBatch(events) => {
                 let mut batch_result = UpdateResult::none();
@@ -185,7 +165,6 @@ impl App {
                 batch_result.dedupe_render_requests();
                 batch_result
             }
-            TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
                 let history_window_before = (
@@ -293,40 +272,6 @@ impl App {
                 } else {
                     UpdateResult::none()
                 }
-            }
-            TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
-            TuiMsg::TerminalMouse(mouse) => {
-                let history_window_before = (
-                    self.view_state.output.render_line_limit(),
-                    self.view_state.output.history_window_tail_offset,
-                );
-                let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
-                let history_window_after = (
-                    self.view_state.output.render_line_limit(),
-                    self.view_state.output.history_window_tail_offset,
-                );
-                if history_window_after != history_window_before {
-                    self.mark_output_dirty();
-                    crate::tui::log_debug!(
-                        "tui.output.scroll_dirty source=terminal_mouse reason=history_window_changed before_limit={} after_limit={} before_tail_offset={} after_tail_offset={} dirty_output=true",
-                        history_window_before.0,
-                        history_window_after.0,
-                        history_window_before.1,
-                        history_window_after.1
-                    );
-                }
-                UpdateResult {
-                    effects,
-                    spawn_effect: None,
-                    pending_slash: None,
-                }
-            }
-            TuiMsg::TerminalResize { width, height } => {
-                self.handle_resize(width, height);
-                UpdateResult::none()
-            }
-            TuiMsg::EffectCompleted(_) | TuiMsg::TimerTick { .. } | TuiMsg::RenderTick => {
-                UpdateResult::none()
             }
         }
     }
@@ -443,6 +388,67 @@ impl App {
                 self.append_system_notice(error);
                 self.mark_output_dirty();
             }
+            TuiRuntimeEvent::ReflectionHistory { records } => {
+                if records.is_empty() {
+                    self.append_system_notice("No reflection history.");
+                } else {
+                    self.append_system_notice(format_reflection_history(records));
+                }
+            }
+            TuiRuntimeEvent::ModelSwitched {
+                display_name,
+                context_window,
+                reasoning_active,
+            } => {
+                if *context_window > 0 {
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::ContextSize(
+                            *context_window as u64,
+                        ),
+                    ));
+                }
+                self.session.current_model_display = display_name.clone();
+                self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                    crate::tui::model::runtime_presentation::RuntimePresentationIntent::ProviderModel {
+                        provider: self
+                            .model
+                            .runtime_presentation
+                            .provider()
+                            .map(ToOwned::to_owned),
+                        model_id: Some(display_name.clone()),
+                    },
+                ));
+                if let Some(enabled) = reasoning_active {
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
+                            *enabled,
+                        ),
+                    ));
+                }
+                self.append_system_notice(format!("[switched to {display_name}]"));
+            }
+            TuiRuntimeEvent::ThinkingChanged { enabled } => {
+                self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                    crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
+                        *enabled,
+                    ),
+                ));
+            }
+            TuiRuntimeEvent::ContextEstimated {
+                estimated_tokens,
+                context_size,
+                usage_percentage,
+                message_count,
+                ..
+            } => {
+                self.append_system_notice(format!(
+                    "Context window: ~{estimated_tokens} / {context_size} tokens ({usage_percentage:.0}%)"
+                ));
+                self.append_system_notice(format!("Messages: {message_count}"));
+                if *usage_percentage > 80.0 {
+                    self.append_system_notice("[auto-compaction will trigger at 80%]");
+                }
+            }
             TuiRuntimeEvent::CompactOperationCompleted { .. } => {
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::ClearCompactRuntime(ClearCompactRuntime),
@@ -509,6 +515,25 @@ impl App {
                     spawn_effect: None,
                     pending_slash: None,
                 };
+            }
+            TuiRuntimeEvent::SessionResumeFailed { kind, id, message } => {
+                let prefix = match kind {
+                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::NotFound => {
+                        "⚠️ 会话恢复失败（不存在）"
+                    }
+                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Corrupt => {
+                        "⚠️ 会话恢复失败（文件损坏）"
+                    }
+                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Io => {
+                        "⚠️ 会话恢复失败（IO 错误）"
+                    }
+                };
+                self.append_system_notice(format!("{prefix}: {message}"));
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "session resume failed: id={} kind={:?} msg={}",
+                    id, kind, message
+                );
             }
             TuiRuntimeEvent::InteractionRequested(ref req) => {
                 self.mark_output_dirty();
@@ -631,42 +656,6 @@ impl App {
             spawn_effect: None,
             pending_slash: None,
         }
-    }
-
-    fn update_agent_event(
-        &mut self,
-        ev: UiEvent,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        spawn_refs: &SpawnContextRefs,
-    ) -> UpdateResult {
-        let mapping = map_agent_event_for_ui(&ev);
-        crate::tui::log_trace!(
-            "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={}",
-            ui_event_name(&ev),
-            mapping.conversation.len(),
-            mapping.diagnostic.len(),
-            mapping.session.len()
-        );
-        let model_result = if mapping == Default::default() {
-            TuiUpdateResult::default()
-        } else {
-            reduce_agent_event(&mut self.model, mapping)
-        };
-        crate::tui::log_trace!(
-            "tui.agent_event reduced event={} dirty_output={} dirty_status={} dirty_dialog={} dirty_input={} effects={} timeline_items={} chats={}",
-            ui_event_name(&ev),
-            model_result.dirty.output,
-            model_result.dirty.status,
-            model_result.dirty.dialog,
-            model_result.dirty.input,
-            model_result.effects.len(),
-            self.model.conversation.timeline.items().len(),
-            self.model.conversation.chats.len()
-        );
-        let mut result = self.update_ui(ev, ui_tx, spawn_refs);
-        crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
-        result.effects.extend(model_result.effects);
-        result
     }
 
     pub(crate) fn output_document_width(&self) -> u16 {

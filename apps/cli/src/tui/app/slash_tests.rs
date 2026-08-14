@@ -59,11 +59,18 @@ fn system_texts(app: &App) -> Vec<&str> {
         .collect()
 }
 
-fn apply_ui_event(app: &mut App, event: super::event::UiEvent) {
+fn apply_runtime_event(
+    app: &mut App,
+    event: crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
+) {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     let spawn_refs =
         crate::tui::effect::session::processing::SpawnContextRefs { agent_client: None };
-    app.update(crate::tui::update::msg::TuiMsg::Ui(event), &tx, &spawn_refs);
+    app.update(
+        crate::tui::update::msg::TuiMsg::Runtime(event),
+        &tx,
+        &spawn_refs,
+    );
 }
 
 #[tokio::test]
@@ -125,9 +132,8 @@ fn reflection_history_displays_safe_metadata_without_body() {
         std::env::temp_dir(),
         "test-model".to_string(),
     );
-    apply_ui_event(
-        &mut app,
-        super::event::UiEvent::ReflectionHistory {
+    let event = crate::tui::adapter::event_mapping::sdk_event_to_tui_event(
+        sdk::ChatEvent::ReflectionHistory {
             records: vec![sdk::ReflectionHistoryView {
                 id: "reflection-secret-body-must-not-appear".to_string(),
                 timestamp: 1_700_000_000,
@@ -146,6 +152,10 @@ fn reflection_history_displays_safe_metadata_without_body() {
             }],
         },
     );
+    let crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) = event else {
+        panic!("reflection history must map to one runtime event");
+    };
+    apply_runtime_event(&mut app, event);
 
     let rendered = system_texts(&app).join("\n");
     assert!(rendered.contains("timestamp=1700000000"));

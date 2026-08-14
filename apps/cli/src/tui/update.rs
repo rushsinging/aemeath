@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod coordinator;
 pub mod dirty;
 pub mod intent;

@@ -24,12 +24,6 @@ impl OutputTimelineModel {
     }
 
     #[cfg(test)]
-    pub(crate) fn record_identity_read(&self) {
-        self.identity_read_count
-            .set(self.identity_read_count.get().saturating_add(1));
-    }
-
-    #[cfg(test)]
     pub(crate) fn reset_identity_read_count(&self) {
         self.identity_read_count.set(0);
     }
@@ -107,6 +101,7 @@ impl OutputTimelineModel {
         self.tool_call_index.contains(&reference)
     }
 
+    #[cfg(test)]
     pub fn contains_tool_result(&self, chat_id: &ChatId, run_id: &ChatRunId, id: &str) -> bool {
         let reference = TimelineToolCallRef::new(
             chat_id.clone(),

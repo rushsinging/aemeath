@@ -47,10 +47,6 @@ impl TuiScenarioHarness {
         self.messages.push_back(TuiMsg::Ui(event));
         self.drain(32);
     }
-    pub fn runtime(&mut self, event: UiEvent) {
-        self.messages.push_back(TuiMsg::AgentEvent(event));
-        self.drain(32);
-    }
     pub fn runtime_event(
         &mut self,
         event: crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
