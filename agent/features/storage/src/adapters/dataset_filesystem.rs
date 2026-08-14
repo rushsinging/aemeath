@@ -242,7 +242,71 @@ impl FileSystemDatasetAdapter {
         let dir = self.open_dataset_dir(key)?;
         let lock = self.lock(&dir)?;
         self.recover(&dir)?;
+        self.collect_orphan_member_content_best_effort(&dir);
         Ok((dir, lock))
+    }
+
+    /// 回收不被 primary / previous 任一代 manifest 引用的成员内容文件（孤儿）。
+    ///
+    /// 每次增量修订都会让 envelope / state / metadata 类成员产生新内容摘要，被替换
+    /// 的旧内容在 previous 代被下一次提交覆盖后即无任何引用。本清理在每个数据集
+    /// 入口（recover 后）与每次提交收尾时执行，使 `members/` 稳态收敛为
+    /// 「primary + previous 两代引用集」。
+    ///
+    /// 纯清理动作：被删除的文件不被任何存活代引用，中断后由下一次入口补跑，
+    /// 绝不影响提交语义与崩溃恢复。legacy 布局的成员内容位于各代 blobs/ 目录，
+    /// 不在共享 `members/` 内，天然不受影响。
+    fn collect_orphan_member_content(&self, dir: &Dir) -> Result<usize, StorageError> {
+        let mut referenced_digests = BTreeSet::new();
+        for generation_dir in [PRIMARY_DIR, PREVIOUS_DIR] {
+            if let Some(record) = proto::read_manifest(dir, Path::new(generation_dir))? {
+                referenced_digests.extend(
+                    record
+                        .成员证据
+                        .iter()
+                        .filter(|member| !member.内容摘要.is_empty())
+                        .map(|member| member.内容摘要.clone()),
+                );
+            }
+        }
+        let member_store = PathBuf::from(MEMBERS_DIR);
+        if !proto::exists(dir, &member_store)? {
+            return Ok(0);
+        }
+        let member_dir = dir.open_dir(&member_store).map_err(proto::map_io)?;
+        let mut removed_count = 0usize;
+        for entry in member_dir.entries().map_err(proto::map_io)? {
+            let entry = entry.map_err(proto::map_io)?;
+            let file_type = entry.file_type().map_err(proto::map_io)?;
+            // 只回收普通文件；目录与符号链接不是内容寻址存储的合法形态，保持原位
+            // 由隔离 / 人工排查处理，绝不递归删除。
+            if !file_type.is_file() {
+                continue;
+            }
+            let content_digest = entry.file_name().to_string_lossy().into_owned();
+            if referenced_digests.contains(content_digest.as_str()) {
+                continue;
+            }
+            member_dir
+                .remove_file(&content_digest)
+                .map_err(proto::map_io)?;
+            removed_count += 1;
+        }
+        if removed_count > 0 {
+            proto::sync_subdir(dir, &member_store)?;
+        }
+        Ok(removed_count)
+    }
+
+    /// best-effort 孤儿回收：失败仅告警，绝不阻断读写入口——回收延迟一个入口
+    /// 只影响磁盘占用，不影响任何存活代的数据完整性。
+    fn collect_orphan_member_content_best_effort(&self, dir: &Dir) {
+        match self.collect_orphan_member_content(dir) {
+            Ok(_) => {}
+            Err(_) => {
+                log::warn!(target: crate::LOG_TARGET, "dataset_orphan_collection_pending");
+            }
+        }
     }
 
     // ---- 崩溃恢复 ----
@@ -1088,6 +1152,8 @@ impl FileSystemDatasetAdapter {
             proto::sync_dir(dir)?;
             let _ = dir.remove_dir_all(&stage_dir);
             proto::remove_journal(dir)?;
+            // 提交收尾：previous 前进后，旧 previous 代独有内容已成孤儿，立即回收。
+            self.collect_orphan_member_content_best_effort(dir);
             proto::sync_dir(dir)
         })();
 
