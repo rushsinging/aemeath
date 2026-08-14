@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use context::adapters::DatasetCanonicalSessionWriter;
+use context::adapters::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
 use context::domain::session::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionCommitPlan,
@@ -654,4 +654,81 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
         .expect("Session state member");
     let value: serde_json::Value = serde_json::from_slice(state.bytes()).expect("metadata JSON");
     assert_eq!(value["metadata"]["title"], "committed");
+}
+
+#[tokio::test]
+async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+
+    // 模拟外部清空：先落一代，再删除数据集目录。
+    let seeded = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
+    writer
+        .save_initial(&seeded)
+        .await
+        .expect("seed generation before wipe");
+    std::fs::remove_dir_all(root.path().join("session").join("session.dataset"))
+        .expect("wipe dataset directory");
+
+    let wiped_session = session_with_steps(
+        "session",
+        26,
+        &[("run-a", "step-a", "a"), ("run-b", "step-b", "b")],
+    );
+    writer
+        .rebuild_empty_dataset("session", &wiped_session)
+        .await
+        .expect("wiped dataset must be rebuilt from the in-memory session");
+
+    let manifest = dataset
+        .read_manifest(&dataset_key("session"))
+        .await
+        .expect("read rebuilt manifest");
+    assert!(
+        !manifest.members().is_empty(),
+        "rebuilt dataset must carry members"
+    );
+    let state_name = "session-state.json"
+        .parse::<SafePathSegment>()
+        .expect("safe state member name");
+    let read = dataset
+        .read_consistent(&dataset_key("session"), &[state_name])
+        .await
+        .expect("read rebuilt members");
+    let DatasetReadOutcome::Found(read) = read else {
+        panic!("rebuilt generation must be readable");
+    };
+    assert_eq!(read.members().len(), 1);
+
+    // 重建后磁盘 manifest revision 必须与内存对齐：后续增量提交不再冲突。
+    let mut after = wiped_session.clone();
+    after.revision = 27;
+    writer
+        .save_incremental(
+            &wiped_session,
+            &after,
+            context::adapters::SessionSaveIntent::ReplaceCompleteHistory,
+        )
+        .await
+        .expect("incremental commit after rebuild must align with rebuilt revision");
+}
+
+#[tokio::test]
+async fn rebuild_empty_dataset_fails_closed_when_dataset_is_not_empty() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+
+    let seeded = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
+    writer.save_initial(&seeded).await.expect("seed generation");
+
+    let outcome = writer
+        .rebuild_empty_dataset("session", &seeded)
+        .await
+        .expect_err("non-empty dataset must fail closed instead of being overwritten");
+    assert!(
+        outcome.contains("非空"),
+        "failure must explain the dataset is not empty: {outcome}"
+    );
 }
