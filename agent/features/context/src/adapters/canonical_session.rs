@@ -29,6 +29,16 @@ pub trait CanonicalSessionWriter: Send + Sync {
         expected_revision: u64,
         plan: SessionCommitPlan,
     ) -> Result<(), String>;
+
+    /// 数据集为空集时以内存全量快照重建持久化状态；数据集非空时必须
+    /// fail-closed，防止覆盖并发写者。重建后磁盘修订号与内存对齐。
+    async fn rebuild_empty_dataset(
+        &self,
+        _session_id: &str,
+        _session: &crate::domain::session::CanonicalSession,
+    ) -> Result<(), String> {
+        Err("Session writer 不支持空数据集全量重建".to_string())
+    }
 }
 
 #[async_trait]
@@ -759,7 +769,18 @@ impl CanonicalSessionRepository {
         intent: SessionSaveIntent,
     ) -> Result<(), String> {
         let plan = Self::build_commit_plan(before, after, intent)?;
-        self.writer.commit(&after.id, before.revision, plan).await
+        match self.writer.commit(&after.id, before.revision, plan).await {
+            Ok(()) => Ok(()),
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。
+                match self.writer.rebuild_empty_dataset(&after.id, after).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(commit_error),
+                }
+            }
+        }
     }
 
     fn publish_generation(

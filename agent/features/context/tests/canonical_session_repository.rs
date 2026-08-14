@@ -35,6 +35,9 @@ struct RecordedSessionCommit {
 struct RecordingWriter {
     saved: Mutex<Vec<RecordedSessionCommit>>,
     fail: bool,
+    /// 模拟数据集被外部清空：增量 commit 一律失败，仅全量重建可成功。
+    wiped: bool,
+    rebuilt: Mutex<Vec<(String, u64)>>,
 }
 
 #[async_trait]
@@ -45,6 +48,11 @@ impl CanonicalSessionWriter for RecordingWriter {
         expected_revision: u64,
         plan: SessionCommitPlan,
     ) -> Result<(), String> {
+        if self.wiped {
+            return Err(format!(
+                "Session 数据集修订号已变更: expected={expected_revision}, actual=0"
+            ));
+        }
         if self.fail {
             return Err("disk full".to_string());
         }
@@ -56,6 +64,21 @@ impl CanonicalSessionWriter for RecordingWriter {
             expected_revision,
             plan,
         });
+        Ok(())
+    }
+
+    async fn rebuild_empty_dataset(
+        &self,
+        session_id: &str,
+        session: &CanonicalSession,
+    ) -> Result<(), String> {
+        if !self.wiped {
+            return Err("Session 数据集非空，拒绝全量重建".to_string());
+        }
+        self.rebuilt
+            .lock()
+            .unwrap()
+            .push((session_id.to_string(), session.revision));
         Ok(())
     }
 }
@@ -460,6 +483,7 @@ async fn skill_load_revision_is_atomic_idempotent_and_failure_safe() {
     let failing_writer = Arc::new(RecordingWriter {
         saved: Mutex::new(Vec::new()),
         fail: true,
+        ..RecordingWriter::default()
     });
     let (failing, failing_holder) = repository(failing_writer);
     let failing_session_id = failing_holder.read().unwrap().id.clone();
@@ -1357,6 +1381,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
     let writer = Arc::new(RecordingWriter {
         saved: Mutex::new(vec![]),
         fail: true,
+        ..RecordingWriter::default()
     });
     let (repository, holder) = repository(writer);
 
@@ -1993,4 +2018,50 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
     assert!(result.summary.contains("- Next action: 实现压缩拼接"));
     assert!(result.summary.contains("## Current Objective"));
+}
+
+#[tokio::test]
+async fn append_recovers_from_wiped_dataset_by_full_rebuild() {
+    let writer = Arc::new(RecordingWriter {
+        wiped: true,
+        ..RecordingWriter::default()
+    });
+    let (repository, holder) = repository(writer.clone());
+
+    let receipt = repository.append_finalized(&append("recovered")).await;
+
+    let receipt = receipt.expect("append must recover from a wiped dataset");
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(holder.read().unwrap().revision, 1);
+    let rebuilt = writer.rebuilt.lock().unwrap().clone();
+    assert_eq!(
+        rebuilt,
+        vec![(holder.read().unwrap().id.clone(), 1)],
+        "full rebuild must carry the in-memory candidate revision"
+    );
+    assert!(
+        writer.saved.lock().unwrap().is_empty(),
+        "wiped dataset must never accept the incremental plan"
+    );
+}
+
+#[tokio::test]
+async fn append_surfaces_error_when_rebuild_also_fails() {
+    let writer = Arc::new(RecordingWriter {
+        fail: true,
+        ..RecordingWriter::default()
+    });
+    let (repository, holder) = repository(writer.clone());
+
+    let outcome = repository.append_finalized(&append("still-failing")).await;
+
+    assert!(
+        outcome.is_err(),
+        "when both incremental commit and rebuild fail the append must surface an error"
+    );
+    assert_eq!(holder.read().unwrap().revision, 0);
+    assert!(
+        writer.rebuilt.lock().unwrap().is_empty(),
+        "plain disk-full failures have an intact dataset and must not trigger rebuild"
+    );
 }
