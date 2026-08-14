@@ -57,8 +57,8 @@ pub fn exit_plan_mode(lang: &str) -> &'static str {
 /// AskUserQuestion description。
 pub fn ask_user(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
-        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
+        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。每个选项必须是 `{\"title\": ..., \"description\": ...}` 对象，title 与 description 均必填且非空；不接受纯字符串选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
+        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Every option must be a {\"title\": ..., \"description\": ...} object with both fields required and non-empty; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
     }
 }
 
@@ -113,6 +113,10 @@ mod tests {
         assert!(enter_plan_mode("zh").contains("进入计划模式"));
         assert!(exit_plan_mode("zh").contains("退出计划模式"));
         assert!(ask_user("zh").contains("向用户提问"));
+        assert!(ask_user("zh").contains("不接受纯字符串选项"));
+        let ask_user_en = ask_user("en");
+        assert!(ask_user_en.contains("plain string options are rejected"));
+        assert!(ask_user_en.contains("required"));
         assert!(brief("zh").contains("简要总结"));
         assert!(sleep("zh").contains("暂停执行"));
         assert!(tool_search("zh").contains("搜索可用工具"));

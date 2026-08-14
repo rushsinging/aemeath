@@ -730,6 +730,49 @@ fn interaction_request_keeps_request_run_and_body_identity() {
 }
 
 #[test]
+fn interaction_request_user_questions_keep_option_descriptions() {
+    let request = sdk::InteractionRequest {
+        id: sdk::InteractionRequestId::new("request-1"),
+        run_id: sdk::RunId::new("run-1"),
+        tool_call_id: Some("call-1".to_string()),
+        body: sdk::InteractionRequestBody::UserQuestions(vec![sdk::UserQuestion {
+            prompt: "choose".to_string(),
+            options: vec![
+                sdk::OptionItem::new("a", "first choice"),
+                sdk::OptionItem::new("b", "second choice"),
+            ],
+            allow_multi: false,
+        }]),
+    };
+
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::InteractionRequested { request });
+
+    match mapped {
+        SdkEventMapping::Runtime(TuiRuntimeEvent::InteractionRequested(request)) => {
+            match request.body {
+                crate::tui::adapter::tui_runtime_event::TuiInteractionBody::UserQuestions(
+                    questions,
+                ) => {
+                    assert_eq!(questions.len(), 1);
+                    assert_eq!(questions[0].options.len(), 2);
+                    assert_eq!(questions[0].options[0].title, "a");
+                    assert_eq!(
+                        questions[0].options[0].description.as_deref(),
+                        Some("first choice")
+                    );
+                    assert_eq!(
+                        questions[0].options[1].description.as_deref(),
+                        Some("second choice")
+                    );
+                }
+                other => panic!("expected UserQuestions body, got {other:?}"),
+            }
+        }
+        _other => panic!("expected InteractionRequested event, got a different mapping"),
+    }
+}
+
+#[test]
 fn task_state_preserves_structured_payload() {
     let expected = sdk::TaskStateView::empty("session-a", 42);
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {

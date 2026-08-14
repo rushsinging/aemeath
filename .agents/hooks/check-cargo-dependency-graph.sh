@@ -21,28 +21,28 @@ import subprocess
 import sys
 
 FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
-TOOLS_DEPENDENCY_BUDGET = {"share", "project", "task", "memory"}
+TOOLS_DEPENDENCY_BUDGET = {"share", "project", "task", "memory", "utils"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
-    "cli": {"composition", "sdk"},
+    "cli": {"composition", "sdk", "utils"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "runtime": {"config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging", "utils"},
     "config": {"share", "storage"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
-    "project": {"share"},
+    "project": {"share", "utils"},
     "policy": {"share", "sdk", "tools"},
-    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "tools", "sdk"},
+    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "tools", "sdk", "utils"},
     "memory": {"share", "storage", "utils"},
     "provider": {"share", "logging"},
     # Approved horizontal dependencies: tools -> project/storage, Memory/Task-owned OHS/PL.
-    "tools": {"share", "project", "memory", "task"},
+    "tools": {"share", "project", "memory", "task", "utils"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),
-    "hook": {"share"},
+    "hook": {"share", "utils"},
     "audit": {"share", "sdk", "storage"},
     "workflow": {"share"},
     # SDK publishes delivery contracts and typed tool result DTOs. During #993 the

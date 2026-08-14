@@ -547,7 +547,10 @@ impl App {
                             let mut options: Vec<sdk::OptionItem> = q
                                 .options
                                 .iter()
-                                .map(|o| sdk::OptionItem::title_only(o.clone()))
+                                .map(|o| sdk::OptionItem {
+                                    title: o.title.clone(),
+                                    description: o.description.clone(),
+                                })
                                 .collect();
                             // 追加 "Type something..." 内建选项 —— cursor 超出
                             // llm_option_count 时切换到自由输入子态

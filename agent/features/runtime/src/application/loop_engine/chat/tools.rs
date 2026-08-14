@@ -112,7 +112,13 @@ where
                         .iter()
                         .map(|q| SuspendedQuestion {
                             prompt: q.prompt.clone(),
-                            options: q.options.iter().map(|o| o.title.clone()).collect(),
+                            options: q
+                                .options
+                                .iter()
+                                .map(|o| {
+                                    sdk::OptionItem::new(o.title.clone(), o.description.clone())
+                                })
+                                .collect(),
                             allow_multi: q.allow_multi,
                         })
                         .collect(),

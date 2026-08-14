@@ -302,9 +302,15 @@ pub(crate) enum TuiInteractionBody {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiOptionItem {
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiUserQuestion {
     pub(crate) prompt: String,
-    pub(crate) options: Vec<String>,
+    pub(crate) options: Vec<TuiOptionItem>,
     pub(crate) allow_multi: bool,
 }
 

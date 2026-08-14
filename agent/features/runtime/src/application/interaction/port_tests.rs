@@ -15,7 +15,7 @@ fn question_request() -> InteractionRequest {
         tool_call_id: None,
         body: InteractionRequestBody::UserQuestions(vec![UserQuestion {
             prompt: "继续？".to_string(),
-            options: vec!["是".to_string()],
+            options: vec![sdk::OptionItem::new("是", "同意")],
             allow_multi: false,
         }]),
     }

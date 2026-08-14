@@ -50,9 +50,15 @@ pub(crate) enum InteractionBody {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct UiOptionItem {
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct UiUserQuestion {
     pub(crate) prompt: String,
-    pub(crate) options: Vec<String>,
+    pub(crate) options: Vec<UiOptionItem>,
     pub(crate) allow_multi: bool,
 }
 

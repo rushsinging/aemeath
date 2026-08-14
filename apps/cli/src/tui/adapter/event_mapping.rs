@@ -919,7 +919,14 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
                         .into_iter()
                         .map(|question| TuiUserQuestion {
                             prompt: question.prompt,
-                            options: question.options,
+                            options: question
+                                .options
+                                .into_iter()
+                                .map(|option| TuiOptionItem {
+                                    title: option.title,
+                                    description: option.description,
+                                })
+                                .collect(),
                             allow_multi: question.allow_multi,
                         })
                         .collect(),

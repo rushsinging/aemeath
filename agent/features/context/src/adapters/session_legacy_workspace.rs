@@ -73,6 +73,7 @@ struct Probe {
 /// stay stable regardless of the ambient locale.
 fn git_command() -> Command {
     let mut command = Command::new("git");
+    utils::configure_std_noninteractive(&mut command).expect("当前平台必须支持非交互进程隔离");
     command.env("LC_ALL", "C").env("LANG", "C");
     command
 }

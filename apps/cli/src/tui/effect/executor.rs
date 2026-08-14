@@ -75,23 +75,23 @@ fn interaction_failure_from_sdk(
     }
 }
 
-fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
-    let branch = std::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(root)
+fn git_output(root: &str, args: &[&str]) -> Option<std::process::Output> {
+    let mut command = std::process::Command::new("git");
+    command.args(args).current_dir(root);
+    utils::configure_std_noninteractive(&mut command).ok()?;
+    command
         .output()
         .ok()
         .filter(|output| output.status.success())
+}
+
+fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
+    let branch = git_output(root, &["branch", "--show-current"])
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
 
-    let kind = std::process::Command::new("git")
-        .args(["rev-parse", "--git-dir", "--git-common-dir"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
+    let kind = git_output(root, &["rev-parse", "--git-dir", "--git-common-dir"])
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|stdout| {
             let mut lines = stdout.lines().map(str::trim);
@@ -577,17 +577,14 @@ impl App {
         #[cfg(target_os = "windows")]
         let cmd = "cmd";
 
-        let result = {
-            #[cfg(target_os = "windows")]
-            {
-                std::process::Command::new(cmd)
-                    .args(["/C", "start", target])
-                    .spawn()
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                std::process::Command::new(cmd).arg(target).spawn()
-            }
+        let mut command = std::process::Command::new(cmd);
+        #[cfg(target_os = "windows")]
+        command.args(["/C", "start", target]);
+        #[cfg(not(target_os = "windows"))]
+        command.arg(target);
+        let result = match utils::configure_std_noninteractive(&mut command) {
+            Ok(()) => command.spawn(),
+            Err(error) => Err(error),
         };
 
         match result {

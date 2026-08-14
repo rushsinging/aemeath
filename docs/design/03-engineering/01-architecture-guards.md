@@ -38,9 +38,10 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单；禁止 Task PL/行为爬回 Shared |
-| 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
+| 4a | `check-noninteractive-child-session.sh` + `check-noninteractive-child-session-tests.sh` | 安全/IO | 所有生产非交互外部进程必须经 `utils` 唯一边界创建独立 session，禁止继承父控制终端 |
+| 4b | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块 |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage PL、AppendLog/worker 生产入口及被 Composition 消费的 `usage_query_service` 查询装配入口 |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
@@ -115,19 +116,19 @@
 
 | Crate | 允许依赖（workspace crate） |
 |---|---|
-| `cli` | `composition`, `sdk` |
+| `cli` | `composition`, `sdk`, `utils` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging`, `utils` |
 | `share` | `logging`, `utils` |
-| `project` | `share` |
+| `project` | `share`, `utils` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk`, `utils` |
 | `memory` | `share`, `storage`, `utils` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `memory`, `task` |
+| `tools` | `share`, `project`, `storage`, `memory`, `task`, `utils` |
 | `storage` | `share` |
 | `task` | ∅ |
-| `hook` | `share` |
+| `hook` | `share`, `utils` |
 | `audit` | `share`, `sdk`, `storage` |
 | `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
@@ -148,10 +149,10 @@
 
 ## 2. check-cli-thin-entry.sh
 
-- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
+- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + utils 纯技术进程边界`。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
-  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
+  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk, utils}`
   - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
@@ -195,7 +196,15 @@
 
 - **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
 
-### 4a. check-composition-layout.sh
+## 4a. check-noninteractive-child-session.sh
+
+- **功能**：扫描 `apps/**/src`、`agent/**/src` 与 `packages/**/src` 的生产 Rust 源码，要求所有 `std::process::Command` / `tokio::process::Command` 启动点在 spawn/output/status 前调用 `utils::configure_std_noninteractive` 或 `utils::configure_tokio_noninteractive`。
+- **唯一底层 owner**：`packages/global/utils/src/process.rs` 在 Unix spawn 前回调中调用 `setsid()`；业务 adapter 禁止自行调用 `process_group`、`pre_exec` 或 `setsid`。
+- **排除范围**：`tests/`、`tests.rs`、`*_tests.rs`、`*_test.rs` 与 Project crate-root 测试夹具不属于生产启动点。
+- **失败模式**：发现未配置的生产命令或复制 session 系统调用时以 exit code 2 阻断。
+- **故意违规证据**：`check-noninteractive-child-session-tests.sh` 用裸 `Command::output` 负例证明阻断，以统一配置正例、测试目录与唯一底层实现证明 clean pass。
+
+### 4b. check-composition-layout.sh
 
 - **功能**：锁定 `agent/composition/src` 的 capability-first wiring modules 结构；Composition 按被装配职责分片，不机械复制 feature crate 的 Hexagonal 四层。
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `audit.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/audit/provider/runtime/tools/update` 六个 wiring module。`audit.rs` 仅装配 #929 worker lifecycle/value extraction，Runtime UsageSink bridge 仍归 #931。

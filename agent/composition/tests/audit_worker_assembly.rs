@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use audit::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use audit::{UsageDropReason, UsageEmitOutcome, UsageQuery, UsageQueryPort, UsageRecord};
 use composition::audit::{usage_worker_config_from_snapshot, wire_session_audit, AuditUsageSink};
 use runtime::UsageSink;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
@@ -68,12 +68,32 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
         audit::UsageShutdownOutcome::Drained
     );
     assert_eq!(
-        sink.try_record(record),
+        sink.try_record(record.clone()),
         UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
     );
-    assert!(agents_dir
-        .join("audit/usage/01900000-0000-7000-8000-000000000011.jsonl")
-        .is_file());
+    let audit_root = storage::SafeStorageRoot::open(agents_dir.join("audit"))
+        .expect("reopen production audit root");
+    let query_service = audit::usage_query_service(std::sync::Arc::new(
+        audit::file_usage_append_store(audit_root),
+    ));
+    let page = query_service
+        .query(UsageQuery {
+            session_id: Some(record.session_id.clone()),
+            run_id: Some(record.run_id.clone()),
+            run_step_id: Some(record.run_step_id.clone()),
+            model_invocation_id: Some(record.model_invocation_id.clone()),
+            provider: Some(record.provider.clone()),
+            model: Some(record.model.clone()),
+            recorded_range: None,
+            pagination: audit::Pagination {
+                cursor: None,
+                limit: std::num::NonZeroUsize::new(10).expect("non-zero query limit"),
+            },
+        })
+        .await
+        .expect("query drained production record");
+    assert_eq!(page.records, vec![record]);
+    assert!(page.warnings.is_empty());
 }
 
 #[test]

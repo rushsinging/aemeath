@@ -42,12 +42,14 @@ async fn read_clipboard_image_bytes() -> Result<Vec<u8>, ImageError> {
         "#
     );
 
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
+    let mut command = Command::new("osascript");
+    command.arg("-e").arg(&script);
+    utils::configure_tokio_noninteractive(&mut command)
+        .map_err(|error| ImageError::ReadError(format!("osascript isolation failed: {error}")))?;
+    let output = command
         .output()
         .await
-        .map_err(|e| ImageError::ReadError(format!("osascript failed: {e}")))?;
+        .map_err(|error| ImageError::ReadError(format!("osascript failed: {error}")))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
@@ -80,10 +82,13 @@ async fn read_clipboard_image_bytes() -> Result<Vec<u8>, ImageError> {
     use tokio::process::Command;
 
     // Try xclip first
-    let output = Command::new("xclip")
-        .args(["-selection", "clipboard", "-t", "image/png", "-o"])
-        .output()
-        .await;
+    let mut command = Command::new("xclip");
+    command.args(["-selection", "clipboard", "-t", "image/png", "-o"]);
+    let output = if utils::configure_tokio_noninteractive(&mut command).is_ok() {
+        command.output().await
+    } else {
+        return Err(ImageError::ReadError("clipboard command isolation unsupported".to_string()));
+    };
 
     if let Ok(output) = output {
         if output.status.success() && !output.stdout.is_empty() {
@@ -92,10 +97,13 @@ async fn read_clipboard_image_bytes() -> Result<Vec<u8>, ImageError> {
     }
 
     // Fallback to xsel
-    let output = Command::new("xsel")
-        .args(["--clipboard", "--output"])
-        .output()
-        .await;
+    let mut command = Command::new("xsel");
+    command.args(["--clipboard", "--output"]);
+    let output = if utils::configure_tokio_noninteractive(&mut command).is_ok() {
+        command.output().await
+    } else {
+        return Err(ImageError::ReadError("clipboard command isolation unsupported".to_string()));
+    };
 
     if let Ok(output) = output {
         if output.status.success() && !output.stdout.is_empty() {
@@ -110,10 +118,13 @@ async fn read_clipboard_image_bytes() -> Result<Vec<u8>, ImageError> {
     }
 
     // Try wl-paste for Wayland
-    let output = Command::new("wl-paste")
-        .args(["--type", "image/png"])
-        .output()
-        .await;
+    let mut command = Command::new("wl-paste");
+    command.args(["--type", "image/png"]);
+    let output = if utils::configure_tokio_noninteractive(&mut command).is_ok() {
+        command.output().await
+    } else {
+        return Err(ImageError::ReadError("clipboard command isolation unsupported".to_string()));
+    };
 
     if let Ok(output) = output {
         if output.status.success() && !output.stdout.is_empty() {

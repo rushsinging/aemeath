@@ -1,9 +1,11 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use audit::{
-    file_usage_append_store, usage_query_service, Pagination, TimeRange, UsageCursor,
-    UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryPort, UsageQueryWarning, UsageRecord,
+    file_usage_append_store, start_usage_worker, usage_query_service, Pagination, TimeRange,
+    UsageCursor, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryPort, UsageQueryWarning,
+    UsageRecord, UsageShutdownOutcome, UsageWorkerConfig, CURRENT_USAGE_SCHEMA_VERSION,
 };
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use storage::SafeStorageRoot;
@@ -56,13 +58,82 @@ async fn service(
     (store, query)
 }
 
-async fn append(store: &audit::FileUsageAppendStore, record: UsageRecord) {
+async fn append_envelope(store: &audit::FileUsageAppendStore, envelope: UsageEnvelopeV1) {
     use audit::UsageAppendStorePort;
-    let stream = store.stream_for_session(&record.session_id);
-    let mut bytes = serde_json::to_vec(&UsageEnvelopeV1::new(record)).unwrap();
+    let stream = store.stream_for_session(&envelope.record.session_id);
+    let mut bytes = serde_json::to_vec(&envelope).unwrap();
     bytes.push(b'\n');
     store.append(&stream, &bytes).await.unwrap();
     store.flush(&stream).await.unwrap();
+}
+
+async fn append(store: &audit::FileUsageAppendStore, record: UsageRecord) {
+    append_envelope(store, UsageEnvelopeV1::new(record)).await;
+}
+
+#[tokio::test]
+async fn query_skips_unknown_schema_with_exact_warning_and_keeps_neighbors() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, service) = service(&temp).await;
+    let first = record("session-a", "first", 10);
+    let unknown_record = record("session-a", "unknown", 11);
+    let last = record("session-a", "last", 12);
+    append(&store, first.clone()).await;
+    let mut unknown = UsageEnvelopeV1::new(unknown_record);
+    unknown.schema_version = CURRENT_USAGE_SCHEMA_VERSION + 1;
+    append_envelope(&store, unknown).await;
+    append(&store, last.clone()).await;
+
+    let page = service.query(query(10)).await.unwrap();
+    assert_eq!(page.records, vec![first, last]);
+    assert_eq!(
+        page.warnings,
+        vec![UsageQueryWarning::CorruptLine {
+            stream: store
+                .stream_for_session(&SessionId::new("session-a"))
+                .as_str()
+                .to_string(),
+            line_number: 2,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Arc::new(file_usage_append_store(
+        SafeStorageRoot::open(temp.path()).unwrap(),
+    ));
+    let service = usage_query_service(store.clone());
+    let expected = record("session-l4", "match", 15);
+    let (sender, handle) =
+        start_usage_worker(store, UsageWorkerConfig::new(4, Duration::from_secs(1)));
+
+    assert_eq!(
+        sender.try_record(expected.clone()),
+        audit::UsageEmitOutcome::Accepted
+    );
+    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
+
+    let mut request = query(10);
+    request.session_id = Some(expected.session_id.clone());
+    request.provider = Some(expected.provider.clone());
+    request.model = Some(expected.model.clone());
+    request.recorded_range = Some(TimeRange {
+        from_inclusive_unix_ms: Some(15),
+        to_exclusive_unix_ms: Some(16),
+    });
+    let page = service.query(request.clone()).await.unwrap();
+    assert_eq!(page.records, vec![expected]);
+    assert!(page.warnings.is_empty());
+
+    let summary = service.summarize(request).await.unwrap();
+    assert_eq!(summary.record_count, 1);
+    assert_eq!(summary.input_tokens, 10);
+    assert_eq!(summary.output_tokens, 20);
+    assert_eq!(summary.cache_write_tokens, 3);
+    assert_eq!(summary.cache_read_tokens, 0);
+    assert_eq!(summary.reasoning_tokens, 5);
 }
 
 #[tokio::test]
