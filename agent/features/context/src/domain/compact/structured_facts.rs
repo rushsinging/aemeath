@@ -90,6 +90,88 @@ impl ConstraintMetadata {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactFactEntity {
+    PullRequest,
+    CiRun,
+    Branch,
+    Worktree,
+    Task,
+    TestSuite,
+    Deployment,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactFactDimension {
+    Status,
+    HeadRevision,
+    CiStatus,
+    Mergeability,
+    Cleanliness,
+    Progress,
+    TestResult,
+    DeploymentState,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactFactLifecycle {
+    Persistent,
+    Dynamic,
+    Task,
+    Phase,
+    Ephemeral,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactFactIdentity {
+    entity: CompactFactEntity,
+    key: String,
+    dimension: CompactFactDimension,
+    lifecycle: CompactFactLifecycle,
+}
+
+impl CompactFactIdentity {
+    pub fn new(
+        entity: CompactFactEntity,
+        key: impl Into<String>,
+        dimension: CompactFactDimension,
+        lifecycle: CompactFactLifecycle,
+    ) -> Result<Self, CompactFactError> {
+        let key = key.into();
+        if key.trim().is_empty() {
+            return Err(CompactFactError::EmptyIdentityKey);
+        }
+        Ok(Self {
+            entity,
+            key,
+            dimension,
+            lifecycle,
+        })
+    }
+
+    pub const fn entity(&self) -> CompactFactEntity {
+        self.entity
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub const fn dimension(&self) -> CompactFactDimension {
+        self.dimension
+    }
+
+    pub const fn lifecycle(&self) -> CompactFactLifecycle {
+        self.lifecycle
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CompactFact {
     sequence: u64,
@@ -98,6 +180,8 @@ pub struct CompactFact {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     constraint: Option<ConstraintMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    identity: Option<CompactFactIdentity>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +192,7 @@ struct CompactFactWire {
     kind: CompactFactKind,
     text: String,
     constraint: Option<ConstraintMetadata>,
+    identity: Option<CompactFactIdentity>,
 }
 
 impl<'de> Deserialize<'de> for CompactFact {
@@ -120,12 +205,13 @@ impl<'de> Deserialize<'de> for CompactFact {
         use serde::de::Error;
 
         let wire = CompactFactWire::deserialize(deserializer)?;
-        Self::new(
+        Self::new_with_metadata(
             wire.sequence,
             wire.source,
             wire.kind,
             wire.text,
             wire.constraint,
+            wire.identity,
         )
         .map_err(DeserializerType::Error::custom)
     }
@@ -139,16 +225,46 @@ impl CompactFact {
         text: impl Into<String>,
         constraint: Option<ConstraintMetadata>,
     ) -> Result<Self, CompactFactError> {
+        Self::new_with_metadata(sequence, source, kind, text, constraint, None)
+    }
+
+    pub fn new_with_identity(
+        sequence: u64,
+        source: CompactFactSource,
+        kind: CompactFactKind,
+        text: impl Into<String>,
+        identity: CompactFactIdentity,
+    ) -> Result<Self, CompactFactError> {
+        Self::new_with_metadata(sequence, source, kind, text, None, Some(identity))
+    }
+
+    fn new_with_metadata(
+        sequence: u64,
+        source: CompactFactSource,
+        kind: CompactFactKind,
+        text: impl Into<String>,
+        constraint: Option<ConstraintMetadata>,
+        identity: Option<CompactFactIdentity>,
+    ) -> Result<Self, CompactFactError> {
         let text = text.into();
         if text.trim().is_empty() {
             return Err(CompactFactError::EmptyText);
         }
-        match (kind, constraint.is_some()) {
-            (CompactFactKind::Constraint, false) => {
+        match (kind, constraint.is_some(), identity.is_some()) {
+            (CompactFactKind::Constraint, false, _) => {
                 return Err(CompactFactError::MissingConstraintMetadata)
             }
-            (CompactFactKind::Constraint, true) | (_, false) => {}
-            (_, true) => return Err(CompactFactError::UnexpectedConstraintMetadata),
+            (CompactFactKind::Constraint, true, true) => {
+                return Err(CompactFactError::UnexpectedFactIdentity)
+            }
+            (CompactFactKind::Constraint, true, false) | (_, false, _) => {}
+            (_, true, _) => return Err(CompactFactError::UnexpectedConstraintMetadata),
+        }
+        if identity
+            .as_ref()
+            .is_some_and(|metadata| metadata.key.trim().is_empty())
+        {
+            return Err(CompactFactError::EmptyIdentityKey);
         }
         Ok(Self {
             sequence,
@@ -156,6 +272,7 @@ impl CompactFact {
             kind,
             text,
             constraint,
+            identity,
         })
     }
 
@@ -192,6 +309,10 @@ impl CompactFact {
 
     pub const fn constraint_metadata(&self) -> Option<&ConstraintMetadata> {
         self.constraint.as_ref()
+    }
+
+    pub const fn identity(&self) -> Option<&CompactFactIdentity> {
+        self.identity.as_ref()
     }
 
     pub fn normalize_scope(mut self) -> Self {
@@ -467,6 +588,8 @@ pub fn reconcile_checkpoint_with_task_snapshot(
                     .join(", ")
             )
         };
+        wire.uncommitted_working_set
+            .retain(|line| !same_task_working_item(line, item));
         wire.uncommitted_working_set.push(format!(
             "Pending task {}: {}{dependency}",
             item.sequence(),
@@ -503,6 +626,20 @@ pub fn reduce_compact_facts_with_task_snapshot(
         .enumerate()
         .collect::<Vec<_>>();
     indexed_facts.sort_by_key(|(original_index, fact)| (fact.sequence(), *original_index));
+    let superseded_dynamic_facts = indexed_facts
+        .iter()
+        .filter_map(|(original_index, fact)| {
+            fact.identity()
+                .filter(|identity| identity.lifecycle() == CompactFactLifecycle::Dynamic)
+                .map(|identity| (identity.clone(), *original_index))
+        })
+        .fold(
+            std::collections::HashMap::new(),
+            |mut latest_by_identity, (identity, original_index)| {
+                latest_by_identity.insert(identity, original_index);
+                latest_by_identity
+            },
+        );
 
     let mut immutable_constraints = Vec::new();
     let mut current_objective = None;
@@ -513,8 +650,17 @@ pub fn reduce_compact_facts_with_task_snapshot(
     let mut revalidation = Vec::new();
     let mut milestones = Vec::new();
 
-    for (_, fact) in indexed_facts {
+    for (original_index, fact) in indexed_facts {
         let fact = fact.normalize_scope();
+        if fact.identity().is_some_and(|identity| {
+            identity.lifecycle() == CompactFactLifecycle::Dynamic
+                && superseded_dynamic_facts.get(identity) != Some(&original_index)
+        }) {
+            continue;
+        }
+        let dynamic_fact = fact
+            .identity()
+            .is_some_and(|identity| identity.lifecycle() == CompactFactLifecycle::Dynamic);
         match fact.kind() {
             CompactFactKind::Constraint => {
                 let metadata = fact
@@ -547,8 +693,11 @@ pub fn reduce_compact_facts_with_task_snapshot(
             CompactFactKind::Objective if fact.source() == CompactFactSource::MainUser => {
                 current_objective = Some(as_fact_bullet(fact.text()));
             }
-            CompactFactKind::Objective => {
-                risks.push(format!("- unverified objective: {}", fact.text()));
+            CompactFactKind::Objective => {}
+            CompactFactKind::CommittedFact
+                if fact.source() == CompactFactSource::ToolResult && dynamic_fact =>
+            {
+                revalidation.push(as_fact_bullet(fact.text()));
             }
             CompactFactKind::CommittedFact if fact.source() == CompactFactSource::ToolResult => {
                 committed_facts.push(as_fact_bullet(fact.text()));
@@ -561,9 +710,7 @@ pub fn reduce_compact_facts_with_task_snapshot(
             CompactFactKind::ResumeCandidate if fact.source() == CompactFactSource::MainUser => {
                 next_action = Some(fact.text().to_string());
             }
-            CompactFactKind::ResumeCandidate => {
-                risks.push(format!("- unverified next action: {}", fact.text()));
-            }
+            CompactFactKind::ResumeCandidate => {}
             CompactFactKind::Revalidation => revalidation.push(as_fact_bullet(fact.text())),
             CompactFactKind::Milestone => milestones.push(as_fact_bullet(fact.text())),
         }
@@ -606,6 +753,7 @@ pub fn reduce_compact_facts_with_task_snapshot(
                         .join(", ")
                 )
             };
+            working_set.retain(|line| !same_task_working_item(line, item));
             working_set.push(format!(
                 "- Pending task {}: {}{dependency}",
                 item.sequence(),
@@ -643,6 +791,13 @@ pub fn reduce_compact_facts_with_task_snapshot(
             ContinuationStatus::Completed => unreachable!("fact reducer never infers completion"),
         }),
     })
+}
+
+fn same_task_working_item(line: &str, item: &CompactTaskItem) -> bool {
+    let normalized_line = normalize_for_comparison(line);
+    let normalized_subject = normalize_for_comparison(item.subject());
+    normalized_line.contains(&format!("pending task {}", item.sequence()))
+        || (!normalized_subject.is_empty() && normalized_line.contains(&normalized_subject))
 }
 
 fn contradicts_completed_work(line: &str, completed_subjects: &[String]) -> bool {
@@ -688,14 +843,19 @@ fn as_fact_bullet(source: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactFactError {
     EmptyText,
+    EmptyIdentityKey,
     MissingConstraintMetadata,
     UnexpectedConstraintMetadata,
+    UnexpectedFactIdentity,
 }
 
 impl fmt::Display for CompactFactError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyText => write!(formatter, "compact fact text must not be empty"),
+            Self::EmptyIdentityKey => {
+                write!(formatter, "compact fact identity key must not be empty")
+            }
             Self::MissingConstraintMetadata => {
                 write!(
                     formatter,
@@ -706,6 +866,12 @@ impl fmt::Display for CompactFactError {
                 formatter,
                 "constraint metadata is only allowed for constraint facts"
             ),
+            Self::UnexpectedFactIdentity => {
+                write!(
+                    formatter,
+                    "fact identity is not allowed for constraint facts"
+                )
+            }
         }
     }
 }

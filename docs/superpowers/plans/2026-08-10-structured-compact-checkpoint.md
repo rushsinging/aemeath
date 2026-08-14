@@ -469,3 +469,27 @@ TDD 与跨层证据：
 4. Context repository 失败测试：typed snapshot 穿透 request → generation → commit，checkpoint 与 companion 状态一致。
 5. 运行 focused tests、`cargo fmt --all -- --check`、`cargo test -p context`、`cargo build -p context`、严格 Clippy、`git diff --check` 和完整架构守卫。
 6. 创建本地提交，不推送。
+
+## 摘要质量补充：typed fact identity 与生命周期归并
+
+真实 session 回放显示 typed checkpoint、Rust-owned Reduce 与 Task snapshot 已能稳定生成一致的恢复游标，但同一 PR/CI/branch/worktree 的历次动态状态、旧 objective/cursor 和跨分区重复仍会逐轮累积。根因是 `CompactFact` 只有 kind、text 和 sequence，没有可验证的实体身份、状态维度或生命周期；Reducer 只能追加文本，无法确定新事实是否替代旧状态。
+
+领域模型与 authority 约束：
+
+1. 非约束 fact 可携带可选 `identity`，由 `entity`、`key`、`dimension` 和 `lifecycle` 组成。只有四项都经过严格枚举/非空校验后，Reducer 才允许做 supersession；缺失或不完整 identity 时 fail closed，保留原事实。
+2. `entity` 表达稳定对象类型（pull_request、ci_run、branch、worktree、task、test_suite、deployment、other），`key` 表达同一对象的稳定标识，`dimension` 表达被观察的单一状态轴，`lifecycle` 区分 persistent、dynamic、task、phase、ephemeral。sequence 只决定同一 Map 历史流中的来源顺序，不与 Task revision 混用。
+3. 同 `entity + key + dimension` 的 dynamic fact 只保留 source order 最新项；persistent facts 不因 identity 相同而静默删除。旧动态状态不会自动进入 milestone，只有显式 milestone fact 才可归档。
+4. 动态 current-state fact 的 section owner 固定为 Required Revalidation；LLM 不得把它提升为 Committed Facts。跨分区完全重复按稳定 owner 优先级保留一份；无法证明语义相同时不得模糊合并。
+5. main-user Current Objective 继续按 source order 只保留最新一项；非 main-user objective 与 resume candidate 只在仍可能影响恢复且未被更新的情况下保守留风险。active Task snapshot 的唯一 in-progress task仍是唯一 Next action，Task companion 中的 pending/completed 展示不得在权威 section 重复生成。
+6. 预算归一化先执行 typed supersession、owner 规范化和精确去重，再按 section 价值淘汰；Immutable Constraints、Current Objective、唯一 Next action、prohibited actions、Continuation Status/reason 永不裁剪。Refresh patch只能压缩归并后的非保护集合，不能恢复被 Rust supersede 的条目。
+7. previous checkpoint 仍以九段兼容文本持久化；没有 typed identity 的历史条目只能执行保守的精确去重和已知动态状态迁移，不通过正则猜测实体后删除，避免错误淘汰。
+
+TDD 与验收证据：
+
+1. Domain schema 测试：identity JSON 严格 round-trip，拒绝未知字段、空 key/dimension、constraint 携带 identity，以及非 constraint 携带 constraint metadata。
+2. Domain Reduce 测试：同 PR CI 维度只保留最新状态；不同维度、不同实体或 persistent lifecycle 均不得互相覆盖；乱序 Map batch 按 sequence 与原始稳定顺序归并。
+3. Domain owner 测试：dynamic committed fact 进入 Required Revalidation；同一 identity 在 working/risk/revalidation 中只保留最新 owner；旧 non-main objective/cursor 不与当前权威 objective/cursor 并存。
+4. Task 测试：pending task 不重复进入 working set；completed task 清理对应陈旧工作；唯一 in-progress task仍生成唯一 Next action且不覆盖 main-user objective。
+5. Adapter 契约测试：Map prompt 发布完整 identity schema；multi-chunk Map 的 typed identity 在本地 Reduce 中生效；Refresh 输入不包含已 supersede 的状态且 patch 不能恢复 protected semantics。
+6. 真实样本合成回放：九段顺序不变、Next action 恰好一个、Current Task State 恰好一个、同一 PR/branch 动态维度至多一项，摘要长度显著下降且连续归一化幂等。
+7. 运行 focused tests、Context/Runtime 全测、`cargo fmt --all -- --check`、严格 Clippy、build、`git diff --check` 和完整架构守卫；创建本地提交，不推送。

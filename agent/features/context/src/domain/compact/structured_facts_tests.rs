@@ -389,3 +389,291 @@ fn non_active_or_ambiguous_task_snapshot_does_not_override_main_user_cursor() {
         assert!(rendered.contains("- Next action: Run the focused tests."));
     }
 }
+
+fn dynamic_identity(
+    entity: CompactFactEntity,
+    key: &str,
+    dimension: CompactFactDimension,
+) -> CompactFactIdentity {
+    CompactFactIdentity::new(entity, key, dimension, CompactFactLifecycle::Dynamic).unwrap()
+}
+
+#[test]
+fn compact_fact_identity_json_round_trips_strictly() {
+    let source = r#"{
+      "facts": [{
+        "sequence": 8,
+        "source": "tool_result",
+        "kind": "committed_fact",
+        "text": "PR #42 CI is green.",
+        "identity": {
+          "entity": "pull_request",
+          "key": "repo#42",
+          "dimension": "ci_status",
+          "lifecycle": "dynamic"
+        }
+      }]
+    }"#;
+
+    let batch: CompactFactBatch = serde_json::from_str(source).unwrap();
+    let identity = batch.facts()[0].identity().unwrap();
+
+    assert_eq!(identity.entity(), CompactFactEntity::PullRequest);
+    assert_eq!(identity.key(), "repo#42");
+    assert_eq!(identity.dimension(), CompactFactDimension::CiStatus);
+    assert_eq!(identity.lifecycle(), CompactFactLifecycle::Dynamic);
+    assert_eq!(
+        serde_json::from_str::<CompactFactBatch>(&serde_json::to_string(&batch).unwrap()).unwrap(),
+        batch
+    );
+}
+
+#[test]
+fn compact_fact_identity_rejects_empty_key_and_constraint_identity() {
+    let empty_key = r#"{
+      "facts": [{
+        "sequence": 1,
+        "source": "tool_result",
+        "kind": "committed_fact",
+        "text": "CI passed.",
+        "identity": {
+          "entity": "pull_request",
+          "key": " ",
+          "dimension": "ci_status",
+          "lifecycle": "dynamic"
+        }
+      }]
+    }"#;
+    let constraint_identity = r#"{
+      "facts": [{
+        "sequence": 1,
+        "source": "main_user",
+        "kind": "constraint",
+        "text": "Do not merge.",
+        "constraint": {
+          "scope": "session",
+          "lifecycle": "persistent",
+          "action": "restrict"
+        },
+        "identity": {
+          "entity": "pull_request",
+          "key": "repo#42",
+          "dimension": "mergeability",
+          "lifecycle": "dynamic"
+        }
+      }]
+    }"#;
+
+    assert!(serde_json::from_str::<CompactFactBatch>(empty_key).is_err());
+    assert!(serde_json::from_str::<CompactFactBatch>(constraint_identity).is_err());
+}
+
+#[test]
+fn latest_dynamic_fact_supersedes_same_entity_dimension_and_moves_to_revalidation() {
+    let identity = dynamic_identity(
+        CompactFactEntity::PullRequest,
+        "repo#42",
+        CompactFactDimension::CiStatus,
+    );
+    let facts = CompactFactBatch::new(vec![
+        CompactFact::new_with_identity(
+            3,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 CI has two failures.",
+            identity.clone(),
+        )
+        .unwrap(),
+        CompactFact::new_with_identity(
+            9,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 CI is green.",
+            identity,
+        )
+        .unwrap(),
+        CompactFact::new(
+            10,
+            CompactFactSource::MainUser,
+            CompactFactKind::Objective,
+            "Finish PR #42.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            11,
+            CompactFactSource::MainUser,
+            CompactFactKind::ResumeCandidate,
+            "Verify the current PR head.",
+            None,
+        )
+        .unwrap(),
+    ]);
+
+    let rendered = reduce_compact_facts(facts).unwrap().render();
+    let committed = rendered
+        .split("## Committed Facts\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Uncommitted Working Set")
+        .next()
+        .unwrap();
+    let revalidation = rendered
+        .split("## Required Revalidation\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Archived Milestones")
+        .next()
+        .unwrap();
+
+    assert!(!rendered.contains("two failures"));
+    assert!(!committed.contains("CI is green"));
+    assert!(revalidation.contains("PR #42 CI is green."));
+    assert_eq!(rendered.matches("PR #42 CI").count(), 1);
+}
+
+#[test]
+fn supersession_is_fail_closed_across_dimensions_and_persistent_lifecycles() {
+    let facts = CompactFactBatch::new(vec![
+        CompactFact::new_with_identity(
+            1,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 head is abc.",
+            dynamic_identity(
+                CompactFactEntity::PullRequest,
+                "repo#42",
+                CompactFactDimension::HeadRevision,
+            ),
+        )
+        .unwrap(),
+        CompactFact::new_with_identity(
+            2,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 CI is green.",
+            dynamic_identity(
+                CompactFactEntity::PullRequest,
+                "repo#42",
+                CompactFactDimension::CiStatus,
+            ),
+        )
+        .unwrap(),
+        CompactFact::new_with_identity(
+            3,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 was created.",
+            CompactFactIdentity::new(
+                CompactFactEntity::PullRequest,
+                "repo#42",
+                CompactFactDimension::Progress,
+                CompactFactLifecycle::Persistent,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        CompactFact::new_with_identity(
+            4,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "PR #42 received review approval.",
+            CompactFactIdentity::new(
+                CompactFactEntity::PullRequest,
+                "repo#42",
+                CompactFactDimension::Progress,
+                CompactFactLifecycle::Persistent,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        CompactFact::new(
+            5,
+            CompactFactSource::MainUser,
+            CompactFactKind::Objective,
+            "Finish PR #42.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            6,
+            CompactFactSource::MainUser,
+            CompactFactKind::ResumeCandidate,
+            "Verify PR #42.",
+            None,
+        )
+        .unwrap(),
+    ]);
+
+    let rendered = reduce_compact_facts(facts).unwrap().render();
+
+    assert!(rendered.contains("head is abc"));
+    assert!(rendered.contains("CI is green"));
+    assert!(rendered.contains("was created"));
+    assert!(rendered.contains("received review approval"));
+}
+
+#[test]
+fn authoritative_objective_cursor_and_task_snapshot_remove_stale_control_noise() {
+    let facts = CompactFactBatch::new(vec![
+        CompactFact::new(
+            1,
+            CompactFactSource::AssistantReport,
+            CompactFactKind::Objective,
+            "Old inferred objective.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            2,
+            CompactFactSource::Unknown,
+            CompactFactKind::ResumeCandidate,
+            "Old inferred next action.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            3,
+            CompactFactSource::MainUser,
+            CompactFactKind::Objective,
+            "Run the read-only compatibility test.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            4,
+            CompactFactSource::MainUser,
+            CompactFactKind::ResumeCandidate,
+            "Inspect the downloaded copies.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            5,
+            CompactFactSource::Unknown,
+            CompactFactKind::WorkingSet,
+            "Pending task 6: Summarize results.",
+            None,
+        )
+        .unwrap(),
+    ]);
+    let task_snapshot = CompactTaskSnapshot::active(
+        12,
+        16,
+        "Read-only compatibility test",
+        vec![
+            CompactTaskItem::in_progress(5, "Verify compatibility."),
+            CompactTaskItem::pending(6, "Summarize results.", vec![5]),
+        ],
+    );
+
+    let rendered = reduce_compact_facts_with_task_snapshot(facts, Some(&task_snapshot))
+        .unwrap()
+        .render();
+
+    assert!(!rendered.contains("Old inferred objective"));
+    assert!(!rendered.contains("Old inferred next action"));
+    assert_eq!(rendered.matches("Pending task 6").count(), 1);
+    assert_eq!(rendered.matches("- Next action:").count(), 1);
+    assert!(rendered.contains("- Next action: Verify compatibility."));
+}

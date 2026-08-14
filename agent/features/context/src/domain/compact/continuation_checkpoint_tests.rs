@@ -398,6 +398,61 @@ fn normalization_fails_when_protected_sections_exceed_budget() {
 }
 
 #[test]
+fn budget_normalization_prefers_active_work_over_committed_history() {
+    let committed_noise = (0..80)
+        .map(|index| {
+            format!(
+                "- Historical verified fact {index}: {}",
+                "detail ".repeat(15)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let working = "- CURRENT-WORK verify compatibility on local copies.";
+    let risk = "- CURRENT-RISK database head differs from the downloaded bundle.";
+    let source = COMPLETE_CHECKPOINT
+        .replace(
+            "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+            &committed_noise,
+        )
+        .replace("- Runtime and SDK are migrated; TUI remains.", working)
+        .replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            risk,
+        );
+
+    let normalized = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(1_000)
+        .unwrap()
+        .render();
+
+    assert!(normalized.contains("CURRENT-WORK"));
+    assert!(normalized.contains("CURRENT-RISK"));
+    assert!(!normalized.contains("Historical verified fact 79"));
+    assert!(crate::domain::token_budget::estimate_tokens(&normalized) <= 1_000);
+}
+
+#[test]
+fn normalization_is_idempotent_after_owner_and_budget_cleanup() {
+    let source = COMPLETE_CHECKPOINT.replace(
+        "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+        "- PR #1541 is OPEN and CI is green.\n- PR #1541 is OPEN and CI is green.",
+    );
+    let first = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+    let second = ContinuationCheckpoint::parse(&first.render())
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+
+    assert_eq!(second.render(), first.render());
+    assert_eq!(second.resume_cursor().next_action_count(), 1);
+}
+
+#[test]
 fn legacy_summary_becomes_conservative_checkpoint() {
     let checkpoint = ContinuationCheckpoint::from_legacy_summary(
         "## User Requests\n- 只分析，不实现\n\n## Next Action\n- 检查当前分支\n\n## Continuation Status\nContinue — work remains.",

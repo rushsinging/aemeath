@@ -103,6 +103,10 @@ Allowed kind values: constraint, objective, committed_fact, working_set, risk, r
 Constraint facts must also contain:
 {"constraint":{"scope":"session|task|phase|tool_call|unknown","lifecycle":"persistent|until_task_end|until_phase_end|until_tool_call_end|unknown","action":"grant|restrict|revoke|supersede"}}
 
+Non-constraint facts MAY contain a typed identity only when the history provides a stable object and one state dimension:
+{"identity":{"entity":"pull_request|ci_run|branch|worktree|task|test_suite|deployment|other","key":"stable object key","dimension":"status|head_revision|ci_status|mergeability|cleanliness|progress|test_result|deployment_state|other","lifecycle":"persistent|dynamic|task|phase|ephemeral"}}
+Use the same entity + key + dimension for observations of the same state axis. Use lifecycle=dynamic for current PR, CI, branch, worktree, test, or deployment state that must be revalidated. Use lifecycle=persistent only for durable events that must not supersede one another. Omit identity when any component is uncertain; never guess a key. Constraint facts must not contain identity.
+
 Rules:
 - Preserve the supplied chronological sequence numbers. Never invent a source identity or wider scope.
 - Only explicit main-user text may use source=main_user and scope=session.

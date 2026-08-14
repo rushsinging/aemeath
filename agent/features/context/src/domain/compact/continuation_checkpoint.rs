@@ -470,7 +470,7 @@ impl ContinuationCheckpoint {
             return Ok(self);
         }
 
-        for section_index in [7usize, 2, 3, 4] {
+        for section_index in [7usize, 2, 4, 3] {
             while !self.sections[section_index].is_empty()
                 && estimate_checkpoint_tokens(&self) > budget
             {

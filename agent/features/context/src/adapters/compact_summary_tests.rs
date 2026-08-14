@@ -273,6 +273,10 @@ fn compact_prompts_require_typed_json_contracts() {
     assert!(COMPACT_PROMPT.contains("scope"));
     assert!(COMPACT_PROMPT.contains("lifecycle"));
     assert!(COMPACT_PROMPT.contains("grant|restrict|revoke|supersede"));
+    assert!(COMPACT_PROMPT.contains("\"identity\""));
+    assert!(COMPACT_PROMPT.contains("entity + key + dimension"));
+    assert!(COMPACT_PROMPT.contains("pull_request|ci_run|branch|worktree"));
+    assert!(COMPACT_PROMPT.contains("persistent|dynamic|task|phase|ephemeral"));
     assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
     assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
     assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
