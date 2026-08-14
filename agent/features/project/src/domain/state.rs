@@ -391,7 +391,7 @@ pub fn prepare_restore(
         Ok(path) => path,
         Err(WorkspaceRestoreError::PathNotFound { path }) if path_base_fallback_eligible => {
             log::warn!(
-                target: "aemeath:agent:project",
+                target: crate::LOG_TARGET,
                 "workspace restore path_base fallback: persisted path_base={path} 不存在，回退 workspace_root={}",
                 workspace_root.display()
             );
@@ -450,7 +450,7 @@ pub fn prepare_restore(
             ) {
                 if path_base_fallback_eligible {
                     log::warn!(
-                        target: "aemeath:agent:project",
+                        target: crate::LOG_TARGET,
                         "workspace restore path_base fallback: persisted path_base={} 校验失败（{restore_error}），回退 workspace_root={}",
                         path_base.display(),
                         workspace_root.display()
