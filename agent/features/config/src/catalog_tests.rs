@@ -215,13 +215,8 @@ fn catalog_recommended_models_have_positive_windows_and_max_tokens() {
                 model_id
             );
             assert!(
-                max_tokens > 0,
-                "推荐模型 {} 的 max_tokens 必须 > 0",
-                model_id
-            );
-            assert!(
-                max_tokens as usize <= context_window,
-                "推荐模型 {} 的 max_tokens ({}) 不得大于 context_window ({})",
+                max_tokens == 0 || (max_tokens as usize) <= context_window,
+                "推荐模型 {} 的 max_tokens ({}) 必须为 0（官方未公布）或 <= context_window ({})",
                 model_id,
                 max_tokens,
                 context_window
@@ -258,6 +253,12 @@ fn catalog_recommended_models_carry_evidence_metadata_when_present() {
 
 #[test]
 fn configured_catalog_defaults_match_product_requirements() {
+    // max_tokens == 0 表示官方文档未公布输出上限（如 MiniMax），
+    // 落盘后由运行时按全局默认解析，禁止伪造数值。
+    let zhipu_models = &[
+        ("glm-5.2", 1_000_000, 131_072),
+        ("glm-5-turbo", 200_000, 131_072),
+    ][..];
     let cases = [
         (
             "Anthropic",
@@ -270,17 +271,43 @@ fn configured_catalog_defaults_match_product_requirements() {
         (
             "OpenAI",
             "https://api.openai.com",
-            &[("gpt-5.6-sol", 1_000_000, 16_384)][..],
+            &[
+                ("gpt-5.6-sol", 1_050_000, 128_000),
+                ("gpt-5.6-terra", 1_050_000, 128_000),
+                ("gpt-5.6-luna", 1_050_000, 128_000),
+                ("gpt-5.5", 1_050_000, 128_000),
+            ][..],
         ),
         (
             "Zhipu",
             "https://open.bigmodel.cn/api/paas/v4",
-            &[("glm-5.2", 1_000_000, 16_384)][..],
+            zhipu_models,
         ),
         (
             "ZhipuCodingPlan",
             "https://open.bigmodel.cn/api/coding/paas/v4",
-            &[("glm-5.2", 1_000_000, 16_384)][..],
+            zhipu_models,
+        ),
+        (
+            "Minimax",
+            "https://api.minimaxi.com/v1",
+            &[("MiniMax-M3", 1_000_000, 0), ("MiniMax-M2.7", 204_800, 0)][..],
+        ),
+        (
+            "Mimo",
+            "https://api.xiaomimimo.com/v1",
+            &[
+                ("mimo-v2.5-pro", 1_000_000, 131_072),
+                ("mimo-v2.5", 1_000_000, 131_072),
+            ][..],
+        ),
+        (
+            "DeepSeek",
+            "https://api.deepseek.com",
+            &[
+                ("deepseek-v4-pro", 1_000_000, 393_216),
+                ("deepseek-v4-flash", 1_000_000, 393_216),
+            ][..],
         ),
     ];
 
@@ -291,7 +318,11 @@ fn configured_catalog_defaults_match_product_requirements() {
             Some(endpoint),
             "{source} 必须使用已确认的默认 endpoint"
         );
-        assert_eq!(entry.recommended_models.len(), expected_models.len());
+        assert_eq!(
+            entry.recommended_models.len(),
+            expected_models.len(),
+            "{source} 推荐模型数量不符"
+        );
         for (model, (model_id, context_window, max_tokens)) in
             entry.recommended_models.iter().zip(expected_models)
         {
@@ -314,14 +345,7 @@ fn provider_catalog_can_publish_multiple_recommended_models() {
 
 #[test]
 fn self_hosted_or_unverified_catalog_defaults_remain_explicitly_absent() {
-    for source in [
-        "LiteLLM",
-        "Volcengine",
-        "Minimax",
-        "Mimo",
-        "Agnes",
-        "Ollama",
-    ] {
+    for source in ["LiteLLM", "Volcengine", "Agnes", "Ollama"] {
         let entry = find_by_source(source).expect("Catalog Provider 必须存在");
         assert!(
             entry.default_endpoint.is_none(),
@@ -337,6 +361,21 @@ fn self_hosted_or_unverified_catalog_defaults_remain_explicitly_absent() {
 #[test]
 fn catalog_entries_without_recommended_models_pass_invariant() {
     static_assert_catalog_invariants().expect("允许无推荐模型的 Catalog 条目不能破坏启动期不变量");
+}
+
+#[test]
+fn catalog_models_without_published_output_cap_report_zero_max_tokens() {
+    // MiniMax 官方文档只公布上下文窗口，未公布最大输出 token 上限。
+    // max_tokens 必须保持 0（官方未公布），落盘后由运行时按全局默认解析，
+    // 绝不伪造数值。
+    let minimax = find_by_source("Minimax").expect("Minimax 必须存在");
+    for model in minimax.recommended_models {
+        assert_eq!(
+            model.max_tokens, 0,
+            "官方未公布输出上限的推荐模型 {} 必须保持 max_tokens == 0",
+            model.model_id
+        );
+    }
 }
 
 #[test]

@@ -68,7 +68,9 @@ use http::HeaderValue;
 /// 推荐模型条目。
 ///
 /// 字段说明：
-/// - `model_id` / `context_window` / `max_tokens` 是基本窗口；
+/// - `model_id` / `context_window` 是基本窗口；
+/// - `max_tokens == 0` 表示官方文档未公布输出上限（落盘后由运行时按全局
+///   默认解析），其余值必须落在 `(0, context_window]`；
 /// - `evidence_url` / `verified_at` 必须配套填写，保证 `recommended_models` 一旦
 ///   非空就携带可核验证据，避免悄悄引入仓库 fixture / adapter 默认。
 ///
@@ -147,7 +149,40 @@ pub struct ProviderCatalogEntry {
 // 非空条目必须配套 evidence 元数据；不可核验条目继续保持为空。
 // ---------------------------------------------------------------------------
 
-const VERIFIED_AT: chrono::NaiveDate = chrono::NaiveDate::from_ymd_opt(2026, 7, 21).unwrap();
+const VERIFIED_AT: chrono::NaiveDate = chrono::NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
+
+const OPENAI_MODEL_EVIDENCE: &str = "https://developers.openai.com/api/docs/models";
+
+const OPENAI_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "gpt-5.6-sol",
+        context_window: 1_050_000,
+        max_tokens: 128_000,
+        evidence_url: OPENAI_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "gpt-5.6-terra",
+        context_window: 1_050_000,
+        max_tokens: 128_000,
+        evidence_url: OPENAI_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "gpt-5.6-luna",
+        context_window: 1_050_000,
+        max_tokens: 128_000,
+        evidence_url: OPENAI_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "gpt-5.5",
+        context_window: 1_050_000,
+        max_tokens: 128_000,
+        evidence_url: OPENAI_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT,
+    },
+];
 
 const ANTHROPIC_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
@@ -180,13 +215,22 @@ const ANTHROPIC_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
-const OPENAI_MODELS: &[RecommendedModel] = &[RecommendedModel {
-    model_id: "gpt-5.6-sol",
-    context_window: 1_000_000,
-    max_tokens: 16_384,
-    evidence_url: "https://developers.openai.com/api/docs/models",
-    verified_at: VERIFIED_AT,
-}];
+const ZHIPU_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "glm-5.2",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "glm-5-turbo",
+        context_window: 200_000,
+        max_tokens: 131_072,
+        evidence_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5-turbo",
+        verified_at: VERIFIED_AT,
+    },
+];
 
 /// OpenAI Catalog 条目。
 const OPENAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
@@ -201,14 +245,6 @@ const OPENAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     api_key_hint: Some("OpenAI Dashboard → API keys"),
     official_sdk_user_agent: None,
 };
-
-const ZHIPU_MODELS: &[RecommendedModel] = &[RecommendedModel {
-    model_id: "glm-5.2",
-    context_window: 1_000_000,
-    max_tokens: 16_384,
-    evidence_url: "https://open.bigmodel.cn/dev/api/normal-model/glm-5",
-    verified_at: VERIFIED_AT,
-}];
 
 /// Zhipu（智谱开放平台）Catalog 条目。
 const ZHIPU_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
@@ -265,35 +301,89 @@ const VOLCENGINE_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
 
 /// MiniMax (MiniMax) Catalog 条目。
 ///
-/// base URL 与推荐模型当前都没有可核验证据，由 Connect 引导用户填写。
+/// 官方 OpenAI 兼容文档公布上下文窗口，但未公布最大输出 token 上限；
+/// 推荐模型的 `max_tokens` 保持 `0`（官方未公布），落盘后由运行时按全局
+/// 默认解析，绝不伪造数值。
+const MINIMAX_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "MiniMax-M3",
+        context_window: 1_000_000,
+        max_tokens: 0,
+        evidence_url: "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "MiniMax-M2.7",
+        context_window: 204_800,
+        max_tokens: 0,
+        evidence_url: "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
+        verified_at: VERIFIED_AT,
+    },
+];
+
 const MINIMAX_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     source: ProviderSource::new("Minimax"),
     driver: DriverId::new("minimax"),
-    default_endpoint: None,
-    recommended_models: &[],
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://api.minimaxi.com/v1",
+        evidence_url: "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
+        verified_at: VERIFIED_AT,
+    }),
+    recommended_models: MINIMAX_MODELS,
     api_key_hint: Some("Minimax 开放平台 → API Keys"),
     official_sdk_user_agent: None,
 };
 
 /// Xiaomi MiMo Catalog 条目。
 ///
-/// base URL 与推荐模型当前都没有可核验证据，由 Connect 引导用户填写。
+/// `mimo-v2-pro` / `mimo-v2-flash` 等旧模型已于 2026-06-30 下线，
+/// 只收录当前在线的 V2.5 系列。
+const MIMO_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "mimo-v2.5-pro",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model",
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "mimo-v2.5",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/model",
+        verified_at: VERIFIED_AT,
+    },
+];
+
 const MIMO_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     source: ProviderSource::new("Mimo"),
     driver: DriverId::new("mimo"),
-    default_endpoint: None,
-    recommended_models: &[],
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://api.xiaomimimo.com/v1",
+        evidence_url: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call",
+        verified_at: VERIFIED_AT,
+    }),
+    recommended_models: MIMO_MODELS,
     api_key_hint: Some("Xiaomi MiMo 开放平台 → API Keys"),
     official_sdk_user_agent: None,
 };
 
-const DEEPSEEK_MODELS: &[RecommendedModel] = &[RecommendedModel {
-    model_id: "deepseek-v4-pro",
-    context_window: 1_000_000,
-    max_tokens: 393_216,
-    evidence_url: "https://api-docs.deepseek.com/quick_start/pricing",
-    verified_at: VERIFIED_AT,
-}];
+const DEEPSEEK_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "deepseek-v4-pro",
+        context_window: 1_000_000,
+        max_tokens: 393_216,
+        evidence_url: "https://api-docs.deepseek.com/quick_start/pricing",
+        verified_at: VERIFIED_AT,
+    },
+    RecommendedModel {
+        model_id: "deepseek-v4-flash",
+        context_window: 1_000_000,
+        max_tokens: 393_216,
+        evidence_url: "https://api-docs.deepseek.com/quick_start/pricing",
+        verified_at: VERIFIED_AT,
+    },
+];
 
 /// DeepSeek Catalog 条目。
 const DEEPSEEK_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
@@ -438,12 +528,12 @@ fn check_unique_sources() -> Result<(), &'static str> {
 }
 
 fn check_recommended_models() -> Result<(), &'static str> {
-    // 推荐模型列表允许为空（条目无核验证据时由 Connect 阶段要求用户填写），
-    // 但每条非空条目都必须有合法的窗口，并保证 evidence_url 字段配套（类型系统
-    // 已强制；这里再次校验为 0 → 防御）。
+    // 推荐模型列表允许为空（条目无核验证据时由 Connect 阶段要求用户填写）。
+    // 每条非空条目都必须有合法窗口；`max_tokens == 0` 表示官方未公布输出
+    // 上限（落盘后运行时按全局默认解析），其余值必须落在 (0, context_window]。
     for entry in PROVIDER_CATALOG {
         for model in entry.recommended_models {
-            if model.context_window == 0 || model.max_tokens == 0 {
+            if model.context_window == 0 {
                 return Err("推荐模型窗口非法");
             }
             if model.max_tokens as usize > model.context_window {

@@ -529,13 +529,18 @@ fn recommended_model_field(
                 .iter()
                 .enumerate()
                 .map(|(index, model)| {
+                    let description = if model.max_tokens == 0 {
+                        format!("Context {} · Max 官方未公布", model.context_window)
+                    } else {
+                        format!(
+                            "Context {} · Max {}",
+                            model.context_window, model.max_tokens
+                        )
+                    };
                     option(
                         &format!("recommended-{index}"),
                         model.model_id,
-                        Some(&format!(
-                            "Context {} · Max {}",
-                            model.context_window, model.max_tokens
-                        )),
+                        Some(&description),
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -628,11 +633,14 @@ fn context_window(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry
 }
 
 fn max_tokens(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<u64> {
+    // `0` 表示官方未公布输出上限：不作为可编辑预填值展示，
+    // 落盘后由运行时按全局默认解析。
     connect
         .draft
         .model
         .as_ref()
         .and_then(|model| model.max_tokens)
+        .filter(|value| *value > 0)
         .map(u64::from)
         .or_else(|| {
             connect
@@ -641,6 +649,7 @@ fn max_tokens(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -
                 .and_then(|source| catalog.iter().find(|entry| entry.source == source))
                 .and_then(|entry| entry.recommended_models.first())
                 .map(|model| u64::from(model.max_tokens))
+                .filter(|value| *value > 0)
         })
 }
 

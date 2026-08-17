@@ -198,6 +198,47 @@ fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
     assert!(form.page.fields[2].display_value.is_none());
     assert!(form.page.fields.iter().all(|field| !field.has_value));
 }
+
+#[test]
+fn model_page_marks_unpublished_output_cap_instead_of_zero() {
+    let mut view = connect_view(ConnectStage::SelectModel);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Minimax"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+    let model_options = &form.page.fields[0].options;
+
+    assert_eq!(model_options[0].label, "MiniMax-M3");
+    assert_eq!(
+        model_options[0].description.as_deref(),
+        Some("Context 1000000 · Max 官方未公布")
+    );
+    assert_eq!(model_options[1].label, "MiniMax-M2.7");
+    assert_eq!(
+        model_options[1].description.as_deref(),
+        Some("Context 204800 · Max 官方未公布")
+    );
+}
+
+#[test]
+fn custom_model_page_leaves_max_tokens_empty_when_catalog_value_unpublished() {
+    let mut view = connect_view(ConnectStage::EditCustomModel);
+    view.draft.source = Some(crate::catalog::ProviderSource::new("Minimax"));
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    assert_eq!(
+        form.page.fields[0].display_value.as_deref(),
+        Some("MiniMax-M3")
+    );
+    assert_eq!(
+        form.page.fields[1].display_value.as_deref(),
+        Some("1000000")
+    );
+    assert!(
+        form.page.fields[2].display_value.is_none(),
+        "官方未公布输出上限时 Max Tokens 不得预填 0"
+    );
+}
 #[test]
 fn custom_model_submission_maps_all_typed_fields() {
     let command = connect_command_for_form(
