@@ -190,7 +190,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(
         &config.reader().committed_snapshot(),
@@ -232,7 +232,7 @@ async fn build_agent_client_with_gateways(
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
     init_logging(
         &config.reader().committed_snapshot(),
         logging_output,
@@ -258,7 +258,7 @@ pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> 
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
     Ok(config
         .reader()
         .committed_snapshot()
@@ -283,7 +283,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(
         &config.reader().committed_snapshot(),
