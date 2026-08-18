@@ -1409,12 +1409,17 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, context::domain::CompactGenerationFailure> {
+        ) -> Result<
+            context::domain::CompactGenerationOutput,
+            context::domain::CompactGenerationFailure,
+        > {
             if let Some(started) = self.started.lock().unwrap().take() {
                 let _ = started.send(());
             }
             self.release.lock().await.recv().await;
-            Ok(valid_fact_batch("generated"))
+            Ok(context::domain::CompactGenerationOutput::from(
+                valid_fact_batch("generated"),
+            ))
         }
     }
 
@@ -1492,7 +1497,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             &self,
             _request: Vec<Message>,
             cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             assert!(cancel.is_cancelled());
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Cancelled,
@@ -1549,7 +1554,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Provider,
@@ -1642,14 +1647,16 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
                 Err(CompactGenerationFailure::new(
                     CompactGenerationFailureKind::Provider,
                     "provider failed",
                 ))
             } else {
-                Ok(valid_fact_batch("manual"))
+                Ok(context::domain::CompactGenerationOutput::from(
+                    valid_fact_batch("manual"),
+                ))
             }
         }
     }
@@ -1926,8 +1933,13 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, context::domain::CompactGenerationFailure> {
-            Ok(valid_fact_batch(self.0))
+        ) -> Result<
+            context::domain::CompactGenerationOutput,
+            context::domain::CompactGenerationFailure,
+        > {
+            Ok(context::domain::CompactGenerationOutput::from(
+                valid_fact_batch(self.0),
+            ))
         }
     }
 

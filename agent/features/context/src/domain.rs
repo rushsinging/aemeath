@@ -417,6 +417,68 @@ impl std::fmt::Debug for ManualCompactRequest {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactGenerationOutput {
+    text: String,
+    completion_reason: Option<String>,
+    text_delta_count: usize,
+    non_text_delta_count: usize,
+    completed: bool,
+}
+
+impl CompactGenerationOutput {
+    pub fn completed(
+        text: impl Into<String>,
+        completion_reason: Option<impl Into<String>>,
+        text_delta_count: usize,
+        non_text_delta_count: usize,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            completion_reason: completion_reason.map(Into::into),
+            text_delta_count,
+            non_text_delta_count,
+            completed: true,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn into_text(self) -> String {
+        self.text
+    }
+
+    pub fn completion_reason(&self) -> Option<&str> {
+        self.completion_reason.as_deref()
+    }
+
+    pub const fn text_delta_count(&self) -> usize {
+        self.text_delta_count
+    }
+
+    pub const fn non_text_delta_count(&self) -> usize {
+        self.non_text_delta_count
+    }
+
+    pub const fn stream_completed(&self) -> bool {
+        self.completed
+    }
+}
+
+impl From<String> for CompactGenerationOutput {
+    fn from(text: String) -> Self {
+        Self::completed(text, None::<String>, 0, 0)
+    }
+}
+
+impl From<&str> for CompactGenerationOutput {
+    fn from(text: &str) -> Self {
+        Self::completed(text, None::<String>, 0, 0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactGenerationFailureKind {
     Cancelled,
@@ -449,6 +511,10 @@ impl CompactGenerationFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactSummaryQuality {
     Llm,
+    PartialMapFallback {
+        degraded_chunks: usize,
+        failure: CompactGenerationFailureKind,
+    },
     LocalFallback(CompactGenerationFailureKind),
     LocalOnly,
 }

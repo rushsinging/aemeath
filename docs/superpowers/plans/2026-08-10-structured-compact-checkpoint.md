@@ -493,3 +493,25 @@ TDD 与验收证据：
 5. Adapter 契约测试：Map prompt 发布完整 identity schema；multi-chunk Map 的 typed identity 在本地 Reduce 中生效；Refresh 输入不包含已 supersede 的状态且 patch 不能恢复 protected semantics。
 6. 真实样本合成回放：九段顺序不变、Next action 恰好一个、Current Task State 恰好一个、同一 PR/branch 动态维度至多一项，摘要长度显著下降且连续归一化幂等。
 7. 运行 focused tests、Context/Runtime 全测、`cargo fmt --all -- --check`、严格 Clippy、build、`git diff --check` 和完整架构守卫；创建本地提交，不推送。
+
+## 空 Map 响应补充：typed 终态、原请求重试与局部降级
+
+真实运行显示 10 个并发 Map chunk 中至少一个 provider 调用以 Completed 结束但没有文本；当前 `CompactGenerator` 只返回 `String`，丢失 stop reason 与 delta 计数，`llm_generate` 又在空文本处提前返回，使 typed repair 无法执行。Map 收集使用 fail-fast `?`，因此一个空 chunk 会丢弃全部成功 typed facts并把整轮降级为低质量文本 fallback。
+
+根因设计：
+
+1. `CompactGenerator` 返回 Context-owned `CompactGenerationOutput`，包含 text、稳定的 completion reason、text delta count、non-text delta count 与 completed 标志；Runtime adapter 从 Provider stream 确定性填充，Context 不依赖 provider 类型。
+2. 每个 Map chunk 都有明确 index/total、消息数和估算 token。首次空文本或 typed JSON/领域校验失败时，使用同一原始 chunk request 追加纠错指令后重试一次；现有只携带 invalid response 的 repair 仅用于非空 invalid typed output，空响应不能脱离原始 history 修复。
+3. Cancelled 立即终止且不重试。Provider/timeout/rate-limit 继续服从 provider 自身策略；Context 的 bounded retry只处理 InvalidSummary，避免双层网络重试。
+4. 第二次仍为 InvalidSummary 时，只对该 chunk 从原始消息构造 local typed fact batch；其他成功 chunk 保留。最终仍按 chunk index 与 fact sequence 进入单一 Rust-owned Reduce，不新增 backing、Markdown protocol 或平行 L5 路径。
+5. 质量类型区分完整 LLM、partial Map degradation 与整轮 local fallback；局部降级必须保留失败 kind 和降级 chunk 数，不能误报为完整 LLM。
+6. 日志只记录安全结构元数据：stage、chunk index/total、attempt、input messages/tokens、failure kind、completion reason、output chars、delta counts、completed，以及最终 successful/degraded counts。per-chunk 和中间重试用 debug，最终 chunk降级用 warn，总体生命周期用 info；不得记录 prompt、响应正文、身份信息或凭据。
+7. 失败 chunk 的 local facts 必须经过与正常 Map 相同的 `CompactFactBatch`、Task reconciliation、预算归一化和 renderer；protected semantics、唯一 Next action、authority/scope/lifecycle/action 均不得旁路。
+
+TDD 与验证：
+
+1. Runtime 单元测试证明 Text/非文本 delta 计数和 Completed stop reason 完整映射；stream 无 Completed 仍为 Provider failure。
+2. Context 单块测试证明空响应使用原始 history 重试一次，非空 invalid JSON仍保留 bounded repair，Cancelled 不重试。
+3. Context 多块测试证明一块持续 InvalidSummary 时其余 typed facts不丢失、局部 fallback按 chunk顺序归并，并报告 partial degradation；Provider/Timeout 不被 Context重复请求。
+4. 日志调用通过源码契约测试/守卫证明 target、level 和字段存在，且不包含消息正文。
+5. 运行 Context/Runtime focused 与全量测试、fmt、严格 Clippy、build、diff check、完整架构守卫；仅创建本地提交，不推送。
