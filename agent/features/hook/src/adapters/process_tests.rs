@@ -320,3 +320,56 @@ async fn term_ignoring_process_is_escalated_to_kill_and_reaped() {
     assert_process_gone(shell).await;
     assert_process_gone(child).await;
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn truncated_stream_captures_full_bytes_in_output_file() {
+    // 截断发生时，被丢弃的字节必须完整保留在临时文件中：落盘是 hook 输出的
+    // 最后一份副本，不允许残缺。
+    let output = ProcessDriver
+        .execute(
+            request("printf 'prefix'; yes o | head -c 200000; printf 'suffix'"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("超限输出应正常完成");
+
+    assert_eq!(output.stdout.len(), 64);
+    assert!(output.stdout_truncated);
+    let stdout_file = output
+        .stdout_file
+        .as_ref()
+        .expect("截断发生时必须提供全量输出文件");
+    let captured = std::fs::read(stdout_file).expect("全量输出文件必须可读");
+    // 全量文件必须远超内存缓冲上限，且头尾完整（字节总数由管道实现决定，
+    // 只验证 > limit 与边界标记）。
+    assert!(
+        captured.len() > 200000,
+        "全量文件应包含完整输出，实际 {} 字节",
+        captured.len()
+    );
+    assert!(captured.starts_with(b"prefix"));
+    assert!(captured.ends_with(b"suffix"));
+
+    // stderr 未超限：不产生文件。
+    assert!(!output.stderr_truncated);
+    assert!(
+        output.stderr_file.is_none(),
+        "未截断的流不得产生全量输出文件"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn untruncated_stream_leaves_no_output_file() {
+    let output = ProcessDriver
+        .execute(request("printf 'small'"), &CancellationToken::new())
+        .await
+        .expect("小输出应正常完成");
+
+    assert!(!output.stdout_truncated);
+    assert!(
+        output.stdout_file.is_none() && output.stderr_file.is_none(),
+        "未截断时不得产生任何全量输出文件"
+    );
+}
