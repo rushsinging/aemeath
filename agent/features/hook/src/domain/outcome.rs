@@ -138,6 +138,11 @@ pub struct HookExecution {
     pub stdout: String,
     /// stderr 输出。
     pub stderr: String,
+    /// 截断发生时保留全量 stdout 的临时文件；未截断为 None。消费方负责
+    /// move 或删除，避免孤儿文件。
+    pub stdout_file: Option<std::path::PathBuf>,
+    /// 截断发生时保留全量 stderr 的临时文件；未截断为 None。
+    pub stderr_file: Option<std::path::PathBuf>,
     /// 总执行时长。
     pub duration: Duration,
 }

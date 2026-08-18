@@ -288,22 +288,75 @@ const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 /// Materialize Stop Hook feedback with the same behavior for Main and Sub.
 /// Long output is persisted under a per-session temp directory and the model
-/// receives the real readable path.
+/// receives the real readable path. When the process layer spilled full output
+/// to files (truncation occurred), the spill files are moved into the archive
+/// so the persisted copy is the complete hook output, not the 8KB bounded copy.
 pub(crate) async fn materialize_stop_hook_feedback(
     detail: &RuntimeHookBlockDetail,
     reason: &RuntimeHookReason,
     session_id: &str,
     language: &str,
 ) -> HookNoticeMaterial {
-    let output = full_hook_output(detail, reason);
-    let output_file = if output.len() > INLINE_HOOK_OUTPUT_LIMIT {
-        write_long_hook_feedback(session_id, &detail.command, &output)
-            .await
-            .map(|path| path.display().to_string())
-    } else {
-        None
-    };
+    let output_file = archive_hook_output(detail, reason, session_id)
+        .await
+        .map(|path| path.display().to_string());
     build_stop_hook_feedback(detail, reason, language, output_file)
+}
+
+/// Decide what to persist:
+/// - spill files present → move them into the archive (full output wins);
+/// - no spill but combined bounded output > inline limit → write bounded copy;
+/// - otherwise → nothing (inline previews carry the full content).
+async fn archive_hook_output(
+    detail: &RuntimeHookBlockDetail,
+    reason: &RuntimeHookReason,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let has_spill =
+        detail.execution.stdout_file.is_some() || detail.execution.stderr_file.is_some();
+    let bounded_output = full_hook_output(detail, reason);
+    if !has_spill && bounded_output.len() <= INLINE_HOOK_OUTPUT_LIMIT {
+        return None;
+    }
+    let dir = std::env::temp_dir()
+        .join("aemeath-hook-results")
+        .join(session_id);
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    // 文件名带执行序号：同一命令多次 block 各自留档，绝不互相覆盖。
+    let stem = sanitized_file_stem(&detail.command);
+    let path = dir.join(format!("{stem}-{}.txt", detail.execution_ordinal));
+    if has_spill {
+        let mut body = String::new();
+        body.push_str(&format!(
+            "command: {}\nexit_code: {:?}\nreason: {}\n",
+            detail.command,
+            detail.execution.exit_code,
+            format_reason(reason)
+        ));
+        let stdout_full = match &detail.execution.stdout_file {
+            Some(spill) => {
+                let text = tokio::fs::read_to_string(spill).await.ok()?;
+                let _ = tokio::fs::remove_file(spill).await;
+                text
+            }
+            None => detail.execution.stdout.clone(),
+        };
+        let stderr_full = match &detail.execution.stderr_file {
+            Some(spill) => {
+                let text = tokio::fs::read_to_string(spill).await.ok()?;
+                let _ = tokio::fs::remove_file(spill).await;
+                text
+            }
+            None => detail.execution.stderr.clone(),
+        };
+        body.push_str(&format!(
+            "\nstdout:\n{stdout_full}\n\nstderr:\n{stderr_full}"
+        ));
+        tokio::fs::write(&path, body).await.ok()?;
+    } else {
+        tokio::fs::write(&path, &bounded_output).await.ok()?;
+    }
+    Some(path)
 }
 
 fn build_stop_hook_feedback(
@@ -352,20 +405,6 @@ fn full_hook_output(detail: &RuntimeHookBlockDetail, reason: &RuntimeHookReason)
         detail.execution.stdout,
         detail.execution.stderr,
     )
-}
-
-async fn write_long_hook_feedback(
-    session_id: &str,
-    command: &str,
-    details: &str,
-) -> Option<PathBuf> {
-    let dir = std::env::temp_dir()
-        .join("aemeath-hook-results")
-        .join(session_id);
-    tokio::fs::create_dir_all(&dir).await.ok()?;
-    let path = dir.join(format!("{}.txt", sanitized_file_stem(command)));
-    tokio::fs::write(&path, details).await.ok()?;
-    Some(path)
 }
 
 fn sanitized_file_stem(command: &str) -> String {
