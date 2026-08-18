@@ -1014,6 +1014,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "用户偏好使用中文回复"),
+                        entry(MemoryLayer::Project, "MemoryPort 支持中文检索"),
+                        entry(MemoryLayer::Project, "用户偏好启用英文日志"),
+                    ],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let chinese = service.search(&MemorySearchQuery {
+            text: "中文回复".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+        assert_eq!(chinese.hits.len(), 2);
+        assert_eq!(chinese.hits[0].entry.content, "用户偏好使用中文回复");
+        assert_eq!(chinese.hits[1].entry.content, "MemoryPort 支持中文检索");
+        assert!(chinese.hits[0].relevance > chinese.hits[1].relevance);
+
+        let mixed = service.search(&MemorySearchQuery {
+            text: "MemoryPort 中文".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+        assert_eq!(mixed.hits[0].entry.content, "MemoryPort 支持中文检索");
+        assert!(
+            mixed.hits[0].relevance > mixed.hits[1].relevance,
+            "matching the Latin identifier and Chinese bigram must rank first"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
+        let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
+        let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+        let mut first = entry(MemoryLayer::Project, "始终使用中文回答");
+        first.id = first_id;
+        let mut second = entry(MemoryLayer::Project, "始终使用中文回答");
+        second.id = second_id;
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+        let query = MemorySearchQuery {
+            text: "中文回答".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        };
+
+        let first_result = service.search(&query);
+        let second_result = service.search(&query);
+        let first_ids = first_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        let second_ids = second_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_ids, vec![first_id, second_id]);
+        assert_eq!(first_ids, second_ids);
+        assert_eq!(
+            first_result.hits[0].relevance,
+            second_result.hits[0].relevance
+        );
+    }
+
+    #[tokio::test]
     async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
         let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
         let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();

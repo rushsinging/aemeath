@@ -176,9 +176,57 @@ fn score_document(
 }
 
 fn tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|term| !term.is_empty())
-        .map(str::to_string)
-        .collect()
+    let mut terms = Vec::new();
+    let mut word = String::new();
+    let mut han_run = Vec::new();
+
+    for character in text.to_lowercase().chars() {
+        if is_han_character(character) {
+            flush_word(&mut word, &mut terms);
+            han_run.push(character);
+        } else {
+            flush_han_run(&mut han_run, &mut terms);
+            if character.is_alphanumeric() {
+                word.push(character);
+            } else {
+                flush_word(&mut word, &mut terms);
+            }
+        }
+    }
+    flush_word(&mut word, &mut terms);
+    flush_han_run(&mut han_run, &mut terms);
+    terms
+}
+
+fn flush_word(word: &mut String, terms: &mut Vec<String>) {
+    if !word.is_empty() {
+        terms.push(std::mem::take(word));
+    }
+}
+
+fn flush_han_run(han_run: &mut Vec<char>, terms: &mut Vec<String>) {
+    match han_run.as_slice() {
+        [] => {}
+        [character] => terms.push(character.to_string()),
+        characters => terms.extend(
+            characters
+                .windows(2)
+                .map(|pair| pair.iter().collect::<String>()),
+        ),
+    }
+    han_run.clear();
+}
+
+fn is_han_character(character: char) -> bool {
+    matches!(character,
+        '\u{3400}'..='\u{4DBF}'
+        | '\u{4E00}'..='\u{9FFF}'
+        | '\u{F900}'..='\u{FAFF}'
+        | '\u{20000}'..='\u{2A6DF}'
+        | '\u{2A700}'..='\u{2B73F}'
+        | '\u{2B740}'..='\u{2B81F}'
+        | '\u{2B820}'..='\u{2CEAF}'
+        | '\u{2CEB0}'..='\u{2EBEF}'
+        | '\u{30000}'..='\u{3134F}'
+    )
 }

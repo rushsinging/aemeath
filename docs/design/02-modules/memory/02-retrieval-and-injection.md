@@ -59,7 +59,8 @@ fn entry_matches(entry: &MemoryEntry, query: &str) -> bool {
 
 生产实现由 Memory domain 的单一 `rank_explicit_search` 路径承担，`MemoryService` 与 `InMemoryMemory` 两种 backing 均复用该函数：
 
-- 对 query、content、tags、category、layer 做小写字母数字分词；空 query 返回空结果。
+- 对 query、content、tags、category、layer 做确定性混合分词；拉丁字母、数字与代码标识符沿用小写字母数字词项，连续 Han 字符生成相邻双字 bigram，单个 Han 字符保留为单字词项；空 query 返回空结果。
+- Han bigram 在同一个 BM25 词项空间内参与字段权重、文档频率和长度归一化，不建立中文专用 fallback、第二索引 backing 或词典依赖；中英文混排分别生成 Latin token 与 Han bigram。
 - 使用 BM25（`k1 = 1.2`、`b = 0.75`）计算词项相关性。
 - content、tag、facet 分别采用 `3.0 / 2.0 / 1.0` 的字段权重，完整 content 精确匹配获得固定 boost。
 - 只保留正相关结果；先按 relevance 降序，再按 `search_tie_break_score` 与 Memory id 稳定排序，因此同一 state/query 的结果确定。
@@ -170,6 +171,7 @@ struct MemoryConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-08-11 | 在单一 Tier 1 BM25 tokenizer 中加入连续 Han 字符 bigram，补齐中文短语与中英代码混排召回，不引入词典或第二检索路径 | Chinese lexical retrieval |
 | 2026-07-26 | 落地共享确定性 BM25 词法排序与 typed Memory Tool PL；明确 Reflection 无需修改、search relevance 不复用写入去重 threshold | Tier 1 retrieval |
 | 2026-07-12 | 初稿：检索模式、BM25 分层、注入格式、similarity_threshold 双重用途、注入职责边界 | 初始设计 |
 | 2026-07-17 | 对齐 #895：旧 top query 统一为只读 `retrieve_for_inject`；outdated/TTL 改为 eligibility 硬过滤；显式 search 改用 relevance + 独立 tie-break，并由 Context 独占 render | #895 |
