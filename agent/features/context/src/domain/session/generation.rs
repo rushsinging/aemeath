@@ -922,6 +922,29 @@ impl SessionCommitPlan {
         self.validate_target_manifest(session_id, expected_revision)
     }
 
+    /// 数据集被外部清空后的全量重建计划：以内存完整状态生成
+    /// target revision = session.revision 的全量成员（reused 为空）。
+    ///
+    /// 与 [`Self::initial`] 共享生成逻辑，但配套的
+    /// [`Self::validate_rebuild_boundary`] 不要求 `expected_revision == 0`，
+    /// 允许内存修订号 N > 0 的长驻进程在空数据集上重建。
+    pub fn complete_snapshot(
+        session: &CanonicalSession,
+    ) -> Result<Self, SessionGenerationWireError> {
+        Self::initial(session)
+    }
+
+    /// 全量重建提交边界：不要求 `expected_revision == 0`（内存修订号可为任意
+    /// N > 0），但仍要求 target manifest 恰好递增一次，维持修订号单调不变量，
+    /// 重建后磁盘修订号与内存自然对齐。
+    pub fn validate_rebuild_boundary(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), SessionGenerationWireError> {
+        self.validate_target_manifest(session_id, expected_revision)
+    }
+
     pub fn validate_commit_boundary(
         &self,
         session_id: &str,
