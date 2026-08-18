@@ -32,6 +32,104 @@ const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 Continue — TUI consumption remains."#;
 
 #[test]
+fn typed_checkpoint_wire_renders_the_compatible_nine_sections() {
+    let source = r#"{
+      "immutable_constraints": ["Do not merge without approval."],
+      "current_objective": "Implement typed compact checkpoints.",
+      "committed_facts": ["Context baseline tests passed."],
+      "uncommitted_working_set": ["Typed fact reducer is in progress."],
+      "open_decisions_and_risks": ["Provider may return invalid JSON."],
+      "resume_cursor": {
+        "context": ["Worktree: structured compact"],
+        "next_action": "Run the reducer tests.",
+        "prohibited_actions": ["Do not merge without approval."]
+      },
+      "required_revalidation": ["Recheck worktree status."],
+      "archived_milestones": ["Baseline `45911518` established."],
+      "continuation_status": "continue",
+      "continuation_reason": "Implementation remains."
+    }"#;
+
+    let wire: ContinuationCheckpointWire = serde_json::from_str(source).unwrap();
+    let checkpoint = ContinuationCheckpoint::try_from(wire).unwrap();
+    let rendered = checkpoint.render();
+
+    assert_eq!(rendered.matches("## ").count(), 9);
+    assert_eq!(rendered.matches("- Next action:").count(), 1);
+    assert!(rendered.contains("## Current Objective\n- Implement typed compact checkpoints."));
+    assert!(rendered.contains("Continue — Implementation remains."));
+    assert_eq!(
+        ContinuationCheckpoint::parse(&rendered).unwrap(),
+        checkpoint
+    );
+}
+
+#[test]
+fn typed_checkpoint_wire_rejects_unknown_fields() {
+    let source = r#"{
+      "immutable_constraints": [],
+      "current_objective": "Continue.",
+      "committed_facts": [],
+      "uncommitted_working_set": [],
+      "open_decisions_and_risks": [],
+      "resume_cursor": {"context": [], "next_action": "Continue.", "prohibited_actions": []},
+      "required_revalidation": [],
+      "archived_milestones": [],
+      "continuation_status": "continue",
+      "continuation_reason": "Work remains.",
+      "unexpected": true
+    }"#;
+
+    let error = serde_json::from_str::<ContinuationCheckpointWire>(source).unwrap_err();
+
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn refresh_rejects_any_protected_semantic_change() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+
+    for changed in [
+        COMPLETE_CHECKPOINT.replace("- NEVER merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue the content-stream migration without widening scope.",
+            "Implement and merge the content-stream migration.",
+        ),
+        COMPLETE_CHECKPOINT.replace(
+            "inspect all legacy Token/Thinking consumers.",
+            "edit all legacy consumers.",
+        ),
+        COMPLETE_CHECKPOINT.replace("- Prohibited: do not merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue — TUI consumption remains.",
+            "Waiting for User — approval required.",
+        ),
+    ] {
+        let refreshed = ContinuationCheckpoint::parse(&changed).unwrap();
+        let error = refreshed
+            .validate_refresh_from(&original)
+            .expect_err("protected compact semantics must not change during refresh");
+        assert!(matches!(error, CheckpointError::ProtectedRefreshChanged));
+    }
+}
+
+#[test]
+fn refresh_allows_shortening_unprotected_sections() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+    let shortened_source = COMPLETE_CHECKPOINT
+        .replace("- Commit `5e42c9aa` passed Runtime and CLI tests.", "")
+        .replace("- Runtime and SDK are migrated; TUI remains.", "")
+        .replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            "",
+        )
+        .replace("- ToolCall split completed in `5e42c9aa`.", "");
+    let shortened = ContinuationCheckpoint::parse(&shortened_source).unwrap();
+
+    shortened.validate_refresh_from(&original).unwrap();
+}
+
+#[test]
 fn parses_complete_checkpoint_with_one_resume_cursor() {
     let checkpoint =
         ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).expect("checkpoint must parse");

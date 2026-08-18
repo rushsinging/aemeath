@@ -245,10 +245,35 @@ fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
     }
 }
 
-fn valid_checkpoint(objective: &str) -> String {
-    format!(
-        "## Immutable Constraints\n- preserve constraints\n\n## Current Objective\n- {objective}\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue"
-    )
+fn valid_fact_batch(objective: &str) -> String {
+    serde_json::json!({
+        "facts": [
+            {
+                "sequence": 1,
+                "source": "main_user",
+                "kind": "constraint",
+                "text": "preserve constraints",
+                "constraint": {
+                    "scope": "session",
+                    "lifecycle": "persistent",
+                    "action": "restrict"
+                }
+            },
+            {
+                "sequence": 2,
+                "source": "main_user",
+                "kind": "objective",
+                "text": objective
+            },
+            {
+                "sequence": 3,
+                "source": "main_user",
+                "kind": "resume_candidate",
+                "text": "continue"
+            }
+        ]
+    })
+    .to_string()
 }
 
 fn compact_request(session_id: SessionId) -> ContextRequest {
@@ -1389,10 +1414,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
                 let _ = started.send(());
             }
             self.release.lock().await.recv().await;
-            Ok(format!(
-                "<summary>{}</summary>",
-                valid_checkpoint("generated")
-            ))
+            Ok(valid_fact_batch("generated"))
         }
     }
 
@@ -1627,7 +1649,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
                     "provider failed",
                 ))
             } else {
-                Ok(format!("<summary>{}</summary>", valid_checkpoint("manual")))
+                Ok(valid_fact_batch("manual"))
             }
         }
     }
@@ -1811,9 +1833,11 @@ async fn second_compact_advances_single_marker() {
         "second compact marker must contain a valid continuation checkpoint: {}",
         marker.summary
     );
-    assert!(marker
-        .summary
-        .contains("Preserve the user's requested action level"));
+    assert!(
+        marker.summary.contains("newly-visible-0") && marker.summary.contains("newly-visible-1"),
+        "second compact must preserve prior and newly compacted context: {}",
+        marker.summary
+    );
     assert!(session
         .structured_messages()
         .iter()
@@ -1903,7 +1927,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             _request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, context::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{}</summary>", self.0))
+            Ok(valid_fact_batch(self.0))
         }
     }
 
@@ -1911,9 +1935,8 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
-    let repository_under_test = base_repository.with_generator(Arc::new(FixedGenerator(
-        "## Immutable Constraints\n- review only\n\n## Current Objective\n- LLM 生成的语义摘要\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue",
-    )));
+    let repository_under_test =
+        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
 
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;

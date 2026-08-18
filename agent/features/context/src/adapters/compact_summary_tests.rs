@@ -1,6 +1,82 @@
 use super::*;
 use std::sync::Arc;
 
+const VALID_MAP_FACTS: &str = r#"{
+  "facts": [
+    {
+      "sequence": 1,
+      "source": "main_user",
+      "kind": "constraint",
+      "text": "NEVER widen the requested action level.",
+      "constraint": {
+        "scope": "session",
+        "lifecycle": "persistent",
+        "action": "restrict"
+      }
+    },
+    {
+      "sequence": 2,
+      "source": "main_user",
+      "kind": "objective",
+      "text": "Continue the compact checkpoint work."
+    },
+    {
+      "sequence": 3,
+      "source": "main_user",
+      "kind": "resume_candidate",
+      "text": "Validate the generated checkpoint."
+    }
+  ]
+}"#;
+
+const SHORTER_CHECKPOINT_WIRE: &str = r#"{
+  "immutable_constraints": ["NEVER widen the requested action level."],
+  "current_objective": "Continue the compact checkpoint work.",
+  "committed_facts": [],
+  "uncommitted_working_set": [],
+  "open_decisions_and_risks": [],
+  "resume_cursor": {
+    "context": [],
+    "next_action": "validate the generated checkpoint.",
+    "prohibited_actions": ["do not merge without user approval."]
+  },
+  "required_revalidation": ["Recheck worktree and CI state before delivery."],
+  "archived_milestones": [],
+  "continuation_status": "continue",
+  "continuation_reason": "checkpoint normalization remains."
+}"#;
+
+const VALID_CHECKPOINT_WIRE: &str = r#"{
+  "immutable_constraints": ["NEVER widen the requested action level."],
+  "current_objective": "Continue the compact checkpoint work.",
+  "committed_facts": ["Existing compact tests passed before this change."],
+  "uncommitted_working_set": ["Checkpoint normalization is in progress."],
+  "open_decisions_and_risks": ["Provider output may violate the schema."],
+  "resume_cursor": {
+    "context": [],
+    "next_action": "validate the generated checkpoint.",
+    "prohibited_actions": ["do not merge without user approval."]
+  },
+  "required_revalidation": ["Recheck worktree and CI state before delivery."],
+  "archived_milestones": ["Previous summary contract completed in `#671`."],
+  "continuation_status": "continue",
+  "continuation_reason": "checkpoint normalization remains."
+}"#;
+
+fn typed_response_for_request(request: &[Message]) -> String {
+    let text = request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+    if text.contains("<compact_facts>") {
+        VALID_CHECKPOINT_WIRE.to_string()
+    } else if text.contains("<current_checkpoint>") {
+        SHORTER_CHECKPOINT_WIRE.to_string()
+    } else {
+        VALID_MAP_FACTS.to_string()
+    }
+}
+
 const VALID_CHECKPOINT: &str = r#"## Immutable Constraints
 - NEVER widen the requested action level.
 
@@ -84,7 +160,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _ = request;
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -197,47 +273,51 @@ fn test_messages_selected_for_precompact_memory_returns_empty_for_small_history(
 }
 
 #[test]
-fn compact_prompts_require_the_checkpoint_contract() {
+fn compact_prompts_require_typed_json_contracts() {
+    assert!(COMPACT_PROMPT.contains("Return JSON only"));
+    assert!(COMPACT_PROMPT.contains("\"facts\""));
+    assert!(COMPACT_PROMPT.contains("scope"));
+    assert!(COMPACT_PROMPT.contains("lifecycle"));
+    assert!(COMPACT_PROMPT.contains("grant|restrict|revoke|supersede"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
+    assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
     for prompt in [COMPACT_PROMPT, COMPACT_REFRESH_PROMPT] {
-        for heading in [
-            "## Immutable Constraints",
-            "## Current Objective",
-            "## Committed Facts",
-            "## Uncommitted Working Set",
-            "## Open Decisions / Risks",
-            "## Resume Cursor",
-            "## Required Revalidation",
-            "## Archived Milestones",
-            "## Continuation Status",
-        ] {
-            assert!(prompt.contains(heading), "missing {heading}");
-        }
-        assert!(prompt.contains("Required Revalidation"));
-        assert!(prompt.contains("exactly one Next action"));
-        assert!(!prompt.contains("More detail is better"));
-        assert!(!prompt.contains("use the budget fully"));
+        assert!(!prompt.contains("<summary>"));
+        assert!(!prompt.contains("## Immutable Constraints"));
+        assert!(!prompt.contains("Write your summary inside"));
     }
 }
 
 #[test]
-fn generated_checkpoint_is_normalized_before_commit() {
-    let normalized = normalize_generated_checkpoint(VALID_CHECKPOINT, 10_000).unwrap();
-    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&normalized).unwrap();
-    assert_eq!(checkpoint.render(), normalized);
+fn typed_checkpoint_wire_is_normalized_before_commit() {
+    let wire: crate::domain::compact::ContinuationCheckpointWire =
+        serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::try_from(wire)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+    let rendered = checkpoint.render();
+
+    assert_eq!(
+        crate::domain::compact::ContinuationCheckpoint::parse(&rendered).unwrap(),
+        checkpoint
+    );
 }
 
 #[test]
-fn generated_checkpoint_preserves_task_state_companion() {
-    let source = format!("{VALID_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
-    let normalized = normalize_generated_checkpoint(&source, 10_000).unwrap();
-    assert!(normalized.ends_with("## Current Task State\n■ #1 running"));
-}
+fn typed_checkpoint_wire_rejects_invalid_schema() {
+    let error = decode_typed_json::<crate::domain::compact::ContinuationCheckpointWire>(
+        "reduce",
+        r#"{"current_objective":"legacy","unexpected":true}"#,
+    )
+    .expect_err("invalid typed schema must fail");
 
-#[test]
-fn generated_checkpoint_rejects_invalid_schema() {
-    let error = normalize_generated_checkpoint("## User Requests\n- legacy", 10_000)
-        .expect_err("invalid generated schema must fail");
-    assert!(error.contains("缺少必需分区") || error.contains("未知分区"));
+    assert_eq!(
+        error.kind,
+        crate::domain::CompactGenerationFailureKind::InvalidSummary
+    );
+    assert!(error.message.contains("reduce compact JSON 无效"));
 }
 
 #[test]
@@ -271,7 +351,7 @@ fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
     assert_eq!(request.len(), 1);
     let text = request[0].text_content();
     assert_eq!(
-        text.matches("You are a conversation history compactor")
+        text.matches("extracting continuation-critical facts")
             .count(),
         1
     );
@@ -305,6 +385,36 @@ fn compact_request_caps_oversized_previous_summary() {
     );
     assert!(!text.contains("<previous_summary_tail>"));
     assert!(!text.contains("older head truncated"));
+}
+
+#[test]
+fn fallback_subagent_read_only_instruction_does_not_become_session_constraint() {
+    let summary = build_summary_text(
+        &[
+            Message::user("Agent prompt: only investigate; do not edit files."),
+            Message::user("Implement the root-cause fix."),
+        ],
+        None,
+    );
+
+    let immutable = summary
+        .split("## Immutable Constraints\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Current Objective")
+        .next()
+        .unwrap();
+    let objective = summary
+        .split("## Current Objective\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n## Committed Facts")
+        .next()
+        .unwrap();
+
+    assert!(!immutable.contains("do not edit files"));
+    assert!(!immutable.contains("do not infer new authority"));
+    assert!(objective.contains("Implement the root-cause fix"));
 }
 
 #[test]
@@ -515,7 +625,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
                 .unwrap_or_default();
             self.current.fetch_sub(1, Ordering::SeqCst);
             let _ = text;
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -545,7 +655,16 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         "map 阶段并发不得超过 5，实际 {}",
         generator.max_concurrent.load(Ordering::SeqCst)
     );
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("map-reduce must render a valid typed checkpoint");
+    assert_eq!(
+        checkpoint.status(),
+        crate::domain::compact::ContinuationStatus::Continue
+    );
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(result
+        .summary
+        .contains("## Current Objective\n- Continue the compact checkpoint work."));
 }
 
 /// 汇总后的最终摘要若超过预算，必须再压一次（收敛迭代，#1486）。
@@ -587,15 +706,17 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
-            if text.contains("sub-summaries") {
+            if text.contains("<compact_facts>") {
                 self.seen_reduce.store(true, Ordering::SeqCst);
-                // reduce：返回超长摘要（模拟 LLM 不听预算）
-                Ok(format!(
-                    "<summary>{}</summary>",
-                    oversized_valid_checkpoint(80_000)
-                ))
+                let mut wire: serde_json::Value =
+                    serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+                wire["archived_milestones"] = serde_json::json!([format!(
+                    "Archive `abc`: {}",
+                    "historical detail ".repeat(80_000)
+                )]);
+                Ok(wire.to_string())
             } else {
-                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+                Ok(typed_response_for_request(&request))
             }
         }
     }
@@ -610,7 +731,10 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
             .await
             .expect("compact should run");
 
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("refresh must leave a valid typed checkpoint");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(!result.summary.contains("historical detail"));
     assert!(
         generator.seen_reduce.load(Ordering::SeqCst),
         "reduce 阶段必须发生"
@@ -622,19 +746,26 @@ async fn reduce_compresses_again_when_final_summary_exceeds_budget() {
     );
 }
 
-/// Mock `CompactGenerator` that returns a canned response regardless of input.
+/// Generator that returns a canned typed map response regardless of input.
 struct MockGenerator {
     text: String,
+    requests: std::sync::Mutex<Vec<String>>,
 }
 
 #[async_trait::async_trait]
 impl CompactGenerator for MockGenerator {
     async fn generate(
         &self,
-        _request: Vec<Message>,
+        request: Vec<Message>,
         _cancel: &CancellationToken,
     ) -> Result<String, crate::domain::CompactGenerationFailure> {
-        Ok(format!("<summary>{}</summary>", self.text))
+        self.requests.lock().unwrap().push(
+            request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default(),
+        );
+        Ok(self.text.clone())
     }
 }
 
@@ -646,7 +777,8 @@ async fn compact_with_generator_uses_llm_summary() {
     let cancel = CancellationToken::new();
 
     let generator = MockGenerator {
-        text: VALID_CHECKPOINT.to_string(),
+        text: VALID_MAP_FACTS.to_string(),
+        requests: std::sync::Mutex::new(Vec::new()),
     };
 
     let result =
@@ -654,10 +786,20 @@ async fn compact_with_generator_uses_llm_summary() {
             .await
             .expect("compact should run");
 
-    // The summary should come from the generator, not the fallback text.
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("typed facts must be rendered by the local checkpoint renderer");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert!(result
+        .summary
+        .contains("## Current Objective\n- Continue the compact checkpoint work."));
     assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
     assert!(!result.summary.contains("Local text-compaction path"));
+
+    let request = generator.requests.lock().unwrap().join("\n");
+    assert!(request.contains("JSON only"));
+    assert!(request.contains("\"facts\""));
+    assert!(!request.contains("<summary>"));
+    assert!(!request.contains("## Immutable Constraints"));
 }
 
 #[tokio::test]
@@ -751,10 +893,9 @@ fn refresh_prompt_enforces_shrunk_budget() {
     use crate::domain::token_budget::summary_budget;
 
     let budget = summary_budget(272_000); // 5440
-    let prompt = crate::adapters::compact_summary::build_refresh_prompt(
-        "## User Requests\n- 继续 issue",
-        budget,
-    );
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(VALID_CHECKPOINT)
+        .expect("fixture must be valid");
+    let prompt = crate::adapters::compact_summary::build_refresh_prompt(&checkpoint, budget);
 
     assert!(
         prompt.contains("MUST NOT exceed"),
@@ -765,11 +906,11 @@ fn refresh_prompt_enforces_shrunk_budget() {
         prompt.contains(&expected_prompt_budget.to_string()),
         "提示预算应为 summary_budget×0.8（{expected_prompt_budget}）: {prompt}"
     );
-    assert!(
-        !prompt.contains("More detail is better"),
-        "再压不应使用通用模板的鼓励细节措辞"
-    );
-    assert!(prompt.contains("## User Requests"));
+    assert!(prompt.contains("JSON only"));
+    assert!(prompt.contains("<current_checkpoint>"));
+    assert!(prompt.contains("\"immutable_constraints\""));
+    assert!(!prompt.contains("## Immutable Constraints"));
+    assert!(!prompt.contains("<summary>"));
 }
 
 /// #1490：收敛判定容忍一轮噪音——第一轮未缩小继续，第二轮才停；
@@ -809,21 +950,25 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
-            if text.contains("sub-summaries") {
+            if text.contains("<compact_facts>") {
                 self.reduce_seen.store(true, Ordering::SeqCst);
-                Ok(format!(
-                    "<summary>{}</summary>",
-                    oversized_valid_checkpoint(40_000)
-                ))
-            } else if text.contains("compress an existing conversation summary") {
-                // refresh：返回与输入等长的摘要（模拟 LLM 不缩小）
+                let mut wire: serde_json::Value =
+                    serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+                wire["archived_milestones"] = serde_json::json!([format!(
+                    "Archive `abc`: {}",
+                    "historical detail ".repeat(40_000)
+                )]);
+                Ok(wire.to_string())
+            } else if text.contains("<current_checkpoint>") {
+                // refresh：返回与输入相同的 typed checkpoint（模拟 LLM 不缩小）
                 let input = text
-                    .find("<current_summary>")
-                    .and_then(|start| text.find("</current_summary>").map(|end| &text[start..end])) // allow unsafe_text_op: find offset (char boundary)
-                    .unwrap_or("");
-                Ok(format!("<summary>{input}</summary>"))
+                    .split("<current_checkpoint>\n")
+                    .nth(1)
+                    .and_then(|body| body.split("\n</current_checkpoint>").next())
+                    .unwrap_or(VALID_CHECKPOINT_WIRE);
+                Ok(input.to_string())
             } else {
-                Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+                Ok(typed_response_for_request(&request))
             }
         }
     }
@@ -838,10 +983,12 @@ async fn refresh_stops_after_two_non_shrinking_rounds_without_worsening() {
             .expect("compact should run");
 
     assert!(reduce_seen.load(Ordering::SeqCst), "reduce 阶段必须发生");
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("未缩小轮次必须保留有效 typed checkpoint");
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
     assert!(
-        result.summary.len() < 41_000,
-        "未缩小轮次不应采用更差输出（保持原 reduce 结果）: {} chars",
-        result.summary.len()
+        result.summary.contains("historical detail"),
+        "未缩小轮次应保持原 reduce 结果"
     );
     assert!(
         calls.load(Ordering::SeqCst) >= 3,
@@ -872,10 +1019,10 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     impl CompactGenerator for EchoGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -898,7 +1045,8 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
     )
     .await
     .expect("compact should run");
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("progress path must render a valid typed checkpoint");
 
     let seen = seen.lock().unwrap();
     assert_eq!(
@@ -958,10 +1106,10 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     impl CompactGenerator for EchoGenerator {
         async fn generate(
             &self,
-            _request: Vec<Message>,
+            request: Vec<Message>,
             _cancel: &CancellationToken,
         ) -> Result<String, crate::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{VALID_CHECKPOINT}</summary>"))
+            Ok(typed_response_for_request(&request))
         }
     }
 
@@ -984,7 +1132,8 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     )
     .await
     .expect("compact should run");
-    assert_eq!(result.summary, VALID_CHECKPOINT);
+    crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("progress path must render a valid typed checkpoint");
 
     let seen = seen.lock().unwrap();
     assert_eq!(
@@ -999,6 +1148,329 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
             .all(|(_, work)| *work == CompactWork::Indeterminate),
         "单次摘要不应伪造 chunk 计数，实际 {seen:?}"
     );
+}
+
+#[tokio::test]
+async fn invalid_single_map_json_is_repaired_before_fallback() {
+    use std::sync::Mutex;
+
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+
+    struct RepairingMapGenerator {
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for RepairingMapGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            let prompt = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            let mut requests = self.requests.lock().unwrap();
+            requests.push(prompt.clone());
+            if requests.len() == 1 {
+                Ok(r#"{"facts":"not-an-array"}"#.to_string())
+            } else {
+                Ok(VALID_MAP_FACTS.to_string())
+            }
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&RepairingMapGenerator {
+            requests: requests.clone(),
+        }),
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("repair should preserve compact");
+
+    assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
+    assert!(!result.summary.contains("Local text-compaction path"));
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "invalid map should receive one repair call"
+    );
+    assert!(requests[1].contains("map"));
+    assert!(requests[1].contains("invalid type"));
+    assert!(requests[1].contains(r#"{"facts":"not-an-array"}"#));
+}
+
+#[tokio::test]
+async fn invalid_reduce_checkpoint_is_repaired_before_fallback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let reduce_calls = Arc::new(AtomicUsize::new(0));
+
+    struct RepairingReduceGenerator {
+        reduce_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for RepairingReduceGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            let prompt = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if prompt.contains("<compact_facts>") {
+                self.reduce_calls.fetch_add(1, Ordering::SeqCst);
+                return Ok(r#"{"current_objective":"missing fields"}"#.to_string());
+            }
+            if prompt.contains("repairing the reduce") {
+                self.reduce_calls.fetch_add(1, Ordering::SeqCst);
+                return Ok(VALID_CHECKPOINT_WIRE.to_string());
+            }
+            Ok(VALID_MAP_FACTS.to_string())
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&RepairingReduceGenerator {
+            reduce_calls: reduce_calls.clone(),
+        }),
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("repair should preserve compact");
+
+    assert_eq!(reduce_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
+    assert!(result
+        .summary
+        .contains("Continue the compact checkpoint work"));
+    assert!(!result.summary.contains("Local text-compaction path"));
+}
+
+#[tokio::test]
+async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkpoint() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let refresh_calls = Arc::new(AtomicUsize::new(0));
+    let repair_seen = Arc::new(AtomicBool::new(false));
+
+    struct RepairingRefreshGenerator {
+        refresh_calls: Arc<AtomicUsize>,
+        repair_seen: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for RepairingRefreshGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            let prompt = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if prompt.contains("<compact_facts>") {
+                let mut wire: serde_json::Value =
+                    serde_json::from_str(VALID_CHECKPOINT_WIRE).unwrap();
+                wire["archived_milestones"] =
+                    serde_json::json!(["historical detail ".repeat(80_000)]);
+                return Ok(wire.to_string());
+            }
+            if prompt.contains("repairing the refresh") {
+                self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+                self.repair_seen.store(true, Ordering::SeqCst);
+                return Ok(SHORTER_CHECKPOINT_WIRE.to_string());
+            }
+            if prompt.contains("<current_checkpoint>") {
+                self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+                return Ok(r#"{"resume_cursor":{"next_action":[]}}"#.to_string());
+            }
+            Ok(VALID_MAP_FACTS.to_string())
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&RepairingRefreshGenerator {
+            refresh_calls: refresh_calls.clone(),
+            repair_seen: repair_seen.clone(),
+        }),
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("repair should preserve compact");
+
+    assert!(repair_seen.load(Ordering::SeqCst));
+    assert_eq!(refresh_calls.load(Ordering::SeqCst), 2);
+    assert!(!result.summary.contains("historical detail"));
+    assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
+}
+
+#[tokio::test]
+async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let cancel = CancellationToken::new();
+
+    struct CancelDuringRepairGenerator {
+        calls: Arc<AtomicUsize>,
+        cancel: CancellationToken,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for CancelDuringRepairGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.cancel.cancel();
+            Ok(r#"{"facts":"not-an-array"}"#.to_string())
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&CancelDuringRepairGenerator {
+            calls: calls.clone(),
+            cancel: cancel.clone(),
+        }),
+        None,
+        &cancel,
+    )
+    .await;
+
+    assert!(result.is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    struct AlwaysInvalidGenerator(Arc<AtomicUsize>);
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for AlwaysInvalidGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<String, crate::domain::CompactGenerationFailure> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(r#"{"facts":"not-an-array"}"#.to_string())
+        }
+    }
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&AlwaysInvalidGenerator(calls.clone())),
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("exhausted repair should use local fallback");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(result.summary.contains("Local text-compaction path"));
+    assert_eq!(
+        result.quality,
+        crate::domain::CompactSummaryQuality::LocalFallback(
+            crate::domain::CompactGenerationFailureKind::InvalidSummary
+        )
+    );
+}
+
+#[test]
+fn fallback_extracts_evidence_working_set_and_executable_cursor() {
+    let summary = build_summary_text(
+        &[
+            Message::user("在 fix/typed-compact 分支修复 reduce JSON schema 错误并创建 PR"),
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "已修改 compact_summary.rs，尚未运行 cargo test".to_string(),
+                }],
+                metadata: None,
+            },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call-test".to_string(),
+                    content: serde_json::json!(
+                        "cargo test -p context: 170 passed; commit ebbf89af"
+                    ),
+                    text: Some("cargo test -p context: 170 passed; commit ebbf89af".to_string()),
+                    is_error: false,
+                }],
+                metadata: None,
+            },
+            Message::user("继续修复格式错误，先补重试测试，再实现并验证"),
+        ],
+        None,
+    );
+
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&summary)
+        .expect("fallback must render a valid checkpoint");
+    assert!(summary.contains("继续修复格式错误，先补重试测试，再实现并验证"));
+    assert!(summary.contains("cargo test -p context: 170 passed; commit ebbf89af"));
+    assert!(summary.contains("compact_summary.rs"));
+    assert_eq!(
+        checkpoint.resume_cursor().next_action(),
+        "Follow the latest user request exactly: 继续修复格式错误，先补重试测试，再实现并验证"
+    );
+    assert!(!summary.contains("Observed tool invocation"));
 }
 
 #[test]
