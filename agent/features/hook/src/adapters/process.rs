@@ -300,13 +300,14 @@ async fn read_bounded(
         if truncated {
             // 已进入 spill 模式：全量字节（含截断前的前缀已补写）只写文件。
             if let Some((_, file)) = spill.as_mut() {
-                file.write_all(&buffer[..count]).map_err(|error| {
-                    cleanup_spill(&spill);
-                    ProcessFailure::new(
-                        ProcessFailureKind::Io,
-                        format!("写入 hook {stream} 全量临时文件失败: {error}"),
-                    )
-                })?;
+                file.write_all(&buffer[..count]) // allow unsafe_text_op: Vec slice (read count)
+                    .map_err(|error| {
+                        cleanup_spill(&spill);
+                        ProcessFailure::new(
+                            ProcessFailureKind::Io,
+                            format!("写入 hook {stream} 全量临时文件失败: {error}"),
+                        )
+                    })?;
             }
             continue;
         }
@@ -316,7 +317,7 @@ async fn read_bounded(
             truncated = true;
             match open_spill_file(stream) {
                 Some((path, mut file)) => {
-                    let spilled_prefix = &buffer[..count];
+                    let spilled_prefix = &buffer[..count]; // allow unsafe_text_op: Vec slice (read count)
                     if let Err(error) = file
                         .write_all(bytes.as_slice())
                         .and_then(|_| file.write_all(spilled_prefix).map(|_| ()))
