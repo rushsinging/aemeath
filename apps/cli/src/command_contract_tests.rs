@@ -1,6 +1,15 @@
 use std::sync::Arc;
 
 #[test]
+fn connect_command_delegates_to_generic_form_without_stage_parser_or_manual_renderer() {
+    let source = include_str!("subcommand/connect_command.rs");
+    assert!(source.contains("run_config_form"));
+    assert!(!source.contains("ConnectStage"));
+    assert!(!source.contains("println!"));
+    assert!(!source.contains("ConnectProjection"));
+}
+
+#[test]
 fn tui_and_no_tui_share_the_same_router_contract() {
     let wiring = composition::tools::wire_commands().expect("command wiring");
     let catalog = wiring.catalog();

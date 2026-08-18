@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, RunStepCursor, SnapshotState,
 };
 use share::message::{ContentBlock, Message, Role};
@@ -47,7 +47,7 @@ fn unfinished_tool_session_with_outcome(
             vec![CommittedRunStep {
                 step_id: "step-1".to_string(),
                 accepted_input: None,
-                outcome: has_outcome.then(|| crate::domain::session::FinalizedOutcomeProjection {
+                outcome: has_outcome.then(|| crate::domain::session::FinalizedOutcomeRecord {
                     finalize_cause: crate::domain::FinalizeCause::UserCancelledStep,
                     duration_ms: Some(7_325_000),
                     messages: vec![Message {
@@ -90,11 +90,11 @@ fn two_step_session() -> CanonicalSession {
             vec![
                 CommittedRunStep::accepted_only(
                     "step-1",
-                    AcceptedInputProjection::new(vec![Message::user("first")], "fp-1", 0),
+                    AcceptedInputRecord::new(vec![Message::user("first")], "fp-1", 0),
                 ),
                 CommittedRunStep::accepted_only(
                     "step-2",
-                    AcceptedInputProjection::new(vec![Message::user("second")], "fp-2", 0),
+                    AcceptedInputRecord::new(vec![Message::user("second")], "fp-2", 0),
                 ),
             ],
         )]
@@ -361,14 +361,14 @@ fn restore_reads_only_steps_from_active_marker() {
                 "run-1",
                 vec![CommittedRunStep::accepted_only(
                     "step-1",
-                    AcceptedInputProjection::new(vec![Message::user("hidden")], "fp-1", 0),
+                    AcceptedInputRecord::new(vec![Message::user("hidden")], "fp-1", 0),
                 )],
             ),
             CommittedRunSlice::new(
                 "run-2",
                 vec![CommittedRunStep::accepted_only(
                     "step-2",
-                    AcceptedInputProjection::new(vec![Message::user("visible")], "fp-2", 0),
+                    AcceptedInputRecord::new(vec![Message::user("visible")], "fp-2", 0),
                 )],
             ),
         ]

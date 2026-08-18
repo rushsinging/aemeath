@@ -409,6 +409,11 @@ impl RuntimeContextFactory {
             } else {
                 provider::ReasoningLevel::Off
             });
+        let runtime_provider = config::resolve_provider_runtime_for_selection(
+            request.session().config(),
+            &role.model,
+            None,
+        );
         let binding = self
             .provider_factory
             .as_ref()
@@ -418,7 +423,7 @@ impl RuntimeContextFactory {
                 source_key: source_key.clone(),
                 api_style: model.api_style.clone(),
                 api_key: source.api_key.clone(),
-                base_url: (!source.base_url.is_empty()).then(|| source.base_url.clone()),
+                base_url: runtime_provider.base_url,
                 model: crate::ports::ModelId {
                     provider: source_key,
                     model: model.id.clone(),
@@ -429,7 +434,7 @@ impl RuntimeContextFactory {
                 timeout: std::time::Duration::from_secs(
                     request.session().config().api_timeout_secs(),
                 ),
-                user_agent: request.session().config().user_agent().to_string(),
+                user_agent: runtime_provider.user_agent,
             })
             .map_err(|error| RunCreationError::SubProviderBuild {
                 message: error.to_string(),

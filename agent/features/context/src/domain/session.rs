@@ -12,9 +12,9 @@ mod types;
 
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
 pub use envelope::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,
-    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SessionHistory,
+    FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError, SessionHistory,
     SkillLoadRecord, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use generation::{

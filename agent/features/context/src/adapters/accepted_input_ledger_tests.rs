@@ -1,5 +1,5 @@
 use super::AtomicBlobAcceptedInputLedger;
-use crate::domain::session::{AcceptedInputProjection, CanonicalSession};
+use crate::domain::session::{AcceptedInputRecord, CanonicalSession};
 use share::message::Message;
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ async fn overlay_does_not_advance_canonical_session_revision() {
             35250,
             "run",
             "step",
-            &AcceptedInputProjection::new(vec![Message::user("queued")], "queued", 35250),
+            &AcceptedInputRecord::new(vec![Message::user("queued")], "queued", 35250),
         )
         .await
         .expect("save accepted input");
@@ -48,7 +48,7 @@ async fn finalized_acknowledgement_removes_only_matching_input() {
                 revision,
                 run_id,
                 step_id,
-                &AcceptedInputProjection::new(vec![Message::user(step_id)], step_id, revision),
+                &AcceptedInputRecord::new(vec![Message::user(step_id)], step_id, revision),
             )
             .await
             .expect("save accepted input");

@@ -1,6 +1,6 @@
 use super::*;
 use crate::domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
+    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, RunStepCursor, SnapshotState,
 };
 use share::message::Message;
@@ -28,14 +28,14 @@ fn session() -> CanonicalSession {
                 "run-1",
                 vec![CommittedRunStep::accepted_only(
                     "step-1",
-                    AcceptedInputProjection::new(vec![Message::user("hidden")], "fp-1", 0),
+                    AcceptedInputRecord::new(vec![Message::user("hidden")], "fp-1", 0),
                 )],
             ),
             CommittedRunSlice::new(
                 "run-2",
                 vec![CommittedRunStep::accepted_only(
                     "step-2",
-                    AcceptedInputProjection::new(vec![Message::user("visible preview")], "fp-2", 0),
+                    AcceptedInputRecord::new(vec![Message::user("visible preview")], "fp-2", 0),
                 )],
             ),
         ]

@@ -6,7 +6,7 @@ use storage::api::{
     StorageKey, StorageNamespace, WriteOptions,
 };
 
-use crate::domain::session::{AcceptedInputProjection, CanonicalSession};
+use crate::domain::session::{AcceptedInputRecord, CanonicalSession};
 
 const ACCEPTED_INPUT_LEDGER_SCHEMA_VERSION: u32 = 1;
 
@@ -15,7 +15,7 @@ struct PersistedAcceptedInput {
     revision: u64,
     run_id: String,
     step_id: String,
-    input: AcceptedInputProjection,
+    input: AcceptedInputRecord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -83,7 +83,7 @@ impl AtomicBlobAcceptedInputLedger {
         revision: u64,
         run_id: &str,
         step_id: &str,
-        input: &AcceptedInputProjection,
+        input: &AcceptedInputRecord,
     ) -> Result<(), String> {
         let mut ledger = self.read().await?;
         if let Some(existing) = ledger

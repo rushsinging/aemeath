@@ -7,16 +7,16 @@ use context::compact::{
     ContextReadStep, ProtectedRunPolicy,
 };
 use context::domain::session::{
-    AcceptedInputProjection, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeProjection, SessionHistory,
+    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
+    FinalizedOutcomeRecord, SessionHistory,
 };
 use context::domain::{
     CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentity, ToolCallReceipt,
     ToolOutcomeKind, ToolTerminalReceipt,
 };
 
-fn finalized(messages: Vec<Message>) -> FinalizedOutcomeProjection {
-    FinalizedOutcomeProjection {
+fn finalized(messages: Vec<Message>) -> FinalizedOutcomeRecord {
+    FinalizedOutcomeRecord {
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: messages.into(),
@@ -27,8 +27,8 @@ fn finalized(messages: Vec<Message>) -> FinalizedOutcomeProjection {
     }
 }
 
-fn accepted(text: &str) -> AcceptedInputProjection {
-    AcceptedInputProjection::new(vec![Message::user(text)], format!("fp-{text}"), 1)
+fn accepted(text: &str) -> AcceptedInputRecord {
+    AcceptedInputRecord::new(vec![Message::user(text)], format!("fp-{text}"), 1)
 }
 
 fn completed_run(run_id: &str, user_text: &str) -> CommittedRunSlice {

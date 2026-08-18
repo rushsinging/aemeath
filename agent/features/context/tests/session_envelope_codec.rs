@@ -1,8 +1,8 @@
 use context::adapters::decode_session;
 use context::domain::session::{
-    AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    CommittedStepMessages, FinalizedOutcomeProjection, SessionCodec, SessionCodecError,
-    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
+    CommittedStepMessages, FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
+    CURRENT_SESSION_SCHEMA_VERSION,
 };
 use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
@@ -161,7 +161,7 @@ fn structured_projection_flattens_steps_once() {
             "run-a",
             vec![CommittedRunStep::accepted_only(
                 "step-a",
-                AcceptedInputProjection::new(vec![Message::user("accepted-a")], "fp-a", 1),
+                AcceptedInputRecord::new(vec![Message::user("accepted-a")], "fp-a", 1),
             )],
         ),
         CommittedRunSlice::new(
@@ -189,7 +189,7 @@ fn accepted_only_step_round_trips_without_outcome_or_runtime_state() {
         "run",
         vec![CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputProjection::new(vec![Message::user("durable input")], "fp", 1),
+            AcceptedInputRecord::new(vec![Message::user("durable input")], "fp", 1),
         )],
     )]
     .into();
@@ -220,12 +220,12 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         "run",
         vec![CommittedRunStep {
             step_id: "step".to_string(),
-            accepted_input: Some(AcceptedInputProjection::new(
+            accepted_input: Some(AcceptedInputRecord::new(
                 vec![Message::user("accepted")],
                 "input-fingerprint",
                 1,
             )),
-            outcome: Some(FinalizedOutcomeProjection {
+            outcome: Some(FinalizedOutcomeRecord {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
