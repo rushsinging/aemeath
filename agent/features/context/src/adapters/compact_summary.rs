@@ -343,10 +343,11 @@ pub fn build_compact_request(
     let previous_summary = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            let (checkpoint_text, _) =
-                crate::domain::compact::split_checkpoint_and_task_state(summary);
-            let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+            let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
                 .unwrap_or_else(|_| {
+                    let (checkpoint_text, _) =
+                        crate::domain::compact::split_checkpoint_and_task_state(summary);
                     crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
                         checkpoint_text,
                     )
@@ -455,10 +456,11 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
     let previous_checkpoint = previous_summary
         .filter(|summary| !summary.trim().is_empty())
         .map(|summary| {
-            let (checkpoint_text, _) =
-                crate::domain::compact::split_checkpoint_and_task_state(summary);
-            crate::domain::compact::ContinuationCheckpoint::parse(checkpoint_text)
+            crate::domain::compact::CanonicalCompactSummary::decode(summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
                 .unwrap_or_else(|_| {
+                    let (checkpoint_text, _) =
+                        crate::domain::compact::split_checkpoint_and_task_state(summary);
                     crate::domain::compact::ContinuationCheckpoint::from_legacy_summary(
                         checkpoint_text,
                     )
@@ -1151,7 +1153,8 @@ async fn compact_messages_map_reduce(
     }
     indexed_fact_batches.sort_by_key(|(chunk_index, _, _)| *chunk_index);
     if let Some(previous_summary) = previous_summary {
-        let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(previous_summary)
+        let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(previous_summary)
+            .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
             .map_err(|parse_error| {
                 CompactGenerationFailure::new(
                     CompactGenerationFailureKind::InvalidSummary,

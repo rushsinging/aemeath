@@ -1382,6 +1382,53 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
 }
 
 #[tokio::test]
+async fn previous_summary_with_task_companion_reaches_typed_reduce() {
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "continued-compact-{index} {}",
+                "history ".repeat(100)
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    struct SuccessfulMapGenerator;
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for SuccessfulMapGenerator {
+        async fn generate(
+            &self,
+            _request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+            Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+        }
+    }
+
+    let previous = format!(
+        "{VALID_CHECKPOINT}\n\n## Current Task State\nBatch #13 — Tasks: 1/7\n■ [task:2] 定义 Execution Specifications"
+    );
+    let result = compact_messages_with_llm(
+        &messages,
+        Some(&previous),
+        100_000,
+        Some(&SuccessfulMapGenerator),
+        None,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("task companion must not invalidate previous checkpoint");
+
+    assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
+    assert!(result
+        .summary
+        .contains("Existing compact tests passed before this change."));
+    assert!(!result.summary.contains("Current Task State"));
+    assert_eq!(result.summary.matches("- Next action:").count(), 1);
+}
+
+#[tokio::test]
 async fn partial_map_fallback_preserves_previous_constraints() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 

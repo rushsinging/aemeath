@@ -512,13 +512,19 @@ impl CanonicalSessionRepository {
         summary: &str,
         task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     ) -> String {
-        let (checkpoint, _) = crate::domain::compact::split_checkpoint_and_task_state(summary);
+        let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(summary)
+            .map(|decoded| decoded.checkpoint().render())
+            .unwrap_or_else(|_| {
+                let (checkpoint, _) =
+                    crate::domain::compact::split_checkpoint_and_task_state(summary);
+                checkpoint.to_string()
+            });
         match task_snapshot {
             Some(snapshot) if !snapshot.items().is_empty() => format!(
                 "{checkpoint}\n\n## Current Task State\n{}",
                 snapshot.render_companion()
             ),
-            _ => checkpoint.to_string(),
+            _ => checkpoint,
         }
     }
 
@@ -627,7 +633,8 @@ impl CanonicalSessionRepository {
             };
         };
         let reconciled_summary =
-            crate::domain::compact::ContinuationCheckpoint::parse(&compacted.summary)
+            crate::domain::compact::CanonicalCompactSummary::decode(&compacted.summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
                 .and_then(|checkpoint| {
                     crate::domain::compact::reconcile_checkpoint_with_task_snapshot(
                         checkpoint,

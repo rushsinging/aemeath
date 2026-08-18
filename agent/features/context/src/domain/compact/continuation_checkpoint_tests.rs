@@ -475,6 +475,31 @@ fn task_state_companion_is_split_from_checkpoint() {
 }
 
 #[test]
+fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+
+    let decoded = CanonicalCompactSummary::decode(&source).expect("canonical summary must decode");
+
+    assert_eq!(decoded.checkpoint().render(), COMPLETE_CHECKPOINT);
+    assert_eq!(decoded.task_state_companion(), Some("■ #1 running"));
+}
+
+#[test]
+fn canonical_summary_rejects_unknown_authoritative_section_before_task_companion() {
+    let source = format!(
+        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current Task State\n■ #1 running"
+    );
+
+    let error = CanonicalCompactSummary::decode(&source)
+        .expect_err("unknown authoritative section must remain fail closed");
+
+    assert!(matches!(
+        error,
+        CheckpointError::UnknownSection { section: _ }
+    ));
+}
+
+#[test]
 fn rejects_sections_in_wrong_order() {
     let source = COMPLETE_CHECKPOINT
         .replace("## Current Objective", "## TEMP")

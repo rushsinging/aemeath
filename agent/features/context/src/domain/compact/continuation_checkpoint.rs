@@ -164,6 +164,35 @@ pub struct CheckpointSections {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalCompactSummary<'a> {
+    checkpoint: ContinuationCheckpoint,
+    task_state_companion: Option<&'a str>,
+}
+
+impl<'a> CanonicalCompactSummary<'a> {
+    pub fn decode(source: &'a str) -> Result<Self, CheckpointError> {
+        let (checkpoint_source, task_state_companion) = split_checkpoint_and_task_state(source);
+        let checkpoint = ContinuationCheckpoint::parse(checkpoint_source)?;
+        Ok(Self {
+            checkpoint,
+            task_state_companion,
+        })
+    }
+
+    pub fn checkpoint(&self) -> &ContinuationCheckpoint {
+        &self.checkpoint
+    }
+
+    pub fn into_checkpoint(self) -> ContinuationCheckpoint {
+        self.checkpoint
+    }
+
+    pub fn task_state_companion(&self) -> Option<&'a str> {
+        self.task_state_companion
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationCheckpoint {
     sections: [Vec<String>; 9],
     resume_cursor: ResumeCursor,
