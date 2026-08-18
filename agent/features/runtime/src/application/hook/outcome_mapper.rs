@@ -127,6 +127,10 @@ pub struct RuntimeHookExecution {
     pub stdout: String,
     /// stderr 原样输出。
     pub stderr: String,
+    /// 截断发生时保留全量 stdout 的临时文件；未截断为 None。
+    pub stdout_file: Option<std::path::PathBuf>,
+    /// 截断发生时保留全量 stderr 的临时文件；未截断为 None。
+    pub stderr_file: Option<std::path::PathBuf>,
     /// 总执行时长。
     pub duration: Duration,
 }
@@ -256,6 +260,8 @@ fn map_execution(execution: &hook::HookExecution) -> RuntimeHookExecution {
         exit_code: execution.exit_code,
         stdout: execution.stdout.clone(),
         stderr: execution.stderr.clone(),
+        stdout_file: execution.stdout_file.clone(),
+        stderr_file: execution.stderr_file.clone(),
         duration: execution.duration,
     }
 }
