@@ -1930,7 +1930,9 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "env_logger",
+ "libc",
  "log",
+ "portable-pty",
  "serde_json",
  "tempfile",
  "tokio",

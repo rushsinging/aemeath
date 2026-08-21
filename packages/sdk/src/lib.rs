@@ -48,7 +48,7 @@ pub use activity::{
     CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
     RunPhaseKindView, RunPurposeView,
 };
-pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
+pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode, NativeStderrMode};
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,

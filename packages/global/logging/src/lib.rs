@@ -19,7 +19,10 @@ pub use adapters::{
     set_boot_ts, spawn_instrumented, timestamp_local_rfc3339, timestamp_rfc3339, within,
     UnifiedLogger,
 };
-pub use domain::{FieldPatch, LogContext, LogContextPatch, LoggingOutputMode, LoggingSettings};
+pub use domain::{
+    FieldPatch, LogContext, LogContextPatch, LoggingOutputMode, LoggingSettings,
+    NativeStderrRouting,
+};
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
 pub fn level_filter_from_str(level: &str) -> log::LevelFilter {

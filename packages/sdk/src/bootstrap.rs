@@ -15,6 +15,13 @@ pub enum LoggingOutputMode {
     Stderr,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NativeStderrMode {
+    #[default]
+    Preserve,
+    RouteToLogs,
+}
+
 /// 启动聊天运行时所需的参数。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatBootstrapArgs {
@@ -33,4 +40,5 @@ pub struct ChatBootstrapArgs {
     pub no_think: bool,
     pub max_reasoning: Option<String>,
     pub logging_output: LoggingOutputMode,
+    pub native_stderr: NativeStderrMode,
 }
