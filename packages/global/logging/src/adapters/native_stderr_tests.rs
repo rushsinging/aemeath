@@ -50,7 +50,7 @@ impl NativeStderrOps for FakeNativeStderrOps {
     }
 
     fn replace_stderr(&self, _target: &Self::Target) -> io::Result<()> {
-        self.replaced.borrow_mut().push(libc::STDERR_FILENO);
+        self.replaced.borrow_mut().push(STDERR_FD);
         if self.fail_replace {
             Err(io::Error::other("replace failed"))
         } else {
@@ -73,20 +73,17 @@ fn settings(routing: NativeStderrRouting) -> LoggingSettings {
 
 fn same_terminal_ops() -> FakeNativeStderrOps {
     FakeNativeStderrOps {
-        tty: RefCell::new(vec![
-            (libc::STDOUT_FILENO, true),
-            (libc::STDERR_FILENO, true),
-        ]),
+        tty: RefCell::new(vec![(STDOUT_FD, true), (STDERR_FD, true)]),
         identities: RefCell::new(vec![
             (
-                libc::STDOUT_FILENO,
+                STDOUT_FD,
                 TerminalIdentity {
                     device: 7,
                     inode: 11,
                 },
             ),
             (
-                libc::STDERR_FILENO,
+                STDERR_FD,
                 TerminalIdentity {
                     device: 7,
                     inode: 11,
@@ -110,9 +107,7 @@ fn preserve_does_not_inspect_or_replace_stderr() {
 #[test]
 fn non_terminal_stderr_is_preserved() {
     let ops = same_terminal_ops();
-    ops.tty
-        .borrow_mut()
-        .retain(|(fd, _)| *fd != libc::STDERR_FILENO);
+    ops.tty.borrow_mut().retain(|(fd, _)| *fd != STDERR_FD);
 
     route_native_stderr_with(&settings(NativeStderrRouting::AppendToFile), &ops).unwrap();
 
@@ -122,9 +117,7 @@ fn non_terminal_stderr_is_preserved() {
 #[test]
 fn non_terminal_stdout_is_preserved() {
     let ops = same_terminal_ops();
-    ops.tty
-        .borrow_mut()
-        .retain(|(fd, _)| *fd != libc::STDOUT_FILENO);
+    ops.tty.borrow_mut().retain(|(fd, _)| *fd != STDOUT_FD);
 
     route_native_stderr_with(&settings(NativeStderrRouting::AppendToFile), &ops).unwrap();
 
@@ -155,7 +148,7 @@ fn shared_terminal_routes_stderr_to_append_file() {
         ops.opened_paths.borrow().as_slice(),
         [PathBuf::from("/tmp/aemeath-logs/native-stderr.log")]
     );
-    assert_eq!(ops.replaced.borrow().as_slice(), [libc::STDERR_FILENO]);
+    assert_eq!(ops.replaced.borrow().as_slice(), [STDERR_FD]);
 }
 
 #[test]

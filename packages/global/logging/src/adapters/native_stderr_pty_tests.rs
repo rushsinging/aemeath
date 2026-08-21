@@ -64,6 +64,6 @@ fn run_probe_child() {
     route_native_stderr(&settings).expect("route native stderr");
     // SAFETY: MARKER points to valid bytes for the duration of the write and FD 2
     // remains process-owned after routing.
-    let written = unsafe { libc::write(libc::STDERR_FILENO, MARKER.as_ptr().cast(), MARKER.len()) };
+    let written = unsafe { libc::write(STDERR_FD, MARKER.as_ptr().cast(), MARKER.len()) };
     assert_eq!(written, MARKER.len() as isize);
 }

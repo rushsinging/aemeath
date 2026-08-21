@@ -1,10 +1,14 @@
 use crate::domain::{LoggingSettings, NativeStderrRouting};
+#[cfg(unix)]
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::Path;
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
+
+const STDOUT_FD: i32 = 1;
+const STDERR_FD: i32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TerminalIdentity {
@@ -41,7 +45,7 @@ where
     if settings.native_stderr_routing() == NativeStderrRouting::Preserve {
         return Ok(());
     }
-    if !ops.is_terminal(libc::STDERR_FILENO).map_err(|error| {
+    if !ops.is_terminal(STDERR_FD).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("inspect native stderr terminal: {error}"),
@@ -49,24 +53,20 @@ where
     })? {
         return Ok(());
     }
-    if !ops.is_terminal(libc::STDOUT_FILENO).map_err(|error| {
+    if !ops.is_terminal(STDOUT_FD).map_err(|error| {
         io::Error::new(error.kind(), format!("inspect stdout terminal: {error}"))
     })? {
         return Ok(());
     }
-    let stdout_identity = ops
-        .terminal_identity(libc::STDOUT_FILENO)
-        .map_err(|error| {
-            io::Error::new(error.kind(), format!("identify stdout terminal: {error}"))
-        })?;
-    let stderr_identity = ops
-        .terminal_identity(libc::STDERR_FILENO)
-        .map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("identify native stderr terminal: {error}"),
-            )
-        })?;
+    let stdout_identity = ops.terminal_identity(STDOUT_FD).map_err(|error| {
+        io::Error::new(error.kind(), format!("identify stdout terminal: {error}"))
+    })?;
+    let stderr_identity = ops.terminal_identity(STDERR_FD).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("identify native stderr terminal: {error}"),
+        )
+    })?;
     if stdout_identity != stderr_identity {
         return Ok(());
     }
@@ -141,7 +141,7 @@ impl NativeStderrOps for UnixNativeStderrOps {
     fn replace_stderr(&self, target: &Self::Target) -> io::Result<()> {
         // SAFETY: both descriptors are valid for this call; `dup2` atomically
         // replaces FD 2 while `target` remains alive through the call.
-        if unsafe { libc::dup2(target.as_raw_fd(), libc::STDERR_FILENO) } == -1 {
+        if unsafe { libc::dup2(target.as_raw_fd(), STDERR_FD) } == -1 {
             Err(io::Error::last_os_error())
         } else {
             Ok(())
@@ -149,9 +149,9 @@ impl NativeStderrOps for UnixNativeStderrOps {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "native_stderr_pty_tests.rs"]
 mod pty_tests;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "native_stderr_tests.rs"]
 mod tests;
