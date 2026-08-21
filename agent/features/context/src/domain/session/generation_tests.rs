@@ -592,3 +592,74 @@ fn future_generation_manifest_preserves_original_bytes() {
         } if original_bytes == bytes
     ));
 }
+
+#[test]
+fn complete_snapshot_covers_every_member_with_session_revision() {
+    let session = session_with_steps(
+        "session",
+        26,
+        &[("run-a", "step-a", "a"), ("run-b", "step-b", "b")],
+    );
+    let plan = SessionCommitPlan::complete_snapshot(&session)
+        .expect("complete snapshot plan for wiped dataset rebuild");
+    plan.validate_rebuild_boundary("session", 25)
+        .expect("rebuild boundary must accept target = expected + 1");
+
+    let manifest_member = plan
+        .changed_members()
+        .iter()
+        .find(|member| member.name() == "manifest.json")
+        .expect("complete snapshot must carry the generation manifest");
+    let manifest = SessionGenerationCodec::decode_manifest(manifest_member.bytes())
+        .expect("decodable generation manifest");
+    assert_eq!(
+        manifest.revision(),
+        26,
+        "rebuilt manifest must align with in-memory revision"
+    );
+    assert_eq!(manifest.session_id(), "session");
+
+    let changed_names = plan
+        .changed_members()
+        .iter()
+        .map(|member| member.name().to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        changed_names.iter().any(|name| name.starts_with("step-")),
+        "complete snapshot must carry step members: {changed_names:?}"
+    );
+    assert!(
+        changed_names
+            .iter()
+            .any(|name| name.contains("session-state")),
+        "complete snapshot must carry session state: {changed_names:?}"
+    );
+    assert!(
+        plan.reused_members().is_empty(),
+        "complete snapshot must not reuse members from a wiped dataset"
+    );
+}
+
+#[test]
+fn rebuild_boundary_rejects_non_incremental_or_mismatched_revisions() {
+    let session = session_with_steps("session", 26, &[("run-a", "step-a", "a")]);
+    let plan = SessionCommitPlan::complete_snapshot(&session)
+        .expect("complete snapshot plan for wiped dataset rebuild");
+
+    let stale = plan
+        .validate_rebuild_boundary("session", 26)
+        .expect_err("expected revision equal to target must be rejected");
+    assert!(matches!(
+        stale,
+        SessionGenerationWireError::InvalidManifest(message)
+            if message.contains("递增一次")
+    ));
+
+    let mismatch = plan
+        .validate_rebuild_boundary("other-session", 25)
+        .expect_err("session identity mismatch must be rejected");
+    assert!(matches!(
+        mismatch,
+        SessionGenerationWireError::SessionIdentityMismatch { .. }
+    ));
+}

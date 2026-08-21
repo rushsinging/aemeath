@@ -211,8 +211,15 @@ struct UserInteractionSpec {
 
 struct UserQuestion {
     prompt: String,                 // 向用户展示的问题文本
-    options: Vec<String>,           // 可选选项；空 = 自由文本回答
+    options: Vec<UserOption>,       // 预设选项
     allow_multi: bool,              // 是否允许多选
+    allow_free_input: bool,         // 是否允许自由输入（默认 true）
+    default: Option<String>,        // 用户跳过时的默认答案
+}
+
+struct UserOption {
+    title: String,                  // 选项标题（必填，非空）
+    description: String,            // 选项描述（必填，非空）
 }
 
 struct ToolSuccess {

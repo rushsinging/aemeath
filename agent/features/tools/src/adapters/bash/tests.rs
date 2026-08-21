@@ -133,6 +133,38 @@ async fn test_bash_display_field_contains_stdout_not_message() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn bash_child_starts_new_session_without_controlling_terminal() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let result = bash_tool(&ctx)
+        .call(
+            json!({ "command": "python3 - <<'PY'\nimport os\ntry:\n    tty = open('/dev/tty', 'rb')\nexcept OSError:\n    tty_open = 0\nelse:\n    tty.close()\n    tty_open = 1\nprint(f'{os.getpgid(0)} {os.getsid(0)} {tty_open}')\nPY" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        !result.is_error,
+        "session probe should run: {}",
+        result.text
+    );
+    let output = result.data.expect("session probe data").stdout;
+    let fields: Vec<&str> = output.split_whitespace().collect();
+    assert_eq!(fields.len(), 3, "unexpected probe output: {output:?}");
+    assert_eq!(
+        fields[0], fields[1],
+        "bash process group must own its session"
+    );
+    assert_eq!(fields[2], "0", "bash child must not have a controlling tty");
+}
+
 #[tokio::test]
 async fn bash_reads_eof_from_isolated_stdin() {
     let workspace = tempdir().unwrap();

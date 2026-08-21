@@ -22,23 +22,20 @@ impl UserInteractionSpec {
 }
 
 /// An answer choice is a pure value and preserves the SDK's user-visible
-/// title/description pair.
+/// title/description pair. Description is mandatory: the tool input contract
+/// rejects any option without it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserOption {
     pub title: String,
-    pub description: Option<String>,
+    pub description: String,
 }
 
 impl UserOption {
-    pub fn new(title: impl Into<String>, description: Option<String>) -> Self {
+    pub fn new(title: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             title: title.into(),
-            description,
+            description: description.into(),
         }
-    }
-
-    pub fn title_only(title: impl Into<String>) -> Self {
-        Self::new(title, None)
     }
 }
 

@@ -30,12 +30,14 @@ struct SystemGitRunner;
 
 impl GitCommandRunner for SystemGitRunner {
     fn run(&self, cwd: &Path, args: &[OsString]) -> Result<GitCommandOutput, io::Error> {
-        let output = Command::new("git")
+        let mut command = Command::new("git");
+        command
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .args(args)
-            .current_dir(cwd)
-            .output()?;
+            .current_dir(cwd);
+        utils::configure_std_noninteractive(&mut command)?;
+        let output = command.output()?;
         Ok(GitCommandOutput {
             success: output.status.success(),
             exit_code: output.status.code(),

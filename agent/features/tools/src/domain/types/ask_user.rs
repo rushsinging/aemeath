@@ -21,7 +21,10 @@ pub struct AskUserQuestionInput {
     /// the prompt area — it is never truncated or used as a header — so prefer multi-line
     /// Markdown over a single long sentence when the context warrants detail.
     pub question: String,
-    /// Optional list of predefined answer choices. Each choice MUST be one separate array item — either a plain string or an object { title, description }. Do not combine choices into one string or embed them in question.
+    /// Optional list of predefined answer choices. Each choice MUST be an object of the form
+    /// { "title": "...", "description": "..." } where both fields are required and non-empty.
+    /// Plain string choices are NOT accepted. Do not combine choices into one string or embed
+    /// them in question.
     pub options: Option<Vec<Value>>,
     /// If true, the user may select more than one predefined choice
     pub multi_select: Option<bool>,

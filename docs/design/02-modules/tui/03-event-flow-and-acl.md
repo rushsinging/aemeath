@@ -271,9 +271,13 @@ struct ChatMessage {
 }
 
 struct UiInteractionRequestId(String); // 对 Runtime InteractionRequestId 的 TUI-owned 无损 newtype
+struct UiOptionItem {
+    title: String,
+    description: Option<String>, // 协议层保留 Option：历史会话兼容与系统内建选项
+}
 struct UiUserQuestion {
     prompt: String,
-    options: Vec<String>,
+    options: Vec<UiOptionItem>,
     default: Option<String>,
 }
 

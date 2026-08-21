@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::chat_view::OptionItem;
 use crate::{InteractionRequestId, RunId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -23,7 +24,7 @@ pub enum InteractionRequestBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct UserQuestion {
     pub prompt: String,
-    pub options: Vec<String>,
+    pub options: Vec<OptionItem>,
     pub allow_multi: bool,
 }
 

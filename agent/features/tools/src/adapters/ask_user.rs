@@ -15,7 +15,7 @@ impl TypedTool for AskUserQuestionTool {
         "AskUserQuestion"
     }
     fn description(&self) -> &str {
-        "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Free-text input defaults to enabled; when options are present, the system supplies `Type something...` as its entry. Do not add that option yourself."
+        "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Every option must be an object with required `title` and `description` fields; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system supplies `Type something...` as its entry. Do not add that option yourself."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::ask_user(lang))
@@ -66,18 +66,29 @@ fn parse_interaction(input: &Value) -> Result<UserInteractionSpec, String> {
         .options
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|option| {
-            if let Some(title) = option.as_str() {
-                return Some(UserOption::title_only(title));
+        .enumerate()
+        .map(|(index, option)| {
+            let position = format!("options[{index}]");
+            if !option.is_object() {
+                return Err(format!(
+                    "{position}: each option must be an object with required `title` and `description` fields"
+                ));
             }
-            let title = option.get("title")?.as_str()?.to_owned();
+            let title = option
+                .get("title")
+                .and_then(Value::as_str)
+                .filter(|title| !title.is_empty())
+                .ok_or_else(|| format!("{position}: `title` is required and must be non-empty"))?;
             let description = option
                 .get("description")
                 .and_then(Value::as_str)
-                .map(str::to_owned);
-            Some(UserOption::new(title, description))
+                .filter(|description| !description.is_empty())
+                .ok_or_else(|| {
+                    format!("{position}: `description` is required and must be non-empty")
+                })?;
+            Ok(UserOption::new(title, description))
         })
-        .collect();
+        .collect::<Result<Vec<_>, String>>()?;
     Ok(UserInteractionSpec::new(vec![UserQuestion::new(
         args.question,
         options,

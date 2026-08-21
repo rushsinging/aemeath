@@ -60,7 +60,7 @@ fn question_body() -> (sdk::InteractionRequestBody, InteractionContinuation) {
     (
         sdk::InteractionRequestBody::UserQuestions(vec![UserQuestion {
             prompt: "继续？".to_string(),
-            options: vec!["是".to_string()],
+            options: vec![sdk::OptionItem::new("是", "同意")],
             allow_multi: false,
         }]),
         InteractionContinuation::CompleteToolCall(sdk::ids::ToolCallId::from_legacy_or_new(

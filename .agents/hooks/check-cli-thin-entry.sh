@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 CLI_CRATE = "cli"
-ALLOWED_CLI_WORKSPACE_DEPS = {"composition", "sdk"}
+ALLOWED_CLI_WORKSPACE_DEPS = {"composition", "sdk", "utils"}
 FORBIDDEN_DOMAIN_CRATES = {
     "runtime",
     "project",

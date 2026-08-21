@@ -561,6 +561,8 @@ impl Dispatcher {
                                 exit_code: raw.exit_code,
                                 stdout: raw.stdout,
                                 stderr: raw.stderr,
+                                stdout_file: raw.stdout_file,
+                                stderr_file: raw.stderr_file,
                                 duration,
                             };
                             // 成功也必须保留 prior executions（此前失败的 attempt 明细），
@@ -590,6 +592,8 @@ impl Dispatcher {
                                 exit_code: raw.exit_code,
                                 stdout: raw.stdout,
                                 stderr: raw.stderr,
+                                stdout_file: raw.stdout_file,
+                                stderr_file: raw.stderr_file,
                                 duration,
                             };
                             executions.push(execution);
@@ -614,6 +618,8 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
@@ -637,6 +643,8 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
@@ -659,6 +667,8 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
