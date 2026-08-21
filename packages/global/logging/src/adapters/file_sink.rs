@@ -2,6 +2,7 @@
 
 use super::formatter::format_diag_json_line;
 use super::lifecycle::{EmergencyWriter, FileSinkLifecycle, StdFileOps, StdMonotonicClock};
+use super::native_stderr::route_native_stderr;
 use crate::domain::{DiagnosticSinkId, LoggingOutputMode, LoggingSettings, TargetCatalog};
 use log::{Log, Metadata, Record};
 use std::collections::HashMap;
@@ -93,6 +94,7 @@ static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
 impl UnifiedLogger {
     /// Installs the global logger. Failure to open one sink degrades only that sink.
     pub fn init(settings: LoggingSettings) -> io::Result<()> {
+        route_native_stderr(&settings)?;
         // emergency 兜底按 output_mode 选择：File 模式（含 TUI）落 emergency.log，
         // 避免 stderr 越过 alternate screen 糊屏（#1215）；Stderr 模式（no-tui -v）
         // 保留实时 stderr 语义。
