@@ -310,6 +310,8 @@ pub struct MemoryConfigPatch {
     #[serde(default)]
     pub inject_count: Option<usize>,
     #[serde(default)]
+    pub inject_token_budget: Option<usize>,
+    #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
 
@@ -759,6 +761,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     }
     if let Some(v) = patch.inject_count {
         base.inject_count = v;
+    }
+    if let Some(v) = patch.inject_token_budget {
+        base.inject_token_budget = v;
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);

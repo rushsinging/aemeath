@@ -12,6 +12,8 @@ pub enum MemoryAction {
     Pin,
     #[default]
     List,
+    Archive,
+    Restore,
     AddReminder,
     CompleteReminder,
 }
@@ -80,6 +82,23 @@ pub struct MemorySearchHitResult {
     pub relevance: Option<f64>,
 }
 
+/// Actionable Memory capacity candidate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryEvictionCandidateResult {
+    pub id: String,
+    pub content: String,
+    pub layer: MemoryLayerInput,
+    pub category: MemoryCategoryInput,
+    pub tags: Vec<String>,
+    pub pinned: bool,
+    pub outdated: bool,
+    pub ttl_expired: bool,
+    pub confirmation_count: u32,
+    pub last_confirmed_at: u64,
+    pub eviction_score: i64,
+    pub eviction_reason: String,
+}
+
 /// Typed result returned by the `memory` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct MemoryResult {
@@ -87,6 +106,7 @@ pub struct MemoryResult {
     pub id: Option<String>,
     pub entries: Option<Vec<MemoryEntryResult>>,
     pub hits: Option<Vec<MemorySearchHitResult>>,
+    pub eviction_candidates: Option<Vec<MemoryEvictionCandidateResult>>,
 }
 
 /// Typed input for the `memory` tool.
@@ -96,7 +116,7 @@ pub struct MemoryResult {
 pub struct MemoryInput {
     /// Memory action to perform
     pub action: MemoryAction,
-    /// Memory id for delete, pin, or complete_reminder actions
+    /// Memory id for delete, pin, archive, restore, or complete_reminder actions
     pub id: Option<String>,
     /// Persistent memory or session reminder content, max 500 chars
     pub content: Option<String>,

@@ -31,8 +31,8 @@ pub use tools::types::list_mcp_resources::ListMcpResourcesResult;
 pub use tools::types::mcp_manager::McpManagerResult;
 pub use tools::types::mcp_tool::McpToolResult;
 pub use tools::types::memory::{
-    MemoryCategoryInput, MemoryEntryResult, MemoryLayerInput, MemoryLocationResult, MemoryResult,
-    MemorySearchHitResult,
+    MemoryCategoryInput, MemoryEntryResult, MemoryEvictionCandidateResult, MemoryLayerInput,
+    MemoryLocationResult, MemoryResult, MemorySearchHitResult,
 };
 pub use tools::types::plan_mode::PlanModeResult;
 pub use tools::types::read::ReadResult;

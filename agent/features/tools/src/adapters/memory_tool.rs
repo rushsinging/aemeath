@@ -20,6 +20,8 @@ fn memory_input_schema() -> Value {
         action_contract("search", &["action", "query"]),
         action_contract("pin", &["action", "id"]),
         action_contract("list", &["action"]),
+        action_contract("archive", &["action", "id"]),
+        action_contract("restore", &["action", "id"]),
         action_contract("add_reminder", &["action", "content"]),
         action_contract("complete_reminder", &["action", "id"]),
     ]);
@@ -89,6 +91,8 @@ impl TypedTool for MemoryTool {
             MemoryAction::Search => handlers::search_memory(input, &*port),
             MemoryAction::Pin => handlers::pin_memory(input, &*port).await,
             MemoryAction::List => handlers::list_memory(input, &*port),
+            MemoryAction::Archive => handlers::archive_memory(input, &*port).await,
+            MemoryAction::Restore => handlers::restore_memory(input, &*port).await,
             MemoryAction::AddReminder => handlers::add_reminder(input, ctx),
             MemoryAction::CompleteReminder => handlers::complete_reminder(input, ctx),
         }

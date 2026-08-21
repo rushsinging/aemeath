@@ -7,6 +7,6 @@
 //! See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
 //! Phase 0a (方案 D) for the rationale.
 pub use tools::types::memory::{
-    MemoryCategoryInput, MemoryEntryResult, MemoryLayerInput, MemoryLocationResult, MemoryResult,
-    MemorySearchHitResult,
+    MemoryCategoryInput, MemoryEntryResult, MemoryEvictionCandidateResult, MemoryLayerInput,
+    MemoryLocationResult, MemoryResult, MemorySearchHitResult,
 };

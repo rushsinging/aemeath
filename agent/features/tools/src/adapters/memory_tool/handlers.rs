@@ -1,11 +1,12 @@
 use crate::domain::types::memory::{
-    MemoryCategoryInput, MemoryEntryResult, MemoryLayerInput, MemoryLocationResult, MemoryResult,
-    MemorySearchHitResult,
+    MemoryCategoryInput, MemoryEntryResult, MemoryEvictionCandidateResult, MemoryLayerInput,
+    MemoryLocationResult, MemoryResult, MemorySearchHitResult,
 };
 use crate::domain::{ToolExecutionContext, TypedToolResult};
 use memory::api::{
-    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer, MemoryLocation,
-    MemoryPort, MemorySearchHit, MemorySearchQuery as Query, MemorySource as Source, WriteResult,
+    EvictionCandidate, MemoryCategory as Category, MemoryEntry, MemoryId as Id,
+    MemoryLayer as Layer, MemoryLocation, MemoryPort, MemorySearchHit, MemorySearchQuery as Query,
+    MemorySource as Source, RestoreResult, WriteResult,
 };
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -72,8 +73,19 @@ pub(super) async fn add_memory(
                 ..MemoryResult::default()
             },
         ),
-        Ok(WriteResult::NeedsEviction { candidates: _ }) => {
-            TypedToolResult::error("记忆数量已达上限，请先归档候选记忆")
+        Ok(WriteResult::NeedsEviction { candidates }) => {
+            let candidate_results = candidates
+                .iter()
+                .map(eviction_candidate_result)
+                .collect::<Vec<_>>();
+            TypedToolResult::success(
+                render_eviction_candidates(&candidates),
+                MemoryResult {
+                    action: "needs_eviction".to_string(),
+                    eviction_candidates: Some(candidate_results),
+                    ..MemoryResult::default()
+                },
+            )
         }
         Ok(WriteResult::NoOp) => TypedToolResult::success(
             "记忆写入已跳过。",
@@ -200,6 +212,115 @@ pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResul
             ..MemoryResult::default()
         },
     )
+}
+
+pub(super) async fn archive_memory(
+    input: Value,
+    port: &dyn MemoryPort,
+) -> TypedToolResult<MemoryResult> {
+    let id = match required_string(&input, "id")
+        .and_then(|id| Id::new(id).map_err(|error| error.to_string()))
+    {
+        Ok(id) => id,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    match port.archive(std::slice::from_ref(&id)).await {
+        Ok(true) => {}
+        Ok(false) => return TypedToolResult::error("记忆不存在、已归档或已固定。"),
+        Err(error) => return TypedToolResult::error(error.to_string()),
+    }
+    TypedToolResult::success(
+        format!("记忆已归档。ID: {id}"),
+        MemoryResult {
+            action: "archive".to_string(),
+            id: Some(id.to_string()),
+            ..MemoryResult::default()
+        },
+    )
+}
+
+pub(super) async fn restore_memory(
+    input: Value,
+    port: &dyn MemoryPort,
+) -> TypedToolResult<MemoryResult> {
+    let id = match required_string(&input, "id")
+        .and_then(|id| Id::new(id).map_err(|error| error.to_string()))
+    {
+        Ok(id) => id,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    match port.restore(&id).await {
+        Ok(RestoreResult::Restored { id }) => TypedToolResult::success(
+            format!("记忆已恢复。ID: {id}"),
+            MemoryResult {
+                action: "restore".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
+            },
+        ),
+        Ok(RestoreResult::NeedsEviction { candidates }) => TypedToolResult::success(
+            render_eviction_candidates(&candidates),
+            MemoryResult {
+                action: "needs_eviction".to_string(),
+                id: Some(id.to_string()),
+                eviction_candidates: Some(
+                    candidates.iter().map(eviction_candidate_result).collect(),
+                ),
+                ..MemoryResult::default()
+            },
+        ),
+        Ok(RestoreResult::NotFound) => TypedToolResult::error("归档记忆不存在。"),
+        Ok(RestoreResult::NoOp) => TypedToolResult::success(
+            "记忆恢复已跳过。",
+            MemoryResult {
+                action: "noop".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
+            },
+        ),
+        Err(error) => TypedToolResult::error(error.to_string()),
+    }
+}
+
+fn render_eviction_candidates(candidates: &[EvictionCandidate]) -> String {
+    if candidates.is_empty() {
+        return "记忆数量已达上限，且没有可归档的非固定候选。".to_string();
+    }
+    let details = candidates
+        .iter()
+        .map(|candidate| {
+            format!(
+                "- id={} layer={} category={} confirmation_count={} last_confirmed_at={} eviction_score={} reason={}\n  {}",
+                candidate.entry.id,
+                memory_layer_name(candidate.entry.layer),
+                memory_category_name(candidate.entry.category),
+                candidate.entry.confirmation_count,
+                candidate.entry.last_confirmed_at,
+                candidate.eviction_score,
+                candidate.eviction_reason,
+                candidate.entry.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("记忆数量已达上限；写入未发生。请先使用 archive 显式归档候选，再重试：\n{details}")
+}
+
+fn eviction_candidate_result(candidate: &EvictionCandidate) -> MemoryEvictionCandidateResult {
+    MemoryEvictionCandidateResult {
+        id: candidate.entry.id.to_string(),
+        content: candidate.entry.content.clone(),
+        layer: memory_layer_result(candidate.entry.layer),
+        category: memory_category_result(candidate.entry.category),
+        tags: candidate.entry.tags.clone(),
+        pinned: candidate.entry.pinned,
+        outdated: candidate.entry.outdated,
+        ttl_expired: candidate.ttl_expired,
+        confirmation_count: candidate.entry.confirmation_count,
+        last_confirmed_at: candidate.entry.last_confirmed_at,
+        eviction_score: candidate.eviction_score,
+        eviction_reason: candidate.eviction_reason.clone(),
+    }
 }
 
 fn render_search_hits(hits: &[MemorySearchHit]) -> String {

@@ -27,7 +27,8 @@ trait MemoryPort: Send + Sync {
     ) -> Result<ReflectionApplyResult, MemoryError>;
 
     // —— 归档 / 淘汰 ——
-    async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError>;
+    async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError>;
+    async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError>;
     async fn compact(&self) -> Result<CompactResult, MemoryError>;
 
     // —— 管理 / 查询 ——
@@ -54,7 +55,7 @@ struct MemorySearchQuery {
 enum WriteResult {
     Added { id: MemoryId },
     Merged { existing_id: MemoryId },
-    NeedsEviction { candidates: Vec<MemoryEntry> },
+    NeedsEviction { candidates: Vec<EvictionCandidate> },
     NoOp,
 }
 
@@ -92,7 +93,8 @@ enum MemoryStorageErrorKind {
 - **MUST** 所有 mutation 使用“复制 live state + expected dataset revision → 应用领域规则得到 candidate → CAS durable commit → 无失败 publish candidate + returned revision”协议。Storage 返回 `Err` 时保证尚未提交，live state 保持旧版本；返回 committed receipt 时无论是否带 recovery warning，都必须发布 candidate。**NEVER** 先修改 cache 再吞掉写失败，也 **NEVER** 把 committed warning 映射成普通 `MemoryError`。
 - **MUST** `retrieve_for_inject` 不 touch（只读，避免排序漂移）；旧 mutating `top_for_inject` **NEVER** 出现在 Target API。
 - **MUST** `retrieve_for_inject` 与 `search` 返回同一个 `MemorySearchResult` envelope：前者标记 `InjectionPriority` 且只含 active eligible hit，后者完整携带 retrieval mode、relevance、archive/outdated/TTL 状态。精确定义只见 [检索与注入](02-retrieval-and-injection.md)，本文件 **NEVER** 复制第二份类型。
-- **MUST** `search` 按 query 的 `include_archive` 跨 active + archive 检索且不隐式修改 access_count；需要访问统计时必须另发显式、fallible mutation。
+- **MUST** `search` 按 query 的 `include_archive` 跨 active + archive 检索且不隐式修改 confirmation_count；确认只来自相似内容重复写入。
+- **MUST** `archive` 返回是否发生移动；`restore` 只从 archive 移回同层 active，容量已满时返回 typed candidates 且不提交。
 - **MUST** `compact` 跳过 pinned 条目；`archive` / `compact` 对每个受影响 layer 的 active + archive 成对提交，**NEVER** 暴露只移动一边的半归档。
 
 ## 1.1 MemoryTool ACL 与 current port
@@ -100,7 +102,8 @@ enum MemoryStorageErrorKind {
 Tools BC 的 `MemoryTool` 持有 `MemoryPortSource`，每次 action 执行时调用 `current()`，**NEVER** 在 registry bootstrap 捕获旧的 `Arc<dyn MemoryPort>`；因此 Resume / Session 切换后 search、list 与 mutation 都读取当前 committed port。
 
 - Memory BC 发布过滤、排序、hit identity、location/status/relevance；Tools 只做 typed input/output 与 text-first 映射，**NEVER** 二次排序。
-- ToolRegistry 向 Provider 发布 action/layer/category/priority 枚举和 action-specific required 约束；SDK 只薄 re-export 同一类型。
+- ToolRegistry 向 Provider 发布 add/delete/search/pin/list/archive/restore/reminder 的 action 枚举和 action-specific required 约束；SDK 只薄 re-export 同一类型。
+- 满容量结果将 Memory-owned `EvictionCandidate` 映射为 typed Tool result，保留完整 ID、确认元数据与 score/reason；Tool 不复制评分，也不自动归档。
 - search/list 的 LLM text 与 structured data 都必须携完整可管理 ID 和有序内容；TUI/server 可消费 structured data，Provider 仅消费 text-first view。
 - `add_reminder` / `complete_reminder` 通过 Session reminder port，不进入持久化 Memory dataset。
 
@@ -173,7 +176,8 @@ impl MemoryPort for NoOpMemory {
     async fn pin(&self, _: &MemoryId, _: bool) -> Result<bool, MemoryError> { Ok(false) }
     async fn mark_outdated(&self, _: &MemoryId) -> Result<bool, MemoryError> { Ok(false) }
     async fn apply_reflection(&self, _: &ReflectionOutput) -> Result<ReflectionApplyResult, MemoryError> { Ok(ReflectionApplyResult { suggestions_added: 0, outdated_marked: 0 }) }
-    async fn archive(&self, _: &[MemoryId]) -> Result<(), MemoryError> { Ok(()) }
+    async fn archive(&self, _: &[MemoryId]) -> Result<bool, MemoryError> { Ok(false) }
+    async fn restore(&self, _: &MemoryId) -> Result<RestoreResult, MemoryError> { Ok(RestoreResult::NoOp) }
     async fn compact(&self) -> Result<CompactResult, MemoryError> { Ok(CompactResult { archived: 0, remaining: 0 }) }
     fn list(&self, _: Option<MemoryLayer>) -> Vec<MemoryEntry> { Vec::new() }
     fn stats(&self) -> MemoryStats { MemoryStats { global_count: 0, global_archive_count: 0, project_count: 0, project_archive_count: 0 } }

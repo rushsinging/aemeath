@@ -227,6 +227,85 @@ async fn list_result_publishes_manageable_entries_in_llm_text() {
     assert!(result.text.contains(&entries[0].id));
 }
 
+#[tokio::test]
+async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation() {
+    let memory = memory::InMemoryMemory::new_with_clock(
+        MemoryPolicy {
+            max_entries: 1,
+            similarity_threshold: 0.8,
+        },
+        || 2_000,
+    )
+    .unwrap();
+    let existing = test_entry("existing capacity candidate", MemoryCategory::Fact);
+    memory.write(existing.clone()).await.unwrap();
+    let revision = memory.revision();
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let result = handlers::add_memory(
+        serde_json::json!({
+            "action": "add",
+            "content": "a completely unrelated new preference",
+            "layer": "project",
+            "category": "preference"
+        }),
+        &context,
+        &memory,
+    )
+    .await;
+
+    assert!(!result.is_error);
+    assert_eq!(memory.revision(), revision);
+    let data = result.data.unwrap();
+    assert_eq!(data.action, "needs_eviction");
+    let candidates = data.eviction_candidates.unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, existing.id.to_string());
+    assert!(result.text.contains(&candidates[0].id));
+    assert!(result.text.contains("archive"));
+}
+
+#[tokio::test]
+async fn archive_and_restore_actions_publish_manageable_terminal_results() {
+    let memory = Arc::new(
+        memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
+    );
+    let entry = test_entry("archive lifecycle", MemoryCategory::Decision);
+    memory.write(entry.clone()).await.unwrap();
+    let source = Arc::new(SwappableMemorySource {
+        current: RwLock::new(memory.clone()),
+    });
+    let tool = MemoryTool { source };
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let archived = tool
+        .call(
+            serde_json::json!({"action": "archive", "id": entry.id.to_string()}),
+            &context,
+        )
+        .await;
+    let restored = tool
+        .call(
+            serde_json::json!({"action": "restore", "id": entry.id.to_string()}),
+            &context,
+        )
+        .await;
+
+    assert!(!archived.is_error);
+    assert_eq!(archived.data.unwrap().action, "archive");
+    assert!(!restored.is_error);
+    assert_eq!(restored.data.unwrap().action, "restore");
+    assert_eq!(memory.list(None), vec![entry]);
+}
+
 #[test]
 fn memory_schema_publishes_constrained_actions_layers_and_categories() {
     let schema = memory_input_schema();
@@ -240,6 +319,8 @@ fn memory_schema_publishes_constrained_actions_layers_and_categories() {
             "search",
             "pin",
             "list",
+            "archive",
+            "restore",
             "add_reminder",
             "complete_reminder"
         ])
@@ -259,6 +340,8 @@ fn memory_schema_publishes_constrained_actions_layers_and_categories() {
         ("search", vec!["action", "query"]),
         ("pin", vec!["action", "id"]),
         ("list", vec!["action"]),
+        ("archive", vec!["action", "id"]),
+        ("restore", vec!["action", "id"]),
         ("add_reminder", vec!["action", "content"]),
         ("complete_reminder", vec!["action", "id"]),
     ] {
@@ -285,6 +368,13 @@ fn memory_description_explains_persistence_layers_categories_and_reminders() {
         "pitfall",
         "reminder",
         "automatic injection",
+        "search before relying on historical",
+        "explicitly asks you to remember",
+        "sensitive",
+        "must not override system",
+        "do not invent",
+        "archive",
+        "restore",
     ] {
         assert!(
             description.contains(expected),
@@ -301,6 +391,29 @@ fn memory_result_schema_exposes_entries_and_search_hits() {
     assert!(properties.contains_key("id"));
     assert!(properties.contains_key("entries"));
     assert!(properties.contains_key("hits"));
+    assert!(properties.contains_key("eviction_candidates"));
+    let eviction_properties = properties["eviction_candidates"]["items"]["properties"]
+        .as_object()
+        .unwrap();
+    for field in [
+        "id",
+        "content",
+        "layer",
+        "category",
+        "tags",
+        "pinned",
+        "outdated",
+        "ttl_expired",
+        "confirmation_count",
+        "last_confirmed_at",
+        "eviction_score",
+        "eviction_reason",
+    ] {
+        assert!(
+            eviction_properties.contains_key(field),
+            "missing eviction candidate field {field}"
+        );
+    }
     let hit_properties = properties["hits"]["items"]["properties"]
         .as_object()
         .unwrap();

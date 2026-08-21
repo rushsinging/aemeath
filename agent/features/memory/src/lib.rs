@@ -13,7 +13,7 @@ mod service;
 
 pub mod api {
     pub use crate::{
-        AtomicDatasetReflectionHistoryStore, CompactResult, DatasetMemoryOpener,
+        AtomicDatasetReflectionHistoryStore, CompactResult, DatasetMemoryOpener, EvictionCandidate,
         FileLegacyMemorySourceFactory, InMemoryMemory, MemoryCategory, MemoryEntry, MemoryError,
         MemoryId, MemoryLayer, MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError,
         MemoryPolicy, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
@@ -23,7 +23,7 @@ pub mod api {
         ReflectionExecutionResult, ReflectionHistoryQuery, ReflectionHistoryStore,
         ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionResult,
         ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
-        ReflectionWorkflow, ReflectionWorkflowError, WriteResult,
+        ReflectionWorkflow, ReflectionWorkflowError, RestoreResult, WriteResult,
     };
 }
 
