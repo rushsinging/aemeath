@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::{LoggingOutputMode, LoggingSettings};
+use crate::domain::{LoggingOutputMode, LoggingSettings, NativeStderrRouting};
 use log::LevelFilter;
 use std::fs;
 use std::path::Path;
@@ -41,6 +41,7 @@ fn settings(
     LoggingSettings::new(
         "trace".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         dir.to_path_buf(),
         max_bytes,
         max_backups,

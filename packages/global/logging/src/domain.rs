@@ -7,4 +7,4 @@ mod settings;
 
 pub use context::{FieldPatch, LogContext, LogContextPatch};
 pub(crate) use routing::{DiagnosticSinkId, TargetCatalog};
-pub use settings::{LoggingOutputMode, LoggingSettings};
+pub use settings::{LoggingOutputMode, LoggingSettings, NativeStderrRouting};

@@ -5,7 +5,7 @@ use runtime::ProviderFactory;
 use sdk::{AgentClient, MemoryConfigView, SdkError};
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
-use logging::{LoggingOutputMode, LoggingSettings, UnifiedLogger};
+use logging::{LoggingOutputMode, LoggingSettings, NativeStderrRouting, UnifiedLogger};
 use share::config::domain::snapshot::ConfigSnapshot;
 use std::path::Path;
 
@@ -93,10 +93,12 @@ fn logging_settings_from_snapshot(
     snapshot: &ConfigSnapshot,
     default_logs_dir: &Path,
     output_mode: LoggingOutputMode,
+    native_stderr_routing: NativeStderrRouting,
 ) -> LoggingSettings {
     LoggingSettings::new(
         snapshot.logging_level().to_string(),
         output_mode,
+        native_stderr_routing,
         snapshot
             .logs_dir()
             .map(PathBuf::from)
@@ -111,12 +113,22 @@ fn logging_settings_from_bootstrap(
     snapshot: &ConfigSnapshot,
     default_logs_dir: &Path,
     output_mode: sdk::LoggingOutputMode,
+    native_stderr: sdk::NativeStderrMode,
 ) -> LoggingSettings {
     let output_mode = match output_mode {
         sdk::LoggingOutputMode::File => LoggingOutputMode::File,
         sdk::LoggingOutputMode::Stderr => LoggingOutputMode::Stderr,
     };
-    logging_settings_from_snapshot(snapshot, default_logs_dir, output_mode)
+    let native_stderr_routing = match native_stderr {
+        sdk::NativeStderrMode::Preserve => NativeStderrRouting::Preserve,
+        sdk::NativeStderrMode::RouteToLogs => NativeStderrRouting::AppendToFile,
+    };
+    logging_settings_from_snapshot(
+        snapshot,
+        default_logs_dir,
+        output_mode,
+        native_stderr_routing,
+    )
 }
 
 static LOGGING_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -143,6 +155,7 @@ fn logging_init_decision(
 fn init_logging(
     snapshot: &ConfigSnapshot,
     output_mode: sdk::LoggingOutputMode,
+    native_stderr: sdk::NativeStderrMode,
     default_logs_dir: &Path,
 ) -> Result<(), String> {
     let _guard = LOGGING_INIT_LOCK
@@ -158,7 +171,8 @@ fn init_logging(
         LoggingInitDecision::AlreadyInitialized => return Ok(()),
         LoggingInitDecision::Initialize => {}
     }
-    let settings = logging_settings_from_bootstrap(snapshot, default_logs_dir, output_mode);
+    let settings =
+        logging_settings_from_bootstrap(snapshot, default_logs_dir, output_mode, native_stderr);
     UnifiedLogger::init(settings.clone()).map_err(|error| error.to_string())?;
     logging::set_boot_ts(logging::timestamp_local_rfc3339());
     logging::set_app_version(share::version().to_string());
@@ -183,6 +197,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
+    let native_stderr = args.native_stderr;
     let agents_dir = share::config::paths::global_agents_dir();
     let config = config::wire_project_config_with_cli(
         &cwd,
@@ -195,6 +210,7 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
     init_logging(
         &config.reader().committed_snapshot(),
         logging_output,
+        native_stderr,
         &agents_dir.join("logs"),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
@@ -219,6 +235,7 @@ async fn build_agent_client_with_gateways(
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
+    let native_stderr = args.native_stderr;
     // Tests construct the config wiring directly via `ConfigAppService` so the
     // global config path is bounded by the test's `agents_dir` rather than
     // `share::config::paths::global_agents_dir()` (which reads process env vars
@@ -236,6 +253,7 @@ async fn build_agent_client_with_gateways(
     init_logging(
         &config.reader().committed_snapshot(),
         logging_output,
+        native_stderr,
         &agents_dir.join("logs"),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
@@ -276,6 +294,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .map_err(|error| SdkError::Init(error.to_string()))?
         .into_views();
     let logging_output = args.logging_output;
+    let native_stderr = args.native_stderr;
     let agents_dir = share::config::paths::global_agents_dir();
     let config = config::wire_project_config_with_cli(
         &cwd,
@@ -288,6 +307,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     init_logging(
         &config.reader().committed_snapshot(),
         logging_output,
+        native_stderr,
         &agents_dir.join("logs"),
     )
     .map_err(|error| SdkError::Init(format!("日志初始化失败：{error}")))?;
@@ -717,15 +737,25 @@ mod tests {
             &snapshot,
             Path::new("/fallback/logs"),
             sdk::LoggingOutputMode::File,
+            sdk::NativeStderrMode::RouteToLogs,
         );
         let stderr = logging_settings_from_bootstrap(
             &snapshot,
             Path::new("/fallback/logs"),
             sdk::LoggingOutputMode::Stderr,
+            sdk::NativeStderrMode::Preserve,
         );
 
         assert_eq!(file.output_mode(), LoggingOutputMode::File);
+        assert_eq!(
+            file.native_stderr_routing(),
+            NativeStderrRouting::AppendToFile
+        );
         assert_eq!(stderr.output_mode(), LoggingOutputMode::Stderr);
+        assert_eq!(
+            stderr.native_stderr_routing(),
+            NativeStderrRouting::Preserve
+        );
     }
 
     #[test]
@@ -740,6 +770,7 @@ mod tests {
             &ConfigSnapshot::new(config),
             Path::new("/fallback/logs"),
             LoggingOutputMode::Stderr,
+            NativeStderrRouting::AppendToFile,
         );
 
         assert_eq!(settings.logs_dir(), PathBuf::from("custom/logs"));
@@ -755,6 +786,7 @@ mod tests {
             &ConfigSnapshot::new(Config::default()),
             Path::new("/fallback/logs"),
             LoggingOutputMode::File,
+            NativeStderrRouting::Preserve,
         );
         assert_eq!(settings.logs_dir(), PathBuf::from("/fallback/logs"));
     }

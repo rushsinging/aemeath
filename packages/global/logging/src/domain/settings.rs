@@ -8,12 +8,21 @@ pub enum LoggingOutputMode {
     Stderr,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeStderrRouting {
+    Preserve,
+    AppendToFile,
+}
+
+const NATIVE_STDERR_FILE: &str = "native-stderr.log";
+
 /// Logging 初始化所需的完整不可变静态设置。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoggingSettings {
     filter_directive: String,
     max_level: LevelFilter,
     output_mode: LoggingOutputMode,
+    native_stderr_routing: NativeStderrRouting,
     logs_dir: PathBuf,
     max_bytes: u64,
     max_backups: usize,
@@ -24,6 +33,7 @@ impl LoggingSettings {
     pub fn new(
         filter_directive: String,
         output_mode: LoggingOutputMode,
+        native_stderr_routing: NativeStderrRouting,
         logs_dir: PathBuf,
         max_bytes: u64,
         max_backups: usize,
@@ -34,6 +44,7 @@ impl LoggingSettings {
             filter_directive,
             max_level,
             output_mode,
+            native_stderr_routing,
             logs_dir,
             max_bytes: max_bytes.max(1),
             max_backups,
@@ -51,6 +62,14 @@ impl LoggingSettings {
 
     pub fn output_mode(&self) -> LoggingOutputMode {
         self.output_mode
+    }
+
+    pub fn native_stderr_routing(&self) -> NativeStderrRouting {
+        self.native_stderr_routing
+    }
+
+    pub fn native_stderr_path(&self) -> PathBuf {
+        self.logs_dir.join(NATIVE_STDERR_FILE)
     }
 
     pub fn logs_dir(&self) -> &Path {
