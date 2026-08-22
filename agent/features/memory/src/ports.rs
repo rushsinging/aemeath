@@ -206,11 +206,33 @@ pub struct MemorySearchQuery {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvictionCandidate {
+    pub entry: MemoryEntry,
+    pub ttl_expired: bool,
+    pub eviction_score: i64,
+    pub eviction_reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteResult {
     Added { id: MemoryId },
     Merged { existing_id: MemoryId },
-    NeedsEviction { candidates: Vec<MemoryEntry> },
+    NeedsEviction { candidates: Vec<EvictionCandidate> },
     NoOp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreResult {
+    Restored { id: MemoryId },
+    NeedsEviction { candidates: Vec<EvictionCandidate> },
+    NotFound,
+    NoOp,
+}
+
+impl RestoreResult {
+    pub fn is_restored(&self) -> bool {
+        matches!(self, Self::Restored { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,7 +292,8 @@ pub trait MemoryPort: Send + Sync {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError>;
-    async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError>;
+    async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError>;
+    async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError>;
     async fn compact(&self) -> Result<CompactResult, MemoryError>;
     fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry>;
     fn stats(&self) -> MemoryStats;

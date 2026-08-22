@@ -4,11 +4,36 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 use crate::domain::memory_source::MemoryPortSource;
-use crate::domain::types::memory::{MemoryInput, MemoryResult};
+use crate::domain::types::memory::{MemoryAction, MemoryInput, MemoryResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+
+fn memory_input_schema() -> Value {
+    use crate::domain::types::ToolSchema;
+
+    let mut schema = MemoryInput::data_schema();
+    schema["oneOf"] = serde_json::json!([
+        action_contract("add", &["action", "content"]),
+        action_contract("delete", &["action", "id"]),
+        action_contract("search", &["action", "query"]),
+        action_contract("pin", &["action", "id"]),
+        action_contract("list", &["action"]),
+        action_contract("archive", &["action", "id"]),
+        action_contract("restore", &["action", "id"]),
+        action_contract("add_reminder", &["action", "content"]),
+        action_contract("complete_reminder", &["action", "id"]),
+    ]);
+    schema
+}
+
+fn action_contract(action: &str, required: &[&str]) -> Value {
+    serde_json::json!({
+        "properties": {"action": {"const": action}},
+        "required": required,
+    })
+}
 
 /// Memory management tool.
 ///
@@ -28,15 +53,14 @@ impl TypedTool for MemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Manage persistent memory. Supports add, delete, search, pin, and list actions."
+        "Manage persistent Memory and current-session reminders. Supports typed add, delete, search, pin, list, add_reminder, and complete_reminder actions."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::memory(lang))
     }
 
     fn input_schema(&self) -> Value {
-        use crate::domain::types::ToolSchema;
-        MemoryInput::data_schema()
+        memory_input_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
@@ -60,19 +84,17 @@ impl TypedTool for MemoryTool {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let action = args.action.as_str();
         let port = self.source.current();
-
-        match action {
-            "add" => handlers::add_memory(input, ctx, &*port).await,
-            "delete" => handlers::delete_memory(input, &*port).await,
-            "search" => handlers::search_memory(input, &*port),
-            "pin" => handlers::pin_memory(input, &*port).await,
-            "list" => handlers::list_memory(input, &*port),
-            "add_reminder" => handlers::add_reminder(input, ctx),
-            "complete_reminder" => handlers::complete_reminder(input, ctx),
-            "" => TypedToolResult::error("缺少必需参数: action"),
-            other => TypedToolResult::error(format!("未知 memory action: {other}")),
+        match args.action {
+            MemoryAction::Add => handlers::add_memory(input, ctx, &*port).await,
+            MemoryAction::Delete => handlers::delete_memory(input, &*port).await,
+            MemoryAction::Search => handlers::search_memory(input, &*port),
+            MemoryAction::Pin => handlers::pin_memory(input, &*port).await,
+            MemoryAction::List => handlers::list_memory(input, &*port),
+            MemoryAction::Archive => handlers::archive_memory(input, &*port).await,
+            MemoryAction::Restore => handlers::restore_memory(input, &*port).await,
+            MemoryAction::AddReminder => handlers::add_reminder(input, ctx),
+            MemoryAction::CompleteReminder => handlers::complete_reminder(input, ctx),
         }
     }
 }
