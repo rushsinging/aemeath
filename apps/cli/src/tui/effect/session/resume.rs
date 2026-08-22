@@ -32,41 +32,6 @@ impl App {
         self.mark_output_dirty();
     }
 
-    pub(crate) fn restore_startup_session(&mut self, resume: sdk::SessionResumeView) {
-        crate::tui::log_debug!(
-            "resume_lifecycle boundary=tui_startup stage=view_received session_id={} steps={} messages={}",
-            resume.session_id,
-            resume.steps.len(),
-            resume.steps.iter().map(|step| step.messages.len()).sum::<usize>()
-        );
-        let steps = resume
-            .steps
-            .into_iter()
-            .map(|step| TuiResumedSessionStep {
-                run_id: step.run_id,
-                step_id: step.step_id,
-                messages: step
-                    .messages
-                    .into_iter()
-                    .map(crate::tui::adapter::event_mapping::chat_message)
-                    .collect(),
-                finalize_cause: step.finalize_cause.map(|cause| match cause {
-                    sdk::ResumedStepFinalizeCause::Completed => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::Completed,
-                    sdk::ResumedStepFinalizeCause::UserCancelledStep => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::UserCancelledStep,
-                    sdk::ResumedStepFinalizeCause::RunTerminated => crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause::RunTerminated,
-                }),
-                duration_ms: step.duration_ms,
-            })
-            .collect();
-        self.resume_session_messages(
-            &resume.session_id,
-            steps,
-            None,
-            resume.created_at.to_string(),
-            resume.compacted,
-        );
-    }
-
     pub(crate) fn resume_session_messages(
         &mut self,
         session_id: &str,
@@ -154,11 +119,6 @@ impl App {
     }
 }
 
-pub(crate) fn apply_resume_input_history(app: &mut App, messages: &[TuiChatMessage]) {
-    let history = extract_user_input_history(messages);
-    app.apply_agent_intent(AgentIntent::Input(InputIntent::ReplaceHistory(history)));
-}
-
 fn extract_user_input_history(messages: &[TuiChatMessage]) -> Vec<String> {
     messages
         .iter()
@@ -225,31 +185,6 @@ mod tests {
                 .expect("history step")
                 .message_segments[0]
         ));
-    }
-
-    #[test]
-    fn startup_view_restores_history_without_runtime_resume_event() {
-        let mut app = App::new(
-            "session-bootstrap".to_string(),
-            PathBuf::from("/tmp"),
-            "model".to_string(),
-        );
-        app.restore_startup_session(sdk::SessionResumeView {
-            steps: vec![sdk::ResumedSessionStep {
-                run_id: "run-1".to_string(),
-                step_id: "step-1".to_string(),
-                messages: vec![sdk::ChatMessage::assistant_text("P5 progress is preserved")],
-                finalize_cause: None,
-                duration_ms: None,
-            }],
-            session_id: "session-resumed".to_string(),
-            created_at: 42,
-            compacted: false,
-        });
-
-        assert_eq!(app.session.session_id(), "session-resumed");
-        assert_eq!(app.model.conversation.timeline.items().len(), 2);
-        assert!(app.model.conversation.revision() > 0);
     }
 
     #[test]
@@ -378,27 +313,5 @@ mod tests {
             .activity_observations()
             .activities()
             .is_empty());
-    }
-    #[test]
-    fn test_apply_resume_input_history_populates_app_history() {
-        let mut app = App::new(
-            "new-session".to_string(),
-            PathBuf::from("/tmp/aemeath"),
-            "test-model".to_string(),
-        );
-        let messages = vec![
-            TuiChatMessage::user_text("first"),
-            TuiChatMessage::assistant_text("answer"),
-            TuiChatMessage::user_text("second"),
-        ];
-
-        apply_resume_input_history(&mut app, &messages);
-
-        assert_eq!(
-            app.model.input.history.entries,
-            vec!["first".to_string(), "second".to_string()]
-        );
-        assert_eq!(app.model.input.history.selected_index, None);
-        assert_eq!(app.model.input.history.saved_input, "");
     }
 }

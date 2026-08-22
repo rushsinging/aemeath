@@ -1,6 +1,9 @@
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+#[cfg(test)]
+use ratatui::text::Line;
+use ratatui::text::Span;
 
+#[cfg(test)]
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::LinkSpan;
 use crate::tui::render::theme;
@@ -21,6 +24,7 @@ pub use table::{is_table_row, is_table_separator, render_table_block};
 /// - `~~strikethrough~~` → `strikethrough`
 /// - `[text](url)` → `text`
 /// - 格式不完整时保留原始文本
+#[cfg(test)]
 pub fn strip_inline_formatting(text: &str) -> String {
     let mut result = String::new();
     let mut chars = text.chars().peekable();
@@ -55,6 +59,7 @@ pub fn strip_inline_formatting(text: &str) -> String {
     result
 }
 
+#[cfg(test)]
 fn strip_delimited(
     result: &mut String,
     chars: &mut std::iter::Peekable<std::str::Chars>,
@@ -70,6 +75,7 @@ fn strip_delimited(
     }
 }
 
+#[cfg(test)]
 fn strip_link(result: &mut String, chars: &mut std::iter::Peekable<std::str::Chars>) -> bool {
     let rest: String = chars.clone().collect();
     let Some(close_bracket) = rest.find(']') else {
@@ -102,6 +108,7 @@ fn strip_link(result: &mut String, chars: &mut std::iter::Peekable<std::str::Cha
 ///
 /// 必须先解析 Markdown 再换行，避免行内代码标记（如反引号）恰好跨越
 /// wrap 边界时被当成未闭合标记，导致背景截断或文字溢出。
+#[cfg(test)]
 pub fn inline_markdown_lines(
     text: &str,
     base_style: Style,
@@ -110,6 +117,7 @@ pub fn inline_markdown_lines(
     wrap_spans(inline_markdown_spans(text, base_style), max_width)
 }
 
+#[cfg(test)]
 fn wrap_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<'static>> {
     wrap_spans_with_prefix(spans, max_width, None, WrapMode::Word)
         .into_iter()

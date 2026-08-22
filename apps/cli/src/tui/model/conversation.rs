@@ -37,7 +37,6 @@ mod resumed_history_tests;
 mod retained_state_tests;
 pub mod runtime_state;
 pub mod status_notice;
-pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;
 pub mod task_status;

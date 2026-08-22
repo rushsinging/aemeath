@@ -1,10 +1,13 @@
 use super::InputArea;
-use crate::tui::render::display::safe_text::{col_to_char_idx, safe_char_slice};
+#[cfg(test)]
+use crate::tui::render::display::safe_text::col_to_char_idx;
+use crate::tui::render::display::safe_text::safe_char_slice;
 use crate::tui::render::input::input_area::wrap::{
     anchor_for_display_position, wrap_input_lines_for_width,
 };
 use ratatui::layout::Rect;
 
+#[cfg(test)]
 pub fn text_anchor_for_screen_col(text: &str, row: usize, screen_col: usize) -> (usize, usize) {
     let char_col = text
         .split('\n')

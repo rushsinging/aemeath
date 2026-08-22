@@ -1,17 +1,13 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
-use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::block_cache::{
     BlockCache, CacheKey, DEFAULT_RENDER_CACHE_CAPACITY,
 };
 use crate::tui::render::output::bounded_lru::BoundedLruMap;
 use crate::tui::render::output::gutter;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
-use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{
-    AskUserPhaseView, BlockNode, OutputBlockKind, OutputRenderWindow, OutputViewModel,
-};
+use crate::tui::view_model::output::{BlockNode, OutputRenderWindow, OutputViewModel};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use std::rc::Rc;
@@ -21,7 +17,6 @@ use std::rc::Rc;
 pub struct OutputRenderResult {
     pub document: RenderedDocument,
     pub source_total_lines: usize,
-    pub folded_earlier_lines: usize,
 }
 
 /// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
@@ -206,7 +201,6 @@ impl OutputDocumentRenderer {
         OutputRenderResult {
             document,
             source_total_lines,
-            folded_earlier_lines,
         }
     }
 
@@ -380,126 +374,6 @@ impl OutputDocumentRenderer {
     pub fn gutted_render_count(&self) -> usize {
         self.gutted_render_count.get()
     }
-}
-
-fn estimate_block_lines(kind: &OutputBlockKind, text_width: usize) -> usize {
-    match kind {
-        OutputBlockKind::UserMessage(view) => {
-            estimate_wrapped_text_lines(&view.text, text_width, false)
-                .max(1)
-                .saturating_add(2)
-        }
-        OutputBlockKind::AssistantMessage(view) => {
-            estimate_wrapped_text_lines(&view.text, text_width, true).max(1)
-        }
-        OutputBlockKind::ThinkingMessage(view) => {
-            estimate_wrapped_text_lines(&view.text, text_width, false).max(1)
-        }
-        OutputBlockKind::ToolCall(_) => 1usize,
-        OutputBlockKind::ToolResult(view) => estimate_tool_result_lines(view, text_width),
-        OutputBlockKind::HookNotice(view) => 1usize.saturating_add(
-            view.body
-                .lines()
-                .count()
-                .saturating_add(usize::from(view.body.ends_with('\n'))),
-        ),
-        OutputBlockKind::DiagnosticNotice(view) | OutputBlockKind::SystemNotice(view) => view
-            .text
-            .lines()
-            .count()
-            .saturating_add(usize::from(view.text.ends_with('\n'))),
-        OutputBlockKind::AskUserBatch(view) => match (view.completion, view.phase) {
-            (
-                crate::tui::view_model::output::AskUserCompletionView::Answered
-                | crate::tui::view_model::output::AskUserCompletionView::Cancelled
-                | crate::tui::view_model::output::AskUserCompletionView::ReplyPending
-                | crate::tui::view_model::output::AskUserCompletionView::CancelPending,
-                _,
-            ) => 2usize.saturating_add(view.slots.len().saturating_mul(3)),
-            (
-                crate::tui::view_model::output::AskUserCompletionView::Active,
-                AskUserPhaseView::Confirming,
-            ) => 6usize.saturating_add(view.slots.len().saturating_mul(2)),
-            (
-                crate::tui::view_model::output::AskUserCompletionView::Active,
-                AskUserPhaseView::Answering,
-            ) => {
-                let answered = view
-                    .slots
-                    .iter()
-                    .enumerate()
-                    .filter(|(index, slot)| *index != view.active_index && slot.answer.is_some())
-                    .count();
-                let active = view.slots.get(view.active_index);
-                let options = active.map(|slot| slot.options.len()).unwrap_or(0);
-                5usize
-                    .saturating_add(answered)
-                    .saturating_add(options.saturating_mul(2))
-            }
-        },
-    }
-}
-
-fn estimate_tool_result_lines(
-    view: &crate::tui::view_model::output::ToolResultBlockView,
-    text_width: usize,
-) -> usize {
-    match result_policy(&view.tool_title) {
-        ResultPolicy::Hidden => 0,
-        ResultPolicy::Visible {
-            max_lines,
-            render_kind,
-            tail_mode: _,
-        } => match render_kind {
-            ResultRender::Plain => max_lines.unwrap_or(5).saturating_add(1),
-            ResultRender::Diff => {
-                let (old_lines, new_lines) = view
-                    .data
-                    .as_ref()
-                    .and_then(|data| Some((data.get("old")?.as_str()?, data.get("new")?.as_str()?)))
-                    .map(|(old, new)| (old.lines().count(), new.lines().count()))
-                    .unwrap_or_else(|| {
-                        let marker_count = view
-                            .result_text
-                            .lines()
-                            .filter(|line| line.starts_with("---DIFF"))
-                            .count();
-                        let source_lines = view
-                            .result_text
-                            .lines()
-                            .count()
-                            .saturating_sub(marker_count + 1);
-                        (
-                            source_lines / 2,
-                            source_lines.saturating_sub(source_lines / 2),
-                        )
-                    });
-                old_lines
-                    .max(new_lines)
-                    .saturating_add(2)
-                    .max(estimate_wrapped_line_count(&view.result_text, text_width).min(8))
-            }
-        },
-    }
-}
-
-fn estimate_wrapped_text_lines(text: &str, width: usize, preserve_blank: bool) -> usize {
-    text.lines().fold(0usize, |total, line| {
-        let lines = if line.is_empty() {
-            usize::from(preserve_blank)
-        } else {
-            estimate_wrapped_line_count(line, width)
-        };
-        total.saturating_add(lines)
-    })
-}
-
-fn estimate_wrapped_line_count(line: &str, width: usize) -> usize {
-    if line.is_empty() {
-        return 1;
-    }
-    let width = width.max(1);
-    str_display_width(line).max(1).div_ceil(width)
 }
 
 fn prepend_folded_history_hint(document: &mut RenderedDocument, folded_lines: usize) {

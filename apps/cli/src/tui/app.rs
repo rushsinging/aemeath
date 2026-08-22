@@ -38,8 +38,6 @@ const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(50);
 const SLOW_FRAME_LOG_COOLDOWN: Duration = Duration::from_secs(5);
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
-#[cfg(test)]
-use event::StatusContextUpdate;
 pub use event::UiEvent;
 
 /// `refresh_output_document_from_model` 的增量装配结果 owner。
@@ -168,28 +166,6 @@ pub(crate) fn display_status_path(path: &Path) -> String {
     } else {
         raw
     }
-}
-
-#[cfg(test)]
-pub(crate) fn status_context_for_paths(path_base: &Path, workspace_root: &Path) -> UiEvent {
-    status_context_for_workspace(sdk::WorkspaceContextView {
-        path_base: path_base.to_path_buf(),
-        workspace_root: workspace_root.to_path_buf(),
-        context_stack: Vec::new(),
-    })
-}
-
-#[cfg(test)]
-pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
-    let path_base = workspace.path_base.clone();
-    let workspace_root = workspace.workspace_root.clone();
-    UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
-        path_base: display_status_path(&path_base),
-        workspace_root: display_status_path(&workspace_root),
-        raw_path_base: path_base,
-        raw_workspace_root: workspace_root,
-        workspace,
-    })
 }
 
 impl App {

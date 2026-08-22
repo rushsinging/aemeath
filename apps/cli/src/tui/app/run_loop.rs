@@ -51,13 +51,6 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
         TuiMsg::Ui(_) => "Ui",
         TuiMsg::Runtime(_) => "Runtime",
         TuiMsg::RuntimeBatch(_) => "RuntimeBatch",
-        TuiMsg::TerminalKey(_) => "TerminalKey",
-        TuiMsg::TerminalMouse(_) => "TerminalMouse",
-        TuiMsg::TerminalResize { .. } => "TerminalResize",
-        TuiMsg::AgentEvent(_) => "AgentEvent",
-        TuiMsg::EffectCompleted(_) => "EffectCompleted",
-        TuiMsg::TimerTick { .. } => "TimerTick",
-        TuiMsg::RenderTick => "RenderTick",
     }
 }
 
@@ -68,18 +61,14 @@ impl App {
     /// `chat.input_event_tx`，port 随 `ChatRequest.ingress` 传给 runtime），
     /// 以当前历史 `messages` 调一次 `chat()` 并 spawn 长生命周期流消费任务。
     /// 已存在通道（`input_event_tx` 为 Some）时为 no-op，调用安全幂等。
-    fn ensure_persistent_processing(
-        &mut self,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        runtime_tx: &mpsc::Sender<TuiRuntimeEvent>,
-    ) {
+    fn ensure_persistent_processing(&mut self, runtime_tx: &mpsc::Sender<TuiRuntimeEvent>) {
         if self.chat.input_event_tx.is_some() {
             return;
         }
         let spawn_refs = processing::SpawnContextRefs {
             agent_client: self.agent_client.clone(),
         };
-        match self.build_spawn_context(ui_tx, runtime_tx, &spawn_refs) {
+        match self.build_spawn_context(runtime_tx, &spawn_refs) {
             Some(spawn_ctx) => {
                 let handle = processing::spawn_processing(spawn_ctx);
                 self.chat.set_processing_handle(handle);
@@ -127,7 +116,7 @@ impl App {
         // 直到首条 UserMessage 经 input_events 通道到达；此后每次提交（首条 / 插话）
         // 都复用此通道，不再 per-submit spawn。messages 为当前历史（新会话为空，
         // resume 为已加载历史）。
-        self.ensure_persistent_processing(&ui_tx, &runtime_tx);
+        self.ensure_persistent_processing(&runtime_tx);
 
         loop {
             let loop_now = Instant::now();
@@ -266,7 +255,7 @@ impl App {
             // 变 None，此处检测并重建，使后续提交仍可经事件通道驱动。正常 /clear 不再
             // drop tx（#391 S2 已统一为 runtime gate 清 messages，loop 存活）。
             if !self.layout.should_exit && self.chat.input_event_tx.is_none() {
-                self.ensure_persistent_processing(&ui_tx, &runtime_tx);
+                self.ensure_persistent_processing(&runtime_tx);
             }
         }
 

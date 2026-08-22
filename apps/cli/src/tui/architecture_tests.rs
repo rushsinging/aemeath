@@ -442,14 +442,9 @@ fn test_phase_four_workspace_metadata_git_is_executor_only() {
             && !app.contains("worktree_kind_for"),
         "SDK event and app paths must not synchronously resolve Git metadata"
     );
-    let snapshot_event = event
-        .split("pub struct StatusContextUpdate")
-        .nth(1)
-        .and_then(|source| source.split("pub struct WorkspaceMetadataResolved").next())
-        .expect("extract workspace snapshot event");
     assert!(
-        !snapshot_event.contains("pub branch:") && !snapshot_event.contains("pub kind:"),
-        "workspace snapshot event must not carry derived Git metadata"
+        !event.contains("pub struct StatusContextUpdate"),
+        "local UI events must not carry workspace snapshots"
     );
     assert!(
         !provider.contains("ApplySnapshot {\n        path_base: Option<String>,\n        workspace_root: Option<String>,\n        branch:"),
@@ -508,6 +503,95 @@ fn run_control_ack_cannot_become_a_terminal_source() {
         assert!(
             !executor.contains(forbidden),
             "ACK must not publish terminal: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn issue_947_legacy_runtime_and_view_paths_are_retired() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let local_event = fs::read_to_string(root.join("app/event.rs")).expect("read local event");
+    let local_event_mapper =
+        fs::read_to_string(root.join("adapter/agent_event.rs")).expect("read local event mapper");
+    let local_event_update =
+        fs::read_to_string(root.join("app/update/ui_event.rs")).expect("read local event update");
+    let effects = fs::read_to_string(root.join("effect/effect.rs")).expect("read effects");
+    let output_view_model =
+        fs::read_to_string(root.join("view_model/output.rs")).expect("read output view model");
+
+    for forbidden_runtime_variant in [
+        "\n    Text {",
+        "Thinking {",
+        "BlockComplete {",
+        "ToolCallStart {",
+        "ToolCallUpdate {",
+        "ToolResult {",
+        "Usage {",
+        "Cancelled {",
+        "TurnStarted {",
+        "MicrocompactDone {",
+        "SessionMessageStateChanged {",
+        "ApiError {",
+        "CompactOperationRolledBack {",
+        "CompactOperationCompleted {",
+        "UserMessagesAdopted {",
+        "UserMessagesQueued {",
+        "Done {",
+        "DoneWithDuration {",
+        "LiveTps(",
+        "InteractionRequested {",
+        "TaskStateChanged(",
+        "SessionReset",
+        "UserMessagesWithdrawn(",
+        "GraphPhaseChanged {",
+    ] {
+        assert!(
+            !local_event.contains(forbidden_runtime_variant),
+            "LocalUiEvent must not retain Runtime variant {forbidden_runtime_variant}"
+        );
+    }
+    assert!(
+        !local_event_mapper.contains("map_agent_event_for_ui"),
+        "the legacy LocalUiEvent mapper must be removed"
+    );
+    assert!(
+        !local_event_update.contains("Runtime 事件已走")
+            && !local_event_update.contains("UiEvent::InteractionRequested"),
+        "local event update must not retain Runtime no-op branches"
+    );
+    assert!(
+        !effects.contains("CancelCurrentRun"),
+        "TUI Effects must not retain the identity-free cancellation fallback"
+    );
+    assert!(
+        !output_view_model.contains("follow_tail_hint"),
+        "OutputViewModel must not duplicate follow-tail state"
+    );
+    let processing_handle = fs::read_to_string(root.join("effect/session/processing/handle.rs"))
+        .expect("read processing handle");
+    let processing_handle_struct = processing_handle
+        .split("pub(crate) struct ProcessingHandle")
+        .nth(1)
+        .and_then(|source| source.split("impl std::fmt::Debug").next())
+        .expect("extract ProcessingHandle struct");
+    assert!(
+        !processing_handle_struct.contains("agent_client"),
+        "ProcessingHandle must remain a task lifecycle handle without AgentClient ownership"
+    );
+
+    for file in rust_files_under(&root) {
+        if file
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains("test"))
+            || file == root.join("architecture_tests.rs")
+        {
+            continue;
+        }
+        let source = fs::read_to_string(&file).expect("read TUI production source");
+        assert!(
+            !source.contains("#![allow(dead_code)]"),
+            "{} must not use a module-level dead-code exemption",
+            file.display()
         );
     }
 }

@@ -118,19 +118,17 @@ impl App {
 
     pub(crate) async fn execute_effect(&mut self, effect: Effect, ui_tx: &mpsc::Sender<UiEvent>) {
         match effect {
-            Effect::None | Effect::RequestRender => {}
+            Effect::RequestRender => {}
             Effect::QuitApplication => {
                 // #390 A1 常驻 loop shutdown：drop input_event_tx → loop 干净退出 →
                 // spawn task 执行 auto-save。退出路径在 session_lifecycle.rs 中 await 完成。
                 self.chat.clear_input_event_buffer();
                 self.layout.request_exit();
             }
-            Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::LoadDisplayHistoryWindow { request } => {
                 self.load_display_history_window_effect(request, ui_tx)
             }
-            Effect::CancelCurrentRun => self.cancel_current_run(),
             Effect::CancelRunStep { run_id, step_id } => self.cancel_run_step(&run_id, &step_id),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
@@ -145,12 +143,9 @@ impl App {
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
             Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
-            Effect::SetCurrentRun { run_step } => self.set_current_run_effect(run_step),
-            Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
-            Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state().await,
             Effect::OpenUrl { url } => self.open_url_effect(&url),
@@ -338,52 +333,6 @@ impl App {
         }
     }
 
-    fn cancel_current_run(&mut self) {
-        let processing_handle_present = self.chat.processing_handle.is_some();
-        crate::tui::log_debug!(
-            "cancel_current_run effect started: processing_handle_present={} is_processing={} is_cancelling={}",
-            processing_handle_present,
-            self.chat.is_processing,
-            self.chat.is_cancelling
-        );
-        let outcome = self
-            .chat
-            .processing_handle
-            .as_ref()
-            .map(|handle| handle.cancel_current_run())
-            .unwrap_or(sdk::CancelCurrentRunOutcome::NoActiveRun);
-        crate::tui::log_debug!(
-            "cancel_current_run effect completed: processing_handle_present={} outcome={:?}",
-            processing_handle_present,
-            outcome
-        );
-        match outcome {
-            sdk::CancelCurrentRunOutcome::Accepted
-            | sdk::CancelCurrentRunOutcome::AlreadyCancelling => {
-                self.chat.start_cancelling();
-                self.apply_agent_intent(AgentIntent::Conversation(
-                    ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
-                        "Cancelling current response…",
-                    ))),
-                ));
-            }
-            sdk::CancelCurrentRunOutcome::RunTerminating => {
-                self.chat.start_cancelling();
-                self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
-            }
-            sdk::CancelCurrentRunOutcome::NoActiveStep => {
-                self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
-            }
-            sdk::CancelCurrentRunOutcome::NoActiveRun => {
-                self.set_transient_notice(StatusNotice::warning("No active run to cancel"));
-            }
-            sdk::CancelCurrentRunOutcome::RunTerminal => {
-                self.chat.stop_processing();
-                self.set_transient_notice(StatusNotice::warning("Current run already finished"));
-            }
-        }
-    }
-
     fn load_display_history_window_effect(
         &self,
         request: sdk::DisplayHistoryWindowRequest,
@@ -525,10 +474,6 @@ impl App {
         }
     }
 
-    fn set_current_run_effect(&mut self, _turn: usize) {
-        // #567：set_current_run 删除——runtime loop 内部自维护 run_step 计数器。
-    }
-
     fn query_reflection_history_effect(&mut self, limit: usize) {
         self.chat
             .push_input_event(sdk::ChatInputEvent::QueryReflectionHistory { limit });
@@ -592,13 +537,6 @@ impl App {
                 }
             }
         });
-    }
-
-    fn fetch_reminder_recap_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567：list_reminders 走事件流。reminder recap 由 ReminderList 事件回传后处理。
-        // 暂时发 ListReminders 事件，recap 在 UiEvent 处理中生成。
-        self.chat
-            .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 
     /// 用系统默认程序打开 URL 或本地文件路径（Cmd+Click markdown link / 行内代码路径）。

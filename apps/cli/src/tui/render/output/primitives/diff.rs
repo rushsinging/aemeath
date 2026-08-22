@@ -5,6 +5,7 @@ use crate::tui::render::output::primitives::spanparts_to_spans;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output_area::types::SpanPart;
 
+#[cfg(test)]
 pub fn diff(old: &str, new: &str, ext: Option<&str>, width: u16) -> Vec<RenderedLine> {
     diff_from(old, new, 1, 1, ext, width)
 }

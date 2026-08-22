@@ -56,6 +56,7 @@ impl InputDocument {
 
     /// 用字符索引（char index）设置光标，自动转为字节位置
     /// textarea 的光标列号是字符索引，模型需要字节位置
+    #[cfg(test)]
     pub fn set_cursor_col(&mut self, col: usize) {
         let byte_pos = self
             .buffer
@@ -156,6 +157,7 @@ impl InputDocument {
         self.buffer.clone()
     }
 
+    #[cfg(test)]
     pub fn expand_copied_text(&self) -> String {
         if self.copied_text_spans.is_empty() {
             return self.buffer.clone();
@@ -255,11 +257,13 @@ impl InputDocument {
     }
 
     /// 光标所在行号（从 0 开始）
+    #[cfg(test)]
     pub fn cursor_row(&self) -> usize {
         self.buffer[..self.cursor].matches('\n').count()
     }
 
     /// 光标在当前行中的字节偏移（不含前面的换行符）
+    #[cfg(test)]
     pub fn cursor_col_byte_offset(&self) -> usize {
         let before_cursor = &self.buffer[..self.cursor];
         if let Some(pos) = before_cursor.rfind('\n') {
@@ -280,6 +284,7 @@ impl InputDocument {
     }
 
     /// 总行数（空 buffer 为 1）
+    #[cfg(test)]
     pub fn line_count(&self) -> usize {
         if self.buffer.is_empty() {
             return 1;

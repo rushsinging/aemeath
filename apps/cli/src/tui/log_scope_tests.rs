@@ -101,7 +101,6 @@ mod tests {
         }
 
         for marker in [
-            "map tool_call_start",
             "model observe tool_call_start",
             "render tool_call block_id",
             "render tool_result block_id",

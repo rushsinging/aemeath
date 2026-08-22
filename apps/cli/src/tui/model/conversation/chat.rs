@@ -18,22 +18,10 @@ impl Chat {
             runs: vec![ChatRun::new(ChatRunId::new_v7(), 0)],
         }
     }
-
-    pub fn active_turn_mut(&mut self) -> Option<&mut ChatRun> {
-        self.runs.last_mut()
-    }
-
-    pub fn active_turn(&self) -> Option<&ChatRun> {
-        self.runs.last()
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChatStatus {
-    Created,
     Running,
     Completing,
-    Completed,
-    Failed,
-    Cancelled,
 }
