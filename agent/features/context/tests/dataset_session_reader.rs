@@ -115,11 +115,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 
     let current = session_with_step("recover", 2, "current history");
     writer
-        .save_incremental(
-            &previous,
-            &current,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&previous, &current)
         .await
         .expect("save current generation");
 
@@ -189,6 +185,117 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
             original_bytes,
         } if original_bytes == future_bytes
     ));
+}
+
+#[tokio::test]
+async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("cleared", 7, "history before clear");
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            "run-1",
+            vec![CommittedRunStep::accepted_only(
+                "step-1",
+                AcceptedInputProjection::new(vec![Message::user("hidden")], "fp-1", 1),
+            )],
+        ),
+        CommittedRunSlice::new(
+            "run-2",
+            vec![CommittedRunStep::accepted_only(
+                "step-2",
+                AcceptedInputProjection::new(vec![Message::user("also hidden")], "fp-2", 7),
+            )],
+        ),
+    ]
+    .into();
+    // /clear 写入逻辑断点：最后被清除的 step 是 step-2。
+    session.cleared_after = Some(context::domain::session::RunStepCursor {
+        run_id: "run-2".to_string(),
+        step_id: "step-2".to_string(),
+    });
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume("cleared")
+        .await
+        .expect("load cleared generation");
+    let loaded = prepared.active_session;
+
+    // active 历史为空；clear 边界随 state 恢复。
+    assert!(loaded.run_slices.is_empty());
+    assert_eq!(
+        loaded
+            .cleared_after
+            .as_ref()
+            .map(|cursor| cursor.step_id.as_str()),
+        Some("step-2")
+    );
+    // display history 不回看 clear 前消息。
+    assert!(prepared.display_history.steps().is_empty());
+}
+
+#[tokio::test]
+async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("cleared-then-append", 7, "history before clear");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run-1",
+        vec![CommittedRunStep::accepted_only(
+            "step-1",
+            AcceptedInputProjection::new(vec![Message::user("hidden")], "fp-1", 1),
+        )],
+    )]
+    .into();
+    session.cleared_after = Some(context::domain::session::RunStepCursor {
+        run_id: "run-1".to_string(),
+        step_id: "step-1".to_string(),
+    });
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save cleared generation");
+    // clear 之后产生新 step。
+    let mut after = session.clone();
+    after.revision = 8;
+    after.cleared_after = session.cleared_after.clone();
+    after.run_slices = after.run_slices.append_accepted_input(
+        "run-2",
+        "step-2",
+        AcceptedInputProjection::new(vec![Message::user("fresh")], "fp-2", 8),
+    );
+    writer
+        .save_incremental(&session, &after)
+        .await
+        .expect("append after clear must commit");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume("cleared-then-append")
+        .await
+        .expect("load cleared-then-appended generation");
+    let loaded = prepared.active_session;
+
+    // active 历史只含 clear 后的新 step；display index 同样截断。
+    assert_eq!(loaded.run_slices.len(), 1);
+    assert_eq!(loaded.run_slices[0].steps.len(), 1);
+    assert_eq!(loaded.run_slices[0].steps[0].step_id, "step-2");
+    assert_eq!(
+        prepared
+            .display_history
+            .steps()
+            .iter()
+            .map(|step| step.step_id())
+            .collect::<Vec<_>>(),
+        ["step-2"]
+    );
 }
 
 #[tokio::test]

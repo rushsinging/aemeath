@@ -31,7 +31,7 @@ mod tests {
         let roots: Vec<BlockNode> = (0..lines)
             .map(|i| leaf(&format!("b-{i}"), &format!("line {i}")))
             .collect();
-        OutputViewModel::from_roots(roots, 1, true)
+        OutputViewModel::from_roots(roots, 1)
     }
 
     #[test]
@@ -50,7 +50,6 @@ mod tests {
                 children: Vec::new(),
             }],
             1,
-            true,
         );
 
         let document = renderer.render_model_document(

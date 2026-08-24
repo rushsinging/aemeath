@@ -1,5 +1,6 @@
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::change::ConversationChange;
+#[cfg(test)]
 use crate::tui::model::input::change::InputChange;
 
 use crate::tui::model::workspace_provider::WorkspaceChange;
@@ -39,6 +40,7 @@ pub fn effects_for_conversation_change(change: &ConversationChange) -> Vec<Effec
     }
 }
 
+#[cfg(test)]
 pub fn effects_for_input_change(change: &InputChange) -> Vec<Effect> {
     match change {
         InputChange::TextChanged { .. }

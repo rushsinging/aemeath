@@ -87,11 +87,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
         AcceptedInputProjection::new(vec![Message::user("b")], "run-b:step-b:b", 2),
     );
     writer
-        .save_incremental(
-            &before,
-            &after,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &after)
         .await
         .expect("incremental generation must commit");
 
@@ -140,6 +136,58 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 }
 
 #[tokio::test]
+async fn commit_clearing_history_keeps_every_persisted_step_member() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    // 磁盘持久化完整历史：compact 边界前的 step-a 与边界后的 step-b。
+    let persisted = session_with_steps(
+        "clear-session",
+        1,
+        &[
+            ("run-a", "step-a", "archived"),
+            ("run-b", "step-b", "active"),
+        ],
+    );
+    writer
+        .save_initial(&persisted)
+        .await
+        .expect("initial generation must commit");
+
+    // resume 后内存仅装载 compact 边界后的 active step；step-a 只存在于磁盘。
+    let before = session_with_steps("clear-session", 1, &[("run-b", "step-b", "active")]);
+    let mut after = before.clone();
+    after.revision = 2;
+    after.run_slices = after.run_slices.cleared();
+    after.committed_steps = after.committed_steps.cleared();
+    after.compact = None;
+
+    let committed = writer
+        .commit_clearing_history(&before, after)
+        .await
+        .expect("clearing history must keep every persisted step member");
+
+    // clear 边界 = clear 时刻磁盘 generation 的最后一个 step。
+    assert_eq!(
+        committed
+            .cleared_after
+            .as_ref()
+            .map(|cursor| cursor.step_id.as_str()),
+        Some("step-b")
+    );
+    let manifest = dataset
+        .read_manifest(&dataset_key("clear-session"))
+        .await
+        .expect("read committed generation");
+    let step_count = manifest
+        .members()
+        .iter()
+        .filter(|member| member.as_str().starts_with("step-"))
+        .count();
+    assert_eq!(step_count, 2);
+}
+
+#[tokio::test]
 async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
@@ -161,11 +209,7 @@ async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
     after.metadata.title = Some("persist overlay".to_string());
 
     writer
-        .save_incremental(
-            &before,
-            &after,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &after)
         .await
         .expect("overlay member must be written without reuse evidence failure");
 
@@ -221,11 +265,7 @@ async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() 
         AcceptedInputProjection::new(vec![Message::user("new input")], "new-input", 2),
     );
     writer
-        .save_incremental(
-            &before,
-            &after,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &after)
         .await
         .expect("accepted input mutation");
 
@@ -296,11 +336,7 @@ async fn active_resume_append_reuses_compact_history_members() {
     );
 
     writer
-        .save_incremental(
-            &active,
-            &appended,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&active, &appended)
         .await
         .expect("active Resume append must commit against complete generation");
 
@@ -374,11 +410,7 @@ async fn active_resume_finalize_reuses_compact_history_members() {
     );
 
     writer
-        .save_incremental(
-            &active,
-            &finalized,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&active, &finalized)
         .await
         .expect("active Resume finalize must preserve complete generation");
 
@@ -422,11 +454,7 @@ async fn partial_history_commit_intent_cannot_remove_persisted_step_members() {
     after.run_slices = after.run_slices.cleared();
 
     writer
-        .save_incremental(
-            &before,
-            &after,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &after)
         .await
         .expect("partial history commit must preserve persisted steps");
 
@@ -443,7 +471,9 @@ async fn partial_history_commit_intent_cannot_remove_persisted_step_members() {
 }
 
 #[tokio::test]
-async fn complete_history_replacement_removes_every_step_member() {
+async fn incremental_save_with_cleared_memory_keeps_persisted_step_members() {
+    // 物理删除路径已退役（/clear 改为逻辑断点）：内存清空历史的增量
+    // 提交保留磁盘全部 step 成员，由 state 的 clear 边界负责截断。
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
@@ -459,28 +489,23 @@ async fn complete_history_replacement_removes_every_step_member() {
     let mut after = before.clone();
     after.revision = 2;
     after.run_slices = after.run_slices.cleared();
+    after.committed_steps = after.committed_steps.cleared();
 
     writer
-        .save_incremental(
-            &before,
-            &after,
-            context::adapters::SessionSaveIntent::ReplaceCompleteHistory,
-        )
+        .save_incremental(&before, &after)
         .await
-        .expect("complete history replacement must commit");
+        .expect("cleared-memory incremental must commit");
 
     let manifest = dataset
         .read_manifest(&dataset_key("cleared"))
         .await
         .expect("read committed manifest");
-    assert_eq!(
-        manifest
-            .members()
-            .iter()
-            .map(SafePathSegment::as_str)
-            .collect::<Vec<_>>(),
-        ["manifest.json", "metadata.json", "session-state.json"]
-    );
+    let step_count = manifest
+        .members()
+        .iter()
+        .filter(|member| member.as_str().starts_with("step-"))
+        .count();
+    assert_eq!(step_count, 2);
 }
 
 #[tokio::test]
@@ -614,11 +639,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     committed.revision = 2;
     committed.metadata.title = Some("committed".to_string());
     writer
-        .save_incremental(
-            &before,
-            &committed,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &committed)
         .await
         .expect("first incremental generation must commit");
 
@@ -626,11 +647,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     stale_candidate.revision = 2;
     stale_candidate.metadata.title = Some("stale".to_string());
     let error = writer
-        .save_incremental(
-            &before,
-            &stale_candidate,
-            context::adapters::SessionSaveIntent::CommitPartialHistory,
-        )
+        .save_incremental(&before, &stale_candidate)
         .await
         .expect_err("stale Session generation must be rejected");
     assert!(error.to_string().contains("修订号"));
@@ -705,11 +722,7 @@ async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
     let mut after = wiped_session.clone();
     after.revision = 27;
     writer
-        .save_incremental(
-            &wiped_session,
-            &after,
-            context::adapters::SessionSaveIntent::ReplaceCompleteHistory,
-        )
+        .save_incremental(&wiped_session, &after)
         .await
         .expect("incremental commit after rebuild must align with rebuilt revision");
 }

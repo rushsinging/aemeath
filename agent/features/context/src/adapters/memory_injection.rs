@@ -22,7 +22,7 @@ impl MemoryRetrieveAdapter {
         &self,
         config: &share::config::MemoryConfig,
     ) -> Result<MemoryMaterialization, String> {
-        if !config.enabled || config.inject_count == 0 {
+        if !config.enabled || config.inject_count == 0 || config.inject_token_budget == 0 {
             return Ok(empty_materialization());
         }
 
@@ -43,7 +43,32 @@ impl MemoryRetrieveAdapter {
             }
         }
 
-        let hits: Vec<_> = result.hits.into_iter().take(config.inject_count).collect();
+        let candidate_count = result.hits.len().min(config.inject_count);
+        let hits = take_ordered_prefix_within_budget(
+            result.hits.into_iter().take(config.inject_count),
+            config.inject_token_budget,
+        );
+        let estimated_tokens = hits
+            .iter()
+            .map(|hit| crate::domain::token_budget::estimate_tokens(&render_memory_line(hit)))
+            .sum::<usize>();
+        let global_hits = hits
+            .iter()
+            .filter(|hit| hit.entry.layer == memory::api::MemoryLayer::Global)
+            .count();
+        let project_hits = hits.len().saturating_sub(global_hits);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "memory_injection_materialized candidates={} injected={} estimated_tokens={} dropped={} count_limit={} token_budget={} global_hits={} project_hits={}",
+            candidate_count,
+            hits.len(),
+            estimated_tokens,
+            candidate_count.saturating_sub(hits.len()),
+            config.inject_count,
+            config.inject_token_budget,
+            global_hits,
+            project_hits
+        );
         if hits.is_empty() {
             return Ok(empty_materialization());
         }
@@ -91,11 +116,31 @@ fn empty_materialization() -> MemoryMaterialization {
     }
 }
 
+fn take_ordered_prefix_within_budget(
+    hits: impl IntoIterator<Item = MemorySearchHit>,
+    token_budget: usize,
+) -> Vec<MemorySearchHit> {
+    let mut selected = Vec::new();
+    let mut used_tokens = 0usize;
+    for hit in hits {
+        let rendered = render_memory_line(&hit);
+        let tokens = crate::domain::token_budget::estimate_tokens(&rendered);
+        if used_tokens.saturating_add(tokens) > token_budget {
+            break;
+        }
+        used_tokens = used_tokens.saturating_add(tokens);
+        selected.push(hit);
+    }
+    selected
+}
+
+fn render_memory_line(hit: &MemorySearchHit) -> String {
+    let pinned = if hit.entry.pinned { "★ " } else { "" };
+    format!("- {pinned}[{:?}] {}", hit.entry.category, hit.entry.content)
+}
+
 fn render_memory_context(hits: &[MemorySearchHit]) -> String {
-    let lines = hits.iter().map(|hit| {
-        let pinned = if hit.entry.pinned { "★ " } else { "" };
-        format!("- {pinned}[{:?}] {}", hit.entry.category, hit.entry.content)
-    });
+    let lines = hits.iter().map(render_memory_line);
     format!(
         "<memory-context>\n{}\n</memory-context>",
         lines.collect::<Vec<_>>().join("\n")
@@ -226,7 +271,10 @@ mod tests {
         ) -> Result<ReflectionApplyResult, MemoryError> {
             panic!("context injection must not mutate memory")
         }
-        async fn archive(&self, _ids: &[MemoryId]) -> Result<(), MemoryError> {
+        async fn archive(&self, _ids: &[MemoryId]) -> Result<bool, MemoryError> {
+            panic!("context injection must not mutate memory")
+        }
+        async fn restore(&self, _id: &MemoryId) -> Result<memory::api::RestoreResult, MemoryError> {
             panic!("context injection must not mutate memory")
         }
         async fn compact(&self) -> Result<CompactResult, MemoryError> {
@@ -261,10 +309,11 @@ mod tests {
         }
     }
 
-    fn request(enabled: bool, inject_count: usize) -> ContextRequest {
+    fn request(enabled: bool, inject_count: usize, inject_token_budget: usize) -> ContextRequest {
         let mut config = Config::default();
         config.memory.enabled = enabled;
         config.memory.inject_count = inject_count;
+        config.memory.inject_token_budget = inject_token_budget;
         ContextRequest {
             session_id: sdk::SessionId::new("session"),
             request_id: ContextRequestId::new("request"),
@@ -313,7 +362,7 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 4242));
 
-        let result = adapter.materialize(&request(true, 2)).await.unwrap();
+        let result = adapter.materialize(&request(true, 2, 300)).await.unwrap();
 
         assert_eq!(result.blocks.len(), 1);
         assert_eq!(
@@ -342,7 +391,11 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 99));
 
-        let block = &adapter.materialize(&request(true, 5)).await.unwrap().blocks[0];
+        let block = &adapter
+            .materialize(&request(true, 5, 300))
+            .await
+            .unwrap()
+            .blocks[0];
         assert_eq!(
             block.content,
             "<memory-context>\n- ★ [Preference] visible only\n</memory-context>"
@@ -363,10 +416,59 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
 
-        let result = adapter.materialize(&request(false, 5)).await.unwrap();
+        let result = adapter.materialize(&request(false, 5, 300)).await.unwrap();
 
         assert!(result.blocks.is_empty());
         assert_eq!(result.revision, 0);
+        assert!(memory.queries.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn token_budget_keeps_only_the_ordered_prefix() {
+        let memory = Arc::new(FakeMemory::new(
+            MemoryRetrievalMode::InjectionPriority,
+            vec![
+                hit(
+                    "01890f3c-7c00-7000-8000-000000000011",
+                    MemoryCategory::Fact,
+                    "short first",
+                    false,
+                ),
+                hit(
+                    "01890f3c-7c00-7000-8000-000000000012",
+                    MemoryCategory::Decision,
+                    "second entry is deliberately much longer than the remaining budget",
+                    false,
+                ),
+                hit(
+                    "01890f3c-7c00-7000-8000-000000000013",
+                    MemoryCategory::Pattern,
+                    "tiny third",
+                    false,
+                ),
+            ],
+        ));
+        let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 1));
+
+        let result = adapter.materialize(&request(true, 3, 8)).await.unwrap();
+        let content = &result.blocks[0].content;
+
+        assert!(content.contains("short first"));
+        assert!(!content.contains("second entry"));
+        assert!(!content.contains("tiny third"));
+    }
+
+    #[tokio::test]
+    async fn zero_token_budget_disables_injection_without_retrieving() {
+        let memory = Arc::new(FakeMemory::new(
+            MemoryRetrievalMode::InjectionPriority,
+            vec![],
+        ));
+        let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
+
+        let result = adapter.materialize(&request(true, 5, 0)).await.unwrap();
+
+        assert!(result.blocks.is_empty());
         assert!(memory.queries.lock().unwrap().is_empty());
     }
 
@@ -377,7 +479,7 @@ mod tests {
             Arc::new(|| 1),
         );
         assert!(disabled
-            .materialize(&request(true, 5))
+            .materialize(&request(true, 5, 300))
             .await
             .unwrap()
             .blocks
@@ -387,7 +489,10 @@ mod tests {
             Arc::new(FakeMemory::new(MemoryRetrievalMode::ExplicitSearch, vec![])),
             Arc::new(|| 1),
         );
-        let error = explicit.materialize(&request(true, 5)).await.unwrap_err();
+        let error = explicit
+            .materialize(&request(true, 5, 300))
+            .await
+            .unwrap_err();
         assert!(error.contains("InjectionPriority"));
         assert!(error.contains("ExplicitSearch"));
     }

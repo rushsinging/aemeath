@@ -44,7 +44,7 @@ fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
 }
 
 fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
-    OutputViewModel::from_roots(roots, 1, true)
+    OutputViewModel::from_roots(roots, 1)
 }
 
 #[test]
@@ -260,7 +260,6 @@ fn renderer_preserves_materialized_window_metadata() {
     );
 
     assert_eq!(rendered.source_total_lines, 42);
-    assert_eq!(rendered.folded_earlier_lines, 30);
     assert_eq!(
         rendered
             .document
@@ -471,7 +470,6 @@ fn spacing_policy_change_invalidates_content_and_gutted_caches() {
             children: vec![],
         }],
         1,
-        false,
     );
     let mut renderer = OutputDocumentRenderer::default();
 
@@ -504,7 +502,7 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         kind,
         children: Vec::new(),
     };
-    let vm = OutputViewModel::from_roots(vec![node], 1, true);
+    let vm = OutputViewModel::from_roots(vec![node], 1);
     let mut r = OutputDocumentRenderer::default();
     let _ = r.render_model_document(
         &vm,

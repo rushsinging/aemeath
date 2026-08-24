@@ -713,7 +713,11 @@ impl MemoryPort for InMemoryMemory {
             .filter(|entry| is_injection_eligible(entry, query.now))
             .cloned()
             .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| std::cmp::Reverse(injection_score(entry, query.now)));
+        entries.sort_by(|left, right| {
+            injection_score(right, query.now)
+                .cmp(&injection_score(left, query.now))
+                .then_with(|| left.id.cmp(&right.id))
+        });
         entries.truncate(query.limit);
         MemorySearchResult {
             mode: MemoryRetrievalMode::InjectionPriority,
@@ -746,30 +750,9 @@ impl MemoryPort for InMemoryMemory {
             } else {
                 Box::new(active)
             };
-        let mut hits = entries
-            .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-            .filter_map(|(entry, location)| {
-                relevance(entry, &query.text).map(|relevance| MemorySearchHit {
-                    entry: entry.clone(),
-                    location,
-                    outdated: entry.outdated,
-                    ttl_expired: entry.is_ttl_expired(query.now),
-                    relevance: Some(relevance),
-                })
-            })
-            .collect::<Vec<_>>();
-        hits.sort_by(|left, right| {
-            right
-                .relevance
-                .partial_cmp(&left.relevance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    search_tie_break_score(&right.entry, query.now)
-                        .cmp(&search_tie_break_score(&left.entry, query.now))
-                })
-                .then_with(|| left.entry.id.cmp(&right.entry.id))
-        });
-        hits.truncate(query.limit);
+        let candidates =
+            entries.filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
@@ -794,8 +777,8 @@ impl MemoryPort for InMemoryMemory {
             existing.tags.append(&mut entry.tags);
             existing.tags.sort();
             existing.tags.dedup();
-            existing.accessed_at = entry.created_at;
-            existing.access_count = existing.access_count.saturating_add(1);
+            existing.last_confirmed_at = entry.created_at;
+            existing.confirmation_count = existing.confirmation_count.saturating_add(1);
             let existing_id = existing.id;
             state.revision = state.revision.saturating_add(1);
             return Ok(WriteResult::Merged { existing_id });
@@ -882,7 +865,7 @@ impl MemoryPort for InMemoryMemory {
         Ok(result)
     }
 
-    async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError> {
+    async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         let mut state = self.state.write().expect("memory state lock poisoned");
         let mut moved = Vec::new();
         state.active.retain(|entry| {
@@ -893,11 +876,34 @@ impl MemoryPort for InMemoryMemory {
                 true
             }
         });
-        if !moved.is_empty() {
+        let changed = !moved.is_empty();
+        if changed {
             state.archive.extend(moved);
             state.revision = state.revision.saturating_add(1);
         }
-        Ok(())
+        Ok(changed)
+    }
+
+    async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let Some(archived) = state.archive.iter().find(|entry| &entry.id == id).cloned() else {
+            return Ok(RestoreResult::NotFound);
+        };
+        let layer_entries = state
+            .active
+            .iter()
+            .filter(|entry| entry.layer == archived.layer)
+            .cloned()
+            .collect::<Vec<_>>();
+        if layer_entries.len() >= self.policy.max_entries {
+            return Ok(RestoreResult::NeedsEviction {
+                candidates: eviction_candidates(&layer_entries, 3, archived.last_confirmed_at),
+            });
+        }
+        state.archive.retain(|entry| &entry.id != id);
+        state.active.push(archived);
+        state.revision = state.revision.saturating_add(1);
+        Ok(RestoreResult::Restored { id: *id })
     }
 
     async fn compact(&self) -> Result<CompactResult, MemoryError> {
@@ -916,12 +922,15 @@ impl MemoryPort for InMemoryMemory {
                 excess,
                 layer_entries
                     .iter()
-                    .map(|entry| entry.accessed_at)
+                    .map(|entry| entry.last_confirmed_at)
                     .max()
                     .unwrap_or(0),
             ));
         }
-        let ids = candidates.iter().map(|entry| entry.id).collect::<Vec<_>>();
+        let ids = candidates
+            .iter()
+            .map(|candidate| candidate.entry.id)
+            .collect::<Vec<_>>();
         let mut moved = Vec::new();
         state.active.retain(|entry| {
             if ids.contains(&entry.id) {
@@ -1011,8 +1020,8 @@ fn apply_reflection_entry(
         existing.tags.append(&mut entry.tags);
         existing.tags.sort();
         existing.tags.dedup();
-        existing.accessed_at = entry.created_at;
-        existing.access_count = existing.access_count.saturating_add(1);
+        existing.last_confirmed_at = entry.created_at;
+        existing.confirmation_count = existing.confirmation_count.saturating_add(1);
         return Ok(());
     }
     let layer_entries = state
@@ -1025,7 +1034,7 @@ fn apply_reflection_entry(
         let candidates = eviction_candidates(&layer_entries, 3, entry.created_at);
         let ids = candidates
             .iter()
-            .map(|candidate| candidate.id)
+            .map(|candidate| candidate.entry.id)
             .collect::<Vec<_>>();
         let mut moved = Vec::new();
         state.active.retain(|stored| {
@@ -1066,30 +1075,6 @@ fn matches_filters(
 ) -> bool {
     layer.is_none_or(|layer| entry.layer == layer)
         && category.is_none_or(|category| entry.category == category)
-}
-
-fn relevance(entry: &MemoryEntry, text: &str) -> Option<f64> {
-    let text = text.trim().to_lowercase();
-    if text.is_empty() {
-        return None;
-    }
-    let content = entry.content.to_lowercase();
-    let category = format!("{:?}", entry.category).to_lowercase();
-    let layer = format!("{:?}", entry.layer).to_lowercase();
-    if content == text {
-        Some(1.0)
-    } else if content.contains(&text)
-        || entry
-            .tags
-            .iter()
-            .any(|tag| tag.to_lowercase().contains(&text))
-        || category.contains(&text)
-        || layer.contains(&text)
-    {
-        Some(0.5)
-    } else {
-        None
-    }
 }
 
 fn count_layer(entries: &[MemoryEntry], layer: MemoryLayer) -> usize {

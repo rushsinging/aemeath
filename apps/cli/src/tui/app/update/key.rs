@@ -53,7 +53,7 @@ fn ctrlc_action(
 }
 
 impl App {
-    fn cancel_active_step_effect(&self) -> Effect {
+    fn cancel_active_step_effect(&self) -> Option<Effect> {
         self.chat
             .active_run_step
             .as_ref()
@@ -61,7 +61,6 @@ impl App {
                 run_id: run_id.clone(),
                 step_id: step_id.clone(),
             })
-            .unwrap_or(Effect::CancelCurrentRun)
     }
 
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
@@ -123,7 +122,9 @@ impl App {
                             self.chat.processing_handle.is_some()
                         );
                         self.layout.mark_ctrlc_now();
-                        return UpdateResult::one(self.cancel_active_step_effect());
+                        return self
+                            .cancel_active_step_effect()
+                            .map_or_else(UpdateResult::none, UpdateResult::one);
                     }
                     CtrlCAction::ClearInput => {
                         self.handle_input_intent(InputIntent::Clear);
@@ -170,7 +171,9 @@ impl App {
                     self.chat.is_cancelling,
                     self.chat.processing_handle.is_some()
                 );
-                return UpdateResult::one(self.cancel_active_step_effect());
+                return self
+                    .cancel_active_step_effect()
+                    .map_or_else(UpdateResult::none, UpdateResult::one);
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if completion_visible {

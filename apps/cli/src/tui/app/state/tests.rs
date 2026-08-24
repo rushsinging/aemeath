@@ -4,7 +4,7 @@ mod tests {
     use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
     use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
     use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
-    use crate::tui::app::{App, UiEvent};
+    use crate::tui::app::App;
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
 
@@ -296,7 +296,7 @@ mod tests {
             &spawn_refs,
         );
         for event in grep_after_thinking_events() {
-            let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
+            let _ = app.update(TuiMsg::Runtime(event), &ui_tx, &spawn_refs);
         }
         app.flush_dirty_view_models();
 
@@ -364,45 +364,45 @@ mod tests {
         }
     }
 
-    fn test_turn_context() -> crate::tui::app::event::UiTurnContext {
-        crate::tui::app::event::UiTurnContext {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
-            run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-test"),
+    fn test_turn_context() -> crate::tui::adapter::tui_runtime_event::TuiRunContext {
+        crate::tui::adapter::tui_runtime_event::TuiRunContext {
+            chat_id: "chat-test".into(),
+            run_id: "turn-test".into(),
         }
     }
 
-    fn grep_after_thinking_events() -> Vec<UiEvent> {
+    fn grep_after_thinking_events() -> Vec<TuiRuntimeEvent> {
         vec![
-            UiEvent::Thinking {
+            TuiRuntimeEvent::ThinkingDelta {
+                context: test_turn_context(),
+                delta: "thinking".to_string(),
+            },
+            TuiRuntimeEvent::BlockComplete {
                 context: test_turn_context(),
                 text: "thinking".to_string(),
             },
-            UiEvent::BlockComplete {
+            TuiRuntimeEvent::ToolCallStarted {
                 context: test_turn_context(),
-                text: "thinking".to_string(),
-            },
-            UiEvent::ToolCallStart {
-                context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1"),                provider_id: Some("provider-grep-1".to_string()),
-                name: "Grep".to_string(),
-                index: 1,
-            },
-            UiEvent::ToolCallUpdate {
-                context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1"),
+                id: "grep-1".to_string(),
                 provider_id: Some("provider-grep-1".to_string()),
                 name: "Grep".to_string(),
                 index: 1,
-                arguments_delta: None,
+            },
+            TuiRuntimeEvent::ToolCallStateChanged {
+                context: test_turn_context(),
+                id: "grep-1".to_string(),
+                provider_id: Some("provider-grep-1".to_string()),
+                name: "Grep".to_string(),
+                index: 1,
                 arguments: Some(serde_json::json!({
                     "pattern": "76",
                     "path": "docs/bug/active.md"
                 })),
-                status: sdk::ToolCallStatusView::Ready,
+                status: crate::tui::adapter::tui_runtime_event::TuiToolCallStatus::Ready,
             },
-            UiEvent::ToolResult {
+            TuiRuntimeEvent::ToolResult {
                 context: test_turn_context(),
-                id: sdk::ids::ToolCallId::new("grep-1"),
+                id: "grep-1".to_string(),
                 provider_id: "provider-grep-1".to_string(),
                 tool_name: "Grep".to_string(),
                 output: "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted".to_string(),

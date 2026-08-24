@@ -18,8 +18,8 @@ struct MemoryEntry {                     // 聚合根（可序列化，持久化
     pinned: bool,                        // 固定条目，不参与淘汰
     ttl: Option<Duration>,               // 相对 created_at 的过期时长（None=永不过期）；过期检查：now > created_at + ttl
     created_at: u64,                     // Unix 秒
-    accessed_at: u64,                    // 最后访问时间
-    access_count: u32,                   // 访问次数（单调递增）
+    last_confirmed_at: u64,              // 最后一次重复写入确认时间
+    confirmation_count: u32,             // 重复写入确认次数（单调递增）
     outdated: bool,                      // Reflection 标记为过期（不可逆）
 }
 ```
@@ -85,7 +85,7 @@ Memory BC 守护以下局部不变量：
 | M1 | **id 唯一** | 两条 active 记忆有相同 id | `add` 时检查；id 为空时自动生成 UUIDv7 |
 | M2 | **layer 不可变** | 修改已有记忆的 layer | 无 `set_layer` 方法；`update` 只改 content |
 | M3 | **content 非空** | 写入空字符串 | `add` / `update` 前校验 `content.trim().is_empty()` |
-| M4 | **access_count 单调递增** | 回退 access_count | `touch` 只做 `saturating_add(1)` |
+| M4 | **confirmation_count 单调递增** | 回退 confirmation_count | 仅相似内容 merge 做 `saturating_add(1)`；search/list/injection 不修改 |
 | M5 | **outdated 不可逆且不可注入** | 从 outdated 回到 active，或将 outdated 记忆放入注入候选 | 无 `unmark_outdated` 方法；`is_injection_eligible` 硬过滤 |
 | M6 | **pinned 不被淘汰** | compact/evict 淘汰了 pinned 条目 | `eviction_candidates` 过滤 `!entry.pinned` |
 | M7 | **active 容量上限** | active 条目数超过 `max_entries` | `add` 时检查，返回 `NeedsEviction` |
@@ -105,18 +105,18 @@ fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
 fn injection_score(entry: &MemoryEntry, now: u64) -> i64 {
     debug_assert!(is_injection_eligible(entry, now));
     let pinned_bonus    = if entry.pinned { 10_000 } else { 0 };
-    let access_score    = i64::from(entry.access_count.min(20)) * 100;
-    pinned_bonus + access_score + recency_score(entry.accessed_at, now)
+    let confirmation_score = i64::from(entry.confirmation_count.min(20)) * 100;
+    pinned_bonus + confirmation_score + recency_score(entry.last_confirmed_at, now)
 }
 ```
 
 | 因子 | 权重 | 说明 |
 |---|---|---|
 | pinned | +10,000 | 在 eligible 条目中保持最高优先级 |
-| access_count | +100/次（封顶 20 次 = +2,000）| 高频访问 = 高价值 |
-| recency | +50 ~ +1,000 | 越近访问权重越高（0天=1000, 1-7天=800, 8-30天=500, 31-90天=200, >90天=50）|
+| confirmation_count | +100/次（封顶 20 次 = +2,000）| 重复确认 = 高置信度 |
+| recency | +50 ~ +1,000 | 越近确认权重越高（0天=1000, 1-7天=800, 8-30天=500, 31-90天=200, >90天=50）|
 
-**设计意图**：outdated 或 TTL-expired 条目在评分前就被排除，`pinned` 不能绕过 eligibility。`pinned_bonus` 大于 access 与 recency 两项的最大和，因此 eligible pinned 条目始终排在未 pinned 条目前；未 pinned 条目按 access 与 recency 的加和排序，二者之间**没有**固定优先级。
+**设计意图**：outdated 或 TTL-expired 条目在评分前就被排除，`pinned` 不能绕过 eligibility。`pinned_bonus` 大于 confirmation 与 recency 两项的最大和，因此 eligible pinned 条目始终排在未 pinned 条目前；未 pinned 条目按 confirmation 与 recency 的加和排序，二者之间**没有**固定优先级。
 
 `injection_score` 是**query-independent** 的自动注入优先级：`MemoryQuery` 只有 limit / layer / category / now 等过滤输入，不携带搜索文本。它 **NEVER** 被描述成 BM25 relevance，也 **NEVER** 因显式搜索升级为 BM25 就自动获得“更相关”的收益；若未来自动注入要使用用户 query，**MUST** 另行版本化输入、评分与 cache/fingerprint 语义。
 
@@ -125,8 +125,8 @@ fn injection_score(entry: &MemoryEntry, now: u64) -> i64 {
 ```rust
 fn search_tie_break_score(entry: &MemoryEntry, now: u64) -> i64 {
     let pinned_bonus = if entry.pinned { 10_000 } else { 0 };
-    let access_score = i64::from(entry.access_count.min(20)) * 100;
-    pinned_bonus + access_score + recency_score(entry.accessed_at, now)
+    let confirmation_score = i64::from(entry.confirmation_count.min(20)) * 100;
+    pinned_bonus + confirmation_score + recency_score(entry.last_confirmed_at, now)
 }
 ```
 
@@ -137,15 +137,15 @@ fn search_tie_break_score(entry: &MemoryEntry, now: u64) -> i64 {
 ```rust
 fn eviction_score(entry: &MemoryEntry, now: u64) -> i64 {
     if entry.pinned { return i64::MAX; }    // pinned 不可淘汰
-    let age_days = now.saturating_sub(entry.accessed_at) / 86_400;
+    let age_days = now.saturating_sub(entry.last_confirmed_at) / 86_400;
     let recency_weight = 100_i64.saturating_sub(age_days.min(100) as i64);
-    i64::from(entry.access_count) * 10 + recency_weight
+    i64::from(entry.confirmation_count) * 10 + recency_weight
 }
 ```
 
 - **pinned = i64::MAX**：永不淘汰。
-- **低 access_count + 高 age_days = 低分 = 优先淘汰**。
-- recency_weight 在 100 天后归零，之后只靠 access_count 保命。
+- **低 confirmation_count + 高 age_days = 低分 = 优先淘汰**。
+- recency_weight 在 100 天后归零，之后只靠 confirmation_count 保命。
 
 ## 5. 去重（Dedup）
 
@@ -163,14 +163,9 @@ fn jaccard_similarity(left: &str, right: &str) -> f64 {
 - **阈值**：`similarity_threshold`（默认 0.8）。
 - **写入时去重**：`write` 时遍历同 layer active 条目，若 Jaccard ≥ threshold 则合并（tags 取并集 + touch），返回 `WriteResult::Merged`。
 
-### similarity_threshold 的双重用途
+### similarity_threshold 的单一用途
 
-| 用途 | 语义 | 阈值含义 |
-|---|---|---|
-| **去重** | 写入时判断是否与已有记忆重复 | Jaccard ≥ threshold → 合并 |
-| **检索过滤**（Tier 1+）| query-aware 检索时过滤低相关性结果 | 相关性分数 < threshold → 排除 |
-
-v0.1.0 的 BM25 检索与写入去重 **MUST** 共用同一配置值，但分别按各自分数语义解释；调用点 **NEVER** 硬编码第二份阈值。
+`similarity_threshold` 只用于写入去重：Jaccard ≥ threshold 时合并。BM25 relevance 未归一化，不复用该配置做显式检索过滤；若未来需要检索阈值，必须发布独立 typed policy。
 
 ## 6. 淘汰与归档
 
@@ -195,10 +190,11 @@ write(entry)
 
 ### 归档语义
 
-- **archive_entries(ids)**：从 active 移到 archive 文件。
-- **不删除**：归档条目保留在 `_archive.json`，可供 `search` 跨域检索。
-- **compact()**：对每个超容量 layer 取 10 个淘汰候选，批量归档。
-- **evict(ids)**：等价于 `archive_entries`——Memory BC 不做物理删除。
+- **archive(ids)**：显式将非 pinned active 条目移到同层 archive，并返回是否发生变化。
+- **restore(id)**：在同层 active 容量允许时原子移回；容量已满时返回 typed candidates 且 NotCommitted。
+- **不删除**：归档条目保留在 archive member，可供显式 `search` 检索。
+- **compact()**：仅归档超过容量的非 pinned 候选。
+- Tool 不静默执行候选：模型或用户必须显式选择 `archive`，之后再重试 add/restore。
 
 ## 7. WriteResult
 
@@ -206,16 +202,16 @@ write(entry)
 enum WriteResult {
     Added { id: MemoryId },                  // 新增成功
     Merged { existing_id: MemoryId },        // 与已有记忆合并
-    NeedsEviction { candidates: Vec<MemoryEntry> }, // 需先淘汰
+    NeedsEviction { candidates: Vec<EvictionCandidate> }, // 完整 ID、状态、确认元数据、score/reason
     NoOp,                                    // NoOpMemory 显式不写
 }
 ```
 
-`NeedsEviction` 是**非错误**——它告诉调用方“容量已满，这是淘汰候选”，Memory application service 可归档后重试。Storage / serialization 失败则通过结构化 `MemoryError` 返回，**NEVER** 伪装成结果值。
+`NeedsEviction` 是**非错误且 NotCommitted**——它发布至多 3 个非 pinned、可操作候选，调用方必须显式 archive 后再重试。Storage / serialization 失败则通过结构化 `MemoryError` 返回，**NEVER** 伪装成结果值。持久化 reader 用 serde alias 接受旧 `accessed_at` / `access_count`，当前 writer 统一输出 `last_confirmed_at` / `confirmation_count`。
 
 > **写入顺序**：write **MUST** 先检查去重（content similarity），再检查容量。若新条目与已有条目重复（score ≥ similarity_threshold），直接 merge 并返回 `Merged`，**NEVER** 因容量满而拒绝合并。容量检查只针对全新条目。
 >
-> **TTL 过期检查**：`is_ttl_expired(now)` = `ttl.is_some() && now > created_at + ttl.unwrap()`。基准时间点固定为 `created_at`（创建时间），不是 accessed_at 或 updated_at。
+> **TTL 过期检查**：`is_ttl_expired(now)` = `ttl.is_some() && now > created_at + ttl.unwrap()`。基准时间点固定为 `created_at`（创建时间），不是 last_confirmed_at 或 updated_at。
 
 ## 8. SessionReminder 所有权边界
 

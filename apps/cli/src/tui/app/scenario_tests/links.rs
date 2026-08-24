@@ -1,32 +1,32 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::tui::app::event::UiEvent;
+use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiRuntimeEvent};
 
 use super::super::testing::TuiScenarioHarness;
 
-fn context() -> UiTurnContext {
-    UiTurnContext {
-        chat_id: ChatId::new("chat-link"),
-        run_id: ChatRunId::new("turn-link"),
+fn context() -> TuiRunContext {
+    TuiRunContext {
+        chat_id: "chat-link".into(),
+        run_id: "turn-link".into(),
     }
 }
-
-use crate::tui::app::event::UiTurnContext;
-use crate::tui::model::conversation::ids::{ChatId, ChatRunId};
 
 #[test]
 fn markdown_link_in_assistant_message_produces_clickable_linkspan() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.ui(UiEvent::TurnStarted { messages: vec![] });
-    harness.ui(UiEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
+        context: context(),
+        delta: "see [example](https://example.com) here".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: context(),
         text: "see [example](https://example.com) here".into(),
     });
-    harness.ui(UiEvent::BlockComplete {
+    harness.runtime_event(TuiRuntimeEvent::Done {
         context: context(),
-        text: "see [example](https://example.com) here".into(),
+        duration_ms: None,
     });
-    harness.ui(UiEvent::Done { context: context() });
     harness.render();
 
     // 检查渲染后的 document 中是否存在 links
@@ -46,16 +46,19 @@ fn markdown_link_in_assistant_message_produces_clickable_linkspan() {
 #[test]
 fn cmd_click_on_markdown_link_opens_url_after_full_render() {
     let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.ui(UiEvent::TurnStarted { messages: vec![] });
-    harness.ui(UiEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
+        context: context(),
+        delta: "see [example](https://example.com) here".into(),
+    });
+    harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context: context(),
         text: "see [example](https://example.com) here".into(),
     });
-    harness.ui(UiEvent::BlockComplete {
+    harness.runtime_event(TuiRuntimeEvent::Done {
         context: context(),
-        text: "see [example](https://example.com) here".into(),
+        duration_ms: None,
     });
-    harness.ui(UiEvent::Done { context: context() });
     harness.render();
 
     // 找到包含链接的 logic_idx 及其 link 信息

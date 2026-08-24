@@ -558,6 +558,12 @@ pub struct CanonicalSession {
     pub revision: u64,
     #[serde(default)]
     pub compact: Option<ActiveCompactMarker>,
+    /// `/clear` 逻辑断点：clear 时刻磁盘 generation 中最后一个被清除的
+    /// step。clear 前的 step 成员仍在磁盘上无限保留（排查用），但 resume
+    /// 的 active 加载与 display history 都从该边界之后开始。`None` 表示
+    /// 该 session 从未 clear。
+    #[serde(default)]
+    pub cleared_after: Option<RunStepCursor>,
     #[serde(default)]
     pub run_slices: SessionHistory,
     #[serde(default)]
@@ -840,6 +846,7 @@ impl CanonicalSession {
             workspace: SnapshotState::Missing,
             revision: 0,
             compact: None,
+            cleared_after: None,
             run_slices: Default::default(),
             committed_steps: Default::default(),
             skill_load_records: Vec::new(),
@@ -912,6 +919,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
             workspace: session.workspace,
             revision: session.revision,
             compact: session.compact,
+            cleared_after: None,
             run_slices: session
                 .run_slices
                 .into_iter()
@@ -1166,6 +1174,7 @@ impl SessionCodec {
                         workspace: legacy.workspace,
                         revision: legacy.revision,
                         compact,
+                        cleared_after: None,
                         run_slices: run_slices.into(),
                         committed_steps: legacy.committed_steps.into(),
                         skill_load_records: Vec::new(),
@@ -1262,6 +1271,7 @@ impl SessionCodec {
                 workspace: workspace.map_or(SnapshotState::Missing, SnapshotState::Captured),
                 revision: 0,
                 compact,
+                cleared_after: None,
                 run_slices: run_slices.into(),
                 committed_steps: Default::default(),
                 skill_load_records: Vec::new(),

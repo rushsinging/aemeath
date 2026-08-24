@@ -26,6 +26,34 @@ impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
         self.commit_plan(session_id, expected_revision, plan).await
     }
 
+    /// `/clear` 逻辑断点提交：以磁盘 persisted manifest 的最后一个 step
+    /// 作为 clear 边界写入 state，走 preserving 增量路径——磁盘全部
+    /// step 成员 reused 保留、零删除，供后期排查。
+    async fn commit_clearing_history(
+        &self,
+        before: &CanonicalSession,
+        mut after: CanonicalSession,
+    ) -> Result<CanonicalSession, String> {
+        let dataset_key =
+            session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
+        let manifest = self
+            .dataset
+            .read_manifest(&dataset_key)
+            .await
+            .map_err(|error| error.to_string())?;
+        if !manifest.members().is_empty() {
+            let persisted_manifest = self
+                .read_persisted_generation_manifest(&dataset_key)
+                .await?;
+            after.cleared_after = persisted_manifest
+                .steps()
+                .last()
+                .map(|reference| reference.cursor().clone());
+        }
+        self.save_incremental(before, &after).await?;
+        Ok(after)
+    }
+
     /// 数据集为空集时以内存全量快照重建：磁盘是空集、内存是唯一真相源，
     /// 全量重建不丢任何数据。数据集非空时 fail-closed（防覆盖并发写者）。
     ///
@@ -60,6 +88,33 @@ impl DatasetCanonicalSessionWriter {
         Self { dataset }
     }
 
+    /// 读取磁盘 primary generation 的 manifest member（解码后的持久化
+    /// steps 索引），供增量与 clear 断点提交对齐磁盘真相。
+    async fn read_persisted_generation_manifest(
+        &self,
+        dataset_key: &DatasetKey,
+    ) -> Result<SessionGenerationManifest, String> {
+        let manifest_member_name =
+            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
+                .map_err(|error| error.to_string())?;
+        let persisted_manifest = self
+            .dataset
+            .read_consistent(dataset_key, std::slice::from_ref(&manifest_member_name))
+            .await
+            .map_err(|error| error.to_string())?;
+        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
+            return Err("Session generation manifest 不存在".to_string());
+        };
+        SessionGenerationCodec::decode_manifest(
+            persisted_manifest
+                .members()
+                .first()
+                .ok_or_else(|| "Session generation manifest 不存在".to_string())?
+                .bytes(),
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub async fn save_initial(&self, session: &CanonicalSession) -> Result<(), String> {
         let changes = SessionCommitPlan::initial(session).map_err(|error| error.to_string())?;
         self.commit(session.id.as_str(), changes).await
@@ -69,7 +124,6 @@ impl DatasetCanonicalSessionWriter {
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: crate::adapters::SessionSaveIntent,
     ) -> Result<(), String> {
         let dataset_key =
             session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
@@ -81,37 +135,14 @@ impl DatasetCanonicalSessionWriter {
         if manifest.members().is_empty() {
             return self.save_initial(after).await;
         }
-        let manifest_member_name =
-            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
-                .map_err(|error| error.to_string())?;
         let persisted_manifest = self
-            .dataset
-            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_member_name))
-            .await
-            .map_err(|error| error.to_string())?;
-        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
-            return Err("Session generation manifest 不存在".to_string());
-        };
-        let persisted_manifest = SessionGenerationCodec::decode_manifest(
-            persisted_manifest
-                .members()
-                .first()
-                .ok_or_else(|| "Session generation manifest 不存在".to_string())?
-                .bytes(),
+            .read_persisted_generation_manifest(&dataset_key)
+            .await?;
+        let mut changes = SessionCommitPlan::between_preserving_unloaded_steps(
+            before,
+            after,
+            &persisted_manifest,
         )
-        .map_err(|error| error.to_string())?;
-        let mut changes = match intent {
-            crate::adapters::SessionSaveIntent::CommitPartialHistory => {
-                SessionCommitPlan::between_preserving_unloaded_steps(
-                    before,
-                    after,
-                    &persisted_manifest,
-                )
-            }
-            crate::adapters::SessionSaveIntent::ReplaceCompleteHistory => {
-                SessionCommitPlan::between(before, after)
-            }
-        }
         .map_err(|error| error.to_string())?;
         changes
             .validate_commit_boundary(after.id.as_str(), before.revision, &persisted_manifest)
@@ -141,25 +172,9 @@ impl DatasetCanonicalSessionWriter {
                 .commit_with_manifest(&dataset_key, &manifest, plan)
                 .await;
         }
-        let manifest_member_name =
-            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
-                .map_err(|error| error.to_string())?;
         let persisted_manifest = self
-            .dataset
-            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_member_name))
-            .await
-            .map_err(|error| error.to_string())?;
-        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
-            return Err("Session generation manifest 不存在".to_string());
-        };
-        let persisted_manifest = SessionGenerationCodec::decode_manifest(
-            persisted_manifest
-                .members()
-                .first()
-                .ok_or_else(|| "Session generation manifest 不存在".to_string())?
-                .bytes(),
-        )
-        .map_err(|error| error.to_string())?;
+            .read_persisted_generation_manifest(&dataset_key)
+            .await?;
         let persisted_revision = persisted_manifest.revision();
         if persisted_revision != expected_revision {
             return Err(format!(

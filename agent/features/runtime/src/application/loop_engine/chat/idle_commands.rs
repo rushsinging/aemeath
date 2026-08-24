@@ -290,8 +290,12 @@ fn format_write_result(result: &WriteResult) -> String {
             format!("已与相似记忆合并: {existing_id}")
         }
         WriteResult::NeedsEviction { candidates } => {
+            let entries = candidates
+                .iter()
+                .map(|candidate| candidate.entry.clone())
+                .collect::<Vec<_>>();
             let mut output = String::from("记忆数量已达上限，请先归档候选记忆：\n");
-            output.push_str(&format_entry_list(candidates));
+            output.push_str(&format_entry_list(&entries));
             output
         }
         WriteResult::NoOp => "记忆未变更。".to_string(),
