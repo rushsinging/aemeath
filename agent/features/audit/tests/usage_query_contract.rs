@@ -5,7 +5,7 @@ use std::time::Duration;
 use audit::{
     file_usage_append_store, start_usage_worker, usage_query_service, Pagination, TimeRange,
     UsageCursor, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryPort, UsageQueryWarning,
-    UsageRecord, UsageShutdownOutcome, UsageWorkerConfig, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageRecord, UsageWorkerConfig, CURRENT_USAGE_SCHEMA_VERSION,
 };
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use storage::SafeStorageRoot;
@@ -106,14 +106,14 @@ async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
     ));
     let service = usage_query_service(store.clone());
     let expected = record("session-l4", "match", 15);
-    let (sender, handle) =
+    let (sender, worker) =
         start_usage_worker(store, UsageWorkerConfig::new(4, Duration::from_secs(1)));
 
     assert_eq!(
         sender.try_record(expected.clone()),
         audit::UsageEmitOutcome::Accepted
     );
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
+    worker.shutdown().await;
 
     let mut request = query(10);
     request.session_id = Some(expected.session_id.clone());
@@ -134,6 +134,41 @@ async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
     assert_eq!(summary.cache_write_tokens, 3);
     assert_eq!(summary.cache_read_tokens, 0);
     assert_eq!(summary.reasoning_tokens, 5);
+}
+
+#[tokio::test]
+async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Arc::new(file_usage_append_store(
+        SafeStorageRoot::open(temp.path()).unwrap(),
+    ));
+    let service = usage_query_service(store.clone());
+    let first = record("session-global-a", "match", 15);
+    let second = record("session-global-b", "match", 16);
+    let (sender, worker) =
+        start_usage_worker(store, UsageWorkerConfig::new(4, Duration::from_secs(1)));
+
+    assert_eq!(
+        sender.try_record(first.clone()),
+        audit::UsageEmitOutcome::Accepted
+    );
+    assert_eq!(
+        sender.try_record(second.clone()),
+        audit::UsageEmitOutcome::Accepted
+    );
+    worker.shutdown().await;
+
+    let page = service.query(query(10)).await.unwrap();
+    assert_eq!(page.records.len(), 2);
+    assert!(page.records.contains(&first));
+    assert!(page.records.contains(&second));
+    let summary = service.summarize(query(10)).await.unwrap();
+    assert_eq!(summary.record_count, 2);
+    assert_eq!(summary.input_tokens, 20);
+    assert_eq!(summary.output_tokens, 40);
+    assert_eq!(summary.cache_write_tokens, 6);
+    assert_eq!(summary.cache_read_tokens, 0);
+    assert_eq!(summary.reasoning_tokens, 10);
 }
 
 #[tokio::test]
