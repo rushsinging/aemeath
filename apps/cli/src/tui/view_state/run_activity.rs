@@ -1,12 +1,9 @@
 use crate::tui::model::conversation::interaction::UiRunId;
-use std::time::{Duration, Instant};
-
-const MODEL_SILENCE_THRESHOLD: Duration = Duration::from_secs(10);
+use std::time::Instant;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RunActivityState {
     main_run_id: Option<UiRunId>,
-    invoking_model_silence_started_at: Option<Instant>,
     total_timing_observed_at: Option<Instant>,
     phase_timing_observed_at: Option<Instant>,
     root_timing_revision: Option<u64>,
@@ -15,7 +12,6 @@ pub struct RunActivityState {
     primary_activity_id: Option<String>,
     total_elapsed_ms: u64,
     phase_elapsed_ms: u64,
-    silence_interval: u64,
     pub frame: u64,
     pub verb: String,
 }
@@ -27,13 +23,12 @@ impl RunActivityState {
         now: Instant,
     ) {
         let Some(summary) = summary else {
-            self.sync_main_run(None, false, 0, 0, 0, 0, now);
+            self.sync_main_run(None, 0, 0, 0, 0, now);
             return;
         };
         let primary = summary.primary.as_ref();
         self.sync_main_run_with_activity_ids(
             Some(&summary.run_id),
-            primary.is_some_and(|primary| primary.invoking_model),
             Some(&summary.root_activity_id),
             summary.root_timing_revision,
             summary.total_elapsed_ms,
@@ -47,7 +42,6 @@ impl RunActivityState {
     pub fn sync_main_run(
         &mut self,
         run_id: Option<&UiRunId>,
-        invoking_model: bool,
         root_timing_revision: u64,
         total_elapsed_ms: u64,
         phase_timing_revision: u64,
@@ -56,7 +50,6 @@ impl RunActivityState {
     ) {
         self.sync_main_run_with_activity_ids(
             run_id,
-            invoking_model,
             Some("__compat_root__"),
             root_timing_revision,
             total_elapsed_ms,
@@ -71,7 +64,6 @@ impl RunActivityState {
     fn sync_main_run_with_activity_ids(
         &mut self,
         run_id: Option<&UiRunId>,
-        invoking_model: bool,
         root_activity_id: Option<&str>,
         root_timing_revision: u64,
         total_elapsed_ms: u64,
@@ -139,24 +131,6 @@ impl RunActivityState {
                 run_id.is_none(),
             );
         }
-
-        if run_id.is_some() && invoking_model {
-            if identity_changed || self.invoking_model_silence_started_at.is_none() {
-                self.begin_silence_interval(now);
-            }
-        } else {
-            self.invoking_model_silence_started_at = None;
-        }
-    }
-
-    pub fn observe_main_model_activity(&mut self, run_id: &UiRunId, now: Instant) -> bool {
-        if self.main_run_id.as_ref() != Some(run_id)
-            || self.invoking_model_silence_started_at.is_none()
-        {
-            return false;
-        }
-        self.begin_silence_interval(now);
-        true
     }
 
     pub fn advance_frame(&mut self) {
@@ -165,13 +139,6 @@ impl RunActivityState {
 
     pub fn is_active(&self) -> bool {
         self.main_run_id.is_some()
-    }
-
-    pub fn is_model_silent(&self, now: Instant) -> bool {
-        self.invoking_model_silence_started_at
-            .is_some_and(|started_at| {
-                now.saturating_duration_since(started_at) >= MODEL_SILENCE_THRESHOLD
-            })
     }
 
     pub(crate) fn root_timing_identity(&self) -> Option<(&str, u64)> {
@@ -198,17 +165,6 @@ impl RunActivityState {
             / 1000
     }
 
-    #[cfg(test)]
-    pub fn silence_block_id(&self) -> Option<String> {
-        let run_id = self.main_run_id.as_ref()?;
-        self.invoking_model_silence_started_at?;
-        Some(format!(
-            "run-model-silence-{}-{}",
-            run_id.as_str(),
-            self.silence_interval
-        ))
-    }
-
     fn elapsed_ms_since_observation(
         &self,
         now: Instant,
@@ -220,10 +176,5 @@ impl RunActivityState {
                 .unwrap_or(u64::MAX)
         });
         baseline_ms.saturating_add(delta_ms)
-    }
-
-    fn begin_silence_interval(&mut self, now: Instant) {
-        self.invoking_model_silence_started_at = Some(now);
-        self.silence_interval = self.silence_interval.wrapping_add(1);
     }
 }

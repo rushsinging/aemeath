@@ -308,15 +308,9 @@ fn test_spinner_tick_active_requests_redraw_without_marking_output_dirty() {
         .conversation
         .activity_observations_mut()
         .replace_for_test(run_id.clone(), 2, Vec::new());
-    app.view_state.run_activity.sync_main_run(
-        Some(&run_id),
-        true,
-        1,
-        0,
-        1,
-        0,
-        std::time::Instant::now(),
-    );
+    app.view_state
+        .run_activity
+        .sync_main_run(Some(&run_id), 1, 0, 1, 0, std::time::Instant::now());
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };

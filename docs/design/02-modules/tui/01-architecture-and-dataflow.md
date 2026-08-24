@@ -257,14 +257,14 @@ struct AppViewState {
     status: StatusViewState,            // status line scroll/selection
     input: InputViewState,              // cursor display/selection
     dialog: DialogViewState,            // dialog cursor
-    run_activity: RunActivityState,     // Main Run 静默时间 + 活动动画
+    run_activity: RunActivityState,     // Main Run 双计时插值 + 活动动画
     dirty: ViewModelDirty,              // {output, status, input, dialog}
 }
 ```
 
-`RunActivityState` 只保存 Main Run identity、`InvokingModel` 静默起点、最近一次有效可展示模型活动时间、动画 frame 与当前稳定 verb。它使用可注入单调时间，既不持久化，也不保存 `RunStatus`、业务 phase、`run_active` 或可见性副本。
+`RunActivityState` 只保存 Main Run identity、Runtime root / primary Activity 的两组计时观测基线、动画 frame 与当前稳定 verb。它使用可注入单调时间在相邻 heartbeat 之间插值，既不持久化，也不保存 `RunStatus`、业务 phase、`run_active` 或可见性副本。
 
-活动 phase、文案与可见性 **MUST** 由 Model 的 typed `RunStateSnapshot`、当前 Tool/Hook/Compact detail 与 `RunActivityState` 纯函数派生为 `RunActivityView`。离开 `InvokingModel` 时清除静默条件；Sub Run 事件不得重置 Main Run 的静默时间。
+活动 phase、文案与可见性 **MUST** 由 Model 的 typed Activity snapshot、当前 Tool/Hook/Compact detail 与 `RunActivityState` 纯函数派生为 `RunActivityView`。模型等待反馈只由 live-status spinner 表达；Output timeline / ViewModel **NEVER** 注入额外静默占位块。
 
 `ViewState` 的可变性只覆盖 scroll / collapse / selection / animation / cache / 本地单调展示时间等瞬时交互与渲染状态；Run、Interaction、timeline、input buffer 等 UI 业务事实仍只在 Model 中变更。
 

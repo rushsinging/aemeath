@@ -100,7 +100,7 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_ui`，只处理本地 Effect 的
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
 3. **Sub Run activity 投影**：结构化 Text/Thinking/ToolCall/ToolOutput/ToolResult/Terminal 进入父 Agent ToolCall 的 bounded activity preview；Model 只另存每个 Sub Run 最新 `(sequence, sequence_index)` watermark 用于去重/乱序拒绝，NEVER 复制无消费者的 progress 历史
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
-5. **模型活动信号**：非空 `AssistantTextDelta` / `ThinkingDelta`、`ToolCallStarted`、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；SDK 旧 `Token` / `Thinking` / `ToolCallStart` 只在第一层兼容读取并立即归一化为 typed fact；ACL 不创建或清理 placeholder
+5. **模型内容事实**：非空 `AssistantTextDelta` / `ThinkingDelta`、`ToolCallStarted`、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 只更新 Conversation 投影；SDK 旧 `Token` / `Thinking` / `ToolCallStart` 只在第一层兼容读取并立即归一化为 typed fact。TUI 不再跟踪内容静默区间，也不创建 output placeholder
 6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）
 
 ### 3.2 AgentEventMapping 结构
@@ -136,7 +136,7 @@ enum AgentIntent {
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
-| Conversation | `AssistantTextDelta` / `ThinkingDelta` / `BlockComplete` / `ToolCallStarted` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolOutputDelta` / `ToolResult` / `SubRunStarted` / `SubRunActivity` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；SDK `Token` / legacy `Thinking` / `ToolCallStart` / `ToolProgress` / `AgentProgress` 只作为 public compatibility dual-read，在第一层 ACL 立即转为 typed delta/fact；SDK `ToolCallUpdate` 同样只在第一层拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
+| Conversation | `AssistantTextDelta` / `ThinkingDelta` / `BlockComplete` / `ToolCallStarted` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolOutputDelta` / `ToolResult` / `SubRunStarted` / `SubRunActivity` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；SDK `Token` / legacy `Thinking` / `ToolCallStart` / `ToolProgress` / `AgentProgress` 只作为 public compatibility dual-read，在第一层 ACL 立即转为 typed delta/fact；SDK `ToolCallUpdate` 同样只在第一层拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
 | Conversation | `RunTransitioned { run_id, parent_run_id, status: RunStatusView }` | 第一层穷举转换为 TUI-owned `TuiRunStatus`，第二层产生 `ObserveRunStatus` Intent；禁止字符串降级。Main 由 `parent_run_id == None` 判断，Sub 不驱动主活动展示 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
@@ -239,7 +239,7 @@ Compact 展示 MUST 只消费 Activity 中 typed stage/work；旧 stringly `Comp
 
 `ChatEvent` 与 `ContentBlock` 各自只有一个权威定义；SDK 通过 re-export 或同一 schema 生成发布类型。`RunTransitioned.status` 使用封闭枚举 `RunStatusView`，Runtime adapter 与 TUI `event_mapping.rs` 都必须穷举匹配；禁止 JSON round-trip、`Debug`/字符串类型擦除或两份手写 wire schema。
 
-Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位 heartbeat。Main Run 的 10 秒 `InvokingModel` 静默占位只由 TUI ViewState 的可注入单调时钟和既有 Tick 派生，不进入 SDK Published Language、Model timeline、history 或持久化。
+Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位事件。模型等待反馈由 TUI live-status spinner 消费 Activity heartbeat 并展示双计时；Output timeline / ViewModel 不注入独立静默占位块。
 
 ### 4.2 TUI 自有 DTO 完全隔离
 
