@@ -302,6 +302,7 @@ impl SessionRunFixtureBuilder {
                     ),
                     revision: session_snapshot.revision(),
                     compact: None,
+                    cleared_after: None,
                     run_slices: Vec::new().into(),
                     committed_steps: Default::default(),
                     skill_load_records: Vec::new(),

@@ -15,12 +15,6 @@ use crate::domain::{
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionSaveIntent {
-    CommitPartialHistory,
-    ReplaceCompleteHistory,
-}
-
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
     async fn commit(
@@ -29,6 +23,23 @@ pub trait CanonicalSessionWriter: Send + Sync {
         expected_revision: u64,
         plan: SessionCommitPlan,
     ) -> Result<(), String>;
+
+    /// `/clear` 逻辑断点提交：磁盘 step 成员全部保留，state 记录 clear
+    /// 边界（clear 时刻磁盘 generation 的最后一个 step）。
+    ///
+    /// 返回写入 clear 边界后的 session 快照（与磁盘一致），调用方必须以
+    /// 返回值发布内存 generation。默认实现面向无磁盘增量的 backing：
+    /// 无未加载成员需要保留，边界保持 `after` 原样。
+    async fn commit_clearing_history(
+        &self,
+        before: &CanonicalSession,
+        after: CanonicalSession,
+    ) -> Result<CanonicalSession, String> {
+        let plan = SessionCommitPlan::between(before, &after).map_err(|error| error.to_string())?;
+        self.commit(after.id.as_str(), before.revision, plan)
+            .await?;
+        Ok(after)
+    }
 
     /// 数据集为空集时以内存全量快照重建持久化状态；数据集非空时必须
     /// fail-closed，防止覆盖并发写者。重建后磁盘修订号与内存对齐。
@@ -670,13 +681,9 @@ impl CanonicalSessionRepository {
         });
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
             .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
@@ -720,42 +727,35 @@ impl CanonicalSessionRepository {
     fn build_commit_plan(
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<SessionCommitPlan, String> {
-        match intent {
-            SessionSaveIntent::CommitPartialHistory => {
-                let manifest = crate::domain::session::SessionGenerationManifest::new(
-                    before.id.clone(),
-                    before.revision,
-                    before
-                        .run_slices
+        let manifest = crate::domain::session::SessionGenerationManifest::new(
+            before.id.clone(),
+            before.revision,
+            before
+                .run_slices
+                .iter()
+                .flat_map(|slice| {
+                    slice
+                        .steps
                         .iter()
-                        .flat_map(|slice| {
-                            slice
-                                .steps
-                                .iter()
-                                .map(|step| crate::domain::session::RunStepCursor {
-                                    run_id: slice.run_id.clone(),
-                                    step_id: step.step_id.clone(),
-                                })
+                        .map(|step| crate::domain::session::RunStepCursor {
+                            run_id: slice.run_id.clone(),
+                            step_id: step.step_id.clone(),
                         })
-                        .collect(),
-                )
-                .map_err(|error| error.to_string())?;
-                SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
-            }
-            SessionSaveIntent::ReplaceCompleteHistory => SessionCommitPlan::between(before, after),
-        }
-        .map_err(|error| error.to_string())
+                })
+                .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+        SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
+            .map_err(|error| error.to_string())
     }
 
     async fn persist_candidate(
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<(), String> {
-        let plan = Self::build_commit_plan(before, after, intent)?;
+        let plan = Self::build_commit_plan(before, after)?;
         match self.writer.commit(&after.id, before.revision, plan).await {
             Ok(()) => Ok(()),
             Err(commit_error) => {
@@ -975,13 +975,9 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(tools::SkillLoadStateError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(tools::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(tools::SkillLoadStateError::Storage)?;
         Ok(decision)
@@ -1072,13 +1068,9 @@ impl SessionRepository for CanonicalSessionRepository {
             committed_revision: candidate.revision,
         });
 
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextAppendError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
@@ -1157,14 +1149,30 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::ReplaceCompleteHistory,
-        )
-        .await
-        .map_err(ContextPortError::SessionRepository)?;
-        self.publish_generation(&current, candidate)
+        // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear
+        // 边界，由 writer 按 persisted manifest 计算并返回对齐后的快照。
+        let fallback = candidate.clone();
+        let cleared = match self
+            .writer
+            .commit_clearing_history(&current, candidate)
+            .await
+        {
+            Ok(cleared) => cleared,
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。空数据集
+                // 没有可截断的持久化 step，边界保持 None。
+                let mut fallback = fallback;
+                fallback.cleared_after = None;
+                self.writer
+                    .rebuild_empty_dataset(&current.id, &fallback)
+                    .await
+                    .map_err(|_| ContextPortError::SessionRepository(commit_error))?;
+                fallback
+            }
+        };
+        self.publish_generation(&current, cleared)
             .map_err(ContextPortError::SessionRepository)?;
         self.accepted_input_writer
             .delete_all(&current.id)
