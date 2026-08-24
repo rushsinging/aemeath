@@ -184,18 +184,25 @@ L5 对本 MVP 判定为 **N/A**：真实文件系统、并发 append 和 shutdow
 
 ### 10.5 验证与覆盖率
 
-最终门禁与本轮覆盖率将在实现完成后按实际命令输出回写；不得沿用旧 worker metrics 设计的测试数或覆盖率作为本轮证据。
+本轮完整门禁实测：
 
-当前已取得的定向证据：
+- `cargo fmt --all --check`：通过。
+- `cargo test -p audit --all-targets`：通过；Audit 合计 35 个测试（17 unit、5 append adapter contract、4 Usage PL contract、8 query contract、1 worker contract）。
+- Runtime Usage、Composition Audit assembly/canonical Session JSONL、CLI drain 定向测试：通过。
+- Audit、Runtime、Composition、CLI production-only check/clippy 与 all-targets clippy：通过。
+- `cargo test --workspace`：通过。
+- `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `.agents/hooks/check-architecture-guards.sh --full`：通过。首次运行发现仍有效的 TUI slash migration exception 指向已关闭 owner，恢复其 tracking Issue 为 Open；随后发现 Runtime event naming 负向 fixture 使用已退役锚点而未实际注入违例，改用当前 `UiEvent::Error` 锚点并由 fixture 自测和完整 Guard 复验通过。
+- `scripts/coverage.sh`：通过；workspace 为 regions **82.68%**、functions **83.47%**、lines **83.67%**。
+- Audit 聚焦覆盖率：regions **94.09%**（669/711）、functions **98.89%**（89/90）、lines **95.65%**（506/529）。
 
-- Audit ingest：无指标 sender、跨 Session record 分区、append/flush 失败隔离、shutdown timeout/取消/Drop abort。
-- Audit 公开契约：消费式 worker；全局 query/summary 读取两个 Session JSONL。
-- Composition：消费式 Audit owner 与 canonical Session Usage 落盘。
-- CLI：frontend 成功/失败与 drain 正交。
+TDD 首次 RED 由旧借用式 `shutdown(&self)` 无法移动进独立 task 触发，证明测试命中了消费所有权要求；实现后 timeout、shutdown Future 取消与 owner Drop 均验证 blocked append future 被撤销，未遗留 detached worker。
+
+coverage 只作风险信号，production reachability 由独立 source guard 与 production-only check/clippy 证明。JSONL 是唯一持久事实；未保留 worker metrics、共享 shutdown outcome、completion cache、coordinator 或 per-Session worker registry。
 
 ## 11. 验收结论
 
-当前代码与设计已收敛到 JSONL 单一事实边界；最终父项级结论等待 workspace tests、all-targets clippy、完整架构守卫和 coverage gate 的本轮实测结果。
+Usage 写入已收敛为无状态 bounded worker：每条 record 按自身 canonical Session 写入 JSONL，显式 shutdown 消费唯一 owner并尽力 drain，timeout/取消/Drop 都 abort worker。全局 UsageQuery 继续从一个或全部 Session JSONL 即时分页和汇总。格式、分层测试、production reachability、all-targets clippy、workspace 测试、完整架构守卫和 coverage gate 均已通过，本轮 JSONL 单一事实边界验收完成。
 
 ## 修改历史
 
