@@ -322,6 +322,94 @@ fn overlay_step_missing_from_persisted_generation_is_not_removed() {
 }
 
 #[test]
+fn display_history_index_excludes_steps_up_to_clear_boundary() {
+    let before = session_with_steps(
+        "session",
+        1,
+        &[
+            ("run-a", "step-a", "archived"),
+            ("run-b", "step-b", "active"),
+        ],
+    );
+    let manifest = SessionGenerationManifest::new(
+        before.id.clone(),
+        before.revision,
+        vec![
+            RunStepCursor {
+                run_id: "run-a".to_string(),
+                step_id: "step-a".to_string(),
+            },
+            RunStepCursor {
+                run_id: "run-b".to_string(),
+                step_id: "step-b".to_string(),
+            },
+        ],
+    )
+    .expect("persisted manifest");
+    let cleared_after = RunStepCursor {
+        run_id: "run-a".to_string(),
+        step_id: "step-a".to_string(),
+    };
+
+    let index = DisplayHistoryStepIndex::from_manifest_after_clear(&manifest, Some(&cleared_after));
+
+    assert_eq!(
+        index
+            .steps()
+            .iter()
+            .map(|step| step.step_id.as_str())
+            .collect::<Vec<_>>(),
+        ["step-b"]
+    );
+}
+
+#[test]
+fn state_member_round_trips_clear_boundary() {
+    let mut session = session_with_steps(
+        "session",
+        7,
+        &[
+            ("run-a", "step-a", "archived"),
+            ("run-b", "step-b", "active"),
+        ],
+    );
+    session.cleared_after = Some(RunStepCursor {
+        run_id: "run-a".to_string(),
+        step_id: "step-a".to_string(),
+    });
+
+    let state = super::SessionStateMember::from_session(&session);
+    let state_bytes = SessionGenerationCodec::encode_state(&state).expect("encode state");
+    let decoded = SessionGenerationCodec::decode_state(&state_bytes).expect("decode state");
+
+    assert_eq!(decoded.cleared_after(), session.cleared_after.as_ref());
+    let restored = decoded.into_session(
+        super::SessionMetadataMember::from_session(&session),
+        Default::default(),
+    );
+    assert_eq!(restored.cleared_after, session.cleared_after);
+}
+
+#[test]
+fn state_member_without_clear_boundary_decodes_as_none() {
+    let session = session_with_steps("session", 1, &[("run", "step", "body")]);
+    let state = super::SessionStateMember::from_session(&session);
+    let state_bytes = SessionGenerationCodec::encode_state(&state).expect("encode state");
+    // 旧代 state member 不含 clear 边界字段，serde default 必须兼容读取。
+    let raw: serde_json::Value = serde_json::from_slice(&state_bytes).expect("state json");
+    let legacy_bytes = {
+        let mut value = raw;
+        let object = value.as_object_mut().expect("state object");
+        object.remove("cleared_after");
+        serde_json::to_vec(&object).expect("legacy state json")
+    };
+
+    let decoded = SessionGenerationCodec::decode_state(&legacy_bytes).expect("decode legacy");
+
+    assert_eq!(decoded.cleared_after(), None);
+}
+
+#[test]
 fn state_member_round_trips_non_step_session_state() {
     let mut session = session_with_steps("session", 7, &[("run", "step", "body")]);
     session.created_at = "2026-01-01T00:00:00Z".to_string();

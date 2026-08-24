@@ -45,6 +45,7 @@ impl AgentActivityLine {
         }
     }
 
+    #[cfg(test)]
     pub fn contains(&self, pattern: &str) -> bool {
         match &self.content {
             AgentActivityContent::Text(content) => content.contains(pattern),
@@ -54,6 +55,7 @@ impl AgentActivityLine {
         }
     }
 
+    #[cfg(test)]
     pub fn text(&self) -> Option<&str> {
         match &self.content {
             AgentActivityContent::Text(content) => Some(content),

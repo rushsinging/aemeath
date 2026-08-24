@@ -14,8 +14,8 @@ use crate::adapters::{
 use crate::application::SessionPersistenceService;
 use crate::domain::session::{
     CanonicalSession, CommittedRunSlice, DisplayHistoryStepIndex, DisplayHistoryStepWindow,
-    SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
-    SessionStepMember,
+    RunStepCursor, SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError,
+    SessionHistory, SessionStepMember, SessionStepReference,
 };
 
 pub struct PreparedDatasetResume {
@@ -321,14 +321,10 @@ impl DatasetSessionReader {
             ));
         }
         let active_start = state.compact_start_at();
-        let active_names = manifest
-            .steps()
+        let cleared_after = state.cleared_after();
+        let visible_steps = visible_steps_after_boundaries(&manifest, active_start, cleared_after)?;
+        let active_names = visible_steps
             .iter()
-            .skip_while(|step| {
-                active_start.is_some_and(|start| {
-                    step.cursor().run_id != start.run_id || step.cursor().step_id != start.step_id
-                })
-            })
             .map(|step| safe_member_name(step.member_name()))
             .collect::<Result<Vec<_>, _>>()?;
         let active_outcome = match generation {
@@ -369,9 +365,45 @@ impl DatasetSessionReader {
         }
         Ok(PreparedDatasetResume {
             active_session,
-            display_history: DisplayHistoryStepIndex::from_manifest(&manifest),
+            display_history: DisplayHistoryStepIndex::from_manifest_after_clear(
+                &manifest,
+                cleared_after,
+            ),
         })
     }
+}
+
+/// 按可见边界（compact 起点 + `/clear` 逻辑断点）过滤 manifest steps：
+/// 取两边界中更晚者之后的 step 引用，供 active 成员加载使用。
+/// clear 边界必须命中当前 generation manifest，否则视为数据不一致。
+fn visible_steps_after_boundaries<'a>(
+    manifest: &'a SessionGenerationManifest,
+    active_start: Option<&RunStepCursor>,
+    cleared_after: Option<&RunStepCursor>,
+) -> Result<Vec<&'a SessionStepReference>, SessionGenerationWireError> {
+    let steps_after_clear: Vec<&SessionStepReference> = match cleared_after {
+        Some(cleared) => {
+            let position = manifest
+                .steps()
+                .iter()
+                .position(|step| step.cursor() == cleared)
+                .ok_or_else(|| {
+                    SessionGenerationWireError::InvalidManifest(
+                        "Session clear 边界不在此 generation manifest 中".to_string(),
+                    )
+                })?;
+            manifest.steps().iter().skip(position + 1).collect()
+        }
+        None => manifest.steps().iter().collect(),
+    };
+    Ok(steps_after_clear
+        .into_iter()
+        .skip_while(|step| {
+            active_start.is_some_and(|start| {
+                step.cursor().run_id != start.run_id || step.cursor().step_id != start.step_id
+            })
+        })
+        .collect())
 }
 
 fn assemble_session(
@@ -404,10 +436,12 @@ fn assemble_session(
         ));
     }
 
-    let active_start = state.compact_start_at().cloned();
+    let active_start = state.compact_start_at();
+    let visible_steps =
+        visible_steps_after_boundaries(manifest, active_start, state.cleared_after())?;
     let mut active = active_start.is_none();
     let mut slices = Vec::<CommittedRunSlice>::new();
-    for reference in manifest.steps() {
+    for reference in visible_steps {
         let Some(bytes) = members_by_name.get(reference.member_name()) else {
             if !active {
                 continue;
@@ -423,11 +457,7 @@ fn assemble_session(
                 "Session step reference 与 member identity 不一致".to_string(),
             ));
         }
-        if !active
-            && active_start
-                .as_ref()
-                .is_some_and(|cursor| cursor == reference.cursor())
-        {
+        if !active && active_start.is_some_and(|cursor| cursor == reference.cursor()) {
             active = true;
         }
         if !active {

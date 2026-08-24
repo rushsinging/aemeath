@@ -52,7 +52,15 @@ fn working_directory_change_updates_status_projection() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let root = std::path::Path::new("/workspace");
     let worktree = root.join("feature-one");
-    harness.ui(crate::tui::app::status_context_for_paths(&worktree, root));
+    harness.runtime_event(
+        crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent::WorkspaceSnapshot(
+            crate::tui::adapter::tui_runtime_event::TuiWorkspaceSnapshot {
+                path_base: worktree.display().to_string(),
+                workspace_root: root.display().to_string(),
+                context_stack: vec![],
+            },
+        ),
+    );
     harness.render();
 
     let expected_path_base = worktree.display().to_string();

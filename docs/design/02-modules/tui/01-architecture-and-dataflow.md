@@ -52,9 +52,10 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
        │
        ▼
 ③ Coordinator       App::update(msg)
-   │                ├─ map_agent_event（TUI-owned UiEvent → Intent）
-   │                ├─ root_reducer（Intent → Model change）
-   │                └─ effects_for（Change → Effect request）
+    │                ├─ Runtime：map_runtime_event（TuiRuntimeEvent → Intent）
+    │                ├─ Local：update_ui（本地 Effect 纯值结果）
+    │                ├─ root_reducer（Intent → Model change）
+    │                └─ effects_for（Change → Effect request）
        │
        ▼
 ④ Model             TuiModel { conversation, input, diagnostic, session, config, workspace }
@@ -105,10 +106,10 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 ```
 Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
   → sdk_event_to_tui_event（adapter/event_mapping.rs）
-  → UiEvent → mpsc channel (cap 256)
-  → ui_rx → tokio::select! → TuiMsg::Ui(ui_event)
-  → App::update_agent_event()
-  → map_agent_event（adapter/agent_event.rs，ACL，只产 Intent）
+  → TuiRuntimeEvent → runtime mpsc channel (cap 256)
+  → runtime_rx → tokio::select! → TuiMsg::Runtime / RuntimeBatch
+  → App::update_runtime_event()
+  → map_runtime_event（adapter/agent_event.rs，ACL，只产 Intent）
   → AgentEventMapping { intents }
   → root_reducer → Model Change → Coordinator Effect → result Intent
   → ViewModelDirty → ViewAssembler → Render

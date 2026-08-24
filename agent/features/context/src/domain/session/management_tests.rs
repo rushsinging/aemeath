@@ -23,6 +23,7 @@ fn session() -> CanonicalSession {
             }),
             source_revision: 1,
         }),
+        cleared_after: None,
         run_slices: vec![
             CommittedRunSlice::new(
                 "run-1",

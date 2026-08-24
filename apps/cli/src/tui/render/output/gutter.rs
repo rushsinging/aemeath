@@ -50,6 +50,7 @@ const MAX_GUTTER_DEPTH: usize = 256;
 
 /// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
 /// `apply_gutter` 按显示宽度补白填满 marker 槽。
+#[cfg(test)]
 pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
     animated_marker_glyph(kind, 0)
 }
@@ -115,6 +116,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
 ///
 /// 任意 `usize` depth 都安全：saturating 运算保证不溢出（防御性 depth 来自
 /// `effective_block_width` 的错误路径测试）。
+#[cfg(test)]
 pub fn gutter_width(depth: usize) -> usize {
     gutter_width_with_indent(depth, PER_DEPTH_INDENT)
 }

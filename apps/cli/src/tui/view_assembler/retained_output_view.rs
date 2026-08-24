@@ -122,7 +122,6 @@ impl RetainedOutputView {
         let view_model = crate::tui::view_model::OutputViewModel {
             roots,
             version: conversation.revision(),
-            follow_tail_hint: true,
             source_total_lines: Some(selection.source_total_lines),
             folded_earlier_lines: selection.folded_earlier_lines,
         };

@@ -42,6 +42,7 @@ fn unfinished_tool_session_with_outcome(
         workspace: SnapshotState::Missing,
         revision: 0,
         compact: None,
+        cleared_after: None,
         run_slices: vec![CommittedRunSlice::new(
             "run-1",
             vec![CommittedRunStep {
@@ -85,6 +86,7 @@ fn two_step_session() -> CanonicalSession {
         workspace: SnapshotState::Missing,
         revision: 0,
         compact: None,
+        cleared_after: None,
         run_slices: vec![CommittedRunSlice::new(
             "run-1",
             vec![
@@ -356,6 +358,7 @@ fn restore_reads_only_steps_from_active_marker() {
             }),
             source_revision: 0,
         }),
+        cleared_after: None,
         run_slices: vec![
             CommittedRunSlice::new(
                 "run-1",

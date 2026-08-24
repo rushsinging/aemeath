@@ -21,6 +21,7 @@ pub fn result_policy(name: &str) -> ResultPolicy {
 }
 
 /// 该工具 result 的渲染类型（取自 `ToolDisplay::render_policy`，未注册回退 `Plain`）。
+#[cfg(test)]
 pub fn result_render_kind(name: &str) -> ResultRender {
     match result_policy(name) {
         ResultPolicy::Visible { render_kind, .. } => render_kind,

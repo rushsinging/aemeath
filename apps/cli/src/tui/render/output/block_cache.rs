@@ -86,6 +86,7 @@ impl BlockCache {
     /// 清除不在 `live_set` 中的缓存条目（防内存泄漏）。
     /// 调用方应先将 live ids 收入 `HashSet<&str>`（O(n) 构建），
     /// 使此处每个条目的成员查询为 O(1)，整体 O(n) 而非 O(n²)。
+    #[cfg(test)]
     pub fn retain(&mut self, live_set: &std::collections::HashSet<&str>) {
         let evicted = self.map.retain(|id, _| live_set.contains(id.as_str()));
         #[cfg(test)]
@@ -99,6 +100,7 @@ impl BlockCache {
         self.map.len()
     }
 
+    #[cfg(test)]
     pub fn contains(&self, block_id: &str) -> bool {
         self.map.peek(&block_id.to_string()).is_some()
     }
