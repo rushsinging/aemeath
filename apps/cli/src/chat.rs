@@ -43,7 +43,7 @@ where
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
     let quiet = args.quiet;
-    let bootstrap = composition::app::build_agent_bootstrap(args.into())
+    let mut bootstrap = composition::app::build_agent_bootstrap(args.into())
         .await
         .unwrap_or_else(|e| {
             eprintln!("Error: {e}");
@@ -77,11 +77,13 @@ pub(crate) async fn run_chat(args: Args) {
             let client = bootstrap.client.clone();
             let command_router = bootstrap.command_router.clone();
             let quiet_session_id = session_id.clone();
+            let audit_drain = bootstrap
+                .session_audit
+                .take()
+                .map(|session_audit| async move { session_audit.shutdown().await });
             run_frontend_with_audit_drain(
                 client,
-                bootstrap.session_audit.as_ref().map(|session_audit| async move {
-                    let _ = session_audit.shutdown().await;
-                }),
+                audit_drain,
                 move |client| async move {
                     crate::chat::no_tui::run_no_tui_chat(
                         client,
@@ -151,11 +153,13 @@ pub(crate) async fn run_chat(args: Args) {
             );
         }
         let client = bootstrap.client.clone();
+        let audit_drain = bootstrap
+            .session_audit
+            .take()
+            .map(|session_audit| async move { session_audit.shutdown().await });
         run_frontend_with_audit_drain(
             client,
-            bootstrap.session_audit.as_ref().map(|session_audit| async move {
-                let _ = session_audit.shutdown().await;
-            }),
+            audit_drain,
             move |client| async move { app.run(client).await },
         )        .await
         .unwrap_or_else(|error| {
