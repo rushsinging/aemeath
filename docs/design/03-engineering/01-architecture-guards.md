@@ -41,7 +41,7 @@
 | 4a | `check-noninteractive-child-session.sh` + `check-noninteractive-child-session-tests.sh` | 安全/IO | 所有生产非交互外部进程必须经 `utils` 唯一边界创建独立 session，禁止继承父控制终端 |
 | 4b | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage PL、AppendLog/worker 生产入口及被 Composition 消费的 `usage_query_service` 查询装配入口 |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage/Query PL、AppendLog 入口、无指标 `UsageSender`、消费式 `UsageWorker` 及被 Composition 消费的 `usage_query_service` 查询装配入口；退役 worker metrics 与共享 shutdown outcome 不得重新进入 façade |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
