@@ -337,6 +337,7 @@ fn repository(
             workspace: SnapshotState::Captured(workspace()),
             revision: 0,
             compact: None,
+            cleared_after: None,
             run_slices: vec![].into(),
             committed_steps: Default::default(),
             skill_load_records: Vec::new(),
@@ -373,6 +374,7 @@ fn ten_step_session(
         workspace: SnapshotState::Captured(workspace()),
         revision,
         compact: None,
+        cleared_after: None,
         run_slices: ten_step_slices().into(),
         committed_steps: Default::default(),
         skill_load_records: Vec::new(),
@@ -612,6 +614,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
         workspace: SnapshotState::Captured(workspace()),
         revision,
         compact: None,
+        cleared_after: None,
         run_slices: vec![CommittedRunSlice::new(
             "run",
             vec![CommittedRunStep {
@@ -713,6 +716,110 @@ async fn snapshot_does_not_publish_a_new_session_generation() {
     assert!(Arc::ptr_eq(&committed, &holder.read().unwrap()));
 }
 
+#[tokio::test]
+async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset: Arc<dyn storage::api::AtomicDatasetPort> =
+        Arc::new(storage::FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
+        dataset.clone(),
+    ));
+    let session_id = SessionId::new("resume-clear-session");
+    // 磁盘持久化完整历史：compact 边界前的 run-a 与边界后的 run-b。
+    let persisted = CanonicalSession {
+        run_slices: vec![
+            CommittedRunSlice::new(
+                "run-a",
+                vec![CommittedRunStep::accepted_only(
+                    "step-a",
+                    AcceptedInputProjection::new(
+                        vec![Message::user("archived")],
+                        "run-a:step-a:archived",
+                        1,
+                    ),
+                )],
+            ),
+            CommittedRunSlice::new(
+                "run-b",
+                vec![CommittedRunStep::accepted_only(
+                    "step-b",
+                    AcceptedInputProjection::new(
+                        vec![Message::user("active")],
+                        "run-b:step-b:active",
+                        1,
+                    ),
+                )],
+            ),
+        ]
+        .into(),
+        ..ten_step_session(&session_id, vec![], 1)
+    };
+    writer
+        .save_initial(&persisted)
+        .await
+        .expect("initial commit");
+
+    // resume 后内存仅装载 compact 边界后的 active step。
+    let resumed = CanonicalSession {
+        run_slices: vec![CommittedRunSlice::new(
+            "run-b",
+            vec![CommittedRunStep::accepted_only(
+                "step-b",
+                AcceptedInputProjection::new(
+                    vec![Message::user("active")],
+                    "run-b:step-b:active",
+                    1,
+                ),
+            )],
+        )]
+        .into(),
+        ..persisted.clone()
+    };
+    let (repository, holder) = repository_with_session(writer, resumed);
+
+    repository
+        .clear(&session_id)
+        .await
+        .expect("clear must succeed");
+
+    // 内存历史清空，clear 边界持久化到磁盘最后被清除的 step。
+    assert!(holder.read().unwrap().run_slices.is_empty());
+    assert_eq!(
+        holder
+            .read()
+            .unwrap()
+            .cleared_after
+            .as_ref()
+            .map(|c| c.step_id.as_str()),
+        Some("step-b")
+    );
+    let manifest = dataset
+        .read_manifest(
+            &storage::api::DatasetKey::new(
+                storage::api::StorageNamespace::Session,
+                vec![format!("{}.dataset", session_id.as_str())
+                    .parse::<storage::api::SafePathSegment>()
+                    .expect("safe dataset segment")],
+            )
+            .expect("valid dataset key"),
+        )
+        .await
+        .expect("read committed manifest");
+    let names = manifest
+        .members()
+        .iter()
+        .map(storage::api::SafePathSegment::as_str)
+        .collect::<Vec<_>>();
+    // 逻辑断点：磁盘保留全部 step 成员（含内存未装载的 step-a）。
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.starts_with("step-"))
+            .count(),
+        2
+    );
+}
+
 #[cfg(feature = "dev")]
 #[tokio::test]
 async fn clear_reports_zero_persisted_structure_and_releases_old_generation() {
@@ -795,6 +902,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             workspace: SnapshotState::Captured(workspace()),
             revision: step_count as u64,
             compact: None,
+            cleared_after: None,
             run_slices,
             committed_steps: Default::default(),
             skill_load_records: Vec::new(),
@@ -1118,6 +1226,7 @@ async fn snapshot_reads_structured_projection_not_legacy_chats() {
         workspace: SnapshotState::Captured(workspace()),
         revision: 0,
         compact: None,
+        cleared_after: None,
         run_slices: vec![CommittedRunSlice::new(
             "run",
             vec![CommittedRunStep::accepted_only(
@@ -1185,6 +1294,7 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
         workspace: SnapshotState::Captured(workspace()),
         revision: 1,
         compact: None,
+        cleared_after: None,
         run_slices: vec![CommittedRunSlice::new(
             "run-existing",
             vec![CommittedRunStep::accepted_only(

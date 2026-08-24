@@ -25,7 +25,7 @@ pub use canonical_session::{
     AcceptedInputWriter, AtomicBlobAcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
     AtomicBlobToolReceiptWriter, CanonicalSessionRepository, CanonicalSessionWriter,
     NoOpAcceptedInputWriter, NoOpCanonicalSessionWriter, NoOpToolReceiptWriter,
-    ProductionMainContextFactory, SessionSaveIntent, ToolReceiptWriter,
+    ProductionMainContextFactory, ToolReceiptWriter,
 };
 pub use dataset_session_management::DatasetSessionManagement;
 pub use dataset_session_reader::{DatasetSessionReader, PreparedDatasetResume};
