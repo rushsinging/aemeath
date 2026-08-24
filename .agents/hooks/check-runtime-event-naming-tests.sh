@@ -208,8 +208,8 @@ from pathlib import Path
 import sys
 path = Path(sys.argv[1])
 source = path.read_text().replace(
-    "    CurrentRunChanged(usize),",
-    "    AgentProgress { sequence: usize },\n    CurrentRunChanged(usize),",
+    "    Error(String),",
+    "    AgentProgress { sequence: usize },\n    Error(String),",
     1,
 )
 path.write_text(source)
