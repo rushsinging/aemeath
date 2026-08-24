@@ -476,6 +476,7 @@ impl CanonicalSessionRepository {
         previous_summary: Option<&str>,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
         match &self.generator {
@@ -486,6 +487,7 @@ impl CanonicalSessionRepository {
                     context_size,
                     Some(generator.as_ref()),
                     progress.as_deref(),
+                    task_snapshot,
                     cancellation,
                 )
                 .await;
@@ -516,18 +518,24 @@ impl CanonicalSessionRepository {
         }
     }
 
-    /// #1537：将当前 Task 状态段落拼接到 compact summary 末尾。
-    ///
-    /// task 状态不经过 LLM 压缩（递进管线的 map/reduce/refresh 均不感知），
-    /// 只在 summary 定稿后追加，保证 compact 后 Agent 仍能看到任务进度。
-    /// `task_context` 为 `None` 或空时原样返回 summary。
-    fn append_task_context(summary: &str, task_context: &Option<String>) -> String {
-        let (checkpoint, _) = crate::domain::compact::split_checkpoint_and_task_state(summary);
-        match task_context {
-            Some(context) if !context.trim().is_empty() => {
-                format!("{checkpoint}\n\n## Current Task State\n{context}")
-            }
-            _ => checkpoint.to_string(),
+    /// 将 typed Task snapshot 确定性渲染为非权威 companion。
+    fn append_task_snapshot_companion(
+        summary: &str,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+    ) -> String {
+        let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(summary)
+            .map(|decoded| decoded.checkpoint().render())
+            .unwrap_or_else(|_| {
+                let (checkpoint, _) =
+                    crate::domain::compact::split_checkpoint_and_task_state(summary);
+                checkpoint.to_string()
+            });
+        match task_snapshot {
+            Some(snapshot) if !snapshot.items().is_empty() => format!(
+                "{checkpoint}\n\n## Current Task State\n{}",
+                snapshot.render_companion()
+            ),
+            _ => checkpoint,
         }
     }
 
@@ -543,7 +551,7 @@ impl CanonicalSessionRepository {
                 &source,
                 request.source.context_size,
                 request.progress.clone(),
-                &request.task_context,
+                request.task_snapshot.as_ref(),
                 &request.cancellation,
             )
             .await
@@ -615,7 +623,7 @@ impl CanonicalSessionRepository {
         source: &CompactSource,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_context: &Option<String>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
         let Some(compacted) = self
@@ -624,6 +632,7 @@ impl CanonicalSessionRepository {
                 source.previous_summary.as_deref(),
                 context_size,
                 progress,
+                task_snapshot,
                 cancellation,
             )
             .await
@@ -634,8 +643,19 @@ impl CanonicalSessionRepository {
                 Ok(None)
             };
         };
+        let reconciled_summary =
+            crate::domain::compact::CanonicalCompactSummary::decode(&compacted.summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
+                .and_then(|checkpoint| {
+                    crate::domain::compact::reconcile_checkpoint_with_task_snapshot(
+                        checkpoint,
+                        task_snapshot,
+                    )
+                })
+                .map(|checkpoint| checkpoint.render())
+                .unwrap_or_else(|_| compacted.summary.clone());
         Ok(Some(GeneratedCompact {
-            summary: Self::append_task_context(&compacted.summary, task_context),
+            summary: Self::append_task_snapshot_companion(&reconciled_summary, task_snapshot),
             recent_messages: compacted.recent_messages,
             quality: compacted.quality,
         }))
@@ -1114,7 +1134,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 &source,
                 request.context_size,
                 request.progress.clone(),
-                &request.task_context,
+                request.task_snapshot.as_ref(),
                 &tokio_util::sync::CancellationToken::new(),
             )
             .await

@@ -1,0 +1,517 @@
+# Auto-compact 结构化 Checkpoint 实施计划
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 将 auto-compact 的 map、reduce、refresh 全部改成 typed JSON 管线，并由 Context 单一 renderer 确定性生成兼容九段 Markdown checkpoint。
+
+**Architecture:** Context domain 新增局部事实与 checkpoint wire 类型，adapter 只负责提示、LLM 调用和 JSON 解码；领域归并器按来源顺序、scope 和 lifecycle 解析授权，refresh invariant 拒绝关键语义丢失或升级。既有 `ContinuationCheckpoint` 成为最终领域对象和唯一 Markdown renderer，legacy Markdown 仅保留为 previous summary 兼容读取入口。
+
+**Tech Stack:** Rust、Serde/serde_json、Tokio、现有 `CompactGenerator` Port、cargo test/clippy/fmt、架构守卫。
+
+---
+
+## 文件结构
+
+- 新建 `agent/features/context/src/domain/compact/structured_facts.rs`：定义 map 局部事实、来源、scope、lifecycle、约束动作及确定性归并规则。
+- 新建 `agent/features/context/src/domain/compact/structured_facts_tests.rs`：覆盖 JSON 严格解析、scope 降级、授权顺序与跨 scope 不升级。
+- 修改 `agent/features/context/src/domain/compact/continuation_checkpoint.rs`：增加 typed checkpoint wire 转换、protected refresh fingerprint/invariant，保留唯一 renderer 与 legacy parser。
+- 修改 `agent/features/context/src/domain/compact/continuation_checkpoint_tests.rs`：覆盖 typed wire、refresh 保护和 renderer 兼容。
+- 修改 `agent/features/context/src/domain/compact.rs`：注册并窄 re-export structured compact 类型。
+- 修改 `agent/features/context/src/adapters/compact_summary.rs`：将 map/reduce/refresh 改为 JSON 请求和 typed 解码；previous/fallback 汇入领域类型；删除自由文本阶段协议。
+- 修改 `agent/features/context/src/adapters/compact_summary_tests.rs`：使用 scripted generator 驱动全阶段 JSON，覆盖错误分类、fallback 和端到端模板输出。
+- 修改 `agent/features/context/tests/canonical_session_repository.rs`：验证 typed LLM checkpoint 经 durable compact 后仍以九段 `active_summary` 恢复。
+- 修改 `docs/design/02-modules/context-management/02-compact.md`：同步 typed pipeline、scope/lifecycle 与 renderer Target 契约。
+
+### Task 1：建立 typed map facts 契约
+
+**Files:**
+- Create: `agent/features/context/src/domain/compact/structured_facts.rs`
+- Create: `agent/features/context/src/domain/compact/structured_facts_tests.rs`
+- Modify: `agent/features/context/src/domain/compact.rs`
+
+- [ ] **Step 1: 先写 JSON round-trip 与 unknown-field 失败测试**
+
+定义测试 fixture，覆盖 `CompactFactBatch { facts }`，其中每个事实包含 `sequence`、`source`、`kind`、`text`、可选 `constraint`。反序列化类型使用 `#[serde(deny_unknown_fields)]`，测试未知字段返回错误。
+
+- [ ] **Step 2: 运行定向测试确认失败**
+
+Run: `cargo test -p context structured_facts -- --nocapture`
+
+Expected: FAIL，原因是 `structured_facts` 模块或类型尚不存在。
+
+- [ ] **Step 3: 实现领域类型**
+
+实现以下受限枚举并统一 `snake_case` 序列化：
+
+- `CompactFactSource::{MainUser, AssistantReport, ToolInvocation, ToolResult, SystemGenerated, SubagentInstruction, Unknown}`
+- `ConstraintScope::{Session, Task, Phase, ToolCall, Unknown}`
+- `ConstraintLifecycle::{Persistent, UntilTaskEnd, UntilPhaseEnd, UntilToolCallEnd, Unknown}`
+- `ConstraintAction::{Grant, Restrict, Revoke, Supersede}`
+- `CompactFactKind::{Constraint, Objective, CommittedFact, WorkingSet, Risk, ResumeCandidate, Revalidation, Milestone}`
+
+构造函数必须验证：空文本非法；`kind=constraint` 必须带 constraint metadata；其他 kind 禁止携带 constraint metadata；sequence 用 `u64`。
+
+- [ ] **Step 4: 实现 scope 安全归一化**
+
+规则固定为：只有 `source=main_user` 可保留 `scope=session`；其他来源声明的 session scope 必须降为 `unknown`，并转入 risk，禁止进入 immutable constraints。`SubagentInstruction`、`SystemGenerated` 和 `Unknown` 不能产生主 Session grant/restrict/revoke/supersede。
+
+- [ ] **Step 5: 运行测试确认通过**
+
+Run: `cargo test -p context structured_facts -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 6: 提交领域事实契约**
+
+Run:
+
+```bash
+git add agent/features/context/src/domain/compact.rs \
+  agent/features/context/src/domain/compact/structured_facts.rs \
+  agent/features/context/src/domain/compact/structured_facts_tests.rs
+git commit -m "feat(context): add typed compact fact contract"
+```
+
+### Task 2：将 typed facts 归并为 continuation checkpoint
+
+**Files:**
+- Modify: `agent/features/context/src/domain/compact/structured_facts.rs`
+- Modify: `agent/features/context/src/domain/compact/structured_facts_tests.rs`
+- Modify: `agent/features/context/src/domain/compact/continuation_checkpoint.rs`
+- Modify: `agent/features/context/src/domain/compact/continuation_checkpoint_tests.rs`
+
+- [ ] **Step 1: 先写授权生命周期回归测试**
+
+覆盖以下顺序：tool-call 只读限制后出现 main-user 实施授权，最终 immutable constraints 不得包含 tool-call 只读；同一 session scope 的 later revoke/supersede 必须替代早期 restrict；unknown scope 不得扩大成 session scope。
+
+- [ ] **Step 2: 写 checkpoint wire 与 renderer 测试**
+
+定义 `ContinuationCheckpointWire` 的 JSON fixture，字段对应九段语义但不含 Markdown 标题；验证 `try_from_wire(...).render()` 仍产生固定顺序九段标题且唯一 `Next action`。
+
+- [ ] **Step 3: 运行测试确认失败**
+
+Run: `cargo test -p context continuation_checkpoint structured_facts -- --nocapture`
+
+Expected: FAIL，缺少 wire 转换和归并器。
+
+- [ ] **Step 4: 实现顺序归并器**
+
+按 `(sequence, 原始位置)` 稳定排序。约束只在同一 scope identity 内执行 grant/restrict/revoke/supersede；task/phase/tool_call 缺少可证明 identity 时保持 scoped risk，不提升为 immutable constraint。目标取最新 main-user objective；committed fact 只接受 ToolResult 或 durable-evidence 标记；assistant 报告进入 working set/risk。
+
+- [ ] **Step 5: 实现 typed checkpoint wire 转换**
+
+`ContinuationCheckpointWire` 使用 `deny_unknown_fields`；`next_action` 为单一字符串而非数组；`status` 复用可 serde 的 `ContinuationStatus`。转换时调用现有 `ContinuationCheckpoint::from_sections`，Markdown renderer 仍只保留一处。
+
+- [ ] **Step 6: 运行定向测试确认通过**
+
+Run: `cargo test -p context continuation_checkpoint structured_facts -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 7: 提交归并与 wire 类型**
+
+Run:
+
+```bash
+git add agent/features/context/src/domain/compact/structured_facts.rs \
+  agent/features/context/src/domain/compact/structured_facts_tests.rs \
+  agent/features/context/src/domain/compact/continuation_checkpoint.rs \
+  agent/features/context/src/domain/compact/continuation_checkpoint_tests.rs
+git commit -m "feat(context): reduce compact facts into typed checkpoint"
+```
+
+### Task 3：建立 refresh 受保护语义 invariant
+
+**Files:**
+- Modify: `agent/features/context/src/domain/compact/continuation_checkpoint.rs`
+- Modify: `agent/features/context/src/domain/compact/continuation_checkpoint_tests.rs`
+
+- [ ] **Step 1: 先写 refresh 拒绝测试**
+
+分别验证 refresh 不能删除/改写 immutable constraints、不能提升 current objective 动作级别、不能改变 next action、不能删除 prohibited lines、不能把 `WaitingForUser` 改为 `Continue`、不能删除 waiting reason。
+
+- [ ] **Step 2: 写允许压缩测试**
+
+验证 refresh 可以减少 committed facts、working set、risks 和 archived milestones，只要受保护字段逐字保持且 token 更少。
+
+- [ ] **Step 3: 运行测试确认失败**
+
+Run: `cargo test -p context refresh -- --nocapture`
+
+Expected: FAIL，缺少 refresh invariant。
+
+- [ ] **Step 4: 实现 `validate_refresh_from`**
+
+以 typed 字段比较而非 Markdown 文本搜索：immutable constraints、current objective、resume next action、resume prohibited lines、status 和 status reason 构成 protected identity；新 checkpoint 必须等于旧值。普通字段只允许减少或重述，不参与权限判断。
+
+- [ ] **Step 5: 运行测试确认通过**
+
+Run: `cargo test -p context refresh -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 6: 提交 refresh invariant**
+
+Run:
+
+```bash
+git add agent/features/context/src/domain/compact/continuation_checkpoint.rs \
+  agent/features/context/src/domain/compact/continuation_checkpoint_tests.rs
+git commit -m "fix(context): protect compact semantics during refresh"
+```
+
+### Task 4：将单块 map 调用改为 typed JSON
+
+**Files:**
+- Modify: `agent/features/context/src/adapters/compact_summary.rs`
+- Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
+
+- [ ] **Step 1: 先改测试 generator 返回 `CompactFactBatch` JSON**
+
+新增 `ScriptedCompactGenerator`，以线程安全队列按调用顺序返回 JSON，并记录请求文本。单块测试断言提示词要求“JSON only”、包含 schema 字段说明、不包含九个 Markdown 标题或 `<summary>` 标签。
+
+- [ ] **Step 2: 运行单块测试确认失败**
+
+Run: `cargo test -p context compact_with_generator_uses_llm_summary -- --nocapture`
+
+Expected: FAIL，当前实现仍解析 `<summary>` Markdown。
+
+- [ ] **Step 3: 实现通用 typed JSON 解码**
+
+替换 `parse_compact_response`/`llm_generate` 为泛型或阶段专用 decode helper：去除可选 fenced JSON 外壳后用 `serde_json::from_str` 解码；空文本、非法 JSON、未知字段统一映射到 `InvalidSummary`，错误消息带 `map`/`reduce`/`refresh` stage。
+
+- [ ] **Step 4: 构建 map 请求**
+
+`build_compact_request` 输出局部事实 schema 指令。序号由 Context 给每条输入消息分配稳定区间，LLM 只能引用给定 sequence；Message metadata 映射为 `MainUser/SystemGenerated`，assistant/tool block 分别映射来源。不能从当前 Message 数据证明 subagent identity 时，提示模型使用 `unknown`，不得猜 session scope。
+
+- [ ] **Step 5: 单块路径本地归并并渲染**
+
+单块返回 `CompactFactBatch` 后直接调用领域归并器生成 `ContinuationCheckpoint`，归一化预算，再由 `render()` 生成 summary。
+
+- [ ] **Step 6: 运行相关测试确认通过**
+
+Run: `cargo test -p context compact_summary_tests -- --nocapture`
+
+Expected: 单块、fallback、取消、进度测试通过；map-reduce 测试可暂时仍失败并在下一任务修复。
+
+- [ ] **Step 7: 提交单块 typed map**
+
+Run:
+
+```bash
+git add agent/features/context/src/adapters/compact_summary.rs \
+  agent/features/context/src/adapters/compact_summary_tests.rs
+git commit -m "feat(context): decode typed compact map facts"
+```
+
+### Task 5：将 map-reduce 改为 typed facts 和 typed checkpoint
+
+**Files:**
+- Modify: `agent/features/context/src/adapters/compact_summary.rs`
+- Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
+
+- [ ] **Step 1: 先写多块 scripted 测试**
+
+按 N 个 map 响应加一个 reduce 响应排队。断言 map 响应解码为 facts；reduce 请求包含 JSON facts 数组；reduce 返回 `ContinuationCheckpointWire`；并发完成顺序不同仍按 chunk index/sequence 稳定合并。
+
+- [ ] **Step 2: 写跨 chunk 权限回归测试**
+
+chunk 1 包含 tool-call scoped `restrict`，chunk 2 包含 later main-user session `grant/supersede`；最终 Markdown 不得出现全 Session 禁止写入，当前目标和 next action 必须使用 later user 要求。
+
+- [ ] **Step 3: 运行 map-reduce 测试确认失败**
+
+Run: `cargo test -p context map_reduce -- --nocapture`
+
+Expected: FAIL，reduce 仍消费 Markdown 分段摘要。
+
+- [ ] **Step 4: 实现 typed map-reduce**
+
+并发 map 返回 `(chunk_index, CompactFactBatch)`；按 chunk index 排序并重编号/验证 sequence；reduce prompt 只包含 JSON facts 与 checkpoint wire schema；decode 后执行本地 scope validator、checkpoint normalizer 和 renderer。
+
+- [ ] **Step 5: 运行 map-reduce 测试确认通过**
+
+Run: `cargo test -p context map_reduce -- --nocapture`
+
+Expected: PASS，包括并发上限、进度和 chunk 数测试。
+
+- [ ] **Step 6: 提交 typed reduce**
+
+Run:
+
+```bash
+git add agent/features/context/src/adapters/compact_summary.rs \
+  agent/features/context/src/adapters/compact_summary_tests.rs
+git commit -m "feat(context): reduce typed compact facts"
+```
+
+### Task 6：将 refresh 改为 typed checkpoint
+
+**Files:**
+- Modify: `agent/features/context/src/adapters/compact_summary.rs`
+- Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
+
+- [ ] **Step 1: 先写 typed refresh scripted 测试**
+
+让 reduce 返回超预算 wire，refresh 返回更短 wire；断言请求传递 JSON checkpoint，不传 Markdown，并在受保护字段不变时接受。
+
+- [ ] **Step 2: 写恶意 refresh 回归测试**
+
+refresh 删除只读/授权边界或把 `WaitingForUser` 改为 `Continue` 时，结果必须拒绝并保留上一版较长 checkpoint；不得转成新的保守 session 限制。
+
+- [ ] **Step 3: 运行 refresh 测试确认失败**
+
+Run: `cargo test -p context refresh -- --nocapture`
+
+Expected: FAIL，refresh 仍使用 Markdown。
+
+- [ ] **Step 4: 实现 typed refresh**
+
+`llm_refresh` 接收 `&ContinuationCheckpoint`，序列化 wire 后请求更短 wire；decode 后先 `validate_refresh_from`，再比较 token 数。非法 refresh 记阶段化 warning，并沿用原 checkpoint；取消继续中止且不 fallback。
+
+- [ ] **Step 5: 运行 refresh 测试确认通过**
+
+Run: `cargo test -p context refresh -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 6: 提交 typed refresh**
+
+Run:
+
+```bash
+git add agent/features/context/src/adapters/compact_summary.rs \
+  agent/features/context/src/adapters/compact_summary_tests.rs
+git commit -m "fix(context): validate typed compact refresh"
+```
+
+### Task 7：统一 previous summary 与 local fallback
+
+**Files:**
+- Modify: `agent/features/context/src/adapters/compact_summary.rs`
+- Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
+- Modify: `agent/features/context/src/domain/compact/continuation_checkpoint.rs`
+
+- [ ] **Step 1: 先写 previous checkpoint typed 输入测试**
+
+验证现有九段 Markdown 只在边界解析一次为 `ContinuationCheckpoint`，随后以 JSON wire 进入 map/reduce；`Current Task State` companion 继续剥离且不发送给 LLM。
+
+- [ ] **Step 2: 先写 fallback 不产生虚构 session 权限测试**
+
+历史只包含 subagent/tool-call “只读”时，fallback 的 immutable constraints 不得生成主 Session 禁写；无法确认 scope 的限制进入 risk/revalidation。最新主用户明确批准实施时，current objective/next action 反映实施，但不自行增加 commit/push/merge 权限。
+
+- [ ] **Step 3: 运行 fallback 测试确认失败**
+
+Run: `cargo test -p context fallback -- --nocapture`
+
+Expected: 至少权限 scope 回归 FAIL。
+
+- [ ] **Step 4: 重写 local fallback 为 typed 构造**
+
+本地扫描直接生成 `CompactFactBatch`，复用同一领域归并器；删除硬编码的全 Session “Preserve action level; do not infer new authority” immutable constraint，改为 scope 不明风险与 required revalidation。仅最终调用 renderer。
+
+- [ ] **Step 5: 清理自由文本阶段协议**
+
+删除 `<summary>` parser、Markdown reduce part 拼装、LLM Markdown normalizer 和不再使用的测试常量。保留 `ContinuationCheckpoint::parse` 仅用于持久化 legacy/current nine-section 兼容读取。
+
+- [ ] **Step 6: 运行 compact 全部测试**
+
+Run: `cargo test -p context compact -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 7: 提交统一 fallback**
+
+Run:
+
+```bash
+git add agent/features/context/src/adapters/compact_summary.rs \
+  agent/features/context/src/adapters/compact_summary_tests.rs \
+  agent/features/context/src/domain/compact/continuation_checkpoint.rs
+git commit -m "fix(context): unify compact fallback through typed facts"
+```
+
+### Task 8：补 durable session 契约和设计文档
+
+**Files:**
+- Modify: `agent/features/context/tests/canonical_session_repository.rs`
+- Modify: `docs/design/02-modules/context-management/02-compact.md`
+
+- [ ] **Step 1: 先写 durable compact 集成测试**
+
+更新 fixed generator 返回 typed JSON。断言 compact commit 后 `active_summary` 是九段 renderer 输出，resume 后逐字一致，quality 为 LLM；非法 JSON fallback 保留对应 failure kind。
+
+- [ ] **Step 2: 运行集成测试确认失败**
+
+Run: `cargo test -p context --test canonical_session_repository commit_compaction_with_generator_uses_llm_summary -- --nocapture`
+
+Expected: FAIL，fixture 仍使用 Markdown 响应。
+
+- [ ] **Step 3: 更新集成 fixture 并跑通**
+
+复用测试模块内 JSON helper，禁止复制生产归并逻辑；断言最终 summary 可被 `ContinuationCheckpoint::parse` 读取。
+
+- [ ] **Step 4: 核对并完成设计文档门禁**
+
+确认文档明确 map facts、reduce/refresh typed checkpoint、scope/lifecycle、single renderer、legacy Markdown 边界与错误语义；正文不引用 Issue/PR 编号，只在修改历史保留关联。
+
+- [ ] **Step 5: 运行集成测试**
+
+Run: `cargo test -p context --test canonical_session_repository -- --nocapture`
+
+Expected: PASS。
+
+- [ ] **Step 6: 提交集成契约与文档**
+
+Run:
+
+```bash
+git add agent/features/context/tests/canonical_session_repository.rs \
+  docs/design/02-modules/context-management/02-compact.md
+git commit -m "test(context): cover durable typed compact checkpoint"
+```
+
+### Task 9：完整验证、Issue 门禁与 PR
+
+**Files:**
+- Modify only if validation reveals an in-scope defect.
+
+- [ ] **Step 1: 格式与差异检查**
+
+Run: `cargo fmt --all -- --check && git diff --check`
+
+Expected: PASS。
+
+- [ ] **Step 2: context 全测试**
+
+Run: `cargo test -p context`
+
+Expected: PASS，0 failed。
+
+- [ ] **Step 3: context clippy**
+
+Run: `cargo clippy -p context --all-targets -- -D warnings`
+
+Expected: PASS，0 warnings。
+
+- [ ] **Step 4: 架构守卫**
+
+Run: `bash .agents/hooks/check-architecture-guards.sh`
+
+Expected: PASS；如脚本要求其他入口，按输出运行仓库登记的等价 guard，禁止绕过。
+
+- [ ] **Step 5: 检查死代码和废弃协议残留**
+
+Run: `rg -n '<summary>|Part [0-9]+ summary|Write your summary inside|normalize_generated_checkpoint' agent/features/context/src`
+
+Expected: 不存在 map/reduce/refresh 自由文本阶段协议；仅允许明确的 legacy compatibility 引用，并在 PR 说明理由。
+
+- [ ] **Step 6: 更新 Issue 清单和 Release Gate**
+
+用 `gh issue view 1582 --repo rushsinging/aemeath` 逐项核对 checklist；已完成项勾选，N/A 项记录证据。确认 #579 仍关联 #1582。
+
+- [ ] **Step 7: 同步最新 main**
+
+Run: `git pull origin main`
+
+Expected: 成功合并或快进；若冲突，逐项保留双方测试保护行为并重跑 Step 1–4。
+
+- [ ] **Step 8: 推送并创建 PR**
+
+PR 标题：`fix(context): structure auto-compact checkpoint pipeline`
+
+PR body 必须包含：根因、typed map/reduce/refresh、scope 防升级、legacy 兼容、文档核对、完整 Test plan，以及 `Closes #1582`。
+
+- [ ] **Step 9: 查询 PR 状态**
+
+Run: `gh pr view <PR编号> --repo rushsinging/aemeath --json url,state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,headRefOid`
+
+Expected: PR OPEN、非 Draft；报告真实 required checks 状态，未经当前 head 的具体授权不合并。
+
+## 根因收敛补充：Rust-owned Reduce
+
+真实运行证明，要求 LLM 输出完整 `ContinuationCheckpointWire` 即使经过格式修复仍会把 string、string array 与 object 混淆。根因方案调整为：
+
+1. 所有 Map chunk 只输出 `CompactFactBatch`。
+2. Context 按 chunk index 与 fact sequence 合并 fact batch，并由 `reduce_compact_facts` 确定性构造完整 `ContinuationCheckpoint`。
+3. LLM 不再生成完整 checkpoint wire，也不能写入 immutable constraints、current objective、resume cursor、continuation status 或 continuation reason。
+4. checkpoint 超预算时，LLM 只返回 `CheckpointCompressionPatch`，字段限定为 committed facts、working set、risks、required revalidation、archived milestones 与 resume context。
+5. Context 将 patch 应用到原 checkpoint，同时保留全部 protected semantics；非法 patch 先进行一次格式修复，仍失败则保留当前 checkpoint。
+6. 删除旧的 LLM checkpoint Reduce prompt、wire decode 和相关兼容测试，避免形成第二条 authoritative construction path。
+
+执行步骤：
+
+1. 添加多块 Map 本地归并失败测试，证明 Reduce 阶段不再请求完整 checkpoint。
+2. 添加 typed compression patch schema、repair 和 protected-field 测试。
+3. 实现 Rust-owned multi-chunk fact reduction。
+4. 实现并应用非保护字段 compression patch。
+5. 清理 LLM full-wire Reduce 路径并同步 durable contract。
+6. 运行 Context、Clippy、架构守卫与 pre-push 等价验证。
+7. 创建本地提交，不推送。
+
+## 语义新鲜度补充：typed Task snapshot 参与 Reduce
+
+真实运行证明 Rust-owned Reduce 和 typed Refresh 已消除完整 checkpoint schema fallback，但权威 checkpoint 与压缩后追加的 `Current Task State` companion 仍会冲突：消息 facts 可能声称修复尚无证据，而较新的 Task aggregate 已记录实现与验证完成。根因是 Task 状态仅以 Markdown 在 checkpoint 定稿后追加，未参与领域归并。
+
+领域与数据流约束：
+
+1. Runtime 从 `TaskAccess` 构造 Context-owned `CompactTaskSnapshot`，携带 Task revision、active batch summary/status、按 sequence 排序的 typed task items，以及每项 subject/status/blocking dependency；Markdown 不作为输入协议。
+2. `CompactRequest` 与 `ManualCompactRequest` 传递同一个 typed snapshot；展示用 `Current Task State` 由该 snapshot 确定性渲染，避免 typed state 与 companion 双源漂移。
+3. Context 在 Rust-owned Reduce 完成后、预算归一化前协调 task snapshot：唯一 in-progress task 成为唯一 Next action；其余未完成 task 只进入 resume context；completed task 只作为状态证据用于移除与其 subject 对应的陈旧 working-set/risk/revalidation 项，不自动升级为 committed fact，也不覆盖 main-user objective。
+4. Task snapshot 不是用户授权来源，不能建立、删除或改变 immutable constraints、prohibited actions、continuation status/reason，也不能在缺少 active batch 或唯一 executable task 时覆盖 main-user objective/Next action。
+5. Task snapshot revision 只证明同一 Task aggregate 内的新鲜度，不与消息 fact sequence 混用；只有 `Active` batch 参与 authoritative reconciliation，paused/archived snapshot 仅供 companion 展示。
+6. 最终 checkpoint 仍由 `ContinuationCheckpoint::render` 生成兼容九段；task companion 仍为非权威附录。
+
+TDD 与跨层证据：
+
+1. Domain 失败测试：active snapshot 校正 objective、完成项清除陈旧 working set、唯一 in-progress task 成为唯一 Next action，且 protected semantics 不变。
+2. Domain 失败测试：paused/archived、多个 in-progress、全部 completed 或无可执行 pending 时 fail closed，不覆盖 main-user objective/Next action。
+3. Runtime adapter 失败测试：`TaskAccess` 生成 typed snapshot，并由同一 snapshot 渲染 companion。
+4. Context repository 失败测试：typed snapshot 穿透 request → generation → commit，checkpoint 与 companion 状态一致。
+5. 运行 focused tests、`cargo fmt --all -- --check`、`cargo test -p context`、`cargo build -p context`、严格 Clippy、`git diff --check` 和完整架构守卫。
+6. 创建本地提交，不推送。
+
+## 摘要质量补充：typed fact identity 与生命周期归并
+
+真实 session 回放显示 typed checkpoint、Rust-owned Reduce 与 Task snapshot 已能稳定生成一致的恢复游标，但同一 PR/CI/branch/worktree 的历次动态状态、旧 objective/cursor 和跨分区重复仍会逐轮累积。根因是 `CompactFact` 只有 kind、text 和 sequence，没有可验证的实体身份、状态维度或生命周期；Reducer 只能追加文本，无法确定新事实是否替代旧状态。
+
+领域模型与 authority 约束：
+
+1. 非约束 fact 可携带可选 `identity`，由 `entity`、`key`、`dimension` 和 `lifecycle` 组成。只有四项都经过严格枚举/非空校验后，Reducer 才允许做 supersession；缺失或不完整 identity 时 fail closed，保留原事实。
+2. `entity` 表达稳定对象类型（pull_request、ci_run、branch、worktree、task、test_suite、deployment、other），`key` 表达同一对象的稳定标识，`dimension` 表达被观察的单一状态轴，`lifecycle` 区分 persistent、dynamic、task、phase、ephemeral。sequence 只决定同一 Map 历史流中的来源顺序，不与 Task revision 混用。
+3. 同 `entity + key + dimension` 的 dynamic fact 只保留 source order 最新项；persistent facts 不因 identity 相同而静默删除。旧动态状态不会自动进入 milestone，只有显式 milestone fact 才可归档。
+4. 动态 current-state fact 的 section owner 固定为 Required Revalidation；LLM 不得把它提升为 Committed Facts。跨分区完全重复按稳定 owner 优先级保留一份；无法证明语义相同时不得模糊合并。
+5. main-user Current Objective 继续按 source order 只保留最新一项；非 main-user objective 与 resume candidate 只在仍可能影响恢复且未被更新的情况下保守留风险。active Task snapshot 的唯一 in-progress task仍是唯一 Next action，Task companion 中的 pending/completed 展示不得在权威 section 重复生成。
+6. 预算归一化先执行 typed supersession、owner 规范化和精确去重，再按 section 价值淘汰；Immutable Constraints、Current Objective、唯一 Next action、prohibited actions、Continuation Status/reason 永不裁剪。Refresh patch只能压缩归并后的非保护集合，不能恢复被 Rust supersede 的条目。
+7. previous checkpoint 仍以九段兼容文本持久化；没有 typed identity 的历史条目只能执行保守的精确去重和已知动态状态迁移，不通过正则猜测实体后删除，避免错误淘汰。
+
+TDD 与验收证据：
+
+1. Domain schema 测试：identity JSON 严格 round-trip，拒绝未知字段、空 key/dimension、constraint 携带 identity，以及非 constraint 携带 constraint metadata。
+2. Domain Reduce 测试：同 PR CI 维度只保留最新状态；不同维度、不同实体或 persistent lifecycle 均不得互相覆盖；乱序 Map batch 按 sequence 与原始稳定顺序归并。
+3. Domain owner 测试：dynamic committed fact 进入 Required Revalidation；同一 identity 在 working/risk/revalidation 中只保留最新 owner；旧 non-main objective/cursor 不与当前权威 objective/cursor 并存。
+4. Task 测试：pending task 不重复进入 working set；completed task 清理对应陈旧工作；唯一 in-progress task仍生成唯一 Next action且不覆盖 main-user objective。
+5. Adapter 契约测试：Map prompt 发布完整 identity schema；multi-chunk Map 的 typed identity 在本地 Reduce 中生效；Refresh 输入不包含已 supersede 的状态且 patch 不能恢复 protected semantics。
+6. 真实样本合成回放：九段顺序不变、Next action 恰好一个、Current Task State 恰好一个、同一 PR/branch 动态维度至多一项，摘要长度显著下降且连续归一化幂等。
+7. 运行 focused tests、Context/Runtime 全测、`cargo fmt --all -- --check`、严格 Clippy、build、`git diff --check` 和完整架构守卫；创建本地提交，不推送。
+
+## 空 Map 响应补充：typed 终态、原请求重试与局部降级
+
+真实运行显示 10 个并发 Map chunk 中至少一个 provider 调用以 Completed 结束但没有文本；当前 `CompactGenerator` 只返回 `String`，丢失 stop reason 与 delta 计数，`llm_generate` 又在空文本处提前返回，使 typed repair 无法执行。Map 收集使用 fail-fast `?`，因此一个空 chunk 会丢弃全部成功 typed facts并把整轮降级为低质量文本 fallback。
+
+根因设计：
+
+1. `CompactGenerator` 返回 Context-owned `CompactGenerationOutput`，包含 text、稳定的 completion reason、text delta count、non-text delta count 与 completed 标志；Runtime adapter 从 Provider stream 确定性填充，Context 不依赖 provider 类型。
+2. 每个 Map chunk 都有明确 index/total、消息数和估算 token。首次空文本或 typed JSON/领域校验失败时，使用同一原始 chunk request 追加纠错指令后重试一次；现有只携带 invalid response 的 repair 仅用于非空 invalid typed output，空响应不能脱离原始 history 修复。
+3. Cancelled 立即终止且不重试。Provider/timeout/rate-limit 继续服从 provider 自身策略；Context 的 bounded retry只处理 InvalidSummary，避免双层网络重试。
+4. 第二次仍为 InvalidSummary 时，只对该 chunk 从原始消息构造 local typed fact batch；其他成功 chunk 保留。最终仍按 chunk index 与 fact sequence 进入单一 Rust-owned Reduce，不新增 backing、Markdown protocol 或平行 L5 路径。
+5. 质量类型区分完整 LLM、partial Map degradation 与整轮 local fallback；局部降级必须保留失败 kind 和降级 chunk 数，不能误报为完整 LLM。
+6. 日志只记录安全结构元数据：stage、chunk index/total、attempt、input messages/tokens、failure kind、completion reason、output chars、delta counts、completed，以及最终 successful/degraded counts。per-chunk 和中间重试用 debug，最终 chunk降级用 warn，总体生命周期用 info；不得记录 prompt、响应正文、身份信息或凭据。
+7. 失败 chunk 的 local facts 必须经过与正常 Map 相同的 `CompactFactBatch`、Task reconciliation、预算归一化和 renderer；protected semantics、唯一 Next action、authority/scope/lifecycle/action 均不得旁路。
+
+TDD 与验证：
+
+1. Runtime 单元测试证明 Text/非文本 delta 计数和 Completed stop reason 完整映射；stream 无 Completed 仍为 Provider failure。
+2. Context 单块测试证明空响应使用原始 history 重试一次，非空 invalid JSON仍保留 bounded repair，Cancelled 不重试。
+3. Context 多块测试证明一块持续 InvalidSummary 时其余 typed facts不丢失、局部 fallback按 chunk顺序归并，并报告 partial degradation；Provider/Timeout 不被 Context重复请求。
+4. 日志调用通过源码契约测试/守卫证明 target、level 和字段存在，且不包含消息正文。
+5. 运行 Context/Runtime focused 与全量测试、fmt、严格 Clippy、build、diff check、完整架构守卫；仅创建本地提交，不推送。

@@ -32,6 +32,170 @@ const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 Continue — TUI consumption remains."#;
 
 #[test]
+fn compression_patch_changes_only_unprotected_sections() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+    let protected_wire = original.to_wire();
+    let patch = CheckpointCompressionPatch {
+        committed_facts: vec!["Commit `5e42c9aa` passed tests.".to_string()],
+        uncommitted_working_set: vec!["TUI remains.".to_string()],
+        open_decisions_and_risks: vec!["Compatibility ownership remains open.".to_string()],
+        resume_context: vec!["Worktree: structured compact".to_string()],
+        required_revalidation: vec!["Recheck PR state.".to_string()],
+        archived_milestones: vec!["Baseline `5e42c9aa`.".to_string()],
+    };
+
+    let compressed = original.apply_compression_patch(patch).unwrap();
+    let compressed_wire = compressed.to_wire();
+
+    assert_eq!(
+        compressed_wire.immutable_constraints,
+        protected_wire.immutable_constraints
+    );
+    assert_eq!(
+        compressed_wire.current_objective,
+        protected_wire.current_objective
+    );
+    assert_eq!(
+        compressed_wire.resume_cursor.next_action,
+        protected_wire.resume_cursor.next_action
+    );
+    assert_eq!(
+        compressed_wire.resume_cursor.prohibited_actions,
+        protected_wire.resume_cursor.prohibited_actions
+    );
+    assert_eq!(
+        compressed_wire.continuation_status,
+        protected_wire.continuation_status
+    );
+    assert_eq!(
+        compressed_wire.continuation_reason,
+        protected_wire.continuation_reason
+    );
+    assert_eq!(
+        compressed_wire.committed_facts,
+        vec!["Commit `5e42c9aa` passed tests."]
+    );
+    assert_eq!(
+        compressed_wire.uncommitted_working_set,
+        vec!["TUI remains."]
+    );
+}
+
+#[test]
+fn compression_patch_rejects_unknown_fields() {
+    let source = r#"{
+      "committed_facts": [],
+      "uncommitted_working_set": [],
+      "open_decisions_and_risks": [],
+      "resume_context": [],
+      "required_revalidation": [],
+      "archived_milestones": [],
+      "current_objective": "must not be writable"
+    }"#;
+
+    let error = serde_json::from_str::<CheckpointCompressionPatch>(source).unwrap_err();
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn typed_checkpoint_wire_renders_the_compatible_nine_sections() {
+    let source = r#"{
+      "immutable_constraints": ["Do not merge without approval."],
+      "current_objective": "Implement typed compact checkpoints.",
+      "committed_facts": ["Context baseline tests passed."],
+      "uncommitted_working_set": ["Typed fact reducer is in progress."],
+      "open_decisions_and_risks": ["Provider may return invalid JSON."],
+      "resume_cursor": {
+        "context": ["Worktree: structured compact"],
+        "next_action": "Run the reducer tests.",
+        "prohibited_actions": ["Do not merge without approval."]
+      },
+      "required_revalidation": ["Recheck worktree status."],
+      "archived_milestones": ["Baseline `45911518` established."],
+      "continuation_status": "continue",
+      "continuation_reason": "Implementation remains."
+    }"#;
+
+    let wire: ContinuationCheckpointWire = serde_json::from_str(source).unwrap();
+    let checkpoint = ContinuationCheckpoint::try_from(wire).unwrap();
+    let rendered = checkpoint.render();
+
+    assert_eq!(rendered.matches("## ").count(), 9);
+    assert_eq!(rendered.matches("- Next action:").count(), 1);
+    assert!(rendered.contains("## Current Objective\n- Implement typed compact checkpoints."));
+    assert!(rendered.contains("Continue — Implementation remains."));
+    assert_eq!(
+        ContinuationCheckpoint::parse(&rendered).unwrap(),
+        checkpoint
+    );
+}
+
+#[test]
+fn typed_checkpoint_wire_rejects_unknown_fields() {
+    let source = r#"{
+      "immutable_constraints": [],
+      "current_objective": "Continue.",
+      "committed_facts": [],
+      "uncommitted_working_set": [],
+      "open_decisions_and_risks": [],
+      "resume_cursor": {"context": [], "next_action": "Continue.", "prohibited_actions": []},
+      "required_revalidation": [],
+      "archived_milestones": [],
+      "continuation_status": "continue",
+      "continuation_reason": "Work remains.",
+      "unexpected": true
+    }"#;
+
+    let error = serde_json::from_str::<ContinuationCheckpointWire>(source).unwrap_err();
+
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
+fn refresh_rejects_any_protected_semantic_change() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+
+    for changed in [
+        COMPLETE_CHECKPOINT.replace("- NEVER merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue the content-stream migration without widening scope.",
+            "Implement and merge the content-stream migration.",
+        ),
+        COMPLETE_CHECKPOINT.replace(
+            "inspect all legacy Token/Thinking consumers.",
+            "edit all legacy consumers.",
+        ),
+        COMPLETE_CHECKPOINT.replace("- Prohibited: do not merge PR #1541.", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "Continue — TUI consumption remains.",
+            "Waiting for User — approval required.",
+        ),
+    ] {
+        let refreshed = ContinuationCheckpoint::parse(&changed).unwrap();
+        let error = refreshed
+            .validate_refresh_from(&original)
+            .expect_err("protected compact semantics must not change during refresh");
+        assert!(matches!(error, CheckpointError::ProtectedRefreshChanged));
+    }
+}
+
+#[test]
+fn refresh_allows_shortening_unprotected_sections() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+    let shortened_source = COMPLETE_CHECKPOINT
+        .replace("- Commit `5e42c9aa` passed Runtime and CLI tests.", "")
+        .replace("- Runtime and SDK are migrated; TUI remains.", "")
+        .replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            "",
+        )
+        .replace("- ToolCall split completed in `5e42c9aa`.", "");
+    let shortened = ContinuationCheckpoint::parse(&shortened_source).unwrap();
+
+    shortened.validate_refresh_from(&original).unwrap();
+}
+
+#[test]
 fn parses_complete_checkpoint_with_one_resume_cursor() {
     let checkpoint =
         ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).expect("checkpoint must parse");
@@ -234,6 +398,61 @@ fn normalization_fails_when_protected_sections_exceed_budget() {
 }
 
 #[test]
+fn budget_normalization_prefers_active_work_over_committed_history() {
+    let committed_noise = (0..80)
+        .map(|index| {
+            format!(
+                "- Historical verified fact {index}: {}",
+                "detail ".repeat(15)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let working = "- CURRENT-WORK verify compatibility on local copies.";
+    let risk = "- CURRENT-RISK database head differs from the downloaded bundle.";
+    let source = COMPLETE_CHECKPOINT
+        .replace(
+            "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+            &committed_noise,
+        )
+        .replace("- Runtime and SDK are migrated; TUI remains.", working)
+        .replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            risk,
+        );
+
+    let normalized = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(1_000)
+        .unwrap()
+        .render();
+
+    assert!(normalized.contains("CURRENT-WORK"));
+    assert!(normalized.contains("CURRENT-RISK"));
+    assert!(!normalized.contains("Historical verified fact 79"));
+    assert!(crate::domain::token_budget::estimate_tokens(&normalized) <= 1_000);
+}
+
+#[test]
+fn normalization_is_idempotent_after_owner_and_budget_cleanup() {
+    let source = COMPLETE_CHECKPOINT.replace(
+        "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+        "- PR #1541 is OPEN and CI is green.\n- PR #1541 is OPEN and CI is green.",
+    );
+    let first = ContinuationCheckpoint::parse(&source)
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+    let second = ContinuationCheckpoint::parse(&first.render())
+        .unwrap()
+        .normalize_to_budget(10_000)
+        .unwrap();
+
+    assert_eq!(second.render(), first.render());
+    assert_eq!(second.resume_cursor().next_action_count(), 1);
+}
+
+#[test]
 fn legacy_summary_becomes_conservative_checkpoint() {
     let checkpoint = ContinuationCheckpoint::from_legacy_summary(
         "## User Requests\n- 只分析，不实现\n\n## Next Action\n- 检查当前分支\n\n## Continuation Status\nContinue — work remains.",
@@ -253,6 +472,31 @@ fn task_state_companion_is_split_from_checkpoint() {
 
     assert_eq!(checkpoint, COMPLETE_CHECKPOINT);
     assert_eq!(task_state, Some("■ #1 running"));
+}
+
+#[test]
+fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+
+    let decoded = CanonicalCompactSummary::decode(&source).expect("canonical summary must decode");
+
+    assert_eq!(decoded.checkpoint().render(), COMPLETE_CHECKPOINT);
+    assert_eq!(decoded.task_state_companion(), Some("■ #1 running"));
+}
+
+#[test]
+fn canonical_summary_rejects_unknown_authoritative_section_before_task_companion() {
+    let source = format!(
+        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current Task State\n■ #1 running"
+    );
+
+    let error = CanonicalCompactSummary::decode(&source)
+        .expect_err("unknown authoritative section must remain fail closed");
+
+    assert!(matches!(
+        error,
+        CheckpointError::UnknownSection { section: _ }
+    ));
 }
 
 #[test]

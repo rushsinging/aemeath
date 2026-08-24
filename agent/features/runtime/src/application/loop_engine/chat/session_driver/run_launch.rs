@@ -127,8 +127,7 @@ where
                         }
                     };
                     let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
-                    // #1537：idle 手动 compact 同样拼接 Task 状态。
-                    let task_context = crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+                    let task_snapshot = crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                         task_access.as_ref(),
                     );
                     let request = crate::ports::ManualCompactRequest {
@@ -137,7 +136,7 @@ where
                         system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
                         context_size,
                         progress: None,
-                        task_context,
+                        task_snapshot,
                     };
                     log::debug!(
                         target: crate::LOG_TARGET,

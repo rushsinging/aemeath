@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 const SECTION_HEADINGS: [&str; 9] = [
@@ -12,7 +13,8 @@ const SECTION_HEADINGS: [&str; 9] = [
     "Continuation Status",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ContinuationStatus {
     Continue,
     WaitingForUser,
@@ -52,6 +54,100 @@ impl ResumeCursor {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeCursorWire {
+    pub context: Vec<String>,
+    pub next_action: String,
+    pub prohibited_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckpointCompressionPatch {
+    pub committed_facts: Vec<String>,
+    pub uncommitted_working_set: Vec<String>,
+    pub open_decisions_and_risks: Vec<String>,
+    pub resume_context: Vec<String>,
+    pub required_revalidation: Vec<String>,
+    pub archived_milestones: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContinuationCheckpointWire {
+    pub immutable_constraints: Vec<String>,
+    pub current_objective: String,
+    pub committed_facts: Vec<String>,
+    pub uncommitted_working_set: Vec<String>,
+    pub open_decisions_and_risks: Vec<String>,
+    pub resume_cursor: ResumeCursorWire,
+    pub required_revalidation: Vec<String>,
+    pub archived_milestones: Vec<String>,
+    pub continuation_status: ContinuationStatus,
+    pub continuation_reason: String,
+}
+
+impl TryFrom<ContinuationCheckpointWire> for ContinuationCheckpoint {
+    type Error = CheckpointError;
+
+    fn try_from(wire: ContinuationCheckpointWire) -> Result<Self, Self::Error> {
+        let current_objective = normalize_control_text(&wire.current_objective);
+        if current_objective.is_empty() {
+            return Err(CheckpointError::MissingCurrentObjective);
+        }
+        let mut resume_cursor_lines = wire
+            .resume_cursor
+            .context
+            .into_iter()
+            .map(|line| as_bullet(&line))
+            .collect::<Vec<_>>();
+        resume_cursor_lines.extend(
+            wire.resume_cursor
+                .prohibited_actions
+                .into_iter()
+                .map(|line| format!("- Prohibited: {}", normalize_control_text(&line))),
+        );
+        Self::from_sections(CheckpointSections {
+            immutable_constraints: wire
+                .immutable_constraints
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            current_objective: vec![as_bullet(&current_objective)],
+            committed_facts: wire
+                .committed_facts
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            uncommitted_working_set: wire
+                .uncommitted_working_set
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            open_decisions_and_risks: wire
+                .open_decisions_and_risks
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            resume_cursor_lines,
+            next_action: wire.resume_cursor.next_action,
+            required_revalidation: wire
+                .required_revalidation
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            archived_milestones: wire
+                .archived_milestones
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
+            status: wire.continuation_status,
+            status_reason: Some(wire.continuation_reason),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckpointSections {
     pub immutable_constraints: Vec<String>,
@@ -68,6 +164,35 @@ pub struct CheckpointSections {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalCompactSummary<'a> {
+    checkpoint: ContinuationCheckpoint,
+    task_state_companion: Option<&'a str>,
+}
+
+impl<'a> CanonicalCompactSummary<'a> {
+    pub fn decode(source: &'a str) -> Result<Self, CheckpointError> {
+        let (checkpoint_source, task_state_companion) = split_checkpoint_and_task_state(source);
+        let checkpoint = ContinuationCheckpoint::parse(checkpoint_source)?;
+        Ok(Self {
+            checkpoint,
+            task_state_companion,
+        })
+    }
+
+    pub fn checkpoint(&self) -> &ContinuationCheckpoint {
+        &self.checkpoint
+    }
+
+    pub fn into_checkpoint(self) -> ContinuationCheckpoint {
+        self.checkpoint
+    }
+
+    pub fn task_state_companion(&self) -> Option<&'a str> {
+        self.task_state_companion
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationCheckpoint {
     sections: [Vec<String>; 9],
     resume_cursor: ResumeCursor,
@@ -75,6 +200,61 @@ pub struct ContinuationCheckpoint {
 }
 
 impl ContinuationCheckpoint {
+    pub fn to_wire(&self) -> ContinuationCheckpointWire {
+        let status_line = self.sections[8]
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .cloned()
+            .unwrap_or_default();
+        let status_word = match self.status {
+            ContinuationStatus::Continue => "Continue",
+            ContinuationStatus::WaitingForUser => "Waiting for User",
+            ContinuationStatus::Completed => "Completed",
+        };
+        let continuation_reason = status_line
+            .strip_prefix(status_word)
+            .unwrap_or(&status_line)
+            .trim_start_matches(" —")
+            .trim()
+            .to_string();
+        let resume_context = self.sections[5]
+            .iter()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                !trimmed.starts_with("- Next action:") && !trimmed.starts_with("- Prohibited:")
+            })
+            .map(|line| without_bullet(line).to_string())
+            .collect();
+        let prohibited_actions = prohibited_lines(&self.sections[5])
+            .into_iter()
+            .map(|line| {
+                line.trim_start()
+                    .trim_start_matches("- Prohibited:")
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        ContinuationCheckpointWire {
+            immutable_constraints: section_without_bullets(&self.sections[0]),
+            current_objective: self.sections[1]
+                .first()
+                .map(|line| without_bullet(line).to_string())
+                .unwrap_or_default(),
+            committed_facts: section_without_bullets(&self.sections[2]),
+            uncommitted_working_set: section_without_bullets(&self.sections[3]),
+            open_decisions_and_risks: section_without_bullets(&self.sections[4]),
+            resume_cursor: ResumeCursorWire {
+                context: resume_context,
+                next_action: self.resume_cursor.next_action.clone(),
+                prohibited_actions,
+            },
+            required_revalidation: section_without_bullets(&self.sections[6]),
+            archived_milestones: section_without_bullets(&self.sections[7]),
+            continuation_status: self.status,
+            continuation_reason,
+        }
+    }
+
     pub fn from_sections(parts: CheckpointSections) -> Result<Self, CheckpointError> {
         let next_action = normalize_control_text(&parts.next_action);
         if next_action.is_empty() {
@@ -263,6 +443,31 @@ impl ContinuationCheckpoint {
         })
     }
 
+    pub fn apply_compression_patch(
+        self,
+        patch: CheckpointCompressionPatch,
+    ) -> Result<Self, CheckpointError> {
+        let protected_wire = self.to_wire();
+        let patched = Self::try_from(ContinuationCheckpointWire {
+            immutable_constraints: protected_wire.immutable_constraints,
+            current_objective: protected_wire.current_objective,
+            committed_facts: patch.committed_facts,
+            uncommitted_working_set: patch.uncommitted_working_set,
+            open_decisions_and_risks: patch.open_decisions_and_risks,
+            resume_cursor: ResumeCursorWire {
+                context: patch.resume_context,
+                next_action: protected_wire.resume_cursor.next_action,
+                prohibited_actions: protected_wire.resume_cursor.prohibited_actions,
+            },
+            required_revalidation: patch.required_revalidation,
+            archived_milestones: patch.archived_milestones,
+            continuation_status: protected_wire.continuation_status,
+            continuation_reason: protected_wire.continuation_reason,
+        })?;
+        patched.validate_refresh_from(&self)?;
+        Ok(patched)
+    }
+
     pub fn status(&self) -> ContinuationStatus {
         self.status
     }
@@ -294,7 +499,7 @@ impl ContinuationCheckpoint {
             return Ok(self);
         }
 
-        for section_index in [7usize, 2, 3, 4] {
+        for section_index in [7usize, 2, 4, 3] {
             while !self.sections[section_index].is_empty()
                 && estimate_checkpoint_tokens(&self) > budget
             {
@@ -347,6 +552,20 @@ impl ContinuationCheckpoint {
         });
     }
 
+    pub fn validate_refresh_from(&self, previous: &Self) -> Result<(), CheckpointError> {
+        let protected_sections_match = self.sections[0] == previous.sections[0]
+            && self.sections[1] == previous.sections[1]
+            && prohibited_lines(&self.sections[5]) == prohibited_lines(&previous.sections[5])
+            && self.resume_cursor == previous.resume_cursor
+            && self.status == previous.status
+            && self.sections[8] == previous.sections[8];
+        if protected_sections_match {
+            Ok(())
+        } else {
+            Err(CheckpointError::ProtectedRefreshChanged)
+        }
+    }
+
     pub fn render(&self) -> String {
         SECTION_HEADINGS
             .iter()
@@ -379,6 +598,34 @@ fn decode_content_line(line: &str) -> String {
         .filter(|content| content.starts_with("## ") || content.starts_with(CONTENT_ESCAPE_PREFIX))
         .unwrap_or(line)
         .to_string()
+}
+
+fn section_without_bullets(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| without_bullet(line).to_string())
+        .collect()
+}
+
+fn without_bullet(line: &str) -> &str {
+    line.trim().strip_prefix("- ").unwrap_or(line.trim())
+}
+
+fn prohibited_lines(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| line.trim_start().starts_with("- Prohibited:"))
+        .collect()
+}
+
+fn as_bullet(source: &str) -> String {
+    let normalized = normalize_control_text(source);
+    if normalized.starts_with("- ") {
+        normalized
+    } else {
+        format!("- {normalized}")
+    }
 }
 
 fn normalize_control_text(source: &str) -> String {
@@ -464,6 +711,8 @@ pub enum CheckpointError {
         estimated_tokens: usize,
         budget: usize,
     },
+    ProtectedRefreshChanged,
+    MissingCurrentObjective,
     ContentBeforeFirstSection,
 }
 
@@ -492,6 +741,10 @@ impl fmt::Display for CheckpointError {
                 formatter,
                 "checkpoint 保护分区超过预算：估算 {estimated_tokens} tokens，预算 {budget} tokens"
             ),
+            Self::ProtectedRefreshChanged => {
+                write!(formatter, "refresh 修改了受保护的 continuation 语义")
+            }
+            Self::MissingCurrentObjective => write!(formatter, "Current Objective 不得为空"),
             Self::ContentBeforeFirstSection => {
                 write!(formatter, "首个 checkpoint 分区前存在非法内容")
             }

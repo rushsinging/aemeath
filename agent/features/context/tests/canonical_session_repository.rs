@@ -245,10 +245,35 @@ fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
     }
 }
 
-fn valid_checkpoint(objective: &str) -> String {
-    format!(
-        "## Immutable Constraints\n- preserve constraints\n\n## Current Objective\n- {objective}\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue"
-    )
+fn valid_fact_batch(objective: &str) -> String {
+    serde_json::json!({
+        "facts": [
+            {
+                "sequence": 1,
+                "source": "main_user",
+                "kind": "constraint",
+                "text": "preserve constraints",
+                "constraint": {
+                    "scope": "session",
+                    "lifecycle": "persistent",
+                    "action": "restrict"
+                }
+            },
+            {
+                "sequence": 2,
+                "source": "main_user",
+                "kind": "objective",
+                "text": objective
+            },
+            {
+                "sequence": 3,
+                "source": "main_user",
+                "kind": "resume_candidate",
+                "text": "continue"
+            }
+        ]
+    })
+    .to_string()
 }
 
 fn compact_request(session_id: SessionId) -> ContextRequest {
@@ -390,7 +415,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -536,7 +561,7 @@ async fn compaction_preserves_skill_load_records() {
             source: compact_request(SessionId::new(&session_id)),
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -858,7 +883,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         }),
     )
@@ -1494,14 +1519,16 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, context::domain::CompactGenerationFailure> {
+        ) -> Result<
+            context::domain::CompactGenerationOutput,
+            context::domain::CompactGenerationFailure,
+        > {
             if let Some(started) = self.started.lock().unwrap().take() {
                 let _ = started.send(());
             }
             self.release.lock().await.recv().await;
-            Ok(format!(
-                "<summary>{}</summary>",
-                valid_checkpoint("generated")
+            Ok(context::domain::CompactGenerationOutput::from(
+                valid_fact_batch("generated"),
             ))
         }
     }
@@ -1527,7 +1554,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
                     source: request,
                     trigger: CompactTrigger::Automatic,
                     progress: None,
-                    task_context: None,
+                    task_snapshot: None,
                     cancellation: tokio_util::sync::CancellationToken::new(),
                 })
                 .await
@@ -1580,7 +1607,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             &self,
             _request: Vec<Message>,
             cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             assert!(cancel.is_cancelled());
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Cancelled,
@@ -1605,7 +1632,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation,
         })
         .await
@@ -1637,7 +1664,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Provider,
@@ -1686,7 +1713,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
                 source: request.clone(),
                 trigger: CompactTrigger::Automatic,
                 progress: None,
-                task_context: None,
+                task_snapshot: None,
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -1699,7 +1726,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: CancellationToken::new(),
         })
         .await
@@ -1730,14 +1757,16 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, CompactGenerationFailure> {
+        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
             if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
                 Err(CompactGenerationFailure::new(
                     CompactGenerationFailureKind::Provider,
                     "provider failed",
                 ))
             } else {
-                Ok(format!("<summary>{}</summary>", valid_checkpoint("manual")))
+                Ok(context::domain::CompactGenerationOutput::from(
+                    valid_fact_batch("manual"),
+                ))
             }
         }
     }
@@ -1779,7 +1808,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
         source: automatic_source,
         trigger: CompactTrigger::Automatic,
         progress: None,
-        task_context: None,
+        task_snapshot: None,
         cancellation: CancellationToken::new(),
     };
     let _ = repository.commit_compaction(&automatic).await;
@@ -1792,7 +1821,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 200_000,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -1821,7 +1850,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -1846,7 +1875,7 @@ async fn manual_compaction_bypasses_automatic_threshold() {
             system_prompt: SystemPromptSpec::new("system"),
             context_size: 1_000_000,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -1921,9 +1950,11 @@ async fn second_compact_advances_single_marker() {
         "second compact marker must contain a valid continuation checkpoint: {}",
         marker.summary
     );
-    assert!(marker
-        .summary
-        .contains("Preserve the user's requested action level"));
+    assert!(
+        marker.summary.contains("newly-visible-0") && marker.summary.contains("newly-visible-1"),
+        "second compact must preserve prior and newly compacted context: {}",
+        marker.summary
+    );
     assert!(session
         .structured_messages()
         .iter()
@@ -1945,7 +1976,7 @@ async fn compaction_rejects_stale_source_revision() {
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await;
@@ -2012,8 +2043,13 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<String, context::domain::CompactGenerationFailure> {
-            Ok(format!("<summary>{}</summary>", self.0))
+        ) -> Result<
+            context::domain::CompactGenerationOutput,
+            context::domain::CompactGenerationFailure,
+        > {
+            Ok(context::domain::CompactGenerationOutput::from(
+                valid_fact_batch(self.0),
+            ))
         }
     }
 
@@ -2021,9 +2057,8 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
-    let repository_under_test = base_repository.with_generator(Arc::new(FixedGenerator(
-        "## Immutable Constraints\n- review only\n\n## Current Objective\n- LLM 生成的语义摘要\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- none\n\n## Resume Cursor\n- Next action: continue\n\n## Required Revalidation\n- revalidate state\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue",
-    )));
+    let repository_under_test =
+        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
 
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;
@@ -2034,7 +2069,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             source: generated_request,
             trigger: CompactTrigger::Automatic,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -2071,7 +2106,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
 
 /// #1537：compact summary 出口拼接当前 Task 状态，防止递进压缩后上下文丢失。
 #[tokio::test]
-async fn commit_compaction_appends_task_context_to_summary() {
+async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
@@ -2085,17 +2120,26 @@ async fn commit_compaction_appends_task_context_to_summary() {
             source: request,
             trigger: context::domain::CompactTrigger::Automatic,
             progress: None,
-            task_context: Some("■ #1 实现压缩拼接".to_string()),
+            task_snapshot: Some(context::compact::CompactTaskSnapshot::active(
+                1,
+                1,
+                "实现压缩拼接",
+                vec![context::compact::CompactTaskItem::in_progress(
+                    1,
+                    "实现压缩拼接",
+                )],
+            )),
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(ref result)
-            if result.summary.matches("## Current Task State").count() == 1
-            && result.summary.contains("■ #1 实现压缩拼接")
-    ));
+    let context::domain::CompactOutcome::Committed(result) = &outcome else {
+        panic!("expected committed compact: {outcome:?}");
+    };
+    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
+    assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
+    assert!(result.summary.contains("- Next action: 实现压缩拼接"));
+    assert!(result.summary.contains("## Current Objective"));
 }
 
 #[tokio::test]

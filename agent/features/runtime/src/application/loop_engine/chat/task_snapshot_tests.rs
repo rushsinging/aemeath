@@ -168,10 +168,9 @@ fn task_reminder_intent_none_without_active_batch() {
     assert!(build_task_reminder_intent(access, 7).is_none());
 }
 
-/// #1537：build_task_snapshot_text 返回纯文本（无标签包装），供 compact 拼接。
-/// compact 路径携带完整标识（batch id / task id / seq），与 TUI 路径不同。
+/// typed compact snapshot 与 companion 使用同一份 Task 状态。
 #[test]
-fn task_snapshot_text_renders_with_full_identifiers_for_compact() {
+fn compact_task_snapshot_renders_with_full_identifiers() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
@@ -180,7 +179,11 @@ fn task_snapshot_text_renders_with_full_identifiers_for_compact() {
         .transition(completed.id(), TaskStatus::Completed, 4)
         .unwrap();
 
-    let text = build_task_snapshot_text(access).expect("snapshot text rendered");
+    let snapshot = build_compact_task_snapshot(access).expect("typed snapshot built");
+    let text = snapshot.render_companion();
+
+    assert_eq!(snapshot.items().len(), 2);
+    assert_eq!(snapshot.batch_summary(), "batch");
 
     // 不含 TUI 标签包装
     assert!(!text.contains("<system-reminder>"));
@@ -198,10 +201,10 @@ fn task_snapshot_text_renders_with_full_identifiers_for_compact() {
     assert!(text.contains("□"));
 }
 
-/// #1537：无活跃 task 时 build_task_snapshot_text 返回 None。
+/// 无任务时 typed compact snapshot 返回 None。
 #[test]
-fn task_snapshot_text_none_without_tasks() {
+fn compact_task_snapshot_none_without_tasks() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
-    assert!(build_task_snapshot_text(access).is_none());
+    assert!(build_compact_task_snapshot(access).is_none());
 }

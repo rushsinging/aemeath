@@ -6,7 +6,9 @@
 
 use async_trait::async_trait;
 use context::compact::CompactGenerator;
-use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+use context::domain::{
+    CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput,
+};
 use futures::StreamExt;
 use provider::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, ModelId, ReasoningLevel,
@@ -43,7 +45,7 @@ impl CompactGenerator for ProviderCompactGenerator {
         &self,
         request: Vec<Message>,
         cancel: &CancellationToken,
-    ) -> Result<String, CompactGenerationFailure> {
+    ) -> Result<CompactGenerationOutput, CompactGenerationFailure> {
         let mut invocation = InvocationRequest::new(
             self.model.clone(),
             request,
@@ -59,12 +61,24 @@ impl CompactGenerator for ProviderCompactGenerator {
             .map_err(compact_generation_failure)?;
 
         let mut text = String::new();
+        let mut text_delta_count = 0usize;
+        let mut non_text_delta_count = 0usize;
         let mut stream = stream;
         while let Some(event) = stream.next().await {
             match event {
-                InvocationEvent::Delta(InvocationDelta::Text(part)) => text.push_str(&part),
-                InvocationEvent::Delta(_) => {}
-                InvocationEvent::Completed(_) => return Ok(text),
+                InvocationEvent::Delta(InvocationDelta::Text(part)) => {
+                    text_delta_count += 1;
+                    text.push_str(&part);
+                }
+                InvocationEvent::Delta(_) => non_text_delta_count += 1,
+                InvocationEvent::Completed(completion) => {
+                    return Ok(CompactGenerationOutput::completed(
+                        text,
+                        Some(completion_reason(&completion.stop_reason)),
+                        text_delta_count,
+                        non_text_delta_count,
+                    ));
+                }
                 InvocationEvent::Failed(error) => {
                     return Err(compact_generation_failure(error));
                 }
@@ -74,6 +88,17 @@ impl CompactGenerator for ProviderCompactGenerator {
             CompactGenerationFailureKind::Provider,
             "Provider 流在完成事件前结束",
         ))
+    }
+}
+
+fn completion_reason(reason: &provider::ProviderStopReason) -> String {
+    match reason {
+        provider::ProviderStopReason::EndTurn => "end_turn".to_string(),
+        provider::ProviderStopReason::ToolUse => "tool_use".to_string(),
+        provider::ProviderStopReason::MaxOutputTokens => "max_output_tokens".to_string(),
+        provider::ProviderStopReason::ContentFiltered => "content_filtered".to_string(),
+        provider::ProviderStopReason::StopSequence => "stop_sequence".to_string(),
+        provider::ProviderStopReason::Other(reason) => format!("other:{reason}"),
     }
 }
 
@@ -114,16 +139,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn collects_text_deltas_into_full_summary() {
-        // FakeProvider::invoke 返回 happy_path_stream("hello")：
-        // Delta(Text("hello")) + Completed → generate 返回 "hello"。
+    async fn collects_text_deltas_into_typed_completion_diagnostics() {
         let result = fake_generator()
             .generate(
                 vec![Message::user("summarize this")],
                 &CancellationToken::new(),
             )
-            .await;
-        assert_eq!(result, Ok("hello".to_string()));
+            .await
+            .unwrap();
+
+        assert_eq!(result.text(), "hello");
+        assert_eq!(result.completion_reason(), Some("end_turn"));
+        assert_eq!(result.text_delta_count(), 1);
+        assert_eq!(result.non_text_delta_count(), 0);
+        assert!(result.stream_completed());
     }
 
     #[tokio::test]
