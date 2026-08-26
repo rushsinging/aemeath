@@ -455,11 +455,6 @@ impl ConversationModel {
         self.next_block_sequence += 1;
         format!("{prefix}-{}", self.next_block_sequence)
     }
-
-    pub(super) fn active_chat_mut(&mut self) -> Option<&mut Chat> {
-        let active = self.active_chat_id.clone()?;
-        self.chats.iter_mut().find(|chat| chat.id == active)
-    }
 }
 
 fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String> {
@@ -481,7 +476,6 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
             tool_id: _,
         }
         | ConversationChange::ToolStreamingOutputRecorded { block_id } => Some(block_id.clone()),
-        ConversationChange::AskUserDismissed { .. } => None,
         ConversationChange::ToolCallObserved { .. } => None,
         ConversationChange::OutputDirty => None,
         ConversationChange::ToolCallBound {

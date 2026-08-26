@@ -27,13 +27,6 @@ impl StatusNotice {
         Self::default()
     }
 
-    pub fn normal(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            kind: StatusNoticeKind::Normal,
-        }
-    }
-
     pub fn running(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),

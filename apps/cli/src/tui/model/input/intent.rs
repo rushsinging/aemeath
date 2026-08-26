@@ -1,5 +1,4 @@
 use super::completion_item::CompletionItem;
-use super::mode::InputMode;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputIntent {
@@ -18,7 +17,6 @@ pub enum InputIntent {
     InsertNewline,
     DeleteBackward,
     DeleteWordBeforeCursor,
-    DeleteForward,
     MoveHistoryPrevious,
     MoveHistoryNext,
     ReplaceHistory(Vec<String>),
@@ -29,8 +27,6 @@ pub enum InputIntent {
     SelectCompletionNext,
     SelectCompletionPrevious,
     AcceptCompletion,
-    AcceptCompletionValue(String),
-    SetMode(InputMode),
     Submit,
     Clear,
 }

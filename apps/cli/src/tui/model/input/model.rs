@@ -82,11 +82,6 @@ impl InputModel {
                 self.document.delete_word_before_cursor();
                 self.text_changed()
             }
-            InputIntent::DeleteForward => {
-                self.completion.clear();
-                self.document.delete_forward();
-                self.text_changed()
-            }
             InputIntent::MoveHistoryPrevious => self.history_previous(),
             InputIntent::MoveHistoryNext => self.history_next(),
             InputIntent::ReplaceHistory(entries) => {
@@ -116,18 +111,11 @@ impl InputModel {
                 vec![self.completion_changed()]
             }
             InputIntent::AcceptCompletion => self.accept_completion(),
-            InputIntent::AcceptCompletionValue(replacement) => {
-                self.accept_completion_replacement(replacement)
-            }
             InputIntent::InsertImage(image) => {
                 self.completion.clear();
                 self.history.selected_index = None;
                 self.document.insert_image(image);
                 self.text_changed()
-            }
-            InputIntent::SetMode(mode) => {
-                self.mode = mode;
-                vec![InputChange::ModeChanged { mode }]
             }
             InputIntent::Submit => self.submit(),
             InputIntent::Clear => {

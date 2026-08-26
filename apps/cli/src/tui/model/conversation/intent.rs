@@ -317,30 +317,8 @@ pub struct RecordUsage {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct UpdateLastInputTokens(pub u64);
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct RecordLiveTps {
     pub tps: f64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct UpdateTaskStatus {
-    pub total: usize,
-    pub completed: usize,
-    pub in_progress: usize,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct StartProcessingJob {
-    pub id: String,
-    pub chat_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct FinishProcessingJob {
-    pub id: String,
-    pub success: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -360,9 +338,6 @@ pub struct SetTransientStatusNotice {
     pub notice: StatusNotice,
     pub expires_at: Instant,
 }
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SetGraphPhase(pub Option<String>);
 
 #[derive(Clone, Debug)]
 pub struct SyncQueuedSubmissions {
@@ -436,17 +411,12 @@ pub enum ConversationIntent {
     CompleteChat(CompleteChat),
     // ── 原 runtime variants ──
     RecordUsage(RecordUsage),
-    UpdateLastInputTokens(UpdateLastInputTokens),
     RecordLiveTps(RecordLiveTps),
-    UpdateTaskStatus(UpdateTaskStatus),
-    StartProcessingJob(StartProcessingJob),
-    FinishProcessingJob(FinishProcessingJob),
     ReplaceRuntimeStatus(ReplaceRuntimeStatus),
     ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
-    SetGraphPhase(SetGraphPhase),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
     ClearCompactRuntime(ClearCompactRuntime),
 }

@@ -1,7 +1,6 @@
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
-use crate::tui::model::runtime::processing_job::ProcessingStatus;
 use crate::tui::model::runtime::session_model::SessionModel;
 use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
 use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
@@ -180,19 +179,6 @@ impl StatusViewAssembler {
                 ),
                 style: SemanticStyle::Muted,
                 priority: 40,
-            });
-        }
-        if conversation.runtime.processing_jobs.iter().any(|job| {
-            matches!(
-                job.status,
-                ProcessingStatus::Running | ProcessingStatus::Starting
-            )
-        }) {
-            vm.center.push(StatusSegment {
-                key: "processing".to_string(),
-                text: "processing".to_string(),
-                style: SemanticStyle::Running,
-                priority: 2,
             });
         }
         if let Some(session) = session {

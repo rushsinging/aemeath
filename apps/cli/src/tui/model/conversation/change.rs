@@ -70,9 +70,6 @@ pub enum ConversationChange {
     ChatCompleting {
         chat_id: String,
     },
-    ChatCompleted {
-        chat_id: String,
-    },
     OrphanToolResultObserved {
         id: String,
     },
@@ -80,9 +77,6 @@ pub enum ConversationChange {
         id: String,
     },
     AskUserUpdated {
-        id: String,
-    },
-    AskUserDismissed {
         id: String,
     },
     InteractionShown {
@@ -129,21 +123,12 @@ pub enum ConversationChange {
     LiveTpsChanged {
         tps: f64,
     },
-    TaskStatusChanged {
-        total: usize,
-        completed: usize,
-        in_progress: usize,
-    },
-    ProcessingJobChanged {
-        id: String,
-    },
     QueuedSubmissionsSynced {
         count: usize,
     },
     CompactRuntimeCleared,
     TaskLinesChanged,
     StatusNoticeChanged,
-    GraphPhaseChanged,
 }
 
 impl ConversationChange {

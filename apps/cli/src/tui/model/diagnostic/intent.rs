@@ -13,7 +13,4 @@ pub enum DiagnosticIntent {
     AnswerPrompt {
         answer: String,
     },
-    DismissNotice {
-        id: String,
-    },
 }

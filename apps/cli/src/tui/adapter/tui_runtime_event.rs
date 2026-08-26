@@ -679,11 +679,6 @@ pub(crate) enum TuiRuntimeEvent {
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },
-    GraphPhaseChanged {
-        node: String,
-        effort: String,
-        previous: String,
-    },
     ThinkingChanged {
         enabled: bool,
     },

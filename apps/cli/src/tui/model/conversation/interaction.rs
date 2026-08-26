@@ -103,7 +103,6 @@ pub(crate) enum InteractionDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum InteractionDraftAction {
     Approve,
-    Deny { reason: Option<String> },
     SetUserAnswer { index: usize, answer: String },
     ContinueHardPause,
 }
@@ -151,32 +150,11 @@ impl InteractionDraft {
         }
     }
 
-    pub(crate) fn is_approved(&self) -> bool {
-        matches!(
-            self,
-            Self::Approval {
-                approved: Some(true),
-                ..
-            }
-        )
-    }
-
     fn apply(&mut self, action: InteractionDraftAction) -> bool {
         match (self, action) {
             (Self::Approval { approved, reason }, InteractionDraftAction::Approve) => {
                 *approved = Some(true);
                 *reason = None;
-                true
-            }
-            (
-                Self::Approval {
-                    approved,
-                    reason: draft_reason,
-                },
-                InteractionDraftAction::Deny { reason },
-            ) => {
-                *approved = Some(false);
-                *draft_reason = reason;
                 true
             }
             (
@@ -196,35 +174,10 @@ impl InteractionDraft {
             _ => false,
         }
     }
-
-    fn reply(&self) -> Option<UiInteractionReply> {
-        match self {
-            Self::UserAnswers(answers) if answers.iter().all(|answer| !answer.is_empty()) => {
-                Some(UiInteractionReply::UserAnswers(answers.clone()))
-            }
-            Self::Approval {
-                approved: Some(true),
-                ..
-            } => Some(UiInteractionReply::ToolApproval {
-                approved: true,
-                reason: None,
-            }),
-            Self::Approval {
-                approved: Some(false),
-                reason,
-            } => Some(UiInteractionReply::ToolApproval {
-                approved: false,
-                reason: reason.clone(),
-            }),
-            Self::HardPause { continue_run: true } => Some(UiInteractionReply::ContinueHardPause),
-            _ => None,
-        }
-    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InteractionPhase {
     Collecting,
-    Confirming,
     ReplyPending,
     CancelPending,
 }
@@ -252,14 +205,6 @@ impl InteractionState {
 
     pub(crate) fn run_id(&self) -> &UiRunId {
         &self.request.run_id
-    }
-
-    pub(crate) fn body(&self) -> &InteractionBody {
-        &self.request.body
-    }
-
-    pub(crate) fn draft(&self) -> &InteractionDraft {
-        &self.draft
     }
 
     pub(crate) fn phase(&self) -> InteractionPhase {
@@ -301,20 +246,14 @@ impl InteractionState {
     }
 
     fn update_draft(&mut self, action: InteractionDraftAction) -> bool {
-        if !matches!(
-            self.phase,
-            InteractionPhase::Collecting | InteractionPhase::Confirming
-        ) {
+        if !matches!(self.phase, InteractionPhase::Collecting) {
             return false;
         }
         self.draft.apply(action)
     }
 
     fn confirm(&mut self) -> Option<UiInteractionReply> {
-        if !matches!(
-            self.phase,
-            InteractionPhase::Collecting | InteractionPhase::Confirming
-        ) {
+        if !matches!(self.phase, InteractionPhase::Collecting) {
             return None;
         }
         let reply = self.reply()?;
@@ -323,10 +262,7 @@ impl InteractionState {
     }
 
     fn cancel(&mut self) -> bool {
-        if !matches!(
-            self.phase,
-            InteractionPhase::Collecting | InteractionPhase::Confirming
-        ) {
+        if !matches!(self.phase, InteractionPhase::Collecting) {
             return false;
         }
         self.phase = InteractionPhase::CancelPending;
@@ -555,7 +491,6 @@ impl ConversationModel {
                             ToolCallStatus::Success
                                 | ToolCallStatus::Error
                                 | ToolCallStatus::Cancelled
-                                | ToolCallStatus::Orphaned
                         )
                     {
                         call.complete(result.clone());

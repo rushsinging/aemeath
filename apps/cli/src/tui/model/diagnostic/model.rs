@@ -34,10 +34,6 @@ impl DiagnosticModel {
                 self.active_prompt = None;
                 vec![DiagnosticChange::PromptAnswered { answer }]
             }
-            DiagnosticIntent::DismissNotice { id } => {
-                self.notices.retain(|notice| notice.id != id);
-                vec![DiagnosticChange::NoticeDismissed { id }]
-            }
         }
     }
 

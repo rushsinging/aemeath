@@ -271,11 +271,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ],
             ..AgentEventMapping::default()
         },
-        TuiRuntimeEvent::GraphPhaseChanged { node, .. } => {
-            conversation(ConversationIntent::SetGraphPhase(SetGraphPhase(
-                (node != "idle").then(|| node.clone()),
-            )))
-        }
         TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
             ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
         ),

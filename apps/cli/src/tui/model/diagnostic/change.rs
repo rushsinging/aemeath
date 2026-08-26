@@ -12,7 +12,4 @@ pub enum DiagnosticChange {
     PromptAnswered {
         answer: String,
     },
-    NoticeDismissed {
-        id: String,
-    },
 }

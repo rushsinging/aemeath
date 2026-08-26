@@ -136,16 +136,6 @@ impl InputDocument {
         self.delete_range(start, end);
     }
 
-    pub fn delete_forward(&mut self) {
-        if self.cursor >= self.buffer.len() {
-            return;
-        }
-        let start = self.cursor;
-        self.move_right();
-        let end = self.cursor;
-        self.delete_range(start, end);
-    }
-
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.cursor = 0;
@@ -262,17 +252,6 @@ impl InputDocument {
         self.buffer[..self.cursor].matches('\n').count()
     }
 
-    /// 光标在当前行中的字节偏移（不含前面的换行符）
-    #[cfg(test)]
-    pub fn cursor_col_byte_offset(&self) -> usize {
-        let before_cursor = &self.buffer[..self.cursor];
-        if let Some(pos) = before_cursor.rfind('\n') {
-            self.cursor - pos - 1
-        } else {
-            self.cursor
-        }
-    }
-
     /// 光标在当前行中的字符列号（从 0 开始）
     pub fn cursor_col(&self) -> usize {
         let before_cursor = &self.buffer[..self.cursor];
@@ -281,15 +260,6 @@ impl InputDocument {
         } else {
             before_cursor.chars().count()
         }
-    }
-
-    /// 总行数（空 buffer 为 1）
-    #[cfg(test)]
-    pub fn line_count(&self) -> usize {
-        if self.buffer.is_empty() {
-            return 1;
-        }
-        self.buffer.matches('\n').count() + 1
     }
 
     /// 光标是否在第一行
