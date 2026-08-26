@@ -20,7 +20,7 @@ impl OutputRenderWindow {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OutputViewModel {
     pub roots: Vec<Arc<BlockNode>>,
     pub version: u64,
@@ -34,17 +34,6 @@ impl OutputViewModel {
         Self {
             roots: roots.into_iter().map(Arc::new).collect(),
             version,
-            source_total_lines: None,
-            folded_earlier_lines: 0,
-        }
-    }
-}
-
-impl Default for OutputViewModel {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            version: 0,
             source_total_lines: None,
             folded_earlier_lines: 0,
         }
@@ -267,7 +256,6 @@ pub enum ToolSemanticStatus {
     Success,
     Error,
     Cancelled,
-    Orphaned,
 }
 
 #[cfg(test)]

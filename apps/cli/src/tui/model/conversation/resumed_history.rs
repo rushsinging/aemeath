@@ -15,8 +15,6 @@ pub(crate) struct DisplayHistoryStepSlot {
     pub(crate) member_name: String,
     pub(crate) estimated_lines: usize,
     pub(crate) user_input_history: Vec<String>,
-    pub(crate) finalize_cause: Option<TuiResumedStepFinalizeCause>,
-    pub(crate) duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -161,8 +159,6 @@ impl ResumedHistoryBacking {
                 member_name: step.member_name,
                 estimated_lines: step.estimated_lines,
                 user_input_history: step.user_input_history,
-                finalize_cause: step.finalize_cause,
-                duration_ms: step.duration_ms,
             })
             .collect::<Vec<_>>();
         let items = step_slots
@@ -344,17 +340,6 @@ fn map_finalize_cause(cause: sdk::ResumedStepFinalizeCause) -> TuiResumedStepFin
             TuiResumedStepFinalizeCause::UserCancelledStep
         }
         sdk::ResumedStepFinalizeCause::RunTerminated => TuiResumedStepFinalizeCause::RunTerminated,
-    }
-}
-
-fn resumed_step_from_wire(step: sdk::ResumedSessionStep) -> ResumedHistoryStep {
-    let local = sdk::LocalResumedSessionStep::from_wire(step);
-    ResumedHistoryStep {
-        run_id: local.run_id,
-        step_id: local.step_id,
-        message_segments: local.message_segments,
-        finalize_cause: local.finalize_cause.map(map_finalize_cause),
-        duration_ms: local.duration_ms,
     }
 }
 

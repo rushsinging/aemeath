@@ -54,10 +54,9 @@ impl ChatRun {
                 }
             }
             ToolCallStatus::Running => ChatTurnStatus::ToolExecuting,
-            ToolCallStatus::Success
-            | ToolCallStatus::Error
-            | ToolCallStatus::Cancelled
-            | ToolCallStatus::Orphaned => self.status,
+            ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled => {
+                self.status
+            }
         };
         Some((call.args_preview.clone(), changes))
     }
@@ -71,10 +70,7 @@ impl ChatRun {
         if self.tool_calls.iter().all(|call| {
             matches!(
                 call.status,
-                ToolCallStatus::Success
-                    | ToolCallStatus::Error
-                    | ToolCallStatus::Cancelled
-                    | ToolCallStatus::Orphaned
+                ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
             )
         }) {
             self.status = ChatTurnStatus::Completing;

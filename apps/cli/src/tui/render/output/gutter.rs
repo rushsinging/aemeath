@@ -63,7 +63,6 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
             ToolSemanticStatus::Cancelled => "✗",
-            ToolSemanticStatus::Orphaned => "?",
             ToolSemanticStatus::Running => {
                 let blink_frame = animation_frame / TOOL_MARKER_BLINK_DIVISOR;
                 if blink_frame.is_multiple_of(2) {
@@ -97,7 +96,6 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
             ToolSemanticStatus::Error => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
             ToolSemanticStatus::Cancelled => theme::ERROR,
-            ToolSemanticStatus::Orphaned => theme::WARNING,
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,

@@ -201,7 +201,6 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
-            | ConversationChange::AskUserDismissed { .. }
             | ConversationChange::InteractionShown { .. }
             | ConversationChange::InteractionUpdated { .. }
             | ConversationChange::InteractionReplyRequested { .. }
@@ -220,14 +219,10 @@ impl From<&ConversationChange> for ModelChange {
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }
             | ConversationChange::ChatCompleting { .. }
-            | ConversationChange::ChatCompleted { .. }
             | ConversationChange::UsageChanged { .. }
             | ConversationChange::LiveTpsChanged { .. }
-            | ConversationChange::TaskStatusChanged { .. }
-            | ConversationChange::ProcessingJobChanged { .. }
             | ConversationChange::TaskLinesChanged
-            | ConversationChange::StatusNoticeChanged
-            | ConversationChange::GraphPhaseChanged => ModelChange::status_dirty(),
+            | ConversationChange::StatusNoticeChanged => ModelChange::status_dirty(),
         }
     }
 }

@@ -5,9 +5,6 @@
 use super::change::ConversationChange;
 use super::intent::*;
 use super::model::ConversationModel;
-use super::processing_job::{ProcessingJob, ProcessingStatus};
-use super::runtime_state::RuntimeState;
-use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
 
@@ -493,66 +490,10 @@ impl ConversationUpdate for RecordUsage {
     }
 }
 
-impl ConversationUpdate for UpdateLastInputTokens {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.usage.last_input_tokens = self.0;
-        vec![ConversationChange::UsageChanged {
-            input_tokens: model.runtime.usage.input_tokens,
-            output_tokens: model.runtime.usage.output_tokens,
-        }]
-    }
-}
-
 impl ConversationUpdate for RecordLiveTps {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.runtime.live_tps = Some(self.tps);
         vec![ConversationChange::LiveTpsChanged { tps: self.tps }]
-    }
-}
-
-impl ConversationUpdate for UpdateTaskStatus {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.task_status = TaskStatusSnapshot {
-            total: self.total,
-            completed: self.completed,
-            in_progress: self.in_progress,
-            lines: std::mem::take(&mut model.runtime.task_status.lines),
-            ..TaskStatusSnapshot::default()
-        };
-        vec![ConversationChange::TaskStatusChanged {
-            total: self.total,
-            completed: self.completed,
-            in_progress: self.in_progress,
-        }]
-    }
-}
-
-impl ConversationUpdate for StartProcessingJob {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.processing_jobs.push(ProcessingJob {
-            id: self.id.clone(),
-            chat_id: self.chat_id,
-            status: ProcessingStatus::Running,
-        });
-        vec![ConversationChange::ProcessingJobChanged { id: self.id }]
-    }
-}
-
-impl ConversationUpdate for FinishProcessingJob {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if let Some(job) = model
-            .runtime
-            .processing_jobs
-            .iter_mut()
-            .find(|job| job.id == self.id)
-        {
-            job.status = if self.success {
-                ProcessingStatus::Finished
-            } else {
-                ProcessingStatus::Failed
-            };
-        }
-        vec![ConversationChange::ProcessingJobChanged { id: self.id }]
     }
 }
 
@@ -601,17 +542,6 @@ impl ConversationUpdate for SetTransientStatusNotice {
         model.runtime.status_notice = self.notice;
         model.runtime.transient_notice_expiry = Some(self.expires_at);
         vec![ConversationChange::StatusNoticeChanged]
-    }
-}
-
-impl ConversationUpdate for SetGraphPhase {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.graph_phase = self.0.clone();
-        // 非 transient 时同步更新 status_notice
-        if model.runtime.transient_notice_expiry.is_none() {
-            model.runtime.status_notice = RuntimeState::notice_from_phase(self.0.as_deref());
-        }
-        vec![ConversationChange::GraphPhaseChanged]
     }
 }
 
@@ -692,17 +622,12 @@ impl ConversationUpdate for ConversationIntent {
             Self::ReplaceActivitySnapshot(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
-            Self::UpdateLastInputTokens(s) => s.update(model),
             Self::RecordLiveTps(s) => s.update(model),
-            Self::UpdateTaskStatus(s) => s.update(model),
-            Self::StartProcessingJob(s) => s.update(model),
-            Self::FinishProcessingJob(s) => s.update(model),
             Self::ReplaceRuntimeStatus(status) => status.update(model),
             Self::ReplaceTaskState(state) => state.update(model),
             Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
-            Self::SetGraphPhase(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }

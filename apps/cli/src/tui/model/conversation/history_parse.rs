@@ -30,18 +30,9 @@ pub(crate) enum HistoryAssistantBlock {
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum HistoryDisplayParseError {
     UnsupportedRole(String),
-    ContentNotArray,
-    BlockNotObject,
-    MissingBlockType,
     UnsupportedUserBlock(String),
     UnsupportedAssistantBlock(String),
-    MissingText,
     EmptyUserText,
-    MissingToolUseId,
-    MissingToolUseName,
-    MissingToolUseInput,
-    MissingToolResultId,
-    MissingToolResultContent,
     EmptyAssistantMessage,
     NonUserVisibleMessage,
 }
