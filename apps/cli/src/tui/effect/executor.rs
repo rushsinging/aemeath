@@ -24,13 +24,6 @@ fn interaction_reply_summary(reply: &UiInteractionReply) -> String {
                 answers.len()
             )
         }
-        UiInteractionReply::ToolApproval { approved, .. } => {
-            format!("tool_approval approved={approved}")
-        }
-        UiInteractionReply::PlanApproval { approved, .. } => {
-            format!("plan_approval approved={approved}")
-        }
-        UiInteractionReply::ContinueHardPause => "continue_hard_pause".to_string(),
     }
 }
 
@@ -39,21 +32,6 @@ fn interaction_reply_to_sdk(reply: UiInteractionReply) -> sdk::InteractionReply 
         UiInteractionReply::UserAnswers(answers) => {
             sdk::InteractionReply::UserQuestions(answers.into_iter().map(sdk::UserAnswer).collect())
         }
-        UiInteractionReply::ToolApproval { approved, reason } => {
-            sdk::InteractionReply::ToolApproval(if approved {
-                sdk::ApprovalDecision::Approve
-            } else {
-                sdk::ApprovalDecision::Deny { reason }
-            })
-        }
-        UiInteractionReply::PlanApproval { approved, reason } => {
-            sdk::InteractionReply::PlanApproval(if approved {
-                sdk::ApprovalDecision::Approve
-            } else {
-                sdk::ApprovalDecision::Deny { reason }
-            })
-        }
-        UiInteractionReply::ContinueHardPause => sdk::InteractionReply::HardPauseContinue,
     }
 }
 

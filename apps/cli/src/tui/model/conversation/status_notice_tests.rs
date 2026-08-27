@@ -9,14 +9,6 @@ fn status_notice_default_is_ready_normal() {
 }
 
 #[test]
-fn status_notice_running_sets_kind_and_text() {
-    let notice = StatusNotice::running("thinking");
-
-    assert_eq!(notice.text, "thinking");
-    assert_eq!(notice.kind, StatusNoticeKind::Running);
-}
-
-#[test]
 fn status_notice_success_sets_kind_and_text() {
     let notice = StatusNotice::success("Copied");
 

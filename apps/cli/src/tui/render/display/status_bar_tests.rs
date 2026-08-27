@@ -105,27 +105,6 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
 }
 
 #[test]
-fn running_notice_uses_tool_running_color() {
-    let bar = StatusBar::new();
-    let view = StatusViewModel {
-        notice: StatusNoticeViewModel {
-            text: "Thinking".to_string(),
-            kind: StatusNoticeViewKind::Running,
-        },
-        ..StatusViewModel::default()
-    };
-    let area = Rect::new(0, 0, 80, 1);
-    let mut buf = Buffer::empty(area);
-
-    bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
-
-    assert_eq!(
-        buf.cell((0, 0)).unwrap().style().fg,
-        Some(theme::TOOL_RUNNING)
-    );
-}
-
-#[test]
 fn runtime_and_context_rows_use_spaces_without_vertical_separators() {
     let bar = StatusBar::new();
     let mut view = runtime_context_view("~/aemeath", "~/aemeath", "main");

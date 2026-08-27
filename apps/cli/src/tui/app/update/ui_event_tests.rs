@@ -55,7 +55,7 @@ fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
     app.model.input.document.cursor = "/super".len();
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::SkillsUpdated {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::SkillsUpdated {
             revision: "r1".to_string(),
             skills: vec![crate::tui::adapter::tui_runtime_event::TuiSkillView {
                 name: "superpowers:brainstorming".to_string(),
@@ -71,7 +71,7 @@ fn skills_updated_atomically_rebuilds_qualified_route_and_completion_catalog() {
                 aliases: Vec::new(),
                 argument_hint: None,
             }],
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -108,10 +108,10 @@ fn test_update_message_state_only_updates_metadata_without_echo() {
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::SessionMessageStateChanged {
             message_count: 2,
             revision: 1,
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -135,10 +135,10 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::SessionMessageStateChanged {
             message_count: 2,
             revision: 1,
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -167,10 +167,10 @@ fn test_post_tool_sync_no_display() {
     assert_eq!(app.model.conversation.queued_submissions.len(), 1);
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::SessionMessageStateChanged {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::SessionMessageStateChanged {
             message_count: 1,
             revision: 1,
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -245,10 +245,10 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
         },
     ];
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -337,10 +337,10 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
     }];
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -388,7 +388,7 @@ fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echo
     app.enqueue_submission_echo(hook_id.clone(), "hook feedback");
 
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
             items: vec![
                 TuiChatMessage {
                     role: "user".to_string(),
@@ -424,7 +424,7 @@ fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echo
                 },
             ],
             queued: Vec::new(),
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -480,10 +480,10 @@ fn test_api_error_appends_notice_and_defers_processing_to_done() {
 
     let error = "stream error: stream interrupted after partial output".to_string();
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::ApiError {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ApiError {
             messages: vec![],
             error: error.clone(),
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -515,22 +515,22 @@ fn test_api_error_then_done_clears_processing() {
 
     // Runtime 权威错误路径：先 ApiError，随后由 Done 收口 processing。
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::ApiError {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ApiError {
             messages: vec![],
             error: "stream error: boom".to_string(),
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
     assert!(app.chat.is_processing);
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::Done {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::Done {
             context: crate::tui::adapter::tui_runtime_event::TuiRunContext {
                 chat_id: "chat-test".into(),
                 run_id: "turn-test".into(),
             },
             duration_ms: Some(1_000),
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );
@@ -591,10 +591,10 @@ fn user_messages_adopted_handler_logs_text_length_not_preview() {
         skill_request: None,
     }];
     app.update(
-        TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
             items,
             queued: vec![],
-        }),
+        }]),
         &ui_tx,
         &spawn_refs,
     );

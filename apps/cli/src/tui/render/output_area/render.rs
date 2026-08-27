@@ -42,19 +42,6 @@ fn animate_visible_line(line: &RenderedLine, frame: u64) -> Option<RenderedLine>
             gutter.content = format!("{prefix}{glyph} ").into();
             Some(animated)
         }
-        LineAnimation::ThinkingDots => {
-            let mut animated = line.clone();
-            let dots = match frame % 3 {
-                0 => ".",
-                1 => "..",
-                _ => "...",
-            };
-            let header = format!("Thinking{dots}");
-            let span = animated.spans.first_mut()?;
-            span.content = header.clone().into();
-            animated.plain = header;
-            Some(animated)
-        }
     }
 }
 

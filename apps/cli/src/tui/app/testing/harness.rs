@@ -51,7 +51,7 @@ impl TuiScenarioHarness {
         &mut self,
         event: crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
     ) {
-        self.messages.push_back(TuiMsg::Runtime(event));
+        self.messages.push_back(TuiMsg::RuntimeBatch(vec![event]));
         self.drain(32);
     }
     pub fn sdk_runtime_batch(&mut self, events: impl IntoIterator<Item = sdk::ChatEvent>) {

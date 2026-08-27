@@ -48,7 +48,6 @@ impl StatusViewAssembler {
             text: notice.text.clone(),
             kind: match notice.kind {
                 StatusNoticeKind::Normal => StatusNoticeViewKind::Normal,
-                StatusNoticeKind::Running => StatusNoticeViewKind::Running,
                 StatusNoticeKind::Success => StatusNoticeViewKind::Success,
                 StatusNoticeKind::Warning => StatusNoticeViewKind::Warning,
             },

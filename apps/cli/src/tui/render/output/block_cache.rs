@@ -123,7 +123,7 @@ mod tests {
         CacheKey {
             version,
             text_width: 80,
-            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            markdown_spacing: crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
         }
     }
 

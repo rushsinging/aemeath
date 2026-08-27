@@ -271,6 +271,7 @@ impl ConversationModel {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
         let chat_id = ChatId::new_v7();
@@ -278,19 +279,11 @@ impl ConversationModel {
         self.active_chat_id = Some(chat_id.clone());
         self.chats.push(chat);
         let user_block_id = self.next_block_id("user");
-        let run_id = ChatRunId::new_v7();
         self.timeline.push(OutputTimelineItem::UserMessage {
             id: user_block_id.clone(),
             text: submission,
         });
         vec![
-            ConversationChange::ChatStarted {
-                chat_id: chat_id.to_string(),
-            },
-            ConversationChange::ChatTurnStarted {
-                chat_id: chat_id.to_string(),
-                run_id: run_id.to_string(),
-            },
             ConversationChange::UserMessageAppended {
                 block_id: user_block_id,
             },

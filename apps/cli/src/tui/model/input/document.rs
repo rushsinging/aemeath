@@ -50,10 +50,6 @@ impl InputDocument {
         self.image_spans.clear();
     }
 
-    pub fn move_cursor(&mut self, cursor: usize) {
-        self.cursor = clamp_to_char_boundary(&self.buffer, cursor.min(self.buffer.len()));
-    }
-
     /// 用字符索引（char index）设置光标，自动转为字节位置
     /// textarea 的光标列号是字符索引，模型需要字节位置
     #[cfg(test)]
@@ -65,6 +61,12 @@ impl InputDocument {
             .map(|(idx, _)| idx)
             .unwrap_or(self.buffer.len());
         self.move_cursor(byte_pos);
+    }
+
+    /// 测试脚手架：绝对位置光标设置。生产光标移动经相对方向 intent。
+    #[cfg(test)]
+    pub fn move_cursor(&mut self, cursor: usize) {
+        self.cursor = cursor.min(self.buffer.len());
     }
 
     pub fn move_left(&mut self) {

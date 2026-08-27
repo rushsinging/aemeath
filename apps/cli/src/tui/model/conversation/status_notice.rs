@@ -2,7 +2,6 @@
 pub enum StatusNoticeKind {
     #[default]
     Normal,
-    Running,
     Success,
     Warning,
 }
@@ -25,13 +24,6 @@ impl Default for StatusNotice {
 impl StatusNotice {
     pub fn ready() -> Self {
         Self::default()
-    }
-
-    pub fn running(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            kind: StatusNoticeKind::Running,
-        }
     }
 
     pub fn success(text: impl Into<String>) -> Self {

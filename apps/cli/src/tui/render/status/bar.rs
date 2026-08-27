@@ -193,9 +193,6 @@ impl StatusBar {
             RuntimeSegmentStyle::Status(StatusNoticeViewKind::Normal) => {
                 Style::default().fg(theme::TEXT)
             }
-            RuntimeSegmentStyle::Status(StatusNoticeViewKind::Running) => {
-                Style::default().fg(theme::TOOL_RUNNING)
-            }
             RuntimeSegmentStyle::Status(StatusNoticeViewKind::Success) => {
                 Style::default().fg(theme::SUCCESS)
             }

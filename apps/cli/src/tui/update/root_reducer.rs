@@ -68,11 +68,6 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
             result.input_changes = model.input.apply(intent);
             result.dirty.mark_input();
         }
-        AgentIntent::Diagnostic(intent) => {
-            model.diagnostic.apply(intent);
-            result.dirty.mark_status();
-            result.dirty.mark_dialog();
-        }
         AgentIntent::Session(intent) => {
             model.session.apply(intent);
             result.dirty.mark_status();
@@ -202,9 +197,6 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
             | ConversationChange::InteractionShown { .. }
-            | ConversationChange::InteractionUpdated { .. }
-            | ConversationChange::InteractionReplyRequested { .. }
-            | ConversationChange::InteractionCancelRequested { .. }
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
             | ConversationChange::InteractionConflict { .. }
@@ -216,9 +208,7 @@ impl From<&ConversationChange> for ModelChange {
             ConversationChange::QueuedSubmissionsSynced { .. }
             | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
-            ConversationChange::ChatStarted { .. }
-            | ConversationChange::ChatTurnStarted { .. }
-            | ConversationChange::ChatCompleting { .. }
+            ConversationChange::ChatCompleting { .. }
             | ConversationChange::UsageChanged { .. }
             | ConversationChange::LiveTpsChanged { .. }
             | ConversationChange::TaskLinesChanged

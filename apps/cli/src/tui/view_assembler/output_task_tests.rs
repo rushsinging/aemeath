@@ -8,8 +8,12 @@ use crate::tui::view_model::{OutputBlockKind, ToolSemanticStatus};
 #[test]
 fn test_output_assembler_renders_task_list_create_tool_call() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "fix bug".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "fix bug".to_string(),
     });
     add_task_tool(
         &mut conversation,
@@ -45,8 +49,12 @@ fn test_output_assembler_renders_task_list_create_tool_call() {
 #[test]
 fn test_output_assembler_renders_task_create_tool_call() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "fix bug".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "fix bug".to_string(),
     });
     add_task_tool(
         &mut conversation,
@@ -74,8 +82,12 @@ fn test_output_assembler_renders_task_create_tool_call() {
 #[test]
 fn test_output_assembler_renders_task_update_tool_call() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "fix bug".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "fix bug".to_string(),
     });
     add_task_tool(
         &mut conversation,

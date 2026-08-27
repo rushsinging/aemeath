@@ -7,7 +7,6 @@ pub enum InputIntent {
     InsertPastedText(String),
     InsertImage(sdk::ClipboardImageView),
     ReplaceText(String),
-    MoveCursor(usize),
     MoveCursorLeft,
     MoveCursorRight,
     MoveCursorUp,
@@ -17,8 +16,6 @@ pub enum InputIntent {
     InsertNewline,
     DeleteBackward,
     DeleteWordBeforeCursor,
-    MoveHistoryPrevious,
-    MoveHistoryNext,
     ReplaceHistory(Vec<String>),
     SetCompletions {
         query: String,

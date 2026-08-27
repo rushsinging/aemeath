@@ -89,9 +89,11 @@ fn test_output_assembler_embedded_result_carries_output_for_preview() {
 #[test]
 fn test_output_assembler_keeps_assistant_text_outside_read_result() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "查看 active bug".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "查看 active bug".to_string() });
     add_completed_tool(
         &mut conversation,
         "tool-read",
@@ -138,9 +140,11 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
 #[test]
 fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "edit docs".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "edit docs".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -276,9 +280,11 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
 #[test]
 fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "read file".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "read file".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -330,9 +336,11 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
 #[test]
 fn test_output_assembler_write_arguments_delta_updates_realtime_bytes_header() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "write file".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "write file".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -385,9 +393,11 @@ fn test_output_assembler_write_arguments_delta_updates_realtime_bytes_header() {
 fn test_output_assembler_pending_tool_has_no_result_child() {
     // 边界：未产出结果（仅 ToolCallStart，无 ToolResult）的工具不附结果子块。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "search".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -424,9 +434,11 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
 fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
     // 回归：Agent 工具完成后，streaming_preview 应为 None，让位给权威最终 ToolResult 子块。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "run sub-agent".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "run sub-agent".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -446,12 +458,12 @@ fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
         status: ToolCallStatus::Ready,
     });
     // 子代理运行中发送 progress（写入 activities）
-    conversation.apply(RecordAgentActivities {
-        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
-        tool_id: ToolCallId::new("tool-1"),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("子代理最终输出文本".to_string())],
-    });
+    conversation.record_agent_activities(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        ToolCallId::new("tool-1"),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("子代理最终输出文本".to_string())],
+    );
     // 工具完成
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -542,9 +554,11 @@ fn sub_run_tool_call_uses_current_workspace_root_during_view_assembly() {
 fn test_output_assembler_shows_streaming_preview_while_tool_running() {
     // 运行中（未完成）的工具应将 activities 合并为 streaming_preview 文本。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "run sub-agent".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "run sub-agent".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -563,12 +577,12 @@ fn test_output_assembler_shows_streaming_preview_while_tool_running() {
         arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(RecordAgentActivities {
-        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
-        tool_id: ToolCallId::new("tool-1"),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("Agent turn 1/200, messages: 2, est_tokens: 500".to_string())],
-    });
+    conversation.record_agent_activities(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        ToolCallId::new("tool-1"),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("Agent turn 1/200, messages: 2, est_tokens: 500".to_string())],
+    );
 
     let vm = assemble_output_view(&conversation, None);
     let tool = vm
@@ -595,9 +609,11 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
     // （block_id = `<tool-id>-streaming-result`），由 gutter 统一管理 marker/缩进，
     // 而非留在 ToolCall 内部的 activity 行被 renderer 手工拼接。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "run sub-agent".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "run sub-agent".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -616,18 +632,18 @@ fn test_output_assembler_streaming_preview_is_tool_result_child() {
         arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(RecordAgentActivities {
-        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
-        tool_id: ToolCallId::new("tool-1"),
-        activities: vec![
+    conversation.record_agent_activities(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        ToolCallId::new("tool-1"),
+        vec![
             AgentActivityLine::tool_call(
                 "Read",
                 serde_json::json!({"file_path": "src/domain.rs"}),
             ),
             AgentActivityLine::message("Read as ordinary prose"),
         ],
-    });
+    );
 
     let vm = assemble_output_view(&conversation, None);
     let tool_node = vm
@@ -677,9 +693,11 @@ fn test_output_assembler_completed_tool_has_single_authoritative_result_child() 
     // #1547：工具完成后仅有唯一权威最终 ToolResult 子节点（`<tool-id>-result`），
     // 不应同时存在 streaming-result 子节点（二者互斥）。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "run sub-agent".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "run sub-agent".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
@@ -699,12 +717,12 @@ fn test_output_assembler_completed_tool_has_single_authoritative_result_child() 
         status: ToolCallStatus::Ready,
     });
     // 运行中发送 streaming progress
-    conversation.apply(RecordAgentActivities {
-        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
-        tool_id: ToolCallId::new("tool-1"),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("intermediate preview".to_string())],
-    });
+    conversation.record_agent_activities(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        ToolCallId::new("tool-1"),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("intermediate preview".to_string())],
+    );
     // 工具完成
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -753,9 +771,11 @@ fn test_output_assembler_completed_tool_has_single_authoritative_result_child() 
 fn test_output_assembler_pending_tool_without_streaming_has_no_child() {
     // 边界：未产出结果、无 streaming preview 的工具不附任何子块。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "search".to_string() });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),

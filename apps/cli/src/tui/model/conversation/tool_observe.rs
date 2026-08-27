@@ -251,7 +251,7 @@ impl ConversationModel {
         ]
     }
 
-    pub(super) fn record_agent_activities(
+    pub(crate) fn record_agent_activities(
         &mut self,
         chat_id: ChatId,
         run_id: ChatRunId,

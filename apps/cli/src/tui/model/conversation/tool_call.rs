@@ -74,14 +74,6 @@ impl ToolCall {
         }
         changes
     }
-    pub fn bind(&mut self) -> Vec<ToolCallChange> {
-        if self.status == ToolCallStatus::PendingArgs {
-            self.status = ToolCallStatus::Running;
-            vec![ToolCallChange::Bound, ToolCallChange::Running]
-        } else {
-            vec![ToolCallChange::Bound]
-        }
-    }
     pub fn complete(&mut self, result: ToolResultPayload) {
         let is_error = result.is_error;
         self.result = Some(result);
@@ -135,22 +127,15 @@ mod tests {
         ToolCall::pending(ToolCallId::new("tool-1"), stream_key())
     }
 
-    #[test]
-    fn test_tool_call_binds_id_and_runs() {
-        let mut call = pending_call();
-        let changes = call.bind();
-        assert!(call.id.as_ref().is_some(), "id should be set after bind");
-        assert_eq!(call.status, ToolCallStatus::Running);
-        assert_eq!(
-            changes,
-            vec![ToolCallChange::Bound, ToolCallChange::Running]
-        );
+    fn bound_call() -> ToolCall {
+        let mut call = ToolCall::pending(ToolCallId::new("tool-1"), stream_key());
+        call.update(None, ToolCallStatus::Running);
+        call
     }
 
     #[test]
     fn test_tool_call_completes_success() {
-        let mut call = pending_call();
-        call.bind();
+        let mut call = bound_call();
         let payload = ToolResultPayload::new(
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
@@ -169,8 +154,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_completes_error() {
-        let mut call = pending_call();
-        call.bind();
+        let mut call = bound_call();
         call.complete(ToolResultPayload::new(
             "failed".to_string(),
             serde_json::json!({ "text": "failed" }),

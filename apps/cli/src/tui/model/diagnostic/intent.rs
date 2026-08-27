@@ -6,11 +6,4 @@ pub enum DiagnosticIntent {
         severity: DiagnosticSeverity,
         message: String,
     },
-    OpenPrompt {
-        id: String,
-        question: String,
-    },
-    AnswerPrompt {
-        answer: String,
-    },
 }

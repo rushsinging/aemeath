@@ -131,10 +131,6 @@ mod tests {
             StatusNoticeViewKind::Normal
         );
         assert_eq!(
-            StatusViewAssembler::assemble_notice_view(&StatusNotice::running("Thinking")).kind,
-            StatusNoticeViewKind::Running
-        );
-        assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::success("Copied")).kind,
             StatusNoticeViewKind::Success
         );
@@ -173,13 +169,10 @@ mod tests {
     #[test]
     fn test_status_view_projects_diagnostic_severity() {
         let mut model = TuiModel::default();
-        reduce_intent(
-            &mut model,
-            AgentIntent::Diagnostic(DiagnosticIntent::RecordNotice {
-                severity: DiagnosticSeverity::Error,
-                message: "boom".to_string(),
-            }),
-        );
+        model.diagnostic.apply(DiagnosticIntent::RecordNotice {
+            severity: DiagnosticSeverity::Error,
+            message: "boom".to_string(),
+        });
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,

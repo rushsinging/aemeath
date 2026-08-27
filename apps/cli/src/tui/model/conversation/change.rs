@@ -1,16 +1,9 @@
-use super::interaction::{InteractionCommandFailure, UiInteractionReply, UiInteractionRequestId};
+use super::interaction::{InteractionCommandFailure, UiInteractionRequestId};
 use super::tool_call::ToolCallStatus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationChange {
     // ── 原 conversation changes ──
-    ChatStarted {
-        chat_id: String,
-    },
-    ChatTurnStarted {
-        chat_id: String,
-        run_id: String,
-    },
     UserMessageAppended {
         block_id: String,
     },
@@ -82,16 +75,6 @@ pub enum ConversationChange {
     InteractionShown {
         request_id: UiInteractionRequestId,
     },
-    InteractionUpdated {
-        request_id: UiInteractionRequestId,
-    },
-    InteractionReplyRequested {
-        request_id: UiInteractionRequestId,
-        reply: UiInteractionReply,
-    },
-    InteractionCancelRequested {
-        request_id: UiInteractionRequestId,
-    },
     InteractionCompleted {
         request_id: UiInteractionRequestId,
     },
@@ -131,12 +114,4 @@ pub enum ConversationChange {
     StatusNoticeChanged,
 }
 
-impl ConversationChange {
-    pub(crate) fn is_interaction_conflict(&self) -> bool {
-        matches!(self, Self::InteractionConflict { .. })
-    }
-
-    pub(crate) fn is_interaction_reply_requested(&self) -> bool {
-        matches!(self, Self::InteractionReplyRequested { .. })
-    }
-}
+impl ConversationChange {}

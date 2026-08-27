@@ -24,18 +24,6 @@ pub fn effects_for_conversation_change(change: &ConversationChange) -> Vec<Effec
             name: "error".to_string(),
             message: message.clone(),
         }],
-        ConversationChange::InteractionReplyRequested { request_id, reply } => {
-            vec![Effect::ReplyInteraction {
-                request_id: request_id.clone(),
-                reply: reply.clone(),
-            }]
-        }
-        ConversationChange::InteractionCancelRequested { request_id } => {
-            vec![Effect::CancelInteraction {
-                request_id: request_id.clone(),
-                reason: crate::tui::model::conversation::interaction::UiInteractionCancelReason::UserCancelled,
-            }]
-        }
         _ => Vec::new(),
     }
 }
@@ -57,32 +45,11 @@ pub fn effects_for_input_change(change: &InputChange) -> Vec<Effect> {
 mod tests {
     use crate::tui::effect::effect::Effect;
     use crate::tui::model::conversation::change::ConversationChange;
-    use crate::tui::model::conversation::interaction::{
-        UiInteractionReply, UiInteractionRequestId,
-    };
+    use crate::tui::model::conversation::interaction::UiInteractionRequestId;
     use crate::tui::model::input::change::InputChange;
     use crate::tui::model::input::submission::InputSubmission;
 
     use super::effects_for_input_change;
-
-    #[test]
-    fn test_interaction_reply_change_emits_typed_effect() {
-        let request_id = UiInteractionRequestId::from("request-1");
-        let effects = super::effects_for_conversation_change(
-            &ConversationChange::InteractionReplyRequested {
-                request_id: request_id.clone(),
-                reply: UiInteractionReply::ContinueHardPause,
-            },
-        );
-
-        assert_eq!(
-            effects,
-            vec![Effect::ReplyInteraction {
-                request_id,
-                reply: UiInteractionReply::ContinueHardPause,
-            }]
-        );
-    }
 
     #[test]
     fn test_interaction_display_changes_do_not_emit_command_effects() {

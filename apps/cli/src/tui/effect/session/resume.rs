@@ -176,7 +176,7 @@ mod tests {
         });
 
         assert_eq!(app.model.conversation.chats.len(), 0);
-        assert_eq!(app.model.display_history.steps().len(), 1);
+        assert_eq!(app.model.display_history.loaded_step_count_for_test(), 1);
         assert!(std::sync::Arc::ptr_eq(
             &shared_messages,
             &app.model

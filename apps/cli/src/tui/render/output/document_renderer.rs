@@ -131,7 +131,7 @@ impl OutputDocumentRenderer {
             view_model,
             outer_width,
             0,
-            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
             OutputRenderWindow::all(),
         )
         .document

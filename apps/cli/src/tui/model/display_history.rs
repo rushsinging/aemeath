@@ -17,13 +17,13 @@ impl DisplayHistoryModel {
         self.backing = backing;
     }
 
-    #[cfg(test)]
-    pub(crate) fn steps(&self) -> &[ResumedHistoryStep] {
-        self.backing.steps()
-    }
-
     pub(crate) fn step(&self, index: usize) -> Option<&ResumedHistoryStep> {
         self.backing.step(index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn loaded_step_count_for_test(&self) -> usize {
+        self.backing.loaded_step_count_for_test()
     }
 
     pub(crate) fn items(&self) -> &[ResumedHistoryItem] {

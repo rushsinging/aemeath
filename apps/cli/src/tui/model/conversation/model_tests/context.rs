@@ -1,9 +1,10 @@
 #[test]
 fn test_ensure_runtime_turn_does_not_change_active_chat() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "user focused chat".to_string(),
-    });
+    model.ensure_runtime_turn(
+        super::ids::ChatId::new("user-chat"),
+        super::ids::ChatRunId::new("user-turn"),
+    );
     let active_before = model.active_chat_id.clone();
 
     model.ensure_runtime_turn(
@@ -38,12 +39,12 @@ fn test_record_agent_activities_uses_explicit_runtime_context_when_active_turn_d
     });
     model.ensure_runtime_turn(stale_chat.clone(), stale_turn.clone());
 
-    model.apply(RecordAgentActivities {
-        chat_id: live_chat.clone(),
-        run_id: live_turn.clone(),
-        tool_id: agent_tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files".to_string())],
-    });
+    model.record_agent_activities(
+        live_chat.clone(),
+        live_turn.clone(),
+        agent_tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files".to_string())],
+    );
 
     let live_call = model
         .chats
