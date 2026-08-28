@@ -63,11 +63,13 @@ fn test_append_system_notice_renders_into_document() {
 #[test]
 fn test_append_user_echo_pushes_user_block_without_new_chat() {
     let mut app = make_app();
-    app.model
-        .conversation
-        .apply(crate::tui::model::conversation::intent::StartChat {
-            submission: "原始提问".to_string(),
-        });
+    app.model.conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    app.model.conversation.apply(AppendUserMessage {
+        text: "原始提问".to_string(),
+    });
     let chats_before = app.model.conversation.chats.len();
 
     app.append_user_echo("我的答复");
@@ -238,8 +240,12 @@ fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
 
     let mut app = make_app();
     // 模拟用户提问
-    app.model.conversation.apply(StartChat {
-        submission: "hello".to_string(),
+    app.model.conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    app.model.conversation.apply(AppendUserMessage {
+        text: "hello".to_string(),
     });
     // 模拟 LLM streaming
     app.model.conversation.apply(AssistantText {

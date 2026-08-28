@@ -53,8 +53,6 @@ pub struct LinkSpan {
 pub enum LineAnimation {
     /// 运行中工具首行 gutter 在实心/空心圆之间切换。
     RunningToolMarker,
-    /// 模型流占位首行的 Thinking 点号循环。
-    ThinkingDots,
 }
 
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），

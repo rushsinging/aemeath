@@ -303,18 +303,18 @@ fn concurrent_agent_activities_attaches_to_matching_parent_tool_blocks() {
         });
     }
 
-    model.apply(RecordAgentActivities {
-        chat_id: chat_id.clone(),
-        run_id: run_id.clone(),
-        tool_id: first_tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("first child activity".to_string())],
-    });
-    model.apply(RecordAgentActivities {
-        chat_id: chat_id.clone(),
-        run_id: run_id.clone(),
-        tool_id: second_tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("second child activity".to_string())],
-    });
+    model.record_agent_activities(
+        chat_id.clone(),
+        run_id.clone(),
+        first_tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("first child activity".to_string())],
+    );
+    model.record_agent_activities(
+        chat_id.clone(),
+        run_id.clone(),
+        second_tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("second child activity".to_string())],
+    );
 
     assert_eq!(
         tool_call(&model, &chat_id, &run_id, &first_tool_id)
@@ -342,9 +342,11 @@ fn test_timeline_mirrors_blocks_with_inline_agent_activities_only() {
     let tool_id = super::ids::ToolCallId::new("tool-a42");
 
     // 1. 用户消息
-    model.apply(StartChat {
-        submission: "run task".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(crate::tui::model::conversation::intent::AppendUserMessage { text: "run task".to_string() });
 
     // 2. Assistant text
     model.apply(AssistantText {
@@ -368,12 +370,12 @@ fn test_timeline_mirrors_blocks_with_inline_agent_activities_only() {
     });
 
     // 4. Agent progress — 不进 timeline，只写入 tool_calls[].activities
-    model.apply(RecordAgentActivities {
-        chat_id: chat_id.clone(),
-        run_id: run_id.clone(),
-        tool_id: tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("analysing codebase".to_string())],
-    });
+    model.record_agent_activities(
+        chat_id.clone(),
+        run_id.clone(),
+        tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("analysing codebase".to_string())],
+    );
 
     // 5. Tool result
     model.apply(ToolResult {
@@ -473,12 +475,12 @@ fn test_agent_activity_preview_limits_activity_lines() {
         index: 0,
     });
 
-    model.apply(RecordAgentActivities {
-        chat_id: chat_id.clone(),
-        run_id: run_id.clone(),
-        tool_id: tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("one\ntwo\nthree\nfour\nfive\nsix".to_string())],
-    });
+    model.record_agent_activities(
+        chat_id.clone(),
+        run_id.clone(),
+        tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("one\ntwo\nthree\nfour\nfive\nsix".to_string())],
+    );
 
     let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
         .map(|call| call.activities.clone())
@@ -549,7 +551,7 @@ fn bash_tool_streaming_output_multiple_chunks_tail_five_lines() {
     );
 }
 
-/// 场景测试：Agent 工具的 sub-agent activity 仍走 `RecordAgentActivities`
+/// 场景测试：Agent 工具的 sub-agent activity 仍走 `record_agent_activities`
 /// 并经 streaming_preview 显示 tail 行（确保重构未破坏 Agent 路径）。
 #[test]
 fn agent_tool_progress_still_uses_streaming_preview_after_refactor() {
@@ -568,12 +570,12 @@ fn agent_tool_progress_still_uses_streaming_preview_after_refactor() {
         index: 0,
     });
 
-    model.apply(RecordAgentActivities {
-        chat_id: chat_id.clone(),
-        run_id: run_id.clone(),
-        tool_id: tool_id.clone(),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("step-1\nstep-2\nstep-3\nstep-4\nstep-5\nstep-6\nstep-7".to_string())],
-    });
+    model.record_agent_activities(
+        chat_id.clone(),
+        run_id.clone(),
+        tool_id.clone(),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("step-1\nstep-2\nstep-3\nstep-4\nstep-5\nstep-6\nstep-7".to_string())],
+    );
 
     let activities = tool_call(&model, &chat_id, &run_id, &tool_id)
         .map(|call| call.activities.clone())

@@ -16,10 +16,6 @@ impl SessionModel {
                 self.current_session_id = Some(id.clone());
                 vec![SessionChange::CurrentSessionChanged { id }]
             }
-            SessionIntent::MarkDirty => {
-                self.dirty = true;
-                vec![SessionChange::DirtyChanged { dirty: true }]
-            }
             SessionIntent::MessagesSynced { message_count } => {
                 self.message_count = message_count;
                 self.dirty = false;
@@ -111,7 +107,6 @@ mod tests {
     #[test]
     fn test_session_model_sync_clears_dirty() {
         let mut model = SessionModel::default();
-        model.apply(SessionIntent::MarkDirty);
         model.apply(SessionIntent::MessagesSynced { message_count: 3 });
         assert!(!model.dirty);
         assert_eq!(model.message_count, 3);

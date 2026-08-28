@@ -373,39 +373,6 @@ fn visible_running_tool_gutter_animates_without_replacing_document() {
 }
 
 #[test]
-fn visible_placeholder_header_animates_without_replacing_document() {
-    let mut line = RenderedLine::from_plain("Thinking.");
-    line.animation = Some(LineAnimation::ThinkingDots);
-    let mut area = OutputArea::new();
-    area.replace_document(RenderedDocument::new(vec![RenderedBlock {
-        block_id: "placeholder".into(),
-        lines: Rc::new(vec![line]),
-    }]));
-    let rect = Rect::new(0, 0, 16, 2);
-    let view = OutputViewState {
-        last_visible_height: 2,
-        ..Default::default()
-    };
-    let mut frame_zero = Buffer::empty(rect);
-    let mut frame_four = Buffer::empty(rect);
-    let live_zero = live_status_spinner_fixture_with_frame("Thinking", 0);
-    let live_four = live_status_spinner_fixture_with_frame("Thinking", 4);
-
-    area.render(rect, &mut frame_zero, &view, &live_zero);
-    area.render(rect, &mut frame_four, &view, &live_four);
-
-    let row_zero = (0..10)
-        .map(|x| frame_zero[(x, 0)].symbol())
-        .collect::<String>();
-    let row_four = (0..10)
-        .map(|x| frame_four[(x, 0)].symbol())
-        .collect::<String>();
-    assert!(row_zero.starts_with("Thinking."));
-    assert!(row_four.starts_with("Thinking.."));
-    assert_eq!(area.document().total_lines(), 1);
-}
-
-#[test]
 fn test_render_spinner_does_not_overflow_into_scrollbar_gap_narrow_terminal() {
     let mut area = OutputArea::new();
     // 文档 10 行 + visible=3 → needs_scrollbar=true → content_area.width=30-3=27

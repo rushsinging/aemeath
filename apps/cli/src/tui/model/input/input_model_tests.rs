@@ -45,7 +45,7 @@ fn test_input_model_replace_history_allows_previous_navigation() {
         "second".to_string(),
     ]));
 
-    let changes = model.apply(InputIntent::MoveHistoryPrevious);
+    let changes = model.apply(InputIntent::MoveCursorUp);
 
     assert_eq!(model.document.buffer, "second");
     assert_eq!(model.history.selected_index, Some(1));
@@ -60,9 +60,9 @@ fn test_input_model_history_next_restores_saved_draft() {
     let mut model = InputModel::default();
     model.apply(InputIntent::ReplaceHistory(vec!["past".to_string()]));
     model.apply(InputIntent::InsertText("draft".to_string()));
-    model.apply(InputIntent::MoveHistoryPrevious);
+    model.apply(InputIntent::MoveCursorUp);
 
-    model.apply(InputIntent::MoveHistoryNext);
+    model.apply(InputIntent::MoveCursorDown);
 
     assert_eq!(model.document.buffer, "draft");
     assert_eq!(model.history.selected_index, None);
@@ -72,7 +72,7 @@ fn test_input_model_history_next_restores_saved_draft() {
 fn test_input_model_replace_history_clears_active_selection() {
     let mut model = InputModel::default();
     model.apply(InputIntent::ReplaceHistory(vec!["old".to_string()]));
-    model.apply(InputIntent::MoveHistoryPrevious);
+    model.apply(InputIntent::MoveCursorUp);
 
     model.apply(InputIntent::ReplaceHistory(vec!["new".to_string()]));
 
@@ -132,7 +132,9 @@ fn test_input_model_backspace_deletes_copied_text_as_atomic_block() {
 fn test_input_model_backspace_inside_copied_text_deletes_atomic_block() {
     let mut model = InputModel::default();
     model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
-    model.apply(InputIntent::MoveCursor(5));
+    for _ in 0..10 {
+        model.apply(InputIntent::MoveCursorLeft);
+    }
 
     model.apply(InputIntent::DeleteBackward);
 
@@ -168,7 +170,9 @@ fn test_input_model_copied_text_counter_increments_per_long_paste() {
 fn test_accept_completion_replaces_slash_token() {
     let mut model = InputModel::default();
     model.apply(InputIntent::InsertText("/he now".to_string()));
-    model.apply(InputIntent::MoveCursor(3));
+    for _ in 0..4 {
+        model.apply(InputIntent::MoveCursorLeft);
+    }
     model.apply(InputIntent::SetCompletions {
         query: "/he now".to_string(),
         items: vec![CompletionItem::new("/help", "/help")],
@@ -185,7 +189,9 @@ fn test_accept_completion_replaces_slash_token() {
 fn test_accept_completion_replaces_at_token_with_prefix() {
     let mut model = InputModel::default();
     model.apply(InputIntent::InsertText("read @src/main tail".to_string()));
-    model.apply(InputIntent::MoveCursor(14));
+    for _ in 0..5 {
+        model.apply(InputIntent::MoveCursorLeft);
+    }
     model.apply(InputIntent::SetCompletions {
         query: "read @src/main tail".to_string(),
         items: vec![CompletionItem::with_type(

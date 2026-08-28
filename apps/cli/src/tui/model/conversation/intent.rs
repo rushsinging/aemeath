@@ -4,20 +4,20 @@
 
 use super::block::AskUserSlot;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
-use super::interaction::{
-    InteractionCommandFailure, InteractionDraftAction, InteractionRequest, UiInteractionRequestId,
-};
+use super::interaction::{InteractionCommandFailure, InteractionRequest, UiInteractionRequestId};
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiResumedSessionStep};
-use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
 //  Conversation intent structs（原 ConversationIntent enum 的 27 个 variant）
 // ════════════════════════════════════════════════════════════════════
 
+/// 测试脚手架：直接建立带 active chat 的会话状态。生产路径经
+/// `ensure_runtime_turn` 懒创建，不再显式开启 chat。
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg(test)]
 pub struct StartChat {
     pub submission: String,
 }
@@ -136,6 +136,17 @@ pub struct ClearQueuedSubmissionById {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClearAllQueuedSubmissions;
 
+/// 测试脚手架：批量灌入 agent activity 的唯一 apply 入口；生产经
+/// `RecordSubRunActivity` 逐条驱动。
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg(test)]
+pub struct RecordAgentActivities {
+    pub chat_id: ChatId,
+    pub run_id: ChatRunId,
+    pub tool_id: ToolCallId,
+    pub activities: Vec<crate::tui::model::conversation::agent_activity::AgentActivityLine>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecordSubRunActivity {
     pub agent_id: String,
@@ -145,14 +156,6 @@ pub struct RecordSubRunActivity {
     pub sequence: u64,
     pub sequence_index: u32,
     pub kind: crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecordAgentActivities {
-    pub chat_id: ChatId,
-    pub run_id: ChatRunId,
-    pub tool_id: ToolCallId,
-    pub activities: Vec<AgentActivityLine>,
 }
 
 /// 工具 stdout 流式输出（如 Bash 长输出命令的逐行 stdout）。
@@ -251,22 +254,6 @@ pub struct ShowInteraction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UpdateInteractionDraft {
-    pub request_id: UiInteractionRequestId,
-    pub action: InteractionDraftAction,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfirmInteraction {
-    pub request_id: UiInteractionRequestId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CancelInteraction {
-    pub request_id: UiInteractionRequestId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InteractionReplyAccepted {
     pub request_id: UiInteractionRequestId,
 }
@@ -362,8 +349,11 @@ pub struct ClearCompactRuntime;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationIntent {
-    // ── 原 conversation variants ──
+    #[cfg(test)]
     StartChat(StartChat),
+    #[cfg(test)]
+    RecordAgentActivities(RecordAgentActivities),
+    // ── 原 conversation variants ──
     ResumeConversation(ResumeConversation),
     AppendUserMessage(AppendUserMessage),
     AssistantText(AssistantText),
@@ -381,7 +371,6 @@ pub enum ConversationIntent {
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordSubRunActivity(RecordSubRunActivity),
-    RecordAgentActivities(RecordAgentActivities),
     RecordToolStreamingOutput(RecordToolStreamingOutput),
     UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),
@@ -399,9 +388,6 @@ pub enum ConversationIntent {
     ConfirmAskUserBatch(ConfirmAskUserBatch),
     DismissAskUserBatch(DismissAskUserBatch),
     ShowInteraction(ShowInteraction),
-    UpdateInteractionDraft(UpdateInteractionDraft),
-    ConfirmInteraction(ConfirmInteraction),
-    CancelInteraction(CancelInteraction),
     InteractionReplyAccepted(InteractionReplyAccepted),
     InteractionCancelAccepted(InteractionCancelAccepted),
     InteractionReplyRejected(InteractionReplyRejected),

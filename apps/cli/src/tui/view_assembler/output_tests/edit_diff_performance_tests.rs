@@ -1,7 +1,7 @@
 use super::super::{assemble_output_view, assemble_output_window};
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AppendSystemMessage, StartChat, ToolCallUpdate, ToolResult,
+    AppendSystemMessage, AppendUserMessage, ToolCallUpdate, ToolResult,
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -32,8 +32,12 @@ fn source_lines(count: usize, changed_index: Option<usize>) -> String {
 
 fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationModel {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "恢复长会话并检查 Edit 历史".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "恢复长会话并检查 Edit 历史".to_string(),
     });
     let chat_id = ChatId::new("chat-main");
     let run_id = ChatRunId::new("turn-main");
@@ -103,10 +107,10 @@ fn edit_cold_work_scales_and_spinner_warm_render_reuses_static_diff() {
         let vm = assemble_output_view(&conversation, None);
         let mut renderer = OutputDocumentRenderer::default();
         let (_, cold) = capture(|| {
-            renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+            renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default())
         });
         let (_, warm) = capture(|| {
-            renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+            renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default())
         });
         (cold, warm)
     }
@@ -145,7 +149,7 @@ fn edit_cold_window_limits_diff_work_to_selected_history() {
                 &vm,
                 100,
                 0,
-                MarkdownSpacingPolicy::normal(),
+                MarkdownSpacingPolicy::default(),
                 OutputRenderWindow {
                     line_limit: 100,
                     tail_offset: 0,
@@ -175,7 +179,7 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
             &first_vm,
             100,
             0,
-            MarkdownSpacingPolicy::normal(),
+            MarkdownSpacingPolicy::default(),
             OutputRenderWindow {
                 line_limit: 10_000,
                 tail_offset: 0,
@@ -191,7 +195,7 @@ fn revision_update_after_history_trim_reuses_windowed_static_edit_layout() {
             &next_vm,
             100,
             1,
-            MarkdownSpacingPolicy::normal(),
+            MarkdownSpacingPolicy::default(),
             OutputRenderWindow {
                 line_limit: 10_000,
                 tail_offset: 0,
@@ -235,7 +239,7 @@ fn edit_diff_window_release_workload() {
                     &vm,
                     100,
                     0,
-                    MarkdownSpacingPolicy::normal(),
+                    MarkdownSpacingPolicy::default(),
                     OutputRenderWindow {
                         line_limit: WINDOW_LINES,
                         tail_offset: 0,
@@ -294,7 +298,7 @@ fn edit_diff_release_workload() {
                     100,
                     100,
                     0,
-                    MarkdownSpacingPolicy::normal(),
+                    MarkdownSpacingPolicy::default(),
                 );
                 cold_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
             });
@@ -305,7 +309,7 @@ fn edit_diff_release_workload() {
                     100,
                     100,
                     1,
-                    MarkdownSpacingPolicy::normal(),
+                    MarkdownSpacingPolicy::default(),
                 );
                 warm_ns.push(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX));
             });

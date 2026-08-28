@@ -23,17 +23,6 @@ impl DiagnosticModel {
                 });
                 vec![DiagnosticChange::NoticeRecorded { id, severity }]
             }
-            DiagnosticIntent::OpenPrompt { id, question } => {
-                self.active_prompt = Some(ActivePrompt {
-                    id: id.clone(),
-                    question,
-                });
-                vec![DiagnosticChange::PromptOpened { id }]
-            }
-            DiagnosticIntent::AnswerPrompt { answer } => {
-                self.active_prompt = None;
-                vec![DiagnosticChange::PromptAnswered { answer }]
-            }
         }
     }
 
@@ -77,20 +66,6 @@ mod tests {
         assert!(changes
             .iter()
             .any(|change| matches!(change, DiagnosticChange::NoticeRecorded { .. })));
-    }
-
-    #[test]
-    fn test_opens_and_answers_prompt() {
-        let mut model = DiagnosticModel::default();
-        model.apply(DiagnosticIntent::OpenPrompt {
-            id: "p1".to_string(),
-            question: "继续?".to_string(),
-        });
-        assert!(model.active_prompt.is_some());
-        model.apply(DiagnosticIntent::AnswerPrompt {
-            answer: "是".to_string(),
-        });
-        assert!(model.active_prompt.is_none());
     }
 
     #[test]

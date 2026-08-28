@@ -89,36 +89,8 @@ pub(crate) enum UiRiskLevel {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum InteractionDraft {
-    UserAnswers(Vec<String>),
-    Approval {
-        approved: Option<bool>,
-        reason: Option<String>,
-    },
-    HardPause {
-        continue_run: bool,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum InteractionDraftAction {
-    Approve,
-    SetUserAnswer { index: usize, answer: String },
-    ContinueHardPause,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum UiInteractionReply {
     UserAnswers(Vec<String>),
-    ToolApproval {
-        approved: bool,
-        reason: Option<String>,
-    },
-    PlanApproval {
-        approved: bool,
-        reason: Option<String>,
-    },
-    ContinueHardPause,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -136,67 +108,14 @@ pub(crate) enum UiInteractionCancelReason {
     UserCancelled,
 }
 
-impl InteractionDraft {
-    fn for_body(body: &InteractionBody) -> Self {
-        match body {
-            InteractionBody::UserQuestions(questions) => {
-                Self::UserAnswers(vec![String::new(); questions.len()])
-            }
-            InteractionBody::ToolApproval(_) | InteractionBody::PlanApproval(_) => Self::Approval {
-                approved: None,
-                reason: None,
-            },
-            InteractionBody::HardPause(_) => Self::HardPause { continue_run: true },
-        }
-    }
-
-    fn apply(&mut self, action: InteractionDraftAction) -> bool {
-        match (self, action) {
-            (Self::Approval { approved, reason }, InteractionDraftAction::Approve) => {
-                *approved = Some(true);
-                *reason = None;
-                true
-            }
-            (
-                Self::UserAnswers(answers),
-                InteractionDraftAction::SetUserAnswer { index, answer },
-            ) => {
-                let Some(slot) = answers.get_mut(index) else {
-                    return false;
-                };
-                *slot = answer;
-                true
-            }
-            (Self::HardPause { continue_run }, InteractionDraftAction::ContinueHardPause) => {
-                *continue_run = true;
-                true
-            }
-            _ => false,
-        }
-    }
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InteractionPhase {
-    Collecting,
-    ReplyPending,
-    CancelPending,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InteractionState {
     request: InteractionRequest,
-    draft: InteractionDraft,
-    phase: InteractionPhase,
 }
 
 impl InteractionState {
     fn new(request: InteractionRequest) -> Self {
-        let draft = InteractionDraft::for_body(&request.body);
-        Self {
-            request,
-            draft,
-            phase: InteractionPhase::Collecting,
-        }
+        Self { request }
     }
 
     pub(crate) fn request_id(&self) -> &UiInteractionRequestId {
@@ -205,72 +124,6 @@ impl InteractionState {
 
     pub(crate) fn run_id(&self) -> &UiRunId {
         &self.request.run_id
-    }
-
-    pub(crate) fn phase(&self) -> InteractionPhase {
-        self.phase
-    }
-
-    fn reply(&self) -> Option<UiInteractionReply> {
-        match (&self.request.body, &self.draft) {
-            (InteractionBody::UserQuestions(_), InteractionDraft::UserAnswers(answers))
-                if answers.iter().all(|answer| !answer.is_empty()) =>
-            {
-                Some(UiInteractionReply::UserAnswers(answers.clone()))
-            }
-            (
-                InteractionBody::ToolApproval(_),
-                InteractionDraft::Approval {
-                    approved: Some(approved),
-                    reason,
-                },
-            ) => Some(UiInteractionReply::ToolApproval {
-                approved: *approved,
-                reason: reason.clone(),
-            }),
-            (
-                InteractionBody::PlanApproval(_),
-                InteractionDraft::Approval {
-                    approved: Some(approved),
-                    reason,
-                },
-            ) => Some(UiInteractionReply::PlanApproval {
-                approved: *approved,
-                reason: reason.clone(),
-            }),
-            (InteractionBody::HardPause(_), InteractionDraft::HardPause { continue_run: true }) => {
-                Some(UiInteractionReply::ContinueHardPause)
-            }
-            _ => None,
-        }
-    }
-
-    fn update_draft(&mut self, action: InteractionDraftAction) -> bool {
-        if !matches!(self.phase, InteractionPhase::Collecting) {
-            return false;
-        }
-        self.draft.apply(action)
-    }
-
-    fn confirm(&mut self) -> Option<UiInteractionReply> {
-        if !matches!(self.phase, InteractionPhase::Collecting) {
-            return None;
-        }
-        let reply = self.reply()?;
-        self.phase = InteractionPhase::ReplyPending;
-        Some(reply)
-    }
-
-    fn cancel(&mut self) -> bool {
-        if !matches!(self.phase, InteractionPhase::Collecting) {
-            return false;
-        }
-        self.phase = InteractionPhase::CancelPending;
-        true
-    }
-
-    fn restore_collecting(&mut self) {
-        self.phase = InteractionPhase::Collecting;
     }
 }
 
@@ -307,66 +160,6 @@ impl ConversationModel {
         let request_id = request.request_id.clone();
         self.active_interaction = Some(InteractionState::new(request));
         vec![ConversationChange::InteractionShown { request_id }]
-    }
-
-    pub(super) fn update_interaction_draft(
-        &mut self,
-        request_id: &UiInteractionRequestId,
-        action: InteractionDraftAction,
-    ) -> Vec<ConversationChange> {
-        let Some(interaction) = self.active_interaction.as_mut() else {
-            return Vec::new();
-        };
-        if interaction.request_id() != request_id || !interaction.update_draft(action) {
-            return Vec::new();
-        }
-        vec![ConversationChange::InteractionUpdated {
-            request_id: request_id.clone(),
-        }]
-    }
-
-    pub(super) fn confirm_interaction(
-        &mut self,
-        request_id: &UiInteractionRequestId,
-    ) -> Vec<ConversationChange> {
-        let Some(interaction) = self.active_interaction.as_mut() else {
-            return Vec::new();
-        };
-        if interaction.request_id() != request_id {
-            return Vec::new();
-        }
-        let Some(reply) = interaction.confirm() else {
-            return Vec::new();
-        };
-        let mut changes = self.set_ask_user_completion_for_request(
-            request_id,
-            super::block::AskUserCompletion::ReplyPending,
-        );
-        changes.push(ConversationChange::InteractionReplyRequested {
-            request_id: request_id.clone(),
-            reply,
-        });
-        changes
-    }
-
-    pub(super) fn cancel_interaction(
-        &mut self,
-        request_id: &UiInteractionRequestId,
-    ) -> Vec<ConversationChange> {
-        let Some(interaction) = self.active_interaction.as_mut() else {
-            return Vec::new();
-        };
-        if interaction.request_id() != request_id || !interaction.cancel() {
-            return Vec::new();
-        }
-        let mut changes = self.set_ask_user_completion_for_request(
-            request_id,
-            super::block::AskUserCompletion::CancelPending,
-        );
-        changes.push(ConversationChange::InteractionCancelRequested {
-            request_id: request_id.clone(),
-        });
-        changes
     }
 
     pub(super) fn accept_interaction_reply(
@@ -559,7 +352,6 @@ impl ConversationModel {
         if interaction.request_id() != request_id {
             return Vec::new();
         }
-        interaction.restore_collecting();
         let mut changes = self.set_ask_user_completion_for_request(
             request_id,
             super::block::AskUserCompletion::Active,

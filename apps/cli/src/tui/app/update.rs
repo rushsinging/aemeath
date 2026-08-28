@@ -156,7 +156,6 @@ impl App {
     ) -> UpdateResult {
         match msg {
             TuiMsg::Ui(ev) => self.update_ui(ev, ui_tx, spawn_refs),
-            TuiMsg::Runtime(ev) => self.update_runtime_event(ev),
             TuiMsg::RuntimeBatch(events) => {
                 let mut batch_result = UpdateResult::none();
                 for event in events {

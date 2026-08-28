@@ -1,9 +1,11 @@
 #[test]
 fn test_conversation_keeps_tool_args_preview() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read file".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read file".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -48,9 +50,11 @@ fn test_conversation_keeps_tool_args_preview() {
 #[test]
 fn test_tool_call_timeline_item_stores_reference_not_copied_payload() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read file".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read file".to_string() });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -91,9 +95,11 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
     // #95 场景：LLM 返回 text + tool_use 时，ToolCallStart 用纯 tool 序号 (0)，
     // ToolCall 用 content_block index (1)。验证 Agent tool result 不因此变成 orphan。
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "review code".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "review code".to_string() });
     // LLM 先输出 assistant text（content_block 0）
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -125,12 +131,12 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         status: ToolCallStatus::Ready,
     });
     // Agent progress（不影响绑定）
-    model.apply(RecordAgentActivities {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        run_id: super::ids::ChatRunId::new("turn-1"),
-        tool_id: super::ids::ToolCallId::new("call_agent_1"),
-        activities: vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files...".to_string())],
-    });
+    model.record_agent_activities(
+        super::ids::ChatId::new("chat-1"),
+        super::ids::ChatRunId::new("turn-1"),
+        super::ids::ToolCallId::new("call_agent_1"),
+        vec![crate::tui::model::conversation::agent_activity::AgentActivityLine::message("reading files...".to_string())],
+    );
     // Agent tool result
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -166,9 +172,11 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
     // #95 场景 B：assistant text 还在 streaming（未 CompleteBlock）时，
     // tool call 就到了。ToolCallStart index=0, ToolCall index=1（错位）。
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "review".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "review".to_string() });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -219,9 +227,11 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     // 修复前 observe_tool_call 中 bind_tool 返回 None 导致 ToolCall block 不被创建，
     // ToolResult 到达时 complete_active_tool 找不到匹配 id → orphan。
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "review code".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "review code".to_string() });
     // 不发送 ToolCallStart
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),

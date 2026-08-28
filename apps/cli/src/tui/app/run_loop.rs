@@ -49,7 +49,6 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
         TuiMsg::Resize { .. } => "Resize",
         TuiMsg::SpinnerTick => "SpinnerTick",
         TuiMsg::Ui(_) => "Ui",
-        TuiMsg::Runtime(_) => "Runtime",
         TuiMsg::RuntimeBatch(_) => "RuntimeBatch",
     }
 }

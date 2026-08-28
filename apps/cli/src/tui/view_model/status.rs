@@ -4,7 +4,6 @@ use super::style::SemanticStyle;
 pub enum StatusNoticeViewKind {
     #[default]
     Normal,
-    Running,
     Success,
     Warning,
 }

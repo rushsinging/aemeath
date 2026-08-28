@@ -67,7 +67,7 @@ fn apply_runtime_event(
     let spawn_refs =
         crate::tui::effect::session::processing::SpawnContextRefs { agent_client: None };
     app.update(
-        crate::tui::update::msg::TuiMsg::Runtime(event),
+        crate::tui::update::msg::TuiMsg::RuntimeBatch(vec![event]),
         &tx,
         &spawn_refs,
     );

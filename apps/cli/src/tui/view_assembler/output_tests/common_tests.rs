@@ -27,9 +27,11 @@ fn add_tool_after_thinking(
     output: &str,
     is_error: bool,
 ) {
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "search".to_string() });
     conversation.apply(ThinkingText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),

@@ -188,7 +188,7 @@ fn test_phase_one_root_reducer_intent_entrypoint_exists() {
     let reducer =
         fs::read_to_string(root.join("update/root_reducer.rs")).expect("read root reducer");
 
-    for context in ["Conversation", "Input", "Diagnostic", "Session"] {
+    for context in ["Conversation", "Input", "Session"] {
         assert!(
             intent.contains(&format!("{context}(")),
             "AgentIntent must route the {context} context"

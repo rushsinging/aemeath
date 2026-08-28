@@ -10,6 +10,5 @@ pub enum TuiMsg {
     Resize { width: u16, height: u16 },
     SpinnerTick,
     Ui(UiEvent),
-    Runtime(TuiRuntimeEvent),
     RuntimeBatch(Vec<TuiRuntimeEvent>),
 }

@@ -279,18 +279,15 @@ impl ResumedHistoryBacking {
         );
     }
 
-    pub(crate) fn loaded_step_count(&self) -> usize {
-        self.loaded_steps.len()
-    }
-
-    pub(crate) fn steps(&self) -> &[ResumedHistoryStep] {
-        &self.steps
-    }
-
     pub(crate) fn step(&self, index: usize) -> Option<&ResumedHistoryStep> {
         self.loaded_steps
             .get(&index)
             .or_else(|| self.steps.get(index))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn loaded_step_count_for_test(&self) -> usize {
+        self.steps.len()
     }
 
     pub(crate) fn items(&self) -> &[ResumedHistoryItem] {

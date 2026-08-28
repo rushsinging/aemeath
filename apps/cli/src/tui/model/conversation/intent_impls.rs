@@ -12,12 +12,6 @@ use super::update::ConversationUpdate;
 //  Conversation intent impls
 // ════════════════════════════════════════════════════════════════════
 
-impl ConversationUpdate for StartChat {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.start_chat(self.submission)
-    }
-}
-
 impl ConversationUpdate for ResumeConversation {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         use super::history_parse::{
@@ -201,6 +195,26 @@ impl ConversationUpdate for AssistantText {
     }
 }
 
+impl ConversationUpdate for RecordToolStreamingOutput {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
+    }
+}
+
+#[cfg(test)]
+impl ConversationUpdate for StartChat {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.start_chat(self.submission)
+    }
+}
+
+#[cfg(test)]
+impl ConversationUpdate for RecordAgentActivities {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
+    }
+}
+
 impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_thinking_text(self.chat_id, self.run_id, self.text)
@@ -311,17 +325,6 @@ impl ConversationUpdate for RecordSubRunActivity {
     }
 }
 
-impl ConversationUpdate for RecordAgentActivities {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
-    }
-}
-impl ConversationUpdate for RecordToolStreamingOutput {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
-    }
-}
-
 impl ConversationUpdate for UpdateAgentMeta {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_agent_meta(
@@ -421,24 +424,6 @@ impl ConversationUpdate for DismissAskUserBatch {
 impl ConversationUpdate for ShowInteraction {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.show_interaction(self.request)
-    }
-}
-
-impl ConversationUpdate for UpdateInteractionDraft {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.update_interaction_draft(&self.request_id, self.action)
-    }
-}
-
-impl ConversationUpdate for ConfirmInteraction {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.confirm_interaction(&self.request_id)
-    }
-}
-
-impl ConversationUpdate for CancelInteraction {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.cancel_interaction(&self.request_id)
     }
 }
 
@@ -575,7 +560,6 @@ impl ConversationUpdate for ReplaceActivitySnapshot {
 impl ConversationUpdate for ConversationIntent {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         match self {
-            Self::StartChat(s) => s.update(model),
             Self::ResumeConversation(s) => s.update(model),
             Self::AppendUserMessage(s) => s.update(model),
             Self::AssistantText(s) => s.update(model),
@@ -592,8 +576,11 @@ impl ConversationUpdate for ConversationIntent {
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
-            Self::RecordSubRunActivity(s) => s.update(model),
+            #[cfg(test)]
+            Self::StartChat(s) => s.update(model),
+            #[cfg(test)]
             Self::RecordAgentActivities(s) => s.update(model),
+            Self::RecordSubRunActivity(s) => s.update(model),
             Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
@@ -611,9 +598,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::ConfirmAskUserBatch(s) => s.update(model),
             Self::DismissAskUserBatch(s) => s.update(model),
             Self::ShowInteraction(s) => s.update(model),
-            Self::UpdateInteractionDraft(s) => s.update(model),
-            Self::ConfirmInteraction(s) => s.update(model),
-            Self::CancelInteraction(s) => s.update(model),
             Self::InteractionReplyAccepted(s) => s.update(model),
             Self::InteractionCancelAccepted(s) => s.update(model),
             Self::InteractionReplyRejected(s) => s.update(model),

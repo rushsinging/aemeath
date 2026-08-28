@@ -252,7 +252,7 @@ fn renderer_preserves_materialized_window_metadata() {
         80,
         80,
         0,
-        MarkdownSpacingPolicy::normal(),
+        MarkdownSpacingPolicy::default(),
         OutputRenderWindow {
             line_limit: 1,
             tail_offset: 999,
@@ -286,11 +286,11 @@ fn render_window_keeps_recent_blocks_cached_across_window_round_trip() {
         tail_offset: 2,
     };
 
-    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), newest);
-    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), older);
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::default(), newest);
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::default(), older);
     let before_return = renderer.render_count();
     let gutted_before_return = renderer.gutted_render_count();
-    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::normal(), newest);
+    renderer.render_tree_with_window(&vm, 80, 0, MarkdownSpacingPolicy::default(), newest);
 
     assert_eq!(
         renderer.render_count(),
@@ -317,7 +317,7 @@ fn rendered_caches_never_exceed_configured_capacity_across_windows() {
             &vm,
             80,
             0,
-            MarkdownSpacingPolicy::normal(),
+            MarkdownSpacingPolicy::default(),
             OutputRenderWindow {
                 line_limit: 2,
                 tail_offset,
@@ -473,7 +473,7 @@ fn spacing_policy_change_invalidates_content_and_gutted_caches() {
     );
     let mut renderer = OutputDocumentRenderer::default();
 
-    let normal = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::normal());
+    let normal = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::default());
     let after_normal_content = renderer.render_count();
     let after_normal_gutted = renderer.gutted_render_count();
     let compact = renderer.render_model_document(&vm, 80, 80, 0, MarkdownSpacingPolicy::compact());
@@ -509,7 +509,7 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         80,
         80,
         0,
-        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
     );
     let after_first = r.gutted_render_count();
     // 同一 vm、frame 推进：静态 block 应命中 gutted 缓存，不重算。
@@ -518,7 +518,7 @@ fn test_gutted_cache_reuses_static_block_across_frames() {
         80,
         80,
         1,
-        crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+        crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
     );
     assert_eq!(
         r.gutted_render_count(),
@@ -590,10 +590,10 @@ fn history_over_max_lines_does_not_rehighlight_evicted_static_edits_on_next_fram
     let mut renderer = OutputDocumentRenderer::default();
 
     let (_, cold) = crate::tui::render::performance::capture(|| {
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default())
     });
     let (_, warm) = crate::tui::render::performance::capture(|| {
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default())
     });
 
     assert_eq!(cold.edit_diff_calls, 6);
@@ -610,13 +610,13 @@ fn unrelated_new_root_does_not_rehighlight_windowed_static_edits() {
             .collect(),
     );
     let mut renderer = OutputDocumentRenderer::default();
-    let _ = renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+    let _ = renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default());
 
     vm.version += 1;
     vm.roots
         .push(node("unrelated", "无关的新消息", vec![]).into());
     let (_, revised) = crate::tui::render::performance::capture(|| {
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default())
     });
 
     assert_eq!(revised.edit_diff_calls, 0);
@@ -676,10 +676,10 @@ fn static_edit_diff_reuses_render_and_highlight_across_spinner_frames() {
     let mut renderer = OutputDocumentRenderer::default();
 
     let (_, cold) = crate::tui::render::performance::capture(|| {
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal())
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default())
     });
     let (_, warm) = crate::tui::render::performance::capture(|| {
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal())
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default())
     });
 
     assert_eq!(cold.edit_diff_calls, 1);
@@ -735,8 +735,8 @@ fn resize_and_spinner_frame_do_not_grow_retained_cache_entries() {
     let mut renderer = OutputDocumentRenderer::default();
     let vm = vm_with_roots(vec![assistant_node("stable", "content")]);
 
-    renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::normal());
-    renderer.render_tree_with_animation_frame(&vm, 100, 1, MarkdownSpacingPolicy::normal());
+    renderer.render_tree_with_animation_frame(&vm, 80, 0, MarkdownSpacingPolicy::default());
+    renderer.render_tree_with_animation_frame(&vm, 100, 1, MarkdownSpacingPolicy::default());
 
     let retained = renderer.retained_cache_capacity();
     assert_eq!(retained.block_entries, 1);

@@ -194,7 +194,7 @@ mod tests {
         let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+            TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
                 items: vec![TuiChatMessage {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("search bug 76")],
@@ -204,7 +204,7 @@ mod tests {
                     skill_request: None,
                 }],
                 queued: vec![],
-            }),
+            }]),
             &ui_tx,
             &spawn_refs,
         );
@@ -233,9 +233,9 @@ mod tests {
             })
             .count();
         let _ = app.update(
-            TuiMsg::Runtime(TuiRuntimeEvent::TurnStarted {
+            TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::TurnStarted {
                 messages: vec![TuiChatMessage::user_text("search bug 76")],
-            }),
+            }]),
             &ui_tx,
             &spawn_refs,
         );
@@ -281,7 +281,7 @@ mod tests {
         let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Runtime(TuiRuntimeEvent::UserMessagesAdopted {
+            TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::UserMessagesAdopted {
                 items: vec![TuiChatMessage {
                     role: "user".to_string(),
                     content: vec![TuiContentBlock::text("search bug 76")],
@@ -291,12 +291,12 @@ mod tests {
                     skill_request: None,
                 }],
                 queued: vec![],
-            }),
+            }]),
             &ui_tx,
             &spawn_refs,
         );
         for event in grep_after_thinking_events() {
-            let _ = app.update(TuiMsg::Runtime(event), &ui_tx, &spawn_refs);
+            let _ = app.update(TuiMsg::RuntimeBatch(vec![event]), &ui_tx, &spawn_refs);
         }
         app.flush_dirty_view_models();
 

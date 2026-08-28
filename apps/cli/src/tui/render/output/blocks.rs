@@ -5,7 +5,6 @@ pub mod assistant_message;
 pub mod diagnostic;
 pub mod edit_diff;
 pub mod hook_notice;
-pub mod separator;
 pub mod thinking;
 pub mod tool_call;
 pub mod tool_result;
