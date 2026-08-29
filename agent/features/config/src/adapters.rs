@@ -20,9 +20,29 @@ pub enum ConfigAdapterError {
     Io,
     Parse,
     Invalid,
+    /// 模型选择校验失败，携带可读的根因与可用来源（来自 `ModelResolveError`）。
+    InvalidModel {
+        detail: String,
+    },
     CorruptTransaction,
     UnsupportedDurability,
 }
+
+impl std::fmt::Display for ConfigAdapterError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PermissionDenied => write!(formatter, "配置目录没有写入权限"),
+            Self::Io => write!(formatter, "配置文件读写失败"),
+            Self::Parse => write!(formatter, "配置文件格式无效"),
+            Self::Invalid => write!(formatter, "配置内容无效"),
+            Self::InvalidModel { detail } => write!(formatter, "{detail}"),
+            Self::CorruptTransaction => write!(formatter, "配置写入事务损坏"),
+            Self::UnsupportedDurability => write!(formatter, "不支持的持久化保证"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigAdapterError {}
 
 pub trait EnvSource: Send + Sync {
     fn get(&self, name: &str) -> Option<String>;
@@ -444,14 +464,15 @@ impl ConfigValidator {
         if config.tools.max_concurrency == 0 || config.agents.max_concurrency == 0 {
             return Err(ConfigAdapterError::Invalid);
         }
-        if !config.models.default.is_empty()
-            && !config.models.providers.is_empty()
-            && config
+        if !config.models.default.is_empty() && !config.models.providers.is_empty() {
+            if let Err(error) = config
                 .models
                 .resolve_model_selection(&config.models.default)
-                .is_err()
-        {
-            return Err(ConfigAdapterError::Invalid);
+            {
+                return Err(ConfigAdapterError::InvalidModel {
+                    detail: error.to_string(),
+                });
+            }
         }
         if reqwest::header::HeaderValue::from_str(&config.api.user_agent).is_err() {
             return Err(ConfigAdapterError::Invalid);
@@ -635,27 +656,54 @@ mod tests {
     }
 
     #[test]
-    fn config_validator_rejects_zero_concurrency_and_unknown_model() {
+    fn config_validator_rejects_zero_concurrency() {
         let mut config = share::config::Config::default();
         config.tools.max_concurrency = 0;
         assert_eq!(
             ConfigValidator::validate(&config),
             Err(ConfigAdapterError::Invalid)
         );
+    }
 
+    #[test]
+    fn config_validator_unknown_model_reports_detail_with_available_sources() {
         let mut config = share::config::Config::default();
-        config.models.default = "missing/model".into();
+        config.models.default = "Wanaka/gpt-5.6-sol".into();
         config.models.providers.insert(
-            "known".into(),
+            "OmniRoute".into(),
             share::config::models::ProviderModelsConfig {
                 driver: "openai".into(),
                 ..Default::default()
             },
         );
-        assert_eq!(
-            ConfigValidator::validate(&config),
-            Err(ConfigAdapterError::Invalid)
+        config.models.providers.insert(
+            "Zhipu".into(),
+            share::config::models::ProviderModelsConfig {
+                driver: "zhipu".into(),
+                ..Default::default()
+            },
         );
+
+        let error = ConfigValidator::validate(&config).unwrap_err();
+        // Display 直接透传根因，不再叠加「模型选择无效」等冗余包装。
+        let display = error.to_string();
+        let ConfigAdapterError::InvalidModel { detail } = error else {
+            panic!("未知模型来源应返回带详情的 InvalidModel，实际：{error:?}");
+        };
+        // 中文诊断信息必须保留根因与可用来源，不能只剩 "Invalid"。
+        assert!(
+            detail.contains("Wanaka"),
+            "detail 应包含被查询的来源：{detail}"
+        );
+        assert!(
+            detail.contains("OmniRoute") && detail.contains("Zhipu"),
+            "detail 应列出可用来源：{detail}"
+        );
+        assert!(
+            detail.contains("未找到模型来源"),
+            "detail 应为中文可读诊断：{detail}"
+        );
+        assert_eq!(display, detail);
     }
 
     #[test]

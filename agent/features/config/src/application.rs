@@ -239,7 +239,7 @@ impl ConfigAppService {
             self.env_source.as_ref(),
         )
         .await
-        .map_err(|error| format!("配置加载失败：{error:?}"))?;
+        .map_err(|error| format!("配置加载失败：{error}"))?;
         let global_path = inner.global_path.clone();
         let claude_path = inner.claude_project_settings_path.clone();
         let project_path = inner.project_path.clone();
@@ -371,7 +371,9 @@ fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
         ConfigAdapterError::UnsupportedDurability => ConfigPersistError::UnsupportedDurability,
         ConfigAdapterError::CorruptTransaction => ConfigPersistError::CorruptTransaction,
         ConfigAdapterError::Parse => ConfigPersistError::Serialization,
-        ConfigAdapterError::Io | ConfigAdapterError::Invalid => ConfigPersistError::Io,
+        ConfigAdapterError::Io
+        | ConfigAdapterError::Invalid
+        | ConfigAdapterError::InvalidModel { .. } => ConfigPersistError::Io,
     }
 }
 
@@ -461,7 +463,9 @@ impl ConfigReader for ConfigAppService {
 fn refresh_error(error: ConfigAdapterError) -> ConfigRefreshError {
     match error {
         ConfigAdapterError::Parse => ConfigRefreshError::Parse,
-        ConfigAdapterError::Invalid => ConfigRefreshError::Invalid,
+        ConfigAdapterError::Invalid | ConfigAdapterError::InvalidModel { .. } => {
+            ConfigRefreshError::Invalid
+        }
         ConfigAdapterError::Io
         | ConfigAdapterError::PermissionDenied
         | ConfigAdapterError::UnsupportedDurability
