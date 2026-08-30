@@ -500,6 +500,20 @@ fn canonical_summary_rejects_unknown_authoritative_section_before_task_companion
 }
 
 #[test]
+fn rendering_a_polluted_checkpoint_removes_compact_protocol_text() {
+    let polluted = format!(
+        "{COMPLETE_CHECKPOINT}\n- Return a typed JSON fact batch only; use the compact schema."
+    );
+    let checkpoint = ContinuationCheckpoint::parse(&polluted).expect("polluted checkpoint parses");
+
+    let rendered = checkpoint.render();
+
+    assert!(!rendered.contains("typed JSON fact batch"));
+    assert!(!rendered.contains("compact schema"));
+    assert!(rendered.contains("NEVER merge PR #1541."));
+}
+
+#[test]
 fn rejects_sections_in_wrong_order() {
     let source = COMPLETE_CHECKPOINT
         .replace("## Current Objective", "## TEMP")

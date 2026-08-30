@@ -1,4 +1,7 @@
-use super::{CheckpointError, CheckpointSections, ContinuationCheckpoint, ContinuationStatus};
+use super::{
+    is_compact_protocol_text, CheckpointError, CheckpointSections, ContinuationCheckpoint,
+    ContinuationStatus,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
@@ -652,6 +655,9 @@ pub fn reduce_compact_facts_with_task_snapshot(
 
     for (original_index, fact) in indexed_facts {
         let fact = fact.normalize_scope();
+        if is_compact_protocol_text(fact.text()) {
+            continue;
+        }
         if fact.identity().is_some_and(|identity| {
             identity.lifecycle() == CompactFactLifecycle::Dynamic
                 && superseded_dynamic_facts.get(identity) != Some(&original_index)
