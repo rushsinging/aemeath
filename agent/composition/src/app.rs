@@ -572,7 +572,7 @@ mod tests {
             Arc::new(ReportedUsageProviderFactory::new()),
             configured_policy(&config),
         );
-        let assembly =
+        let mut assembly =
             crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
                 .await
                 .expect("runtime assembly");
@@ -595,7 +595,7 @@ mod tests {
 
         assembly
             .audit
-            .as_ref()
+            .take()
             .expect("session audit")
             .shutdown()
             .await;

@@ -4,8 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use audit::{
     start_usage_worker, AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream,
-    UsageAppendStorePort, UsageDropReason, UsageEmitOutcome, UsageRecord, UsageShutdownOutcome,
-    UsageWorkerConfig,
+    UsageAppendStorePort, UsageDropReason, UsageEmitOutcome, UsageRecord, UsageWorkerConfig,
 };
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
@@ -63,30 +62,36 @@ fn record(id: &str) -> UsageRecord {
 }
 
 #[tokio::test]
-async fn public_worker_appends_flushes_drains_and_rejects_late_records() {
+async fn public_worker_partitions_records_drains_once_and_rejects_late_records() {
     let store = Arc::new(RecordingStore::default());
-    let (sender, handle) = start_usage_worker(
+    let (sender, worker) = start_usage_worker(
         store.clone(),
         UsageWorkerConfig::new(4, Duration::from_secs(1)),
     );
-    assert_eq!(sender.try_record(record("a")), UsageEmitOutcome::Accepted);
-    assert_eq!(sender.try_record(record("b")), UsageEmitOutcome::Accepted);
+    let first = record("a");
+    let second = record("b");
+    let first_stream = AppendLogStream::for_session(&first.session_id)
+        .as_str()
+        .to_string();
+    let second_stream = AppendLogStream::for_session(&second.session_id)
+        .as_str()
+        .to_string();
 
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
-    let calls = store.calls.lock().expect("store calls lock").clone();
-    assert_eq!(calls.len(), 4);
-    assert!(calls[0].starts_with("append:"));
-    assert!(calls[1].starts_with("flush:"));
-    assert!(calls[2].starts_with("append:"));
-    assert!(calls[3].starts_with("flush:"));
+    assert_eq!(sender.try_record(first), UsageEmitOutcome::Accepted);
+    assert_eq!(sender.try_record(second), UsageEmitOutcome::Accepted);
+    worker.shutdown().await;
+
+    assert_eq!(
+        store.calls.lock().expect("store calls lock").as_slice(),
+        [
+            format!("append:{first_stream}:true"),
+            format!("flush:{first_stream}"),
+            format!("append:{second_stream}:true"),
+            format!("flush:{second_stream}"),
+        ]
+    );
     assert_eq!(
         sender.try_record(record("late")),
         UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
     );
-
-    let metrics = sender.metrics();
-    assert_eq!(metrics.accepted_total(), 2);
-    assert_eq!(metrics.completed_total(), 2);
-    assert_eq!(metrics.write_failed_total(), 0);
-    assert_eq!(metrics.dropped_worker_unavailable_total(), 1);
 }
