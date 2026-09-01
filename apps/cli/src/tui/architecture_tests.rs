@@ -567,6 +567,31 @@ fn issue_947_legacy_runtime_and_view_paths_are_retired() {
         !output_view_model.contains("follow_tail_hint"),
         "OutputViewModel must not duplicate follow-tail state"
     );
+    for retired_silence_symbol in [
+        "MODEL_SILENCE_THRESHOLD",
+        "invoking_model_silence_started_at",
+        "silence_interval",
+        "is_model_silent",
+        "silence_block_id",
+        "observe_main_model_activity",
+        "begin_silence_interval",
+    ] {
+        for file in rust_files_under(&root) {
+            if file
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().contains("test"))
+                || file == root.join("architecture_tests.rs")
+            {
+                continue;
+            }
+            let source = production_source(&fs::read_to_string(&file).expect("read TUI source"));
+            assert!(
+                !source.contains(retired_silence_symbol),
+                "{} must not retain retired model-silence placeholder symbol {retired_silence_symbol}",
+                file.display()
+            );
+        }
+    }
     let processing_handle = fs::read_to_string(root.join("effect/session/processing/handle.rs"))
         .expect("read processing handle");
     let processing_handle_struct = processing_handle

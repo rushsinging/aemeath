@@ -233,19 +233,8 @@ impl App {
                     self.view_state.animation.spinner_frame.wrapping_add(1);
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
-                let before_silent = self
-                    .view_state
-                    .run_activity
-                    .is_model_silent(std::time::Instant::now());
                 self.view_state.spinner.advance();
                 self.view_state.run_activity.advance_frame();
-                let after_silent = self
-                    .view_state
-                    .run_activity
-                    .is_model_silent(std::time::Instant::now());
-                if before_silent != after_silent || after_silent {
-                    self.mark_output_dirty();
-                }
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
@@ -605,42 +594,6 @@ impl App {
         }
         let model_result = reduce_agent_event(&mut self.model, mapping);
         self.refresh_live_status_from_model();
-        let valid_model_activity = match &event {
-            TuiRuntimeEvent::AssistantTextDelta { delta, .. }
-            | TuiRuntimeEvent::ThinkingDelta { delta, .. } => !delta.is_empty(),
-            TuiRuntimeEvent::ToolCallStarted { .. } => true,
-            TuiRuntimeEvent::ToolCallArgumentsDelta { delta, .. } => !delta.is_empty(),
-            TuiRuntimeEvent::ToolCallStateChanged { arguments, .. } => arguments.is_some(),
-            _ => false,
-        };
-        if valid_model_activity {
-            let active_run_id = self
-                .model
-                .conversation
-                .activity_observations()
-                .activities()
-                .iter()
-                .find(|activity| {
-                    activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
-                        && matches!(
-                            activity.detail,
-                            crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
-                                purpose:
-                                    crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
-                            }
-                        )
-                })
-                .map(|activity| activity.run_id.clone());
-            if let Some(run_id) = active_run_id.as_ref() {
-                if self
-                    .view_state
-                    .run_activity
-                    .observe_main_model_activity(run_id, std::time::Instant::now())
-                {
-                    self.mark_output_dirty();
-                }
-            }
-        }
         if let Some(kind) = diagnostic_kind {
             crate::tui::log_trace!(
                 "event_delivery boundary=tui_reducer kind={} outcome=reduced timeline_items={} queued={} revision={} dirty_output={} effects={}",
