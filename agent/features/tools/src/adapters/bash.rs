@@ -24,11 +24,60 @@ use std::sync::Arc;
 
 type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
 
-async fn abort_reader_tasks(stdout_handle: ReaderTask, stderr_handle: ReaderTask) {
-    stdout_handle.abort();
-    stderr_handle.abort();
-    let _ = stdout_handle.await;
-    let _ = stderr_handle.await;
+/// 取消 / 超时后排干 reader 的保护时限：正常情况下进程树被终止后管道立即
+/// EOF，该超时只兜底“后台进程持有管道写端”等极端场景。
+const READER_DRAIN_TIMEOUT_MS: u64 = 500;
+
+/// 进程树被终止后管道写端关闭，reader 读到 EOF 自然返回——已读内容保留。
+/// 带保护超时兜底：后台进程持有管道写端等极端场景下放弃等待并丢弃输出，
+/// 避免取消路径挂死。
+async fn drain_reader_tasks(
+    stdout_handle: ReaderTask,
+    stderr_handle: ReaderTask,
+) -> (Vec<u8>, Vec<u8>) {
+    let stdout_abort = stdout_handle.abort_handle();
+    let stderr_abort = stderr_handle.abort_handle();
+    match tokio::time::timeout(Duration::from_millis(READER_DRAIN_TIMEOUT_MS), async {
+        let stdout = stdout_handle.await.unwrap_or_default();
+        let stderr = stderr_handle.await.unwrap_or_default();
+        (stdout, stderr)
+    })
+    .await
+    {
+        Ok(pair) => pair,
+        Err(_elapsed) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "bash reader drain timed out after {READER_DRAIN_TIMEOUT_MS}ms; partial pipe output dropped"
+            );
+            stdout_abort.abort();
+            stderr_abort.abort();
+            (Vec::new(), Vec::new())
+        }
+    }
+}
+
+/// 取消 / 超时时保留已读输出的结果文本：有输出则正文 + 末尾标注，无输出则纯提示。
+fn partial_output_text(
+    stdout: &str,
+    stderr: &str,
+    tail_marker: &str,
+    no_output_text: &str,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if !stdout.is_empty() {
+        parts.push(stdout);
+    }
+    if !stderr.is_empty() {
+        parts.push(stderr);
+    }
+    if parts.is_empty() {
+        no_output_text.to_string()
+    } else {
+        let body = parts.join("\n");
+        let body = body.strip_suffix('\n').unwrap_or(&body);
+        format!("{body}\n{tail_marker}")
+    }
 }
 
 pub struct BashTool {
@@ -162,8 +211,34 @@ impl TypedTool for BashTool {
                     path_base,
                     start.elapsed().as_millis()
                 );
-                abort_reader_tasks(stdout_handle, stderr_handle).await;
-                return TypedToolResult::error("Command cancelled by user");
+                // 回收子进程拿到信号终止状态，并排干 reader 保留已读输出：
+                // 取消前的部分输出对 LLM 判断进度有直接价值，不得丢弃。
+                let status = child.wait().await.ok();
+                let (stdout_bytes, stderr_bytes) =
+                    drain_reader_tasks(stdout_handle, stderr_handle).await;
+                let stdout =
+                    split_stdout_and_cwd(&String::from_utf8_lossy(&stdout_bytes)).0;
+                let stderr = String::from_utf8_lossy(&stderr_bytes);
+                let result = partial_output_text(
+                    &stdout,
+                    &stderr,
+                    "[Command cancelled by user — partial output above]",
+                    "Command cancelled by user",
+                );
+                let mut tool_result = TypedToolResult::error(result);
+                tool_result.data = Some(BashResult {
+                    stdout: stdout.to_string(),
+                    stderr: stderr.to_string(),
+                    exit_code: status
+                        .and_then(|status| status.code())
+                        .unwrap_or(-1),
+                    #[cfg(unix)]
+                    signal: status.as_ref().and_then(|status| status.signal()),
+                    #[cfg(not(unix))]
+                    signal: None,
+                    path_base: None,
+                });
+                return tool_result;
             }
             result = tokio::time::timeout(
                 Duration::from_millis(timeout_ms),
@@ -171,16 +246,41 @@ impl TypedTool for BashTool {
             ) => {
                 match result {
                     Ok(inner) => inner,
-                    // Timeout: kill the child immediately and abort
-                    // reader tasks so we don't hang awaiting pipes
-                    // that will never reach EOF on their own.
+                    // Timeout: kill the child immediately and drain the
+                    // readers so the already-captured output survives — it is
+                    // the primary evidence for diagnosing long-running
+                    // commands. The drain has its own guard timeout for pipes
+                    // that never reach EOF.
                     Err(_) => {
                         terminate_process_tree(&mut child).await;
-                        let _ = child.wait().await;
-                        abort_reader_tasks(stdout_handle, stderr_handle).await;
-                        // Reader tasks are awaited by abort_reader_tasks so their pipe futures
-                        // are dropped before this invocation returns.
-                        return TypedToolResult::error(format!("command timed out after {timeout_ms}ms"));
+                        let status = child.wait().await.ok();
+                        let (stdout_bytes, stderr_bytes) =
+                            drain_reader_tasks(stdout_handle, stderr_handle).await;
+                        let stdout =
+                            split_stdout_and_cwd(&String::from_utf8_lossy(&stdout_bytes)).0;
+                        let stderr = String::from_utf8_lossy(&stderr_bytes);
+                        let result = partial_output_text(
+                            &stdout,
+                            &stderr,
+                            &format!(
+                                "[Command timed out after {timeout_ms}ms — partial output above]"
+                            ),
+                            &format!("command timed out after {timeout_ms}ms"),
+                        );
+                        let mut tool_result = TypedToolResult::error(result);
+                        tool_result.data = Some(BashResult {
+                            stdout: stdout.to_string(),
+                            stderr: stderr.to_string(),
+                            exit_code: status
+                                .and_then(|status| status.code())
+                                .unwrap_or(-1),
+                            #[cfg(unix)]
+                            signal: status.as_ref().and_then(|status| status.signal()),
+                            #[cfg(not(unix))]
+                            signal: None,
+                            path_base: None,
+                        });
+                        return tool_result;
                     }
                 }
             }
