@@ -95,6 +95,48 @@ where
     }
 }
 
+/// #1581 兜底：materialize 前校验旁路结果与本 step assistant tool_use 的配对。
+///
+/// 旁路轮次中存在 assistant 未声明的 tool call（孤儿）时显式失败，防止孤儿
+/// tool_result 写入消息历史后被 Responses API 以 400 拒绝并永久卡死会话。
+/// 配对键为 provider call id：assistant `ToolUse.id` 与 `ToolExecution.provider_id`
+/// 同源同值（#1494 流式路径与普通轮次均已验证）。
+pub(crate) fn validate_streaming_round_pairing(
+    execution: &RunExecutionState,
+    rounds: &[StreamingToolRoundResult],
+) -> Result<(), LoopEngineError> {
+    let assistant_tool_use_ids: std::collections::HashSet<&str> = execution
+        .messages()
+        .iter()
+        .rev()
+        .find(|message| message.role == share::message::Role::Assistant)
+        .map(|message| {
+            message
+                .content
+                .iter()
+                .filter_map(|block| block.as_tool_use().map(|(tool_use_id, ..)| tool_use_id))
+                .collect()
+        })
+        .unwrap_or_default();
+    let orphan_call_ids: Vec<&str> = rounds
+        .iter()
+        .flat_map(|round| round.results.iter())
+        .filter(|result| !assistant_tool_use_ids.contains(result.provider_id.as_str()))
+        .map(|result| result.provider_id.as_str())
+        .collect();
+    if orphan_call_ids.is_empty() {
+        return Ok(());
+    }
+    let mut paired: Vec<&str> = assistant_tool_use_ids.into_iter().collect();
+    paired.sort_unstable();
+    Err(LoopEngineError::Adapter(format!(
+        "streaming tool round pairing violated: results [{}] have no matching assistant \
+         tool_use (paired: {:?}) — refusing to materialize orphaned tool results",
+        orphan_call_ids.join(", "),
+        paired,
+    )))
+}
+
 #[async_trait]
 pub(crate) trait ToolRoundObserver: Send {
     async fn execution_started(
@@ -247,6 +289,8 @@ pub(crate) async fn finalize_streaming_rounds<O: ToolRoundObserver>(
     rounds: Vec<StreamingToolRoundResult>,
     cancel: &CancellationToken,
 ) -> Result<ToolRoundOutcome, LoopEngineError> {
+    // #1581 兜底：materialize 前校验配对，孤儿 tool_result 显式失败而非静默入历史。
+    validate_streaming_round_pairing(execution, &rounds)?;
     let mut results = Vec::new();
     let mut suspensions = Vec::new();
     let mut approvals = Vec::new();

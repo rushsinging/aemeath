@@ -804,3 +804,74 @@ fn hook_directive_context_and_input_invalid_schema_returns_invalid_input() {
     assert!(matches!(outcome, HookDirectiveOutcome::InvalidInput { .. }));
     assert_eq!(policy.eval_count(), 0);
 }
+
+/// 构造一条含 tool_use 的 assistant 消息（本 step 的模型声明）。
+fn assistant_with_tool_use(
+    tool_use_id: &str,
+    tool_name: &str,
+) -> crate::application::run::execution_state::RunExecutionState {
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.append_message(share::message::Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::ToolUse {
+            id: tool_use_id.to_string(),
+            name: tool_name.to_string(),
+            input: serde_json::json!({}),
+        }],
+        metadata: None,
+    });
+    execution
+}
+
+/// 构造一个旁路轮次：provider_id 即 assistant tool_use.id 的配对键。
+fn streaming_round_with_result(
+    provider_id: &str,
+) -> crate::application::loop_engine::chat::tools::ToolRoundResult {
+    let tool_call = ToolCall {
+        id: ToolCallId::from_legacy_or_new(provider_id),
+        provider_id: provider_id.to_string(),
+        name: "Allowed".to_string(),
+        index: 0,
+        input: serde_json::json!({}),
+    };
+    crate::application::loop_engine::chat::tools::ToolRoundResult {
+        results: vec![
+            crate::application::tool::agent::runtime::ToolExecution::new(
+                &tool_call,
+                tools::ToolOutcome::new("ok", serde_json::Value::Null, Vec::new()),
+            ),
+        ],
+        fuse_bypassed: Vec::new(),
+        suspensions: Vec::new(),
+        approvals: Vec::new(),
+    }
+}
+
+/// #1581 兜底：旁路结果与本 step assistant tool_use 完全配对时放行。
+#[test]
+fn streaming_round_pairing_validation_accepts_fully_paired_rounds() {
+    let execution = assistant_with_tool_use("call_paired", "Allowed");
+    let rounds = vec![streaming_round_with_result("call_paired")];
+
+    super::validate_streaming_round_pairing(&execution, &rounds)
+        .expect("paired streaming rounds must pass validation");
+}
+
+/// #1581 兜底：旁路结果中存在 assistant 未声明的孤儿 tool call 时显式失败，
+/// 防止孤儿 tool_result materialize 进消息历史后被 Responses API 以 400 拒绝。
+#[test]
+fn streaming_round_pairing_validation_rejects_orphan_results() {
+    let execution = assistant_with_tool_use("call_paired", "Allowed");
+    let rounds = vec![
+        streaming_round_with_result("call_paired"),
+        streaming_round_with_result("call_orphan"),
+    ];
+
+    let error = super::validate_streaming_round_pairing(&execution, &rounds)
+        .expect_err("orphan streaming round must fail validation");
+    let message = error.to_string();
+    assert!(
+        message.contains("call_orphan"),
+        "failure must name the orphaned call: {message}"
+    );
+}
