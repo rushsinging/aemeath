@@ -443,8 +443,34 @@ async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
     assert_eq!(execution.text, "Command cancelled by user");
 }
 
+/// 取消 / 超时结果文本拼装（纯函数，CI 覆盖 spawn 场景的行为核心）。
+#[test]
+fn partial_output_text_appends_marker_over_existing_output() {
+    let text = partial_output_text(
+        "line-1\n",
+        "",
+        "[Command cancelled by user — partial output above]",
+        "Command cancelled by user",
+    );
+    assert_eq!(
+        text,
+        "line-1\n[Command cancelled by user — partial output above]"
+    );
+
+    let text_with_stderr = partial_output_text("out\n", "err", "[marker]", "fallback");
+    assert_eq!(text_with_stderr, "out\nerr\n[marker]");
+}
+
+#[test]
+fn partial_output_text_without_output_falls_back_to_plain_text() {
+    let text = partial_output_text("", "", "[marker]", "Command cancelled by user");
+    assert_eq!(text, "Command cancelled by user");
+}
+
 /// 运行中取消：已读到的 stdout 必须保留在结果里，末尾附加取消标注，
 /// 而不是被 "Command cancelled by user" 整体替换。
+/// 本地验证：`cargo test -p tools -- --ignored bash_cancellation_preserves`。
+#[ignore = "spawn 真实 bash + 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 #[tokio::test]
 async fn bash_cancellation_preserves_partial_stdout() {
     struct DelayedCancellation {
@@ -522,6 +548,8 @@ async fn bash_cancellation_preserves_partial_stdout() {
 }
 
 /// 超时与取消同构：已读输出保留 + 末尾超时标注，而非整体替换。
+/// 本地验证：`cargo test -p tools -- --ignored bash_timeout_preserves`。
+#[ignore = "spawn 真实 bash + 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
 #[tokio::test]
 async fn bash_timeout_preserves_partial_stdout() {
     let workspace = tempdir().unwrap();

@@ -66,17 +66,15 @@ fn partial_output_text(
 ) -> String {
     let mut parts: Vec<&str> = Vec::new();
     if !stdout.is_empty() {
-        parts.push(stdout);
+        parts.push(stdout.strip_suffix('\n').unwrap_or(stdout));
     }
     if !stderr.is_empty() {
-        parts.push(stderr);
+        parts.push(stderr.strip_suffix('\n').unwrap_or(stderr));
     }
     if parts.is_empty() {
         no_output_text.to_string()
     } else {
-        let body = parts.join("\n");
-        let body = body.strip_suffix('\n').unwrap_or(&body);
-        format!("{body}\n{tail_marker}")
+        format!("{}\n{tail_marker}", parts.join("\n"))
     }
 }
 
