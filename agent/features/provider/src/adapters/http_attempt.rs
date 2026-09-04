@@ -275,14 +275,16 @@ pub(crate) enum HttpAttemptFailure {
     Network {
         source: reqwest::Error,
         kind: NetworkFailureKind,
-        receipt: DiagnosticReceipt,
+        // clippy(result_large_err)：DiagnosticReceipt 内联 6 个 String（约 152B），
+        // 是 Network/Http 两个 variant 超过 200B 阈值的主因；装箱后签名与消费方不变。
+        receipt: Box<DiagnosticReceipt>,
     },
     Http {
         status: reqwest::StatusCode,
         kind: HttpFailureKind,
         headers: SafeResponseHeaders,
-        body: BoundedErrorBody,
-        receipt: DiagnosticReceipt,
+        body: Box<BoundedErrorBody>,
+        receipt: Box<DiagnosticReceipt>,
     },
 }
 
@@ -429,7 +431,7 @@ impl HttpAttemptExecutor {
             _ = cancel.cancelled() => return Err(HttpAttemptFailure::Cancelled),
             result = request.send() => result.map_err(|source| {
                 let kind = NetworkFailureKind::classify(&source);
-                let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+                let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
                 HttpAttemptFailure::Network { source, kind, receipt }
             })?,
         };
@@ -452,12 +454,12 @@ impl HttpAttemptExecutor {
         )
         .await?;
         let kind = refine_http_failure_kind(classify_http_status(status), body.text());
-        let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+        let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
         Err(HttpAttemptFailure::Http {
             status,
             kind,
             headers,
-            body,
+            body: Box::new(body),
             receipt,
         })
     }
@@ -496,12 +498,12 @@ impl HttpAttemptExecutor {
                     body.observed_bytes = observed;
                     body.truncated = true;
                     body.read_error = Some(source.to_string());
-                    let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+                    let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
                     return Err(HttpAttemptFailure::Http {
                         status,
                         kind,
                         headers: headers.clone(),
-                        body,
+                        body: Box::new(body),
                         receipt,
                     });
                 }
