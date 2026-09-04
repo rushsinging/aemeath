@@ -199,11 +199,6 @@ async fn invoke_model_impl(
     invocation_id: &sdk::ModelInvocationId,
     cancel: &CancellationToken,
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
-    // #1494：每次 invoke 开头重置边流边执行缓冲——上次 invoke（retry / compact）
-    // 残留的旁路结果丢弃：异常时 step 作废，重试请求不带已执行工具结果。
-    if let Some(executor) = observer.streaming_tool() {
-        executor.reset_for_invocation(step_id, cancel.clone()).await;
-    }
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
             let coordinator = ContextCoordinator::new(observer.runtime_context().context());
@@ -249,6 +244,13 @@ async fn invoke_model_impl(
     let started = Instant::now();
     let mut coordinator = ModelInvocationCoordinator::new();
     let response = loop {
+        // #1494 / #1581：每次 provider 尝试（含同一次 invoke 内的 retry）前重置
+        // 边流边执行缓冲——上一次尝试（流中断 / retry / compact / 新 invoke）
+        // 残留的旁路结果丢弃：失败尝试的 step 结果不得混入成功尝试，否则产生
+        // 无 tool_use 配对的孤儿 tool_result，被 Responses API 以 400 拒绝。
+        if let Some(executor) = observer.streaming_tool() {
+            executor.reset_for_invocation(step_id, cancel.clone()).await;
+        }
         let request_context = observer.request_log_context(&logging::capture());
         let mut reducer = observer.build_reducer();
         let provider = binding.provider.clone();
