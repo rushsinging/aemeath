@@ -6,7 +6,9 @@
 //! adapter 不捕获 project root，也不缓存 Skill 正文。每次调用都从 query 的
 //! project root、extra dirs 与 available tools 重建可见集合；同名 Skill 按
 //! project `.claude` → project `.agents` → global → extra → builtin 优先级去重。
-//! 目录不存在正常为空；真实入口读取或解析失败保持 typed [`SkillError`]。
+//! 目录不存在正常为空；扫描中遇到的无关入口错误只记录 warn 并跳过，绝不阻断
+//! 其他 Skill 的加载；仅当被请求 identity 的入口自身读取或解析失败时，`load`
+//! 才返回对应的 typed [`SkillError`]。
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -82,17 +84,12 @@ impl FilesystemSkillAdapter {
     /// 发现、去重（先到先得，保持优先级）、过滤（requires_tools /
     /// fallback_for）、并按 stable key 排序。
     ///
-    /// `strict` 控制对已扫描文件读取 / 解析错误的处理：
-    /// `strict=true` 用于 load：真实入口错误必须返回，不得静默跳过；
-    /// - `false`：记录 warn 日志并跳过该文件（用于 `list`，catalog 端口
-    ///   签名无法返回 Err）。
-    fn collect_available(
-        &self,
-        query: &SkillQuery,
-        strict: bool,
-    ) -> Result<Vec<RawSkill>, SkillError> {
+    /// 返回可用的 [`RawSkill`] 列表与扫描中遇到的入口错误；错误如何处置
+    /// （warn 跳过还是归因返回）由调用方决定，扫描本身绝不因单个坏入口中止。
+    fn collect_raws(&self, query: &SkillQuery) -> (Vec<RawSkill>, Vec<SkillError>) {
         let mut seen: HashSet<String> = HashSet::new();
         let mut acc: Vec<RawSkill> = Vec::new();
+        let mut errors: Vec<SkillError> = Vec::new();
         for res in self.discover_all(query) {
             match res {
                 Ok(raw) => {
@@ -100,15 +97,7 @@ impl FilesystemSkillAdapter {
                         acc.push(raw);
                     }
                 }
-                Err(err) => {
-                    if strict {
-                        return Err(err);
-                    }
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "skill discovery skipped a file: {err}"
-                    );
-                }
+                Err(err) => errors.push(err),
             }
         }
 
@@ -121,7 +110,14 @@ impl FilesystemSkillAdapter {
 
         // 稳定排序：按 name（stable_key）。
         filtered.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(filtered)
+        (filtered, errors)
+    }
+
+    /// 记录扫描阶段跳过的坏入口（catalog 与 load 共用，保证无关错误留痕）。
+    fn log_skipped_entries(errors: &[SkillError]) {
+        for err in errors {
+            log::warn!(target: crate::LOG_TARGET, "skill discovery skipped a file: {err}");
+        }
     }
 }
 
@@ -135,12 +131,10 @@ impl Default for FilesystemSkillAdapter {
 
 impl SkillCatalogPort for FilesystemSkillAdapter {
     fn list(&self, query: SkillQuery) -> Vec<SkillDescriptor> {
-        // catalog 采用 best-effort；调用时严格错误由 SkillLoadPort::load 返回。
-        self.collect_available(&query, false)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|raw| raw.into_descriptor())
-            .collect()
+        // catalog 采用 best-effort：坏入口只留痕，不阻断其余 Skill 的元数据。
+        let (raws, errors) = self.collect_raws(&query);
+        Self::log_skipped_entries(&errors);
+        raws.into_iter().map(RawSkill::into_descriptor).collect()
     }
 }
 
@@ -148,18 +142,68 @@ impl SkillCatalogPort for FilesystemSkillAdapter {
 impl SkillLoadPort for FilesystemSkillAdapter {
     async fn load(&self, query: SkillLoadQuery) -> Result<LoadedSkill, SkillError> {
         let identity = query.identity().to_string();
-        let raws = self.collect_available(&query.catalog_query(), true)?;
-        raws.into_iter()
-            .find(|raw| {
-                raw.name.eq_ignore_ascii_case(&identity)
-                    || raw
-                        .aliases
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(&identity))
-            })
-            .map(RawSkill::into_loaded)
-            .ok_or_else(|| SkillError::not_found(identity))
+        let (raws, errors) = self.collect_raws(&query.catalog_query());
+        Self::log_skipped_entries(&errors);
+
+        if let Some(raw) = raws
+            .into_iter()
+            .find(|raw| identity_matches(raw, &identity))
+        {
+            return Ok(raw.into_loaded());
+        }
+
+        // 目标不在可用集合中：若某个失败入口的派生名与 identity 匹配，说明
+        // 正是被请求的 Skill 自身损坏，返回其 typed 错误而非笼统的 NotFound；
+        // 其余错误属于无关入口，不得影响本次加载结果。
+        if let Some(err) = errors
+            .iter()
+            .find(|err| error_entry_matches_identity(err, &identity))
+        {
+            return Err(err.clone());
+        }
+        Err(SkillError::not_found(identity))
     }
+}
+
+/// identity 命中规则：canonical name 或任一 alias（大小写不敏感）。
+fn identity_matches(raw: &RawSkill, identity: &str) -> bool {
+    raw.name.eq_ignore_ascii_case(identity)
+        || raw
+            .aliases
+            .iter()
+            .any(|alias| alias.eq_ignore_ascii_case(identity))
+}
+
+/// 从失败入口路径推断其派生 identity，判断坏的是否正是被请求的 Skill：
+/// 目录入口取目录名，`SKILL.md` 取父目录名，扁平 `.md` 入口取文件 stem。
+/// 带 package namespace 的 identity（如 `superpowers:brainstorming`）取末段比较。
+/// 注意：损坏的文件无法解析出 frontmatter alias，此处只比较入口路径派生名。
+fn error_entry_matches_identity(err: &SkillError, identity: &str) -> bool {
+    let path = match err {
+        SkillError::ReadFailed { path, .. } | SkillError::ParseFailed { path, .. } => path,
+        SkillError::InvalidIdentity { .. } | SkillError::NotFound { .. } => return false,
+    };
+    let entry_path = Path::new(path);
+    let entry_name = match entry_path.file_name().and_then(|name| name.to_str()) {
+        Some(name) if name.eq_ignore_ascii_case("SKILL.md") => entry_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str()),
+        Some(_)
+            if entry_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) =>
+        {
+            entry_path.file_stem().and_then(|stem| stem.to_str())
+        }
+        Some(name) => Some(name),
+        None => None,
+    };
+    let Some(entry_name) = entry_name else {
+        return false;
+    };
+    let identity_tail = identity.rsplit(':').next().unwrap_or(identity);
+    entry_name.eq_ignore_ascii_case(identity) || entry_name.eq_ignore_ascii_case(identity_tail)
 }
 
 // ── 内部：原始解析结果 ─────────────────────────────────────────────────
