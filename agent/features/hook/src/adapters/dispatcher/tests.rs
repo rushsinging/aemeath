@@ -113,9 +113,9 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
         sub(HookPoint::Stop, "stop"),
         sub(HookPoint::StopFailure, "observe"),
     ];
+    // #1614：Timeout 单次终判不重试——Stop 一次超时耗尽即触发 StopFailure，
+    // StopFailure 订阅消费第二步的 ok。
     let scripted = Scripted::from_steps([
-        ScriptStep::fault(ExecutionFault::Timeout),
-        ScriptStep::fault(ExecutionFault::Timeout),
         ScriptStep::fault(ExecutionFault::Timeout),
         ScriptStep::ok_exit(0, ""),
     ]);
@@ -130,14 +130,14 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
         .await;
 
     let calls = scripted.calls();
-    assert_eq!(calls.len(), 4);
-    assert_eq!(calls[3].env["AEMEATH_HOOK_EVENT"], "\"StopFailure\"");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].env["AEMEATH_HOOK_EVENT"], "\"StopFailure\"");
     assert_eq!(
-        calls[3].env["AEMEATH_PROJECT_DIR"],
+        calls[1].env["AEMEATH_PROJECT_DIR"],
         "/tmp/aemeath-stop-workspace"
     );
-    assert!(!calls[3].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
-    assert_eq!(calls[3].stdin["StopFailure"]["run_steps"], 9);
+    assert!(!calls[1].env.contains_key("AEMEATH_STOP_RUN_STEPS"));
+    assert_eq!(calls[1].stdin["StopFailure"]["run_steps"], 9);
 }
 
 // 各测试直接内联构造 Dispatcher + Scripted，以保持调用顺序与步骤入队的可读性。
@@ -499,9 +499,39 @@ async fn retry_io_up_to_three() {
     assert_fault_retries_three_times(ExecutionFault::Io).await;
 }
 
+/// #1614：超时是确定性失败——同输入重跑只会再次超时，重试只会把用户等待
+/// 成倍放大（实测 Stop hook 600s×3≈30 分钟）。超时必须单次终判不重试。
 #[tokio::test]
-async fn retry_timeout_up_to_three() {
-    assert_fault_retries_three_times(ExecutionFault::Timeout).await;
+async fn timeout_does_not_retry() {
+    let subs = vec![sub(HookPoint::Stop, "stop-verify")];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Timeout),
+        // 若错误重试，第二次调用会消费本步骤并把结果错计入执行轨迹。
+        ScriptStep::ok_exit(0, "{}"),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
+
+    let outcome = dispatcher
+        .dispatch(stop(1), &CancellationToken::new())
+        .await;
+
+    assert_eq!(
+        scripted.call_count(),
+        1,
+        "Timeout 应单次终判，不得重试（#1614）"
+    );
+    assert!(
+        outcome
+            .executions
+            .iter()
+            .all(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. })),
+        "Timeout 终判后所有 execution 应为 ExecutionFailed"
+    );
+    assert_eq!(
+        outcome.executions.len(),
+        1,
+        "Timeout 终判只应留下一次 execution"
+    );
 }
 
 #[tokio::test]
