@@ -576,9 +576,10 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ThinkingChanged { enabled } => {
-            ChatEvent::ThinkingChanged { enabled }
-        }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ThinkingChanged {
+            enabled,
+            level,
+        } => ChatEvent::ThinkingChanged { enabled, level },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ContextEstimated {
             estimate,
             message_count,

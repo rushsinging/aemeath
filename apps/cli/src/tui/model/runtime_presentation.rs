@@ -1,3 +1,5 @@
+use crate::tui::view_model::status::ReasoningLevelView;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuntimePresentationIntent {
     ProviderModel {
@@ -5,7 +7,11 @@ pub enum RuntimePresentationIntent {
         model_id: Option<String>,
     },
     ContextSize(u64),
-    Thinking(bool),
+    /// Reasoning 呈现：开关与深度一起更新（#1616 状态栏直接显示 level）。
+    Thinking {
+        enabled: bool,
+        level: ReasoningLevelView,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,7 +21,10 @@ pub enum RuntimePresentationChange {
         model_id: Option<String>,
     },
     ContextSize(u64),
-    Thinking(bool),
+    Thinking {
+        enabled: bool,
+        level: ReasoningLevelView,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,6 +33,7 @@ pub struct RuntimePresentation {
     model_id: Option<String>,
     context_size: u64,
     thinking: bool,
+    reasoning_level: ReasoningLevelView,
 }
 
 impl Default for RuntimePresentation {
@@ -33,6 +43,7 @@ impl Default for RuntimePresentation {
             model_id: None,
             context_size: 0,
             thinking: true,
+            reasoning_level: ReasoningLevelView::High,
         }
     }
 }
@@ -54,7 +65,12 @@ impl RuntimePresentation {
         self.thinking
     }
 
-    pub(crate) fn apply(&mut self, intent: RuntimePresentationIntent) -> RuntimePresentationChange {
+    /// 当前呈现的 reasoning 深度（#1616 状态栏直接显示该值）。
+    pub(crate) fn reasoning_level(&self) -> ReasoningLevelView {
+        self.reasoning_level
+    }
+
+    pub fn apply(&mut self, intent: RuntimePresentationIntent) -> RuntimePresentationChange {
         match intent {
             RuntimePresentationIntent::ProviderModel { provider, model_id } => {
                 self.provider = provider.clone();
@@ -65,9 +81,10 @@ impl RuntimePresentation {
                 self.context_size = context_size;
                 RuntimePresentationChange::ContextSize(context_size)
             }
-            RuntimePresentationIntent::Thinking(thinking) => {
-                self.thinking = thinking;
-                RuntimePresentationChange::Thinking(thinking)
+            RuntimePresentationIntent::Thinking { enabled, level } => {
+                self.thinking = enabled;
+                self.reasoning_level = level;
+                RuntimePresentationChange::Thinking { enabled, level }
             }
         }
     }

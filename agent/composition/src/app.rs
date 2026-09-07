@@ -25,6 +25,8 @@ pub struct AgentClientBootstrap {
     pub allow_all: bool,
     pub context_size: usize,
     pub thinking: bool,
+    /// 启动时生效的 reasoning 深度（#1616 TUI 状态栏初始展示）。
+    pub reasoning_level: provider::ReasoningLevel,
     pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
     pub skill_snapshot: sdk::SkillsUpdatedEvent,
@@ -324,7 +326,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let startup_resume = runtime_client.client.startup_resume();
     let allow_all = runtime_client.client.allow_all();
     let context_size = runtime_client.client.context_size();
-    let thinking = runtime_client.client.requested_reasoning() != provider::ReasoningLevel::Off;
+    let requested_level = runtime_client.client.requested_reasoning();
+    let thinking = requested_level != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
@@ -345,6 +348,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         allow_all,
         context_size,
         thinking,
+        reasoning_level: requested_level,
         config_view,
         memory_config: launch.memory_config,
         skill_snapshot: launch.skill_snapshot,
