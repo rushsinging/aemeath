@@ -98,6 +98,7 @@ fn build_provider_binding_from_runtime_model(
         display_name: display,
         context_window: resolved_model.model.context_window,
         reasoning_active: Some(requested_reasoning != provider::ReasoningLevel::Off),
+        reasoning_level: Some(requested_reasoning),
     };
 
     Ok((binding, result))

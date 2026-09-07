@@ -129,9 +129,12 @@ pub(crate) async fn run_chat(args: Args) {
         );
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::RuntimePresentation(
-                crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
-                    bootstrap.thinking,
-                ),
+                crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
+                    enabled: bootstrap.thinking,
+                    level: crate::tui::adapter::event_mapping::reasoning_level_view(
+                        bootstrap.reasoning_level,
+                    ),
+                },
             ),
         );
         if let Some(resume) = startup_resume {

@@ -9,6 +9,7 @@
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
+use crate::tui::view_model::status::ReasoningLevelView;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UiActivityId(String);
@@ -681,6 +682,8 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ThinkingChanged {
         enabled: bool,
+        /// 切换后的 reasoning 深度（#1616 状态栏直接显示）。
+        level: ReasoningLevelView,
     },
     CommandResultText {
         text: String,
@@ -690,6 +693,8 @@ pub(crate) enum TuiRuntimeEvent {
         display_name: String,
         context_window: usize,
         reasoning_active: Option<bool>,
+        /// 切换后生效的 reasoning 深度（#1616 状态栏直接显示）。
+        reasoning_level: Option<ReasoningLevelView>,
     },
     ContextEstimated {
         estimated_tokens: usize,

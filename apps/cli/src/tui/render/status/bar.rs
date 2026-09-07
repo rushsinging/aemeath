@@ -150,6 +150,11 @@ impl StatusBar {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             segments.push((model.clone(), RuntimeSegmentStyle::Model));
         }
+        // #1616：直接显示 reasoning 深度（如 `high`），紧跟模型名。
+        if let Some(level) = vm.reasoning_level {
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push((level.to_string(), RuntimeSegmentStyle::Muted));
+        }
         segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((
             format!("in {}", sdk::format_tokens(vm.input_tokens)),

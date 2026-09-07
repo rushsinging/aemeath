@@ -372,8 +372,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             result.context_window,
             result.reasoning_active
         ),
-        sdk::ChatEvent::ThinkingChanged { enabled } => {
-            crate::tui::log_trace!("{} thinking_changed enabled={}", stage, enabled)
+        sdk::ChatEvent::ThinkingChanged { enabled, level } => {
+            crate::tui::log_trace!(
+                "{} thinking_changed enabled={} level={}",
+                stage,
+                enabled,
+                level.as_str()
+            )
         }
         sdk::ChatEvent::ContextEstimated {
             estimate,

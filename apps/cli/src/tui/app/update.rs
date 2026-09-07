@@ -387,6 +387,7 @@ impl App {
                 display_name,
                 context_window,
                 reasoning_active,
+                reasoning_level,
             } => {
                 if *context_window > 0 {
                     self.apply_agent_intent(AgentIntent::RuntimePresentation(
@@ -406,20 +407,42 @@ impl App {
                         model_id: Some(display_name.clone()),
                     },
                 ));
-                if let Some(enabled) = reasoning_active {
+                // #1616：level 存在时一并更新深度；旧事件缺 level 时仅按 enabled
+                // 维持原深度（保持 Off 联动语义）。
+                if let Some(level) = reasoning_level {
+                    let enabled = reasoning_active.unwrap_or_else(|| {
+                        !matches!(
+                            level,
+                            crate::tui::view_model::status::ReasoningLevelView::Off
+                        )
+                    });
                     self.apply_agent_intent(AgentIntent::RuntimePresentation(
-                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
-                            *enabled,
-                        ),
+                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
+                            enabled,
+                            level: *level,
+                        },
+                    ));
+                } else if let Some(enabled) = reasoning_active {
+                    let level = if *enabled {
+                        self.model.runtime_presentation.reasoning_level()
+                    } else {
+                        crate::tui::view_model::status::ReasoningLevelView::Off
+                    };
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
+                            enabled: *enabled,
+                            level,
+                        },
                     ));
                 }
                 self.append_system_notice(format!("[switched to {display_name}]"));
             }
-            TuiRuntimeEvent::ThinkingChanged { enabled } => {
+            TuiRuntimeEvent::ThinkingChanged { enabled, level } => {
                 self.apply_agent_intent(AgentIntent::RuntimePresentation(
-                    crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking(
-                        *enabled,
-                    ),
+                    crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
+                        enabled: *enabled,
+                        level: *level,
+                    },
                 ));
             }
             TuiRuntimeEvent::ContextEstimated {

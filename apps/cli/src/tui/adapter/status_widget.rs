@@ -70,7 +70,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(true)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: true,
+                level: crate::tui::view_model::status::ReasoningLevelView::High,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
@@ -107,7 +110,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(false)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: false,
+                level: crate::tui::view_model::status::ReasoningLevelView::Off,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
