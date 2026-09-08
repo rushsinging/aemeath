@@ -17,6 +17,97 @@ const VALID_BATCH_JSON: &str = r#"{
 }"#;
 
 #[test]
+fn compact_protocol_constraint_is_filtered_from_immutable_constraints() {
+    let protocol_fact = CompactFact::constraint(
+        1,
+        CompactFactSource::MainUser,
+        "Return a typed JSON fact batch only, preserving chronological sequence numbers and using the specified source, kind, constraint, and identity schemas.",
+        ConstraintMetadata::new(
+            ConstraintScope::Session,
+            ConstraintLifecycle::Persistent,
+            ConstraintAction::Restrict,
+        ),
+    )
+    .unwrap();
+    let user_fact = CompactFact::constraint(
+        2,
+        CompactFactSource::MainUser,
+        "Keep the user's real persistent constraint.",
+        ConstraintMetadata::new(
+            ConstraintScope::Session,
+            ConstraintLifecycle::Persistent,
+            ConstraintAction::Restrict,
+        ),
+    )
+    .unwrap();
+
+    let rendered = reduce_compact_facts(CompactFactBatch::new(vec![protocol_fact, user_fact]))
+        .unwrap()
+        .render();
+
+    assert!(!rendered.contains("typed JSON fact batch"));
+    assert!(rendered.contains("Keep the user's real persistent constraint."));
+}
+
+#[test]
+fn protocol_constraint_is_filtered_when_it_is_the_only_constraint() {
+    let protocol_fact = CompactFact::constraint(
+        1,
+        CompactFactSource::MainUser,
+        "Return a typed JSON fact batch only; use the compact schema.",
+        ConstraintMetadata::new(
+            ConstraintScope::Session,
+            ConstraintLifecycle::Persistent,
+            ConstraintAction::Restrict,
+        ),
+    )
+    .unwrap();
+
+    let rendered = reduce_compact_facts(CompactFactBatch::new(vec![protocol_fact]))
+        .unwrap()
+        .render();
+
+    assert!(!rendered.contains("compact schema"));
+    assert!(!rendered.contains("typed JSON"));
+}
+#[test]
+fn compact_protocol_text_is_filtered_from_every_checkpoint_section() {
+    let protocol_text =
+        "Extract the typed JSON fact batch using the compact schema and return only JSON.";
+    let facts = CompactFactBatch::new(vec![
+        CompactFact::new(
+            1,
+            CompactFactSource::MainUser,
+            CompactFactKind::Objective,
+            protocol_text,
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            2,
+            CompactFactSource::MainUser,
+            CompactFactKind::WorkingSet,
+            protocol_text,
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            3,
+            CompactFactSource::MainUser,
+            CompactFactKind::CommittedFact,
+            protocol_text,
+            None,
+        )
+        .unwrap(),
+    ]);
+
+    let rendered = reduce_compact_facts(facts).unwrap().render();
+
+    assert!(!rendered.contains("typed JSON fact batch"));
+    assert!(!rendered.contains("compact schema"));
+    assert!(!rendered.contains("Extract the"));
+}
+#[test]
 fn compact_fact_batch_json_round_trips_strictly() {
     let batch: CompactFactBatch = serde_json::from_str(VALID_BATCH_JSON).unwrap();
 

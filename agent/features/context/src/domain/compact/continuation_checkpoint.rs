@@ -573,6 +573,7 @@ impl ContinuationCheckpoint {
             .map(|(index, heading)| {
                 let content = self.sections[index]
                     .iter()
+                    .filter(|line| !is_compact_protocol_text(line))
                     .map(|line| encode_content_line(line))
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -630,6 +631,22 @@ fn as_bullet(source: &str) -> String {
 
 fn normalize_control_text(source: &str) -> String {
     source.lines().map(str::trim).collect::<Vec<_>>().join(" ")
+}
+
+pub(crate) fn is_compact_protocol_text(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    [
+        "typed json fact batch",
+        "compact schema",
+        "compact json",
+        "map compact",
+        "reduce compact",
+        "refresh compact",
+        "chronological sequence numbers",
+        "using the specified source, kind, constraint, and identity schemas",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
