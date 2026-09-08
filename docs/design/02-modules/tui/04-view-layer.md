@@ -17,13 +17,13 @@
 - **ViewState**：可变的瞬时交互 / 渲染状态（scroll/collapse/selection/animation），**NEVER** 复制 Model 业务投影
 - **Render**：读 ViewModel + ViewState + Cache → 写 ratatui Buffer
 
-本文定义封闭的 10 种 Target block；新增种类 **MUST** 同步更新 assembler 穷尽匹配、cache version 与 render 测试。
+本文定义封闭的 9 种 Target block；新增种类 **MUST** 同步更新 assembler 穷尽匹配、cache version 与 render 测试。
 
-## 2. 10 种 Block 类型
+## 2. 9 种 Block 类型
 
 ### 2.1 完整列表
 
-OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。每个块是以下 10 种之一：
+OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。每个块是以下 9 种之一：
 
 | # | Block 类型 | 共享结构 | 来源 Model | 说明 |
 |---|---|---|---|---|
@@ -35,8 +35,7 @@ OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。�
 | 6 | `ToolCall` | ToolCallBlockView | `ToolCall` timeline item + `runs` 重叠投影 | 工具调用（含子块） |
 | 7 | `ToolResult` | ToolResultBlockView | `ToolResult` timeline item + `runs` 重叠投影 | 工具结果（嵌入或独立） |
 | 8 | `HookNotice` | TextBlockView | `HookNotice` timeline item | Hook 执行通知 |
-| 9 | `ModelStreamPlaceholder` | TextBlockView | ConversationModel 只读 placeholder projection | 流式输出占位（"…" 动画） |
-| 10 | `Interaction` | InteractionBlockView | `Interaction` timeline item | UserQuestions / ToolApproval / PlanApproval / HardPause typed 交互 |
+| 9 | `Interaction` | InteractionBlockView | `Interaction` timeline item | UserQuestions / ToolApproval / PlanApproval / HardPause typed 交互 |
 
 ### 2.2 结构体定义
 
@@ -113,7 +112,6 @@ enum InteractionPhaseView {
 | ToolCall | 状态 hash（name + args + status + collapsed + workspace_root） | 状态变化 / worktree 切换 / 折叠切换 |
 | ToolResult | 所有 display-affecting 字段 hash（result_text + data projection + style） | 文本、结构化 diff 或样式变化 |
 | HookNotice | 内容 hash | Hook 通知不变 → 永不失效 |
-| ModelStreamPlaceholder | 固定版本 + animation_frame | 每个 blink 周期失效 |
 | Interaction | request id + body + draft + phase hash | 问题 / decision / diagnostic / 光标 / phase 变化 |
 
 ### 2.4 嵌套规则
@@ -160,10 +158,7 @@ ConversationModel.timeline().items()
   │   ├─ AgentProgress → owning ToolCall 下的 SystemNotice child
   │   └─ Interaction → InteractionBlockView（穷尽四种 body）
   │
-  ├─ Main Run 连续 `InvokingModel` 静默达到 10 秒
-  │   └─ 从 RunActivityState 派生稳定 identity 的临时 Thinking block
-  │
-  ├─ 组装 OutputBlockView 树（按嵌套规则）  │
+  ├─ 组装 OutputBlockView 树（按嵌套规则）
   └─ 产出 OutputViewModel { roots: Vec<OutputBlockView> }
 ```
 
@@ -213,7 +208,7 @@ struct LiveStatusViewModel {
 }
 ```
 
-`RunActivityView` 包含稳定 block identity、活动 kind、单行文案、动画 frame、verb 与 Main `InvokingModel` 静默占位标志。它是 ViewAssembler 输出，不是 Model 或 ViewState 的副本；Render 不读取 `RunStatus`。
+`RunActivityView` 包含稳定 block identity、活动 kind、单行文案、动画 frame 与 verb。它是 ViewAssembler 输出，不是 Model 或 ViewState 的副本；Render 不读取 `RunStatus`。模型等待状态只在此 live-status 投影中表达，OutputViewModel 不携带独立占位标志或块。
 
 ### 3.4.1 ActivitySummaryAssembler
 
@@ -285,17 +280,20 @@ Esc / 新输入         → 清除选区
 ```rust
 struct RunActivityState {
     main_run_id: Option<RunId>,
-    invoking_model_silence_started_at: Option<MonotonicInstant>,
+    total_timing_observed_at: Option<MonotonicInstant>,
+    phase_timing_observed_at: Option<MonotonicInstant>,
+    total_elapsed_ms: u64,
+    phase_elapsed_ms: u64,
     frame: u64,
     verb: String,
 }
 ```
 
-- 既有 90ms Tick 推进 `frame`，同时检查 10 秒静默边界，不新增异步 timer。
-- `main_run_id` 只用于隔离本地展示计时；权威 Main 身份仍来自 Model 中 `parent_run_id == None` 的 snapshot。
-- 进入 Main `InvokingModel` 时记录可注入单调时间；离态立即清除；再次进入重新计时。
-- 非空 Text / Thinking、ToolCallStart、参数实际变化的 ToolCallUpdate 重置静默时间；空 delta、Usage、重复状态、控制、诊断和 Sub Run 事件不重置。
+- 既有 90ms Tick 只推进活动动画并请求重绘，不触发 Output 文档重建。
+- Runtime 1 秒 Activity heartbeat 刷新 root 总计时与 primary phase 计时；两组 identity 与单调插值基线彼此独立。
+- `main_run_id` 只用于隔离本地展示计时；权威 Main 身份仍来自 `parent_run_id == None` 的 Activity snapshot。
 - `verb` 在同一活动区间稳定，`frame` 只用于动画；两者均不表达业务 phase。
+- 模型等待只由 live-status spinner 表达；ViewState 不跟踪内容静默区间，Output 不生成等待占位块。
 - ViewState **NEVER** 持有 `RunStatus`、业务 phase、`run_active` 或可见性副本。
 
 ### 4.3 ViewModelDirty bitfield

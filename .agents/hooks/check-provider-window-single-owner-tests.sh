@@ -36,7 +36,10 @@ cat >"$TMP/agent/features/runtime/src/application/run/derived/setup.rs" <<'RS'
 fn sub_run() { RuntimeStepPersistence::new(ContextRequestData {}); }
 RS
 
-run_guard() { AEMEATH_PROJECT_DIR="$TMP" "$GUARD"; }
+# 显式 /bin/bash（3.2，临时文件 here-doc）执行 guard：忽略 shebang 解析到
+# bash 5.x，规避其 here-doc 匿名管道写进程间歇性卡死（见 check-architecture-
+# guards.sh 顶部说明；此处串行小 here-doc 场景实测复现）。
+run_guard() { AEMEATH_PROJECT_DIR="$TMP" /bin/bash "$GUARD"; }
 expect_failure() {
   local needle="$1"
   local output status=0

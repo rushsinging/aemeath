@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, Semaphore};
 use super::ingest::{start_usage_worker, UsageWorkerConfig};
 use crate::{
     AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
-    UsageDropReason, UsageEmitOutcome, UsageRecord, UsageShutdownOutcome,
+    UsageDropReason, UsageEmitOutcome, UsageRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,26 +17,47 @@ enum StoreCall {
     Flush { stream: String },
 }
 
+struct AppendDropNotice(Option<mpsc::UnboundedSender<()>>);
+
+impl Drop for AppendDropNotice {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
 struct ControlledStore {
     calls: Mutex<Vec<StoreCall>>,
     append_started: mpsc::UnboundedSender<()>,
+    append_dropped: mpsc::UnboundedSender<()>,
     allow_append: Semaphore,
     fail_append: bool,
     fail_flush: bool,
 }
 
 impl ControlledStore {
-    fn new(fail_append: bool, fail_flush: bool) -> (Arc<Self>, mpsc::UnboundedReceiver<()>) {
-        let (append_started, receiver) = mpsc::unbounded_channel();
+    fn new(
+        fail_append: bool,
+        fail_flush: bool,
+    ) -> (
+        Arc<Self>,
+        mpsc::UnboundedReceiver<()>,
+        mpsc::UnboundedReceiver<()>,
+    ) {
+        let (append_started, started_receiver) = mpsc::unbounded_channel();
+        let (append_dropped, dropped_receiver) = mpsc::unbounded_channel();
         (
             Arc::new(Self {
                 calls: Mutex::new(Vec::new()),
                 append_started,
+                append_dropped,
                 allow_append: Semaphore::new(0),
                 fail_append,
                 fail_flush,
             }),
-            receiver,
+            started_receiver,
+            dropped_receiver,
         )
     }
 
@@ -62,6 +83,7 @@ impl UsageAppendStorePort for ControlledStore {
         self.append_started
             .send(())
             .expect("append observer remains available");
+        let _drop_notice = AppendDropNotice(Some(self.append_dropped.clone()));
         self.allow_append
             .acquire()
             .await
@@ -100,10 +122,10 @@ impl UsageAppendStorePort for ControlledStore {
     }
 }
 
-fn record(id: &str) -> UsageRecord {
+fn record(session_id: &str, id: &str) -> UsageRecord {
     UsageRecord {
         recorded_at_unix_ms: 1,
-        session_id: SessionId::new(format!("session-{id}")),
+        session_id: SessionId::new(session_id),
         run_id: RunId::new(format!("run-{id}")),
         run_step_id: RunStepId::new(format!("step-{id}")),
         model_invocation_id: ModelInvocationId::new(format!("invocation-{id}")),
@@ -127,47 +149,45 @@ fn worker_config_enforces_capacity_floor_and_zero_timeout_default() {
 
 #[tokio::test]
 async fn full_queue_drops_immediately_while_first_append_is_blocked() {
-    let (store, mut append_started) = ControlledStore::new(false, false);
-    let (sender, handle) = start_usage_worker(
+    let (store, mut append_started, _append_dropped) = ControlledStore::new(false, false);
+    let (sender, worker) = start_usage_worker(
         store.clone(),
         UsageWorkerConfig::new(1, Duration::from_secs(1)),
     );
 
     assert_eq!(
-        sender.try_record(record("first")),
+        sender.try_record(record("session-a", "first")),
         UsageEmitOutcome::Accepted
     );
     append_started.recv().await.expect("first append starts");
     assert_eq!(
-        sender.try_record(record("queued")),
+        sender.try_record(record("session-a", "queued")),
         UsageEmitOutcome::Accepted
     );
     assert_eq!(
-        sender.try_record(record("overflow")),
+        sender.try_record(record("session-a", "overflow")),
         UsageEmitOutcome::Dropped(UsageDropReason::QueueFull)
     );
 
     store.release_append();
     append_started.recv().await.expect("queued append starts");
     store.release_append();
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
-    assert_eq!(sender.metrics().dropped_queue_full_total(), 1);
+    worker.shutdown().await;
 }
 
 #[tokio::test]
-async fn worker_calls_append_then_flush_in_fifo_order_and_drains() {
-    let (store, mut append_started) = ControlledStore::new(false, false);
-    let (sender, handle) = start_usage_worker(
+async fn worker_partitions_each_record_by_session_and_drains_in_fifo_order() {
+    let (store, mut append_started, _append_dropped) = ControlledStore::new(false, false);
+    let (sender, worker) = start_usage_worker(
         store.clone(),
         UsageWorkerConfig::new(2, Duration::from_secs(1)),
     );
+    let first = record("session-a", "first");
+    let second = record("session-b", "second");
 
+    assert_eq!(sender.try_record(first.clone()), UsageEmitOutcome::Accepted);
     assert_eq!(
-        sender.try_record(record("first")),
-        UsageEmitOutcome::Accepted
-    );
-    assert_eq!(
-        sender.try_record(record("second")),
+        sender.try_record(second.clone()),
         UsageEmitOutcome::Accepted
     );
     append_started.recv().await.expect("first append starts");
@@ -175,11 +195,11 @@ async fn worker_calls_append_then_flush_in_fifo_order_and_drains() {
     append_started.recv().await.expect("second append starts");
     store.release_append();
 
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
-    let first_stream = AppendLogStream::for_session(&record("first").session_id)
+    worker.shutdown().await;
+    let first_stream = AppendLogStream::for_session(&first.session_id)
         .as_str()
         .to_string();
-    let second_stream = AppendLogStream::for_session(&record("second").session_id)
+    let second_stream = AppendLogStream::for_session(&second.session_id)
         .as_str()
         .to_string();
     assert_eq!(
@@ -201,26 +221,22 @@ async fn worker_calls_append_then_flush_in_fifo_order_and_drains() {
             },
         ]
     );
-    let metrics = sender.metrics();
-    assert_eq!(metrics.accepted_total(), 2);
-    assert_eq!(metrics.completed_total(), 2);
-    assert_eq!(metrics.write_failed_total(), 0);
 }
 
 #[tokio::test]
-async fn append_failure_skips_flush_counts_each_record_and_continues() {
-    let (store, mut append_started) = ControlledStore::new(true, false);
-    let (sender, handle) = start_usage_worker(
+async fn append_failure_skips_flush_and_continues_with_next_record() {
+    let (store, mut append_started, _append_dropped) = ControlledStore::new(true, false);
+    let (sender, worker) = start_usage_worker(
         store.clone(),
         UsageWorkerConfig::new(2, Duration::from_secs(1)),
     );
 
     assert_eq!(
-        sender.try_record(record("first")),
+        sender.try_record(record("session-a", "first")),
         UsageEmitOutcome::Accepted
     );
     assert_eq!(
-        sender.try_record(record("second")),
+        sender.try_record(record("session-a", "second")),
         UsageEmitOutcome::Accepted
     );
     append_started.recv().await.expect("first append starts");
@@ -228,31 +244,28 @@ async fn append_failure_skips_flush_counts_each_record_and_continues() {
     append_started.recv().await.expect("second append starts");
     store.release_append();
 
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
-    assert!(store
-        .calls()
+    worker.shutdown().await;
+    let calls = store.calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls
         .iter()
         .all(|call| matches!(call, StoreCall::Append { .. })));
-    let metrics = sender.metrics();
-    assert_eq!(metrics.accepted_total(), 2);
-    assert_eq!(metrics.completed_total(), 2);
-    assert_eq!(metrics.write_failed_total(), 2);
 }
 
 #[tokio::test]
-async fn flush_failure_counts_each_record_and_continues() {
-    let (store, mut append_started) = ControlledStore::new(false, true);
-    let (sender, handle) = start_usage_worker(
+async fn flush_failure_continues_with_next_record() {
+    let (store, mut append_started, _append_dropped) = ControlledStore::new(false, true);
+    let (sender, worker) = start_usage_worker(
         store.clone(),
         UsageWorkerConfig::new(2, Duration::from_secs(1)),
     );
 
     assert_eq!(
-        sender.try_record(record("first")),
+        sender.try_record(record("session-a", "first")),
         UsageEmitOutcome::Accepted
     );
     assert_eq!(
-        sender.try_record(record("second")),
+        sender.try_record(record("session-a", "second")),
         UsageEmitOutcome::Accepted
     );
     append_started.recv().await.expect("first append starts");
@@ -260,67 +273,93 @@ async fn flush_failure_counts_each_record_and_continues() {
     append_started.recv().await.expect("second append starts");
     store.release_append();
 
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
+    worker.shutdown().await;
+    let calls = store.calls();
     assert_eq!(
-        store
-            .calls()
+        calls
+            .iter()
+            .filter(|call| matches!(call, StoreCall::Append { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(
+        calls
             .iter()
             .filter(|call| matches!(call, StoreCall::Flush { .. }))
             .count(),
         2
     );
-    let metrics = sender.metrics();
-    assert_eq!(metrics.completed_total(), 2);
-    assert_eq!(metrics.write_failed_total(), 2);
 }
 
 #[tokio::test(start_paused = true)]
-async fn shutdown_timeout_counts_exact_unconfirmed_records_and_is_idempotent() {
-    let (store, mut append_started) = ControlledStore::new(false, false);
-    let (sender, handle) =
+async fn shutdown_timeout_aborts_blocked_worker_and_closes_sender() {
+    let (store, mut append_started, mut append_dropped) = ControlledStore::new(false, false);
+    let (sender, worker) =
         start_usage_worker(store, UsageWorkerConfig::new(2, Duration::from_secs(1)));
 
     assert_eq!(
-        sender.try_record(record("first")),
+        sender.try_record(record("session-a", "first")),
         UsageEmitOutcome::Accepted
     );
-    assert_eq!(
-        sender.try_record(record("second")),
-        UsageEmitOutcome::Accepted
-    );
-    append_started.recv().await.expect("first append starts");
+    append_started.recv().await.expect("append starts");
 
-    let first = handle.shutdown().await;
-    assert_eq!(first, UsageShutdownOutcome::TimedOut { unconfirmed: 2 });
-    assert_eq!(handle.shutdown().await, first);
-    let metrics = sender.metrics();
-    assert_eq!(metrics.accepted_total(), 2);
-    assert_eq!(metrics.completed_total(), 0);
-    assert_eq!(metrics.drain_abandoned_total(), 2);
+    worker.shutdown().await;
+
+    append_dropped
+        .recv()
+        .await
+        .expect("blocked append future drops");
+    assert_eq!(
+        sender.try_record(record("session-a", "late")),
+        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+    );
 }
 
 #[tokio::test]
-async fn sender_rejects_after_shutdown_and_metrics_preserve_terminal_conservation() {
-    let (store, mut append_started) = ControlledStore::new(false, false);
-    let (sender, handle) = start_usage_worker(
-        store.clone(),
-        UsageWorkerConfig::new(1, Duration::from_secs(1)),
-    );
-
+async fn cancelling_shutdown_aborts_worker_instead_of_detaching_it() {
+    let (store, mut append_started, mut append_dropped) = ControlledStore::new(false, false);
+    let (sender, worker) =
+        start_usage_worker(store, UsageWorkerConfig::new(1, Duration::from_secs(30)));
     assert_eq!(
-        sender.try_record(record("first")),
+        sender.try_record(record("session-a", "first")),
         UsageEmitOutcome::Accepted
     );
-    append_started.recv().await.expect("first append starts");
-    store.release_append();
-    assert_eq!(handle.shutdown().await, UsageShutdownOutcome::Drained);
+    append_started.recv().await.expect("append starts");
+
+    let shutdown_task = tokio::spawn(worker.shutdown());
+    tokio::task::yield_now().await;
+    shutdown_task.abort();
+    let _ = shutdown_task.await;
+
+    append_dropped
+        .recv()
+        .await
+        .expect("append future drops on cancellation");
     assert_eq!(
-        sender.try_record(record("late")),
+        sender.try_record(record("session-a", "late")),
         UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
     );
+}
 
-    let metrics = sender.metrics();
-    assert_eq!(metrics.accepted_total(), metrics.completed_total());
-    assert_eq!(metrics.drain_abandoned_total(), 0);
-    assert_eq!(metrics.dropped_worker_unavailable_total(), 1);
+#[tokio::test]
+async fn dropping_worker_owner_aborts_worker_and_closes_sender() {
+    let (store, mut append_started, mut append_dropped) = ControlledStore::new(false, false);
+    let (sender, worker) =
+        start_usage_worker(store, UsageWorkerConfig::new(1, Duration::from_secs(30)));
+    assert_eq!(
+        sender.try_record(record("session-a", "first")),
+        UsageEmitOutcome::Accepted
+    );
+    append_started.recv().await.expect("append starts");
+
+    drop(worker);
+
+    append_dropped
+        .recv()
+        .await
+        .expect("append future drops with owner");
+    assert_eq!(
+        sender.try_record(record("session-a", "late")),
+        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+    );
 }

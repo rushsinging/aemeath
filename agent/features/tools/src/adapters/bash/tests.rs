@@ -10,8 +10,8 @@ use crate::domain::ToolProgressEvent;
 use serde_json::json;
 use tempfile::tempdir;
 
-#[tokio::test]
-async fn abort_reader_tasks_waits_until_pipe_futures_are_dropped() {
+#[tokio::test(start_paused = true)]
+async fn drain_reader_tasks_times_out_and_aborts_stuck_readers() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
@@ -26,6 +26,7 @@ async fn abort_reader_tasks_waits_until_pipe_futures_are_dropped() {
     let stderr_dropped = Arc::new(AtomicBool::new(false));
     let stdout_marker = DropMarker(stdout_dropped.clone());
     let stderr_marker = DropMarker(stderr_dropped.clone());
+    // 模拟管道永不 EOF（后台进程持有写端）：reader 永远 pending。
     let stdout_handle = tokio::spawn(async move {
         let _marker = stdout_marker;
         std::future::pending::<Vec<u8>>().await
@@ -36,8 +37,12 @@ async fn abort_reader_tasks_waits_until_pipe_futures_are_dropped() {
     });
     tokio::task::yield_now().await;
 
-    abort_reader_tasks(stdout_handle, stderr_handle).await;
+    let (stdout_bytes, stderr_bytes) = drain_reader_tasks(stdout_handle, stderr_handle).await;
+    // abort 是协作式的：让出执行权使被终止任务实际运行到 drop。
+    tokio::task::yield_now().await;
 
+    assert!(stdout_bytes.is_empty());
+    assert!(stderr_bytes.is_empty());
     assert!(stdout_dropped.load(Ordering::SeqCst));
     assert!(stderr_dropped.load(Ordering::SeqCst));
 }
@@ -436,6 +441,145 @@ async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
 
     assert!(execution.is_error);
     assert_eq!(execution.text, "Command cancelled by user");
+}
+
+/// 取消 / 超时结果文本拼装（纯函数，CI 覆盖 spawn 场景的行为核心）。
+#[test]
+fn partial_output_text_appends_marker_over_existing_output() {
+    let text = partial_output_text(
+        "line-1\n",
+        "",
+        "[Command cancelled by user — partial output above]",
+        "Command cancelled by user",
+    );
+    assert_eq!(
+        text,
+        "line-1\n[Command cancelled by user — partial output above]"
+    );
+
+    let text_with_stderr = partial_output_text("out\n", "err", "[marker]", "fallback");
+    assert_eq!(text_with_stderr, "out\nerr\n[marker]");
+}
+
+#[test]
+fn partial_output_text_without_output_falls_back_to_plain_text() {
+    let text = partial_output_text("", "", "[marker]", "Command cancelled by user");
+    assert_eq!(text, "Command cancelled by user");
+}
+
+/// 运行中取消：已读到的 stdout 必须保留在结果里，末尾附加取消标注，
+/// 而不是被 "Command cancelled by user" 整体替换。
+/// 本地验证：`cargo test -p tools -- --ignored bash_cancellation_preserves`。
+#[ignore = "spawn 真实 bash + 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
+#[tokio::test]
+async fn bash_cancellation_preserves_partial_stdout() {
+    struct DelayedCancellation {
+        cancelled: std::sync::atomic::AtomicBool,
+        notify: tokio::sync::Notify,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::domain::CancellationSignal for DelayedCancellation {
+        fn is_cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        async fn cancelled(&self) {
+            if self.is_cancelled() {
+                return;
+            }
+            self.notify.notified().await;
+        }
+
+        fn child_signal(&self) -> std::sync::Arc<dyn crate::domain::CancellationSignal> {
+            std::sync::Arc::new(Self {
+                cancelled: std::sync::atomic::AtomicBool::new(self.is_cancelled()),
+                notify: tokio::sync::Notify::new(),
+            })
+        }
+    }
+
+    let workspace = tempdir().unwrap();
+    let cancellation = std::sync::Arc::new(DelayedCancellation {
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+        notify: tokio::sync::Notify::new(),
+    });
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_cancellation(cancellation.clone());
+    let tool = bash_tool(&ctx);
+
+    let execution = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // call 必须并发驱动：主流程先等 echo 输出被 reader 读到，再触发取消。
+        let call = tokio::spawn(async move {
+            tool.call(
+                json!({ "command": "echo partial-stdout-marker-1; sleep 30", "timeout": 600_000 }),
+                &ctx,
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        cancellation
+            .cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        cancellation.notify.notify_waiters();
+        call.await.expect("call task must not panic")
+    })
+    .await
+    .expect("running Bash must observe the cancellation promptly");
+
+    assert!(
+        execution.is_error,
+        "cancelled run must stay an error result"
+    );
+    assert!(
+        execution.text.contains("partial-stdout-marker-1"),
+        "partial stdout must be preserved instead of being replaced, got: {:?}",
+        execution.text
+    );
+    assert!(
+        execution.text.contains("cancelled"),
+        "the cancellation marker must be appended, got: {:?}",
+        execution.text
+    );
+}
+
+/// 超时与取消同构：已读输出保留 + 末尾超时标注，而非整体替换。
+/// 本地验证：`cargo test -p tools -- --ignored bash_timeout_preserves`。
+#[ignore = "spawn 真实 bash + 进程组清理与 CI runner 进程管理交互，触发 job 取消（见 #1508）"]
+#[tokio::test]
+async fn bash_timeout_preserves_partial_stdout() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let execution = bash_tool(&ctx)
+        .call(
+            json!({ "command": "echo partial-stdout-marker-2; sleep 30", "timeout": 400 }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        execution.is_error,
+        "timed-out run must stay an error result"
+    );
+    assert!(
+        execution.text.contains("partial-stdout-marker-2"),
+        "partial stdout must be preserved on timeout, got: {:?}",
+        execution.text
+    );
+    assert!(
+        execution.text.contains("timed out after 400ms"),
+        "the timeout marker must be appended, got: {:?}",
+        execution.text
+    );
 }
 
 #[tokio::test]

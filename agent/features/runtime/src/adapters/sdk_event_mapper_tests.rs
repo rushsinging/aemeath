@@ -582,3 +582,33 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
+
+/// #1616：ThinkingChanged 携带 reasoning 深度，mapper 必须结构化透传给 SDK。
+#[test]
+fn thinking_changed_mapping_preserves_reasoning_level_for_sdk() {
+    let event = RuntimeStreamEvent::ThinkingChanged {
+        enabled: true,
+        level: share::reasoning::ReasoningLevel::High,
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ThinkingChanged { enabled, level } => {
+            assert!(enabled);
+            assert_eq!(level, share::reasoning::ReasoningLevel::High);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+
+    let event = RuntimeStreamEvent::ThinkingChanged {
+        enabled: false,
+        level: share::reasoning::ReasoningLevel::Off,
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ThinkingChanged { enabled, level } => {
+            assert!(!enabled);
+            assert_eq!(level, share::reasoning::ReasoningLevel::Off);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

@@ -9,7 +9,4 @@ mod ingest_tests;
 #[path = "application/query_tests.rs"]
 mod query_tests;
 
-pub use ingest::{
-    start_usage_worker, UsagePipelineMetricsSnapshot, UsageSender, UsageShutdownOutcome,
-    UsageWorkerConfig, UsageWorkerHandle,
-};
+pub use ingest::{start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig};

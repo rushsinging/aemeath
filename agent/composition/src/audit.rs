@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use audit::{
-    file_usage_append_store, start_usage_worker, UsageSender, UsageWorkerConfig, UsageWorkerHandle,
+    file_usage_append_store, start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig,
 };
 use share::config::domain::snapshot::ConfigSnapshot;
 use storage::SafeStorageRoot;
@@ -28,12 +28,12 @@ impl runtime::UsageSink for AuditUsageSink {
 
 pub struct AuditWorkerAssembly {
     pub sender: UsageSender,
-    pub handle: UsageWorkerHandle,
+    pub worker: UsageWorker,
 }
 
 pub struct SessionAudit {
     sink: std::sync::Arc<dyn runtime::UsageSink>,
-    handle: UsageWorkerHandle,
+    worker: UsageWorker,
 }
 
 impl SessionAudit {
@@ -41,8 +41,8 @@ impl SessionAudit {
         std::sync::Arc::clone(&self.sink)
     }
 
-    pub async fn shutdown(&self) -> audit::UsageShutdownOutcome {
-        self.handle.shutdown().await
+    pub async fn shutdown(self) {
+        self.worker.shutdown().await;
     }
 }
 
@@ -54,7 +54,7 @@ pub fn wire_session_audit(
     let sink = std::sync::Arc::new(AuditUsageSink::new(assembly.sender));
     Ok(SessionAudit {
         sink,
-        handle: assembly.handle,
+        worker: assembly.worker,
     })
 }
 
@@ -65,6 +65,6 @@ pub fn wire_audit_worker(
     let root =
         SafeStorageRoot::open(agents_dir.join("audit")).map_err(|error| error.to_string())?;
     let store = std::sync::Arc::new(file_usage_append_store(root));
-    let (sender, handle) = start_usage_worker(store, usage_worker_config_from_snapshot(snapshot));
-    Ok(AuditWorkerAssembly { sender, handle })
+    let (sender, worker) = start_usage_worker(store, usage_worker_config_from_snapshot(snapshot));
+    Ok(AuditWorkerAssembly { sender, worker })
 }

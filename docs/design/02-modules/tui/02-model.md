@@ -145,7 +145,7 @@ enum TuiRunStatus {
 
 `RunStateSnapshot` 是事实镜像，不拥有转换许可表，也不从事件顺序推断缺失状态。相同 `(run_id, status)` 重复通知幂等；已观察到终态后，非终态迟到通知不得回滚；未知 Run 的 transition 建立带 identity 的 snapshot，避免因丢失 Started 而丢弃权威事实。
 
-`parent_run_id == None` 定义前台 Main Run。只有 Main Run 可更新 `active_main_run_id` 并驱动主活动行；Sub Run snapshot 保留给嵌套展示消费，但不得重置、清除或覆盖 Main Run 的本地静默时间。
+`parent_run_id == None` 定义前台 Main Run。只有 Main Run 可更新 `active_main_run_id` 并驱动主活动行；Sub Run snapshot 保留给嵌套展示消费，但不得重置、清除或覆盖 Main Run 的本地计时插值基线。
 
 目标 Runtime 终态只有 `Completed / Failed / Terminated`。迁移期 `Cancelling / Cancelled` 必须由 SDK 与 TUI ACL 无损接纳，但不构成 TUI 自有状态机；用户可见 terminal cause 继续只消费 Runtime 权威 terminal 事件，command result、Interaction reply 或内容事件均不得伪造终态。
 
@@ -361,7 +361,6 @@ struct RunActivityView {
     text: String,
     frame: u64,
     verb: String,
-    show_model_silence_placeholder: bool,
 }
 
 fn assemble_run_activity(
@@ -377,7 +376,7 @@ fn assemble_run_activity(
 | `DrainingInput` | `Preparing input…` |
 | `PreparingContext` | `Preparing context…` |
 | `Compacting` | `Compacting…`，可附 compact detail |
-| `InvokingModel` | 主活动行；连续 10 秒无有效可展示模型消息时额外派生单行 `Thinking.` / `Thinking..` / `Thinking...` 临时 block |
+| `InvokingModel` | 主活动行持续显示 spinner、总计时与当前模型阶段计时；Output 不注入重复的等待占位块 |
 | `ApplyingResponse` | `Applying response…` |
 | `AwaitingToolApproval` / `AwaitingUser` | 无活动 spinner；交互块独立展示 |
 | `ExecutingTools` | `Calling <tool>…` 或 `Calling tools…`；tool detail 缺失时使用通用文案 |
@@ -387,11 +386,9 @@ fn assemble_run_activity(
 | `Terminating` | `Terminating…` |
 | `Completed / Failed / Cancelled / Terminated` | 无活动展示 |
 
-Main `InvokingModel` 静默策略属于 ViewState：进入状态时用可注入单调时钟记录起点；非空 Text、非空 Thinking、ToolCallStart、参数内容实际变化的 ToolCallUpdate 重置静默起点。Usage、重复状态、空 delta、日志、诊断、控制和 Sub Run 事件不重置。离开 `InvokingModel` 立即清除条件，再次进入重新计时。
+模型等待状态只由 live-status spinner 表达。TUI **NEVER** 为无内容等待向 Output timeline / ViewModel 注入 `Thinking.` 临时块，也不跟踪内容活动静默区间；Runtime 与 SDK **NEVER** 发布 `ModelStreamWaiting` 这类 UI 占位事件。
 
-Spinner 双计时必须保留 Runtime Activity 的两个独立观测域：outer 读取 Main Run root 的 `total_elapsed_ms` 与 root revision，inner 读取当前 primary Activity 的 `state_elapsed_ms` 与 phase revision。`RunActivityState` 分别维护两组本地单调插值基线；root 更新不得重置 phase 基线，phase 切换不得重置或回基 outer 总计时。ViewState 只在 Runtime 观测之间插值，**NEVER** 推导或拥有 Run / phase 生命周期。
-
-临时占位拥有同一静默区间内稳定的 block identity，但不写入 timeline、history 或持久化。真实消息到达后，Assembler 在同一帧不再产出占位，正常内容块按既有路径展示。Runtime 与 SDK **NEVER** 发布 `ModelStreamWaiting` 或 heartbeat。
+Spinner 双计时必须保留 Runtime Activity 的两个独立观测域：outer 读取 Main Run root 的 `total_elapsed_ms` 与 root revision，inner 读取当前 primary Activity 的 `state_elapsed_ms` 与 phase revision。`RunActivityState` 分别维护两组本地单调插值基线；root 更新不得重置 phase 基线，phase 切换不得重置或回基 outer 总计时。ViewState 只在 Runtime heartbeat 观测之间插值，**NEVER** 推导或拥有 Run / phase 生命周期。
 
 #### 3.6.2 UsageSummary
 
@@ -997,7 +994,7 @@ Model 中的状态均不是领域权威：
 
 以下状态只在 TUI 拥有：
 
-- `RunActivityState` 的 Main identity、本地单调静默时间、动画 frame 与 verb；
+- `RunActivityState` 的 Main identity、Runtime 双计时单调插值基线、动画 frame 与 verb；
 - InputMode；
 - InteractionPhase 与四类 typed draft；
 - OutputTimeline 块顺序；
@@ -1009,7 +1006,7 @@ Model 中的状态均不是领域权威：
 | 状态 | 真相源 | 禁止 |
 |---|---|---|
 | 活动可见性与 kind | `assemble_run_activity(main_snapshot, runtime_detail, activity_state)` | 在 Model 或 ViewState 独立维护 `chat_active`、业务 phase 或 lifecycle counter |
-| Main 模型静默占位 | Main `InvokingModel` snapshot + `RunActivityState` 单调时间 | Runtime/SDK 发布 `ModelStreamWaiting`、timer 或 heartbeat |
+| 模型等待反馈 | Runtime Activity snapshot → live-status spinner | Output timeline / ViewModel 注入 `Thinking.` 占位，或 Runtime/SDK 发布 `ModelStreamWaiting` |
 | input buffer | `model.input().document().buffer()` | Render 维护独立缓冲 |
 | active prompt | `model.diagnostic().active_prompt()` | ViewState 维护 prompt 副本 |
 | 用户可见 Run 终态 | Runtime 权威 terminal 事件 | command outcome、Interaction cancel、内容事件或 TUI 计时伪造 terminal |

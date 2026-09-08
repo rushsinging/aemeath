@@ -12,7 +12,7 @@ async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = storage::SafeStorageRoot::open(temp.path()).expect("storage root");
     let store = std::sync::Arc::new(audit::file_usage_append_store(root));
-    let (sender, handle) = audit::start_usage_worker(
+    let (sender, worker) = audit::start_usage_worker(
         store,
         audit::UsageWorkerConfig::new(1, Duration::from_secs(1)),
     );
@@ -33,7 +33,7 @@ async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
     };
 
     assert_eq!(sink.try_record(record.clone()), UsageEmitOutcome::Accepted);
-    handle.shutdown().await;
+    worker.shutdown().await;
     assert_eq!(
         sink.try_record(record),
         UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
@@ -63,10 +63,7 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
     };
 
     assert_eq!(sink.try_record(record.clone()), UsageEmitOutcome::Accepted);
-    assert_eq!(
-        session_audit.shutdown().await,
-        audit::UsageShutdownOutcome::Drained
-    );
+    session_audit.shutdown().await;
     assert_eq!(
         sink.try_record(record.clone()),
         UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)

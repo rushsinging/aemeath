@@ -67,6 +67,8 @@ impl StatusViewAssembler {
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
             model: presentation.model_id().map(ToOwned::to_owned),
+            // #1616：状态栏直接显示 reasoning 深度字符串（off 也如实显示）。
+            reasoning_level: Some(presentation.reasoning_level().as_str()),
             session_id: session.and_then(|s| s.current_session_id.clone()),
             input_tokens: conversation.runtime.usage.input_tokens,
             output_tokens: conversation.runtime.usage.output_tokens,

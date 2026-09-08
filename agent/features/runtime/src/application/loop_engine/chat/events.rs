@@ -1,5 +1,6 @@
 use sdk::ids::{ChatId, ChatRunId, ToolCallId};
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 use share::session_types::PersistedWorkspaceContext;
 use std::future::Future;
 use std::pin::Pin;
@@ -193,8 +194,10 @@ pub enum RuntimeStreamEvent {
         result: sdk::ModelSwitchResult,
     },
     /// Reasoning 模式切换完成通知（#497）。runtime idle 分支执行 set_thinking 后回传结果。
+    /// `level` 携带切换后的 reasoning 深度（#1616 状态栏展示）。
     ThinkingChanged {
         enabled: bool,
+        level: ReasoningLevel,
     },
     /// 上下文估算完成通知（#497）。runtime idle 分支执行 estimate 后回传结果。
     ContextEstimated {

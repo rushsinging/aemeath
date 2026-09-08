@@ -672,7 +672,12 @@ impl Dispatcher {
                         duration,
                     };
                     executions.push(execution);
-                    if attempts >= self.execution_policy.max_attempts() {
+                    // #1614：超时是确定性失败——同输入重跑只会再次超时，
+                    // 重试仅把调用方等待放大 max_attempts 倍（实测 Stop hook
+                    // 600s×3≈30 分钟）。Timeout 单次终判，不进入重试循环。
+                    if matches!(fault, ExecutionFault::Timeout)
+                        || attempts >= self.execution_policy.max_attempts()
+                    {
                         Self::observe_subscription_execution(
                             subscription_execution_observer,
                             HookSubscriptionExecutionEvent::Finished {

@@ -128,6 +128,20 @@ pub(crate) async fn parse_responses_stream(
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
+                        // #1581：不同 call_id 复用同一 output_index（SSE 重放 / 网关
+                        // 异常）时静默覆盖会丢失前一个 tool_use，而其旁路执行的
+                        // tool_result 已发出——孤儿配对会被 Responses API 以 400
+                        // 拒绝。fail-fast 为可重试的流中断，让上层重试整次请求。
+                        if let Some((existing_call_id, ..)) = function_calls.get(&output_index) {
+                            if *existing_call_id != call_id {
+                                return Err(crate::LlmError::StreamInterrupted(format!(
+                                    "responses stream reused output_index {output_index} \
+                                     for a different function_call ('{call_id}' after \
+                                     '{existing_call_id}') — suspected SSE replay; \
+                                     retry the request"
+                                )));
+                            }
+                        }
                         function_calls
                             .insert(output_index, (call_id.clone(), name.clone(), String::new()));
                         handler.emit_tool_use_start(&name, Some(&call_id), output_index);
