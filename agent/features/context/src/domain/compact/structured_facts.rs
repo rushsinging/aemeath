@@ -488,6 +488,10 @@ impl CompactTaskSnapshot {
     }
 
     pub fn render_companion(&self) -> String {
+        self.render_companion_with_limit(self.items.len())
+    }
+
+    pub fn render_companion_with_limit(&self, item_limit: usize) -> String {
         let completed = self
             .items
             .iter()
@@ -498,7 +502,21 @@ impl CompactTaskSnapshot {
             self.batch_id,
             self.items.len()
         )];
-        for item in &self.items {
+        let prioritized_items = self
+            .items
+            .iter()
+            .filter(|item| item.status == CompactTaskStatus::InProgress)
+            .chain(
+                self.items
+                    .iter()
+                    .filter(|item| item.status == CompactTaskStatus::Pending),
+            )
+            .chain(
+                self.items
+                    .iter()
+                    .filter(|item| item.status == CompactTaskStatus::Completed),
+            );
+        for item in prioritized_items.take(item_limit) {
             let icon = match item.status {
                 CompactTaskStatus::Pending => "□",
                 CompactTaskStatus::InProgress => "■",
@@ -519,6 +537,12 @@ impl CompactTaskSnapshot {
             lines.push(format!(
                 "{icon} [task:{} seq:{}] {}{blocked_by}",
                 item.sequence, item.sequence, item.subject
+            ));
+        }
+        let hidden_count = self.items.len().saturating_sub(item_limit);
+        if hidden_count > 0 {
+            lines.push(format!(
+                "… {hidden_count} more tasks omitted to fit compact budget"
             ));
         }
         lines.join("\n")

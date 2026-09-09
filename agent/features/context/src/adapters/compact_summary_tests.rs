@@ -1619,6 +1619,94 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
 }
 
 #[tokio::test]
+async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoint() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    struct InvalidRefreshThenUnavailable {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl CompactGenerator for InvalidRefreshThenUnavailable {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let prompt = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if prompt.contains("repairing the refresh") {
+                return Err(crate::domain::CompactGenerationFailure::new(
+                    crate::domain::CompactGenerationFailureKind::Provider,
+                    "provider upstream unavailable",
+                ));
+            }
+            if prompt.contains("<unprotected_checkpoint_details>") {
+                return Ok(CompactGenerationOutput::from(
+                    r#"{"committed_facts":["unterminated""#,
+                ));
+            }
+            let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
+            let facts = batch["facts"].as_array_mut().unwrap();
+            for fact_index in 0..240 {
+                facts.push(serde_json::json!({
+                    "sequence": fact_index + 10,
+                    "source": "tool_result",
+                    "kind": "committed_fact",
+                    "text": format!(
+                        "Evidence {fact_index}: {}",
+                        "detailed durable observation ".repeat(24)
+                    )
+                }));
+            }
+            Ok(CompactGenerationOutput::from(batch.to_string()))
+        }
+    }
+
+    let context_size = 100_000;
+    let budget = crate::domain::token_budget::summary_budget(context_size);
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        context_size,
+        Some(&InvalidRefreshThenUnavailable {
+            calls: calls.clone(),
+        }),
+        None,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("provider failure during refresh must use deterministic degradation");
+
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
+        .expect("degraded summary must remain canonical");
+    assert!(crate::domain::token_budget::estimate_tokens(&result.summary) <= budget);
+    assert!(result
+        .summary
+        .contains("## Current Objective\n- Continue the compact checkpoint work."));
+    assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
+    assert_eq!(
+        result.quality,
+        crate::domain::CompactSummaryQuality::LlmWithLocalBudgetDegradation
+    );
+    assert!(calls.load(Ordering::SeqCst) >= 6);
+}
+
+#[tokio::test]
 async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkpoint() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

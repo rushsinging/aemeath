@@ -84,6 +84,7 @@ struct MapReduceCompactOutput {
     summary: String,
     degraded_chunks: usize,
     degradation_failure: Option<CompactGenerationFailureKind>,
+    locally_degraded_to_budget: bool,
 }
 
 impl MapReduceCompactOutput {
@@ -93,6 +94,9 @@ impl MapReduceCompactOutput {
                 degraded_chunks: self.degraded_chunks,
                 failure,
             },
+            None if self.locally_degraded_to_budget => {
+                CompactSummaryQuality::LlmWithLocalBudgetDegradation
+            }
             None => CompactSummaryQuality::Llm,
         }
     }
@@ -1198,6 +1202,7 @@ async fn compact_messages_map_reduce(
             summary: checkpoint.render(),
             degraded_chunks,
             degradation_failure,
+            locally_degraded_to_budget: false,
         })
         .map_err(|error| {
             CompactGenerationFailure::new(
@@ -1294,10 +1299,30 @@ async fn compact_messages_map_reduce(
         final_checkpoint = refreshed_checkpoint;
         final_summary = refreshed_summary;
     }
+    let mut locally_degraded_to_budget = false;
+    if crate::domain::token_budget::estimate_tokens(&final_summary) > budget {
+        let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
+        final_checkpoint = final_checkpoint
+            .degrade_to_budget(budget)
+            .map_err(|error| {
+                CompactGenerationFailure::new(
+                    CompactGenerationFailureKind::InvalidSummary,
+                    format!("compact checkpoint 无法安全降级到预算：{error}"),
+                )
+            })?;
+        final_summary = final_checkpoint.render();
+        locally_degraded_to_budget = true;
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[compact] refresh 未将摘要收敛到预算，执行本地结构化降级：{tokens_before} -> {} tokens（预算 {budget}）",
+            crate::domain::token_budget::estimate_tokens(&final_summary),
+        );
+    }
     Ok(MapReduceCompactOutput {
         summary: final_summary,
         degraded_chunks,
         degradation_failure,
+        locally_degraded_to_budget,
     })
 }
 

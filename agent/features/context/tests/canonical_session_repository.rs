@@ -407,7 +407,8 @@ fn ten_step_session(
 }
 
 async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId, revision: u64) {
-    let request = compact_request(session_id);
+    let mut request = compact_request(session_id);
+    request.context_size = 100_000;
     let outcome = repository
         .commit_compaction(&CompactRequest {
             run_id: request.run_id.clone(),
@@ -1543,7 +1544,8 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
         started: Mutex::new(Some(started_sender)),
         release: tokio::sync::Mutex::new(release_receiver),
     })));
-    let request = compact_request(session_id.clone());
+    let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
     let compact_task = {
         let repository = Arc::clone(&repository);
         tokio::spawn(async move {
@@ -1697,6 +1699,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
         calls: Arc::clone(&calls),
     }));
     let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
     request.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
         context: share::config::ContextConfig {
             auto_compact_failure_limit: 2,
@@ -2112,7 +2115,8 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
 
-    let request = compact_request(session_id.clone());
+    let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
     let outcome = base_repository
         .commit_compaction(&context::domain::CompactRequest {
             run_id: request.run_id.clone(),
@@ -2140,6 +2144,62 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
     assert!(result.summary.contains("- Next action: 实现压缩拼接"));
     assert!(result.summary.contains("## Current Objective"));
+    assert!(
+        context::compact::estimate_tokens(&result.summary)
+            <= context::compact::summary_budget(100_000),
+        "checkpoint 与 Current Task State companion 的完整持久化结果必须在预算内"
+    );
+}
+
+#[tokio::test]
+async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
+    let writer = Arc::new(RecordingWriter::default());
+    let session_id = SessionId::new("session");
+    let (base_repository, _holder) =
+        repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
+    let mut request = compact_request(session_id.clone());
+    request.context_size = 100_000;
+    let task_items = std::iter::once(context::compact::CompactTaskItem::in_progress(
+        1,
+        "实现压缩预算闭环",
+    ))
+    .chain((2..=30).map(|sequence| {
+        context::compact::CompactTaskItem::pending(
+            sequence,
+            format!("任务 {sequence}: {}", "需要保留的详细恢复信息 ".repeat(80)),
+            Vec::new(),
+        )
+    }))
+    .collect();
+
+    let outcome = base_repository
+        .commit_compaction(&context::domain::CompactRequest {
+            run_id: request.run_id.clone(),
+            source_revision: SessionRevision::new(0),
+            source: request,
+            trigger: context::domain::CompactTrigger::Automatic,
+            progress: None,
+            task_snapshot: Some(context::compact::CompactTaskSnapshot::active(
+                1,
+                1,
+                "实现压缩预算闭环",
+                task_items,
+            )),
+            cancellation: tokio_util::sync::CancellationToken::new(),
+        })
+        .await
+        .unwrap();
+    let context::domain::CompactOutcome::Committed(result) = outcome else {
+        panic!("expected committed compact: {outcome:?}")
+    };
+
+    assert!(
+        context::compact::estimate_tokens(&result.summary)
+            <= context::compact::summary_budget(100_000)
+    );
+    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
+    assert!(result.summary.contains("Batch #1 — Tasks: 0/30"));
+    assert!(result.summary.contains("- Next action:"));
 }
 
 #[tokio::test]
