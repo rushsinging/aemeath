@@ -490,21 +490,35 @@ impl ContinuationCheckpoint {
         self
     }
 
-    pub fn normalize_to_budget(mut self, budget: usize) -> Result<Self, CheckpointError> {
+    pub fn normalize_semantics(mut self) -> Self {
         self.move_dynamic_facts_to_revalidation();
         self.remove_duplicate_lines();
         self.compact_archived_milestones();
+        self
+    }
 
+    pub fn degrade_to_budget(mut self, budget: usize) -> Result<Self, CheckpointError> {
+        self = self.normalize_semantics();
         if estimate_checkpoint_tokens(&self) <= budget {
             return Ok(self);
         }
 
-        for section_index in [7usize, 2, 4, 3] {
-            while !self.sections[section_index].is_empty()
-                && estimate_checkpoint_tokens(&self) > budget
-            {
-                self.sections[section_index].pop();
-            }
+        const DEGRADATION_ORDER: [usize; 4] = [7, 2, 4, 3];
+        while estimate_checkpoint_tokens(&self) > budget {
+            let Some(section_index) = DEGRADATION_ORDER
+                .iter()
+                .copied()
+                .filter(|section_index| !self.sections[*section_index].is_empty())
+                .max_by_key(|section_index| {
+                    self.sections[*section_index]
+                        .last()
+                        .map(|line| estimate_checkpoint_tokens_for_text(line))
+                        .unwrap_or_default()
+                })
+            else {
+                break;
+            };
+            self.sections[section_index].pop();
         }
 
         let estimated_tokens = estimate_checkpoint_tokens(&self);
@@ -515,6 +529,10 @@ impl ContinuationCheckpoint {
             });
         }
         Ok(self)
+    }
+
+    pub fn normalize_to_budget(self, budget: usize) -> Result<Self, CheckpointError> {
+        self.degrade_to_budget(budget)
     }
 
     fn move_dynamic_facts_to_revalidation(&mut self) {
@@ -679,7 +697,11 @@ fn parse_legacy_sections(source: &str) -> std::collections::HashMap<&str, Vec<St
 }
 
 fn estimate_checkpoint_tokens(checkpoint: &ContinuationCheckpoint) -> usize {
-    crate::domain::token_budget::estimate_tokens(&checkpoint.render())
+    estimate_checkpoint_tokens_for_text(&checkpoint.render())
+}
+
+fn estimate_checkpoint_tokens_for_text(text: &str) -> usize {
+    crate::domain::token_budget::estimate_tokens(text)
 }
 
 fn is_dynamic_current_state(line: &str) -> bool {

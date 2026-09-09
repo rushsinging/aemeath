@@ -32,6 +32,51 @@ const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 Continue — TUI consumption remains."#;
 
 #[test]
+fn budget_degradation_preserves_recovery_critical_sections_before_historical_details() {
+    let oversized = COMPLETE_CHECKPOINT
+        .replace(
+            "- Commit `5e42c9aa` passed Runtime and CLI tests.",
+            &format!(
+                "- Critical evidence for the active diagnosis.\n- {}",
+                "low-value historical detail ".repeat(20_000)
+            ),
+        )
+        .replace(
+            "- Recheck worktree status, branch HEAD, PR state, and CI before mutation.",
+            "- Recheck the active blocker before mutation.",
+        );
+    let original = ContinuationCheckpoint::parse(&oversized).unwrap();
+    let protected_wire = original.to_wire();
+
+    let degraded = original
+        .degrade_to_budget(700)
+        .expect("recovery-critical checkpoint should fit after deterministic degradation");
+    let rendered = degraded.render();
+    let degraded_wire = degraded.to_wire();
+
+    assert!(estimate_checkpoint_tokens(&degraded) <= 700);
+    assert_eq!(
+        degraded_wire.immutable_constraints,
+        protected_wire.immutable_constraints
+    );
+    assert_eq!(
+        degraded_wire.current_objective,
+        protected_wire.current_objective
+    );
+    assert_eq!(
+        degraded_wire.resume_cursor.next_action,
+        protected_wire.resume_cursor.next_action
+    );
+    assert_eq!(
+        degraded_wire.continuation_status,
+        protected_wire.continuation_status
+    );
+    assert!(rendered.contains("Critical evidence for the active diagnosis."));
+    assert!(!rendered.contains("low-value historical detail"));
+    assert!(rendered.contains("Recheck the active blocker before mutation."));
+}
+
+#[test]
 fn compression_patch_changes_only_unprotected_sections() {
     let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
     let protected_wire = original.to_wire();

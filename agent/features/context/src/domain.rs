@@ -511,6 +511,7 @@ impl CompactGenerationFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactSummaryQuality {
     Llm,
+    LlmWithLocalBudgetDegradation,
     PartialMapFallback {
         degraded_chunks: usize,
         failure: CompactGenerationFailureKind,

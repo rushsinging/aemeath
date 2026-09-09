@@ -25,6 +25,7 @@ use crate::ports::{
 struct BaselineSession {
     revision: SessionRevision,
     messages: ContextMessages,
+    active_summary: Option<String>,
 }
 
 #[async_trait]
@@ -34,7 +35,7 @@ impl SessionRepository for BaselineSession {
             revision: self.revision,
             messages: self.messages.clone(),
             structured_history: None,
-            active_summary: Some("summary".into()),
+            active_summary: self.active_summary.clone(),
         })
     }
 
@@ -146,10 +147,77 @@ fn service(messages: Vec<Message>, revision: u64) -> ContextApplicationService {
                     .collect(),
                 Vec::new(),
             ),
+            active_summary: Some("summary".into()),
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
     )
+}
+
+fn service_with_summary(
+    messages: Vec<Message>,
+    revision: u64,
+    active_summary: String,
+) -> ContextApplicationService {
+    ContextApplicationService::new(
+        Arc::new(BaselineSession {
+            revision: SessionRevision::new(revision),
+            messages: ContextMessages::from_committed_steps(
+                messages
+                    .into_iter()
+                    .map(|message| Arc::<[Message]>::from(vec![message]))
+                    .collect(),
+                Vec::new(),
+            ),
+            active_summary: Some(active_summary),
+        }),
+        Arc::new(BaselinePrompt),
+        Arc::new(BaselineMemory),
+    )
+}
+
+fn oversized_checkpoint_summary() -> String {
+    format!(
+        "## Immutable Constraints\n- Do not lose the objective.\n\n\
+         ## Current Objective\n- Preserve the semantic compact goal.\n\n\
+         ## Committed Facts\n- {}\n\n\
+         ## Uncommitted Working Set\n- Continue implementation.\n\n\
+         ## Open Decisions / Risks\n- Refresh may be unavailable.\n\n\
+         ## Resume Cursor\n- Next action: run the focused regression.\n\n\
+         ## Required Revalidation\n- Recheck the compact budget.\n\n\
+         ## Archived Milestones\n\n\n\
+         ## Continuation Status\nContinue — implementation remains.",
+        "historical evidence ".repeat(20_000)
+    )
+}
+
+#[tokio::test]
+async fn build_window_structurally_degrades_oversized_summary_without_losing_objective() {
+    let context = service_with_summary(
+        vec![Message::user("history")],
+        42,
+        oversized_checkpoint_summary(),
+    );
+
+    let window = context
+        .build_window(&request(None))
+        .await
+        .expect("oversized canonical summary must be structurally degraded for injection");
+    let summary = window
+        .system_blocks
+        .iter()
+        .find(|block| block.kind == "active_summary")
+        .map(|block| block.content.as_str())
+        .expect("active summary block must remain present");
+
+    assert!(
+        crate::domain::token_budget::estimate_tokens(summary)
+            <= crate::domain::token_budget::summary_budget(128_000)
+    );
+    assert!(summary.contains("## Current Objective\n- Preserve the semantic compact goal."));
+    assert!(summary.contains("- Next action: run the focused regression."));
+    assert_eq!(summary.matches("## ").count(), 9);
+    assert!(!summary.contains("historical evidence"));
 }
 
 fn tool_result_message(bytes: usize) -> (Message, usize) {

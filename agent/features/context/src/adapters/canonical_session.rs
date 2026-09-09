@@ -518,25 +518,47 @@ impl CanonicalSessionRepository {
         }
     }
 
-    /// 将 typed Task snapshot 确定性渲染为非权威 companion。
+    /// 将 typed Task snapshot 确定性渲染为非权威 companion，并将完整 summary
+    /// 收敛到同一 Context-owned summary budget。
     fn append_task_snapshot_companion(
         summary: &str,
         task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
-    ) -> String {
-        let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(summary)
-            .map(|decoded| decoded.checkpoint().render())
-            .unwrap_or_else(|_| {
-                let (checkpoint, _) =
-                    crate::domain::compact::split_checkpoint_and_task_state(summary);
-                checkpoint.to_string()
-            });
-        match task_snapshot {
-            Some(snapshot) if !snapshot.items().is_empty() => format!(
-                "{checkpoint}\n\n## Current Task State\n{}",
-                snapshot.render_companion()
-            ),
-            _ => checkpoint,
+        budget: usize,
+    ) -> Result<String, crate::domain::compact::CheckpointError> {
+        let checkpoint =
+            crate::domain::compact::CanonicalCompactSummary::decode(summary)?.into_checkpoint();
+        let Some(snapshot) = task_snapshot.filter(|snapshot| !snapshot.items().is_empty()) else {
+            return checkpoint
+                .degrade_to_budget(budget)
+                .map(|checkpoint| checkpoint.render());
+        };
+
+        let mut item_limit = snapshot.items().len();
+        loop {
+            let companion = snapshot.render_companion_with_limit(item_limit);
+            let companion_tokens = crate::domain::token_budget::estimate_tokens(&format!(
+                "\n\n## Current Task State\n{companion}"
+            ));
+            if companion_tokens < budget {
+                if let Ok(bounded_checkpoint) = checkpoint
+                    .clone()
+                    .degrade_to_budget(budget - companion_tokens)
+                {
+                    return Ok(format!(
+                        "{}\n\n## Current Task State\n{companion}",
+                        bounded_checkpoint.render()
+                    ));
+                }
+            }
+            if item_limit == 0 {
+                break;
+            }
+            item_limit -= 1;
         }
+
+        checkpoint
+            .degrade_to_budget(budget)
+            .map(|checkpoint| checkpoint.render())
     }
 
     async fn commit_automatic_compaction(
@@ -654,8 +676,14 @@ impl CanonicalSessionRepository {
                 })
                 .map(|checkpoint| checkpoint.render())
                 .unwrap_or_else(|_| compacted.summary.clone());
+        let summary = Self::append_task_snapshot_companion(
+            &reconciled_summary,
+            task_snapshot,
+            crate::domain::token_budget::summary_budget(context_size),
+        )
+        .map_err(|_| crate::domain::CompactSkipReason::CircuitBreakerOpen)?;
         Ok(Some(GeneratedCompact {
-            summary: Self::append_task_snapshot_companion(&reconciled_summary, task_snapshot),
+            summary,
             recent_messages: compacted.recent_messages,
             quality: compacted.quality,
         }))
