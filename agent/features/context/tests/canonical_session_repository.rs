@@ -876,7 +876,8 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     let session_id = SessionId::new("compact-lifecycle-session");
     let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
 
-    let request = compact_request(session_id);
+    let mut request = compact_request(session_id);
+    request.context_size = 100_000;
     let (result, lifecycle) = context::adapters::capture_session_lifecycle(
         repository.commit_compaction(&CompactRequest {
             run_id: request.run_id.clone(),
