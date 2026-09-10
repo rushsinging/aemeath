@@ -331,7 +331,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
             .model
             .as_ref()
             .map(|model| model.model_id.as_str()),
-        Some("claude-opus-4-1-20250805")
+        Some("claude-fable-5-1")
     );
 }
 

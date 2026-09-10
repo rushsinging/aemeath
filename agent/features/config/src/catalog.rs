@@ -26,8 +26,9 @@
 //! `default_endpoint` 与 `recommended_models` 必须有可核验证据，缺一不可：
 //! - 没有证据时**必须**把字段留空（`None` / `&[]`）；
 //! - 禁止把“待复核/示例”伪装为正式默认；
-//! - 当前已核验 Anthropic 官方 endpoint；产品内置模型与用户明确指定的 OpenAI、
-//!   Zhipu 默认值使用各自记录的来源。其余条目继续要求用户显式填写。
+//! - 当前已核验 Anthropic / OpenAI / Zhipu / Minimax / Mimo / DeepSeek 的 endpoint
+//!   与推荐模型，各自记录 evidence 来源与核验日期；LiteLLM / Agnes / Ollama 没有
+//!   可核验证据，继续要求用户显式填写；Volcengine 同样缺证据，因此不进入 Catalog。
 
 /// Config-owned 固定 source 名称。
 ///
@@ -68,9 +69,7 @@ use http::HeaderValue;
 /// 推荐模型条目。
 ///
 /// 字段说明：
-/// - `model_id` / `context_window` 是基本窗口；
-/// - `max_tokens == 0` 表示官方文档未公布输出上限（落盘后由运行时按全局
-///   默认解析），其余值必须落在 `(0, context_window]`；
+/// - `model_id` / `context_window` / `max_tokens` 是基本窗口；
 /// - `evidence_url` / `verified_at` 必须配套填写，保证 `recommended_models` 一旦
 ///   非空就携带可核验证据，避免悄悄引入仓库 fixture / adapter 默认。
 ///
@@ -138,7 +137,12 @@ pub struct ProviderCatalogEntry {
 }
 
 // ---------------------------------------------------------------------------
-// 静态 Catalog：覆盖 10 个 runtime driver；同一 driver 可对应多个稳定 source。
+// 静态 Catalog：覆盖 Connect 暴露的 9 个 runtime driver（10 个内置 source）；
+// 同一 driver 可对应多个稳定 source（例如普通 Zhipu 与 Zhipu Coding Plan）。
+//
+// Volcengine driver 仍在 Provider crate 中受支持（`VOLCENGINE_CODING_PLAN_API_KEY`
+// 环境变量与协议 ACL 不变），但其 endpoint 与推荐模型都没有可核验证据，按
+// 「无证据即留空」原则不进入 Catalog，因此不出现在 Connect 向导中。
 //
 // 所有条目字段都是 `&'static str` / `Option<&'static str>` / `&'static [..]`，零拷贝。
 // 构建期由 `static_assert_catalog_invariants` 验证：
@@ -149,11 +153,28 @@ pub struct ProviderCatalogEntry {
 // 非空条目必须配套 evidence 元数据；不可核验条目继续保持为空。
 // ---------------------------------------------------------------------------
 
+/// endpoint 与证据元数据在 2026-08-05 核验。
 const VERIFIED_AT: chrono::NaiveDate = chrono::NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
 
+/// 推荐模型在 2026-09-10 按各家官方模型文档重新核验。
+const VERIFIED_AT_2026_09_10: chrono::NaiveDate =
+    chrono::NaiveDate::from_ymd_opt(2026, 9, 10).unwrap();
+
 const OPENAI_MODEL_EVIDENCE: &str = "https://developers.openai.com/api/docs/models";
+const ANTHROPIC_MODEL_EVIDENCE: &str =
+    "https://platform.claude.com/docs/en/about-claude/models/overview.md";
+const MINIMAX_MODEL_EVIDENCE: &str =
+    "https://platform.minimaxi.com/docs/api-reference/text-openai-api";
+const DEEPSEEK_MODEL_EVIDENCE: &str = "https://api-docs.deepseek.com/quick_start/pricing";
 
 const OPENAI_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "gpt-6-astra",
+        context_window: 1_050_000,
+        max_tokens: 128_000,
+        evidence_url: OPENAI_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
     RecommendedModel {
         model_id: "gpt-5.6-sol",
         context_window: 1_050_000,
@@ -175,29 +196,40 @@ const OPENAI_MODELS: &[RecommendedModel] = &[
         evidence_url: OPENAI_MODEL_EVIDENCE,
         verified_at: VERIFIED_AT,
     },
-    RecommendedModel {
-        model_id: "gpt-5.5",
-        context_window: 1_050_000,
-        max_tokens: 128_000,
-        evidence_url: OPENAI_MODEL_EVIDENCE,
-        verified_at: VERIFIED_AT,
-    },
 ];
 
+/// Anthropic 当前在线模型。
+///
+/// 官方文档公布 4.6 世代起 dateless 模型 ID 即固定快照（非浮动指针），因此直接
+/// 使用 dateless ID；`claude-haiku-4-5` 是官方列出的 Claude API alias。
 const ANTHROPIC_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
-        model_id: "claude-opus-4-1-20250805",
-        context_window: 200_000,
-        max_tokens: 32_000,
-        evidence_url: "https://platform.claude.com/docs/en/about-claude/models/overview.md",
-        verified_at: VERIFIED_AT,
+        model_id: "claude-fable-5-1",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: ANTHROPIC_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
     RecommendedModel {
-        model_id: "claude-sonnet-4-20250514",
+        model_id: "claude-opus-5",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: ANTHROPIC_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
+    RecommendedModel {
+        model_id: "claude-sonnet-5",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: ANTHROPIC_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
+    RecommendedModel {
+        model_id: "claude-haiku-4-5",
         context_window: 200_000,
         max_tokens: 64_000,
-        evidence_url: "https://platform.claude.com/docs/en/about-claude/models/overview.md",
-        verified_at: VERIFIED_AT,
+        evidence_url: ANTHROPIC_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
 ];
 
@@ -216,6 +248,13 @@ const ANTHROPIC_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
 };
 
 const ZHIPU_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        model_id: "glm-5.3",
+        context_window: 1_000_000,
+        max_tokens: 131_072,
+        evidence_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3",
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
     RecommendedModel {
         model_id: "glm-5.2",
         context_window: 1_000_000,
@@ -287,37 +326,39 @@ const LITELLM_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
-/// Volcengine Catalog 条目。
-///
-/// base URL 与推荐模型当前都没有可核验证据，由 Connect 引导用户填写。
-const VOLCENGINE_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
-    source: ProviderSource::new("Volcengine"),
-    driver: DriverId::new("volcengine"),
-    default_endpoint: None,
-    recommended_models: &[],
-    api_key_hint: Some("火山引擎 → ARK → API Keys"),
-    official_sdk_user_agent: None,
-};
-
 /// MiniMax (MiniMax) Catalog 条目。
 ///
-/// 官方 OpenAI 兼容文档公布上下文窗口，但未公布最大输出 token 上限；
-/// 推荐模型的 `max_tokens` 保持 `0`（官方未公布），落盘后由运行时按全局
-/// 默认解析，绝不伪造数值。
+/// 官方 OpenAI 兼容文档公布在线模型与上下文窗口，但未公布最大输出 token；
+/// `max_tokens` 统一采用 131_072（128K）是经确认的产品决策豁免，理由与风险
+/// 记录在 `docs/design/02-modules/config/02-provider-catalog-and-connect.md`。
 const MINIMAX_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
         model_id: "MiniMax-M3",
         context_window: 1_000_000,
-        max_tokens: 0,
-        evidence_url: "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
-        verified_at: VERIFIED_AT,
+        max_tokens: 131_072,
+        evidence_url: MINIMAX_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
     RecommendedModel {
         model_id: "MiniMax-M2.7",
         context_window: 204_800,
-        max_tokens: 0,
-        evidence_url: "https://platform.minimaxi.com/docs/api-reference/text-openai-api",
-        verified_at: VERIFIED_AT,
+        max_tokens: 131_072,
+        evidence_url: MINIMAX_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
+    RecommendedModel {
+        model_id: "MiniMax-M2.5",
+        context_window: 204_800,
+        max_tokens: 131_072,
+        evidence_url: MINIMAX_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
+    RecommendedModel {
+        model_id: "MiniMax-M2.1",
+        context_window: 204_800,
+        max_tokens: 131_072,
+        evidence_url: MINIMAX_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
 ];
 
@@ -368,20 +409,25 @@ const MIMO_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
+/// DeepSeek 当前在线模型。
+///
+/// 2026-09-10 核验：`deepseek-v4-flash` 已退役，官方模型名改为 `deepseek-flash`
+/// （DeepSeek-V4.1-Flash 承接其请求）；`deepseek-v4-pro` 自 2026-09-14 起同样路由
+/// 到 V4.1-Flash。
 const DEEPSEEK_MODELS: &[RecommendedModel] = &[
     RecommendedModel {
         model_id: "deepseek-v4-pro",
         context_window: 1_000_000,
         max_tokens: 393_216,
-        evidence_url: "https://api-docs.deepseek.com/quick_start/pricing",
-        verified_at: VERIFIED_AT,
+        evidence_url: DEEPSEEK_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
     RecommendedModel {
-        model_id: "deepseek-v4-flash",
+        model_id: "deepseek-flash",
         context_window: 1_000_000,
         max_tokens: 393_216,
-        evidence_url: "https://api-docs.deepseek.com/quick_start/pricing",
-        verified_at: VERIFIED_AT,
+        evidence_url: DEEPSEEK_MODEL_EVIDENCE,
+        verified_at: VERIFIED_AT_2026_09_10,
     },
 ];
 
@@ -434,7 +480,6 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
     ZHIPU_ENTRY,
     ZHIPU_CODING_PLAN_ENTRY,
     LITELLM_ENTRY,
-    VOLCENGINE_ENTRY,
     MINIMAX_ENTRY,
     MIMO_ENTRY,
     DEEPSEEK_ENTRY,
@@ -528,12 +573,12 @@ fn check_unique_sources() -> Result<(), &'static str> {
 }
 
 fn check_recommended_models() -> Result<(), &'static str> {
-    // 推荐模型列表允许为空（条目无核验证据时由 Connect 阶段要求用户填写）。
-    // 每条非空条目都必须有合法窗口；`max_tokens == 0` 表示官方未公布输出
-    // 上限（落盘后运行时按全局默认解析），其余值必须落在 (0, context_window]。
+    // 推荐模型列表允许为空（条目无核验证据时由 Connect 阶段要求用户填写），
+    // 但每条非空条目都必须有合法窗口，并保证 evidence_url 字段配套（类型系统
+    // 已强制；这里再次校验为 0 → 防御）。
     for entry in PROVIDER_CATALOG {
         for model in entry.recommended_models {
-            if model.context_window == 0 {
+            if model.context_window == 0 || model.max_tokens == 0 {
                 return Err("推荐模型窗口非法");
             }
             if model.max_tokens as usize > model.context_window {

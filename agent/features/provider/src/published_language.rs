@@ -48,7 +48,7 @@ impl CancellationSignal for tokio_util::sync::CancellationToken {
 pub struct ModelId {
     /// provider 名称（如 "Anthropic"、"Zhipu"）。
     pub provider: String,
-    /// 模型名称（如 "claude-sonnet-4-20250514"）。
+    /// 模型名称（如 "claude-fable-5-1"）。
     pub model: String,
 }
 

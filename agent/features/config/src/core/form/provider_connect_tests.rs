@@ -140,11 +140,14 @@ fn model_page_publishes_every_catalog_model_before_custom_option() {
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
     let model_options = &form.page.fields[0].options;
 
-    assert!(model_options.len() >= 3);
+    // Anthropic 发布 4 个当前在线模型，末尾固定追加自定义模型入口。
+    assert!(model_options.len() >= 5);
     assert_eq!(model_options[0].id.as_str(), "recommended-0");
-    assert_eq!(model_options[0].label, "claude-opus-4-1-20250805");
+    assert_eq!(model_options[0].label, "claude-fable-5-1");
     assert_eq!(model_options[1].id.as_str(), "recommended-1");
-    assert_eq!(model_options[1].label, "claude-sonnet-4-20250514");
+    assert_eq!(model_options[1].label, "claude-opus-5");
+    assert_eq!(model_options[2].label, "claude-sonnet-5");
+    assert_eq!(model_options[3].label, "claude-haiku-4-5");
     assert_eq!(model_options.last().unwrap().id.as_str(), "custom");
 }
 
@@ -157,10 +160,13 @@ fn custom_model_page_prefills_first_catalog_model_defaults() {
 
     assert_eq!(
         form.page.fields[0].display_value.as_deref(),
-        Some("claude-opus-4-1-20250805")
+        Some("claude-fable-5-1")
     );
-    assert_eq!(form.page.fields[1].display_value.as_deref(), Some("200000"));
-    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("32000"));
+    assert_eq!(
+        form.page.fields[1].display_value.as_deref(),
+        Some("1000000")
+    );
+    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("131072"));
     assert!(form.page.fields.iter().all(|field| field.has_value));
 }
 
@@ -200,7 +206,8 @@ fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
 }
 
 #[test]
-fn model_page_marks_unpublished_output_cap_instead_of_zero() {
+fn minimax_model_page_publishes_128k_output_cap() {
+    // MiniMax 官方只公布上下文窗口；max output 按产品决策统一 128K。
     let mut view = connect_view(ConnectStage::SelectModel);
     view.draft.source = Some(crate::catalog::ProviderSource::new("Minimax"));
 
@@ -210,17 +217,27 @@ fn model_page_marks_unpublished_output_cap_instead_of_zero() {
     assert_eq!(model_options[0].label, "MiniMax-M3");
     assert_eq!(
         model_options[0].description.as_deref(),
-        Some("Context 1000000 · Max 官方未公布")
+        Some("Context 1000000 · Max 131072")
     );
     assert_eq!(model_options[1].label, "MiniMax-M2.7");
     assert_eq!(
         model_options[1].description.as_deref(),
-        Some("Context 204800 · Max 官方未公布")
+        Some("Context 204800 · Max 131072")
+    );
+    assert_eq!(model_options[2].label, "MiniMax-M2.5");
+    assert_eq!(
+        model_options[2].description.as_deref(),
+        Some("Context 204800 · Max 131072")
+    );
+    assert_eq!(model_options[3].label, "MiniMax-M2.1");
+    assert_eq!(
+        model_options[3].description.as_deref(),
+        Some("Context 204800 · Max 131072")
     );
 }
 
 #[test]
-fn custom_model_page_leaves_max_tokens_empty_when_catalog_value_unpublished() {
+fn minimax_custom_model_page_prefills_128k_output_cap() {
     let mut view = connect_view(ConnectStage::EditCustomModel);
     view.draft.source = Some(crate::catalog::ProviderSource::new("Minimax"));
 
@@ -234,10 +251,7 @@ fn custom_model_page_leaves_max_tokens_empty_when_catalog_value_unpublished() {
         form.page.fields[1].display_value.as_deref(),
         Some("1000000")
     );
-    assert!(
-        form.page.fields[2].display_value.is_none(),
-        "官方未公布输出上限时 Max Tokens 不得预填 0"
-    );
+    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("131072"));
 }
 #[test]
 fn custom_model_submission_maps_all_typed_fields() {

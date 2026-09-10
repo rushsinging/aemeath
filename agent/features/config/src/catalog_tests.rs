@@ -1,7 +1,8 @@
 //! `agent/features/config/src/catalog.rs` 的契约测试。
 //!
 //! 覆盖目标：
-//! - 当前 ProviderDriverKind 的 10 个 driver 全部映射；
+//! - Connect 暴露的 9 个 driver 与 10 个内置 source 全部映射；
+//! - Volcengine 无核验证据，保持不进入 Catalog（Connect 不提供该 Provider）；
 //! - source 唯一，同一 runtime driver 可对应多个内置 Provider 配置；
 //! - 按 `ProviderSource` / `DriverId` 查询；
 //! - 推荐模型窗口合法性（context_window > 0, max_tokens > 0）；
@@ -23,7 +24,6 @@ const EXPECTED_SOURCES: &[(&str, &str)] = &[
     ("Zhipu", "zhipu"),
     ("ZhipuCodingPlan", "zhipu"),
     ("LiteLLM", "litellm"),
-    ("Volcengine", "volcengine"),
     ("Minimax", "minimax"),
     ("Mimo", "mimo"),
     ("DeepSeek", "deepseek"),
@@ -36,7 +36,6 @@ const EXPECTED_DRIVERS: &[&str] = &[
     "openai",
     "zhipu",
     "litellm",
-    "volcengine",
     "minimax",
     "mimo",
     "deepseek",
@@ -45,7 +44,9 @@ const EXPECTED_DRIVERS: &[&str] = &[
 ];
 
 #[test]
-fn catalog_covers_every_supported_provider_driver() {
+fn catalog_covers_every_connect_exposed_provider_driver() {
+    // Volcengine driver 仍在 Provider crate 中受支持，但没有可核验的 endpoint、
+    // 推荐模型或官方 SDK UA 证据，因此不进入 Connect 暴露的 Catalog。
     let drivers: Vec<&str> = PROVIDER_CATALOG
         .iter()
         .map(|entry| entry.driver.as_str())
@@ -91,7 +92,7 @@ fn catalog_sources_are_unique_and_use_title_case_names() {
 }
 
 #[test]
-fn catalog_drivers_cover_supported_runtime_drivers_without_requiring_uniqueness() {
+fn catalog_drivers_cover_connect_exposed_runtime_drivers_without_requiring_uniqueness() {
     use std::collections::HashSet;
 
     let drivers: HashSet<&str> = PROVIDER_CATALOG
@@ -215,8 +216,13 @@ fn catalog_recommended_models_have_positive_windows_and_max_tokens() {
                 model_id
             );
             assert!(
-                max_tokens == 0 || (max_tokens as usize) <= context_window,
-                "推荐模型 {} 的 max_tokens ({}) 必须为 0（官方未公布）或 <= context_window ({})",
+                max_tokens > 0,
+                "推荐模型 {} 的 max_tokens 必须 > 0",
+                model_id
+            );
+            assert!(
+                max_tokens as usize <= context_window,
+                "推荐模型 {} 的 max_tokens ({}) 不得大于 context_window ({})",
                 model_id,
                 max_tokens,
                 context_window
@@ -253,9 +259,11 @@ fn catalog_recommended_models_carry_evidence_metadata_when_present() {
 
 #[test]
 fn configured_catalog_defaults_match_product_requirements() {
-    // max_tokens == 0 表示官方文档未公布输出上限（如 MiniMax），
-    // 落盘后由运行时按全局默认解析，禁止伪造数值。
+    // MiniMax 官方文档只公布上下文窗口；max output 采用 131_072（128K）是经确认的
+    // 产品决策豁免，理由与风险记录在
+    // `docs/design/02-modules/config/02-provider-catalog-and-connect.md`。
     let zhipu_models = &[
+        ("glm-5.3", 1_000_000, 131_072),
         ("glm-5.2", 1_000_000, 131_072),
         ("glm-5-turbo", 200_000, 131_072),
     ][..];
@@ -264,18 +272,20 @@ fn configured_catalog_defaults_match_product_requirements() {
             "Anthropic",
             "https://api.anthropic.com",
             &[
-                ("claude-opus-4-1-20250805", 200_000, 32_000),
-                ("claude-sonnet-4-20250514", 200_000, 64_000),
+                ("claude-fable-5-1", 1_000_000, 131_072),
+                ("claude-opus-5", 1_000_000, 131_072),
+                ("claude-sonnet-5", 1_000_000, 131_072),
+                ("claude-haiku-4-5", 200_000, 64_000),
             ][..],
         ),
         (
             "OpenAI",
             "https://api.openai.com",
             &[
+                ("gpt-6-astra", 1_050_000, 128_000),
                 ("gpt-5.6-sol", 1_050_000, 128_000),
                 ("gpt-5.6-terra", 1_050_000, 128_000),
                 ("gpt-5.6-luna", 1_050_000, 128_000),
-                ("gpt-5.5", 1_050_000, 128_000),
             ][..],
         ),
         (
@@ -291,7 +301,12 @@ fn configured_catalog_defaults_match_product_requirements() {
         (
             "Minimax",
             "https://api.minimaxi.com/v1",
-            &[("MiniMax-M3", 1_000_000, 0), ("MiniMax-M2.7", 204_800, 0)][..],
+            &[
+                ("MiniMax-M3", 1_000_000, 131_072),
+                ("MiniMax-M2.7", 204_800, 131_072),
+                ("MiniMax-M2.5", 204_800, 131_072),
+                ("MiniMax-M2.1", 204_800, 131_072),
+            ][..],
         ),
         (
             "Mimo",
@@ -306,7 +321,7 @@ fn configured_catalog_defaults_match_product_requirements() {
             "https://api.deepseek.com",
             &[
                 ("deepseek-v4-pro", 1_000_000, 393_216),
-                ("deepseek-v4-flash", 1_000_000, 393_216),
+                ("deepseek-flash", 1_000_000, 393_216),
             ][..],
         ),
     ];
@@ -345,7 +360,7 @@ fn provider_catalog_can_publish_multiple_recommended_models() {
 
 #[test]
 fn self_hosted_or_unverified_catalog_defaults_remain_explicitly_absent() {
-    for source in ["LiteLLM", "Volcengine", "Agnes", "Ollama"] {
+    for source in ["LiteLLM", "Agnes", "Ollama"] {
         let entry = find_by_source(source).expect("Catalog Provider 必须存在");
         assert!(
             entry.default_endpoint.is_none(),
@@ -361,21 +376,6 @@ fn self_hosted_or_unverified_catalog_defaults_remain_explicitly_absent() {
 #[test]
 fn catalog_entries_without_recommended_models_pass_invariant() {
     static_assert_catalog_invariants().expect("允许无推荐模型的 Catalog 条目不能破坏启动期不变量");
-}
-
-#[test]
-fn catalog_models_without_published_output_cap_report_zero_max_tokens() {
-    // MiniMax 官方文档只公布上下文窗口，未公布最大输出 token 上限。
-    // max_tokens 必须保持 0（官方未公布），落盘后由运行时按全局默认解析，
-    // 绝不伪造数值。
-    let minimax = find_by_source("Minimax").expect("Minimax 必须存在");
-    for model in minimax.recommended_models {
-        assert_eq!(
-            model.max_tokens, 0,
-            "官方未公布输出上限的推荐模型 {} 必须保持 max_tokens == 0",
-            model.model_id
-        );
-    }
 }
 
 #[test]

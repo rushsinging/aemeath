@@ -33,7 +33,7 @@ Config 不拥有正常聊天调用、流式解码或 Runtime 生命周期；Prov
 
 ### 2.1 Catalog 条目
 
-Provider Catalog 是 Config domain 的静态、版本化数据集。首版必须覆盖代码当前支持的全部 driver，而不是另建“Connect 支持列表”。每个条目至少包含：
+Provider Catalog 是 Config domain 的静态、版本化数据集。它必须覆盖所有具备可核验证据的已支持 driver，而不是另建“Connect 支持列表”。`volcengine` driver 仍在 Provider crate 中受支持（协议 ACL 与 `VOLCENGINE_CODING_PLAN_API_KEY` 不变），但其 endpoint、推荐模型与官方 SDK UA 都没有可核验证据，因此按 §2.2 的留空原则不进入 Catalog，Connect 向导也不提供该 Provider。每个条目至少包含：
 
 ```rust
 struct ProviderCatalogEntry {
@@ -73,6 +73,7 @@ struct OfficialSdkUserAgent {
 ### 2.2 Catalog 治理
 
 - Catalog 中的 base URL、推荐模型、token 上限与 UA **必须**来自可核验来源；**禁止**把"待复核/示例/fixture/adapter 默认"伪装为正式默认。
+- **已批准的产品决策豁免**：Minimax 推荐模型的 `max_tokens` 统一为 `131_072`（128K）。官方 OpenAI 兼容文档只公布上下文窗口，未公布最大输出 token；该值来自用户明确批准的产品决策（与同代旗舰对齐），是显式豁免而非核验证据。风险：若服务端真实上限低于 128K，向导预填值可能被拒绝；一旦出现该情况**必须**改为留空并由用户填写。
 - `default_endpoint` 与 `recommended_models` 在没有可核验证据时**必须**为 `None` / `&[]`，由 Connect 引导用户填写。
 - `default_endpoint` 与 `recommended_models` 一旦非空，必须配套 `evidence_url`（非空 `https://`）与 `verified_at`（晚于 1970-01-01 的合法日期）；契约测试 `catalog_default_endpoint_evidence_is_complete_when_present` 与 `catalog_recommended_models_carry_evidence_metadata_when_present` 锁定该约束。
 - 官方 SDK UA 必须精确对应所记录 SDK 版本的真实格式；没有可靠证据时 `official_sdk_user_agent` 必须为 `None`。

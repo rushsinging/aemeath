@@ -450,15 +450,7 @@ fn catalog_lookup_for_anthropic_returns_no_official_sdk_user_agent_by_default() 
 
     // 顺手断言其余 driver 都同样为 None（避免单点遗漏）。
     for driver in [
-        "openai",
-        "zhipu",
-        "litellm",
-        "volcengine",
-        "minimax",
-        "mimo",
-        "deepseek",
-        "agnes",
-        "ollama",
+        "openai", "zhipu", "litellm", "minimax", "mimo", "deepseek", "agnes", "ollama",
     ] {
         let entry = find_by_driver(driver).unwrap_or_else(|| panic!("Catalog 必含 {driver}"));
         assert!(
