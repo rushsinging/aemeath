@@ -17,10 +17,11 @@ pub use application::tool::tool_result_materializer::{
 pub use application::client::{
     build_agent_runner, config_snapshot_to_sdk, from_args_with_workspace,
     resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
-    AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
+    AgentClientImpl, AgentRunnerAssembly, CompactModelOrigin, CompactModelResolveError,
+    CompactModelResolver, CompactModelTarget, InitialProviderAssembly, ModelRuntimeSettings,
     PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
     RuntimeIngressAssembly, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
-    SkillBootstrapAssembly,
+    SessionModelSlot, SkillBootstrapAssembly,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction

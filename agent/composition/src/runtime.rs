@@ -164,17 +164,24 @@ pub(crate) async fn from_args_with_gateways(
         .provider
         .build(provider_spec)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let initial_provider =
-        runtime::InitialProviderAssembly::new(initial_binding, resolved_model, runtime_settings);
-
-    // #1486：compact 走 LLM 语义压缩 —— 注入 ProviderCompactGenerator
-    // （包装主 provider binding）。context_factory 依赖 initial_binding，
-    // 因此 MainSession 装配延后到 provider 构建之后。
-    let agents_dir_buf = agents_dir.to_path_buf();
-    let compact_generator = runtime::ProviderCompactGenerator::new(
-        initial_provider.binding().provider.clone(),
-        initial_provider.binding().model.clone(),
+    let compact_model_slot = runtime::SessionModelSlot::new();
+    let initial_provider = runtime::InitialProviderAssembly::new(
+        initial_binding,
+        resolved_model,
+        runtime_settings,
+        compact_model_slot,
     );
+
+    // #1486/#1621：compact 走 LLM 语义压缩，并按 `context.compact_model`
+    // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
+    // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
+    let agents_dir_buf = agents_dir.to_path_buf();
+    let compact_generator =
+        runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
+            config.reader(),
+            gateways.provider.clone(),
+            initial_provider.compact_model_slot(),
+        )));
     let deps = context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),

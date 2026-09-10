@@ -124,6 +124,191 @@ fn chunk_target_scales_with_context_size() {
     assert_eq!(compact_chunk_target_tokens(64_000), 8_000);
 }
 
+/// Map 分块目标只跟随 compact 调用模型窗口，与 summary 注入窗口无关。
+#[tokio::test]
+async fn map_reduce_chunk_target_follows_compact_model_window() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingGenerator {
+        calls: Arc<AtomicUsize>,
+        window: Option<usize>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for CountingGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(CompactGenerationOutput::from(typed_response_for_request(
+                &request,
+            )))
+        }
+
+        async fn compact_context_window(&self) -> Option<usize> {
+            self.window
+        }
+    }
+
+    async fn calls_for(
+        messages: &[Message],
+        injection_window: usize,
+        compact_window: Option<usize>,
+        cancel: &CancellationToken,
+    ) -> usize {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let generator = CountingGenerator {
+            calls: calls.clone(),
+            window: compact_window,
+        };
+        let _ = compact_messages_with_llm(
+            messages,
+            None,
+            injection_window,
+            Some(&generator),
+            None,
+            None,
+            cancel,
+        )
+        .await
+        .expect("compact must produce a result");
+        calls.load(Ordering::SeqCst)
+    }
+
+    let messages = (0..600)
+        .map(|index| {
+            Message::user(format!(
+                "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+            ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+    let compact_window = 64_000;
+
+    let baseline = calls_for(&messages, compact_window, Some(compact_window), &cancel).await;
+    let wide_injection = calls_for(&messages, 512_000, Some(compact_window), &cancel).await;
+    let narrow_injection = calls_for(&messages, 16_000, Some(compact_window), &cancel).await;
+    let wider_compact_model = calls_for(&messages, compact_window, Some(512_000), &cancel).await;
+
+    assert!(
+        baseline > 1,
+        "测试夹具必须触发 map-reduce 分块，实际调用次数 {baseline}"
+    );
+    assert_eq!(
+        wide_injection, baseline,
+        "注入窗口变大不得改变 Map 分块目标"
+    );
+    assert_eq!(
+        narrow_injection, baseline,
+        "注入窗口变小不得改变 Map 分块目标"
+    );
+    assert!(
+        wider_compact_model < baseline,
+        "compact 模型窗口变大应放宽 Map 分块目标：{wider_compact_model} vs {baseline}"
+    );
+}
+
+/// summary 预算只跟随注入窗口，与 compact 调用模型窗口无关。
+#[tokio::test]
+async fn summary_budget_follows_injection_window_not_compact_window() {
+    struct BulkyFactsGenerator {
+        window: Option<usize>,
+    }
+    #[async_trait::async_trait]
+    impl CompactGenerator for BulkyFactsGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+            let text = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if text.contains("<unprotected_checkpoint_details>") {
+                return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+            }
+            if text.contains("<compact_facts>") {
+                return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+            }
+            let mut facts = serde_json::json!([
+                {
+                    "sequence": 1,
+                    "source": "main_user",
+                    "kind": "constraint",
+                    "text": "NEVER widen the requested action level.",
+                    "constraint": {
+                        "scope": "session",
+                        "lifecycle": "persistent",
+                        "action": "restrict"
+                    }
+                },
+                {
+                    "sequence": 2,
+                    "source": "main_user",
+                    "kind": "objective",
+                    "text": "Continue the compact checkpoint work."
+                },
+                {
+                    "sequence": 3,
+                    "source": "main_user",
+                    "kind": "resume_candidate",
+                    "text": "Validate the generated checkpoint."
+                }
+            ]);
+            for index in 0..12 {
+                facts
+                    .as_array_mut()
+                    .expect("facts array")
+                    .push(serde_json::json!({
+                        "sequence": index + 10,
+                        "source": "tool_result",
+                        "kind": "committed_fact",
+                        "text": format!("Evidence {index}: {}", "durable observation ".repeat(12))
+                    }));
+            }
+            Ok(CompactGenerationOutput::from(
+                serde_json::json!({ "facts": facts }).to_string(),
+            ))
+        }
+
+        async fn compact_context_window(&self) -> Option<usize> {
+            self.window
+        }
+    }
+
+    let messages = (0..12)
+        .map(|index| Message::user(format!("第 {index} 条需要压缩的历史消息。")))
+        .collect::<Vec<_>>();
+    let injection_window = 100_000;
+    let compact_window = 20_000;
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        injection_window,
+        Some(&BulkyFactsGenerator {
+            window: Some(compact_window),
+        }),
+        None,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("compact must produce a result");
+
+    let tokens = crate::domain::token_budget::estimate_tokens(&result.summary);
+    assert!(
+        tokens <= crate::domain::token_budget::summary_budget(injection_window),
+        "summary 必须落在注入窗口预算内，实际 {tokens} tokens"
+    );
+    assert!(
+        tokens > crate::domain::token_budget::summary_budget(compact_window),
+        "summary 不得被 compact 模型窗口预算裁剪，实际 {tokens} tokens"
+    );
+}
+
 /// 分块数量应随 context_size 变化：同量消息，窗口越大块数越少。
 #[tokio::test]
 async fn map_reduce_chunk_count_follows_context_size_ratio() {
