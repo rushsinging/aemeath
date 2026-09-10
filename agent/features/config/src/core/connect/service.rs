@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use crate::catalog::{ProviderCatalogEntry, ProviderSource};
+use crate::catalog::{DriverId, ProviderCatalogEntry, ProviderSource};
 use crate::connect::command::expected_stages;
 use crate::connect::commit::{ConnectCommitError, ConnectCommitPort, ConnectCommitRequest};
 use crate::connect::draft::ConnectDraft;
@@ -31,7 +31,9 @@ use crate::connect::view::{
 };
 use crate::connect::ModelDraft;
 use crate::ports::{ProviderProbePort, ProviderProbeRequest, SystemInformation};
-use crate::user_agent::{resolve_provider_user_agent, ProviderUserAgentInputs};
+use crate::user_agent::{
+    assemble_provider_user_agent_inputs, resolve_provider_user_agent_str, ProviderUserAgentRequest,
+};
 
 /// Probe 调用注入的合法超时上限。该值是 Connect 服务的策略常量，不在
 /// 客户端控制范围内，避免各入口漂移。
@@ -107,6 +109,11 @@ pub struct ConnectAppService {
     sessions: Mutex<std::collections::HashMap<ConnectSessionId, Arc<Mutex<ConnectSession>>>>,
     pub(crate) system: SystemInformation,
     pub(crate) version: &'static str,
+    /// 全局配置 `api.user_agent` 的装配期快照。
+    ///
+    /// Connect probe 与正式 Provider 请求**MUST**来自同一份全局 UA；装配者负责在
+    /// 构造 service 时注入当前值。`None` 或空白等同未配置并继续回退。
+    pub(crate) global_user_agent: Option<String>,
 }
 
 /// `ConnectAppService` 的 builder。测试 / production 都需要相同入口。
@@ -116,6 +123,7 @@ pub struct ConnectAppServiceBuilder {
     commit_state: CommitSlot,
     system: Option<SystemInformation>,
     version: Option<&'static str>,
+    global_user_agent: Option<String>,
 }
 
 /// `Option<Option<...>>` 的清晰表达：None ↔ 显式不要；Some(None) ↔
@@ -159,6 +167,12 @@ impl ConnectAppServiceBuilder {
         self
     }
 
+    /// 注入全局配置 `api.user_agent`；`None` 或空白表示未配置。
+    pub fn with_global_user_agent(mut self, global_user_agent: Option<String>) -> Self {
+        self.global_user_agent = global_user_agent;
+        self
+    }
+
     /// 构建 [`ConnectAppService`]。`catalog` 与 `probe` 必须提供；其他可选。
     pub fn build(self) -> ConnectAppService {
         let commit = match self.commit_state {
@@ -180,6 +194,7 @@ impl ConnectAppServiceBuilder {
                 arch: "unknown-arch".into(),
             }),
             version: self.version.unwrap_or(env!("CARGO_PKG_VERSION")),
+            global_user_agent: self.global_user_agent,
         }
     }
 }
@@ -192,6 +207,7 @@ impl Default for ConnectAppServiceBuilder {
             commit_state: CommitSlot::Absent,
             system: None,
             version: None,
+            global_user_agent: None,
         }
     }
 }
@@ -826,17 +842,16 @@ impl ConnectAppService {
     }
 
     fn resolve_user_agent(&self, draft: &ConnectDraft) -> String {
-        let inputs = ProviderUserAgentInputs {
-            provider_user_agent: draft.provider_user_agent.as_deref(),
-            catalog_official_sdk_user_agent: None,
-            global_user_agent: None,
-            system: self.system.clone(),
-            version: self.version,
-        };
-        resolve_provider_user_agent(inputs)
-            .to_str()
-            .map(str::to_string)
-            .unwrap_or_else(|_| "Aemeath/0.0.0 cli unknown-os/unknown-arch".to_string())
+        resolve_provider_user_agent_str(assemble_provider_user_agent_inputs(
+            ProviderUserAgentRequest {
+                provider_user_agent: draft.provider_user_agent.as_deref(),
+                source_key: draft.source.map(ProviderSource::as_str),
+                driver: draft.driver.map(DriverId::as_str),
+                global_user_agent: self.global_user_agent.as_deref(),
+            },
+            self.system.clone(),
+            self.version,
+        ))
     }
 
     fn project_view(&self, session: &ConnectSession) -> ConnectView {

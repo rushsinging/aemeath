@@ -110,6 +110,57 @@ fn sanitize_segment(raw: &str, fallback: &str) -> String {
     }
 }
 
+/// Provider UA 解析的原始输入请求。
+///
+/// 这是「调用方能看到什么」的最小集合：Provider 专属覆盖、用于查询 Catalog
+/// 官方 SDK UA 的 source / driver 键、以及全局配置 UA。所有调用方（Runtime main
+/// run、派生 run、Runtime 全局回退、Connect probe）都**MUST**经
+/// [`assemble_provider_user_agent_inputs`] 装配输入，**NEVER**各自拼装
+/// [`ProviderUserAgentInputs`]：同一 resolver 收到不同输入集合会让 probe 与正式
+/// 请求的 UA 漂移。
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderUserAgentRequest<'a> {
+    /// `models.providers.<source>.userAgent` 原始值（未归一化）。
+    pub provider_user_agent: Option<&'a str>,
+    /// Catalog `source` key；用于查询该 source 的官方 SDK UA。
+    pub source_key: Option<&'a str>,
+    /// `source_key` 缺失时的 driver 兼容查询键。
+    pub driver: Option<&'a str>,
+    /// 全局配置 `api.user_agent` 原始值（未归一化）。
+    pub global_user_agent: Option<&'a str>,
+}
+
+/// 唯一装配入口：把原始请求 + 环境信息装配为 resolver 输入。
+///
+/// - Provider 专属与全局 UA 先做空白归一：空白等同未配置，继续回退；
+/// - Catalog 官方 SDK UA 按 `source_key` 优先、`driver` 兜底查询；无证据时保持
+///   `None`，**NEVER** 伪造数值。
+pub fn assemble_provider_user_agent_inputs<'a>(
+    request: ProviderUserAgentRequest<'a>,
+    system: SystemInformation,
+    version: &'a str,
+) -> ProviderUserAgentInputs<'a> {
+    let catalog_official_sdk_user_agent = request
+        .source_key
+        .and_then(crate::catalog::find_by_source)
+        .or_else(|| request.driver.and_then(crate::catalog::find_by_driver))
+        .and_then(|entry| entry.official_sdk_user_agent.as_ref())
+        .map(|official| official.value.clone());
+
+    ProviderUserAgentInputs {
+        provider_user_agent: non_blank(request.provider_user_agent),
+        catalog_official_sdk_user_agent,
+        global_user_agent: non_blank(request.global_user_agent),
+        system,
+        version,
+    }
+}
+
+/// 空白字符串等同未配置。
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
 /// 计算 Provider 请求最终 UA 并以 `&str` 形式返回。
 ///
 /// 等价于 [`resolve_provider_user_agent`]，仅返回字符串便于断言。

@@ -40,6 +40,41 @@ impl ProviderProbePort for StubProbe {
     }
 }
 
+/// 捕获 probe 请求，用于断言 Config-owned UA resolver 交付的最终 UA。
+struct CapturingProbe {
+    requests: tokio::sync::Mutex<Vec<ProviderProbeRequest>>,
+}
+
+impl CapturingProbe {
+    fn success() -> Arc<Self> {
+        Arc::new(Self {
+            requests: tokio::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    async fn captured_user_agents(&self) -> Vec<String> {
+        self.requests
+            .lock()
+            .await
+            .iter()
+            .map(|request| request.final_user_agent.clone())
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ProviderProbePort for CapturingProbe {
+    async fn probe(
+        &self,
+        request: ProviderProbeRequest,
+    ) -> Result<ProviderProbeResult, ProviderProbeError> {
+        self.requests.lock().await.push(request);
+        Ok(ProviderProbeResult {
+            latency: Duration::from_millis(1),
+        })
+    }
+}
+
 struct BlockingProbe {
     entered: tokio::sync::Notify,
     release: tokio::sync::Notify,
@@ -112,6 +147,13 @@ async fn advance(
 }
 
 async fn ready_to_probe(service: &ConnectAppService) -> ConnectView {
+    ready_to_probe_with_provider_user_agent(service, None).await
+}
+
+async fn ready_to_probe_with_provider_user_agent(
+    service: &ConnectAppService,
+    provider_user_agent: Option<&str>,
+) -> ConnectView {
     let mut view = service
         .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
         .await;
@@ -142,7 +184,9 @@ async fn ready_to_probe(service: &ConnectAppService) -> ConnectView {
     view = advance(
         service,
         view,
-        ConnectCommand::SetProviderUserAgent { raw: None },
+        ConnectCommand::SetProviderUserAgent {
+            raw: provider_user_agent.map(str::to_string),
+        },
     )
     .await;
     view = advance(service, view, ConnectCommand::EnterCustomModel).await;
@@ -540,6 +584,44 @@ async fn probe_success_moves_directly_to_review() {
         result.probe_status,
         Some(ProbeStatusView::Success { .. })
     ));
+}
+
+#[tokio::test]
+async fn probe_user_agent_uses_global_config_when_provider_ua_is_absent() {
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe(&service).await;
+    advance(&service, view, ConnectCommand::BeginProbe).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["global-agent/9.9".to_string()],
+        "Provider UA 留空时，probe 必须与正式请求使用同一份全局 UA"
+    );
+}
+
+#[tokio::test]
+async fn probe_user_agent_prefers_provider_override_over_global_config() {
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe_with_provider_user_agent(&service, Some("provider-agent/1.0")).await;
+    advance(&service, view, ConnectCommand::BeginProbe).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["provider-agent/1.0".to_string()],
+        "Provider 专属 UA 必须在全局 UA 之前命中"
+    );
 }
 
 #[tokio::test]

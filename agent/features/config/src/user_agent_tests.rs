@@ -11,8 +11,9 @@
 use crate::catalog::{find_by_driver, OfficialSdkUserAgent};
 use crate::ports::SystemInformation;
 use crate::user_agent::{
-    build_global_default_user_agent, resolve_provider_user_agent, resolve_provider_user_agent_str,
-    ProviderUserAgentInputs,
+    assemble_provider_user_agent_inputs, build_global_default_user_agent,
+    resolve_provider_user_agent, resolve_provider_user_agent_str, ProviderUserAgentInputs,
+    ProviderUserAgentRequest,
 };
 use http::HeaderValue;
 use share::config::models::ProviderModelsConfig;
@@ -46,6 +47,93 @@ fn provider_specific_user_agent_wins_even_when_global_is_set() {
     };
     let resolved = resolve_provider_user_agent_str(inputs);
     assert_eq!(resolved, "custom-cli/1.0");
+}
+
+#[test]
+fn assembled_inputs_trim_provider_override_and_keep_priority() {
+    let inputs = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: Some("  provider/1.0  "),
+            source_key: Some("Anthropic"),
+            driver: Some("anthropic"),
+            global_user_agent: Some("global/2.0"),
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+
+    assert_eq!(inputs.provider_user_agent, Some("provider/1.0"));
+    assert_eq!(resolve_provider_user_agent_str(inputs), "provider/1.0");
+}
+
+#[test]
+fn assembled_inputs_normalize_blank_provider_and_global_values() {
+    let inputs = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: Some("   "),
+            source_key: Some("Anthropic"),
+            driver: Some("anthropic"),
+            global_user_agent: Some("\t"),
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+
+    assert!(
+        inputs.provider_user_agent.is_none(),
+        "空白 Provider UA 必须归一为未配置"
+    );
+    assert!(
+        inputs.global_user_agent.is_none(),
+        "空白全局 UA 必须归一为未配置"
+    );
+    assert_eq!(
+        resolve_provider_user_agent_str(inputs),
+        "Aemeath/0.1.0 cli macos/15.5/aarch64"
+    );
+}
+
+#[test]
+fn assembled_inputs_carry_global_config_user_agent() {
+    let inputs = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: None,
+            source_key: Some("Anthropic"),
+            driver: Some("anthropic"),
+            global_user_agent: Some("global/2.0"),
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+
+    assert_eq!(resolve_provider_user_agent_str(inputs), "global/2.0");
+}
+
+#[test]
+fn assembled_inputs_resolve_catalog_lookup_without_fabricating_evidence() {
+    // 当前 Catalog 对所有 source 都没有已核验官方 SDK UA；装配层必须执行查询，
+    // 并在无证据时保持 None，交给下一级（全局配置 / 全局默认）回退。
+    for (source_key, driver) in [("Anthropic", "anthropic"), ("OpenAI", "openai")] {
+        let inputs = assemble_provider_user_agent_inputs(
+            ProviderUserAgentRequest {
+                provider_user_agent: None,
+                source_key: Some(source_key),
+                driver: Some(driver),
+                global_user_agent: None,
+            },
+            system("macos", "aarch64", Some("15.5")),
+            "0.1.0",
+        );
+
+        assert!(
+            inputs.catalog_official_sdk_user_agent.is_none(),
+            "{source_key} 当前无官方 SDK UA 证据，装配层不得伪造"
+        );
+        assert_eq!(
+            resolve_provider_user_agent_str(inputs),
+            "Aemeath/0.1.0 cli macos/15.5/aarch64"
+        );
+    }
 }
 
 #[test]

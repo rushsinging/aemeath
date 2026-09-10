@@ -395,9 +395,10 @@ pub async fn prepare_first_chat_with_agents_dir(
         .create_complete_default()
         .await
         .map_err(global_connect_store_sdk_error)?;
+    let global_user_agent = load_connect_global_user_agent(&store).await?;
     Ok(Some(FirstChatConnectBootstrap {
-        connect: wire_connect_with_store(store.clone()),
-        forms: wire_connect_with_store(store.clone()),
+        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
+        forms: wire_connect_with_store(store.clone(), global_user_agent),
         store,
         receipt,
     }))
@@ -430,26 +431,60 @@ pub async fn build_connect_bootstrap_with_agents_dir(
             .await
             .map_err(global_connect_store_sdk_error)?;
     }
+    let global_user_agent = load_connect_global_user_agent(&store).await?;
     Ok(ConnectBootstrap {
-        connect: wire_connect_with_store(store.clone()),
-        forms: wire_connect_with_store(store),
+        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
+        forms: wire_connect_with_store(store, global_user_agent),
     })
 }
 
-fn wire_connect(agents_dir: &std::path::Path) -> Arc<ConnectFacade> {
+fn wire_connect(
+    agents_dir: &std::path::Path,
+    global_user_agent: Option<String>,
+) -> Arc<ConnectFacade> {
     let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
         config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
     );
-    wire_connect_with_store(store)
+    wire_connect_with_store(store, global_user_agent)
 }
 
-fn wire_connect_with_store(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<ConnectFacade> {
+/// 从全局配置文档读取 `api.user_agent`，空白视为未配置。
+///
+/// 字段名由 `share::config::Config` 类型定义，**NEVER** 手写 JSON 路径；文档结构
+/// 异常时降级为默认配置语义，不制造非法 UA。
+fn connect_global_user_agent_from_document(
+    document: &config::GlobalConfigDocument,
+) -> Option<String> {
+    let config = serde_json::from_value::<share::config::Config>(document.value.clone())
+        .unwrap_or_else(|_| share::config::Config::default());
+    let value = config.api.user_agent.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// 读取当前全局配置的全局 UA，作为 Connect probe 与正式请求的共同回退来源。
+async fn load_connect_global_user_agent(
+    store: &Arc<dyn config::GlobalConfigConnectStore>,
+) -> Result<Option<String>, SdkError> {
+    let document = store
+        .load_global_document()
+        .await
+        .map_err(global_connect_store_sdk_error)?;
+    Ok(document
+        .as_ref()
+        .and_then(connect_global_user_agent_from_document))
+}
+
+fn wire_connect_with_store(
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+    global_user_agent: Option<String>,
+) -> Arc<ConnectFacade> {
     let commit = GlobalConnectCommitAdapter::new(store.clone());
     let service = Arc::new(
         ConnectAppService::builder()
             .with_catalog(config::catalog::PROVIDER_CATALOG)
             .with_probe(crate::provider::ProviderProbeAdapter::new())
             .with_commit(commit)
+            .with_global_user_agent(global_user_agent)
             .with_system(config::ports::SystemInformation {
                 os_name: std::env::consts::OS.to_string(),
                 os_version: None,
@@ -1234,7 +1269,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let thinking = runtime_client.client.requested_reasoning() != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
-    let connect_facade = wire_connect(&agents_dir);
+    let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
     let connect: Arc<dyn sdk::ConnectClient> = connect_facade.clone();
     let forms: Arc<dyn sdk::ConfigFormClient> = connect_facade;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
@@ -1273,6 +1308,50 @@ mod tests {
     use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
     use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn document_with_value(value: serde_json::Value) -> config::GlobalConfigDocument {
+        config::GlobalConfigDocument {
+            revision: config::GlobalConfigRevision::from_digest("test-revision"),
+            value,
+        }
+    }
+
+    #[test]
+    fn connect_global_user_agent_reads_trimmed_document_value() {
+        let document = document_with_value(
+            serde_json::json!({"api": {"user_agent": "  company-agent/7.7  "}}),
+        );
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some("company-agent/7.7".to_string())
+        );
+    }
+
+    #[test]
+    fn connect_global_user_agent_treats_blank_value_as_unconfigured() {
+        let document = document_with_value(serde_json::json!({"api": {"user_agent": "   "}}));
+        assert_eq!(connect_global_user_agent_from_document(&document), None);
+    }
+
+    #[test]
+    fn connect_global_user_agent_keeps_config_default_when_api_section_is_absent() {
+        // `api.user_agent` 是带默认值的 legacy 字段；缺失时必须与
+        // `ConfigSnapshot::user_agent()` 一致地回落到默认配置 UA。
+        let document = document_with_value(serde_json::json!({"models": {"providers": {}}}));
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some(Config::default().api.user_agent)
+        );
+    }
+
+    #[test]
+    fn connect_global_user_agent_degrades_for_non_object_document() {
+        let document = document_with_value(serde_json::json!("not-an-object"));
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some(Config::default().api.user_agent)
+        );
+    }
 
     #[test]
     fn logging_init_decision_initializes_when_no_logger_exists() {

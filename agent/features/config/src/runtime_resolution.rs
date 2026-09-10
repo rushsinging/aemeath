@@ -5,7 +5,9 @@
 
 use crate::catalog::{find_by_driver, find_by_source};
 use crate::ports::SystemInformation;
-use crate::user_agent::{resolve_provider_user_agent_str, ProviderUserAgentInputs};
+use crate::user_agent::{
+    assemble_provider_user_agent_inputs, resolve_provider_user_agent_str, ProviderUserAgentRequest,
+};
 use share::config::domain::models::ResolvedModel;
 use share::config::domain::snapshot::ConfigSnapshot;
 
@@ -73,16 +75,16 @@ impl ProviderRuntimeResolver {
     }
 
     fn resolve_global_user_agent(&self, snapshot: &ConfigSnapshot) -> String {
-        resolve_provider_user_agent_str(ProviderUserAgentInputs {
-            provider_user_agent: None,
-            catalog_official_sdk_user_agent: None,
-            global_user_agent: {
-                let value = snapshot.user_agent().trim();
-                (!value.is_empty()).then_some(value)
+        resolve_provider_user_agent_str(assemble_provider_user_agent_inputs(
+            ProviderUserAgentRequest {
+                provider_user_agent: None,
+                source_key: None,
+                driver: None,
+                global_user_agent: Some(snapshot.user_agent()),
             },
-            system: self.system.clone(),
-            version: &self.version,
-        })
+            self.system.clone(),
+            &self.version,
+        ))
     }
 
     pub fn resolve(
@@ -100,19 +102,16 @@ impl ProviderRuntimeResolver {
             .or_else(|| {
                 catalog.and_then(|entry| entry.default_endpoint.as_ref().map(|e| e.url.to_string()))
             });
-        let catalog_user_agent = catalog
-            .and_then(|entry| entry.official_sdk_user_agent.as_ref())
-            .map(|value| value.value.clone());
-        let user_agent = resolve_provider_user_agent_str(ProviderUserAgentInputs {
-            provider_user_agent: resolved_model.source_config.normalized_user_agent(),
-            catalog_official_sdk_user_agent: catalog_user_agent,
-            global_user_agent: {
-                let value = snapshot.user_agent().trim();
-                (!value.is_empty()).then_some(value)
+        let user_agent = resolve_provider_user_agent_str(assemble_provider_user_agent_inputs(
+            ProviderUserAgentRequest {
+                provider_user_agent: resolved_model.source_config.normalized_user_agent(),
+                source_key: Some(resolved_model.source_key.as_str()),
+                driver: Some(resolved_model.driver.as_str()),
+                global_user_agent: Some(snapshot.user_agent()),
             },
-            system: self.system.clone(),
-            version: &self.version,
-        });
+            self.system.clone(),
+            &self.version,
+        ));
         ResolvedProviderRuntimeConfig {
             base_url,
             user_agent,

@@ -239,6 +239,8 @@ Aemeath/0.1.0 cli macos/15.5/aarch64
 ### 5.3 生命周期
 
 - Config resolver 是 UA 选择与合法性校验的唯一真相；Connect Probe 和正式调用都使用它。
+- 输入装配同样是单一入口：`assemble_provider_user_agent_inputs`（`agent/features/config/src/user_agent.rs`）是唯一把 Provider 专属 UA、Catalog source/driver 与全局 UA 组装成 resolver 输入的位置。Runtime main/derived Run、Runtime 全局回退与 Connect Probe **必须**经它装配输入，**NEVER** 各自拼装输入集合——同一 resolver 收到不同输入集合（例如 Probe 漏传全局 UA）会让连接测试与真实请求的 UA 漂移。
+- Connect 的全局 UA 由装配者在构造 `ConnectAppService` 时经 `with_global_user_agent` 注入：命令入口取 `ConfigSnapshot::user_agent()`（与 Runtime 同一份 committed snapshot），首次配置入口取全局配置文档的 `api.user_agent`。
 - 每个 Main/Sub Run 在 admission 创建 Provider invocation scope 时，从该 Run 的冻结 `ConfigSnapshot` 与 Catalog 解析一次 UA；同一 Run 内不得因 config reload 改变。
 - Provider Adapter 接收最终 UA，不读取全局 Config、不查询 Catalog，也不自行 fallback。
 - 非 Provider 的 Aemeath HTTP 请求继续使用其所属模块定义的全局 UA 语义，不套用 Provider Catalog 层。
