@@ -100,6 +100,18 @@ pub enum ProjectConfigLocationError {
     EmptyIdentity,
 }
 
+impl std::fmt::Display for ProjectConfigLocationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAbsolute => write!(formatter, "项目配置搜索根路径必须是绝对路径"),
+            Self::NotCanonical => write!(formatter, "项目配置搜索根路径必须是规范化路径"),
+            Self::EmptyIdentity => write!(formatter, "项目配置身份不能为空"),
+        }
+    }
+}
+
+impl std::error::Error for ProjectConfigLocationError {}
+
 impl ProjectConfigLocation {
     pub fn try_from_project_identity(
         canonical_search_root: PathBuf,
@@ -226,6 +238,17 @@ pub enum ConfigError {
     Load(String),
     InvalidLocation(ProjectConfigLocationError),
 }
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Load(message) => write!(formatter, "{message}"),
+            Self::InvalidLocation(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
 
 #[async_trait]
 pub trait ProjectConfigParticipant: Send + Sync {
