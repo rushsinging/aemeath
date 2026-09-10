@@ -106,6 +106,30 @@ fn runtime_resolution_uses_explicit_endpoint_override_before_catalog() {
 }
 
 #[test]
+fn runtime_resolution_prefers_catalog_official_sdk_user_agent_over_global() {
+    // Anthropic 已核验官方客户端 UA（Claude Code CLI 2.1.267，本地抓包）；
+    // Catalog 级必须优先于全局配置 `api.user_agent`。
+    let snapshot = snapshot("Anthropic", "anthropic", "", None);
+
+    let resolved = resolve(&snapshot, "Anthropic", "anthropic", None);
+
+    assert_eq!(
+        resolved.user_agent,
+        "claude-cli/2.1.267 (external, sdk-cli)"
+    );
+}
+
+#[test]
+fn runtime_resolution_skips_catalog_level_without_sdk_evidence() {
+    // zhipu 官方 SDK 不发送 User-Agent；Catalog 级保持 None 并回退到全局配置。
+    let snapshot = snapshot("Zhipu", "zhipu", "", None);
+
+    let resolved = resolve(&snapshot, "Zhipu", "zhipu", None);
+
+    assert_eq!(resolved.user_agent, "global/1.0");
+}
+
+#[test]
 fn runtime_resolution_applies_provider_user_agent_before_global_user_agent() {
     let snapshot = snapshot("Anthropic", "anthropic", "", Some("provider/1.0"));
 

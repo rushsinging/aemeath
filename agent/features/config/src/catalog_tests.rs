@@ -379,6 +379,74 @@ fn catalog_entries_without_recommended_models_pass_invariant() {
 }
 
 #[test]
+fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
+    // 已核验的官方客户端 UA 必须成套携带客户端名、版本、逐字符 UA、证据与核验
+    // 日期；缺任何一项都不得进入 Catalog。
+    let cases = [
+        (
+            "Anthropic",
+            "claude-code-cli",
+            "2.1.267",
+            "claude-cli/2.1.267 (external, sdk-cli)",
+        ),
+        (
+            "OpenAI",
+            "codex-cli",
+            "0.153.4",
+            "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)",
+        ),
+    ];
+
+    for (source, sdk_name, sdk_version, expected_ua) in cases {
+        let entry = find_by_source(source).expect("内置 Provider 必须存在");
+        let official = entry
+            .official_sdk_user_agent
+            .as_ref()
+            .unwrap_or_else(|| panic!("{source} 必须具备已核验的官方客户端 UA"));
+        assert_eq!(official.sdk_name, sdk_name, "{source} 客户端名不符");
+        assert_eq!(official.sdk_version, sdk_version, "{source} 客户端版本不符");
+        assert_eq!(
+            official.value, expected_ua,
+            "{source} 官方客户端 UA 必须与核验值逐字符一致"
+        );
+        assert!(
+            official.header_value().is_some(),
+            "{source} 官方客户端 UA 必须可解析为 HeaderValue"
+        );
+        assert!(
+            official.evidence_url.starts_with("https://"),
+            "{source} 官方客户端 UA 证据链接必须为 https://"
+        );
+        assert!(
+            official.verified_at > chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            "{source} 官方客户端 UA 核验日期不得早于 1970-01-01"
+        );
+    }
+}
+
+#[test]
+fn catalog_entries_without_official_sdk_user_agent_evidence_stay_absent() {
+    // 官方 SDK 不发送 UA（zhipu），或根本没有官方 SDK 的 Provider 必须保持 None，
+    // 由全局配置与全局默认继续回退。
+    for source in [
+        "Zhipu",
+        "ZhipuCodingPlan",
+        "Minimax",
+        "Mimo",
+        "DeepSeek",
+        "LiteLLM",
+        "Agnes",
+        "Ollama",
+    ] {
+        let entry = find_by_source(source).expect("内置 Provider 必须存在");
+        assert!(
+            entry.official_sdk_user_agent.is_none(),
+            "{source} 无逐字符可核验的官方客户端 UA 时必须为 None"
+        );
+    }
+}
+
+#[test]
 fn catalog_default_endpoint_evidence_is_complete_when_present() {
     // 向前契约：non-None default_endpoint 必须配套：
     //   - `url` 非空；
@@ -451,9 +519,8 @@ fn catalog_official_sdk_user_agent_evidence_is_complete_when_present() {
                 "{} 的官方 SDK UA 证据链接必须可访问（http(s)），得到 {evidence}",
                 entry.source.as_str()
             );
-            let value_str = ua.value.to_str().unwrap_or("");
             assert!(
-                !value_str.is_empty(),
+                !ua.value.trim().is_empty(),
                 "{} 的官方 SDK UA 值不得为空",
                 entry.source.as_str()
             );
@@ -465,18 +532,17 @@ fn catalog_official_sdk_user_agent_evidence_is_complete_when_present() {
 fn catalog_official_sdk_user_agent_values_are_header_value_safe() {
     for entry in PROVIDER_CATALOG {
         if let Some(ua) = &entry.official_sdk_user_agent {
-            // HeaderValue::from_str 在控制字符处会失败；这里我们已经构造过，
-            // 但仍通过 `to_str` 验证不含 NUL/CR/LF 等非法字符。
-            let bytes = ua
-                .value
-                .to_str()
-                .expect("HeaderValue 必须是合法可见 ASCII")
-                .as_bytes();
             assert!(
-                bytes.iter().all(|b| !b.is_ascii_control()),
+                ua.header_value().is_some(),
+                "{} 的官方 SDK UA 必须可解析为 HeaderValue，得到 {:?}",
+                entry.source.as_str(),
+                ua.value
+            );
+            assert!(
+                ua.value.as_bytes().iter().all(|b| !b.is_ascii_control()),
                 "{} 的官方 SDK UA 不得含 ASCII 控制字符，得到 {:?}",
                 entry.source.as_str(),
-                ua.value.to_str()
+                ua.value
             );
         }
     }

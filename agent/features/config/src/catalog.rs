@@ -117,9 +117,25 @@ pub struct DefaultEndpoint {
 pub struct OfficialSdkUserAgent {
     pub sdk_name: &'static str,
     pub sdk_version: &'static str,
-    pub value: HeaderValue,
+    /// 官方 SDK / CLI 客户端实际发送的 `User-Agent` 字面量。
+    ///
+    /// 保持 `&'static str` 而非 `HeaderValue`：`HeaderValue` 内部带原子引用计数
+    /// （interior mutability），无法进入 `static PROVIDER_CATALOG`。发送前由
+    /// [`OfficialSdkUserAgent::header_value`] 解析。
+    pub value: &'static str,
     pub evidence_url: &'static str,
     pub verified_at: chrono::NaiveDate,
+}
+
+impl OfficialSdkUserAgent {
+    /// 把已核验的 UA 字面量解析为可发送的 [`HeaderValue`]。
+    ///
+    /// 非可见 ASCII 或非法 HeaderValue 时返回 `None`，由 UA resolver 继续回退到
+    /// 下一级；**NEVER** 在这里 panic——Catalog 数据不得让运行时崩溃。
+    pub fn header_value(&self) -> Option<HeaderValue> {
+        let value = HeaderValue::from_str(self.value).ok()?;
+        value.to_str().is_ok().then_some(value)
+    }
 }
 
 /// 单个 Provider 的 Catalog 条目。
@@ -244,7 +260,15 @@ const ANTHROPIC_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     }),
     recommended_models: ANTHROPIC_MODELS,
     api_key_hint: Some("Anthropic Console → Settings → API Keys"),
-    official_sdk_user_agent: None,
+    // 本地抓包核验：Claude Code CLI 2.1.267 向 `/v1/messages` 发送的
+    // `User-Agent` 逐字符为 `claude-cli/2.1.267 (external, sdk-cli)`。
+    official_sdk_user_agent: Some(OfficialSdkUserAgent {
+        sdk_name: "claude-code-cli",
+        sdk_version: "2.1.267",
+        value: "claude-cli/2.1.267 (external, sdk-cli)",
+        evidence_url: "https://github.com/anthropics/claude-code",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
 };
 
 const ZHIPU_MODELS: &[RecommendedModel] = &[
@@ -282,7 +306,19 @@ const OPENAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     }),
     recommended_models: OPENAI_MODELS,
     api_key_hint: Some("OpenAI Dashboard → API keys"),
-    official_sdk_user_agent: None,
+    // 本地抓包核验：codex CLI 0.153.4 的 `POST /v1/responses` 发送的 UA 逐字符为
+    // `codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)`。
+    //
+    // 已知限制：该字符串包含抓包环境的操作系统版本、架构与终端标识，三者都是运行
+    // 时动态段。当前按产品决策固化抓包值，只在同类环境下逐字符吻合；换 OS / 架构 /
+    // 终端后需要重新核验或改为模板化表达（见设计文档 §5.1.1）。
+    official_sdk_user_agent: Some(OfficialSdkUserAgent {
+        sdk_name: "codex-cli",
+        sdk_version: "0.153.4",
+        value: "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)",
+        evidence_url: "https://github.com/openai/codex",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
 };
 
 /// Zhipu（智谱开放平台）Catalog 条目。

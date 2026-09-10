@@ -215,6 +215,17 @@ Config domain 的 UA resolver 必须按以下顺序选择第一个非空白且�
 
 该顺序有意让 Provider 官方 SDK 默认高于全局配置。只要 Catalog 为该 Provider 定义了可靠官方 UA，全局配置便不会作用于它；全局配置只覆盖没有 Provider 默认 UA 的调用。空白字符串等同未配置并继续回退。
 
+### 5.1.1 Catalog 官方客户端 UA 的准入
+
+`ProviderCatalogEntry::official_sdk_user_agent` 记录的是**官方客户端（SDK 或 CLI）实际发送的** `User-Agent` 字面量，不是期望值或推荐值：
+
+- 核验方式：把官方客户端的 base URL 指向本地监听端口抓取真实请求头，必要时与官方源码交叉验证；`evidence_url`、`sdk_name`、`sdk_version`、`verified_at` 必须成套记录。
+- `value` 必须与该客户端该版本的真实输出逐字符相等。
+- `value` 保持 `&'static str`（`HeaderValue` 含内部可变计数，无法进入 `static` Catalog），发送前由 `OfficialSdkUserAgent::header_value` 解析；解析失败返回 `None` 并继续回退，禁止 panic。
+- **只允许静态可表达的值**：官方客户端 UA 含运行时动态段（操作系统版本、架构、终端标识等）时，**NEVER** 用近似的静态字符串代替，保持 `None` 回退到下一级。
+- 当前覆盖：`Anthropic` ← Claude Code CLI 2.1.267（`claude-cli/2.1.267 (external, sdk-cli)`）；`OpenAI` ← codex CLI 0.153.4。
+- **已记录的偏离**：codex 的 UA 逐字符为 `codex_exec/0.153.4 (<os> <os-version>; <arch>) <terminal> (codex_exec; 0.153.4)`，含操作系统版本、架构与终端标识三个运行时动态段。当前按产品决策固化抓包值，因此**只在同类环境下逐字符吻合**；换 OS / 架构 / 终端后必须重新核验，或改为模板化表达（引入占位符 + 运行时替换）以彻底消除该限制。
+
 ### 5.2 全局默认格式
 
 完整格式为：

@@ -145,7 +145,7 @@ pub fn assemble_provider_user_agent_inputs<'a>(
         .and_then(crate::catalog::find_by_source)
         .or_else(|| request.driver.and_then(crate::catalog::find_by_driver))
         .and_then(|entry| entry.official_sdk_user_agent.as_ref())
-        .map(|official| official.value.clone());
+        .and_then(|official| official.header_value());
 
     ProviderUserAgentInputs {
         provider_user_agent: non_blank(request.provider_user_agent),

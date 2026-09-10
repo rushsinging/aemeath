@@ -71,8 +71,8 @@ fn assembled_inputs_normalize_blank_provider_and_global_values() {
     let inputs = assemble_provider_user_agent_inputs(
         ProviderUserAgentRequest {
             provider_user_agent: Some("   "),
-            source_key: Some("Anthropic"),
-            driver: Some("anthropic"),
+            source_key: Some("Zhipu"),
+            driver: Some("zhipu"),
             global_user_agent: Some("\t"),
         },
         system("macos", "aarch64", Some("15.5")),
@@ -98,8 +98,8 @@ fn assembled_inputs_carry_global_config_user_agent() {
     let inputs = assemble_provider_user_agent_inputs(
         ProviderUserAgentRequest {
             provider_user_agent: None,
-            source_key: Some("Anthropic"),
-            driver: Some("anthropic"),
+            source_key: Some("Zhipu"),
+            driver: Some("zhipu"),
             global_user_agent: Some("global/2.0"),
         },
         system("macos", "aarch64", Some("15.5")),
@@ -110,10 +110,32 @@ fn assembled_inputs_carry_global_config_user_agent() {
 }
 
 #[test]
-fn assembled_inputs_resolve_catalog_lookup_without_fabricating_evidence() {
-    // 当前 Catalog 对所有 source 都没有已核验官方 SDK UA；装配层必须执行查询，
-    // 并在无证据时保持 None，交给下一级（全局配置 / 全局默认）回退。
-    for (source_key, driver) in [("Anthropic", "anthropic"), ("OpenAI", "openai")] {
+fn assembled_inputs_take_catalog_user_agent_and_keep_absence_for_unverified() {
+    // Anthropic 已接入抓包核验过的官方客户端 UA，装配层必须把它带进输入；
+    // 尚无逐字符证据的 Provider 必须保持 None，交给下一级回退，禁止伪造。
+    let anthropic = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: None,
+            source_key: Some("Anthropic"),
+            driver: Some("anthropic"),
+            global_user_agent: None,
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+    assert_eq!(
+        anthropic
+            .catalog_official_sdk_user_agent
+            .as_ref()
+            .and_then(|value| value.to_str().ok()),
+        Some("claude-cli/2.1.267 (external, sdk-cli)")
+    );
+    assert_eq!(
+        resolve_provider_user_agent_str(anthropic),
+        "claude-cli/2.1.267 (external, sdk-cli)"
+    );
+
+    for (source_key, driver) in [("Zhipu", "zhipu"), ("Minimax", "minimax")] {
         let inputs = assemble_provider_user_agent_inputs(
             ProviderUserAgentRequest {
                 provider_user_agent: None,
@@ -127,7 +149,7 @@ fn assembled_inputs_resolve_catalog_lookup_without_fabricating_evidence() {
 
         assert!(
             inputs.catalog_official_sdk_user_agent.is_none(),
-            "{source_key} 当前无官方 SDK UA 证据，装配层不得伪造"
+            "{source_key} 无逐字符可核验的官方客户端 UA，装配层不得伪造"
         );
         assert_eq!(
             resolve_provider_user_agent_str(inputs),
@@ -527,23 +549,38 @@ fn ua_resolver_never_leaks_api_key_or_path_in_resolved_value() {
 }
 
 #[test]
-fn catalog_lookup_for_anthropic_returns_no_official_sdk_user_agent_by_default() {
-    // 显式断言当前所有 driver 都没有可靠官方 SDK UA 证据；
-    // 未来官方 SDK UA 接入 Catalog 时，必须把证据元数据写入 OfficialSdkUserAgent。
-    let entry = find_by_driver("anthropic").expect("anthropic 必须存在");
-    assert!(
-        entry.official_sdk_user_agent.is_none(),
-        "anthropic 暂无可靠官方 SDK UA 证据，必须为 None"
+fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
+    // 官方客户端 UA 只对已逐字符核验（抓包或官方源码）的 Provider 设置；
+    // 其余 Provider 必须保持 None，禁止用猜测的字符串填充。
+    let anthropic = find_by_driver("anthropic").expect("anthropic 必须存在");
+    assert_eq!(
+        anthropic
+            .official_sdk_user_agent
+            .as_ref()
+            .map(|official| official.value),
+        Some("claude-cli/2.1.267 (external, sdk-cli)")
     );
 
-    // 顺手断言其余 driver 都同样为 None（避免单点遗漏）。
+    let openai = find_by_driver("openai").expect("openai 必须存在");
+    assert_eq!(
+        openai
+            .official_sdk_user_agent
+            .as_ref()
+            .map(|official| official.value),
+        Some(
+            "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)"
+        )
+    );
+
+    // 其余 driver 都没有逐字符可核验的官方客户端 UA：zhipu 官方 SDK 不发送 UA，
+    // minimax / mimo / deepseek 等没有官方 SDK。
     for driver in [
-        "openai", "zhipu", "litellm", "minimax", "mimo", "deepseek", "agnes", "ollama",
+        "zhipu", "litellm", "minimax", "mimo", "deepseek", "agnes", "ollama",
     ] {
         let entry = find_by_driver(driver).unwrap_or_else(|| panic!("Catalog 必含 {driver}"));
         assert!(
             entry.official_sdk_user_agent.is_none(),
-            "{driver} 暂无可靠官方 SDK UA 证据，必须为 None"
+            "{driver} 暂无逐字符可核验的官方客户端 UA，必须为 None"
         );
     }
 }
@@ -555,11 +592,11 @@ fn official_sdk_user_agent_with_valid_value_is_usable_in_resolver() {
     let official = OfficialSdkUserAgent {
         sdk_name: "anthropic-sdk",
         sdk_version: "0.1.0",
-        value: HeaderValue::from_static("anthropic-sdk/0.1.0"),
+        value: "anthropic-sdk/0.1.0",
         evidence_url: "https://docs.example.com/ua",
         verified_at: chrono::NaiveDate::from_ymd_opt(2026, 7, 21).unwrap(),
     };
-    let header_value = official.value.clone();
+    let header_value = official.header_value().expect("已核验 UA 必须可解析");
     let inputs = ProviderUserAgentInputs {
         provider_user_agent: None,
         catalog_official_sdk_user_agent: Some(header_value),

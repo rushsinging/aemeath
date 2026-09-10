@@ -154,6 +154,14 @@ async fn ready_to_probe_with_provider_user_agent(
     service: &ConnectAppService,
     provider_user_agent: Option<&str>,
 ) -> ConnectView {
+    ready_to_probe_for_source(service, "Anthropic", provider_user_agent).await
+}
+
+async fn ready_to_probe_for_source(
+    service: &ConnectAppService,
+    source_name: &str,
+    provider_user_agent: Option<&str>,
+) -> ConnectView {
     let mut view = service
         .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
         .await;
@@ -161,7 +169,7 @@ async fn ready_to_probe_with_provider_user_agent(
         service,
         view,
         ConnectCommand::SelectProvider {
-            source: find_by_source("Anthropic").unwrap().source,
+            source: find_by_source(source_name).unwrap().source,
         },
     )
     .await;
@@ -587,7 +595,29 @@ async fn probe_success_moves_directly_to_review() {
 }
 
 #[tokio::test]
-async fn probe_user_agent_uses_global_config_when_provider_ua_is_absent() {
+async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
+    // Zhipu 官方 SDK 不发送 User-Agent，Catalog 级为空 → probe 必须与正式请求
+    // 使用同一份全局 UA。
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe_for_source(&service, "Zhipu", None).await;
+    advance(&service, view, ConnectCommand::BeginProbe).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["global-agent/9.9".to_string()],
+        "Catalog 无官方客户端 UA 时，probe 必须与正式请求使用同一份全局 UA"
+    );
+}
+
+#[tokio::test]
+async fn probe_user_agent_uses_catalog_client_ua_when_available() {
+    // Anthropic 已核验 Claude Code CLI UA：probe 必须使用它而不是全局 UA。
     let probe = CapturingProbe::success();
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -600,8 +630,8 @@ async fn probe_user_agent_uses_global_config_when_provider_ua_is_absent() {
 
     assert_eq!(
         probe.captured_user_agents().await,
-        vec!["global-agent/9.9".to_string()],
-        "Provider UA 留空时，probe 必须与正式请求使用同一份全局 UA"
+        vec!["claude-cli/2.1.267 (external, sdk-cli)".to_string()],
+        "Catalog 官方客户端 UA 必须优先于全局配置"
     );
 }
 
