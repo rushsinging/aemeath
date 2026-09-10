@@ -78,6 +78,15 @@ pub trait CompactGenerator: Send + Sync {
         request: Vec<Message>,
         cancel: &CancellationToken,
     ) -> Result<CompactGenerationOutput, CompactGenerationFailure>;
+
+    /// 本次 compact 调用模型的输入窗口。
+    ///
+    /// `None`（默认）表示与 summary 注入的对话模型窗口一致；实现方只有在
+    /// 确实使用不同模型时才返回更小窗口，Context 据此收紧 Map 分块目标，
+    /// **NEVER** 依据未知窗口放大预算。
+    async fn compact_context_window(&self) -> Option<usize> {
+        None
+    }
 }
 
 struct MapReduceCompactOutput {
@@ -293,10 +302,13 @@ pub fn messages_selected_for_precompact_memory(messages: &[Message]) -> Vec<Mess
 }
 
 /// 从早期对话历史构建 LLM 压缩请求消息。
+///
+/// `previous_summary_budget` 是 previous checkpoint 嵌入本次请求的 token 上限，
+/// 由 compact 调用模型的输入窗口决定。
 pub fn build_compact_request(
     early_messages: &[Message],
     previous_summary: Option<&str>,
-    context_size: usize,
+    previous_summary_budget: usize,
 ) -> Vec<Message> {
     let mut conversation_text = String::new();
     for msg in early_messages {
@@ -356,8 +368,7 @@ pub fn build_compact_request(
                         checkpoint_text,
                     )
                 });
-            let previous_budget = crate::domain::token_budget::summary_budget(context_size)
-                .min(FALLBACK_PREVIOUS_SUMMARY_CAP / 4);
+            let previous_budget = previous_summary_budget.min(FALLBACK_PREVIOUS_SUMMARY_CAP / 4);
             let checkpoint = checkpoint
                 .normalize_to_budget(previous_budget)
                 .unwrap_or_else(|error| {
@@ -659,6 +670,14 @@ pub async fn compact_messages_with_llm(
     task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
+    // summary 预算归注入窗口；Map 分块归 compact 调用模型窗口（若不同）。
+    let budgets = match generator {
+        Some(generator) => crate::domain::compact::CompactBudgetSources::resolve(
+            context_size,
+            generator.compact_context_window().await,
+        ),
+        None => crate::domain::compact::CompactBudgetSources::same(context_size),
+    };
     // should_compact 判定已在调用方（状态机 needs_compaction）完成。
     // 进入此函数即直接执行 compact 管线，不再二次检查。
     let total = messages.len();
@@ -685,13 +704,13 @@ pub async fn compact_messages_with_llm(
     let (summary, quality) = match generator {
         Some(generator) => {
             let result: Result<(String, CompactSummaryQuality), CompactGenerationFailure> =
-                if early_tokens > chunk_target_tokens(context_size) {
+                if early_tokens > budgets.chunk_target_tokens() {
                     compact_messages_map_reduce(
                         generator,
                         early_messages,
                         previous_summary,
                         progress,
-                        context_size,
+                        budgets,
                         task_snapshot,
                         cancel,
                     )
@@ -706,7 +725,7 @@ pub async fn compact_messages_with_llm(
                         generator,
                         early_messages,
                         previous_summary,
-                        context_size,
+                        budgets,
                         task_snapshot,
                         cancel,
                     )
@@ -921,10 +940,14 @@ async fn llm_extract_facts(
     generator: &dyn CompactGenerator,
     early_messages: &[Message],
     previous_summary: Option<&str>,
-    context_size: usize,
+    budgets: crate::domain::compact::CompactBudgetSources,
     cancel: &CancellationToken,
 ) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailure> {
-    let request = build_compact_request(early_messages, previous_summary, context_size);
+    let request = build_compact_request(
+        early_messages,
+        previous_summary,
+        budgets.previous_summary_budget(),
+    );
     generate_and_decode_typed(generator, "map", request, cancel).await
 }
 
@@ -934,7 +957,7 @@ async fn llm_extract_facts_or_local_fallback(
     total_chunks: usize,
     messages: &[Message],
     previous_summary: Option<&str>,
-    context_size: usize,
+    budgets: crate::domain::compact::CompactBudgetSources,
     cancel: &CancellationToken,
 ) -> Result<
     (
@@ -943,7 +966,7 @@ async fn llm_extract_facts_or_local_fallback(
     ),
     CompactGenerationFailure,
 > {
-    match llm_extract_facts(generator, messages, previous_summary, context_size, cancel).await {
+    match llm_extract_facts(generator, messages, previous_summary, budgets, cancel).await {
         Ok(facts) => {
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -1022,18 +1045,12 @@ async fn llm_compact(
     generator: &dyn CompactGenerator,
     early_messages: &[Message],
     previous_summary: Option<&str>,
-    context_size: usize,
+    budgets: crate::domain::compact::CompactBudgetSources,
     task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Result<String, CompactGenerationFailure> {
-    let facts = llm_extract_facts(
-        generator,
-        early_messages,
-        previous_summary,
-        context_size,
-        cancel,
-    )
-    .await?;
+    let facts =
+        llm_extract_facts(generator, early_messages, previous_summary, budgets, cancel).await?;
     let checkpoint =
         crate::domain::compact::reduce_compact_facts_with_task_snapshot(facts, task_snapshot)
             .map_err(|error| {
@@ -1043,7 +1060,7 @@ async fn llm_compact(
                 )
             })?;
     checkpoint
-        .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
+        .normalize_to_budget(budgets.summary_budget())
         .map(|checkpoint| checkpoint.render())
         .map_err(|error| {
             CompactGenerationFailure::new(
@@ -1051,11 +1068,6 @@ async fn llm_compact(
                 format!("map compact checkpoint 无法收敛：{error}"),
             )
         })
-}
-
-/// 单块摘要目标 token 数：按上下文总长度比例切（#1486，见 token_budget）。
-fn chunk_target_tokens(context_size: usize) -> usize {
-    crate::domain::token_budget::compact_chunk_target_tokens(context_size)
 }
 
 /// 将消息列表按 token 预算分块（不拆分单条消息）。
@@ -1094,13 +1106,13 @@ async fn compact_messages_map_reduce(
     early_messages: &[Message],
     previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
-    context_size: usize,
+    budgets: crate::domain::compact::CompactBudgetSources,
     task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
 ) -> Result<MapReduceCompactOutput, CompactGenerationFailure> {
     use crate::domain::token_budget::estimate_messages_tokens;
 
-    let chunk_target = chunk_target_tokens(context_size);
+    let chunk_target = budgets.chunk_target_tokens();
     let chunks = split_messages_into_chunks(early_messages, chunk_target);
     let total_chunks = chunks.len();
     // map: 每个 chunk 独立摘要，按块数决定并发上限（3-5）。
@@ -1130,7 +1142,7 @@ async fn compact_messages_map_reduce(
                     total_chunks,
                     chunk,
                     previous_for_chunk,
-                    context_size,
+                    budgets,
                     cancel,
                 )
                 .await?;
@@ -1194,10 +1206,7 @@ async fn compact_messages_map_reduce(
             facts,
             task_snapshot,
         )
-        .and_then(|checkpoint| {
-            checkpoint
-                .normalize_to_budget(crate::domain::token_budget::summary_budget(context_size))
-        })
+        .and_then(|checkpoint| checkpoint.normalize_to_budget(budgets.summary_budget()))
         .map(|checkpoint| MapReduceCompactOutput {
             summary: checkpoint.render(),
             degraded_chunks,
@@ -1233,14 +1242,14 @@ async fn compact_messages_map_reduce(
         target: crate::LOG_TARGET,
         "[compact] reduce 合并完成：{} chars（预算 {} tokens）",
         final_summary.len(),
-        crate::domain::token_budget::summary_budget(context_size),
+        budgets.summary_budget(),
     );
 
     // 收敛迭代：合并结果超预算时再压一次，直到有界或达到轮数上限（#1486/#1490）。
     // 再压使用专用提示词（硬预算 + 激进压缩），提示预算按 summary_budget×0.8
     // 留余量；收敛判定统一用 estimate_tokens，连续两轮未缩小才停（容忍 LLM
     // 输出噪音一轮），且未缩小轮次不采用更差的输出。
-    let budget = crate::domain::token_budget::summary_budget(context_size);
+    let budget = budgets.summary_budget();
     let mut rounds_without_shrink = 0usize;
     for round in 1..=MAX_REDUCE_REFRESH_ROUNDS {
         if crate::domain::token_budget::estimate_tokens(&final_summary) <= budget {

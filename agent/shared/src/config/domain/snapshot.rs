@@ -257,6 +257,19 @@ impl ConfigSnapshot {
         self.inner.context.auto_compact_failure_limit.max(1)
     }
 
+    /// Compact 专用模型 selection；`None` 表示跟随当前会话模型。
+    ///
+    /// 再次归一化空白，避免绕过 `ContextConfig` 反序列化的程序化构造
+    /// 让空白 selection 被误当成"已配置"。
+    pub fn context_compact_model(&self) -> Option<&str> {
+        self.inner
+            .context
+            .compact_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|selection| !selection.is_empty())
+    }
+
     // ── Permissions ──────────────────────────────────────────
 
     pub fn permission_mode(&self) -> PermissionModeConfig {

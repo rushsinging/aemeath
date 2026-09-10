@@ -518,6 +518,20 @@ prompt、memory 和 tool schemas。选择单位是完整 finalized RunStep：
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Run/Invocation binding |
 | `reserved_context` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | threshold safety ratio | 0.8 | `token_budget::autocompact_threshold` |
+| compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver`（经 `CompactGenerator::compact_context_window`） |
+
+Compact 涉及两个语义不同的窗口，**MUST** 分开计算：
+
+| 窗口 | 来源 | 决定的预算 |
+|---|---|---|
+| 注入窗口 | 本 Run 已解析的 `context_size`（summary 注入的主对话模型） | 持久化 summary 上限 `summary_budget` |
+| compact 模型窗口 | `CompactGenerator::compact_context_window()` | Map 单块目标与 previous checkpoint 嵌入预算 |
+
+- 未配置 `context.compact_model`（缺省或空串）时两窗口相同：compact 使用当前会话模型，`/model` 切换在**下一次** compact 生效。
+- 配置后 compact 模型窗口 **MUST** 只收紧 Map 分块与 previous checkpoint 嵌入量，**NEVER** 缩小持久化 summary 预算——summary 的消费方始终是主对话模型。
+- compact 模型窗口缺失或非法时 **MUST** fail closed（使用保守窗口或注入窗口），**NEVER** 因未知而放大预算。
+- 模型选择与窗口解析 **MUST** 只有单一 owner（Runtime `CompactModelResolver`）；Context **NEVER** 直接读取模型目录或 Config 推导 compact 模型，也 **NEVER** 为 compact 单独解析 selection。
+- 已配置的 compact selection 解析失败时 **MUST** 显式报错并走既有 local fallback，**NEVER** 静默回退到主对话模型。
 ## 11. 与 #547 的映射
 | #547 子 issue | 策略 | 目标契约位置 |
 |---|---|---|

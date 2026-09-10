@@ -33,7 +33,7 @@ pub(crate) async fn build_provider_binding_for_switch(
     )
 }
 
-fn build_provider_binding_from_runtime_model(
+pub(crate) fn build_provider_binding_from_runtime_model(
     runtime_model: share::config::models::ResolvedRuntimeModel,
     api_timeout_secs: u64,
     user_agent: &str,

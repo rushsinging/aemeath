@@ -3,6 +3,7 @@
 //! 设计文档：`docs/design/02-modules/context-management/02-compact.md`
 
 mod autocompact;
+mod budget_sources;
 mod context_read_candidate;
 mod continuation_checkpoint;
 mod microcompact;
@@ -19,6 +20,7 @@ pub use crate::domain::token_budget::{
     estimate_tool_schemas_tokens, summary_budget,
 };
 pub use autocompact::*;
+pub use budget_sources::CompactBudgetSources;
 pub use context_read_candidate::{
     ContextReadCandidate, ContextReadRun, ContextReadStep, ProtectedRunPolicy,
 };

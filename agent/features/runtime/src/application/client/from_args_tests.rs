@@ -598,6 +598,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     )
     .expect("build initial binding");
     let initial_snapshot = config.reader().committed_snapshot();
+    let compact_model_slot = crate::SessionModelSlot::new();
     let initial_provider = InitialProviderAssembly::new(
         initial_binding,
         initial_snapshot
@@ -610,6 +611,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             reasoning: false,
             reasoning_effort: None,
         },
+        compact_model_slot.clone(),
     );
     struct NoopRunner;
     #[async_trait::async_trait]
@@ -669,6 +671,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             &hook_runner
         ),
         "Main Run 必须保留 Composition 注入的同一 HookRunner 实例"
+    );
+    assert!(
+        compact_model_slot.current().is_some(),
+        "Runtime 装配必须把会话模型绑定到 Compact 模型槽"
     );
     assert_eq!(
         client.inner.shell.workspace.read().current_path_base(),

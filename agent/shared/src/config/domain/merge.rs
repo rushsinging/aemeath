@@ -152,6 +152,9 @@ pub struct ContextConfigPatch {
     pub microcompact_enabled: Option<bool>,
     #[serde(default)]
     pub auto_compact_failure_limit: Option<u8>,
+    /// `Some("")`（或纯空白）表示清除已配置的 compact 模型。
+    #[serde(default, alias = "compactModel")]
+    pub compact_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -519,6 +522,9 @@ pub(crate) fn apply_context_patch(
     }
     if let Some(value) = patch.auto_compact_failure_limit {
         base.auto_compact_failure_limit = value;
+    }
+    if let Some(value) = patch.compact_model {
+        base.compact_model = crate::config::context::normalize_compact_model_selection(value);
     }
     base
 }
