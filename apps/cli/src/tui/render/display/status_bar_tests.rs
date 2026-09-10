@@ -48,7 +48,7 @@ fn select_via_view_state(
     view: &StatusViewModel,
 ) -> StatusSelectionViewState {
     let start = bar.screen_col_to_char_idx(row, sc, width, view);
-    let end = bar.screen_col_to_char_idx(row, ec, width, view);
+    let end = bar.screen_col_to_selection_end(row, ec, width, view);
     let mut selection = StatusSelectionViewState::default();
     selection.begin_selection(row, start, width);
     selection.update_selection(end);
@@ -73,7 +73,7 @@ fn test_status_bar_selection_maps_cjk_screen_col_to_char_index() {
 
     assert_eq!(
         bar.selected_text_for_view(&selection, &view),
-        Some("好a  ".to_string())
+        Some("好a  i".to_string())
     );
 }
 
@@ -94,7 +94,7 @@ fn test_status_bar_selection_maps_emoji_screen_col_to_char_index() {
 
     assert_eq!(
         bar.selected_text_for_view(&selection, &view),
-        Some("🚀b ".to_string())
+        Some("🚀b  ".to_string())
     );
 }
 
@@ -102,27 +102,6 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
     (0..width)
         .filter_map(|x| buf.cell((x, y)).map(|cell| cell.symbol().to_string()))
         .collect::<String>()
-}
-
-#[test]
-fn running_notice_uses_tool_running_color() {
-    let bar = StatusBar::new();
-    let view = StatusViewModel {
-        notice: StatusNoticeViewModel {
-            text: "Thinking".to_string(),
-            kind: StatusNoticeViewKind::Running,
-        },
-        ..StatusViewModel::default()
-    };
-    let area = Rect::new(0, 0, 80, 1);
-    let mut buf = Buffer::empty(area);
-
-    bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
-
-    assert_eq!(
-        buf.cell((0, 0)).unwrap().style().fg,
-        Some(theme::TOOL_RUNNING)
-    );
 }
 
 #[test]
@@ -322,7 +301,7 @@ fn test_status_bar_selection_supports_context_row() {
 
     assert_eq!(
         bar.selected_text_for_view(&selection, &view),
-        Some("aemeath".to_string())
+        Some("aemeath ".to_string())
     );
 }
 
@@ -365,4 +344,42 @@ fn test_status_line_context_keeps_permission_when_space_is_tight() {
 
     assert!(row.chars().count() <= 24);
     assert!(row.contains("AskMe"));
+}
+
+#[test]
+fn test_status_bar_selection_includes_last_column_of_full_line() {
+    // 回归：拖拽终点落在行尾最后一列时，选区必须包含末字符。
+    // 场景：session 段位于 Runtime 行末尾（如 "session 01a02359-…"），
+    // 满行 Context 同理。鼠标列是"指向字符所在列"，
+    // 折算必须把该字符含入选区（exclusive 边界 = col + 1）。
+    let bar = StatusBar::new();
+    let view = status_view("01a02359-d547-753f-86cc-2b21324bef09");
+    let full = bar.build_full_text(&view);
+    let full_width = crate::tui::text::str_display_width(&full);
+    let selection = select_via_view_state(
+        &bar,
+        StatusBarRow::Runtime,
+        0,
+        full_width.saturating_sub(1) as u16,
+        0,
+        &view,
+    );
+    let selected = bar
+        .selected_text_for_view(&selection, &view)
+        .expect("selection must include the trailing session id characters");
+    assert!(
+        selected.contains("2b21324bef09"),
+        "末列必须可选中，实际结尾：{selected:?}"
+    );
+}
+
+#[test]
+fn test_screen_col_to_selection_end_includes_char_under_cursor() {
+    let bar = StatusBar::new();
+    let view = status_view("abc");
+    let full = bar.build_full_text(&view);
+    let total = crate::tui::text::str_display_width(&full);
+    // 拖拽终点指向最后一列 → 选区含末字符（边界 = chars().count()）。
+    let end = bar.screen_col_to_selection_end(StatusBarRow::Runtime, total as u16 - 1, 0, &view);
+    assert_eq!(end, full.chars().count());
 }

@@ -311,6 +311,8 @@ fn feedback_material_truncates_long_output() {
             exit_code: Some(1),
             stdout: "line1\nline2\nline3\nline4\nline5\nline6\n".to_string(),
             stderr: "err1\nerr2\n".to_string(),
+            stdout_file: None,
+            stderr_file: None,
             duration: std::time::Duration::from_secs(1),
         },
     };
@@ -349,6 +351,8 @@ async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
             exit_code: Some(1),
             stdout: stdout.clone(),
             stderr: String::new(),
+            stdout_file: None,
+            stderr_file: None,
             duration: std::time::Duration::from_secs(1),
         },
     };
@@ -373,6 +377,122 @@ async fn long_feedback_materializes_real_readable_file_for_sub_and_main() {
         .contains(&stdout));
 
     let _ = tokio::fs::remove_file(path).await;
+    let _ = tokio::fs::remove_dir_all(
+        std::env::temp_dir()
+            .join("aemeath-hook-results")
+            .join(session_id),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn spill_files_become_full_output_archive_instead_of_truncated_copy() {
+    use crate::application::hook::outcome_mapper::{RuntimeHookBlockDetail, RuntimeHookExecution};
+
+    // 模拟进程层 spill：stderr 全量 16KB 在临时文件，内存缓冲只有 8KB 残本。
+    let session_id = format!("stop-hook-spill-{}", uuid::Uuid::now_v7());
+    let full_stderr = "F".repeat(16 * 1024);
+    let spill_path = std::env::temp_dir().join(format!("{}-stderr.txt", session_id));
+    std::fs::write(&spill_path, &full_stderr).expect("plant spill file");
+    let detail = RuntimeHookBlockDetail {
+        command: "big-gate.sh".to_string(),
+        execution_ordinal: 1,
+        execution: RuntimeHookExecution {
+            status: RuntimeHookExecutionStatus::Blocked,
+            attempts: 1,
+            exit_code: Some(2),
+            stdout: String::new(),
+            stderr: "F".repeat(8 * 1024),
+            stdout_file: None,
+            stderr_file: Some(spill_path.clone()),
+            duration: std::time::Duration::from_secs(1),
+        },
+    };
+    let reason = RuntimeHookReason::ExitCode {
+        code: 2,
+        stderr: String::new(),
+    };
+
+    let feedback = super::materialize_stop_hook_feedback(&detail, &reason, &session_id, "zh").await;
+    let path = feedback
+        .notice
+        .output_file
+        .as_deref()
+        .expect("spill 输出必须落盘");
+    let archived = tokio::fs::read_to_string(path).await.unwrap();
+    assert!(
+        archived.contains(&full_stderr),
+        "落盘正文必须包含全量 stderr（而非 8KB 截断残本）"
+    );
+    assert!(!spill_path.exists(), "spill 临时文件被 move 后不得残留");
+    let _ = tokio::fs::remove_file(path).await;
+    let _ = tokio::fs::remove_dir_all(
+        std::env::temp_dir()
+            .join("aemeath-hook-results")
+            .join(session_id),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn repeated_blocks_of_same_command_never_overwrite_each_other() {
+    use crate::application::hook::outcome_mapper::{RuntimeHookBlockDetail, RuntimeHookExecution};
+
+    let session_id = format!("stop-hook-seq-{}", uuid::Uuid::now_v7());
+    let make_detail = |ordinal: u32, marker: &str| RuntimeHookBlockDetail {
+        command: "same-gate.sh".to_string(),
+        execution_ordinal: ordinal,
+        execution: RuntimeHookExecution {
+            status: RuntimeHookExecutionStatus::Blocked,
+            attempts: 1,
+            exit_code: Some(2),
+            stdout: format!(
+                "{marker}\n{}",
+                "x".repeat(super::INLINE_HOOK_OUTPUT_LIMIT + 1)
+            ),
+            stderr: String::new(),
+            stdout_file: None,
+            stderr_file: None,
+            duration: std::time::Duration::from_secs(1),
+        },
+    };
+    let reason = RuntimeHookReason::ExitCode {
+        code: 2,
+        stderr: String::new(),
+    };
+
+    let first = super::materialize_stop_hook_feedback(
+        &make_detail(1, "FIRST-BLOCK"),
+        &reason,
+        &session_id,
+        "zh",
+    )
+    .await;
+    let second = super::materialize_stop_hook_feedback(
+        &make_detail(2, "SECOND-BLOCK"),
+        &reason,
+        &session_id,
+        "zh",
+    )
+    .await;
+
+    let first_path = first
+        .notice
+        .output_file
+        .as_deref()
+        .expect("first block file");
+    let second_path = second
+        .notice
+        .output_file
+        .as_deref()
+        .expect("second block file");
+    assert_ne!(first_path, second_path, "两次 block 必须落两个不同文件");
+    let first_text = tokio::fs::read_to_string(first_path).await.unwrap();
+    let second_text = tokio::fs::read_to_string(second_path).await.unwrap();
+    assert!(first_text.contains("FIRST-BLOCK"), "第一次内容不得被覆盖");
+    assert!(second_text.contains("SECOND-BLOCK"));
+    let _ = tokio::fs::remove_file(first_path).await;
+    let _ = tokio::fs::remove_file(second_path).await;
     let _ = tokio::fs::remove_dir_all(
         std::env::temp_dir()
             .join("aemeath-hook-results")

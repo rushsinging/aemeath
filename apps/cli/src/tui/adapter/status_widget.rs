@@ -70,7 +70,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(true)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: true,
+                level: crate::tui::view_model::status::ReasoningLevelView::High,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
@@ -107,7 +110,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(false)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: false,
+                level: crate::tui::view_model::status::ReasoningLevelView::Off,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
@@ -129,10 +135,6 @@ mod tests {
         assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::ready()).kind,
             StatusNoticeViewKind::Normal
-        );
-        assert_eq!(
-            StatusViewAssembler::assemble_notice_view(&StatusNotice::running("Thinking")).kind,
-            StatusNoticeViewKind::Running
         );
         assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::success("Copied")).kind,
@@ -173,13 +175,10 @@ mod tests {
     #[test]
     fn test_status_view_projects_diagnostic_severity() {
         let mut model = TuiModel::default();
-        reduce_intent(
-            &mut model,
-            AgentIntent::Diagnostic(DiagnosticIntent::RecordNotice {
-                severity: DiagnosticSeverity::Error,
-                message: "boom".to_string(),
-            }),
-        );
+        model.diagnostic.apply(DiagnosticIntent::RecordNotice {
+            severity: DiagnosticSeverity::Error,
+            message: "boom".to_string(),
+        });
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,

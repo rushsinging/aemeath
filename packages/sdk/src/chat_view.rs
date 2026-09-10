@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 
 /// AskUserQuestion 选项项：简要 title + 详细 description。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, JsonSchema)]
 pub struct OptionItem {
     /// 简要标题（必填）。
     pub title: String,

@@ -7,5 +7,4 @@ pub mod table;
 pub mod unified_diff;
 pub mod wrap;
 
-#[allow(unused_imports)]
-pub use convert::{rendered_line_from_spanparts, spanparts_to_spans};
+pub use convert::spanparts_to_spans;

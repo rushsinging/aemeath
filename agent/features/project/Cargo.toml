@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -33,7 +33,7 @@ fn busy_slash_routes_through_pending_slash_without_placeholder() {
 }
 
 #[test]
-fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
+fn esc_and_ctrl_c_without_active_step_do_not_fall_back_to_identity_free_cancel() {
     let mut esc_app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -57,8 +57,8 @@ fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
         &spawn_refs,
     );
 
-    assert_eq!(esc.effects, vec![Effect::CancelCurrentRun]);
-    assert_eq!(ctrl_c.effects, vec![Effect::CancelCurrentRun]);
+    assert!(esc.effects.is_empty());
+    assert!(ctrl_c.effects.is_empty());
 }
 
 #[test]

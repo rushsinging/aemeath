@@ -1,12 +1,35 @@
-use super::{LoggingOutputMode, LoggingSettings};
+use super::{LoggingOutputMode, LoggingSettings, NativeStderrRouting};
 use log::LevelFilter;
 use std::path::PathBuf;
+
+#[test]
+fn settings_publish_native_stderr_append_target() {
+    let settings = LoggingSettings::new(
+        "info".to_string(),
+        LoggingOutputMode::File,
+        NativeStderrRouting::AppendToFile,
+        PathBuf::from("/tmp/aemeath-logs"),
+        42,
+        3,
+        14,
+    );
+
+    assert_eq!(
+        settings.native_stderr_routing(),
+        NativeStderrRouting::AppendToFile
+    );
+    assert_eq!(
+        settings.native_stderr_path(),
+        PathBuf::from("/tmp/aemeath-logs/native-stderr.log")
+    );
+}
 
 #[test]
 fn settings_preserve_static_path_rotation_retention_and_mode() {
     let settings = LoggingSettings::new(
         "aemeath:tui=debug,aemeath:agent:runtime=trace".to_string(),
         LoggingOutputMode::Stderr,
+        NativeStderrRouting::Preserve,
         PathBuf::from("/tmp/aemeath-logs"),
         42,
         3,
@@ -30,6 +53,7 @@ fn global_and_per_target_directives_compute_one_consistent_max_level() {
     let global = LoggingSettings::new(
         "info".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         1,
         1,
@@ -38,6 +62,7 @@ fn global_and_per_target_directives_compute_one_consistent_max_level() {
     let per_target = LoggingSettings::new(
         "warn,aemeath:tui=debug,aemeath:agent:runtime=trace".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         1,
         1,
@@ -53,6 +78,7 @@ fn target_only_directive_remains_valid_and_opens_target_to_trace() {
     let settings = LoggingSettings::new(
         "aemeath:tui".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         1,
         1,
@@ -68,6 +94,7 @@ fn message_regex_directive_is_preserved_and_uses_filter_level() {
     let settings = LoggingSettings::new(
         "aemeath=debug/foo,bar=invalid".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         1,
         1,
@@ -82,6 +109,7 @@ fn zero_max_bytes_is_normalized_to_one() {
     let settings = LoggingSettings::new(
         "info".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         0,
         1,
@@ -96,6 +124,7 @@ fn invalid_level_falls_back_to_warn_without_opening_filter() {
     let settings = LoggingSettings::new(
         "aemeath:tui=not-a-level".to_string(),
         LoggingOutputMode::File,
+        NativeStderrRouting::Preserve,
         PathBuf::from("logs"),
         1,
         1,

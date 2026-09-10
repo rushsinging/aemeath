@@ -15,12 +15,6 @@ use crate::domain::{
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionSaveIntent {
-    CommitPartialHistory,
-    ReplaceCompleteHistory,
-}
-
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
     async fn commit(
@@ -29,6 +23,33 @@ pub trait CanonicalSessionWriter: Send + Sync {
         expected_revision: u64,
         plan: SessionCommitPlan,
     ) -> Result<(), String>;
+
+    /// `/clear` 逻辑断点提交：磁盘 step 成员全部保留，state 记录 clear
+    /// 边界（clear 时刻磁盘 generation 的最后一个 step）。
+    ///
+    /// 返回写入 clear 边界后的 session 快照（与磁盘一致），调用方必须以
+    /// 返回值发布内存 generation。默认实现面向无磁盘增量的 backing：
+    /// 无未加载成员需要保留，边界保持 `after` 原样。
+    async fn commit_clearing_history(
+        &self,
+        before: &CanonicalSession,
+        after: CanonicalSession,
+    ) -> Result<CanonicalSession, String> {
+        let plan = SessionCommitPlan::between(before, &after).map_err(|error| error.to_string())?;
+        self.commit(after.id.as_str(), before.revision, plan)
+            .await?;
+        Ok(after)
+    }
+
+    /// 数据集为空集时以内存全量快照重建持久化状态；数据集非空时必须
+    /// fail-closed，防止覆盖并发写者。重建后磁盘修订号与内存对齐。
+    async fn rebuild_empty_dataset(
+        &self,
+        _session_id: &str,
+        _session: &crate::domain::session::CanonicalSession,
+    ) -> Result<(), String> {
+        Err("Session writer 不支持空数据集全量重建".to_string())
+    }
 }
 
 #[async_trait]
@@ -455,6 +476,7 @@ impl CanonicalSessionRepository {
         previous_summary: Option<&str>,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
         match &self.generator {
@@ -465,6 +487,7 @@ impl CanonicalSessionRepository {
                     context_size,
                     Some(generator.as_ref()),
                     progress.as_deref(),
+                    task_snapshot,
                     cancellation,
                 )
                 .await;
@@ -495,19 +518,47 @@ impl CanonicalSessionRepository {
         }
     }
 
-    /// #1537：将当前 Task 状态段落拼接到 compact summary 末尾。
-    ///
-    /// task 状态不经过 LLM 压缩（递进管线的 map/reduce/refresh 均不感知），
-    /// 只在 summary 定稿后追加，保证 compact 后 Agent 仍能看到任务进度。
-    /// `task_context` 为 `None` 或空时原样返回 summary。
-    fn append_task_context(summary: &str, task_context: &Option<String>) -> String {
-        let (checkpoint, _) = crate::domain::compact::split_checkpoint_and_task_state(summary);
-        match task_context {
-            Some(context) if !context.trim().is_empty() => {
-                format!("{checkpoint}\n\n## Current Task State\n{context}")
+    /// 将 typed Task snapshot 确定性渲染为非权威 companion，并将完整 summary
+    /// 收敛到同一 Context-owned summary budget。
+    fn append_task_snapshot_companion(
+        summary: &str,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        budget: usize,
+    ) -> Result<String, crate::domain::compact::CheckpointError> {
+        let checkpoint =
+            crate::domain::compact::CanonicalCompactSummary::decode(summary)?.into_checkpoint();
+        let Some(snapshot) = task_snapshot.filter(|snapshot| !snapshot.items().is_empty()) else {
+            return checkpoint
+                .degrade_to_budget(budget)
+                .map(|checkpoint| checkpoint.render());
+        };
+
+        let mut item_limit = snapshot.items().len();
+        loop {
+            let companion = snapshot.render_companion_with_limit(item_limit);
+            let companion_tokens = crate::domain::token_budget::estimate_tokens(&format!(
+                "\n\n## Current Task State\n{companion}"
+            ));
+            if companion_tokens < budget {
+                if let Ok(bounded_checkpoint) = checkpoint
+                    .clone()
+                    .degrade_to_budget(budget - companion_tokens)
+                {
+                    return Ok(format!(
+                        "{}\n\n## Current Task State\n{companion}",
+                        bounded_checkpoint.render()
+                    ));
+                }
             }
-            _ => checkpoint.to_string(),
+            if item_limit == 0 {
+                break;
+            }
+            item_limit -= 1;
         }
+
+        checkpoint
+            .degrade_to_budget(budget)
+            .map(|checkpoint| checkpoint.render())
     }
 
     async fn commit_automatic_compaction(
@@ -522,7 +573,7 @@ impl CanonicalSessionRepository {
                 &source,
                 request.source.context_size,
                 request.progress.clone(),
-                &request.task_context,
+                request.task_snapshot.as_ref(),
                 &request.cancellation,
             )
             .await
@@ -594,7 +645,7 @@ impl CanonicalSessionRepository {
         source: &CompactSource,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_context: &Option<String>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
         let Some(compacted) = self
@@ -603,6 +654,7 @@ impl CanonicalSessionRepository {
                 source.previous_summary.as_deref(),
                 context_size,
                 progress,
+                task_snapshot,
                 cancellation,
             )
             .await
@@ -613,8 +665,25 @@ impl CanonicalSessionRepository {
                 Ok(None)
             };
         };
+        let reconciled_summary =
+            crate::domain::compact::CanonicalCompactSummary::decode(&compacted.summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
+                .and_then(|checkpoint| {
+                    crate::domain::compact::reconcile_checkpoint_with_task_snapshot(
+                        checkpoint,
+                        task_snapshot,
+                    )
+                })
+                .map(|checkpoint| checkpoint.render())
+                .unwrap_or_else(|_| compacted.summary.clone());
+        let summary = Self::append_task_snapshot_companion(
+            &reconciled_summary,
+            task_snapshot,
+            crate::domain::token_budget::summary_budget(context_size),
+        )
+        .map_err(|_| crate::domain::CompactSkipReason::CircuitBreakerOpen)?;
         Ok(Some(GeneratedCompact {
-            summary: Self::append_task_context(&compacted.summary, task_context),
+            summary,
             recent_messages: compacted.recent_messages,
             quality: compacted.quality,
         }))
@@ -660,13 +729,9 @@ impl CanonicalSessionRepository {
         });
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextPortError::Compact)?;
         self.publish_generation(&current, candidate)
             .map_err(ContextPortError::SessionRepository)?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
@@ -710,43 +775,47 @@ impl CanonicalSessionRepository {
     fn build_commit_plan(
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<SessionCommitPlan, String> {
-        match intent {
-            SessionSaveIntent::CommitPartialHistory => {
-                let manifest = crate::domain::session::SessionGenerationManifest::new(
-                    before.id.clone(),
-                    before.revision,
-                    before
-                        .run_slices
+        let manifest = crate::domain::session::SessionGenerationManifest::new(
+            before.id.clone(),
+            before.revision,
+            before
+                .run_slices
+                .iter()
+                .flat_map(|slice| {
+                    slice
+                        .steps
                         .iter()
-                        .flat_map(|slice| {
-                            slice
-                                .steps
-                                .iter()
-                                .map(|step| crate::domain::session::RunStepCursor {
-                                    run_id: slice.run_id.clone(),
-                                    step_id: step.step_id.clone(),
-                                })
+                        .map(|step| crate::domain::session::RunStepCursor {
+                            run_id: slice.run_id.clone(),
+                            step_id: step.step_id.clone(),
                         })
-                        .collect(),
-                )
-                .map_err(|error| error.to_string())?;
-                SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
-            }
-            SessionSaveIntent::ReplaceCompleteHistory => SessionCommitPlan::between(before, after),
-        }
-        .map_err(|error| error.to_string())
+                })
+                .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+        SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
+            .map_err(|error| error.to_string())
     }
 
     async fn persist_candidate(
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<(), String> {
-        let plan = Self::build_commit_plan(before, after, intent)?;
-        self.writer.commit(&after.id, before.revision, plan).await
+        let plan = Self::build_commit_plan(before, after)?;
+        match self.writer.commit(&after.id, before.revision, plan).await {
+            Ok(()) => Ok(()),
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。
+                match self.writer.rebuild_empty_dataset(&after.id, after).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(commit_error),
+                }
+            }
+        }
     }
 
     fn publish_generation(
@@ -954,13 +1023,9 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(tools::SkillLoadStateError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(tools::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(tools::SkillLoadStateError::Storage)?;
         Ok(decision)
@@ -1051,13 +1116,9 @@ impl SessionRepository for CanonicalSessionRepository {
             committed_revision: candidate.revision,
         });
 
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextAppendError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
@@ -1101,7 +1162,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 &source,
                 request.context_size,
                 request.progress.clone(),
-                &request.task_context,
+                request.task_snapshot.as_ref(),
                 &tokio_util::sync::CancellationToken::new(),
             )
             .await
@@ -1136,14 +1197,30 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::ReplaceCompleteHistory,
-        )
-        .await
-        .map_err(ContextPortError::SessionRepository)?;
-        self.publish_generation(&current, candidate)
+        // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear
+        // 边界，由 writer 按 persisted manifest 计算并返回对齐后的快照。
+        let fallback = candidate.clone();
+        let cleared = match self
+            .writer
+            .commit_clearing_history(&current, candidate)
+            .await
+        {
+            Ok(cleared) => cleared,
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。空数据集
+                // 没有可截断的持久化 step，边界保持 None。
+                let mut fallback = fallback;
+                fallback.cleared_after = None;
+                self.writer
+                    .rebuild_empty_dataset(&current.id, &fallback)
+                    .await
+                    .map_err(|_| ContextPortError::SessionRepository(commit_error))?;
+                fallback
+            }
+        };
+        self.publish_generation(&current, cleared)
             .map_err(ContextPortError::SessionRepository)?;
         self.accepted_input_writer
             .delete_all(&current.id)

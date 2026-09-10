@@ -34,10 +34,10 @@ fn idle_and_busy_escape_close_completion_before_other_actions() {
         assert!(harness.screen().contains("/help"));
         harness.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!harness.app.model.input.completion.visible);
-        assert!(!harness
-            .effects()
-            .iter()
-            .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
+        assert!(!harness.effects().iter().any(|effect| matches!(
+            effect,
+            crate::tui::effect::effect::Effect::CancelRunStep { .. }
+        )));
         harness.assert_idle();
     }
 }
@@ -72,13 +72,23 @@ fn busy_enter_accepts_visible_completion_instead_of_submitting_partial_command()
 fn busy_escape_without_completion_cancels_once() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     harness.app.chat.start_processing();
-    harness.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
+    let run_id = sdk::RunId::from_legacy_or_new("run-completion");
+    let step_id = sdk::RunStepId::from_legacy_or_new("step-completion");
+    harness.app.chat.active_run_step = Some((run_id.clone(), step_id.clone()));
+    harness.expect_effect(ExpectedEffect::CancelRunStep {
+        run_id,
+        step_id,
+        replies: vec![],
+    });
     harness.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(
         harness
             .effects()
             .iter()
-            .filter(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun))
+            .filter(|effect| matches!(
+                effect,
+                crate::tui::effect::effect::Effect::CancelRunStep { .. }
+            ))
             .count(),
         1
     );

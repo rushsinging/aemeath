@@ -1,5 +1,4 @@
 use crate::tui::model::conversation::intent::ConversationIntent;
-use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime_presentation::RuntimePresentationIntent;
@@ -12,7 +11,6 @@ pub enum AgentIntent {
     RuntimePresentation(RuntimePresentationIntent),
     UiPreferences(UiPreferencesIntent),
     Input(InputIntent),
-    Diagnostic(DiagnosticIntent),
     Session(SessionIntent),
     Workspace(WorkspaceIntent),
 }

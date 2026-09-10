@@ -44,7 +44,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
         .await
         .unwrap();
     assert!(
-        matches!(full, WriteResult::NeedsEviction { candidates } if candidates.iter().all(|entry| !entry.pinned))
+        matches!(full, WriteResult::NeedsEviction { candidates } if candidates.iter().all(|candidate| !candidate.entry.pinned))
     );
 
     let before = port.revision();
@@ -63,6 +63,8 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
     }));
     assert_eq!(port.revision(), before);
 
+    port.archive(std::slice::from_ref(&first.id)).await.unwrap();
+    assert!(port.restore(&first.id).await.unwrap().is_restored());
     port.archive(std::slice::from_ref(&first.id)).await.unwrap();
     let search = port.search(&MemorySearchQuery {
         text: "memory".to_string(),
@@ -136,6 +138,83 @@ async fn mutations_are_typed_and_queries_do_not_change_revision() {
     assert_eq!(port.revision(), revision);
 }
 
+#[tokio::test]
+async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
+    let port = InMemoryMemory::new(MemoryPolicy {
+        max_entries: 1,
+        similarity_threshold: 0.8,
+    })
+    .unwrap();
+    let archived = entry("archived", "archived fact", 100);
+    port.write(archived.clone()).await.unwrap();
+    port.archive(std::slice::from_ref(&archived.id))
+        .await
+        .unwrap();
+    let active = entry("active", "active fact", 101);
+    port.write(active.clone()).await.unwrap();
+    let revision = port.revision();
+
+    let outcome = port.restore(&archived.id).await.unwrap();
+
+    assert!(matches!(
+        outcome,
+        RestoreResult::NeedsEviction { candidates }
+            if candidates.len() == 1 && candidates[0].entry.id == active.id
+    ));
+    assert_eq!(port.revision(), revision);
+    let archived_hit = port.search(&MemorySearchQuery {
+        text: "archived".to_string(),
+        limit: 10,
+        layer: Some(MemoryLayer::Project),
+        category: None,
+        include_archive: true,
+        now: 200,
+    });
+    assert_eq!(archived_hit.hits[0].location, MemoryLocation::Archive);
+}
+
+#[tokio::test]
+async fn injection_order_uses_full_id_as_final_tie_break() {
+    let port = InMemoryMemory::new(MemoryPolicy::default()).unwrap();
+    for id in [
+        "01890f3c-7c00-7000-8000-000000000002",
+        "01890f3c-7c00-7000-8000-000000000001",
+    ] {
+        port.write(
+            MemoryEntry::new(
+                MemoryId::new(id).unwrap(),
+                100,
+                MemoryLayer::Project,
+                MemoryCategory::Fact,
+                format!("tie {id}"),
+                MemorySource::User,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+
+    let result = port.retrieve_for_inject(&MemoryQuery {
+        limit: 10,
+        layer: None,
+        category: None,
+        now: 100,
+    });
+
+    assert_eq!(
+        result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id.to_string())
+            .collect::<Vec<_>>(),
+        vec![
+            "01890f3c-7c00-7000-8000-000000000001",
+            "01890f3c-7c00-7000-8000-000000000002",
+        ]
+    );
+}
+
 fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
     MemorySuggestion {
         layer,
@@ -163,8 +242,8 @@ async fn reflection_adds_and_merges_suggestions_with_injected_time() {
     let entries = port.list(Some(MemoryLayer::Project));
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].created_at, 4242);
-    assert_eq!(entries[0].accessed_at, 4242);
-    assert_eq!(entries[0].access_count, 1);
+    assert_eq!(entries[0].last_confirmed_at, 4242);
+    assert_eq!(entries[0].confirmation_count, 1);
     assert_eq!(entries[0].id.as_uuid().get_version_num(), 7);
 }
 

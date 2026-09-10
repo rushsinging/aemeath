@@ -458,8 +458,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             display_name: result.display_name,
             context_window: result.context_window,
             reasoning_active: result.reasoning_active,
+            reasoning_level: result.reasoning_level.map(reasoning_level_view),
         },
-        ChatEvent::ThinkingChanged { enabled } => TuiRuntimeEvent::ThinkingChanged { enabled },
+        ChatEvent::ThinkingChanged { enabled, level } => TuiRuntimeEvent::ThinkingChanged {
+            enabled,
+            level: reasoning_level_view(level),
+        },
         ChatEvent::ContextEstimated {
             estimate,
             message_count,
@@ -919,7 +923,14 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
                         .into_iter()
                         .map(|question| TuiUserQuestion {
                             prompt: question.prompt,
-                            options: question.options,
+                            options: question
+                                .options
+                                .into_iter()
+                                .map(|option| TuiOptionItem {
+                                    title: option.title,
+                                    description: option.description,
+                                })
+                                .collect(),
                             allow_multi: question.allow_multi,
                         })
                         .collect(),
@@ -1350,6 +1361,21 @@ fn reflection_error_category(
         sdk::ReflectionErrorCategoryView::History => TuiReflectionErrorCategory::History,
         sdk::ReflectionErrorCategoryView::Cancelled => TuiReflectionErrorCategory::Cancelled,
         sdk::ReflectionErrorCategoryView::TimedOut => TuiReflectionErrorCategory::TimedOut,
+    }
+}
+
+/// #1616：SDK reasoning 深度 → TUI 视图枚举（adapter 是唯一允许的投影边界）。
+pub(crate) fn reasoning_level_view(
+    level: sdk::ReasoningLevel,
+) -> crate::tui::view_model::status::ReasoningLevelView {
+    match level {
+        sdk::ReasoningLevel::Off => crate::tui::view_model::status::ReasoningLevelView::Off,
+        sdk::ReasoningLevel::Minimal => crate::tui::view_model::status::ReasoningLevelView::Minimal,
+        sdk::ReasoningLevel::Low => crate::tui::view_model::status::ReasoningLevelView::Low,
+        sdk::ReasoningLevel::Medium => crate::tui::view_model::status::ReasoningLevelView::Medium,
+        sdk::ReasoningLevel::High => crate::tui::view_model::status::ReasoningLevelView::High,
+        sdk::ReasoningLevel::Xhigh => crate::tui::view_model::status::ReasoningLevelView::Xhigh,
+        sdk::ReasoningLevel::Max => crate::tui::view_model::status::ReasoningLevelView::Max,
     }
 }
 

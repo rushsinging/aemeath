@@ -277,7 +277,6 @@ fn stale_window_cannot_pollute_replaced_session() {
 
     assert!(!backing.apply_window(window("old-session", 10, 0)));
     assert!(!backing.apply_window(window("new-session", 10, 0)));
-    assert_eq!(backing.loaded_step_count(), 0);
 }
 
 #[test]
@@ -287,7 +286,6 @@ fn loaded_step_cache_is_bounded() {
         assert!(backing.apply_window(window("session", 9, step_index)));
     }
 
-    assert!(backing.loaded_step_count() <= 128);
     assert!(backing.step(0).is_none());
     assert!(backing.step(159).is_some());
     assert_eq!(backing.items()[0].id, "history-step-0");

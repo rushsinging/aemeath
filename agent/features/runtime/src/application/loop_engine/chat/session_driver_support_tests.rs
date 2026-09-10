@@ -181,6 +181,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 workspace: context::session::SnapshotState::Captured(persist.snapshot()),
                 revision: 0,
                 compact: None,
+                cleared_after: None,
                 run_slices: Vec::new().into(),
                 committed_steps: Default::default(),
                 skill_load_records: Vec::new(),

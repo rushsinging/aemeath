@@ -24,12 +24,6 @@ impl ModelChange {
         dirty.mark_status();
         Self { dirty }
     }
-
-    pub fn dialog_dirty() -> Self {
-        let mut dirty = ViewModelDirty::default();
-        dirty.mark_dialog();
-        Self { dirty }
-    }
 }
 
 pub fn dirty_from_model_changes(changes: &[ModelChange]) -> ViewModelDirty {
@@ -58,13 +52,5 @@ mod tests {
         assert!(dirty.status);
         assert!(!dirty.input);
         assert!(!dirty.dialog);
-    }
-
-    #[test]
-    fn test_dirty_from_model_changes_preserves_dialog_dirty() {
-        let dirty = dirty_from_model_changes(&[ModelChange::dialog_dirty()]);
-        assert!(dirty.dialog);
-        assert!(!dirty.output);
-        assert!(!dirty.status);
     }
 }

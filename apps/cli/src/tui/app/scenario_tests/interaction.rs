@@ -7,8 +7,8 @@ use crate::tui::adapter::runtime_view::{
     TuiChatMessage, TuiContentBlock, TuiMessageSource, TuiResumedSessionStep,
 };
 use crate::tui::adapter::tui_runtime_event::{
-    TuiInteractionBody, TuiInteractionRequest, TuiRunContext, TuiRuntimeEvent, TuiToolCallStatus,
-    TuiUserQuestion,
+    TuiInteractionBody, TuiInteractionRequest, TuiOptionItem, TuiRunContext, TuiRuntimeEvent,
+    TuiToolCallStatus, TuiUserQuestion,
 };
 use crate::tui::app::event::UiEvent;
 use crate::tui::model::conversation::interaction::UiInteractionRequestId;
@@ -21,12 +21,19 @@ use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
     busy.app.chat.start_processing();
-    busy.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
+    let run_id = sdk::RunId::from_legacy_or_new("run-cancel");
+    let step_id = sdk::RunStepId::from_legacy_or_new("step-cancel");
+    busy.app.chat.active_run_step = Some((run_id.clone(), step_id.clone()));
+    busy.expect_effect(ExpectedEffect::CancelRunStep {
+        run_id,
+        step_id,
+        replies: vec![],
+    });
     busy.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(busy
-        .effects()
-        .iter()
-        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
+    assert!(busy.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::CancelRunStep { .. }
+    )));
     busy.assert_idle();
 
     let mut idle = TuiScenarioHarness::new(100, 30);
@@ -312,7 +319,10 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
             tool_call_id: Some(tool_call_id.as_str().to_string()),
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "明天想吃什么？".to_string(),
-                options: vec!["日料".to_string()],
+                options: vec![TuiOptionItem {
+                    title: "日料".to_string(),
+                    description: Some("日料的描述".to_string()),
+                }],
                 allow_multi: false,
             }]),
         },
@@ -326,6 +336,17 @@ async fn ask_user_accepted_reply_marks_the_ask_tool_gutter_completed_end_to_end(
         ),
         replies: Vec::new(),
     });
+
+    // 选项 description 必须从 TUI 事件一路渲染到屏幕（全链路不丢失）。
+    // 屏幕文本对 CJK 字符间插入全角间距，断言前先去除空格。
+    harness.render();
+    let screen_with_options = harness.screen();
+    assert!(
+        screen_with_options
+            .lines()
+            .any(|line| line.replace(' ', "").contains("日料的描述")),
+        "选项 description 应渲染在屏幕上\n{screen_with_options}"
+    );
 
     harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
     harness.execute_last_effect().await; // allow tea_side_effect: scenario drives the production effect executor
@@ -388,7 +409,20 @@ fn ask_user_confirm_emits_reply_interaction_effect() {
             tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "中午吃什么?".to_string(),
-                options: vec!["饺子".to_string(), "拉面".to_string(), "盖浇饭".to_string()],
+                options: vec![
+                    TuiOptionItem {
+                        title: "饺子".to_string(),
+                        description: Some("饺子的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "拉面".to_string(),
+                        description: Some("拉面的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "盖浇饭".to_string(),
+                        description: Some("盖浇饭的描述".to_string()),
+                    },
+                ],
                 allow_multi: false,
             }]),
         },
@@ -433,7 +467,16 @@ fn ask_user_free_text_confirmation_emits_reply_interaction_effect() {
             tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "中午吃什么?".to_string(),
-                options: vec!["饺子".to_string(), "拉面".to_string()],
+                options: vec![
+                    TuiOptionItem {
+                        title: "饺子".to_string(),
+                        description: Some("饺子的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "拉面".to_string(),
+                        description: Some("拉面的描述".to_string()),
+                    },
+                ],
                 allow_multi: false,
             }]),
         },
@@ -519,7 +562,16 @@ fn ask_user_current_interaction_does_not_reply_with_resumed_history_answer() {
             tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "明天想吃什么？".to_string(),
-                options: vec!["日料".to_string(), "西餐".to_string()],
+                options: vec![
+                    TuiOptionItem {
+                        title: "日料".to_string(),
+                        description: Some("日料的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "西餐".to_string(),
+                        description: Some("西餐的描述".to_string()),
+                    },
+                ],
                 allow_multi: false,
             }]),
         },
@@ -605,7 +657,10 @@ async fn ask_user_accepted_cancel_marks_the_ask_tool_gutter_cancelled_end_to_end
             tool_call_id: Some(tool_call_id.as_str().to_string()),
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "确认取消？".to_string(),
-                options: vec!["继续".to_string()],
+                options: vec![TuiOptionItem {
+                    title: "继续".to_string(),
+                    description: Some("继续的描述".to_string()),
+                }],
                 allow_multi: false,
             }]),
         },
@@ -650,7 +705,16 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
             tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "确认删除?".to_string(),
-                options: vec!["是".to_string(), "否".to_string()],
+                options: vec![
+                    TuiOptionItem {
+                        title: "是".to_string(),
+                        description: Some("是的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "否".to_string(),
+                        description: Some("否的描述".to_string()),
+                    },
+                ],
                 allow_multi: false,
             }]),
         },
@@ -676,10 +740,10 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
         })
         .count();
     assert_eq!(cancel_effects, 1);
-    assert!(!harness
-        .effects()
-        .iter()
-        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
+    assert!(!harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::CancelRunStep { .. }
+    )));
     harness.assert_idle();
 }
 
@@ -696,7 +760,16 @@ fn ask_user_esc_during_chat_input_exits_chat_mode_not_cancel() {
             tool_call_id: None,
             body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
                 prompt: "自由输入".to_string(),
-                options: vec!["选项A".to_string(), "选项B".to_string()],
+                options: vec![
+                    TuiOptionItem {
+                        title: "选项A".to_string(),
+                        description: Some("选项A的描述".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "选项B".to_string(),
+                        description: Some("选项B的描述".to_string()),
+                    },
+                ],
                 allow_multi: false,
             }]),
         },

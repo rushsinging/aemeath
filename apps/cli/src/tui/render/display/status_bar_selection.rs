@@ -77,6 +77,21 @@ impl StatusBar {
         col_to_char_idx(&self.line_text(row, width, status), col as usize)
     }
 
+    /// 拖拽终点的只读折算：返回"包含鼠标所指字符"的 exclusive 边界
+    /// （该字符 char_idx + 1）。与 Down 起点折算（含指字符的 idx）配对
+    /// 后，正/反向拖拽的归一化区间都完整包含首尾两字符；拖到行尾
+    /// 最后一列时可选中末字符（修复末列丢失）。CJK 双宽列两半折算
+    /// 到同一字符，始终整字包含。
+    pub(crate) fn screen_col_to_selection_end(
+        &self,
+        row: StatusBarRow,
+        col: u16,
+        width: u16,
+        status: &StatusViewModel,
+    ) -> usize {
+        self.screen_col_to_char_idx(row, col, width, status) + 1
+    }
+
     /// 只读折算：把状态栏屏幕坐标 `(row, col)`（已相对 `status_bar_rect`）折算成
     /// view_state 选区锚点 `(StatusBarRow, char_idx, width)`，**不改 widget 选区字段**。
     ///

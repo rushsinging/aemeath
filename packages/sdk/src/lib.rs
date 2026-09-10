@@ -50,7 +50,7 @@ pub use activity::{
     CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
     RunPhaseKindView, RunPurposeView,
 };
-pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
+pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode, NativeStderrMode};
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
@@ -119,6 +119,8 @@ pub use share::message::{
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
     Role as LocalResumeRole,
 };
+/// Reasoning 深度枚举（#1616：CLI/TUI 状态栏展示经 SDK 转出，避免 cli 直依赖 share）。
+pub use share::reasoning::ReasoningLevel;
 pub use task::{
     TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
     TaskStateView,

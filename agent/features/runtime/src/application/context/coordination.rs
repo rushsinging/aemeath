@@ -106,7 +106,7 @@ impl ContextCoordinator {
         request: &ContextRequest,
         source_revision: SessionRevision,
         progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
-        task_context: Option<String>,
+        task_snapshot: Option<context::compact::CompactTaskSnapshot>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
@@ -120,7 +120,7 @@ impl ContextCoordinator {
                 source: request.clone(),
                 trigger: CompactTrigger::Automatic,
                 progress,
-                task_context,
+                task_snapshot,
                 cancellation,
             })
             .await

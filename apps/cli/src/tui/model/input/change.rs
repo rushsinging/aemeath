@@ -29,21 +29,10 @@ pub enum InputChange {
     Cleared,
 }
 
+#[cfg(test)]
 pub fn submitted_text_from_changes(changes: &[InputChange]) -> Option<String> {
     changes.iter().find_map(|change| match change {
         InputChange::Submitted { submission } => Some(submission.text.clone()),
-        InputChange::TextChanged { .. }
-        | InputChange::CursorMoved { .. }
-        | InputChange::CompletionChanged { .. }
-        | InputChange::HistorySelected { .. }
-        | InputChange::ModeChanged { .. }
-        | InputChange::Cleared => None,
-    })
-}
-
-pub fn submitted_display_text_from_changes(changes: &[InputChange]) -> Option<String> {
-    changes.iter().find_map(|change| match change {
-        InputChange::Submitted { submission } => Some(submission.display_text.clone()),
         InputChange::TextChanged { .. }
         | InputChange::CursorMoved { .. }
         | InputChange::CompletionChanged { .. }

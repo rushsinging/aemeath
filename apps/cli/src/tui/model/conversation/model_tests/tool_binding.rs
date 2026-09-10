@@ -1,12 +1,11 @@
 #[test]
 fn test_conversation_observes_tool_lifecycle() {
     let mut model = ConversationModel::default();
-    let changes = model.apply(StartChat {
-        submission: "read file".to_string(),
-    });
-    assert!(changes
-        .iter()
-        .any(|change| matches!(change, ConversationChange::ChatStarted { .. })));
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read file".to_string() });
 
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -47,9 +46,11 @@ fn test_conversation_observes_tool_lifecycle() {
 #[test]
 fn test_conversation_reports_orphan_tool_result() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read file".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read file".to_string() });
     let missing_id = super::ids::ToolCallId::new("missing");
     let changes = model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -71,9 +72,11 @@ fn test_conversation_reports_orphan_tool_result() {
 #[test]
 fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_blocks() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "load first skill".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "load first skill".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -107,9 +110,11 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         run_id: super::ids::ChatRunId::new("turn-1"),
     });
 
-    model.apply(StartChat {
-        submission: "load second skill".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "load second skill".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -230,9 +235,11 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
 #[test]
 fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provider_tool() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "load skill".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "load skill".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -266,9 +273,11 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         run_id: super::ids::ChatRunId::new("turn-1"),
     });
 
-    model.apply(StartChat {
-        submission: "read config".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read config".to_string() });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -329,9 +338,11 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
 #[test]
 fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "load skill".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "load skill".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -384,9 +395,11 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
 #[test]
 fn test_conversation_late_tool_call_binds_existing_result() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read file".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read file".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),

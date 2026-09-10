@@ -9,17 +9,6 @@ pub(super) const TOOL_RESULT_PREVIEW_LIMIT: usize = 16 * 1024;
 pub(super) const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
 const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
 
-pub(super) fn json_value_kind(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
 pub(super) fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
     match serde_json::from_str::<Value>(partial_args) {
         Ok(value) => {

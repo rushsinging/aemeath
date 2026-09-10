@@ -1,7 +1,7 @@
 use super::super::assemble_output_view;
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AppendUserMessage, AssistantText, RecordAgentActivities, ToolCallStart, ToolResult,
+    AppendUserMessage, AssistantText, ToolCallStart, ToolResult,
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
@@ -30,16 +30,16 @@ fn build_retained_state_workload(scale: usize) -> ConversationModel {
             name: "Agent".to_string(),
             index: 0,
         });
-        model.apply(RecordAgentActivities {
-            chat_id: chat_id.clone(),
-            run_id: run_id.clone(),
-            tool_id: tool_id.clone(),
-            activities: vec![
+        model.record_agent_activities(
+            chat_id.clone(),
+            run_id.clone(),
+            tool_id.clone(),
+            vec![
                 crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
                     format!("progress-{index}"),
                 ),
             ],
-        });
+        );
         model.apply(ToolResult {
             chat_id: chat_id.clone(),
             run_id: run_id.clone(),
@@ -62,10 +62,10 @@ fn retained_state_workload_is_deterministic_at_representative_scales() {
         let retained = model.retained_state_snapshot();
         let vm = assemble_output_view(&model, None);
         let mut renderer = OutputDocumentRenderer::default();
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default());
         let cold = renderer.retained_cache_capacity();
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal());
-        renderer.render_model_document(&vm, 120, 120, 2, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default());
+        renderer.render_model_document(&vm, 120, 120, 2, MarkdownSpacingPolicy::default());
         let warm_resized = renderer.retained_cache_capacity();
 
         assert_eq!(retained.chats, scale);
@@ -96,10 +96,10 @@ fn retained_state_release_workload() {
         let assemble_ns = assemble_started.elapsed().as_nanos();
         let mut renderer = OutputDocumentRenderer::default();
         let cold_started = std::time::Instant::now();
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default());
         let cold_ns = cold_started.elapsed().as_nanos();
         let warm_started = std::time::Instant::now();
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default());
         let warm_ns = warm_started.elapsed().as_nanos();
         let cache = renderer.retained_cache_capacity();
 

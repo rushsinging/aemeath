@@ -6,8 +6,6 @@ use ratatui::style::Color;
 
 /// Catppuccin Macchiato rosewater。
 pub const ROSEWATER: Color = Color::Rgb(244, 219, 214);
-/// Catppuccin Macchiato flamingo。
-pub const FLAMINGO: Color = Color::Rgb(240, 198, 198);
 /// Catppuccin Macchiato pink。
 pub const PINK: Color = Color::Rgb(245, 189, 230);
 /// Catppuccin Macchiato mauve。
@@ -24,8 +22,6 @@ pub const YELLOW: Color = Color::Rgb(238, 212, 159);
 pub const GREEN: Color = Color::Rgb(166, 218, 149);
 /// Catppuccin Macchiato teal。
 pub const TEAL: Color = Color::Rgb(139, 213, 202);
-/// Catppuccin Macchiato sky。
-pub const SKY: Color = Color::Rgb(145, 215, 227);
 /// Catppuccin Macchiato sapphire。
 pub const SAPPHIRE: Color = Color::Rgb(125, 196, 228);
 /// Catppuccin Macchiato blue。
@@ -52,10 +48,6 @@ pub const SURFACE1: Color = Color::Rgb(73, 77, 100);
 pub const SURFACE0: Color = Color::Rgb(54, 58, 79);
 /// Catppuccin Macchiato base。
 pub const BASE: Color = Color::Rgb(36, 39, 58);
-/// Catppuccin Macchiato mantle。
-pub const MANTLE: Color = Color::Rgb(30, 32, 48);
-/// Catppuccin Macchiato crust。
-pub const CRUST: Color = Color::Rgb(24, 25, 38);
 
 /// 主文本色。
 pub const TEXT: Color = MACCHIATO_TEXT;
@@ -107,11 +99,7 @@ pub const SPINNER_HIGHLIGHT: Color = GREEN;
 /// Spinner 弱化色。
 pub const SPINNER_DIM: Color = SURFACE2;
 
-/// Diff 新增行背景色。
-pub const DIFF_ADD_BG: Color = Color::Rgb(0, 40, 10);
 /// Diff 新增行前景色。
 pub const DIFF_ADD_FG: Color = Color::Rgb(56, 166, 96);
-/// Diff 删除行背景色。
-pub const DIFF_REMOVE_BG: Color = Color::Rgb(60, 20, 30);
 /// Diff 删除行前景色。
 pub const DIFF_REMOVE_FG: Color = Color::Rgb(220, 100, 110);

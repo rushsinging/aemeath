@@ -32,6 +32,10 @@ pub(crate) struct RawExecution {
     pub(crate) stdout: String,
     /// stderr（已截断）。
     pub(crate) stderr: String,
+    /// 截断发生时保留全量 stdout 的临时文件；未截断为 None。
+    pub(crate) stdout_file: Option<std::path::PathBuf>,
+    /// 截断发生时保留全量 stderr 的临时文件；未截断为 None。
+    pub(crate) stderr_file: Option<std::path::PathBuf>,
 }
 
 /// 单次执行的协议级故障（ExecutionFailed 可重试路径）。
@@ -153,6 +157,8 @@ impl Executor for ProcessDriverExecutor {
                     exit_code: output.exit_code,
                     stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
                     stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                    stdout_file: output.stdout_file,
+                    stderr_file: output.stderr_file,
                 })
             }
             Err(failure) => Err(map_process_failure(failure)),

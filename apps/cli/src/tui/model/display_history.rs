@@ -17,12 +17,13 @@ impl DisplayHistoryModel {
         self.backing = backing;
     }
 
-    pub(crate) fn steps(&self) -> &[ResumedHistoryStep] {
-        self.backing.steps()
-    }
-
     pub(crate) fn step(&self, index: usize) -> Option<&ResumedHistoryStep> {
         self.backing.step(index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn loaded_step_count_for_test(&self) -> usize {
+        self.backing.loaded_step_count_for_test()
     }
 
     pub(crate) fn items(&self) -> &[ResumedHistoryItem] {
@@ -42,13 +43,5 @@ impl DisplayHistoryModel {
 
     pub(crate) fn apply_window(&mut self, window: TuiDisplayHistoryWindow) -> bool {
         self.backing.apply_window(window)
-    }
-
-    pub(crate) fn message_count(&self) -> usize {
-        self.backing.message_count()
-    }
-
-    pub(crate) fn user_input_history(&self) -> Vec<String> {
-        self.backing.user_input_history()
     }
 }

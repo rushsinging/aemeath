@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ResumeConversation, StartChat, ToolCallStart, ToolCallUpdate,
+    AppendUserMessage, ConversationIntent, ResumeConversation, ToolCallStart, ToolCallUpdate,
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
@@ -89,8 +89,12 @@ fn running_tool_update_does_not_mutate_runtime_presentation_state() {
 #[test]
 fn test_reduce_agent_event_tool_call_updates_conversation() {
     let mut model = TuiModel::default();
-    model.conversation.apply(StartChat {
-        submission: "read".to_string(),
+    model.conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.conversation.apply(AppendUserMessage {
+        text: "read".to_string(),
     });
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
     let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-1");

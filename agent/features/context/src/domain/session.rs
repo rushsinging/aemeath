@@ -21,7 +21,7 @@ pub use generation::{
     DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
     SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionMemberBytes, SessionMetadataMember, SessionStateMember,
-    SessionStepMember,
+    SessionStepMember, SessionStepReference,
 };
 pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,

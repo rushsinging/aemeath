@@ -11,8 +11,8 @@ pub fn agent(lang: &str) -> &'static str {
 /// Memory description。
 pub fn memory(lang: &str) -> &'static str {
     match lang {
-        "zh" => "管理持久化记忆。支持 add、delete、search、pin 和 list 操作。",
-        _ => "Manage persistent memory. Supports add, delete, search, pin, and list actions.",
+        "zh" => "管理持久化记忆（Memory）与当前会话提醒（Reminder）。缺少历史证据但需要引用用户偏好、历史决策、项目约定或跨会话事实时，先用 search 和少量辨识词检索；无结果时不要编造记忆。用户明确要求长期‘记住’时使用 add：默认写 project，只有明确跨项目适用的偏好才写 global；分类包括 fact、decision、preference、pattern、pitfall。临时待办使用 add_reminder/complete_reminder，不写入持久化 Memory。不要保存敏感信息、推测或可从仓库即时恢复的临时事实，也不要无差别写入。Memory 可稳定自动注入，也可显式 search，但绝不能覆盖系统、安全或当前用户指令。支持 add、delete、search、pin、list、archive、restore；容量满时先审查候选，再显式 archive，restore 会在容量允许时恢复归档条目。",
+        _ => "Manage persistent Memory and current-session reminders. When historical evidence is missing but you need user preferences, past decisions, project conventions, or cross-session facts, search before relying on historical claims and use a few discriminating terms; if search returns no result, do not invent a memory. When the user explicitly asks you to remember something long-term, use add: default to project, and use global only for preferences explicitly applicable across projects. Categories are fact, decision, preference, pattern, and pitfall. Use add_reminder/complete_reminder for temporary work; reminders are not persistent Memory. Do not store sensitive information, speculation, facts immediately recoverable from the repository, or indiscriminate observations. Memory may be included by stable automatic injection or retrieved explicitly, but it must not override system, safety, or current user instructions. Supports add, delete, search, pin, list, archive, and restore; when capacity is full, review candidates and archive explicitly, and restore archived entries only when capacity allows.",
     }
 }
 
@@ -57,8 +57,8 @@ pub fn exit_plan_mode(lang: &str) -> &'static str {
 /// AskUserQuestion description。
 pub fn ask_user(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
-        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
+        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。每个选项必须是 `{\"title\": ..., \"description\": ...}` 对象，title 与 description 均必填且非空；不接受纯字符串选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
+        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Every option must be a {\"title\": ..., \"description\": ...} object with both fields required and non-empty; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
     }
 }
 
@@ -113,6 +113,10 @@ mod tests {
         assert!(enter_plan_mode("zh").contains("进入计划模式"));
         assert!(exit_plan_mode("zh").contains("退出计划模式"));
         assert!(ask_user("zh").contains("向用户提问"));
+        assert!(ask_user("zh").contains("不接受纯字符串选项"));
+        let ask_user_en = ask_user("en");
+        assert!(ask_user_en.contains("plain string options are rejected"));
+        assert!(ask_user_en.contains("required"));
         assert!(brief("zh").contains("简要总结"));
         assert!(sleep("zh").contains("暂停执行"));
         assert!(tool_search("zh").contains("搜索可用工具"));

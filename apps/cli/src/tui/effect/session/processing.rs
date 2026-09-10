@@ -11,7 +11,6 @@ pub(crate) use input_port::TuiInputEventPort;
 pub(crate) use logging::{log_sdk_event, log_tui_runtime_delivery};
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
-    let agent_client = ctx.agent_client.clone();
     let join = composition::delivery_logging::spawn_instrumented(
         composition::delivery_logging::capture(),
         async move {
@@ -53,7 +52,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             }
         },
     );
-    ProcessingHandle { join, agent_client }
+    ProcessingHandle { join }
 }
 
 #[cfg(test)]
@@ -235,62 +234,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn processing_handle_cancels_current_run_without_observing_run_started() {
-        #[derive(Default)]
-        struct RecordingCancelClient {
-            cancel_current_called: std::sync::atomic::AtomicUsize,
-        }
-
-        #[async_trait]
-        impl sdk::AgentClient for RecordingCancelClient {
-            fn cancel_current_run(
-                &self,
-                _deadline: sdk::ControlDeadline,
-            ) -> sdk::CancelCurrentRunOutcome {
-                let count = self
-                    .cancel_current_called
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if count == 0 {
-                    sdk::CancelCurrentRunOutcome::Accepted
-                } else {
-                    sdk::CancelCurrentRunOutcome::AlreadyCancelling
-                }
-            }
-
-            async fn chat(
-                &self,
-                _input: sdk::ChatRequest,
-            ) -> Result<sdk::ChatStream, sdk::SdkError> {
-                unreachable!()
-            }
-        }
-
-        let client = Arc::new(RecordingCancelClient::default());
-        let handle = ProcessingHandle {
-            join: tokio::spawn(async {}),
-            agent_client: client.clone(),
-        };
-
-        assert_eq!(
-            handle.cancel_current_run(),
-            sdk::CancelCurrentRunOutcome::Accepted
-        );
-        assert_eq!(
-            handle.cancel_current_run(),
-            sdk::CancelCurrentRunOutcome::AlreadyCancelling
-        );
-        assert_eq!(
-            client
-                .cancel_current_called
-                .load(std::sync::atomic::Ordering::SeqCst),
-            2
-        );
-    }
-
-    #[tokio::test]
     async fn spawn_processing_propagates_captured_context() {
         let (runtime_tx, _runtime_rx) = tokio::sync::mpsc::channel(16);
-        let (local_tx, _local_rx) = tokio::sync::mpsc::channel(16);
         let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
         let client = Arc::new(ContextCapturingAgentClient::new(observed_tx));
         let (_input_tx, input_port) = TuiInputEventPort::channel();
@@ -302,7 +247,6 @@ mod tests {
         composition::delivery_logging::instrument(expected.clone(), async move {
             spawn_processing(SpawnContext {
                 runtime_tx,
-                local_tx,
                 input_event_port: input_port,
                 agent_client: client,
                 fallback_context: TuiRunContext {
@@ -346,13 +290,11 @@ mod tests {
     #[tokio::test]
     async fn test_spawn_processing_done_emits_done_event() {
         let (runtime_tx, mut runtime_rx) = tokio::sync::mpsc::channel(16);
-        let (local_tx, _local_rx) = tokio::sync::mpsc::channel(16);
         let client = Arc::new(DoneOnlyAgentClient::default());
 
         let (_input_tx, input_port) = TuiInputEventPort::channel();
         spawn_processing(SpawnContext {
             runtime_tx,
-            local_tx,
             input_event_port: input_port,
             agent_client: client.clone(),
             fallback_context: TuiRunContext {

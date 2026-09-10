@@ -30,7 +30,7 @@ Runtime ChatStream → sdk::ChatEvent
   → ViewModelDirty → ViewAssembler → Render
 ```
 
-`UiEvent → TuiMsg::Ui → map_agent_event_for_ui` 仅承载 TUI 本地 effect 回灌，不是 SDK compatibility 入口。SDK compatibility variant 必须在第一层归一化；两条入口只在 `AgentEventMapping → root_reducer` 边界汇合。
+`UiEvent → TuiMsg::Ui → update_ui` 仅承载 TUI 本地 Effect 的纯值回灌，不经过 Runtime ACL，也不复制 SDK compatibility event。SDK compatibility variant 必须在第一层归一化；只有 Runtime 主链进入 `AgentEventMapping → root_reducer`。
 
 **两层转换的职责边界**：
 
@@ -38,7 +38,7 @@ Runtime ChatStream → sdk::ChatEvent
 |---|---|---|---|
 | 第一层 | `event_mapping.rs` | **结构转换与兼容展开**——SDK 类型 → TUI-owned runtime DTO，消除 SDK 类型依赖；一个 legacy batch 可展开为有序 canonical facts | `sdk::ChatEvent` → `SdkEventMapping::Runtime` / `RuntimeBatch` |
 | 第二层 | `agent_event.rs` | **语义翻译**——Runtime event → Intent 拆分，防腐层核心 | `TuiRuntimeEvent` → `AgentEventMapping` |
-| 本地 Effect 入口 | `app/event.rs` + `agent_event.rs` | TUI 本地 `UiEvent` 的语义翻译；禁止承载 SDK compatibility event | `UiEvent` → `AgentEventMapping` |
+| 本地 Effect 入口 | `app/event.rs` + `app/update/ui_event.rs` | 处理 TUI 本地 Effect 的纯值结果；禁止承载 SDK compatibility event，也不建立第二套 ACL | `UiEvent` → local Model update / follow-up Effect |
 
 > **设计原则**：两层分离是因为结构转换（类型映射）和语义翻译（Intent 拆分）是不同关注点。第一层是机械式 1:1 映射，第二层涉及业务逻辑（sanitize、progress 格式化、hook notice 派生等）。
 
@@ -74,7 +74,7 @@ Runtime ChatStream → sdk::ChatEvent
 └──────────────────────────────────────────────────────────────┘
 ```
 
-TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event_for_ui`，在 `AgentEventMapping` 处与 Runtime 主链汇合；已退役的 `processing/event_mapping.rs` 与 `UiEvent::AgentProgress` 不得恢复。
+TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_ui`，只处理本地 Effect 的纯值结果；Runtime 事实不得进入该分支，也不得恢复 `map_agent_event_for_ui` 或 `TuiMsg::AgentEvent`。已退役的 `processing/event_mapping.rs` 与 `UiEvent::AgentProgress` 同样不得恢复。
 
 ### 2.2 涉及文件
 
@@ -85,7 +85,8 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event_
 | `apps/cli/.../adapter/event_mapping.rs` | `sdk_event_to_tui_event`：第一层结构转换；只产 `TuiRuntimeEvent` 或明确 `Nop` |
 | `apps/cli/.../adapter/tui_runtime_event.rs` | TUI-owned Runtime DTO 定义；SDK 类型不得越过此边界 |
 | `apps/cli/.../app/event.rs` | TUI 本地 effect 回灌 `UiEvent` 定义；NEVER 承载 SDK Runtime stream 或 compatibility variant |
-| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event` / `map_agent_event_for_ui`：第二层 ACL 与本地 effect 翻译；只产 Intent |
+| `apps/cli/.../adapter/agent_event.rs` | `map_runtime_event`：第二层 Runtime ACL；只产 Intent |
+| `apps/cli/.../app/update/ui_event.rs` | 本地 Effect 结果处理；不属于 Runtime ACL |
 | `apps/cli/.../adapter/agent_event/sanitize.rs` | tool 输出/参数截断 |
 | `apps/cli/.../adapter/hook_notice.rs` | Hook 事件 → TUI notice |
 
@@ -93,13 +94,13 @@ TUI 本地 `UiEvent` 走 `TuiMsg::Ui → update_agent_event → map_agent_event_
 
 ### 3.1 ACL 职责
 
-`map_runtime_event` 是 Runtime 事件防腐层核心；`map_agent_event_for_ui` 只处理本地 effect 回灌。职责：
+`map_runtime_event` 是 Runtime 事件防腐层核心；本地 Effect 回灌由 `update_ui` 独立处理。职责：
 
 1. **Intent 拆分**：一个输入事件可能产生多个 Intent（跨 Context），如 `Error` 同时产生 ConversationIntent + DiagnosticIntent；ACL **NEVER** 直接产生 Effect
 2. **sanitize**：tool 输出/参数截断（`sanitize_tool_output` / `sanitize_tool_arguments_delta` / `sanitize_tool_result_content`）
 3. **Sub Run activity 投影**：结构化 Text/Thinking/ToolCall/ToolOutput/ToolResult/Terminal 进入父 Agent ToolCall 的 bounded activity preview；Model 只另存每个 Sub Run 最新 `(sequence, sequence_index)` watermark 用于去重/乱序拒绝，NEVER 复制无消费者的 progress 历史
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
-5. **模型活动信号**：非空 `AssistantTextDelta` / `ThinkingDelta`、`ToolCallStarted`、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 产生显式活动 Intent，供 ViewState 重置 Main `InvokingModel` 静默时间；SDK 旧 `Token` / `Thinking` / `ToolCallStart` 只在第一层兼容读取并立即归一化为 typed fact；ACL 不创建或清理 placeholder
+5. **模型内容事实**：非空 `AssistantTextDelta` / `ThinkingDelta`、`ToolCallStarted`、非空 `ToolCallArgumentsDelta` 与携完整参数的 `ToolCallStateChanged` 只更新 Conversation 投影；SDK 旧 `Token` / `Thinking` / `ToolCallStart` 只在第一层兼容读取并立即归一化为 typed fact。TUI 不再跟踪内容静默区间，也不创建 output placeholder
 6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.6）
 
 ### 3.2 AgentEventMapping 结构
@@ -135,7 +136,7 @@ enum AgentIntent {
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
-| Conversation | `AssistantTextDelta` / `ThinkingDelta` / `BlockComplete` / `ToolCallStarted` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolOutputDelta` / `ToolResult` / `SubRunStarted` / `SubRunActivity` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；四类有效模型活动产生静默计时重置信号；SDK `Token` / legacy `Thinking` / `ToolCallStart` / `ToolProgress` / `AgentProgress` 只作为 public compatibility dual-read，在第一层 ACL 立即转为 typed delta/fact；SDK `ToolCallUpdate` 同样只在第一层拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
+| Conversation | `AssistantTextDelta` / `ThinkingDelta` / `BlockComplete` / `ToolCallStarted` / `ToolCallArgumentsDelta` / `ToolCallStateChanged` / `ToolOutputDelta` / `ToolResult` / `SubRunStarted` / `SubRunActivity` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` | sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 数据；SDK `Token` / legacy `Thinking` / `ToolCallStart` / `ToolProgress` / `AgentProgress` 只作为 public compatibility dual-read，在第一层 ACL 立即转为 typed delta/fact；SDK `ToolCallUpdate` 同样只在第一层拆为 typed delta/state fact；`Done` / `Cancelled` 是已登记 compatibility processing terminal，NEVER 代替 Run / Run Step 终态；Compact 进度只来自 typed Activity stage/work |
 | Conversation | `RunTransitioned { run_id, parent_run_id, status: RunStatusView }` | 第一层穷举转换为 TUI-owned `TuiRunStatus`，第二层产生 `ObserveRunStatus` Intent；禁止字符串降级。Main 由 `parent_run_id == None` 判断，Sub 不驱动主活动展示 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机；Created admission 阶段被拒绝时 `RunFailed` 单阶段直转 Failed，`RunCancelling` 仍先进入非终态 Cancelling（**NEVER** 直接跳到 Cancelled），完整 Created → Failed / Cancelling 映射见 [02-model.md §3.2](02-model.md#32-run-投影与-runstatus-状态机) |
 | Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
@@ -238,7 +239,7 @@ Compact 展示 MUST 只消费 Activity 中 typed stage/work；旧 stringly `Comp
 
 `ChatEvent` 与 `ContentBlock` 各自只有一个权威定义；SDK 通过 re-export 或同一 schema 生成发布类型。`RunTransitioned.status` 使用封闭枚举 `RunStatusView`，Runtime adapter 与 TUI `event_mapping.rs` 都必须穷举匹配；禁止 JSON round-trip、`Debug`/字符串类型擦除或两份手写 wire schema。
 
-Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位 heartbeat。Main Run 的 10 秒 `InvokingModel` 静默占位只由 TUI ViewState 的可注入单调时钟和既有 Tick 派生，不进入 SDK Published Language、Model timeline、history 或持久化。
+Runtime **NEVER** 发布 `ModelStreamWaiting` 或其他 UI 占位事件。模型等待反馈由 TUI live-status spinner 消费 Activity heartbeat 并展示双计时；Output timeline / ViewModel 不注入独立静默占位块。
 
 ### 4.2 TUI 自有 DTO 完全隔离
 
@@ -271,9 +272,13 @@ struct ChatMessage {
 }
 
 struct UiInteractionRequestId(String); // 对 Runtime InteractionRequestId 的 TUI-owned 无损 newtype
+struct UiOptionItem {
+    title: String,
+    description: Option<String>, // 协议层保留 Option：历史会话兼容与系统内建选项
+}
 struct UiUserQuestion {
     prompt: String,
-    options: Vec<String>,
+    options: Vec<UiOptionItem>,
     default: Option<String>,
 }
 
@@ -530,12 +535,12 @@ Sub Run ToolCall 的 name/input 属于事实，`workspace_root` 属于 TUI prese
 |---|---|---|---|---|
 | 第一层 | `adapter/event_mapping.rs` | `sdk::ChatEvent` → `TuiRuntimeEvent` / `Nop` | 结构转换、SDK 类型消除 | **NEVER** 产生 Intent / Effect 或执行 I/O |
 | 第二层 | `adapter/agent_event.rs` | `&TuiRuntimeEvent` → `AgentEventMapping` | Intent 拆分、sanitize、格式化 | **NEVER** 接触 SDK 类型或产生 Effect |
-| 本地入口 | `app/event.rs` + `adapter/agent_event.rs` | `&UiEvent` → `AgentEventMapping` | TUI 本地 effect 回灌语义翻译 | **NEVER** 承载 SDK compatibility event 或绕过同一 reducer |
+| 本地入口 | `app/event.rs` + `app/update/ui_event.rs` | `&UiEvent` → local Model update / follow-up Effect | TUI 本地 Effect 纯值回灌 | **NEVER** 承载 SDK compatibility event、Runtime DTO 或建立第二套 ACL |
 
 ### 7.2 集中化规则
 
 1. **MUST** 所有 `sdk::ChatEvent` → `TuiRuntimeEvent` / `Nop` 转换 **只在** `event_mapping.rs` 中完成
-2. **MUST** 所有 `TuiRuntimeEvent` → `AgentEventMapping` 和本地 `UiEvent` → `AgentEventMapping` 转换 **只在** `agent_event.rs` 中完成
+2. **MUST** 所有 `TuiRuntimeEvent` → `AgentEventMapping` 转换 **只在** `agent_event.rs` 中完成；本地 `UiEvent` **MUST** 只由 `app/update/ui_event.rs` 处理
 3. **MUST** `event_mapping.rs` 和 `agent_event.rs` 位于 `adapter/`；结构 / 语义转换 **NEVER** 放进 `effect/`、`model/` 或 `render/`
 4. **MUST** Composition 根负责装配——`spawn_processing` 与 EffectRunner 持 `AgentClient`；event_mapping 和 agent_event 保持纯函数，TUI 不装配 pending reply registry
 5. **NEVER** 在 `model/` 中 import `sdk::*` 类型（架构门禁 #2 + #6）
@@ -560,11 +565,11 @@ TuiMsg::Runtime(event) / RuntimeBatch(events)
   → reduce_agent_event(&mut model, mapping)
   → Coordinator::effects_for(Change)
 
-// 本地 effect 回灌入口
+// 本地 Effect 回灌入口
 TuiMsg::Ui(event)
-  → App::update_agent_event
-  → map_agent_event_for_ui(&event)
-  → 同一 reduce_agent_event 边界
+  → App::update_ui
+  → 本地 Model update / follow-up Effect
+  → 不进入 Runtime ACL
 
 // effect runner — 唯一副作用执行点
 Effect

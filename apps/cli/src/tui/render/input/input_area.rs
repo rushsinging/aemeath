@@ -26,9 +26,6 @@ impl InputArea {
         Self
     }
 
-    #[cfg(test)]
-    pub(super) fn hide_suggestions(&mut self) {}
-
     /// Get inner input render area, excluding border.
     pub fn get_inner_area(&self, area: &Rect) -> Rect {
         Self::inner_area(*area)

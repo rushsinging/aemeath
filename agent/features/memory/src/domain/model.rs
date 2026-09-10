@@ -71,9 +71,10 @@ pub struct MemoryEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl: Option<Duration>,
     pub created_at: u64,
-    pub accessed_at: u64,
-    #[serde(default)]
-    pub access_count: u32,
+    #[serde(alias = "accessed_at")]
+    pub last_confirmed_at: u64,
+    #[serde(default, alias = "access_count")]
+    pub confirmation_count: u32,
     #[serde(default)]
     pub outdated: bool,
 }
@@ -104,8 +105,8 @@ impl MemoryEntry {
             pinned: false,
             ttl: None,
             created_at: now,
-            accessed_at: now,
-            access_count: 0,
+            last_confirmed_at: now,
+            confirmation_count: 0,
             outdated: false,
         })
     }
@@ -216,7 +217,7 @@ mod tests {
         let mut pinned = entry("pinned");
         pinned.pinned = true;
         let mut frequent = entry("frequent");
-        frequent.access_count = u32::MAX;
+        frequent.confirmation_count = u32::MAX;
         assert!(injection_score(&pinned, 1_000_000) > injection_score(&frequent, 1_000_000));
     }
 
@@ -241,6 +242,7 @@ mod tests {
         pinned.pinned = true;
         let normal = entry("normal");
         let candidates = eviction_candidates(&[pinned, normal.clone()], 5, 1_000_000);
-        assert_eq!(candidates, vec![normal]);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].entry, normal);
     }
 }

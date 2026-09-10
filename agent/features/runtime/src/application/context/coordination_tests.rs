@@ -222,7 +222,7 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
             system_prompt: frozen.system_prompt.clone(),
             context_size: frozen.context_size,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();

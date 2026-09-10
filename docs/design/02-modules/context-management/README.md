@@ -92,7 +92,7 @@ Runtime 与 Context Management 的上下文交互经 6 个方法：
 | `needs_compaction` | 是否需要压缩 | token budget 计算 → 返回 compaction urgency |
 | `compact` | 执行自动 L5 持久压缩 | 在稳定 Session backing 上按冻结 revision 生成并提交 Compact segment |
 | `manual_compact` | 执行 idle `/compact` | 绕过自动阈值，但仍复用 canonical backing、mutation gate 与 AtomicBlob writer |
-| `clear_session` | 清空当前 Session 历史 | 清 chats/幂等账本、递增 revision、收集 Task/Workspace snapshot 后原子落盘 |
+| `clear_session` | 清空当前 Session 历史 | 逻辑断点：清内存 chats/幂等账本/compact、递增 revision、收集 Task/Workspace snapshot；state 持久化 clear 边界（最后被清除 step），磁盘 step 成员无限保留供排查，resume 与 display history 从边界后截断 |
 | `append_and_persist` | 追加对话并落盘 | 写入 ChatChain → 收集跨 BC 快照 → 原子落盘 |
 
 ## 6. 与其他 BC 的关系

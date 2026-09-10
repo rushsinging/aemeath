@@ -1,7 +1,6 @@
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
-use crate::tui::model::runtime::processing_job::ProcessingStatus;
 use crate::tui::model::runtime::session_model::SessionModel;
 use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
 use crate::tui::model::runtime::workspace::WorktreeKind as ModelWorktreeKind;
@@ -49,7 +48,6 @@ impl StatusViewAssembler {
             text: notice.text.clone(),
             kind: match notice.kind {
                 StatusNoticeKind::Normal => StatusNoticeViewKind::Normal,
-                StatusNoticeKind::Running => StatusNoticeViewKind::Running,
                 StatusNoticeKind::Success => StatusNoticeViewKind::Success,
                 StatusNoticeKind::Warning => StatusNoticeViewKind::Warning,
             },
@@ -69,6 +67,8 @@ impl StatusViewAssembler {
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
             model: presentation.model_id().map(ToOwned::to_owned),
+            // #1616：状态栏直接显示 reasoning 深度字符串（off 也如实显示）。
+            reasoning_level: Some(presentation.reasoning_level().as_str()),
             session_id: session.and_then(|s| s.current_session_id.clone()),
             input_tokens: conversation.runtime.usage.input_tokens,
             output_tokens: conversation.runtime.usage.output_tokens,
@@ -180,19 +180,6 @@ impl StatusViewAssembler {
                 ),
                 style: SemanticStyle::Muted,
                 priority: 40,
-            });
-        }
-        if conversation.runtime.processing_jobs.iter().any(|job| {
-            matches!(
-                job.status,
-                ProcessingStatus::Running | ProcessingStatus::Starting
-            )
-        }) {
-            vm.center.push(StatusSegment {
-                key: "processing".to_string(),
-                text: "processing".to_string(),
-                style: SemanticStyle::Running,
-                priority: 2,
             });
         }
         if let Some(session) = session {

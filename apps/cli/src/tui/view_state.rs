@@ -1,9 +1,5 @@
-#![allow(dead_code)]
-
 pub mod animation;
-pub mod input;
 pub mod input_selection;
-pub mod layout;
 pub mod output;
 pub mod run_activity;
 #[cfg(test)]
@@ -13,9 +9,7 @@ pub mod spinner_anim;
 pub mod status;
 
 pub use animation::AnimationViewState;
-pub use input::InputViewState;
 pub use input_selection::InputSelectionViewState;
-pub use layout::LayoutViewState;
 pub use output::OutputViewState;
 pub use run_activity::RunActivityState;
 pub use spinner_anim::SpinnerAnim;
@@ -24,8 +18,6 @@ pub use status::StatusSelectionViewState;
 #[derive(Debug, Default)]
 pub struct AppViewState {
     pub output: OutputViewState,
-    pub input: InputViewState,
-    pub layout: LayoutViewState,
     pub animation: AnimationViewState,
     pub spinner: SpinnerAnim,
     pub run_activity: RunActivityState,
@@ -47,13 +39,6 @@ pub struct ViewModelDirty {
 }
 
 impl ViewModelDirty {
-    pub fn mark_all(&mut self) {
-        self.output = true;
-        self.status = true;
-        self.input = true;
-        self.dialog = true;
-    }
-
     pub fn mark_output(&mut self) {
         self.output = true;
     }
@@ -83,14 +68,6 @@ impl ViewModelDirty {
 
     pub fn clear_status(&mut self) {
         self.status = false;
-    }
-
-    pub fn clear_input(&mut self) {
-        self.input = false;
-    }
-
-    pub fn clear_dialog(&mut self) {
-        self.dialog = false;
     }
 }
 

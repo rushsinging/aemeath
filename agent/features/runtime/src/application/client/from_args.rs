@@ -129,6 +129,7 @@ pub struct InitialProviderAssembly {
     binding: crate::ports::ProviderBinding,
     resolved_model: ResolvedModel,
     runtime_settings: ModelRuntimeSettings,
+    compact_model_slot: crate::application::client::SessionModelSlot,
 }
 
 impl InitialProviderAssembly {
@@ -136,11 +137,13 @@ impl InitialProviderAssembly {
         binding: crate::ports::ProviderBinding,
         resolved_model: ResolvedModel,
         runtime_settings: ModelRuntimeSettings,
+        compact_model_slot: crate::application::client::SessionModelSlot,
     ) -> Self {
         Self {
             binding,
             resolved_model,
             runtime_settings,
+            compact_model_slot,
         }
     }
 
@@ -154,6 +157,11 @@ impl InitialProviderAssembly {
 
     pub fn runtime_settings(&self) -> &ModelRuntimeSettings {
         &self.runtime_settings
+    }
+
+    /// Compact 模型解析共享的会话模型槽；Composition 用它构造解析器。
+    pub fn compact_model_slot(&self) -> crate::application::client::SessionModelSlot {
+        self.compact_model_slot.clone()
     }
 }
 
@@ -434,7 +442,15 @@ pub async fn from_args_with_workspace(
         binding,
         resolved_model,
         runtime_settings: _,
+        compact_model_slot,
     } = initial_provider;
+    // Compact 模型解析所需的会话模型真相源：Composition 创建的槽在这里绑定，
+    // 之后 `/model` 切换与 compact 解析共享同一 `SessionModelState`。
+    let model_state = crate::application::client::SessionModelState::new(
+        resolved_model.clone(),
+        Arc::new(binding.clone()),
+    );
+    compact_model_slot.bind(model_state.clone());
 
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
     let SkillBootstrapAssembly {
@@ -491,10 +507,7 @@ pub async fn from_args_with_workspace(
         config_writer.clone(),
         session_management.clone(),
         provider_factory.clone(),
-        crate::application::client::accessors::SessionModelState::new(
-            resolved_model.clone(),
-            Arc::new(binding.clone()),
-        ),
+        model_state,
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore.clone(),

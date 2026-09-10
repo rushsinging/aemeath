@@ -152,6 +152,9 @@ pub struct ContextConfigPatch {
     pub microcompact_enabled: Option<bool>,
     #[serde(default)]
     pub auto_compact_failure_limit: Option<u8>,
+    /// `Some("")`（或纯空白）表示清除已配置的 compact 模型。
+    #[serde(default, alias = "compactModel")]
+    pub compact_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -309,6 +312,8 @@ pub struct MemoryConfigPatch {
     pub similarity_threshold: Option<f64>,
     #[serde(default)]
     pub inject_count: Option<usize>,
+    #[serde(default)]
+    pub inject_token_budget: Option<usize>,
     #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
@@ -517,6 +522,9 @@ pub(crate) fn apply_context_patch(
     }
     if let Some(value) = patch.auto_compact_failure_limit {
         base.auto_compact_failure_limit = value;
+    }
+    if let Some(value) = patch.compact_model {
+        base.compact_model = crate::config::context::normalize_compact_model_selection(value);
     }
     base
 }
@@ -759,6 +767,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     }
     if let Some(v) = patch.inject_count {
         base.inject_count = v;
+    }
+    if let Some(v) = patch.inject_token_budget {
+        base.inject_token_budget = v;
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);

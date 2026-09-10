@@ -49,8 +49,12 @@ impl MemoryPort for NoOpMemory {
         Ok(ReflectionApplyResult::default())
     }
 
-    async fn archive(&self, _ids: &[MemoryId]) -> Result<(), MemoryError> {
-        Ok(())
+    async fn archive(&self, _ids: &[MemoryId]) -> Result<bool, MemoryError> {
+        Ok(false)
+    }
+
+    async fn restore(&self, _id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+        Ok(RestoreResult::NoOp)
     }
 
     async fn compact(&self) -> Result<CompactResult, MemoryError> {

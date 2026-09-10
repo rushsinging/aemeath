@@ -9,7 +9,7 @@ fn render(text: &str, policy: MarkdownSpacingPolicy) -> Vec<RenderedLine> {
 
 #[test]
 fn normal_preserves_single_source_gap_and_compact_removes_it() {
-    let normal = render("one\n\n\ntwo", MarkdownSpacingPolicy::normal());
+    let normal = render("one\n\n\ntwo", MarkdownSpacingPolicy::default());
     let compact = render("one\n\n\ntwo", MarkdownSpacingPolicy::compact());
 
     assert_eq!(
@@ -67,7 +67,7 @@ fn narrow_table_falls_back_without_dropping_separator_or_rows() {
         "| a | b |\n|---|---|\n| 1 | 2 |",
         Style::default().fg(theme::TEXT),
         20,
-        &MarkdownSpacingPolicy::normal(),
+        &MarkdownSpacingPolicy::default(),
     );
     let plains = lines
         .iter()
@@ -81,13 +81,13 @@ fn narrow_table_falls_back_without_dropping_separator_or_rows() {
 fn table_and_diff_fence_keep_existing_rendering() {
     let table_lines = render(
         "| a | b |\n|---|---|\n| 1 | 2 |",
-        MarkdownSpacingPolicy::normal(),
+        MarkdownSpacingPolicy::default(),
     );
     assert!(table_lines.iter().any(|line| line.plain.contains('│')));
 
     let diff_lines = render(
         "```diff\n@@ -1 +1 @@\n-old\n+new\n```",
-        MarkdownSpacingPolicy::normal(),
+        MarkdownSpacingPolicy::default(),
     );
     assert!(diff_lines.iter().any(|line| {
         line.spans
@@ -100,7 +100,7 @@ fn table_and_diff_fence_keep_existing_rendering() {
 fn text_fence_hides_markers_and_renders_markdown() {
     let lines = render(
         "```text\n**bold**\n- item\n```",
-        MarkdownSpacingPolicy::normal(),
+        MarkdownSpacingPolicy::default(),
     );
     let plains = lines
         .iter()

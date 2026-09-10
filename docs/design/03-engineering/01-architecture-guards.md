@@ -38,9 +38,10 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单；禁止 Task PL/行为爬回 Shared |
-| 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
+| 4a | `check-noninteractive-child-session.sh` + `check-noninteractive-child-session-tests.sh` | 安全/IO | 所有生产非交互外部进程必须经 `utils` 唯一边界创建独立 session，禁止继承父控制终端 |
+| 4b | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块 |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage/Query PL、AppendLog 入口、无指标 `UsageSender`、消费式 `UsageWorker` 及被 Composition 消费的 `usage_query_service` 查询装配入口；退役 worker metrics 与共享 shutdown outcome 不得重新进入 façade；Runtime 登记 Compact 模型解析入口 `CompactModelResolver` / `SessionModelSlot` |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
@@ -79,11 +80,11 @@
 | 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
 | 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent`、SDK mapper `map_lifecycle_event` 以及 Composition 接入 Audit worker 与失败降级所需的 Runtime-owned `UsageSink` / `UnavailableUsageSink` 出站端口；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；BoundaryOnly Hook adapter 必须从 `HookPointMetadata.class` 派生过滤并禁止变体 allow-list，从而保留 Stop 与生命周期 Boundary；Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名。配套正反例脚本验证未登记 façade 以 exit code 2 阻断，并验证登记的 lifecycle、SDK mapper 与 Usage façade clean pass |
-| 23f | `check-projection-naming.sh` | 命名约束 | Rust 生产源码禁止新增宽泛 `Projection` / `projection` 标识符；领域转换必须使用目标或用途明确的名称；测试文件、`*_tests.rs`、`tests/`、`scenario_tests/` 与 `#[cfg(test)]` 模块不扫描 |
-| 23g | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；Runtime production 只允许 logical-commit `ActivitySnapshot` 与 heartbeat，禁止 `RuntimeActivityEvent::Changed` / `publish_change` 回流；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
-| 23h | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress` / `TasksSnapshot` / `AskUserBatch`；不破坏仍登记的 SDK wire compatibility |
-| 23i | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
+| 23e | `check-runtime-capability-assembly.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent`、SDK mapper `map_lifecycle_event` 以及 Composition 接入 Audit worker 与失败降级所需的 Runtime-owned `UsageSink` / `UnavailableUsageSink` 出站端口；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；crate-root façade 另外登记 Compact 模型解析 `CompactModelResolver` / `SessionModelSlot` 及其值类型 `CompactModelOrigin` / `CompactModelTarget` / `CompactModelResolveError`，它们不得演变为第二份模型选择状态；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；BoundaryOnly Hook adapter 必须从 `HookPointMetadata.class` 派生过滤并禁止变体 allow-list，从而保留 Stop 与生命周期 Boundary；Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名。配套正反例脚本验证未登记 façade 以 exit code 2 阻断，并验证登记的 lifecycle、SDK mapper 与 Usage façade clean pass |
+| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；Runtime production 只允许 logical-commit `ActivitySnapshot` 与 heartbeat，禁止 `RuntimeActivityEvent::Changed` / `publish_change` 回流；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
+| 23g | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress` / `TasksSnapshot` / `AskUserBatch`；不破坏仍登记的 SDK wire compatibility |
+| 23h | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
+| 23i | `check-projection-naming.sh` | 命名约束 | Rust 生产源码禁止新增宽泛 `Projection` / `projection` 标识符；领域转换必须使用目标或用途明确的名称；测试文件、`*_tests.rs`、`tests/`、`scenario_tests/` 与 `#[cfg(test)]` 模块不扫描 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
@@ -104,7 +105,7 @@
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
 - **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
 - **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Task committed-change 链额外登记仅供 Tools/Runtime 协调的 `CommittedTaskChange` 与 `TaskChangeFact`；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Sub Run 事实链登记 `SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind` 与 `SubRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
-- **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。
+- **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。`CompactModelResolver` 与 `SessionModelSlot` 是 Composition 装配 Compact 模型解析（配置 `context.compact_model`）的已登记窄入口，`CompactModelOrigin` / `CompactModelTarget` / `CompactModelResolveError` 为该入口的纯值 Published Language；跨 feature 消费 **MUST** 仅经这些 crate-root 符号，**NEVER** 穿透 `application::client::compact_model`。
 - **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
 - **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
 
@@ -116,19 +117,19 @@
 
 | Crate | 允许依赖（workspace crate） |
 |---|---|
-| `cli` | `composition`, `sdk` |
+| `cli` | `composition`, `sdk`, `utils` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging`, `utils` |
 | `share` | `logging`, `utils` |
-| `project` | `share` |
+| `project` | `share`, `utils` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk`, `utils` |
 | `memory` | `share`, `storage`, `utils` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `memory`, `task` |
+| `tools` | `share`, `project`, `storage`, `memory`, `task`, `utils` |
 | `storage` | `share` |
 | `task` | ∅ |
-| `hook` | `share` |
+| `hook` | `share`, `utils` |
 | `audit` | `share`, `sdk`, `storage` |
 | `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
@@ -149,10 +150,10 @@
 
 ## 2. check-cli-thin-entry.sh
 
-- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
+- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + utils 纯技术进程边界`。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
-  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
+  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk, utils}`
   - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
@@ -196,7 +197,15 @@
 
 - **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
 
-### 4a. check-composition-layout.sh
+## 4a. check-noninteractive-child-session.sh
+
+- **功能**：扫描 `apps/**/src`、`agent/**/src` 与 `packages/**/src` 的生产 Rust 源码，要求所有 `std::process::Command` / `tokio::process::Command` 启动点在 spawn/output/status 前调用 `utils::configure_std_noninteractive` 或 `utils::configure_tokio_noninteractive`。
+- **唯一底层 owner**：`packages/global/utils/src/process.rs` 在 Unix spawn 前回调中调用 `setsid()`；业务 adapter 禁止自行调用 `process_group`、`pre_exec` 或 `setsid`。
+- **排除范围**：`tests/`、`tests.rs`、`*_tests.rs`、`*_test.rs` 与 Project crate-root 测试夹具不属于生产启动点。
+- **失败模式**：发现未配置的生产命令或复制 session 系统调用时以 exit code 2 阻断。
+- **故意违规证据**：`check-noninteractive-child-session-tests.sh` 用裸 `Command::output` 负例证明阻断，以统一配置正例、测试目录与唯一底层实现证明 clean pass。
+
+### 4b. check-composition-layout.sh
 
 - **功能**：锁定 `agent/composition/src` 的 capability-first wiring modules 结构；Composition 按被装配职责分片，不机械复制 feature crate 的 Hexagonal 四层。
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `audit.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/audit/provider/runtime/tools/update` 六个 wiring module。`audit.rs` 仅装配 #929 worker lifecycle/value extraction，Runtime UsageSink bridge 仍归 #931。

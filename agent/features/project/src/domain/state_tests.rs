@@ -302,11 +302,15 @@ fn commit_restore_replaces_state_in_one_shot() {
 
 #[test]
 fn prepare_restore_path_not_found_keeps_live_state() {
-    // #894: 路径不存在 -> 结构化 PathNotFound，live state 不变。
+    // #894: 身份路径（workspace_root）不存在 -> 结构化 PathNotFound，live state 不变。
+    // path_base 缺失的回退语义见 restore_falls_back_to_workspace_root_*。
     let root = unique_temp_dir("prep_missing_root");
-    let missing = root.join("missing_sub"); // 位于 root 内但不存在
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let sub = sub.canonicalize().unwrap();
     let common = "/repo/.git";
-    let dto = valid_git_dto(&root, &missing, common);
+    let mut dto = valid_git_dto(&root, &sub, common);
+    dto.workspace_root = root.join("missing_root").display().to_string();
     let git = git_ops_for(&root, common);
 
     let live = st("/repo");
@@ -1103,4 +1107,80 @@ fn enter_promotes_worktree_kind_to_linked_and_captures_previous() {
     );
 
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn restore_falls_back_to_workspace_root_when_primary_path_base_turns_foreign_repo() {
+    // 普通会话（Primary、空栈）的 path_base 目录被外部替换为嵌套仓库：
+    // 身份校验（initial_cwd / workspace_root）通过后，cwd 语义的位置回退
+    // workspace_root，而不是让整个 resume fail-closed。
+    let root = unique_temp_dir("fallback_foreign");
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let sub = sub.canonicalize().unwrap();
+    let common = "/repo/.git";
+    let dto = valid_git_dto(&root, &sub, common);
+    let mut git = git_ops_for(&root, common);
+    // sub 现在是独立嵌套仓库：自身 top-level + foreign common dir。
+    git.toplevel.insert(sub.clone(), sub.clone());
+    git.common_dir
+        .insert(sub.clone(), PathBuf::from("/foreign/.git"));
+
+    let mut live = st("/repo");
+    let prepared: crate::PreparedWorkspaceRestore = prepare_restore(&live, &dto, &git)
+        .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
+    commit_restore(&mut live, prepared);
+    assert_eq!(live.path_base, root.canonicalize().unwrap());
+    assert_eq!(live.workspace_root, root.canonicalize().unwrap());
+}
+
+#[test]
+fn restore_falls_back_to_workspace_root_when_primary_path_base_probe_fails() {
+    // path_base 目录被删除：探测直接失败（模拟 spawn cwd 不存在）。
+    let root = unique_temp_dir("fallback_probe_fail");
+    let missing = root.join("deleted-sub");
+    let common = "/repo/.git";
+    let dto = valid_git_dto(&root, &missing, common);
+    let mut git = git_ops_for(&root, common);
+    git.probe_failures
+        .insert(missing.canonicalize().unwrap_or(missing.clone()));
+
+    let mut live = st("/repo");
+    let prepared: crate::PreparedWorkspaceRestore =
+        prepare_restore(&live, &dto, &git).expect("path_base 探测失败时必须回退 workspace_root");
+    commit_restore(&mut live, prepared);
+    assert_eq!(live.path_base, root.canonicalize().unwrap());
+}
+
+#[test]
+fn restore_keeps_failing_closed_with_nonempty_stack_when_path_base_foreign() {
+    // worktree 会话（栈非空）的 path_base 损坏必须保持 fail-closed：
+    // 静默退出 worktree 有丢上下文风险，应走显式 exit 协议。
+    let root = unique_temp_dir("fallback_stack");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let wt = wt.canonicalize().unwrap();
+    let common = "/repo/.git";
+    let mut dto = valid_git_dto(&root, &wt, common);
+    dto.worktree_kind = WorktreeKind::Linked;
+    dto.context_stack = vec![share::session_types::PersistedWorkspaceFrame {
+        workspace_root: root.display().to_string(),
+        path_base: root.display().to_string(),
+        worktree_kind: WorktreeKind::Primary,
+    }];
+    let mut git = git_ops_for(&root, common);
+    git.toplevel.insert(wt.clone(), wt.clone());
+    git.common_dir
+        .insert(wt.clone(), PathBuf::from("/foreign/.git"));
+    git.worktrees.insert(wt.clone());
+
+    let live = st("/repo");
+    let result = prepare_restore(&live, &dto, &git);
+    assert!(
+        matches!(
+            result,
+            Err(crate::WorkspaceRestoreError::RepositoryMismatch)
+        ),
+        "栈非空时 path_base mismatch 必须保持 fail-closed，got {result:?}"
+    );
 }

@@ -161,6 +161,8 @@ Run 的差异分成两个正交维度：
 
 Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `SessionState`；模型切换、配置刷新或 workspace 变化只影响后续 Run。
 
+Compact 调用模型同属 session 级事实：`CompactModelResolver` 是"本次 compact 使用哪个模型与输入窗口"的唯一 owner。未配置 `context.compact_model`（缺省或空串）时它读取会话当前模型，配置时按 committed 快照解析 selection 并按 selection 缓存 binding；配置更新与 `/model` 切换在下一次 compact 生效。该解析器由 Composition 装配一次，同时交给 Context 的 Compact 生成器与 Runtime 的会话模型槽；**NEVER** 在 Context 内解析模型目录或 Config，**NEVER** 为 compact 建立第二份模型选择状态。
+
 ## 4. 核心类型边界
 
 ### 4.1 `RunSpec`：能力声明与上限

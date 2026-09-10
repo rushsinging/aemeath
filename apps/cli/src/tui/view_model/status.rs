@@ -4,7 +4,6 @@ use super::style::SemanticStyle;
 pub enum StatusNoticeViewKind {
     #[default]
     Normal,
-    Running,
     Success,
     Warning,
 }
@@ -40,6 +39,34 @@ pub struct StatusViewModel {
     pub thinking: bool,
 }
 
+/// Reasoning 深度的 TUI 视图表示（#1616：状态栏直接显示其字符串形式）。
+///
+/// 独立视图类型，不引用 SDK 枚举；由 adapter converter 从 SDK 事件投影。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReasoningLevelView {
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningLevelView {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// 状态栏运行态视图模型：StatusBar 渲染所需 token/tps/model/session/context 的唯一派生表示。
 ///
 /// 真相来自 `RuntimeModel`/`SessionModel`（经 `StatusViewAssembler` 派生），StatusBar 不再
@@ -47,6 +74,8 @@ pub struct StatusViewModel {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StatusRuntimeViewModel {
     pub model: Option<String>,
+    /// 当前 reasoning 深度（#1616：状态栏 model 段后直接显示，如 `high`）。
+    pub reasoning_level: Option<&'static str>,
     pub session_id: Option<String>,
     pub input_tokens: u64,
     pub output_tokens: u64,

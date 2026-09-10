@@ -1,8 +1,8 @@
 use sdk::{
     AgentId, ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome,
     InteractionReply, InteractionReplyError, InteractionRequestBody, InteractionRequestId,
-    PlanApprovalPrompt, RiskLevel, RunStepId, StuckDiagnostic, ToolApprovalPrompt, UserAnswer,
-    UserQuestion,
+    OptionItem, PlanApprovalPrompt, RiskLevel, RunStepId, StuckDiagnostic, ToolApprovalPrompt,
+    UserAnswer, UserQuestion,
 };
 
 fn assert_json_round_trip<T>(value: &T)
@@ -41,7 +41,10 @@ fn every_interaction_request_body_round_trips() {
     let bodies = [
         InteractionRequestBody::UserQuestions(vec![UserQuestion {
             prompt: "choose".to_string(),
-            options: vec!["a".to_string(), "b".to_string()],
+            options: vec![
+                OptionItem::new("a", "first choice"),
+                OptionItem::new("b", "second choice"),
+            ],
             allow_multi: true,
         }]),
         InteractionRequestBody::ToolApproval(ToolApprovalPrompt {
@@ -62,6 +65,45 @@ fn every_interaction_request_body_round_trips() {
     for body in bodies {
         assert_json_round_trip(&body);
     }
+}
+
+#[test]
+fn user_question_options_serialize_with_title_and_description() {
+    let question = UserQuestion {
+        prompt: "choose".to_string(),
+        options: vec![OptionItem::new("a", "first choice")],
+        allow_multi: false,
+    };
+    let value = serde_json::to_value(&question).expect("serialize question");
+    assert_eq!(value["options"][0]["title"], "a");
+    assert_eq!(value["options"][0]["description"], "first choice");
+}
+
+#[test]
+fn user_question_options_still_deserialize_legacy_plain_strings() {
+    // 历史会话落盘的 options 是纯字符串数组；resume 时必须可恢复。
+    let legacy = serde_json::json!({
+        "prompt": "continue?",
+        "options": ["yes", "no"],
+        "allow_multi": false
+    });
+    let question: UserQuestion = serde_json::from_value(legacy).expect("legacy options");
+    assert_eq!(question.options[0].title, "yes");
+    assert!(question.options[0].description.is_none());
+    assert_eq!(question.options[1].title, "no");
+}
+
+#[test]
+fn user_question_options_still_deserialize_object_without_description() {
+    // 历史对象缺 description 也必须可恢复（title_only 展示）。
+    let legacy = serde_json::json!({
+        "prompt": "continue?",
+        "options": [{"title": "yes"}],
+        "allow_multi": false
+    });
+    let question: UserQuestion = serde_json::from_value(legacy).expect("legacy object options");
+    assert_eq!(question.options[0].title, "yes");
+    assert!(question.options[0].description.is_none());
 }
 
 #[test]

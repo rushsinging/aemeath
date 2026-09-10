@@ -520,7 +520,7 @@ impl TypedTool for SuspendingTool {
         Some(Ok(ToolSuspension::UserInteraction(
             crate::domain::UserInteractionSpec::new(vec![crate::domain::UserQuestion::new(
                 "continue?",
-                vec![crate::domain::UserOption::title_only("yes")],
+                vec![crate::domain::UserOption::new("yes", "approve")],
                 false,
                 true,
                 None,

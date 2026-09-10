@@ -1,6 +1,4 @@
 pub struct SpawnAgentChatEffect {
-    pub chat_id: String,
-    pub prompt: String,
     pub context: Option<crate::tui::effect::session::processing::SpawnContext>,
 }
 
@@ -10,20 +8,14 @@ use crate::tui::model::conversation::interaction::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
-    None,
     QuitApplication,
     RequestRender,
-    SpawnAgentChat {
-        chat_id: String,
-        prompt: String,
-    },
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },
     LoadDisplayHistoryWindow {
         request: sdk::DisplayHistoryWindowRequest,
     },
-    CancelCurrentRun,
     CancelRunStep {
         run_id: sdk::RunId,
         step_id: sdk::RunStepId,
@@ -45,7 +37,6 @@ pub enum Effect {
     SaveSession {
         notify: bool,
     },
-    FetchReminderRecap,
     /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
     FetchMemoryList,
     CopyToClipboard {
@@ -63,15 +54,6 @@ pub enum Effect {
         name: String,
         message: String,
     },
-    SetCurrentRun {
-        run_step: usize,
-    },
-    StartTimer {
-        id: String,
-    },
-    StopTimer {
-        id: String,
-    },
     /// 执行自动更新（`/update` 命令触发）。
     RunSelfUpdate,
     /// 重置 per-conversation runtime 状态（清空消息/输出/任务/UI 状态）。
@@ -81,50 +63,4 @@ pub enum Effect {
     OpenUrl {
         url: String,
     },
-}
-
-impl Effect {
-    pub fn is_noop(&self) -> bool {
-        matches!(self, Effect::None)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EffectResult {
-    Noop,
-    SessionSaved,
-    Failed { message: String },
-}
-
-impl EffectResult {
-    pub fn session_saved() -> Self {
-        Self::SessionSaved
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_effect_request_render_is_pure_value() {
-        let effect = Effect::RequestRender;
-        assert!(!effect.is_noop());
-    }
-
-    #[test]
-    fn test_spawn_agent_chat_carries_chat_id() {
-        let effect = Effect::SpawnAgentChat {
-            chat_id: "chat-1".to_string(),
-            prompt: "hello".to_string(),
-        };
-        assert!(
-            matches!(effect, Effect::SpawnAgentChat { ref chat_id, .. } if chat_id == "chat-1")
-        );
-    }
-
-    #[test]
-    fn test_effect_none_is_distinct_from_render() {
-        assert!(!Effect::RequestRender.is_noop());
-    }
 }

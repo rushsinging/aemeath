@@ -57,12 +57,12 @@ fn bench_refresh_cost_by_conversation_size() {
         // render cold：BlockCache 空（冷启动 / resize 成本）
         let mut renderer = OutputDocumentRenderer::default();
         let t = Instant::now();
-        let _ = renderer.render_model_document(&vm, 100, 100, 0, crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal());
+        let _ = renderer.render_model_document(&vm, 100, 100, 0, crate::tui::render::output::spacing::MarkdownSpacingPolicy::default());
         let render_cold_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         // render warm：BlockCache 命中、仅 frame 变（动画 tick 成本：遍历+gutter+clone+trim）
         let t = Instant::now();
-        let _ = renderer.render_model_document(&vm, 100, 100, 1, crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal());
+        let _ = renderer.render_model_document(&vm, 100, 100, 1, crate::tui::render::output::spacing::MarkdownSpacingPolicy::default());
         let render_warm_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         println!(

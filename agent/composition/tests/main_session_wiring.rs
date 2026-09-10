@@ -464,6 +464,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             reasoning: false,
             reasoning_effort: None,
         },
+        runtime::SessionModelSlot::new(),
     );
 
     struct NoopRunner;

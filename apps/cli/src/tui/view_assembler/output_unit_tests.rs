@@ -9,8 +9,12 @@ use crate::tui::view_model::{OutputBlockKind, SemanticStyle, ToolSemanticStatus}
 
 fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallBlockView {
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "run command".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "run command".to_string(),
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-status"),
@@ -63,8 +67,12 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
     // 不应把完整带行号文件内容刷出（看起来像 LLM 正文），应显示工具摘要，
     // 且颜色为 Success（绿）而非 Warning（橙）。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "x".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "x".to_string(),
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -109,8 +117,12 @@ fn test_non_embedded_tool_result_uses_summary() {
     // 非嵌入路径防御性测试：正常流程中 tool result 总是被嵌入，
     // 此处验证 assembler 不会将嵌入式结果泄漏为 DiagnosticNotice。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "search".to_string(),
     });
     conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -158,8 +170,12 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
     // OrphanToolResult 路径：tool result 在 tool call 之前到达。
     // 验证完整 output 不被原样透传/截断刷出，而是走工具摘要（#87）。
     let mut conversation = ConversationModel::default();
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage {
+        text: "search".to_string(),
     });
     let output = (1..=100)
         .map(|i| format!("line {i}"))

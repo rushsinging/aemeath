@@ -301,7 +301,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - stdin 使用结构化 JSON；**stdin 为空时使用 `/dev/null`，不创建空管道**（脚本内后台 job 继承管道读端会阻塞其自身读 stdin 的路径）；
 - stdout/stderr 分别有内存字节上限；达到上限后继续 drain 管道以避免反压死锁，超限部分不进入模型窗口；Storage spill 由独立后续能力承接；
 - timeout/cancel/IO 故障使用同一完整 deadline 与回收路径；
-- Unix 下每次执行创建独立进程组，回收协议固定为进程组 `TERM → grace → KILL`，返回前必须 `wait` 直接子进程；`wait` 返回后必须探测进程组残留并回收——脚本内 `&` 后台 job 若未退出会持续持有 stdout/stderr 管道写端（阻塞 drain EOF、推迟完成）并最终成为孤儿，正常返回路径**NEVER** 跳过进程组残留回收；
+- Unix 下每次执行创建独立 session（直接 child 的 `PID = PGID = SID`，无父控制终端），回收协议固定为进程组 `TERM → grace → KILL`，返回前必须 `wait` 直接子进程；`wait` 返回后必须探测进程组残留并回收——脚本内 `&` 后台 job 若未退出会持续持有 stdout/stderr 管道写端（阻塞 drain EOF、推迟完成）并最终成为孤儿，正常返回路径**NEVER** 跳过进程组残留回收；
 - Windows/non-Unix 当前**不支持 Hook command execution**：ProcessDriver 必须在启动命令前返回 typed `Unsupported`，Dispatcher 将其发布为单次 `ExecutionFailed` 且不重试；**NEVER** 用仅杀直接 child 的降级执行伪造受管回收；
 - Windows CI 只证明 non-Unix unsupported 分支持续可编译且 typed 契约可执行，**NEVER** 将该结果描述为 Windows Hook command support；
 - Hook 输出的 updated input 必须由调用方重新执行 schema/Policy 校验；

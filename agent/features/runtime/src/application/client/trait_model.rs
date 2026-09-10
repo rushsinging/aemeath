@@ -28,7 +28,7 @@ pub(crate) async fn build_provider_binding_for_switch(
     build_provider_binding_from_runtime_model(runtime_model, &snapshot, None, factory)
 }
 
-fn build_provider_binding_from_runtime_model(
+pub(crate) fn build_provider_binding_from_runtime_model(
     runtime_model: share::config::models::ResolvedRuntimeModel,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     base_url_override: Option<&str>,
@@ -94,6 +94,7 @@ fn build_provider_binding_from_runtime_model(
         display_name: display,
         context_window: resolved_model.model.context_window,
         reasoning_active: Some(requested_reasoning != provider::ReasoningLevel::Off),
+        reasoning_level: Some(requested_reasoning),
     };
 
     Ok((binding, result))

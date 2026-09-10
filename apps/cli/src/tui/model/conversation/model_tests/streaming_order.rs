@@ -1,9 +1,11 @@
 #[test]
 fn test_conversation_streams_text_and_thinking_into_blocks() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "hello".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "hello".to_string() });
     model.apply(ThinkingText {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -28,9 +30,11 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
 #[test]
 fn test_conversation_starts_new_thinking_block_after_block_complete() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "inspect state".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "inspect state".to_string() });
     model.apply(ThinkingText {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -62,9 +66,11 @@ fn test_conversation_starts_new_thinking_block_after_block_complete() {
 #[test]
 fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "check docs".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "check docs".to_string() });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -122,9 +128,11 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
 #[test]
 fn test_conversation_keeps_tool_after_completed_assistant_text() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "check docs".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "check docs".to_string() });
     model.apply(AssistantText {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -183,9 +191,11 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
 #[test]
 fn test_conversation_places_tool_result_after_late_bound_tool_call() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read docs".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read docs".to_string() });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),
@@ -243,9 +253,11 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
 #[test]
 fn test_conversation_keeps_tool_result_after_existing_tool_call() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "read docs".to_string(),
-    });
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage { text: "read docs".to_string() });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
         run_id: super::ids::ChatRunId::new("turn-1"),

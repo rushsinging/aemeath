@@ -9,11 +9,13 @@ pub struct LocalImage {
 
 /// #567 S10：TUI 本地读取剪贴板图片（macOS osascript）
 pub async fn read_image() -> Result<LocalImage, String> {
-    // macOS: 使用 pngpaste 或 osascript 读取剪贴板图片
-    let output = Command::new("pngpaste")
-        .arg("-")
+    let mut command = Command::new("pngpaste");
+    command.arg("-");
+    utils::configure_std_noninteractive(&mut command)
+        .map_err(|error| format!("pngpaste 进程隔离失败: {error}"))?;
+    let output = command
         .output()
-        .map_err(|e| format!("pngpaste 启动失败: {e}"))?;
+        .map_err(|error| format!("pngpaste 启动失败: {error}"))?;
     if !output.status.success() {
         return Err(format!(
             "pngpaste 失败: {}",
@@ -28,11 +30,11 @@ pub async fn read_image() -> Result<LocalImage, String> {
 
 /// #567 S10：TUI 本地处理图片文件
 pub fn process_image_file(path: &str) -> Result<LocalImage, String> {
-    let data = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let data = std::fs::read(path).map_err(|error| format!("读取文件失败: {error}"))?;
     let media_type = match std::path::Path::new(path)
         .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_lowercase())
         .as_deref()
     {
         Some("png") => "image/png",
@@ -52,20 +54,23 @@ pub fn copy_text(text: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
+    let mut command = Command::new("pbcopy");
+    command.stdin(Stdio::piped());
+    utils::configure_std_noninteractive(&mut command)
+        .map_err(|error| format!("无法隔离剪贴板命令 pbcopy：{error}"))?;
+    let mut child = command
         .spawn()
-        .map_err(|err| format!("无法启动剪贴板命令 pbcopy：{err}"))?;
+        .map_err(|error| format!("无法启动剪贴板命令 pbcopy：{error}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(text.as_bytes())
-            .map_err(|err| format!("写入剪贴板失败：{err}"))?;
+            .map_err(|error| format!("写入剪贴板失败：{error}"))?;
     }
 
     let status = child
         .wait()
-        .map_err(|err| format!("等待剪贴板命令失败：{err}"))?;
+        .map_err(|error| format!("等待剪贴板命令失败：{error}"))?;
     if status.success() {
         Ok(())
     } else {
@@ -74,22 +79,5 @@ pub fn copy_text(text: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_copy_text_empty_is_ok() {
-        assert!(copy_text("").is_ok());
-    }
-
-    #[test]
-    fn test_copy_text_command_failure_returns_chinese_error() {
-        let err = copy_text("测试").err();
-
-        if cfg!(target_os = "macos") {
-            assert!(err.is_none() || err.unwrap().contains("剪贴板"));
-        } else {
-            assert!(err.unwrap().contains("无法启动剪贴板命令 pbcopy"));
-        }
-    }
-}
+#[path = "clipboard_tests.rs"]
+mod tests;

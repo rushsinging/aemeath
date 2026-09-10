@@ -2,7 +2,6 @@
 pub enum InputMode {
     #[default]
     Normal,
-    PromptAnswer,
     Completion,
 }
 
@@ -13,11 +12,6 @@ mod tests {
     #[test]
     fn test_input_mode_default_is_normal() {
         assert_eq!(InputMode::default(), InputMode::Normal);
-    }
-
-    #[test]
-    fn test_input_mode_prompt_answer_is_distinct() {
-        assert_ne!(InputMode::PromptAnswer, InputMode::Normal);
     }
 
     #[test]

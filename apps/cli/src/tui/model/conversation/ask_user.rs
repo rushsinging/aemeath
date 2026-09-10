@@ -110,25 +110,6 @@ impl ConversationModel {
         })
     }
 
-    /// 获取当前激活 slot 的全部选项文本。
-    pub fn ask_user_batch_active_options(&self) -> Option<Vec<String>> {
-        self.timeline.items().iter().find_map(|item| {
-            if let OutputTimelineItem::AskUserBatch {
-                slots,
-                active_index,
-                completion: AskUserCompletion::Active,
-                ..
-            } = item
-            {
-                slots
-                    .get(*active_index)
-                    .map(|slot| slot.options.iter().map(|o| o.title.clone()).collect())
-            } else {
-                None
-            }
-        })
-    }
-
     /// 读取当前 AskUserBatch 块的交互状态快照（无块时返回 None）。
     pub fn ask_user_snapshot(&self) -> Option<AskUserSnapshot> {
         self.timeline.items().iter().find_map(|item| {

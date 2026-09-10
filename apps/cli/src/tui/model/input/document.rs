@@ -50,12 +50,9 @@ impl InputDocument {
         self.image_spans.clear();
     }
 
-    pub fn move_cursor(&mut self, cursor: usize) {
-        self.cursor = clamp_to_char_boundary(&self.buffer, cursor.min(self.buffer.len()));
-    }
-
     /// 用字符索引（char index）设置光标，自动转为字节位置
     /// textarea 的光标列号是字符索引，模型需要字节位置
+    #[cfg(test)]
     pub fn set_cursor_col(&mut self, col: usize) {
         let byte_pos = self
             .buffer
@@ -64,6 +61,12 @@ impl InputDocument {
             .map(|(idx, _)| idx)
             .unwrap_or(self.buffer.len());
         self.move_cursor(byte_pos);
+    }
+
+    /// 测试脚手架：绝对位置光标设置。生产光标移动经相对方向 intent。
+    #[cfg(test)]
+    pub fn move_cursor(&mut self, cursor: usize) {
+        self.cursor = cursor.min(self.buffer.len());
     }
 
     pub fn move_left(&mut self) {
@@ -135,16 +138,6 @@ impl InputDocument {
         self.delete_range(start, end);
     }
 
-    pub fn delete_forward(&mut self) {
-        if self.cursor >= self.buffer.len() {
-            return;
-        }
-        let start = self.cursor;
-        self.move_right();
-        let end = self.cursor;
-        self.delete_range(start, end);
-    }
-
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.cursor = 0;
@@ -156,6 +149,7 @@ impl InputDocument {
         self.buffer.clone()
     }
 
+    #[cfg(test)]
     pub fn expand_copied_text(&self) -> String {
         if self.copied_text_spans.is_empty() {
             return self.buffer.clone();
@@ -255,18 +249,9 @@ impl InputDocument {
     }
 
     /// 光标所在行号（从 0 开始）
+    #[cfg(test)]
     pub fn cursor_row(&self) -> usize {
         self.buffer[..self.cursor].matches('\n').count()
-    }
-
-    /// 光标在当前行中的字节偏移（不含前面的换行符）
-    pub fn cursor_col_byte_offset(&self) -> usize {
-        let before_cursor = &self.buffer[..self.cursor];
-        if let Some(pos) = before_cursor.rfind('\n') {
-            self.cursor - pos - 1
-        } else {
-            self.cursor
-        }
     }
 
     /// 光标在当前行中的字符列号（从 0 开始）
@@ -277,14 +262,6 @@ impl InputDocument {
         } else {
             before_cursor.chars().count()
         }
-    }
-
-    /// 总行数（空 buffer 为 1）
-    pub fn line_count(&self) -> usize {
-        if self.buffer.is_empty() {
-            return 1;
-        }
-        self.buffer.matches('\n').count() + 1
     }
 
     /// 光标是否在第一行

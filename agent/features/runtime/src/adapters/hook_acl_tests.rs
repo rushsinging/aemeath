@@ -39,6 +39,8 @@ fn exec(
         exit_code,
         stdout: stdout.to_string(),
         stderr: stderr.to_string(),
+        stdout_file: None,
+        stderr_file: None,
         duration,
     }
 }
@@ -817,6 +819,8 @@ fn dispatch_round_trips_directive_and_executions_together() {
                     exit_code: Some(2),
                     stdout: String::new(),
                     stderr: "no".to_string(),
+                    stdout_file: None,
+                    stderr_file: None,
                     duration: Duration::from_millis(3),
                 },
                 RuntimeHookExecution {
@@ -825,6 +829,8 @@ fn dispatch_round_trips_directive_and_executions_together() {
                     exit_code: Some(0),
                     stdout: "{}".to_string(),
                     stderr: String::new(),
+                    stdout_file: None,
+                    stderr_file: None,
                     duration: Duration::from_millis(4),
                 },
             ],

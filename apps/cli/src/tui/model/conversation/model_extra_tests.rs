@@ -11,8 +11,12 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 #[test]
 fn test_append_user_message_pushes_block_without_new_chat() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "ask".to_string(),
+    model.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.apply(AppendUserMessage {
+        text: "ask".to_string(),
     });
     let chats_before = model.chats.len();
     let active_before = model.active_chat_id.clone();
@@ -67,9 +71,13 @@ fn test_append_user_message_empty_text_still_creates_block() {
 #[test]
 fn test_conversation_reset_clears_all_blocks() {
     let mut model = ConversationModel::default();
-    model.apply(StartChat {
-        submission: "hello".to_string(),
-    });
+    model.apply(
+        crate::tui::model::conversation::intent::ConversationIntent::StartChat(
+            crate::tui::model::conversation::intent::StartChat {
+                submission: "hello".to_string(),
+            },
+        ),
+    );
     model.apply(AppendSystemMessage {
         text: "note".to_string(),
     });

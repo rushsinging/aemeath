@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 config = { path = "../config" }
 provider = { path = "../provider", features = ["test-harness"] }
 tools = { path = "../tools", features = ["test-harness"] }

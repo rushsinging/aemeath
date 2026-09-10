@@ -1,86 +1,12 @@
 use super::*;
 use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::conversation::intent::{
-    ConfirmInteraction, ConversationIntent, ShowInteraction, StartChat, SyncQueuedSubmissions,
-    UpdateInteractionDraft,
-};
-use crate::tui::model::conversation::interaction::{
-    InteractionBody, InteractionDraftAction, InteractionRequest, UiInteractionRequestId, UiRunId,
-    UiStuckDiagnostic,
-};
-use crate::tui::model::diagnostic::intent::DiagnosticIntent;
-use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
+use crate::tui::model::conversation::intent::{ConversationIntent, SyncQueuedSubmissions};
+
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 use crate::tui::update::intent::AgentIntent;
-
-#[test]
-fn interaction_confirmation_marks_output_dirty_and_emits_reply_effect() {
-    let mut model = TuiModel::default();
-    let request_id = UiInteractionRequestId::from("request-1");
-    reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::ShowInteraction(ShowInteraction {
-            request: InteractionRequest {
-                request_id: request_id.clone(),
-                run_id: UiRunId::from("run-1"),
-                tool_call_id: None,
-                body: InteractionBody::HardPause(UiStuckDiagnostic {
-                    reason: "等待确认".to_string(),
-                    recent_actions: Vec::new(),
-                }),
-            },
-        })),
-    );
-    reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::UpdateInteractionDraft(
-            UpdateInteractionDraft {
-                request_id: request_id.clone(),
-                action: InteractionDraftAction::ContinueHardPause,
-            },
-        )),
-    );
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::ConfirmInteraction(ConfirmInteraction {
-            request_id,
-        })),
-    );
-
-    assert!(result.dirty.output);
-    assert!(matches!(
-        result.effects.as_slice(),
-        [Effect::ReplyInteraction { reply: crate::tui::model::conversation::interaction::UiInteractionReply::ContinueHardPause, .. }, Effect::RequestRender]
-            | [Effect::RequestRender, Effect::ReplyInteraction { reply: crate::tui::model::conversation::interaction::UiInteractionReply::ContinueHardPause, .. }]
-    ));
-}
-
-#[test]
-fn conversation_intent_starts_chat_and_marks_output_dirty() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Conversation(ConversationIntent::StartChat(StartChat {
-            submission: "hello".to_string(),
-        })),
-    );
-
-    assert_eq!(model.conversation.chats.len(), 1);
-    assert!(result.dirty.output);
-    assert_eq!(
-        result
-            .effects
-            .iter()
-            .filter(|effect| matches!(effect, Effect::RequestRender))
-            .count(),
-        1
-    );
-}
 
 #[test]
 fn input_intent_marks_only_input_dirty() {
@@ -204,23 +130,6 @@ fn matching_workspace_metadata_marks_status_without_triggering_metadata_effect()
         .effects
         .iter()
         .any(|effect| matches!(effect, Effect::ResolveWorkspaceMetadata { .. })));
-}
-
-#[test]
-fn diagnostic_intent_marks_status_and_dialog_dirty() {
-    let mut model = TuiModel::default();
-
-    let result = reduce_intent(
-        &mut model,
-        AgentIntent::Diagnostic(DiagnosticIntent::RecordNotice {
-            severity: DiagnosticSeverity::Warning,
-            message: "warning".to_string(),
-        }),
-    );
-
-    assert_eq!(model.diagnostic.notices.len(), 1);
-    assert!(result.dirty.status);
-    assert!(result.dirty.dialog);
 }
 
 #[test]

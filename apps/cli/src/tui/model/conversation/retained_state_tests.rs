@@ -1,7 +1,5 @@
 use super::ids::{ChatId, ChatRunId, ToolCallId};
-use super::intent::{
-    ConversationIntent, RecordAgentActivities, RecordSubRunActivity, ToolCallStart,
-};
+use super::intent::{ConversationIntent, RecordSubRunActivity, ToolCallStart};
 use super::model::ConversationModel;
 use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
 
@@ -66,18 +64,16 @@ fn retained_state_snapshot_separates_history_from_transient_state() {
         index: 0,
     }));
     for index in 0..3 {
-        model.apply(ConversationIntent::RecordAgentActivities(
-            RecordAgentActivities {
-                chat_id: chat_id.clone(),
-                run_id: run_id.clone(),
-                tool_id: tool_id.clone(),
-                activities: vec![
-                    crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
-                        format!("progress-{index}"),
-                    ),
-                ],
-            },
-        ));
+        model.record_agent_activities(
+            chat_id.clone(),
+            run_id.clone(),
+            tool_id.clone(),
+            vec![
+                crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
+                    format!("progress-{index}"),
+                ),
+            ],
+        );
     }
     let retained = model.retained_state_snapshot();
     assert_eq!(retained.chats, 1);

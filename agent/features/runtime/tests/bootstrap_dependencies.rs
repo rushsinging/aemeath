@@ -79,6 +79,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
             reasoning: false,
             reasoning_effort: None,
         },
+        runtime::SessionModelSlot::new(),
     )
 }
 

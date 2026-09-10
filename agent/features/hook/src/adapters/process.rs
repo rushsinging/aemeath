@@ -1,6 +1,7 @@
 //! Hook 子进程的受管执行边界。
 
 use std::collections::HashMap;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::time::Duration;
@@ -32,6 +33,10 @@ pub(crate) struct ProcessOutput {
     pub stderr: Vec<u8>,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
+    /// 截断发生时保留全量 stdout 的临时文件；未截断为 None。
+    pub stdout_file: Option<PathBuf>,
+    /// 截断发生时保留全量 stderr 的临时文件；未截断为 None。
+    pub stderr_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +72,8 @@ pub(crate) struct ProcessDriver;
 struct BoundedOutput {
     bytes: Vec<u8>,
     truncated: bool,
+    /// 截断发生时保留全量字节的临时文件。
+    spill_file: Option<PathBuf>,
 }
 
 type IoResult = Result<(BoundedOutput, BoundedOutput), ProcessFailure>;
@@ -78,8 +85,6 @@ impl ProcessDriver {
         request: ProcessRequest,
         cancellation: &dyn CancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
-        use std::os::unix::process::CommandExt;
-
         let mut command = Command::new("sh");
         command
             .arg("-c")
@@ -98,7 +103,12 @@ impl ProcessDriver {
             .envs(&request.env)
             // 仅作为 runtime/task 被强制丢弃时的直接 child 兜底；正常路径必须按进程组回收。
             .kill_on_drop(true);
-        command.as_std_mut().process_group(0);
+        utils::configure_tokio_noninteractive(&mut command).map_err(|error| {
+            ProcessFailure::new(
+                ProcessFailureKind::Spawn,
+                format!("隔离 hook 命令进程失败: {error}"),
+            )
+        })?;
 
         let mut child = command.spawn().map_err(|error| {
             ProcessFailure::new(
@@ -159,6 +169,8 @@ impl ProcessDriver {
                     stderr: stderr.bytes,
                     stdout_truncated: stdout.truncated,
                     stderr_truncated: stderr.truncated,
+                    stdout_file: stdout.spill_file,
+                    stderr_file: stderr.spill_file,
                 });
             }
 
@@ -262,6 +274,9 @@ async fn run_io(
     Ok((stdout_result?, stderr_result?))
 }
 
+/// 边读边 tee：内存保留有界缓冲（供 PL / 日志 / preview 消费），一旦发生
+/// 截断就把全部字节（含已保留的前缀）spill 到临时文件——落盘是 hook 输出的
+/// 最后一份完整副本，超限字节不允许丢弃。
 async fn read_bounded(
     mut reader: impl AsyncRead + Unpin,
     limit: usize,
@@ -270,8 +285,10 @@ async fn read_bounded(
     let mut bytes = Vec::with_capacity(limit.min(8192));
     let mut buffer = [0_u8; 8192];
     let mut truncated = false;
+    let mut spill: Option<(PathBuf, std::fs::File)> = None;
     loop {
         let count = reader.read(&mut buffer).await.map_err(|error| {
+            cleanup_spill(&spill);
             ProcessFailure::new(
                 ProcessFailureKind::Io,
                 format!("读取 hook {stream} 失败: {error}"),
@@ -280,11 +297,68 @@ async fn read_bounded(
         if count == 0 {
             break;
         }
+        if truncated {
+            // 已进入 spill 模式：全量字节（含截断前的前缀已补写）只写文件。
+            if let Some((_, file)) = spill.as_mut() {
+                file.write_all(&buffer[..count]) // allow unsafe_text_op: Vec slice (read count)
+                    .map_err(|error| {
+                        cleanup_spill(&spill);
+                        ProcessFailure::new(
+                            ProcessFailureKind::Io,
+                            format!("写入 hook {stream} 全量临时文件失败: {error}"),
+                        )
+                    })?;
+            }
+            continue;
+        }
         let retained = limit.saturating_sub(bytes.len()).min(count);
         bytes.extend_from_slice(&buffer[..retained]); // allow unsafe_text_op: Vec slice (bytes)
-        truncated |= retained < count;
+        if retained < count {
+            truncated = true;
+            match open_spill_file(stream) {
+                Some((path, mut file)) => {
+                    let spilled_prefix = &buffer[..count]; // allow unsafe_text_op: Vec slice (read count)
+                    if let Err(error) = file
+                        .write_all(bytes.as_slice())
+                        .and_then(|_| file.write_all(spilled_prefix).map(|_| ()))
+                    {
+                        let _ = std::fs::remove_file(&path);
+                        return Err(ProcessFailure::new(
+                            ProcessFailureKind::Io,
+                            format!("写入 hook {stream} 全量临时文件失败: {error}"),
+                        ));
+                    }
+                    spill = Some((path, file));
+                }
+                None => {
+                    // 临时目录不可用：退化为旧的丢弃式截断，落盘拿到残本仍优于
+                    // 整个 hook 执行失败。
+                }
+            }
+        }
     }
-    Ok(BoundedOutput { bytes, truncated })
+    Ok(BoundedOutput {
+        bytes,
+        truncated: truncated && spill.is_some(),
+        spill_file: spill.map(|(path, _)| path),
+    })
+}
+
+/// spill 临时文件名前缀；位于系统临时目录，由消费方 move 或删除。
+fn open_spill_file(stream: &'static str) -> Option<(PathBuf, std::fs::File)> {
+    let path = std::env::temp_dir().join(format!(
+        "aemeath-hook-spill-{}-{}.txt",
+        stream,
+        uuid::Uuid::new_v4().simple()
+    ));
+    let file = std::fs::File::create(&path).ok()?;
+    Some((path, file))
+}
+
+fn cleanup_spill(spill: &Option<(PathBuf, std::fs::File)>) {
+    if let Some((path, _)) = spill {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(unix)]

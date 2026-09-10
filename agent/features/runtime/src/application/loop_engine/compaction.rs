@@ -108,7 +108,7 @@ impl CompactionCoordinator {
         execution: &mut RunExecutionState,
         observer: &mut O,
         progress: std::sync::Arc<dyn CompactProgressView>,
-        task_context: Option<String>,
+        task_snapshot: Option<context::compact::CompactTaskSnapshot>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError>
     where
@@ -135,7 +135,7 @@ impl CompactionCoordinator {
                 &request,
                 source_revision,
                 progress,
-                task_context,
+                task_snapshot,
                 cancellation,
             )
             .await

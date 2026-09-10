@@ -7,8 +7,6 @@
 //! the #943 ACL migration; they are retained as DTO reserves and will be
 //! consumed by #1246 / #944 5B.
 
-#![allow(dead_code)]
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiTaskState {
     pub session_id: String,
@@ -219,12 +217,14 @@ pub(crate) struct TuiChatMessage {
 }
 
 impl TuiContentBlock {
+    #[cfg(test)]
     pub(crate) fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 }
 
 impl TuiChatMessage {
+    #[cfg(test)]
     pub(crate) fn user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
@@ -236,6 +236,7 @@ impl TuiChatMessage {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn system_generated_user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
@@ -247,6 +248,7 @@ impl TuiChatMessage {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn skill_request(text: impl Into<String>, payload: TuiSkillRequestMetadata) -> Self {
         Self {
             role: "user".to_string(),
@@ -258,6 +260,7 @@ impl TuiChatMessage {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn hook_notice(text: impl Into<String>, notice: TuiHookNotice) -> Self {
         Self {
             role: "user".to_string(),
@@ -269,6 +272,7 @@ impl TuiChatMessage {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn assistant_text(text: impl Into<String>) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -302,16 +306,6 @@ impl TuiChatMessage {
                 .iter()
                 .any(|block| matches!(block, TuiContentBlock::Text { .. }))
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiClipboardImage {
-    pub(crate) base64: String,
-    pub(crate) media_type: String,
-    pub(crate) final_size: usize,
-    pub(crate) display_path: Option<String>,
-    pub(crate) width: Option<u32>,
-    pub(crate) height: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

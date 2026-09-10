@@ -6,8 +6,8 @@ fn tool_suspension_serde_round_trip_preserves_all_user_interaction_fields() {
         ToolSuspension::UserInteraction(UserInteractionSpec::new(vec![UserQuestion::new(
             "Choose",
             vec![
-                UserOption::title_only("A"),
-                UserOption::new("B", Some("second".to_string())),
+                UserOption::new("A", "first"),
+                UserOption::new("B", "second"),
             ],
             true,
             false,

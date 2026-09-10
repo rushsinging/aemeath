@@ -455,3 +455,198 @@ async fn streaming_tool_results_dropped_on_retry() {
             .collect::<Vec<_>>()
     );
 }
+
+/// 收集一条消息中全部 ToolResult block 的 tool_use_id。
+fn message_tool_result_ids(message: &Message) -> Vec<&str> {
+    message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            share::message::ContentBlock::ToolResult { tool_use_id, .. } => {
+                Some(tool_use_id.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// #1581 根因二：同一次 invoke 内 provider retry——流 1 旁路执行的工具结果
+/// 残留缓冲，流 2 成功后一并 materialize，产出无 tool_use 配对的孤儿 tool_result。
+struct StreamingToolRetryOrphanProvider {
+    call_count: Arc<Mutex<usize>>,
+    recorded_messages: Arc<Mutex<Vec<Vec<Message>>>>,
+}
+
+impl StreamingToolRetryOrphanProvider {
+    fn new() -> Self {
+        Self {
+            call_count: Arc::new(Mutex::new(0)),
+            recorded_messages: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for StreamingToolRetryOrphanProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        let call_num = {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            *count
+        };
+        self.recorded_messages
+            .lock()
+            .unwrap()
+            .push(messages.to_vec());
+        let usage = || {
+            Some(RawUsageSnapshot {
+                input_tokens: Some(10),
+                output_tokens: Some(3),
+                ..RawUsageSnapshot::default()
+            })
+        };
+        if call_num == 1 {
+            // 流 1：完整 ToolCallCompleted（旁路执行已触发），随后流失败触发 retry。
+            let stream = futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_retry_orphan_a".to_string())),
+                    name: "NoopMarker".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: ProviderToolCall {
+                        id: ProviderToolCallId("toolu_retry_orphan_a".to_string()),
+                        name: "NoopMarker".to_string(),
+                        arguments: serde_json::json!({"marker": "orphan-a"}),
+                    },
+                }),
+                InvocationEvent::Failed(ProviderError::retryable(
+                    ProviderErrorKind::Protocol,
+                    "stream broke after tool call",
+                )),
+            ]);
+            Ok(Box::pin(stream))
+        } else if call_num == 2 {
+            // 流 2（retry）：重新发出同参数工具调用并正常完成。
+            let completed_call = ProviderToolCall {
+                id: ProviderToolCallId("toolu_retry_pair_b".to_string()),
+                name: "NoopMarker".to_string(),
+                arguments: serde_json::json!({"marker": "pair-b"}),
+            };
+            let stream = futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
+                    index: 0,
+                    provider_id: Some(ProviderToolCallId("toolu_retry_pair_b".to_string())),
+                    name: "NoopMarker".to_string(),
+                }),
+                InvocationEvent::Delta(InvocationDelta::ToolCallCompleted {
+                    index: 0,
+                    call: completed_call.clone(),
+                }),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::ToolCall(completed_call)],
+                    stop_reason: ProviderStopReason::ToolUse,
+                    usage: usage(),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ]);
+            Ok(Box::pin(stream))
+        } else {
+            // 流 3（工具轮次后的 continuation）：纯文本收尾。
+            Ok(Box::pin(futures::stream::iter(vec![
+                InvocationEvent::Delta(InvocationDelta::Text("turn complete".to_string())),
+                InvocationEvent::Completed(ProviderCompletion {
+                    output: vec![ProviderContentBlock::Text("turn complete".to_string())],
+                    stop_reason: ProviderStopReason::EndTurn,
+                    usage: usage(),
+                    effective_reasoning: ReasoningLevel::Off,
+                }),
+            ])))
+        }
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+/// #1581：retry 后的 continuation 请求历史中，只允许存在与 assistant tool_use
+/// 配对的 tool_result——流 1 失败尝试的旁路结果不得残留为孤儿。
+#[tokio::test(start_paused = true)]
+async fn streaming_tool_retry_discards_stale_round_from_failed_attempt() {
+    let provider = Arc::new(StreamingToolRetryOrphanProvider::new());
+    let recorded = provider.recorded_messages.clone();
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let factory = ::tools::composition::TestCatalogExecutionFactory::new();
+    factory.register(NoopMarkerTool);
+    let tool_ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        Default::default(),
+    );
+    let wired = factory.build(tool_ctx);
+    let _catalog = wired.catalog();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "retry orphan pairing",
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let shell = test_shell_with_catalog(test_hook_port(), wired);
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-streaming-tool-retry-orphan");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    advance_until_retry_condition(
+        "turn complete",
+        std::time::Duration::from_secs(15),
+        || *provider.call_count.lock().unwrap() >= 3,
+    )
+    .await;
+    wait_for_retry_test_condition("Main turn completed", || {
+        sink.events()
+            .iter()
+            .any(|event| event == "DoneWithDuration")
+    })
+    .await;
+    drop(input_tx);
+    run.await.unwrap();
+
+    let recorded = recorded.lock().unwrap().clone();
+    assert_eq!(
+        recorded.len(),
+        3,
+        "expected failed attempt + retry + continuation (3 invocations)"
+    );
+    let continuation_result_ids = recorded[2]
+        .iter()
+        .flat_map(message_tool_result_ids)
+        .collect::<Vec<_>>();
+    assert!(
+        continuation_result_ids.contains(&"toolu_retry_pair_b"),
+        "continuation request must carry the paired retry tool result, got: {continuation_result_ids:?}"
+    );
+    assert!(
+        !continuation_result_ids.contains(&"toolu_retry_orphan_a"),
+        "continuation request must NOT carry the orphaned tool result from the failed attempt, got: {continuation_result_ids:?}"
+    );
+}

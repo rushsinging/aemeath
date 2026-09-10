@@ -41,7 +41,6 @@ fn render_text_lines(block_id: &str, text: &str, semantic_style: SemanticStyle) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::render::output::blocks::separator::render_separator;
 
     #[test]
     fn test_diagnostic_error_uses_error_color() {
@@ -83,13 +82,5 @@ mod tests {
 
         assert_eq!(block.lines.len(), 1);
         assert_eq!(block.lines[0].plain, "plain");
-    }
-
-    #[test]
-    fn test_separator_emits_blank_line() {
-        let block = render_separator("sep-0");
-
-        assert_eq!(block.lines.len(), 1);
-        assert_eq!(block.lines[0].plain, "");
     }
 }

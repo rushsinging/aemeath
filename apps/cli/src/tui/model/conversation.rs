@@ -23,7 +23,6 @@ mod model_extra_tests;
 mod model_tests;
 pub mod notice;
 pub(crate) mod output_view_change;
-pub mod processing_job;
 pub mod queued_submission;
 #[cfg(test)]
 #[path = "conversation/resume_performance_tests.rs"]
@@ -37,7 +36,6 @@ mod resumed_history_tests;
 mod retained_state_tests;
 pub mod runtime_state;
 pub mod status_notice;
-pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;
 pub mod task_status;

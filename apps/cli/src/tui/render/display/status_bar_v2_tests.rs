@@ -49,6 +49,7 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
         },
         runtime: StatusRuntimeViewModel {
             model: Some("zhipu/glm-5.1".to_string()),
+            reasoning_level: Some("high"),
             session_id: Some("019-session".to_string()),
             input_tokens: 12_400,
             output_tokens: 1_800,

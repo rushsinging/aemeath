@@ -6,11 +6,10 @@
 //! Some structs are not yet exercised by production; retained as DTO reserves
 //! for #1246 / #944 5B.
 
-#![allow(dead_code)]
-
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
+use crate::tui::view_model::status::ReasoningLevelView;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UiActivityId(String);
@@ -236,12 +235,6 @@ pub(crate) enum TuiToolCallStatus {
     Running,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiToolCallImage {
-    pub(crate) base64: String,
-    pub(crate) media_type: String,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiRunTerminationReason {
     UserExit,
@@ -310,9 +303,15 @@ pub(crate) enum TuiInteractionBody {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiOptionItem {
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiUserQuestion {
     pub(crate) prompt: String,
-    pub(crate) options: Vec<String>,
+    pub(crate) options: Vec<TuiOptionItem>,
     pub(crate) allow_multi: bool,
 }
 
@@ -681,13 +680,10 @@ pub(crate) enum TuiRuntimeEvent {
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },
-    GraphPhaseChanged {
-        node: String,
-        effort: String,
-        previous: String,
-    },
     ThinkingChanged {
         enabled: bool,
+        /// 切换后的 reasoning 深度（#1616 状态栏直接显示）。
+        level: ReasoningLevelView,
     },
     CommandResultText {
         text: String,
@@ -697,6 +693,8 @@ pub(crate) enum TuiRuntimeEvent {
         display_name: String,
         context_window: usize,
         reasoning_active: Option<bool>,
+        /// 切换后生效的 reasoning 深度（#1616 状态栏直接显示）。
+        reasoning_level: Option<ReasoningLevelView>,
     },
     ContextEstimated {
         estimated_tokens: usize,

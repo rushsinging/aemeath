@@ -5,21 +5,12 @@
 use super::change::ConversationChange;
 use super::intent::*;
 use super::model::ConversationModel;
-use super::processing_job::{ProcessingJob, ProcessingStatus};
-use super::runtime_state::RuntimeState;
-use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
 use super::update::ConversationUpdate;
 
 // ════════════════════════════════════════════════════════════════════
 //  Conversation intent impls
 // ════════════════════════════════════════════════════════════════════
-
-impl ConversationUpdate for StartChat {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.start_chat(self.submission)
-    }
-}
 
 impl ConversationUpdate for ResumeConversation {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
@@ -204,6 +195,26 @@ impl ConversationUpdate for AssistantText {
     }
 }
 
+impl ConversationUpdate for RecordToolStreamingOutput {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
+    }
+}
+
+#[cfg(test)]
+impl ConversationUpdate for StartChat {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.start_chat(self.submission)
+    }
+}
+
+#[cfg(test)]
+impl ConversationUpdate for RecordAgentActivities {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
+    }
+}
+
 impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_thinking_text(self.chat_id, self.run_id, self.text)
@@ -314,17 +325,6 @@ impl ConversationUpdate for RecordSubRunActivity {
     }
 }
 
-impl ConversationUpdate for RecordAgentActivities {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_agent_activities(self.chat_id, self.run_id, self.tool_id, self.activities)
-    }
-}
-impl ConversationUpdate for RecordToolStreamingOutput {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.record_tool_streaming_output(self.chat_id, self.run_id, self.tool_id, self.text)
-    }
-}
-
 impl ConversationUpdate for UpdateAgentMeta {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.update_agent_meta(
@@ -427,24 +427,6 @@ impl ConversationUpdate for ShowInteraction {
     }
 }
 
-impl ConversationUpdate for UpdateInteractionDraft {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.update_interaction_draft(&self.request_id, self.action)
-    }
-}
-
-impl ConversationUpdate for ConfirmInteraction {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.confirm_interaction(&self.request_id)
-    }
-}
-
-impl ConversationUpdate for CancelInteraction {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.cancel_interaction(&self.request_id)
-    }
-}
-
 impl ConversationUpdate for InteractionReplyAccepted {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.accept_interaction_reply(&self.request_id)
@@ -493,66 +475,10 @@ impl ConversationUpdate for RecordUsage {
     }
 }
 
-impl ConversationUpdate for UpdateLastInputTokens {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.usage.last_input_tokens = self.0;
-        vec![ConversationChange::UsageChanged {
-            input_tokens: model.runtime.usage.input_tokens,
-            output_tokens: model.runtime.usage.output_tokens,
-        }]
-    }
-}
-
 impl ConversationUpdate for RecordLiveTps {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.runtime.live_tps = Some(self.tps);
         vec![ConversationChange::LiveTpsChanged { tps: self.tps }]
-    }
-}
-
-impl ConversationUpdate for UpdateTaskStatus {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.task_status = TaskStatusSnapshot {
-            total: self.total,
-            completed: self.completed,
-            in_progress: self.in_progress,
-            lines: std::mem::take(&mut model.runtime.task_status.lines),
-            ..TaskStatusSnapshot::default()
-        };
-        vec![ConversationChange::TaskStatusChanged {
-            total: self.total,
-            completed: self.completed,
-            in_progress: self.in_progress,
-        }]
-    }
-}
-
-impl ConversationUpdate for StartProcessingJob {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.processing_jobs.push(ProcessingJob {
-            id: self.id.clone(),
-            chat_id: self.chat_id,
-            status: ProcessingStatus::Running,
-        });
-        vec![ConversationChange::ProcessingJobChanged { id: self.id }]
-    }
-}
-
-impl ConversationUpdate for FinishProcessingJob {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        if let Some(job) = model
-            .runtime
-            .processing_jobs
-            .iter_mut()
-            .find(|job| job.id == self.id)
-        {
-            job.status = if self.success {
-                ProcessingStatus::Finished
-            } else {
-                ProcessingStatus::Failed
-            };
-        }
-        vec![ConversationChange::ProcessingJobChanged { id: self.id }]
     }
 }
 
@@ -604,17 +530,6 @@ impl ConversationUpdate for SetTransientStatusNotice {
     }
 }
 
-impl ConversationUpdate for SetGraphPhase {
-    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.runtime.graph_phase = self.0.clone();
-        // 非 transient 时同步更新 status_notice
-        if model.runtime.transient_notice_expiry.is_none() {
-            model.runtime.status_notice = RuntimeState::notice_from_phase(self.0.as_deref());
-        }
-        vec![ConversationChange::GraphPhaseChanged]
-    }
-}
-
 impl ConversationUpdate for SyncQueuedSubmissions {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.sync_queued_submissions(self.queued)
@@ -645,7 +560,6 @@ impl ConversationUpdate for ReplaceActivitySnapshot {
 impl ConversationUpdate for ConversationIntent {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         match self {
-            Self::StartChat(s) => s.update(model),
             Self::ResumeConversation(s) => s.update(model),
             Self::AppendUserMessage(s) => s.update(model),
             Self::AssistantText(s) => s.update(model),
@@ -662,8 +576,11 @@ impl ConversationUpdate for ConversationIntent {
             Self::QueueSubmission(s) => s.update(model),
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
-            Self::RecordSubRunActivity(s) => s.update(model),
+            #[cfg(test)]
+            Self::StartChat(s) => s.update(model),
+            #[cfg(test)]
             Self::RecordAgentActivities(s) => s.update(model),
+            Self::RecordSubRunActivity(s) => s.update(model),
             Self::RecordToolStreamingOutput(s) => s.update(model),
             Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
@@ -681,9 +598,6 @@ impl ConversationUpdate for ConversationIntent {
             Self::ConfirmAskUserBatch(s) => s.update(model),
             Self::DismissAskUserBatch(s) => s.update(model),
             Self::ShowInteraction(s) => s.update(model),
-            Self::UpdateInteractionDraft(s) => s.update(model),
-            Self::ConfirmInteraction(s) => s.update(model),
-            Self::CancelInteraction(s) => s.update(model),
             Self::InteractionReplyAccepted(s) => s.update(model),
             Self::InteractionCancelAccepted(s) => s.update(model),
             Self::InteractionReplyRejected(s) => s.update(model),
@@ -692,17 +606,12 @@ impl ConversationUpdate for ConversationIntent {
             Self::ReplaceActivitySnapshot(s) => s.update(model),
             Self::CompleteChat(s) => s.update(model),
             Self::RecordUsage(s) => s.update(model),
-            Self::UpdateLastInputTokens(s) => s.update(model),
             Self::RecordLiveTps(s) => s.update(model),
-            Self::UpdateTaskStatus(s) => s.update(model),
-            Self::StartProcessingJob(s) => s.update(model),
-            Self::FinishProcessingJob(s) => s.update(model),
             Self::ReplaceRuntimeStatus(status) => status.update(model),
             Self::ReplaceTaskState(state) => state.update(model),
             Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),
             Self::SetTransientStatusNotice(s) => s.update(model),
-            Self::SetGraphPhase(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }

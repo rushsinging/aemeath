@@ -56,7 +56,7 @@
         "CompactOperationCompleted", "UserMessagesAdopted", "UserMessagesQueued", "Done", "Run",
         "RunStep", "InteractionRequested", "ToolOutputDelta", "SubRunStarted", "SubRunActivity",
         "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
-        "UserMessagesWithdrawn", "GraphPhaseChanged", "ThinkingChanged", "CommandResultText",
+        "UserMessagesWithdrawn",  "ThinkingChanged", "CommandResultText",
         "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
         "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
         "RuntimeStatusChanged", "TaskStateChanged", "ConfigChanged",
@@ -150,6 +150,6 @@
   ],
   "ack_terminal_compatibility_names": [],
   "tui_container_only_variants": [
-    "Noop", "Error", "Run", "RunStep", "GraphPhaseChanged"
+    "Noop", "Error", "Run", "RunStep"
   ]
 }

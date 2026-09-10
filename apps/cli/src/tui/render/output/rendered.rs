@@ -30,6 +30,7 @@ pub struct RenderCtx {
 }
 
 impl RenderCtx {
+    #[cfg(test)]
     pub const fn for_width(text_width: u16) -> Self {
         Self {
             text_width,
@@ -52,8 +53,6 @@ pub struct LinkSpan {
 pub enum LineAnimation {
     /// 运行中工具首行 gutter 在实心/空心圆之间切换。
     RunningToolMarker,
-    /// 模型流占位首行的 Thinking 点号循环。
-    ThinkingDots,
 }
 
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
@@ -103,6 +102,7 @@ impl RenderedLine {
     }
 
     /// 从纯文本构造渲染行。
+    #[cfg(test)]
     pub fn from_plain(text: impl Into<String>) -> Self {
         let plain = text.into();
         Self {
@@ -235,6 +235,7 @@ impl<'a> Iterator for RenderedLinesInRange<'a> {
 impl ExactSizeIterator for RenderedLinesInRange<'_> {}
 
 impl RenderedDocument {
+    #[cfg(test)]
     pub fn new(blocks: Vec<RenderedBlock>) -> Self {
         let block_line_ends = block_line_ends(&blocks);
         Self {
@@ -259,6 +260,7 @@ impl RenderedDocument {
         self.block_line_ends.last().copied().unwrap_or(0)
     }
 
+    #[cfg(test)]
     pub fn iter_lines(&self) -> impl Iterator<Item = &RenderedLine> {
         self.blocks.iter().flat_map(|block| block.lines.iter())
     }
@@ -349,6 +351,7 @@ impl RenderedDocument {
         self.block_line_ends = block_line_ends(&self.blocks);
     }
 
+    #[cfg(test)]
     pub fn root_group_block_counts(&self) -> Vec<usize> {
         if self.root_group_block_counts.is_empty() {
             vec![1; self.blocks.len()]

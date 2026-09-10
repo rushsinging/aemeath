@@ -43,7 +43,7 @@ struct MemorySuggestion {                // Reflection 产出的候选记忆（V
 }
 ```
 
-MemorySuggestion 是 **Reflection 的产出物**，不是 MemoryEntry——它还没有 id、created_at、accessed_at。apply 时转换为 MemoryEntry（生成 UUIDv7 + 填充时间戳 + source = Llm）写入。
+MemorySuggestion 是 **Reflection 的产出物**，不是 MemoryEntry——它还没有 id、created_at、last_confirmed_at。apply 时转换为 MemoryEntry（生成 UUIDv7 + 填充时间戳 + source = Llm）写入。
 
 ## 3. ReflectionOutput
 

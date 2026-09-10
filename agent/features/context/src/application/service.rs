@@ -144,23 +144,42 @@ impl ContextApplicationService {
         let mut blocks = prompt.cacheable;
         blocks.extend(memory.blocks);
         if let Some(summary) = snapshot.active_summary {
-            // #1486 系统护栏：任何来源的 active_summary 注入 system 前都必须
-            // 有界。历史缺陷曾让 summary 膨胀到 92 万字符撑爆 system prompt；
-            // 此处按预算校验，超限只保留关键尾部并告警。
             let budget = crate::domain::token_budget::summary_budget(request.context_size);
-            let summary = if crate::domain::token_budget::estimate_tokens(&summary) > budget {
-                let tail = share::string_idx::slice_tail(
-                    &summary,
-                    crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP,
-                )
-                .to_string();
+            let estimated_tokens = crate::domain::token_budget::estimate_tokens(&summary);
+            let summary = if estimated_tokens > budget {
+                let decoded = crate::domain::compact::CanonicalCompactSummary::decode(&summary)
+                    .map_err(|error| {
+                        ContextPortError::Compact(format!(
+                            "active_summary 超出预算且无法解析为 canonical checkpoint：{error}"
+                        ))
+                    })?;
+                let task_state_companion = decoded.task_state_companion().map(str::to_string);
+                let bounded_checkpoint = decoded
+                    .into_checkpoint()
+                    .degrade_to_budget(budget)
+                    .map_err(|error| {
+                        ContextPortError::Compact(format!(
+                            "active_summary 超出预算且无法安全降级：{error}"
+                        ))
+                    })?;
+                let bounded_summary = match task_state_companion {
+                    Some(companion) => format!(
+                        "{}\n\n## Current Task State\n{companion}",
+                        bounded_checkpoint.render()
+                    ),
+                    None => bounded_checkpoint.render(),
+                };
+                let bounded_tokens = crate::domain::token_budget::estimate_tokens(&bounded_summary);
+                if bounded_tokens > budget {
+                    return Err(ContextPortError::Compact(format!(
+                        "active_summary 结构化降级后仍超出预算：{bounded_tokens} tokens > budget {budget}"
+                    )));
+                }
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "active_summary 超出预算（{} tokens > budget {budget}），截断为 {} chars 尾部",
-                    crate::domain::token_budget::estimate_tokens(&summary),
-                    tail.len(),
+                    "active_summary 超出预算，按 checkpoint 语义降级：{estimated_tokens} -> {bounded_tokens} tokens（预算 {budget}）",
                 );
-                tail
+                bounded_summary
             } else {
                 summary
             };

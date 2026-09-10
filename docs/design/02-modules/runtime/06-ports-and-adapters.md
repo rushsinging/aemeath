@@ -194,8 +194,15 @@ enum InteractionRequestBody {
 
 struct UserQuestion {
     prompt: String,                 // 向用户展示的问题文本
-    options: Vec<String>,           // 可选选项；空 = 自由文本回答
+    options: Vec<OptionItem>,       // 预设选项；协议层 OptionItem 的 description 为 Option，
+                                    // 以兼容历史会话落盘与系统内建自由输入项；
+                                    // 工具入参边界强制 title/description 必填
     allow_multi: bool,              // 是否允许多选
+}
+
+struct OptionItem {
+    title: String,                  // 选项标题
+    description: Option<String>,    // 选项描述（工具入参边界必填）
 }
 
 struct ToolApprovalPrompt {
