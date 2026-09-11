@@ -579,8 +579,8 @@ fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
             .official_sdk_user_agent
             .as_ref()
             .map(|official| official.value),
-        Some("ZCode/3.9.1"),
-        "ZCode 3.9.1 是智谱 Coding Plan 官方客户端，UA 为 ZCode/<appVersion>"
+        Some("ZCode/3.11.2"),
+        "ZCode 3.11.2 是智谱 Coding Plan 官方客户端，UA 为 ZCode/<appVersion>"
     );
 
     // 其余 driver 都没有逐字符可核验的官方客户端 UA：zhipu 普通开放平台的官方

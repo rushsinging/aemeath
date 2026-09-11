@@ -346,15 +346,15 @@ const ZHIPU_CODING_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     }),
     recommended_models: ZHIPU_MODELS,
     api_key_hint: Some("智谱 Coding Plan → API Keys"),
-    // ZCode 3.9.1 是智谱 Coding Plan 的官方桌面客户端。其 `glm/zcode.cjs` 的
+    // ZCode 3.11.2 是智谱 Coding Plan 的官方桌面客户端。其 `glm/zcode.cjs` 的
     // GLM 请求头构造为 `User-Agent: ZCode/${appVersion}`（伴随
     // `X-ZCode-Agent: glm` 与 `X-ZCode-App-Version`）；appVersion 取自应用
-    // Info.plist 的 CFBundleShortVersionString = 3.9.1，因此 UA 逐字符为
-    // `ZCode/3.9.1`。普通 Zhipu 开放平台不是 ZCode 的目标服务，保持 None。
+    // Info.plist 的 CFBundleShortVersionString = 3.11.2，因此 UA 逐字符为
+    // `ZCode/3.11.2`。普通 Zhipu 开放平台不是 ZCode 的目标服务，保持 None。
     official_sdk_user_agent: Some(OfficialSdkUserAgent {
         sdk_name: "zcode",
-        sdk_version: "3.9.1",
-        value: "ZCode/3.9.1",
+        sdk_version: "3.11.2",
+        value: "ZCode/3.11.2",
         evidence_url: "https://open.bigmodel.cn",
         verified_at: VERIFIED_AT_2026_09_10,
     }),

@@ -395,7 +395,7 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
             "0.154.0",
             "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)",
         ),
-        ("ZhipuCodingPlan", "zcode", "3.9.1", "ZCode/3.9.1"),
+        ("ZhipuCodingPlan", "zcode", "3.11.2", "ZCode/3.11.2"),
     ];
 
     for (source, sdk_name, sdk_version, expected_ua) in cases {
