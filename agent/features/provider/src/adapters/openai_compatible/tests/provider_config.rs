@@ -17,7 +17,7 @@ fn custom_user_agent_is_sent_in_openai_headers() {
     let provider = OpenAICompatibleProvider::new_with_user_agent(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.openai.com".to_string()),
         Some("test-model".to_string()),
         8192,
         false,
@@ -42,7 +42,7 @@ fn minimax_provider_uses_max_completion_tokens_field() {
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.minimaxi.com/v1".to_string()),
         Some("MiniMax-M3".to_string()),
         32000,
         true,
@@ -364,7 +364,7 @@ fn openai_provider_uses_scope_max_tokens_in_request_body() {
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.openai.com".to_string()),
         Some("test-model".to_string()),
         32000,
         false,
@@ -390,7 +390,7 @@ fn invocation_scope_requires_non_zero_max_tokens() {
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.openai.com".to_string()),
         Some("test-model".to_string()),
         32000,
         false,
@@ -417,7 +417,7 @@ fn volcengine_provider_uses_max_output_tokens_field() {
     let provider = OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.openai.com".to_string()),
         Some("test-model".to_string()),
         32000,
         false,

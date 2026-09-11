@@ -107,6 +107,9 @@ pub enum Commands {
         limit: usize,
     },
 
+    /// Configure a built-in LLM provider interactively
+    Connect,
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -193,6 +196,12 @@ impl From<Args> for sdk::ChatBootstrapArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_accepts_connect_subcommand_without_run() {
+        let cli = Cli::try_parse_from(["aemeath", "connect"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Connect)));
+    }
 
     #[test]
     fn tui_and_quiet_modes_map_native_stderr_ownership() {

@@ -9,9 +9,24 @@
   },
   "entries": [
     {
+      "id": "policy.repository.projection-naming",
+      "guard": "check-projection-naming.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent"
+      },
+      "classification": "target_capability_policy",
+      "owner": "architecture",
+      "reason": "生产 Rust 标识符必须表达具体目标或用途，禁止用宽泛 Projection/projection 掩盖职责混合",
+      "tracking_issue": 1457,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent repository-wide semantic naming guard",
+      "status": "active"
+    },
+    {
       "id": "policy.composition.cross-bc-construction-ownership",
-      "guard": "check-composition-construction-ownership.sh",
-      "module": "composition",
+      "guard": "check-composition-construction-ownership.sh",      "module": "composition",
       "scope": {
         "kind": "path_prefix",
         "value": "agent/composition/src"

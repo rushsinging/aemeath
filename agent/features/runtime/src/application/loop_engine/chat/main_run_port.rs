@@ -124,6 +124,15 @@ pub(crate) fn make_agent(
             &tools::ToolProfileName::new("main-full"),
         )
         .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
+    let runtime_provider = config::resolve_provider_runtime_for_selection(
+        runtime_context.config_ref().config(),
+        &format!(
+            "{}/{}",
+            runtime_context.provider_ref().model.provider,
+            runtime_context.provider_ref().model.model
+        ),
+        None,
+    );
     Agent {
         catalog,
         execution: runtime_context.tool_execution(),
@@ -149,7 +158,7 @@ pub(crate) fn make_agent(
                     language: language.to_string(),
                 }),
             )
-            .with_user_agent(runtime_context.config_ref().config().user_agent())
+            .with_user_agent(&runtime_provider.user_agent)
             .with_memory_context(Some(session_id.to_string()), Some(session_reminders))
             .with_skill_load_state(
                 tools::SkillLoadScope::main(),

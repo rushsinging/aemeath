@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use context::adapters::CommittedMemoryRetrieveAdapter;
 use context::application::ContextApplicationService;
 use context::domain::session::{
-    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeProjection,
+    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
     SessionHistory,
 };
 use context::domain::{
@@ -71,7 +71,7 @@ fn structured_fake_session() -> FakeSession {
             CommittedRunStep {
                 step_id: normalized_step_id.as_str().to_string(),
                 accepted_input: None,
-                outcome: Some(FinalizedOutcomeProjection {
+                outcome: Some(FinalizedOutcomeRecord {
                     finalize_cause: FinalizeCause::Completed,
                     duration_ms: None,
                     messages: CommittedStepMessages::from(vec![Message {

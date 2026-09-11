@@ -24,6 +24,8 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - UserQuestions、ToolApproval、PlanApproval、HardPause 共用 Runtime 生成的 Interaction request id，并经 SDK / TUI ACL / AgentClient reply command 无损贯穿；TUI **NEVER** 持有 sender、pending waiter 或自生成协议 id
 - Interaction command result 只结束本地交互块；Run 只由 SDK `RunResumed` / `RunCancelling` / `RunCancelled` 等 Runtime 权威事件推进
 - 六 Context 核心字段私有，root reducer 是唯一写入口；ViewAssembler 只读 accessor，ViewState 只持瞬时交互 / 渲染状态
+- Conversation 的结构化状态（runs / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补状态，只约束重叠事实，**NEVER** 假定可完整互相重建
+- Connect 是 pre-chat Config application 用例；TUI 通过通用 Config Form Ratatui renderer 展示 SDK `ConfigFormView`、采集受保护输入并提交带 revision 的类型化 field/action 值，**NEVER** 维护 Connect 专属 stage parser，也 **NEVER** 读取配置/env、维护 Provider Catalog、执行 Probe 或持久化。完整边界见 [Config Connect 设计](../config/02-provider-catalog-and-connect.md)
 - Activity 增量 / 快照经 SDK event → TUI-owned DTO → Intent → root reducer 事实镜像 → ActivitySummaryAssembler 单向消费；revision gap 隐藏不可信摘要并等待 Snapshot 修复，Operational / Diagnostic detail 不进入主状态行
 - Runtime 事件的 Subject + Fact 以 [统一命名规范](../runtime/events/01-naming-conventions.md) 为唯一真相；TUI 第一层保持事实名，第二层才使用 `Replace*` / `Observe*` / `Append*` / `Present*` consumer action；全量映射见 [Runtime 事件索引](../runtime/events/09-event-index.md)
 ### Reflection 展示边界（#899）

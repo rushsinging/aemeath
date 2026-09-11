@@ -26,7 +26,7 @@ fn openai_provider_with_reasoning_config(
     OpenAICompatibleProvider::new(
         config,
         "test-key".to_string(),
-        None,
+        Some("https://api.openai.com".to_string()),
         Some("test-model".to_string()),
         8192,
         false,

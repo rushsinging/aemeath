@@ -440,8 +440,11 @@ name = "config"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
+ "fs2",
+ "futures",
+ "http",
  "log",
- "reqwest",
  "serde_json",
  "sha2",
  "share",
@@ -449,6 +452,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -453,7 +453,7 @@ impl ConfigValidator {
         {
             return Err(ConfigAdapterError::Invalid);
         }
-        if reqwest::header::HeaderValue::from_str(&config.api.user_agent).is_err() {
+        if http::HeaderValue::from_str(&config.api.user_agent).is_err() {
             return Err(ConfigAdapterError::Invalid);
         }
         Ok(())

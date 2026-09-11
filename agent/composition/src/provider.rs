@@ -234,6 +234,175 @@ fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapability {
         .unwrap_or_else(|_| ReasoningCapability::none())
 }
 
+use std::time::Instant;
+
+use config::connect::{
+    ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
+    ProviderProbeResult,
+};
+use futures_util::StreamExt;
+use provider::InvocationEvent;
+use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone)]
+struct ProbeClientSpec {
+    driver: String,
+    api_key: String,
+    base_url: Option<String>,
+    model: String,
+    max_tokens: u32,
+    timeout_secs: u64,
+    user_agent: String,
+}
+
+trait ProbeClientFactory: Send + Sync {
+    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError>;
+}
+
+struct DefaultProbeClientFactory;
+
+impl ProbeClientFactory for DefaultProbeClientFactory {
+    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError> {
+        let client = LlmClient::from_config(LlmConfigOptions {
+            driver: spec.driver,
+            source_key: "connect-probe".to_string(),
+            api_style: None,
+            api_key: spec.api_key,
+            base_url: spec.base_url,
+            model: spec.model,
+            max_tokens: spec.max_tokens,
+            reasoning: false,
+            reasoning_config: None,
+            timeout_secs: spec.timeout_secs,
+            user_agent: Some(spec.user_agent),
+        })
+        .map_err(|_| ProviderError::fatal(ProviderErrorKind::Configuration, "连接测试配置无效"))?;
+        Ok(Arc::new(client))
+    }
+}
+
+pub struct ProviderProbeAdapter {
+    factory: Arc<dyn ProbeClientFactory>,
+}
+
+impl ProviderProbeAdapter {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            factory: Arc::new(DefaultProbeClientFactory),
+        })
+    }
+
+    #[cfg(test)]
+    fn with_factory(factory: Arc<dyn ProbeClientFactory>) -> Self {
+        Self { factory }
+    }
+}
+
+#[async_trait]
+impl ProviderProbePort for ProviderProbeAdapter {
+    async fn probe(
+        &self,
+        request: ProviderProbeRequest,
+    ) -> Result<ProviderProbeResult, ProviderProbeError> {
+        let started = Instant::now();
+        let timeout = request.timeout;
+        let client = self
+            .factory
+            .build(ProbeClientSpec {
+                driver: request.driver.as_str().to_string(),
+                api_key: request.credential.unwrap_or_default(),
+                base_url: Some(request.base_url),
+                model: request.model_id,
+                max_tokens: 1,
+                timeout_secs: timeout.as_secs().max(1),
+                user_agent: request.final_user_agent,
+            })
+            .map_err(map_probe_error)?;
+        let scope = client
+            .invocation_scope(client.model_name(), Some(1), provider::ReasoningLevel::Off)
+            .map_err(|_| ProviderProbeError {
+                kind: ProviderProbeErrorKind::Internal,
+                message: "连接测试初始化失败".to_string(),
+            })?;
+        let messages = [share::message::Message::user("Reply with OK.")];
+        let cancellation = CancellationToken::new();
+        let operation = async {
+            let mut stream = client
+                .invocation_stream(&scope, &[], &messages, &[], &cancellation)
+                .await
+                .map_err(map_probe_error)?;
+            while let Some(event) = stream.next().await {
+                match event {
+                    InvocationEvent::Completed(_) => {
+                        return Ok(ProviderProbeResult {
+                            latency: started.elapsed(),
+                        });
+                    }
+                    InvocationEvent::Failed(error) => return Err(map_probe_error(error)),
+                    InvocationEvent::Delta(_) => {}
+                }
+            }
+            Err(protocol_error())
+        };
+        match tokio::time::timeout(timeout, operation).await {
+            Ok(result) => result,
+            Err(_) => {
+                cancellation.cancel();
+                Err(ProviderProbeError {
+                    kind: ProviderProbeErrorKind::Timeout,
+                    message: "连接测试超时".to_string(),
+                })
+            }
+        }
+    }
+}
+
+fn protocol_error() -> ProviderProbeError {
+    ProviderProbeError {
+        kind: ProviderProbeErrorKind::Protocol,
+        message: "服务响应未包含完成事件".to_string(),
+    }
+}
+
+fn map_probe_error(error: ProviderError) -> ProviderProbeError {
+    let kind = match error.kind {
+        ProviderErrorKind::Cancelled => ProviderProbeErrorKind::Cancelled,
+        ProviderErrorKind::Timeout => ProviderProbeErrorKind::Timeout,
+        ProviderErrorKind::Authentication | ProviderErrorKind::PermissionDenied => {
+            ProviderProbeErrorKind::Authentication
+        }
+        ProviderErrorKind::ModelUnavailable
+        | ProviderErrorKind::ContextTooLong
+        | ProviderErrorKind::InvalidRequest => ProviderProbeErrorKind::Model,
+        ProviderErrorKind::Protocol | ProviderErrorKind::StreamTruncated => {
+            ProviderProbeErrorKind::Protocol
+        }
+        ProviderErrorKind::Network | ProviderErrorKind::UpstreamUnavailable => {
+            ProviderProbeErrorKind::Endpoint
+        }
+        ProviderErrorKind::RateLimited | ProviderErrorKind::Configuration => {
+            ProviderProbeErrorKind::Internal
+        }
+    };
+    let message = match kind {
+        ProviderProbeErrorKind::Cancelled => "连接测试已取消",
+        ProviderProbeErrorKind::Timeout => "连接测试超时",
+        ProviderProbeErrorKind::Authentication => "认证失败",
+        ProviderProbeErrorKind::Endpoint => "服务地址不可用",
+        ProviderProbeErrorKind::Model => "模型不可用",
+        ProviderProbeErrorKind::Protocol => "服务响应协议无效",
+        ProviderProbeErrorKind::Internal => "连接测试失败",
+    };
+    ProviderProbeError {
+        kind,
+        message: message.to_string(),
+    }
+}
+
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "provider_probe_tests.rs"]
+mod probe_tests;

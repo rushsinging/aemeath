@@ -208,8 +208,8 @@ impl CompactModelResolver {
             .map_err(|error| CompactModelResolveError::Selection(error.to_string()))?;
         let (binding, _) = crate::application::client::build_provider_binding_from_runtime_model(
             runtime_model,
-            snapshot.api_timeout_secs(),
-            snapshot.user_agent(),
+            snapshot,
+            None,
             self.factory.as_ref(),
         )
         .map_err(CompactModelResolveError::Selection)?;
