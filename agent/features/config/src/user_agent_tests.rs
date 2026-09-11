@@ -568,7 +568,7 @@ fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
             .as_ref()
             .map(|official| official.value),
         Some(
-            "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)"
+            "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)"
         )
     );
 

@@ -223,8 +223,8 @@ Config domain 的 UA resolver 必须按以下顺序选择第一个非空白且�
 - `value` 必须与该客户端该版本的真实输出逐字符相等。
 - `value` 保持 `&'static str`（`HeaderValue` 含内部可变计数，无法进入 `static` Catalog），发送前由 `OfficialSdkUserAgent::header_value` 解析；解析失败返回 `None` 并继续回退，禁止 panic。
 - **只允许静态可表达的值**：官方客户端 UA 含运行时动态段（操作系统版本、架构、终端标识等）时，**NEVER** 用近似的静态字符串代替，保持 `None` 回退到下一级。
-- 当前覆盖：`Anthropic` ← Claude Code CLI 2.1.267（`claude-cli/2.1.267 (external, sdk-cli)`）；`OpenAI` ← codex CLI 0.153.4。
-- **已记录的偏离**：codex 的 UA 逐字符为 `codex_exec/0.153.4 (<os> <os-version>; <arch>) <terminal> (codex_exec; 0.153.4)`，含操作系统版本、架构与终端标识三个运行时动态段。当前按产品决策固化抓包值，因此**只在同类环境下逐字符吻合**；换 OS / 架构 / 终端后必须重新核验，或改为模板化表达（引入占位符 + 运行时替换）以彻底消除该限制。
+- 当前覆盖：`Anthropic` ← Claude Code CLI 2.1.267（`claude-cli/2.1.267 (external, sdk-cli)`）；`OpenAI` ← codex CLI 0.154.0。
+- **已记录的偏离**：codex 的 UA 逐字符为 `codex_exec/0.154.0 (<os> <os-version>; <arch>) <terminal> (codex_exec; 0.154.0)`，含操作系统版本、架构与终端标识三个运行时动态段。当前按产品决策固化抓包值，因此**只在同类环境下逐字符吻合**；换 OS / 架构 / 终端后必须重新核验，或改为模板化表达（引入占位符 + 运行时替换）以彻底消除该限制。
 
 ### 5.2 全局默认格式
 

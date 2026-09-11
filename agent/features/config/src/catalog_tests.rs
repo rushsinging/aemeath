@@ -392,8 +392,8 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
         (
             "OpenAI",
             "codex-cli",
-            "0.153.4",
-            "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)",
+            "0.154.0",
+            "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)",
         ),
     ];
 

@@ -306,16 +306,16 @@ const OPENAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     }),
     recommended_models: OPENAI_MODELS,
     api_key_hint: Some("OpenAI Dashboard → API keys"),
-    // 本地抓包核验：codex CLI 0.153.4 的 `POST /v1/responses` 发送的 UA 逐字符为
-    // `codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)`。
+    // 本地抓包核验：codex CLI 0.154.0 的 `POST /v1/responses` 发送的 UA 逐字符为
+    // `codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)`。
     //
     // 已知限制：该字符串包含抓包环境的操作系统版本、架构与终端标识，三者都是运行
     // 时动态段。当前按产品决策固化抓包值，只在同类环境下逐字符吻合；换 OS / 架构 /
     // 终端后需要重新核验或改为模板化表达（见设计文档 §5.1.1）。
     official_sdk_user_agent: Some(OfficialSdkUserAgent {
         sdk_name: "codex-cli",
-        sdk_version: "0.153.4",
-        value: "codex_exec/0.153.4 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.153.4)",
+        sdk_version: "0.154.0",
+        value: "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)",
         evidence_url: "https://github.com/openai/codex",
         verified_at: VERIFIED_AT_2026_09_10,
     }),
