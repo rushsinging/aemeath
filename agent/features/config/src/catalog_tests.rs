@@ -395,6 +395,7 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
             "0.154.0",
             "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)",
         ),
+        ("ZhipuCodingPlan", "zcode", "3.9.1", "ZCode/3.9.1"),
     ];
 
     for (source, sdk_name, sdk_version, expected_ua) in cases {
@@ -426,17 +427,10 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
 
 #[test]
 fn catalog_entries_without_official_sdk_user_agent_evidence_stay_absent() {
-    // 官方 SDK 不发送 UA（zhipu），或根本没有官方 SDK 的 Provider 必须保持 None，
-    // 由全局配置与全局默认继续回退。
+    // 官方 SDK 不发送 UA（zhipu 普通开放平台），或根本没有官方 SDK 的 Provider
+    // 必须保持 None，由全局配置与全局默认继续回退。
     for source in [
-        "Zhipu",
-        "ZhipuCodingPlan",
-        "Minimax",
-        "Mimo",
-        "DeepSeek",
-        "LiteLLM",
-        "Agnes",
-        "Ollama",
+        "Zhipu", "Minimax", "Mimo", "DeepSeek", "LiteLLM", "Agnes", "Ollama",
     ] {
         let entry = find_by_source(source).expect("内置 Provider 必须存在");
         assert!(

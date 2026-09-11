@@ -572,8 +572,21 @@ fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
         )
     );
 
-    // 其余 driver 都没有逐字符可核验的官方客户端 UA：zhipu 官方 SDK 不发送 UA，
-    // minimax / mimo / deepseek 等没有官方 SDK。
+    let zhipu_coding_plan =
+        crate::catalog::find_by_source("ZhipuCodingPlan").expect("ZhipuCodingPlan 必须存在");
+    assert_eq!(
+        zhipu_coding_plan
+            .official_sdk_user_agent
+            .as_ref()
+            .map(|official| official.value),
+        Some("ZCode/3.9.1"),
+        "ZCode 3.9.1 是智谱 Coding Plan 官方客户端，UA 为 ZCode/<appVersion>"
+    );
+
+    // 其余 driver 都没有逐字符可核验的官方客户端 UA：zhipu 普通开放平台的官方
+    // SDK 不发送 UA，minimax / mimo / deepseek 等没有官方 SDK。
+    // 注意 `find_by_driver("zhipu")` 的 canonical 条目是普通版 Zhipu（无 UA），
+    // Coding Plan 的 ZCode UA 只按 source 命中。
     for driver in [
         "zhipu", "litellm", "minimax", "mimo", "deepseek", "agnes", "ollama",
     ] {
