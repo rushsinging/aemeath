@@ -768,3 +768,107 @@ fn authoritative_objective_cursor_and_task_snapshot_remove_stale_control_noise()
     assert_eq!(rendered.matches("- Next action:").count(), 1);
     assert!(rendered.contains("- Next action: Verify compatibility."));
 }
+
+/// 复现真实缺陷 #1623：Map 阶段只输出 committed_fact / working_set 时，
+/// 目标必须由原始主用户消息兜底，而不是退化为占位符。
+#[test]
+fn objective_fallback_is_used_when_facts_lack_main_user_objective() {
+    let facts = CompactFactBatch::new(vec![
+        CompactFact::new(
+            1,
+            CompactFactSource::ToolResult,
+            CompactFactKind::CommittedFact,
+            "origin/release/v2.2.0 lacks the segmented-bubble fix.",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            2,
+            CompactFactSource::MainUser,
+            CompactFactKind::WorkingSet,
+            "Diff before/after steer in useChatAPIV2.ts.",
+            None,
+        )
+        .unwrap(),
+    ]);
+
+    let checkpoint = reduce_compact_facts_with_objective_fallback(
+        facts,
+        None,
+        Some("Investigating staging steer / chat-ordering bug"),
+    )
+    .expect("reduce must succeed");
+
+    let rendered = checkpoint.render();
+    assert!(
+        rendered
+            .contains("## Current Objective\n- Investigating staging steer / chat-ordering bug"),
+        "兜底目标必须进入 Current Objective，实际：{rendered}"
+    );
+    assert!(!rendered.contains("Revalidate the latest user objective"));
+    assert!(rendered.contains("Continue —"));
+    assert_eq!(rendered.matches("- Next action:").count(), 1);
+}
+
+/// facts 自带 objective 时优先级最高，兜底不得覆盖它。
+#[test]
+fn facts_objective_takes_precedence_over_objective_fallback() {
+    let facts = CompactFactBatch::new(vec![CompactFact::new(
+        1,
+        CompactFactSource::MainUser,
+        CompactFactKind::Objective,
+        "Keep the facts objective.",
+        None,
+    )
+    .unwrap()]);
+
+    let rendered = reduce_compact_facts_with_objective_fallback(
+        facts,
+        None,
+        Some("Fallback objective that must not win"),
+    )
+    .expect("reduce must succeed")
+    .render();
+
+    assert!(rendered.contains("## Current Objective\n- Keep the facts objective."));
+    assert!(!rendered.contains("Fallback objective that must not win"));
+}
+
+/// 既无 objective fact 也无兜底时，保持既有保守语义（占位符 + Waiting for User）。
+#[test]
+fn missing_objective_without_fallback_keeps_waiting_for_user() {
+    let facts = CompactFactBatch::new(vec![CompactFact::new(
+        1,
+        CompactFactSource::ToolResult,
+        CompactFactKind::CommittedFact,
+        "Some durable evidence.",
+        None,
+    )
+    .unwrap()]);
+
+    let rendered = reduce_compact_facts_with_objective_fallback(facts, None, None)
+        .expect("reduce must succeed")
+        .render();
+
+    assert!(rendered.contains("Revalidate the latest user objective before continuing."));
+    assert!(rendered.contains("Waiting for User"));
+}
+
+/// 空字符串兜底不得被当作有效目标。
+#[test]
+fn blank_objective_fallback_is_ignored() {
+    let facts = CompactFactBatch::new(vec![CompactFact::new(
+        1,
+        CompactFactSource::ToolResult,
+        CompactFactKind::CommittedFact,
+        "Some durable evidence.",
+        None,
+    )
+    .unwrap()]);
+
+    let rendered = reduce_compact_facts_with_objective_fallback(facts, None, Some("   \n  "))
+        .expect("reduce must succeed")
+        .render();
+
+    assert!(rendered.contains("Waiting for User"));
+}

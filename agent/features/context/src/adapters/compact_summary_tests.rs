@@ -467,6 +467,22 @@ fn compact_prompts_require_typed_json_contracts() {
     assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
     assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
     assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
+    // #1623：目标表达与 kind 位置必须显式约束，且修复不得降级 kind 语义。
+    assert!(COMPACT_PROMPT.contains("kind=objective"));
+    assert!(COMPACT_PROMPT.contains("never downgrade an objective"));
+    let repair_request = build_typed_output_repair_request(
+        "map",
+        "{\"facts\":[]}",
+        &crate::domain::CompactGenerationFailure::new(
+            crate::domain::CompactGenerationFailureKind::InvalidSummary,
+            "unknown field `resume_candidate`",
+        ),
+    );
+    let repair_text = repair_request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+    assert!(repair_text.contains("MUST NOT change a fact's kind semantics"));
     for prompt in [COMPACT_PROMPT, COMPACT_REFRESH_PROMPT] {
         assert!(!prompt.contains("<summary>"));
         assert!(!prompt.contains("## Immutable Constraints"));
@@ -2115,4 +2131,150 @@ fn fallback_preserves_markdown_control_lines_without_panicking() {
     assert!(summary.contains("来源与身份"));
     assert!(summary.contains("用户正文中的示例"));
     assert_eq!(summary.matches("\n## Current Task State\n").count(), 0);
+}
+
+// ── #1623：Map 阶段遗漏 objective 时的主用户目标兜底 ──
+
+#[test]
+fn latest_main_user_request_prefers_last_real_user_message() {
+    let messages = vec![
+        Message::user("先看仓库状态"),
+        Message::system_generated_user("system reminder must be ignored"),
+        Message::user("Investigate the staging steer chat-ordering bug"),
+    ];
+
+    assert_eq!(
+        latest_main_user_request(&messages).as_deref(),
+        Some("Investigate the staging steer chat-ordering bug")
+    );
+}
+
+#[test]
+fn latest_main_user_request_ignores_non_user_messages_and_sources() {
+    let messages = vec![
+        Message::system_generated_user("system reminder"),
+        assistant_text("assistant report"),
+    ];
+
+    assert_eq!(latest_main_user_request(&messages), None);
+}
+
+fn assistant_text(text: impl Into<String>) -> Message {
+    Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text { text: text.into() }],
+        metadata: None,
+    }
+}
+
+#[test]
+fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
+    let long_request = "x".repeat(500);
+    let messages = vec![Message::user("   "), Message::user(long_request)];
+
+    let extracted = latest_main_user_request(&messages).expect("must extract the long request");
+
+    assert_eq!(extracted.chars().count(), 200);
+}
+
+/// 构造只包含 working_set 的 facts，复现真实缺陷中 map 阶段遗漏 objective 的输出。
+struct FactsWithoutObjective;
+
+#[async_trait::async_trait]
+impl CompactGenerator for FactsWithoutObjective {
+    async fn generate(
+        &self,
+        request: Vec<Message>,
+        _cancel: &CancellationToken,
+    ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        let text = request
+            .first()
+            .map(Message::text_content)
+            .unwrap_or_default();
+        if text.contains("<unprotected_checkpoint_details>") {
+            return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+        }
+        if text.contains("<compact_facts>") {
+            return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+        }
+        Ok(CompactGenerationOutput::from(
+            r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
+        ))
+    }
+}
+
+fn messages_with_leading_objective(objective: &str) -> Vec<Message> {
+    let mut messages = vec![Message::user(objective)];
+    for index in 0..24 {
+        messages.push(assistant_text(format!("history turn {index}")));
+    }
+    messages
+}
+
+/// #1623：facts 遗漏 objective 时，最终 checkpoint 仍保留主用户目标。
+#[tokio::test]
+async fn compact_keeps_main_user_objective_when_facts_omit_it() {
+    let objective = "Investigate the staging steer chat-ordering bug for the Studio project";
+    let result = compact_messages_with_llm(
+        &messages_with_leading_objective(objective),
+        None,
+        200_000,
+        Some(&FactsWithoutObjective),
+        None,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("compact must produce a result");
+
+    assert!(
+        result
+            .summary
+            .contains(&format!("## Current Objective\n- {objective}")),
+        "目标必须被兜底保留，实际 summary 摘要：{}",
+        result.summary.chars().take(320).collect::<String>()
+    );
+    assert!(!result
+        .summary
+        .contains("Revalidate the latest user objective"));
+    assert!(result.summary.contains("Continue —"));
+}
+
+/// #1623：上一版 checkpoint 的占位符目标不得向下传播。
+#[tokio::test]
+async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user_request() {
+    let placeholder_previous = VALID_CHECKPOINT
+        .replace(
+            "- Continue the compact checkpoint work.",
+            "- Revalidate the latest user objective before continuing.",
+        )
+        .replace(
+            "Continue — checkpoint normalization remains.",
+            "Waiting for User — no active main-user objective could be established.",
+        );
+    let objective = "Investigate the staging steer chat-ordering bug for the Studio project";
+
+    let result = compact_messages_with_llm(
+        &messages_with_leading_objective(objective),
+        Some(&placeholder_previous),
+        200_000,
+        Some(&FactsWithoutObjective),
+        None,
+        None,
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("compact must produce a result");
+
+    assert!(
+        result
+            .summary
+            .contains(&format!("## Current Objective\n- {objective}")),
+        "占位符不得传播，实际 summary 摘要：{}",
+        result.summary.chars().take(320).collect::<String>()
+    );
+    assert!(!result
+        .summary
+        .contains("Revalidate the latest user objective"));
+    assert!(result.summary.contains("Continue —"));
 }

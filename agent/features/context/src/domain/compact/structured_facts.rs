@@ -640,12 +640,25 @@ fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshot) -> bool {
 pub fn reduce_compact_facts(
     batch: CompactFactBatch,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
-    reduce_compact_facts_with_task_snapshot(batch, None)
+    reduce_compact_facts_with_objective_fallback(batch, None, None)
 }
 
 pub fn reduce_compact_facts_with_task_snapshot(
     batch: CompactFactBatch,
     task_snapshot: Option<&CompactTaskSnapshot>,
+) -> Result<ContinuationCheckpoint, CheckpointError> {
+    reduce_compact_facts_with_objective_fallback(batch, task_snapshot, None)
+}
+
+/// 将 typed facts 归并为 canonical checkpoint。
+///
+/// `objective_fallback` 是 facts 中不存在 main-user objective 时的确定性兜底目标，
+/// 由调用方从**原始主用户消息**派生（LLM 分类可能缺失或降级，见 #1623）。
+/// 空白值视为缺失，此时保持既有保守语义（占位符 + `Waiting for User`）。
+pub fn reduce_compact_facts_with_objective_fallback(
+    batch: CompactFactBatch,
+    task_snapshot: Option<&CompactTaskSnapshot>,
+    objective_fallback: Option<&str>,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     let mut indexed_facts = batch
         .into_facts()
@@ -792,11 +805,29 @@ pub fn reduce_compact_facts_with_task_snapshot(
         }
     }
 
+    // #1623：facts 未提供 main-user objective 时，用原始主用户消息派生的目标兜底；
+    // 只有 facts 与兜底都拿不到目标时，才允许退化为占位符与 Waiting for User。
+    let recovered_objective = if current_objective.is_none() {
+        objective_fallback
+            .map(str::trim)
+            .filter(|objective| !objective.is_empty())
+            .map(as_fact_bullet)
+    } else {
+        None
+    };
+    let objective_recovered_from_messages = recovered_objective.is_some();
+    if let Some(recovered) = recovered_objective {
+        current_objective = Some(recovered);
+    }
+    let objective_missing = current_objective.is_none();
     let current_objective = current_objective
         .unwrap_or_else(|| "- Revalidate the latest user objective before continuing.".to_string());
+    // 兜底恢复目标时，唯一 Next action 就是继续该目标；仍然 NEVER 依赖占位符文本判定状态。
+    let next_action = next_action
+        .or_else(|| objective_recovered_from_messages.then(|| current_objective.clone()));
     let next_action = next_action
         .unwrap_or_else(|| "Revalidate the latest user objective before continuing.".to_string());
-    let status = if current_objective.contains("Revalidate the latest user objective") {
+    let status = if objective_missing {
         ContinuationStatus::WaitingForUser
     } else {
         ContinuationStatus::Continue
