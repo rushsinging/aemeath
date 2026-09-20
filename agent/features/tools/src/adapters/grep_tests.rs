@@ -177,6 +177,10 @@ fn grep_declares_cooperative_cancellation() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    coverage,
+    ignore = "llvm-cov 下 spawn 真实 rg + 进程组清理会触发 CI runner 取消 job；普通 cargo test 保留执行（与 bash 取消测试同一模式）"
+)]
 async fn grep_returns_cancelled_result_when_signal_already_cancelled() {
     // 取消 signal 已置位时，Grep 不得返回搜索成功结果，必须返回可见的取消文本。
     let dir = make_match_dir(3).await;
@@ -202,7 +206,7 @@ async fn grep_returns_cancelled_result_when_signal_already_cancelled() {
 }
 
 #[tokio::test]
-#[ignore = "spawn 真实 rg 子进程；与 CI runner 进程管理交互的风险同 bash 取消测试（#1508），本地验证"]
+#[ignore = "spawn 真实 rg 子进程；与 CI runner 进程管理交互的风险同 bash 取消测试，本地验证"]
 async fn grep_running_search_observes_cancellation_and_terminates_child() {
     // 运行中取消：搜索必须在有界时间内收敛为取消结果，子进程不得继续存活。
     let dir = make_match_dir(3).await;
