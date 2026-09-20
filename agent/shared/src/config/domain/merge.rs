@@ -989,7 +989,8 @@ mod tests {
         .unwrap();
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
-        let policy = snapshot.tool_result_policy();
+        // 大窗口（1M）下比例收紧不生效，验证的就是 patch 后的原始策略值
+        let policy = snapshot.tool_result_policy(1_000_000);
 
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
