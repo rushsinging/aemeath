@@ -26,6 +26,10 @@ indicatif = "0.17"
 console = "0.15"
 async-trait = { workspace = true }
 base64 = "0.22"
+# 跨平台系统剪贴板：macOS NSPasteboard（objc2）/ Linux X11（x11rb）+ Wayland data-control。
+# 取代外部命令依赖（pngpaste / osascript / wl-paste / xclip）。
+arboard = { version = "3.6", features = ["wayland-data-control"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 ratatui = "0.30"
 ratatui-textarea = "0.9"
 uuid = { version = "1", features = ["v4"] }

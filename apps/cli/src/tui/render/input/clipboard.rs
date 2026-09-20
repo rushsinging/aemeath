@@ -1,108 +1,46 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::path::Path;
 
-/// #567 S10：TUI 本地读取剪贴板图片
+/// TUI 本地读取到的图片：已编码字节 + 媒体类型。
 pub struct LocalImage {
     pub data: Vec<u8>,
     pub media_type: String,
 }
 
-/// TUI 本地读取剪贴板图片。
+/// 读取系统剪贴板图片并编码为 PNG。
 ///
-/// 策略链：优先第三方 `pngpaste`（用户可选安装），失败后回退系统自带 `osascript`
-/// 的 ObjC bridge 读取 `NSPasteboard` 的 PNG 数据；两者都失败时返回聚合错误。
+/// 统一走 `arboard` 的平台原生实现（macOS `NSPasteboard`；Linux X11 `x11rb` 与
+/// Wayland data-control），**NEVER** 依赖 `pngpaste` / `osascript` / `xclip` 等外部命令，
+/// 避免用户未安装对应工具时功能静默失效。
 pub async fn read_image() -> Result<LocalImage, String> {
-    match read_image_with_pngpaste() {
-        Ok(image) => Ok(image),
-        Err(pngpaste_error) => match read_image_with_osascript() {
-            Ok(image) => Ok(image),
-            Err(osascript_error) => Err(clipboard_image_error(&pngpaste_error, &osascript_error)),
-        },
-    }
-}
-
-fn read_image_with_pngpaste() -> Result<LocalImage, String> {
-    let mut command = Command::new("pngpaste");
-    command.arg("-");
-    utils::configure_std_noninteractive(&mut command)
-        .map_err(|error| format!("pngpaste 进程隔离失败: {error}"))?;
-    let output = command
-        .output()
-        .map_err(|error| format!("pngpaste 启动失败: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "pngpaste 失败: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(LocalImage {
-        data: output.stdout,
-        media_type: "image/png".to_string(),
-    })
-}
-
-/// JXA 脚本：读系统剪贴板的 PNG 数据并输出标准 base64，避免落临时文件。
-///
-/// 类型名必须是 UTI `public.png`，旧系统/旧写入方用 legacy 四字符码 `PNGf` 兜底；
-/// 实测 `dataForType("PNG")` 会返回 nil 并抛 -2700，**NEVER** 回退到该写法。
-const CLIPBOARD_PNG_BASE64_SCRIPT: &str = r#"
-ObjC.import("AppKit");
-const pasteboard = $.NSPasteboard.generalPasteboard;
-let pngData = pasteboard.dataForType("public.png");
-if (pngData.isNil()) { pngData = pasteboard.dataForType("PNGf"); }
-if (pngData.isNil()) { throw new Error("剪贴板中没有 PNG 图片"); }
-pngData.base64EncodedStringWithOptions(0).js;
-"#;
-
-fn read_image_with_osascript() -> Result<LocalImage, String> {
-    let mut command = Command::new("osascript");
-    command
-        .arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(CLIPBOARD_PNG_BASE64_SCRIPT);
-    utils::configure_std_noninteractive(&mut command)
-        .map_err(|error| format!("osascript 进程隔离失败: {error}"))?;
-    let output = command
-        .output()
-        .map_err(|error| format!("osascript 启动失败: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "osascript 失败: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let data = decode_base64_output(&String::from_utf8_lossy(&output.stdout))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| clipboard_error("连接系统剪贴板", error))?;
+    let image = clipboard
+        .get_image()
+        .map_err(|error| clipboard_error("读取剪贴板图片", error))?;
+    let data = encode_png(image.width, image.height, image.bytes.as_ref())?;
     Ok(LocalImage {
         data,
         media_type: "image/png".to_string(),
     })
 }
 
-/// 解码 `osascript` 输出的 base64，容忍换行与缩进；空输出与非 base64 内容给出中文错误。
-fn decode_base64_output(stdout: &str) -> Result<Vec<u8>, String> {
-    use base64::Engine;
-    let compact: String = stdout.split_whitespace().collect();
-    if compact.is_empty() {
-        return Err("剪贴板图片为空: osascript 未输出 PNG 数据".to_string());
+/// 把文本写入系统剪贴板；与读图共用同一个 `arboard` 边界。
+pub fn copy_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
     }
-    base64::engine::general_purpose::STANDARD
-        .decode(compact.as_bytes())
-        .map_err(|error| format!("剪贴板 PNG base64 解码失败: {error}"))
-}
 
-/// 两条读取策略都失败时聚合原因，并给出可执行建议。
-fn clipboard_image_error(pngpaste_error: &str, osascript_error: &str) -> String {
-    format!(
-        "读取剪贴板图片失败：pngpaste: {pngpaste_error}；osascript: {osascript_error}。\
-         可执行 `brew install pngpaste` 安装第三方工具，或确认系统 osascript 可用"
-    )
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| clipboard_error("连接系统剪贴板", error))?;
+    clipboard
+        .set_text(text)
+        .map_err(|error| clipboard_error("写入剪贴板", error))
 }
 
 /// TUI 本地处理图片文件
 pub fn process_image_file(path: &str) -> Result<LocalImage, String> {
     let data = std::fs::read(path).map_err(|error| format!("无法读取图片文件 {path}：{error}"))?;
-    let media_type = match std::path::Path::new(path)
+    let media_type = match Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_lowercase())
@@ -120,33 +58,46 @@ pub fn process_image_file(path: &str) -> Result<LocalImage, String> {
     })
 }
 
-pub fn copy_text(text: &str) -> Result<(), String> {
-    if text.is_empty() {
-        return Ok(());
+/// RGBA8 像素 → PNG 字节。
+///
+/// 剪贴板 API 交出的是解码后的像素（无压缩），模型侧需要图片格式，
+/// 因此统一编码为无损 PNG。
+fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    use image::ImageEncoder;
+
+    let width = u32::try_from(width).map_err(|_| format!("剪贴板图片宽度超出范围: {width}"))?;
+    let height = u32::try_from(height).map_err(|_| format!("剪贴板图片高度超出范围: {height}"))?;
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| format!("剪贴板图片尺寸溢出: {width}x{height}"))?;
+    if rgba.len() != expected_len {
+        return Err(format!(
+            "剪贴板图片像素数据不完整: 期望 {expected_len} 字节，实际 {} 字节",
+            rgba.len()
+        ));
     }
 
-    let mut command = Command::new("pbcopy");
-    command.stdin(Stdio::piped());
-    utils::configure_std_noninteractive(&mut command)
-        .map_err(|error| format!("无法隔离剪贴板命令 pbcopy：{error}"))?;
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("无法启动剪贴板命令 pbcopy：{error}"))?;
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded)
+        .write_image(rgba, width, height, image::ExtendedColorType::Rgba8)
+        .map_err(|error| format!("剪贴板图片 PNG 编码失败: {error}"))?;
+    Ok(encoded)
+}
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|error| format!("写入剪贴板失败：{error}"))?;
-    }
-
-    let status = child
-        .wait()
-        .map_err(|error| format!("等待剪贴板命令失败：{error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("剪贴板命令 pbcopy 退出失败：{status}"))
-    }
+/// `arboard` 错误 → 中文用户消息，并带上操作语境。
+fn clipboard_error(action: &str, error: arboard::Error) -> String {
+    let reason = match &error {
+        arboard::Error::ContentNotAvailable => "剪贴板中没有可用内容".to_string(),
+        arboard::Error::ClipboardNotSupported => {
+            "当前环境没有可用的系统剪贴板（无图形会话或缺少剪贴板服务）".to_string()
+        }
+        arboard::Error::ClipboardOccupied => "系统剪贴板被其他程序占用".to_string(),
+        arboard::Error::ConversionFailure => "剪贴板内容无法转换为所需格式".to_string(),
+        arboard::Error::Unknown { description } => format!("未知错误: {description}"),
+        other => format!("未知错误: {other}"),
+    };
+    format!("{action}失败：{reason}")
 }
 
 #[cfg(test)]
