@@ -17,6 +17,7 @@ pub(crate) enum ExpectedEffect {
     ReadClipboardImage,
     ProcessImageFile {
         path: String,
+        fallback_text: String,
     },
     QuitApplication,
     ReplyInteraction {
@@ -99,9 +100,18 @@ impl ScriptedEffectDriver {
                 }
                 (Effect::ReadClipboardImage, ExpectedEffect::ReadClipboardImage) => {}
                 (
-                    Effect::ProcessImageFile { path },
-                    ExpectedEffect::ProcessImageFile { path: expected },
-                ) => assert_eq!(path, &expected, "image path mismatch"),
+                    Effect::ProcessImageFile {
+                        path,
+                        fallback_text,
+                    },
+                    ExpectedEffect::ProcessImageFile {
+                        path: expected_path,
+                        fallback_text: expected_fallback,
+                    },
+                ) => {
+                    assert_eq!(path, &expected_path, "image path mismatch");
+                    assert_eq!(fallback_text, &expected_fallback, "原始粘贴文本 mismatch");
+                }
                 (Effect::QuitApplication, ExpectedEffect::QuitApplication) => {}
                 (
                     Effect::ReplyInteraction { request_id, reply },

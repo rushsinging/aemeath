@@ -120,7 +120,10 @@ impl App {
             Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
-            Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
+            Effect::ProcessImageFile {
+                path,
+                fallback_text,
+            } => self.process_image_file_effect(path, fallback_text, ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
@@ -417,10 +420,23 @@ impl App {
         });
     }
 
-    fn process_image_file_effect(&mut self, path: String, ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567 S10：process_image_file 迁移到 TUI 本地
+    fn process_image_file_effect(
+        &mut self,
+        path: String,
+        fallback_text: String,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
         let tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
+            if !std::path::Path::new(&path).is_file() {
+                // 终端粘贴的转义路径、已被清理的临时文件：回填原始文本，不丢用户输入。
+                let _ = tx
+                    .send(UiEvent::PasteFallbackToText {
+                        text: fallback_text,
+                    })
+                    .await;
+                return;
+            }
             match crate::tui::render::input::clipboard::process_image_file(&path) {
                 Ok(img) => {
                     use base64::Engine;
@@ -434,7 +450,11 @@ impl App {
                     };
                     let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                 }
-                Err(e) => crate::tui::log_warn!("image process failed: {e}"),
+                Err(error) => {
+                    let _ = tx
+                        .send(UiEvent::Error(format!("图片加载失败：{error}")))
+                        .await;
+                }
             }
         });
     }
@@ -584,6 +604,10 @@ mod workspace_tests;
 #[cfg(test)]
 #[path = "executor_interaction_tests.rs"]
 mod interaction_tests;
+
+#[cfg(test)]
+#[path = "executor_image_tests.rs"]
+mod image_tests;
 
 #[cfg(test)]
 mod tests {

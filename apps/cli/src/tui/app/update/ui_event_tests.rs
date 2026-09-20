@@ -696,3 +696,42 @@ fn runtime_batch_applies_all_events_before_the_next_render() {
         1
     );
 }
+
+/// 图片路径不可用时（终端粘贴的转义路径、飞书贴纸缓存被清理等），
+/// 回灌事件必须把原始粘贴文本插回输入区，绝不吞掉用户内容。
+#[test]
+fn paste_fallback_inserts_original_text_when_idle() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let pasted = "/Users/me/Library/Application\\ Support/stickers/a.gif".to_string();
+
+    app.update_ui(
+        UiEvent::PasteFallbackToText {
+            text: pasted.clone(),
+        },
+        &ui_tx,
+        &make_spawn_refs(),
+    );
+
+    assert_eq!(app.model.input.document.buffer, pasted);
+}
+
+#[test]
+fn paste_fallback_inserts_original_text_while_processing() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    app.chat.start_processing();
+
+    app.update_ui(
+        UiEvent::PasteFallbackToText {
+            text: "https://example.com/assets/diagram.png".to_string(),
+        },
+        &ui_tx,
+        &make_spawn_refs(),
+    );
+
+    assert_eq!(
+        app.model.input.document.buffer,
+        "https://example.com/assets/diagram.png"
+    );
+}

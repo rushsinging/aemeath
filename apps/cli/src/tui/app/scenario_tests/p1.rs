@@ -39,11 +39,13 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
 
     harness.expect_effect(ExpectedEffect::ProcessImageFile {
         path: "/tmp/p1-fixture.png".into(),
+        fallback_text: " /tmp/p1-fixture.png ".into(),
     });
     harness.paste(" /tmp/p1-fixture.png ");
-    assert!(harness.effects().iter().any(
-        |effect| matches!(effect, Effect::ProcessImageFile { path } if path == "/tmp/p1-fixture.png")
-    ));
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        Effect::ProcessImageFile { path, .. } if path == "/tmp/p1-fixture.png"
+    )));
     harness.assert_idle();
 }
 

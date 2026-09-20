@@ -4,6 +4,7 @@ mod key;
 mod key_nav;
 mod key_scroll;
 mod notice;
+mod paste;
 mod reminder;
 mod spawn_context;
 mod ui_event;
@@ -192,34 +193,7 @@ impl App {
                     pending_slash: None,
                 }
             }
-            TuiMsg::Paste(text) if !self.chat.is_processing => {
-                self.handle_paste_event(text, ui_tx);
-                UpdateResult::none()
-            }
-            TuiMsg::Paste(text) => {
-                // Paste while processing: insert into input area so it can be queued
-                match sdk::classify_paste(&text) {
-                    sdk::PasteKind::Empty => {
-                        self.input.just_pasted = true;
-                        // 删：[reading clipboard image...] —— 同 paste_handler.rs 路径（#fix-tui-image-input-output）
-                        return UpdateResult::one(Effect::ReadClipboardImage);
-                    }
-                    sdk::PasteKind::ImageFile => {
-                        // 删：[loading image: ...] —— 同上（#fix-tui-image-input-output）
-                        self.input.just_pasted = true;
-                        return UpdateResult::one(Effect::ProcessImageFile {
-                            path: text.trim().to_string(),
-                        });
-                    }
-                    sdk::PasteKind::Text => {
-                        self.input.just_pasted = true;
-                        self.handle_input_intent(
-                            crate::tui::model::input::intent::InputIntent::InsertText(text),
-                        );
-                    }
-                }
-                UpdateResult::none()
-            }
+            TuiMsg::Paste(text) => self.route_paste(text),
             TuiMsg::Resize { width, height } => {
                 self.handle_resize(width, height);
                 UpdateResult::none()
