@@ -145,6 +145,7 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -249,6 +250,48 @@ async fn build_window_structurally_degrades_oversized_summary_without_losing_obj
     assert!(summary.contains("- Next action: run the focused regression."));
     assert_eq!(summary.matches("## ").count(), 9);
     assert!(!summary.contains("historical evidence"));
+}
+
+/// #1626 L2：request 携带的 heuristic 校准系数贯穿 application service，
+/// 体现在 window.compaction_decision（HeuristicFallback 路径按系数缩放）。
+#[tokio::test]
+async fn build_window_applies_request_heuristic_calibration_to_decision() {
+    let context = service(vec![Message::user("x".repeat(8_000))], 7);
+
+    let uncalibrated_request = request(None);
+    let mut calibrated_request = request(None);
+    calibrated_request.heuristic_calibration = Some(0.5);
+
+    let uncalibrated = context.build_window(&uncalibrated_request).await.unwrap();
+    let calibrated = context.build_window(&calibrated_request).await.unwrap();
+
+    assert_eq!(
+        calibrated.compaction_decision.decision_token_count,
+        (uncalibrated.compaction_decision.decision_token_count as f64 * 0.5) as usize
+    );
+    assert_eq!(
+        calibrated.compaction_decision.reason,
+        crate::domain::DecisionReason::HeuristicFallback
+    );
+}
+
+/// #1626 L2：短窗口 + 默认 max_output 的 request（旧公式 threshold=0 恒触发）
+/// 经 service 链路后不再恒触发：clamp 后 threshold > 0，判定按真实占比进行。
+#[tokio::test]
+async fn build_window_short_window_no_longer_always_triggers() {
+    let context = service(Vec::new(), 7);
+
+    let mut short_window = request(None);
+    short_window.context_size = 8_192;
+    short_window.max_output_tokens = 8_192;
+
+    let window = context.build_window(&short_window).await.unwrap();
+    let decision = &window.compaction_decision;
+
+    assert!(decision.threshold > 0, "clamp 后 threshold 永不为 0");
+    assert_eq!(decision.effective_window, 8_192 - 163 - 2_048);
+    // 空会话 + 短 system prompt：估算远低于 threshold，不触发
+    assert!(!decision.needed);
 }
 
 fn tool_result_message(bytes: usize) -> (Message, usize) {

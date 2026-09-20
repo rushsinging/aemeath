@@ -436,6 +436,11 @@ impl ConfigSnapshot {
     ///
     /// Priority: CLI explicit (non-zero) > snapshot (env > file already merged) >
     /// provider model context_window > default 128000.
+    ///
+    /// When the snapshot value is adopted but is suspiciously smaller than the
+    /// model registry window (see [`Self::context_size_mismatch_hint`]), a
+    /// warning is logged — the configured value still wins (explicit user
+    /// intent), but the mismatch stays observable (#1626).
     pub fn resolve_context_size(
         &self,
         cli_override: Option<usize>,
@@ -449,6 +454,16 @@ impl ConfigSnapshot {
         }
         // snapshot value (already env > file merged)
         if self.inner.model.context_size > 0 {
+            if let Some((configured, registry)) =
+                self.context_size_mismatch_hint(model_context_window)
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[config] 配置的 context_size {} 明显小于模型 registry 窗口 {}（低于 50%）——若非有意限制，请检查 aemeath.json 的 model.context_size / max_output_tokens 是否与模型真实窗口匹配，否则短窗口会频繁触发 auto-compact",
+                    configured,
+                    registry,
+                );
+            }
             return self.inner.model.context_size;
         }
         // provider model contextWindow
@@ -457,6 +472,20 @@ impl ConfigSnapshot {
         }
         // fallback default
         128_000
+    }
+
+    /// 检测 snapshot `context_size` 与 model registry 窗口的疑似误配（#1626）。
+    ///
+    /// 返回 `Some((configured, registry))` 当且仅当：snapshot 显式配置了
+    /// `context_size > 0`、registry 窗口已知，且配置值低于 registry 窗口的
+    /// 50%。只提供提示信号，不改变 resolve 优先级。
+    pub fn context_size_mismatch_hint(
+        &self,
+        model_context_window: usize,
+    ) -> Option<(usize, usize)> {
+        let configured = self.inner.model.context_size;
+        (configured > 0 && model_context_window > 0 && configured * 2 < model_context_window)
+            .then_some((configured, model_context_window))
     }
 
     /// 返回完整 `ModelsConfig`，供消费方读取 providers / guidance / model entries 等。
@@ -589,6 +618,29 @@ mod tests {
         config.model.context_size = 32000;
         let snap = ConfigSnapshot::new(config);
         assert_eq!(snap.resolve_context_size(Some(0), 0), 32000);
+    }
+
+    /// #1626：snapshot context_size 明显小于 model registry 真实窗口
+    /// （< 50%）时视为疑似误配——返回值仍以 snapshot 为准（尊重显式配置），
+    /// 但必须留下可观测提示（warn + 独立可测的 hint 方法）。
+    #[test]
+    fn test_context_size_mismatch_hint_flags_suspiciously_small_window() {
+        let mut config = Config::default();
+        config.model.context_size = 8192;
+        let snap = ConfigSnapshot::new(config);
+
+        // 8192 < 200_000 / 2 → 疑似误配，hint 返回 registry 窗口供提示
+        assert_eq!(
+            snap.context_size_mismatch_hint(200_000),
+            Some((8192, 200_000))
+        );
+        // 接近真实窗口（8192 ≥ 16384/2，不低于 50%）不提示
+        assert_eq!(snap.context_size_mismatch_hint(16_384), None);
+        // 未配置 snapshot 值（0 = 未设置）不提示
+        let unset = ConfigSnapshot::new(Config::default());
+        assert_eq!(unset.context_size_mismatch_hint(200_000), None);
+        // registry 窗口未知（0）不提示
+        assert_eq!(snap.context_size_mismatch_hint(0), None);
     }
 
     #[test]

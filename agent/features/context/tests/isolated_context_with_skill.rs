@@ -51,6 +51,7 @@ fn base_request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }

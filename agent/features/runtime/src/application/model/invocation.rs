@@ -329,10 +329,10 @@ async fn invoke_model_impl(
         &response,
         unix_timestamp_millis,
     );
-    observer
-        .runtime_context()
-        .usage()
-        .update(crate::application::model::token_usage::normalized_total_tokens(&response.usage));
+    observer.runtime_context().usage().update_with_heuristic(
+        crate::application::model::token_usage::normalized_total_tokens(&response.usage),
+        window.token_estimation.total_tokens as u64,
+    );
     let usage = build_step_token_usage(
         &response,
         observer.context_size(execution) as u64,

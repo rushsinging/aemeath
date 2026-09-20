@@ -256,6 +256,36 @@ fn session_message_state_maps_count_and_revision_without_messages() {
     ));
 }
 
+/// #1626：sdk 新增的 misconfigured_window 决策来源必须在 TUI 边界无损映射，
+/// 不能被覆写或回落成其他来源（跨层链路中间层覆盖）。
+#[test]
+fn runtime_status_maps_misconfigured_window_source_without_loss() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RuntimeStatusChanged {
+        status: Box::new(sdk::RuntimeStatusView {
+            session_id: "session".to_string(),
+            revision: 2,
+            heartbeat_sequence: 0,
+            context_budget: sdk::ContextBudgetView {
+                context_size: 512,
+                effective_window: 374,
+                decision_token_count: 120,
+                threshold: 299,
+                usage_permille: 320,
+                compaction_needed: false,
+                source: sdk::ContextDecisionSourceView::MisconfiguredWindow,
+            },
+        }),
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::RuntimeStatusChanged { status })
+            if status.context_budget.source
+                == crate::tui::adapter::runtime_status::TuiContextDecisionSource::MisconfiguredWindow
+                && !status.context_budget.compaction_needed
+    ));
+}
+
 #[test]
 fn hook_notice_maps_point_kind_and_complete_payload() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookNotice {

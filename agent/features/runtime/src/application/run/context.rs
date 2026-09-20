@@ -156,13 +156,22 @@ pub(crate) fn tool_stream_progress_sink(
 #[derive(Clone)]
 pub struct RunUsageTracker {
     last_api_total_tokens: Arc<std::sync::RwLock<Option<u64>>>,
+    /// Heuristic 估算滑动校准系数（#1626）：provider 上报值 / heuristic
+    /// 估算值的 EMA，初始 1.0；compact reset 后保留（估算偏差与 compact 无关）。
+    heuristic_calibration: Arc<std::sync::RwLock<f64>>,
 }
+
+/// EMA 平滑系数（#1626）：新观测占 0.3，历史占 0.7。
+const CALIBRATION_EMA_ALPHA: f64 = 0.3;
+/// 单次观测与滑动系数的 clamp 区间（#1626）：区间外视为异常，截断或丢弃。
+const CALIBRATION_CLAMP: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 impl RunUsageTracker {
     /// Create a new tracker with no recorded usage.
     pub fn new() -> Self {
         Self {
             last_api_total_tokens: Arc::new(std::sync::RwLock::new(None)),
+            heuristic_calibration: Arc::new(std::sync::RwLock::new(1.0)),
         }
     }
 
@@ -172,6 +181,33 @@ impl RunUsageTracker {
             Ok(mut guard) => *guard = Some(tokens),
             Err(poison) => *poison.into_inner() = Some(tokens),
         }
+    }
+
+    /// Record the latest API total tokens and feed the heuristic calibration
+    /// EMA with `reported / estimated` from the same request (#1626).
+    ///
+    /// 只有同一次请求的 provider 上报值与 heuristic 估算值才可比；
+    /// 估算为 0 或比值严重异常时丢弃观测，只更新 usage 不动校准系数。
+    pub fn update_with_heuristic(&self, tokens: u64, heuristic_estimate: u64) {
+        self.update(tokens);
+        if heuristic_estimate == 0 {
+            return;
+        }
+        let observed = tokens as f64 / heuristic_estimate as f64;
+        // 单次观测超出 clamp 区间 2 倍视为脏观测（provider 返回值与估算
+        // 严重失配，例如窗口刚被外部事件重置），避免污染滑动系数。
+        // 半开区间：恰为 2 倍（4.0）同样丢弃。
+        if !(*CALIBRATION_CLAMP.start() / 2.0..*CALIBRATION_CLAMP.end() * 2.0).contains(&observed) {
+            return;
+        }
+        let clamped_observed = observed.clamp(*CALIBRATION_CLAMP.start(), *CALIBRATION_CLAMP.end());
+        let mut guard = match self.heuristic_calibration.write() {
+            Ok(guard) => guard,
+            Err(poison) => poison.into_inner(),
+        };
+        *guard = (*guard * (1.0 - CALIBRATION_EMA_ALPHA)
+            + clamped_observed * CALIBRATION_EMA_ALPHA)
+            .clamp(*CALIBRATION_CLAMP.start(), *CALIBRATION_CLAMP.end());
     }
 
     /// Test-only fault injection used by the poison-recovery unit tests.
@@ -193,7 +229,18 @@ impl RunUsageTracker {
         }
     }
 
+    /// Current heuristic calibration factor (#1626); starts at 1.0 and only
+    /// moves when provider usage observations are available.
+    pub fn calibration_factor(&self) -> f64 {
+        match self.heuristic_calibration.read() {
+            Ok(guard) => *guard,
+            Err(poison) => *poison.into_inner(),
+        }
+    }
+
     /// Reset usage to `None` (e.g. after compaction invalidates the count).
+    /// The calibration factor survives: it captures estimator bias for the
+    /// model, which compaction does not change.
     pub fn reset(&self) {
         match self.last_api_total_tokens.write() {
             Ok(mut guard) => *guard = None,
