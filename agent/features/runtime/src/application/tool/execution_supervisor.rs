@@ -30,6 +30,9 @@ pub(crate) struct SupervisedToolCall {
     pub input_preview: String,
     pub run_deadline: Option<SystemTime>,
     pub cancellation: Arc<dyn CancellationSignal>,
+    /// per-call child cancellation：deadline 到期或用户取消时由 supervisor
+    /// 触发，经 `context.cancellation()` 传播给 Cooperative 工具。
+    pub child_cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl ToolExecutionSupervisor {
@@ -138,6 +141,7 @@ impl ToolExecutionSupervisor {
                             call.identity.tool_name,
                             started.elapsed().as_millis()
                         );
+                        call.child_cancellation.cancel();
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                     }
                     _ = tokio::time::sleep(wait) => {
@@ -150,6 +154,7 @@ impl ToolExecutionSupervisor {
                             call.identity.tool_name,
                             started.elapsed().as_millis()
                         );
+                        call.child_cancellation.cancel();
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, true).await
                     }
                 }
@@ -166,6 +171,7 @@ impl ToolExecutionSupervisor {
                         call.identity.tool_name,
                         started.elapsed().as_millis()
                     );
+                    call.child_cancellation.cancel();
                     cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                 }
             },

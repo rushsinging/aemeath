@@ -255,6 +255,12 @@ impl Agent {
         let authorization = ctx.authorization();
         let mut input = call.input.clone();
         tools::strip_runtime_meta(&mut input);
+        // per-call child cancellation：deadline 到期或用户取消时由 supervisor
+        // 触发并经工具 ctx 传播；工具观察到的 cancellation 即 per-call scope，
+        // 不再直接绑定 Run 级 token。
+        let child_token = tokio_util::sync::CancellationToken::new();
+        let child_scope =
+            crate::application::run::context::RunCancellationScope::from_token(child_token.clone());
         let invocation = ToolInvocation::new(call.name.as_str(), input, ctx.scope().clone())
             .with_authorization(authorization);
         let supervisor = ToolExecutionSupervisor::new(
@@ -275,10 +281,11 @@ impl Agent {
                     agent: call.name == "Agent",
                 },
                 invocation,
-                context: ctx.clone(),
+                context: ctx.clone().with_cancellation(Arc::new(child_scope)),
                 input_preview: safe_input_preview(&call.input),
                 run_deadline: ctx.scope().deadline(),
                 cancellation: ctx.cancellation(),
+                child_cancellation: child_token,
             })
             .await
             .unwrap_or_else(|error| {
