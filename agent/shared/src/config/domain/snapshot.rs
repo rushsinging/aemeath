@@ -87,6 +87,15 @@ pub struct ToolResultPolicy {
 }
 
 impl ToolResultPolicy {
+    /// 截断阈值占 context window 的比例上限（1/20 = 5%）。
+    ///
+    /// 定量阈值只对大窗口合理：128k 窗口下单条 50k chars（中文场景约
+    /// 50k tokens）即占 40%，会直接把启发式估算顶到 auto-compact 阈值。
+    const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 20;
+
+    /// 窗口收紧后的阈值下限：过小的 preview 无法容纳有效的 head/tail 提示。
+    const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 4_000;
+
     fn from_config(config: &ToolResultConfig) -> Self {
         let valid = config.threshold_chars > 0
             && config.preview_head_chars + config.preview_tail_chars <= config.threshold_chars;
@@ -99,6 +108,28 @@ impl ToolResultPolicy {
             threshold_chars: config.threshold_chars,
             preview_head_chars: config.preview_head_chars,
             preview_tail_chars: config.preview_tail_chars,
+        }
+    }
+
+    /// 按 context window 收紧截断阈值。
+    ///
+    /// - `threshold = min(配置值, 窗口 × 5%)`，下限 4k chars；配置值语义
+    ///   是"大窗口下的上限"
+    /// - head/tail 等比收紧到 threshold 的 1/4、1/8，收紧后仍满足
+    ///   `head + tail ≤ threshold` 不变式（1/4 + 1/8 = 3/8 < 1）
+    /// - `context_size == 0`（窗口未知）时不收紧，避免误伤大窗口
+    pub fn scaled_for_context_window(self, context_size: usize) -> Self {
+        if context_size == 0 {
+            return self;
+        }
+        let ratio_cap = context_size / Self::WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR;
+        let threshold_chars = self
+            .threshold_chars
+            .min(ratio_cap.max(Self::MIN_WINDOW_SCALED_THRESHOLD_CHARS));
+        Self {
+            threshold_chars,
+            preview_head_chars: self.preview_head_chars.min(threshold_chars / 4),
+            preview_tail_chars: self.preview_tail_chars.min(threshold_chars / 8),
         }
     }
 
@@ -302,8 +333,12 @@ impl ConfigSnapshot {
         }
     }
 
-    pub fn tool_result_policy(&self) -> ToolResultPolicy {
+    /// 构造 tool result 截断策略：先按配置校验归一，再按 `context_size`
+    /// 比例收紧（见 [`ToolResultPolicy::scaled_for_context_window`]）。
+    /// 调用方必须传入已解析的 context window；传 0 视为窗口未知，不收紧。
+    pub fn tool_result_policy(&self, context_size: usize) -> ToolResultPolicy {
         ToolResultPolicy::from_config(&self.inner.tools.tool_result)
+            .scaled_for_context_window(context_size)
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -815,7 +850,7 @@ mod tests {
         config.tools.tool_result.preview_tail_chars = 250;
         let snap = ConfigSnapshot::new(config);
 
-        let policy = snap.tool_result_policy();
+        let policy = snap.tool_result_policy(1_000_000);
         assert_eq!(policy.threshold_chars(), 8_000);
         assert_eq!(policy.preview_head_chars(), 1_000);
         assert_eq!(policy.preview_tail_chars(), 250);
@@ -829,7 +864,49 @@ mod tests {
         config.tools.tool_result.preview_tail_chars = 9_000;
         let snap = ConfigSnapshot::new(config);
 
-        let policy = snap.tool_result_policy();
+        let policy = snap.tool_result_policy(1_000_000);
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    /// tool_result 截断阈值必须随 context window 比例收紧：
+    /// `threshold = min(配置值, 窗口×5%)`，下限 4k chars；
+    /// head/tail 等比收紧（threshold 的 1/4、1/8）且收紧后仍满足
+    /// `head + tail ≤ threshold` 不变式；窗口未知（0）时不收紧。
+    /// 配置值语义是"大窗口下的上限"——1M 窗口下默认 50k 占 5% 合理，
+    /// 128k 窗口下单条 50k chars（中文场景约 50k tokens）即占 40%，
+    /// 会直接把启发式估算顶到 auto-compact 阈值。
+    #[test]
+    fn tool_result_policy_scales_threshold_with_context_window() {
+        let snap = ConfigSnapshot::new(Config::default());
+
+        // 1M 窗口：5% = 50k，与默认配置相等，不收紧
+        let policy = snap.tool_result_policy(1_000_000);
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 200k 窗口：5% = 10k 收紧；head/tail 低于等比上限，保持原值
+        let policy = snap.tool_result_policy(200_000);
+        assert_eq!(policy.threshold_chars(), 10_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 128k 窗口：5% = 6.4k；head 收紧到 6400/4 = 1600
+        let policy = snap.tool_result_policy(128_000);
+        assert_eq!(policy.threshold_chars(), 6_400);
+        assert_eq!(policy.preview_head_chars(), 1_600);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 32k 窗口：5% = 1600 低于下限，取 4k；head = 4000/4 = 1000
+        let policy = snap.tool_result_policy(32_000);
+        assert_eq!(policy.threshold_chars(), 4_000);
+        assert_eq!(policy.preview_head_chars(), 1_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 窗口未知（0）：不收紧，避免误伤
+        let policy = snap.tool_result_policy(0);
         assert_eq!(policy.threshold_chars(), 50_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);
