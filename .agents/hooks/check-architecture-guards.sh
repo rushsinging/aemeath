@@ -258,6 +258,7 @@ run_guard fast "$HOOKS_DIR/check-config-reader-injection.sh"
 run_guard fast "$HOOKS_DIR/check-config-workflow-boundary.sh"
 run_guard full "$HOOKS_DIR/check-production-reachability.sh"
 run_guard fast "$HOOKS_DIR/check-no-inline-tests.sh"
+run_guard fast "$HOOKS_DIR/check-no-inline-tests-tests.sh"
 
 if [ "$mode" = "--fast" ]; then
   wait_for_fast_guards || fast_status=1

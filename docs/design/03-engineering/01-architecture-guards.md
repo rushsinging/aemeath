@@ -88,8 +88,11 @@
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
+| 26 | `check-no-inline-tests.sh` + `check-no-inline-tests-tests.sh` | 测试治理 | 源码禁止内嵌 `#[cfg(test)] mod tests { ... }`，测试必须分离为 `foo.rs ↔ foo_tests.rs`；匹配不受 `{` 与 `;` 后的空白影响，整行 `//` 注释不参与匹配；历史存量由 `.agents/inline-tests-baseline.json` 冻结、只拦截新增，基线失效条目强制收缩 |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
+
+`check-no-inline-tests.sh` 的历史存量走 `.agents/inline-tests-baseline.json`：基线登记守卫正则失效期间已存在的内嵌测试文件，只拦截**新增**违规；基线中已无违规的失效条目同样失败，强制迁移完成时同步收缩清单。`specs/3.2.5.3` 要求渐进迁移，**NEVER** 一次性移动全仓历史测试。配套 `check-no-inline-tests-tests.sh` 覆盖 `{` 无尾随空格、注释误报、基线与失效条目、缺基线 fail-closed 四类边界。
 
 `check-runtime-capability-assembly.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
