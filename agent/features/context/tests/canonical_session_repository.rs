@@ -293,6 +293,7 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
         context_size: 1,
         max_output_tokens: 1,
         last_api_total_tokens: Some(100),
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }

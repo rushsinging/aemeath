@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 pub enum ContextDecisionSourceView {
     ActualProviderUsage,
     HeuristicFallback,
+    /// Effective window below the guardrail floor even after clamping the
+    /// output reservation — context window is misconfigured and autocompact
+    /// is disabled to prevent a compaction storm.
+    MisconfiguredWindow,
     Manual,
 }
 

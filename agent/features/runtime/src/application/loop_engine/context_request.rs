@@ -72,6 +72,7 @@ impl<'a> ContextRequestCoordinator<'a> {
             context_size: self.source.context_size,
             max_output_tokens: self.source.max_output_tokens,
             last_api_total_tokens: self.source.runtime_context.usage().get(),
+            heuristic_calibration: Some(self.source.runtime_context.usage().calibration_factor()),
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(
                 &self.source.raw_tool_schemas,

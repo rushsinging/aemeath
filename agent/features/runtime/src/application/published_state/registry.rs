@@ -28,6 +28,9 @@ impl PublishedStateRegistry {
             context::domain::DecisionReason::HeuristicFallback => {
                 sdk::ContextDecisionSourceView::HeuristicFallback
             }
+            context::domain::DecisionReason::MisconfiguredWindow => {
+                sdk::ContextDecisionSourceView::MisconfiguredWindow
+            }
             context::domain::DecisionReason::Manual => sdk::ContextDecisionSourceView::Manual,
         };
         let status = sdk::RuntimeStatusView {
