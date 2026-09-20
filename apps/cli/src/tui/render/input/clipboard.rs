@@ -28,9 +28,9 @@ pub async fn read_image() -> Result<LocalImage, String> {
     })
 }
 
-/// #567 S10：TUI 本地处理图片文件
+/// TUI 本地处理图片文件
 pub fn process_image_file(path: &str) -> Result<LocalImage, String> {
-    let data = std::fs::read(path).map_err(|error| format!("读取文件失败: {error}"))?;
+    let data = std::fs::read(path).map_err(|error| format!("无法读取图片文件 {path}：{error}"))?;
     let media_type = match std::path::Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())

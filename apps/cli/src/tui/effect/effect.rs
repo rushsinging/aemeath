@@ -43,8 +43,11 @@ pub enum Effect {
         text: String,
     },
     ReadClipboardImage,
+    /// 加载粘贴进来的本地图片；`path` 已由 SDK 解码，`fallback_text` 保留原始粘贴文本，
+    /// 供文件不可用时回填输入区。
     ProcessImageFile {
         path: String,
+        fallback_text: String,
     },
     /// 查询最近的 reflection 历史；只向 runtime 推送查询事件，不触发 LLM。
     QueryReflectionHistory {

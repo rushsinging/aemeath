@@ -16,6 +16,10 @@ pub struct WorkspaceMetadataResolved {
 pub enum UiEvent {
     Error(String),
     ClipboardImage(sdk::ClipboardImageView),
+    /// 粘贴的本地图片引用不可用（路径不存在或已被清理）时，回填原始粘贴文本。
+    PasteFallbackToText {
+        text: String,
+    },
     SystemMessage(String),
     SessionSaved {
         id: String,

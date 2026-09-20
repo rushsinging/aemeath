@@ -29,6 +29,9 @@ impl App {
                     crate::tui::model::input::intent::InputIntent::InsertImage(img),
                 );
             }
+            UiEvent::PasteFallbackToText { text } => {
+                self.apply_pasted_text(text);
+            }
             UiEvent::SystemMessage(msg) => {
                 self.append_system_notice(msg.clone());
                 return UpdateResult::one(Effect::RunHook {
