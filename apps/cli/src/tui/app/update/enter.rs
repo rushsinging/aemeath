@@ -8,7 +8,7 @@ impl App {
     ///
     /// 在常驻 chat() 模型下（#390 A1），首条提交不再 spawn 新 chat，而是与「忙时」
     /// 提交统一经 input_events 通道发往常驻 loop（`submit_user_input_event`）。
-    /// 仅 slash 命令仍走 `pending_slash` 单独处理（slash 永不作为 user message）。
+    /// slash 命令同步分发（`handle_slash_command`），永不作为 user message。
     pub(super) fn update_enter(&mut self) -> UpdateResult {
         let Some(submission) = self.submit_input_intent() else {
             return UpdateResult::none();
@@ -17,11 +17,8 @@ impl App {
             return UpdateResult::none();
         }
         if submission.text.starts_with('/') {
-            return UpdateResult {
-                effects: Vec::new(),
-                spawn_effect: None,
-                pending_slash: Some(submission.text),
-            };
+            // slash 命令同步分发：纯 update 产出 Effect，由 run_loop 统一执行。
+            return self.handle_slash_command(&submission.text);
         }
 
         // 首条（非忙）提交：进入 Thinking 态、给出即时反馈，再统一经事件通道提交。
@@ -113,22 +110,32 @@ mod tests {
 
         assert!(result.effects.is_empty());
         assert!(result.spawn_effect.is_none());
-        assert!(result.pending_slash.is_none());
         assert!(!app.chat.is_processing);
     }
 
     #[test]
-    fn test_update_enter_slash_submission_returns_pending_slash() {
+    fn test_update_enter_slash_submission_dispatches_synchronously() {
         let mut app = test_app();
         app.model
             .input
-            .apply(InputIntent::InsertText("/help".to_string()));
+            .apply(InputIntent::InsertText("/compact".to_string()));
 
         let result = app.update_enter();
 
-        assert_eq!(result.pending_slash.as_deref(), Some("/help"));
-        assert!(result.effects.is_empty());
+        // slash 同步分发：App::new 注入真实 builtin router，
+        // /compact 直接产出 SendChatInputEvent{Compact}，无 pending_slash 逃生舱。
+        assert!(
+            result.effects.iter().any(|effect| matches!(
+                effect,
+                Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::Compact
+                }
+            )),
+            "/compact 应同步产出 Compact 事件 effect，实际: {:?}",
+            result.effects
+        );
         assert!(result.spawn_effect.is_none());
+        assert!(!app.chat.is_processing);
     }
 
     /// 非忙（首条）提交不再 spawn 新 chat，而是经事件通道发 `UserMessage`。
@@ -145,7 +152,6 @@ mod tests {
             result.spawn_effect.is_none(),
             "首条提交不应再 spawn 新 chat"
         );
-        assert!(result.pending_slash.is_none());
         assert_eq!(
             sent_user_message_text(&result),
             Some("first message"),

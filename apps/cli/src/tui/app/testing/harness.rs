@@ -132,7 +132,6 @@ impl TuiScenarioHarness {
                 .record(crate::tui::app::frame_driver::FrameOutcome {
                     effects,
                     spawn_effect: None,
-                    pending_slash: None,
                 }),
         );
         self.app.draw(&mut self.terminal).expect("TestBackend draw");

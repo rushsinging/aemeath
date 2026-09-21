@@ -493,8 +493,6 @@ mod tests {
 mod scenario_tests;
 pub mod slash;
 #[cfg(test)]
-mod slash_effect_tests;
-#[cfg(test)]
 mod slash_tests;
 #[cfg(test)]
 mod testing;

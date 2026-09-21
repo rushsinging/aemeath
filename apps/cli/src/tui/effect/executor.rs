@@ -117,7 +117,6 @@ impl App {
             Effect::ResolveWorkspaceMetadata { root, revision } => {
                 self.resolve_workspace_metadata_effect(root, revision, ui_tx)
             }
-            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
             Effect::ProcessImageFile {
@@ -128,7 +127,7 @@ impl App {
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
-            Effect::ResetRuntimeState => self.reset_runtime_state().await,
+            Effect::ResetRuntimeState => self.reset_runtime_state(),
             Effect::OpenUrl { url } => self.open_url_effect(&url),
         }
     }
@@ -371,18 +370,6 @@ impl App {
             std::mem::discriminant(&event)
         );
         self.chat.push_input_event(event);
-    }
-
-    /// `/save` 命令——仅 UX 反馈。Runtime 已有 run_step-level auto-save + loop-exit auto-save，
-    /// TUI 不再发 ChatInputEvent::SaveSession。
-    fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
-        if notify {
-            let id = self.session.session_id().to_string();
-            let tx = ui_tx.clone();
-            crate::tui::effect::spawn_guard::spawn_guarded("save_notify", async move {
-                let _ = tx.send(UiEvent::SessionSaved { id }).await;
-            });
-        }
     }
 
     fn fetch_memory_list_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
