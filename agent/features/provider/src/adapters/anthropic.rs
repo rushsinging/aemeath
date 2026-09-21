@@ -58,15 +58,35 @@ impl AnthropicProvider {
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
+        Self::from_shared_http(
+            api_key,
+            base_url,
+            model,
+            timeout_secs,
+            user_agent,
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
+                .build()
+                .expect("failed to create HTTP client"),
+        )
+    }
+
+    /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
+    /// `ProviderTransport` 持有，本结构只保存引用与展示字段。
+    pub(crate) fn from_shared_http(
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        timeout_secs: u64,
+        user_agent: String,
+        http: reqwest::Client,
+    ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             user_agent,
-            http: reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
-                .build()
-                .expect("failed to create HTTP client"),
+            http,
             timeout_secs,
         }
     }

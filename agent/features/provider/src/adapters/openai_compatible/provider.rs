@@ -56,6 +56,30 @@ impl OpenAICompatibleProvider {
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
+        Self::from_shared_http(
+            config,
+            api_key,
+            base_url,
+            model,
+            reasoning_config,
+            user_agent,
+            build_streaming_http_client_builder(timeout_secs)
+                .build()
+                .expect("failed to create HTTP client"),
+        )
+    }
+
+    /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
+    /// `ProviderTransport` 持有，本结构只保存引用与展示字段。
+    pub(crate) fn from_shared_http(
+        config: OpenAIProviderConfig,
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        reasoning_config: Option<ReasoningConfig>,
+        user_agent: String,
+        http: reqwest::Client,
+    ) -> Self {
         let driver = driver_for_provider_driver(config.driver);
         let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
         let base_url = if matches!(
@@ -77,9 +101,7 @@ impl OpenAICompatibleProvider {
             config,
             api_key,
             user_agent,
-            http: build_streaming_http_client_builder(timeout_secs)
-                .build()
-                .expect("failed to create HTTP client"),
+            http,
             reasoning_config,
             driver,
         }
