@@ -1,7 +1,7 @@
 {
   "version": 1,
   "budgets": {
-    "repository_migration_debt": 0,
+    "repository_migration_debt": 1,
     "modules": {
       "runtime": 0,
       "tui": 1
@@ -150,22 +150,6 @@
       "tracking_issue": 1022,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-slash-file-exemption",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "path",
-        "value": "apps/cli/src/tui/app/slash.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Wontfix file exemption (#59 S5-gap ruling): slash command dispatch stays request-response with Option<String> control flow; an Effect rewrite would add pending-state machinery and break direct Some(prompt) returns for marginal benefit",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove only if slash dispatch is ever rebuilt on Effect round-trips and authoritative events",
       "status": "active"
     },
     {
@@ -358,22 +342,6 @@
       "tracking_issue": 947,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-test-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "slash_tests.rs,slash_effect_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Test mocks are outside production TEA purity",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while these files are test-only",
       "status": "active"
     },
     {

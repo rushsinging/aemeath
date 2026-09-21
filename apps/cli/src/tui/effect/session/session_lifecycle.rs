@@ -2,7 +2,6 @@ use crate::tui::app::App;
 use crate::tui::effect::session::terminal_guard::TerminalGuard;
 use futures::FutureExt;
 use std::io;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 impl App {
@@ -14,13 +13,11 @@ impl App {
 
         // 进入 TUI：RAII guard 保证任何退出路径（正常 / ? / panic 展开）都恢复终端。
         let mut guard = TerminalGuard::enter()?;
-        let interrupted = Arc::new(AtomicBool::new(false));
 
         // catch_unwind 包裹主循环：panic 不再 abort 进程，捕获后仍可 auto-save。
-        let loop_result =
-            std::panic::AssertUnwindSafe(self.run_loop(guard.terminal_mut(), interrupted))
-                .catch_unwind()
-                .await;
+        let loop_result = std::panic::AssertUnwindSafe(self.run_loop(guard.terminal_mut()))
+            .catch_unwind()
+            .await;
 
         // auto-save 已下沉到 runtime：run_loop 退出时 drop input_event_tx →
         // 常驻 loop shutdown → chat_impl spawn task 自动 save。

@@ -203,11 +203,7 @@ impl App {
                     // 产生 typed ChatInputEvent。直接压成 ControlCommand 会丢失 `/compact`
                     // 等应用命令的业务语义，导致 busy 后静默无动作。
                     if submission.text.starts_with('/') {
-                        return UpdateResult {
-                            effects: Vec::new(),
-                            spawn_effect: None,
-                            pending_slash: Some(submission.text),
-                        };
+                        return self.handle_slash_command(&submission.text);
                     }
                     // 忙时普通消息：与首条提交统一经事件通道发 UserMessage。
                     self.set_transient_notice(StatusNotice::warning("message event queued"));

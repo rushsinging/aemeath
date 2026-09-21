@@ -6,7 +6,7 @@ use crate::tui::model::input::completion_item::CompletionItem;
 /// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
 /// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
 #[test]
-fn busy_slash_routes_through_pending_slash_without_placeholder() {
+fn busy_slash_dispatches_synchronously_without_placeholder() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -21,10 +21,17 @@ fn busy_slash_routes_through_pending_slash_without_placeholder() {
 
     let result = app.update_key(key, &spawn_refs);
 
-    assert_eq!(result.pending_slash.as_deref(), Some("/compact"));
+    // busy slash 同步分发：App::new 注入真实 builtin router，/compact 产出
+    // Compact 事件 effect；不降级为 ControlCommand，也不建占位 QueuedUserMessage。
     assert!(
-        result.effects.is_empty(),
-        "busy slash 不得降级为无法执行的 ControlCommand"
+        result.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::Compact
+            }
+        )),
+        "busy slash 应同步产出 Compact 事件 effect，实际: {:?}",
+        result.effects
     );
     assert!(
         app.model.conversation.queued_submissions.is_empty(),

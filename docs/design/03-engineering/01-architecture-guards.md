@@ -401,12 +401,9 @@
 | `apps/cli/src/tui/app/mod.rs` | 同步 git 元数据探测（`Command::new`），非 update 副作用 |
 | `apps/cli/src/tui/app/run_loop.rs` | runtime 编排层（事件循环 `.await`），TEA 副作用执行器所在 |
 | `apps/cli/src/tui/app/runtime.rs` | runtime 编排层 / Effect executor 本身 |
-| `apps/cli/src/tui/app/slash.rs` | B 块 wontfix：命令主分发为 request-response + `Option<String>` 控制流，Effect 化需把每命令拆成"发 Effect + UiEvent 回流续接"状态机，引入大量 pending 状态、破坏 `Some(prompt)` 直返、重写 `slash_tests`，收益仅 guard 名单少一项、成本高 → **整文件豁免**，不引入行级豁免 |
-| `apps/cli/src/tui/app/slash_tests.rs` | 测试 mock |
-| `apps/cli/src/tui/app/slash_effect_tests.rs` | 测试 mock |
 
 - **行级豁免锚点**：单行末尾 `// allow tea_side_effect` 注释可放行。
-- **注**：A1-A4 已 Effect 化/转纯的文件（`dialog.rs`, `suggestions.rs`, 已删除的 `save.rs`, `memory.rs`）已移出本名单，受严格纯度检查约束。
+- **注**：A1-A4 已 Effect 化/转纯的文件（`dialog.rs`, `suggestions.rs`, 已删除的 `save.rs`, `memory.rs`）已移出本名单，受严格纯度检查约束。slash 分发已纯化为同步 update（`handle_slash_command` 返回 `UpdateResult`，#947），连同其测试文件一并移出豁免，受严格纯度检查约束。
 
 ## 10. check-tui-toplevel-layout.sh
 

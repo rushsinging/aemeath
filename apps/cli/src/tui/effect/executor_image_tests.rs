@@ -119,3 +119,27 @@ async fn unavailable_image_path_event_restores_pasted_text_into_input() {
 
     assert_eq!(app.model.input.document.buffer, pasted_text);
 }
+
+/// ReadClipboardImage：剪贴板读取失败（无图内容/环境不可用）时仅记录日志，
+/// 不 panic、不回灌错误事件、不添加待发送图片。
+#[tokio::test]
+async fn read_clipboard_image_effect_handles_failure_gracefully() {
+    let mut app = test_app();
+    let (ui_tx, mut ui_rx) = mpsc::channel(4);
+
+    app.read_clipboard_image_effect(&ui_tx);
+
+    // 环境无图内容时最常见结果是无事件；若有事件也不得是错误文本。
+    let maybe_event = ui_rx.try_recv();
+    if let Ok(event) = maybe_event {
+        assert!(
+            !matches!(event, UiEvent::Error(_)),
+            "剪贴板读取失败不应回灌 Error 事件，实际: {event:?}"
+        );
+    }
+    assert_eq!(
+        app.model.input.document.image_spans.len(),
+        0,
+        "剪贴板读取失败时不应添加待发送图片"
+    );
+}

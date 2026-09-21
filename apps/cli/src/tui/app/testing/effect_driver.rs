@@ -35,7 +35,6 @@ pub(crate) struct ScriptedEffectDriver {
     expected: VecDeque<ExpectedEffect>,
     pub effects: Vec<Effect>,
     pub spawn_effects: Vec<SpawnAgentChatEffect>,
-    pub pending_slash: Vec<String>,
 }
 
 impl ScriptedEffectDriver {
@@ -146,13 +145,10 @@ impl ScriptedEffectDriver {
         if let Some(effect) = outcome.spawn_effect {
             self.spawn_effects.push(effect);
         }
-        if let Some(input) = outcome.pending_slash {
-            self.pending_slash.push(input);
-        }
         replies
     }
 
     pub fn is_idle(&self) -> bool {
-        self.expected.is_empty() && self.spawn_effects.is_empty() && self.pending_slash.is_empty()
+        self.expected.is_empty() && self.spawn_effects.is_empty()
     }
 }

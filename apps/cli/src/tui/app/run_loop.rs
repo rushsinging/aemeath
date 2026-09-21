@@ -7,8 +7,6 @@ use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -79,7 +77,6 @@ impl App {
     pub(crate) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        interrupted: Arc<AtomicBool>,
     ) -> io::Result<()> {
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
         let (runtime_tx, mut runtime_rx) = mpsc::channel::<TuiRuntimeEvent>(256);
@@ -204,11 +201,10 @@ impl App {
             let update_start = Instant::now();
             let result = self.drive_frame(msg, &ui_tx, &spawn_refs);
             crate::tui::log_trace!(
-                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={}",
+                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={}",
                 update_start.elapsed().as_millis(),
                 result.effects.len(),
                 result.spawn_effect.is_some(),
-                result.pending_slash.is_some(),
                 self.view_state.dirty.output,
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
@@ -216,26 +212,6 @@ impl App {
                 self.view_state.run_activity.is_active(),
                 self.view_state.animation.spinner_frame
             );
-            // --- Handle pending slash commands (async) ---
-            if let Some(input) = result.pending_slash {
-                let review_prompt = self
-                    .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
-                    .await;
-                if let Some(prompt) = review_prompt {
-                    // #390 A1：slash 命令产出的 LLM prompt（如 /review）改为经常驻
-                    // input_events 通道发往 loop，不再 spawn 新 chat。回显由 runtime 的
-                    // MessagesSync 单一真相驱动（与普通提交一致）。
-                    interrupted.store(false, Ordering::Relaxed);
-                    self.chat.clear_tool_activity();
-                    self.chat.start_processing();
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::UserMessage {
-                            id: sdk::InputId::new_v7(),
-                            text: prompt,
-                            images: Vec::new(),
-                        });
-                }
-            }
 
             if let Some(spawn_effect) = result.spawn_effect {
                 self.execute_spawn_effect(spawn_effect);

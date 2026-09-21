@@ -10,7 +10,6 @@ use super::update::UpdateResult;
 pub(crate) struct FrameOutcome {
     pub effects: Vec<Effect>,
     pub spawn_effect: Option<SpawnAgentChatEffect>,
-    pub pending_slash: Option<String>,
 }
 
 impl App {
@@ -23,12 +22,10 @@ impl App {
         let UpdateResult {
             effects,
             spawn_effect,
-            pending_slash,
         } = self.update(msg, ui_tx, spawn_refs);
         FrameOutcome {
             effects,
             spawn_effect,
-            pending_slash,
         }
     }
 

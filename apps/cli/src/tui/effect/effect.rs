@@ -32,11 +32,6 @@ pub enum Effect {
         root: String,
         revision: u64,
     },
-    /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
-    /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
-    SaveSession {
-        notify: bool,
-    },
     /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
     FetchMemoryList,
     CopyToClipboard {

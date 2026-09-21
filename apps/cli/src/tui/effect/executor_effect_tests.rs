@@ -42,3 +42,21 @@ fn effect_runtime_accepts_pending_image() {
     ));
     assert_eq!(app.model.input.document.image_spans.len(), 1);
 }
+
+/// FetchMemoryList：loop 未运行（tx 缺失）时静默，不回灌任何 UiEvent。
+#[tokio::test]
+async fn fetch_memory_list_effect_is_silent_without_input_channel() {
+    let mut app = App::new(
+        "s".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "m".to_string(),
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    app.execute_effect(Effect::FetchMemoryList, &tx).await;
+
+    assert!(
+        rx.try_recv().is_err(),
+        "无输入通道时 FetchMemoryList 不应回灌事件"
+    );
+}
