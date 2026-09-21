@@ -5,6 +5,7 @@ mod from_args;
 mod mapping;
 pub mod resume_helper;
 pub(super) mod session_query;
+mod startup_resume;
 mod trait_chat;
 mod trait_impl;
 mod trait_memory;
