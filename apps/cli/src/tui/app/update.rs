@@ -562,6 +562,25 @@ impl App {
                     sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
                 ));
             }
+            // `/memory remind` 结果渲染：ReminderList 在 Intent 层无投影，
+            // 必须在此显式消费，NEVER 静默丢弃（#1092 终审修复）。
+            TuiRuntimeEvent::ReminderList { reminders } => {
+                if reminders.is_empty() {
+                    self.append_system_notice("No reminders.");
+                } else {
+                    let active_count = reminders.iter().filter(|r| !r.done).count();
+                    let mut lines = vec![format!(
+                        "Reminders ({}/{} active):",
+                        active_count,
+                        reminders.len()
+                    )];
+                    for reminder in reminders {
+                        let marker = if reminder.done { "[x]" } else { "[ ]" };
+                        lines.push(format!("  {marker} {}", reminder.content));
+                    }
+                    self.append_system_notice(lines.join("\n"));
+                }
+            }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
                 // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
                 self.chat.active_run_step = None;
