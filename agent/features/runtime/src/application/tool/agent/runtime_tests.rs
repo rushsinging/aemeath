@@ -752,3 +752,169 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
         "no errors expected"
     );
 }
+
+/// deadline 到达时 supervisor 必须向 Cooperative 工具发送 per-call child
+/// cancellation；工具感知并返回后，终态应为确认的 TimedOut，而不是
+/// CancellationUnconfirmed。
+#[tokio::test]
+async fn test_execute_tools_deadline_notifies_cooperative_tool_cancellation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct CooperativeCleanupTool {
+        observed_child_cancellation: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl TypedTool for CooperativeCleanupTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "cooperative_cleanup"
+        }
+        fn description(&self) -> &str {
+            "deadline child cancellation test"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        fn timeout_secs(&self) -> u64 {
+            0
+        }
+        fn cancellation(&self) -> tools::CancellationDeclaration {
+            tools::CancellationDeclaration::Cooperative
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            // 挂起直到 deadline 触发 child cancellation，模拟 Grep 清理路径。
+            ctx.cancellation().cancelled().await;
+            self.observed_child_cancellation
+                .store(true, Ordering::SeqCst);
+            TypedToolResult::success("cleaned up", Value::Null)
+        }
+    }
+
+    let observed_child_cancellation = Arc::new(AtomicBool::new(false));
+    let registry = TestCatalogExecutionFactory::new();
+    registry.register(CooperativeCleanupTool {
+        observed_child_cancellation: observed_child_cancellation.clone(),
+    });
+    let agent = Agent::for_test(&registry, test_ctx(), 10);
+
+    let results = agent
+        .execute_tools(&[ToolCall {
+            provider_id: "provider-deadline".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("deadline-coop-1"),
+            name: "cooperative_cleanup".to_string(),
+            index: 0,
+            input: serde_json::json!({}),
+        }])
+        .await;
+
+    assert_eq!(results.len(), 1);
+    assert!(
+        observed_child_cancellation.load(Ordering::SeqCst),
+        "deadline 到达后工具必须观察到 child cancellation"
+    );
+    assert!(
+        results[0].outcome.text.contains("effective deadline"),
+        "终态应说明到达 deadline：{}",
+        results[0].outcome.text
+    );
+    assert!(
+        !results[0].outcome.text.contains("cleanup unconfirmed"),
+        "Cooperative 工具在 grace 内清理完成时终态不得再标记 unconfirmed：{}",
+        results[0].outcome.text
+    );
+}
+
+/// 用户取消同样必须转发 per-call child cancellation，Cooperative 工具
+/// 清理完成后终态为确认的 Cancelled。
+#[tokio::test]
+async fn test_execute_tools_cancel_notifies_cooperative_tool_cancellation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct CooperativeCancelTool {
+        started: Arc<Notify>,
+        observed_child_cancellation: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl TypedTool for CooperativeCancelTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "cooperative_cancel"
+        }
+        fn description(&self) -> &str {
+            "user cancel child cancellation test"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        fn timeout_secs(&self) -> u64 {
+            600
+        }
+        fn cancellation(&self) -> tools::CancellationDeclaration {
+            tools::CancellationDeclaration::Cooperative
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            self.started.notify_one();
+            ctx.cancellation().cancelled().await;
+            self.observed_child_cancellation
+                .store(true, Ordering::SeqCst);
+            TypedToolResult::success("cleaned up", Value::Null)
+        }
+    }
+
+    let started = Arc::new(Notify::new());
+    let observed_child_cancellation = Arc::new(AtomicBool::new(false));
+    let registry = TestCatalogExecutionFactory::new();
+    registry.register(CooperativeCancelTool {
+        started: started.clone(),
+        observed_child_cancellation: observed_child_cancellation.clone(),
+    });
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        cancel.clone(),
+    );
+    let agent = Agent::for_test(&registry, ctx, 10);
+
+    let cancel_task = tokio::spawn(async move {
+        started.notified().await;
+        cancel.cancel();
+    });
+
+    let results = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        agent.execute_tools(&[ToolCall {
+            provider_id: "provider-cancel".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new("cancel-coop-1"),
+            name: "cooperative_cancel".to_string(),
+            index: 0,
+            input: serde_json::json!({}),
+        }]),
+    )
+    .await
+    .expect("用户取消必须让 Cooperative 工具在 grace 内收敛");
+
+    cancel_task.await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(
+        observed_child_cancellation.load(Ordering::SeqCst),
+        "用户取消后工具必须观察到 child cancellation；实际 outcome：{}",
+        results[0].outcome.text
+    );
+    assert!(
+        !results[0].outcome.text.contains("cleanup unconfirmed"),
+        "Cooperative 工具清理完成时终态不得标记 unconfirmed：{}",
+        results[0].outcome.text
+    );
+}

@@ -6,6 +6,8 @@ use serde_json::Value;
 use std::path::PathBuf;
 use tokio::process::Command;
 
+use super::process_cleanup::terminate_process_tree;
+
 pub struct GrepTool;
 
 #[async_trait]
@@ -33,6 +35,9 @@ impl TypedTool for GrepTool {
     }
     fn is_concurrency_safe(&self) -> bool {
         true
+    }
+    fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
+        crate::domain::published_language::CancellationDeclaration::Cooperative
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<GrepResult> {
@@ -67,33 +72,83 @@ impl TypedTool for GrepTool {
         };
         let glob_filter = args.glob.as_deref();
 
-        let output = if is_rg_available().await {
-            let mut command = Command::new("rg");
-            command.arg("-n").arg("-H").arg("--no-heading").arg(pattern);
+        let mut search_command = if is_rg_available().await {
+            let mut rg_command = Command::new("rg");
+            rg_command
+                .arg("-n")
+                .arg("-H")
+                .arg("--no-heading")
+                .arg(pattern);
             if let Some(glob_pattern) = glob_filter {
-                command.arg("--glob").arg(glob_pattern);
+                rg_command.arg("--glob").arg(glob_pattern);
             }
-            command.arg(&search_path).current_dir(&workspace_root);
-            if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+            rg_command
+                .arg(&search_path)
+                .current_dir(&workspace_root)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            if let Err(error) = utils::configure_tokio_noninteractive(&mut rg_command) {
                 return TypedToolResult::error(format!("Search isolation failed: {error}"));
             }
-            command.output().await
+            rg_command
         } else {
-            let mut command = Command::new("grep");
-            command.arg("-rn").arg(pattern).arg(&search_path);
+            let mut grep_command = Command::new("grep");
+            grep_command.arg("-rn").arg(pattern).arg(&search_path);
             if let Some(glob_pattern) = glob_filter {
-                command.arg("--include").arg(glob_pattern);
+                grep_command.arg("--include").arg(glob_pattern);
             }
-            command.current_dir(&workspace_root);
-            if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+            grep_command
+                .current_dir(&workspace_root)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            if let Err(error) = utils::configure_tokio_noninteractive(&mut grep_command) {
                 return TypedToolResult::error(format!("Search isolation failed: {error}"));
             }
-            command.output().await
+            grep_command
+        };
+        let mut search_child = match search_command.spawn() {
+            Ok(child) => child,
+            Err(error) => return TypedToolResult::error(format!("Search failed: {error}")),
+        };
+        let cancellation = ctx.cancellation();
+        let search_started = std::time::Instant::now();
+        let stdout_pipe = search_child.stdout.take();
+        let stderr_pipe = search_child.stderr.take();
+        let stdout_reader = tokio::spawn(read_pipe_to_end(stdout_pipe));
+        let stderr_reader = tokio::spawn(read_pipe_to_end(stderr_pipe));
+        let output = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "grep observed cancellation: pattern={pattern:?} pid={:?} elapsed_ms={}",
+                    search_child.id(),
+                    search_started.elapsed().as_millis(),
+                );
+                terminate_process_tree(&mut search_child).await;
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "grep cancellation cleanup completed: pattern={pattern:?} pid={:?} elapsed_ms={}",
+                    search_child.id(),
+                    search_started.elapsed().as_millis(),
+                );
+                return TypedToolResult::error("Search cancelled by user");
+            }
+            joined = async {
+                let status = search_child.wait().await;
+                let stdout_bytes = stdout_reader.await.unwrap_or_default();
+                let stderr_bytes = stderr_reader.await.unwrap_or_default();
+                status.map(|_exit_status| (stdout_bytes, stderr_bytes))
+            } => joined.map(|(stdout_bytes, _stderr_bytes)| stdout_bytes),
         };
 
         match output {
             Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stdout = String::from_utf8_lossy(&out);
                 if stdout.is_empty() {
                     TypedToolResult::success(
                         "No matches found",
@@ -179,6 +234,16 @@ async fn is_rg_available() -> bool {
         .await
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+/// 读空子进程输出管道直至 EOF；进程被终止后写端关闭，reader 自然返回。
+async fn read_pipe_to_end<R: tokio::io::AsyncRead + Unpin>(pipe: Option<R>) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut bytes = Vec::new();
+    if let Some(mut reader) = pipe {
+        let _ = reader.read_to_end(&mut bytes).await;
+    }
+    bytes
 }
 
 #[cfg(test)]
