@@ -1,4 +1,3 @@
-use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::effect::Effect;
 
@@ -40,34 +39,13 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
 
     harness.expect_effect(ExpectedEffect::ProcessImageFile {
         path: "/tmp/p1-fixture.png".into(),
+        fallback_text: " /tmp/p1-fixture.png ".into(),
     });
     harness.paste(" /tmp/p1-fixture.png ");
-    assert!(harness.effects().iter().any(
-        |effect| matches!(effect, Effect::ProcessImageFile { path } if path == "/tmp/p1-fixture.png")
-    ));
-    harness.assert_idle();
-}
-
-#[test]
-fn legacy_compact_progress_event_does_not_create_parallel_tui_state() {
-    let mut harness = TuiScenarioHarness::new(100, 30);
-    harness.runtime_event(TuiRuntimeEvent::CompactProgress {
-        stage: "Summarizing".into(),
-        current: Some(2),
-        total: Some(4),
-    });
-    assert!(harness
-        .app
-        .model
-        .conversation
-        .runtime
-        .compact_progress
-        .is_none());
-
-    harness.ui(UiEvent::Error("provider unavailable".into()));
-    assert!(harness.effects().iter().any(
-        |effect| matches!(effect, Effect::RunHook { name, message } if name == "error" && message == "provider unavailable")
-    ));
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        Effect::ProcessImageFile { path, .. } if path == "/tmp/p1-fixture.png"
+    )));
     harness.assert_idle();
 }
 
@@ -76,7 +54,15 @@ fn working_directory_change_updates_status_projection() {
     let mut harness = TuiScenarioHarness::new(100, 30);
     let root = std::path::Path::new("/workspace");
     let worktree = root.join("feature-one");
-    harness.ui(crate::tui::app::status_context_for_paths(&worktree, root));
+    harness.runtime_event(
+        crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent::WorkspaceSnapshot(
+            crate::tui::adapter::tui_runtime_event::TuiWorkspaceSnapshot {
+                path_base: worktree.display().to_string(),
+                workspace_root: root.display().to_string(),
+                context_stack: vec![],
+            },
+        ),
+    );
     harness.render();
 
     let expected_path_base = worktree.display().to_string();

@@ -25,11 +25,11 @@ async fn cancel_step_during_compaction_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::StepCancelled { .. })));
 }
 #[tokio::test]
 async fn engine_terminates_in_flight_compaction_and_emits_terminal_ack() {
@@ -62,7 +62,7 @@ async fn engine_terminates_in_flight_compaction_and_emits_terminal_ack() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(!port.calls().contains(&"model"));
 }
 
@@ -96,11 +96,11 @@ async fn engine_terminates_in_flight_model_and_emits_terminal_ack() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::TerminationRequested { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::TerminationRequested { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
 }
 
 #[tokio::test]
@@ -279,9 +279,9 @@ async fn failed_event_delivery_is_restored_to_the_run_outbox() {
     assert!(matches!(
         run.events(),
         [
-            RunDomainEvent::Transitioned { .. },
-            RunDomainEvent::Started { .. },
-            RunDomainEvent::DrainingInput { .. }
+            RuntimeLifecycleEvent::Transitioned { .. },
+            RuntimeLifecycleEvent::Started { .. },
+            RuntimeLifecycleEvent::DrainingInput { .. }
         ]
     ));
 }
@@ -347,7 +347,7 @@ async fn engine_processes_internal_continuation() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Completed { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Completed { .. })));
 }
 
 /// #1272: InternalContinuation with empty batch while AwaitingUser
@@ -559,7 +559,7 @@ async fn engine_completed_event_carries_last_assistant_text() {
         .events()
         .iter()
         .find_map(|event| match event {
-            RunDomainEvent::Completed { result, .. } => Some(result.clone()),
+            RuntimeLifecycleEvent::Completed { result, .. } => Some(result.clone()),
             _ => None,
         })
         .expect("Completed event must be emitted");
@@ -624,7 +624,7 @@ async fn engine_terminal_text_is_the_last_assistant_text_not_the_first() {
         .events()
         .iter()
         .find_map(|event| match event {
-            RunDomainEvent::Completed { result, .. } => Some(result.clone()),
+            RuntimeLifecycleEvent::Completed { result, .. } => Some(result.clone()),
             _ => None,
         })
         .expect("Completed event must be emitted");

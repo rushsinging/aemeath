@@ -25,6 +25,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - Interaction command result 只结束本地交互块；Run 只由 SDK `RunResumed` / `RunCancelling` / `RunCancelled` 等 Runtime 权威事件推进
 - 六 Context 核心字段私有，root reducer 是唯一写入口；ViewAssembler 只读 accessor，ViewState 只持瞬时交互 / 渲染状态
 - Activity 增量 / 快照经 SDK event → TUI-owned DTO → Intent → root reducer 事实镜像 → ActivitySummaryAssembler 单向消费；revision gap 隐藏不可信摘要并等待 Snapshot 修复，Operational / Diagnostic detail 不进入主状态行
+- Runtime 事件的 Subject + Fact 以 [统一命名规范](../runtime/events/01-naming-conventions.md) 为唯一真相；TUI 第一层保持事实名，第二层才使用 `Replace*` / `Observe*` / `Append*` / `Present*` consumer action；全量映射见 [Runtime 事件索引](../runtime/events/09-event-index.md)
 ### Reflection 展示边界（#899）
 
 - Runtime 的 Interval / PreCompact / Manual Reflection 全部后台异步执行；完成时 **NEVER** 主动向 TUI 发送完整 `ReflectionResult`、formatted content、正文或完成通知块，TUI 不维护 reflection job 结果通道。
@@ -72,6 +73,9 @@ ViewModel / ViewState 作为 `view_assembler/` 产出的纯数据值类型就近
 ## 相关文档
 
 - 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
+- Runtime 事件与 Published Language：[../runtime/08-event-pipeline-and-published-language.md](../runtime/08-event-pipeline-and-published-language.md)
+- Runtime 事件命名规范：[../runtime/events/01-naming-conventions.md](../runtime/events/01-naming-conventions.md)
+- Runtime 事件全量索引：[../runtime/events/09-event-index.md](../runtime/events/09-event-index.md)
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - 上下文地图：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
@@ -88,5 +92,5 @@ ViewModel / ViewState 作为 `view_assembler/` 产出的纯数据值类型就近
 | 2026-07-12 | 初稿：八层 TEA 管线、六 Context 投影、SDK DTO 边界、架构门禁、reducer 纯化目标态 | #795 |
 | 2026-07-12 | 新增 02-model：六 Context 完整字段、投影状态机、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 03-event-flow-and-acl：两层 ACL、六 Context Intent / Effect、agent_id / sub-agent 路由 | #797 |
-| 2026-07-12 | 新增 04-view-layer / 05-e2e-scenario-testing | #795 |
+| 2026-08-08 | 对齐 Runtime 事件统一命名和编号事件索引：第一层 ACL 保持 Subject + Fact，第二层 Intent 使用 consumer action | 事件体系治理 |
 | 2026-07-16 | 冻结 TUI Target 目录：八层 TEA 管线映射为 `adapter / model / update / effect / view_assembler / render` 六个技术目录，**NEVER** 采用 `capabilities/`；目录承载单向数据流与 import 隔离 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

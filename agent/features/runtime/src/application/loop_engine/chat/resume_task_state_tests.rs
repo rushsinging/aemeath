@@ -131,6 +131,7 @@ fn restored_session(
         workspace: context::session::SnapshotState::Captured(workspace),
         revision: 9,
         compact: None,
+        cleared_after: None,
         run_slices: Vec::new().into(),
         committed_steps: Default::default(),
         skill_load_records: Vec::new(),
@@ -206,7 +207,7 @@ fn snapshot_with_one_task() -> task::TaskSnapshot {
 }
 
 fn shell_workspace_snapshot() -> share::session_types::PersistedWorkspaceContext {
-    project::wire_production_workspace(std::env::current_dir().unwrap())
+    project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace")
         .into_views()
         .persist()

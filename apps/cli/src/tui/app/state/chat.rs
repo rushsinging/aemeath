@@ -9,6 +9,7 @@ pub(crate) struct ChatState {
     pub processing_handle: Option<crate::tui::effect::session::processing::ProcessingHandle>,
     pub is_processing: bool,
     pub is_cancelling: bool,
+    pub active_run_step: Option<(sdk::RunId, sdk::RunStepId)>,
 }
 
 impl ChatState {
@@ -45,6 +46,7 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
         self.is_cancelling = false;
+        self.active_run_step = None;
         self.clear_processing_handle();
     }
 

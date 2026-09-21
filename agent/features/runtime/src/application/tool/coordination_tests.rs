@@ -292,6 +292,56 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
 }
 
 #[test]
+fn cancelled_round_convergence_preserves_typed_outcomes_and_call_order() {
+    let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
+    let completed = crate::application::tool::agent::ToolExecution::new_typed(
+        &calls[0],
+        tools::ToolExecutionOutcome::success_text("finished"),
+    );
+    let unconfirmed = crate::application::tool::agent::ToolExecution::new_typed(
+        &calls[1],
+        tools::ToolExecutionOutcome::cancellation_unconfirmed(
+            "cleanup receipt not confirmed",
+            Vec::new(),
+            Vec::new(),
+        ),
+    );
+
+    let convergence = complete_cancelled_tool_round(&calls, vec![unconfirmed, completed]);
+
+    assert_eq!(convergence.results.len(), 3);
+    assert_eq!(convergence.results[0].call_id, calls[0].id);
+    assert_eq!(convergence.results[1].call_id, calls[1].id);
+    assert_eq!(convergence.results[2].call_id, calls[2].id);
+    assert!(matches!(
+        convergence.results[0].typed_outcome,
+        tools::ToolExecutionOutcome::Success(_)
+    ));
+    assert!(matches!(
+        convergence.results[1].typed_outcome,
+        tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
+    ));
+    assert!(matches!(
+        convergence.results[2].typed_outcome,
+        tools::ToolExecutionOutcome::Cancelled(_)
+    ));
+}
+
+#[test]
+fn streaming_and_ordinary_cancellation_share_one_convergence_rule() {
+    let coordination = include_str!("coordination.rs");
+
+    assert_eq!(
+        coordination
+            .matches("converge_cancelled_tool_round(")
+            .count(),
+        3,
+        "定义一次，并由 ordinary 与 streaming 两条入口分别调用"
+    );
+    assert!(!coordination.contains("取消时旁路结果整体丢弃"));
+}
+
+#[test]
 fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_calls() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1)];
     let completed = crate::application::tool::agent::ToolExecution::new(
@@ -299,7 +349,7 @@ fn complete_cancelled_tool_round_preserves_finished_results_and_fills_missing_ca
         tools::ToolOutcome::new("finished", serde_json::Value::Null, Vec::new()),
     );
 
-    let results = complete_cancelled_tool_round(&calls, vec![completed]);
+    let results = complete_cancelled_tool_round(&calls, vec![completed]).results;
 
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].provider_id, "provider-0");
@@ -753,4 +803,75 @@ fn hook_directive_context_and_input_invalid_schema_returns_invalid_input() {
 
     assert!(matches!(outcome, HookDirectiveOutcome::InvalidInput { .. }));
     assert_eq!(policy.eval_count(), 0);
+}
+
+/// 构造一条含 tool_use 的 assistant 消息（本 step 的模型声明）。
+fn assistant_with_tool_use(
+    tool_use_id: &str,
+    tool_name: &str,
+) -> crate::application::run::execution_state::RunExecutionState {
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.append_message(share::message::Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::ToolUse {
+            id: tool_use_id.to_string(),
+            name: tool_name.to_string(),
+            input: serde_json::json!({}),
+        }],
+        metadata: None,
+    });
+    execution
+}
+
+/// 构造一个旁路轮次：provider_id 即 assistant tool_use.id 的配对键。
+fn streaming_round_with_result(
+    provider_id: &str,
+) -> crate::application::loop_engine::chat::tools::ToolRoundResult {
+    let tool_call = ToolCall {
+        id: ToolCallId::from_legacy_or_new(provider_id),
+        provider_id: provider_id.to_string(),
+        name: "Allowed".to_string(),
+        index: 0,
+        input: serde_json::json!({}),
+    };
+    crate::application::loop_engine::chat::tools::ToolRoundResult {
+        results: vec![
+            crate::application::tool::agent::runtime::ToolExecution::new(
+                &tool_call,
+                tools::ToolOutcome::new("ok", serde_json::Value::Null, Vec::new()),
+            ),
+        ],
+        fuse_bypassed: Vec::new(),
+        suspensions: Vec::new(),
+        approvals: Vec::new(),
+    }
+}
+
+/// #1581 兜底：旁路结果与本 step assistant tool_use 完全配对时放行。
+#[test]
+fn streaming_round_pairing_validation_accepts_fully_paired_rounds() {
+    let execution = assistant_with_tool_use("call_paired", "Allowed");
+    let rounds = vec![streaming_round_with_result("call_paired")];
+
+    super::validate_streaming_round_pairing(&execution, &rounds)
+        .expect("paired streaming rounds must pass validation");
+}
+
+/// #1581 兜底：旁路结果中存在 assistant 未声明的孤儿 tool call 时显式失败，
+/// 防止孤儿 tool_result materialize 进消息历史后被 Responses API 以 400 拒绝。
+#[test]
+fn streaming_round_pairing_validation_rejects_orphan_results() {
+    let execution = assistant_with_tool_use("call_paired", "Allowed");
+    let rounds = vec![
+        streaming_round_with_result("call_paired"),
+        streaming_round_with_result("call_orphan"),
+    ];
+
+    let error = super::validate_streaming_round_pairing(&execution, &rounds)
+        .expect_err("orphan streaming round must fail validation");
+    let message = error.to_string();
+    assert!(
+        message.contains("call_orphan"),
+        "failure must name the orphaned call: {message}"
+    );
 }

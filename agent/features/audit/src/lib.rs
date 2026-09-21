@@ -9,10 +9,7 @@ mod ports;
 pub use adapters::{
     file_usage_append_store, usage_query_service, FileUsageAppendStore, UsageQueryService,
 };
-pub use application::{
-    start_usage_worker, UsagePipelineMetricsSnapshot, UsageSender, UsageShutdownOutcome,
-    UsageWorkerConfig, UsageWorkerHandle,
-};
+pub use application::{start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig};
 
 pub use domain::{
     Pagination, TimeRange, UsageCursor, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,

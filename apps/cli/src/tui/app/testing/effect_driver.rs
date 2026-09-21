@@ -9,12 +9,15 @@ pub(crate) enum ExpectedEffect {
         text: String,
         replies: Vec<TuiMsg>,
     },
-    CancelCurrentRun {
+    CancelRunStep {
+        run_id: sdk::RunId,
+        step_id: sdk::RunStepId,
         replies: Vec<TuiMsg>,
     },
     ReadClipboardImage,
     ProcessImageFile {
         path: String,
+        fallback_text: String,
     },
     QuitApplication,
     ReplyInteraction {
@@ -32,7 +35,6 @@ pub(crate) struct ScriptedEffectDriver {
     expected: VecDeque<ExpectedEffect>,
     pub effects: Vec<Effect>,
     pub spawn_effects: Vec<SpawnAgentChatEffect>,
-    pub pending_slash: Vec<String>,
 }
 
 impl ScriptedEffectDriver {
@@ -45,8 +47,7 @@ impl ScriptedEffectDriver {
         for effect in outcome.effects {
             if matches!(
                 effect,
-                Effect::None
-                    | Effect::RequestRender
+                Effect::RequestRender
                     | Effect::RunHook { .. }
                     | Effect::LoadDisplayHistoryWindow { .. }
             ) {
@@ -85,14 +86,31 @@ impl ScriptedEffectDriver {
                     replies.extend(scripted);
                 }
                 (
-                    Effect::CancelCurrentRun,
-                    ExpectedEffect::CancelCurrentRun { replies: scripted },
-                ) => replies.extend(scripted),
+                    Effect::CancelRunStep { run_id, step_id },
+                    ExpectedEffect::CancelRunStep {
+                        run_id: expected_run_id,
+                        step_id: expected_step_id,
+                        replies: scripted,
+                    },
+                ) => {
+                    assert_eq!(run_id, &expected_run_id, "cancel run id mismatch");
+                    assert_eq!(step_id, &expected_step_id, "cancel step id mismatch");
+                    replies.extend(scripted);
+                }
                 (Effect::ReadClipboardImage, ExpectedEffect::ReadClipboardImage) => {}
                 (
-                    Effect::ProcessImageFile { path },
-                    ExpectedEffect::ProcessImageFile { path: expected },
-                ) => assert_eq!(path, &expected, "image path mismatch"),
+                    Effect::ProcessImageFile {
+                        path,
+                        fallback_text,
+                    },
+                    ExpectedEffect::ProcessImageFile {
+                        path: expected_path,
+                        fallback_text: expected_fallback,
+                    },
+                ) => {
+                    assert_eq!(path, &expected_path, "image path mismatch");
+                    assert_eq!(fallback_text, &expected_fallback, "原始粘贴文本 mismatch");
+                }
                 (Effect::QuitApplication, ExpectedEffect::QuitApplication) => {}
                 (
                     Effect::ReplyInteraction { request_id, reply },
@@ -127,13 +145,10 @@ impl ScriptedEffectDriver {
         if let Some(effect) = outcome.spawn_effect {
             self.spawn_effects.push(effect);
         }
-        if let Some(input) = outcome.pending_slash {
-            self.pending_slash.push(input);
-        }
         replies
     }
 
     pub fn is_idle(&self) -> bool {
-        self.expected.is_empty() && self.spawn_effects.is_empty() && self.pending_slash.is_empty()
+        self.expected.is_empty() && self.spawn_effects.is_empty()
     }
 }

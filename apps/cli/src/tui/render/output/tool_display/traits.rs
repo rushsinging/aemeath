@@ -21,7 +21,7 @@ pub trait ToolDisplay: Send + Sync {
     /// Format the header line as plain string.
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String;
 
-    /// Format a one-line header for sub-agent progress.
+    /// Format a one-line header for sub-agent activity.
     ///
     /// This is header-only: never render result payloads, detail lines, or ToolResult blocks.
     fn header_for_subagent(

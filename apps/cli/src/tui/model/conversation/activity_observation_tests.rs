@@ -26,6 +26,68 @@ fn activity(run_id: &str, activity_id: &str, revision: u64) -> TuiActivityObserv
 }
 
 #[test]
+fn snapshot_heartbeat_refreshes_timing_at_same_business_revision() {
+    let mut model = ConversationModel::default();
+    let mut root = activity("run-1", "root", 1);
+    root.timing.total_elapsed_ms = 1_000;
+    model.apply(ReplaceActivitySnapshot {
+        snapshot: TuiActivitySnapshot {
+            run_id: UiRunId::from("run-1"),
+            revision: 1,
+            heartbeat_sequence: 0,
+            activities: vec![root.clone()],
+        },
+    });
+    root.timing.total_elapsed_ms = 2_000;
+
+    let changes = model.apply(ReplaceActivitySnapshot {
+        snapshot: TuiActivitySnapshot {
+            run_id: UiRunId::from("run-1"),
+            revision: 1,
+            heartbeat_sequence: 1,
+            activities: vec![root],
+        },
+    });
+
+    assert_eq!(changes.len(), 1);
+    assert_eq!(
+        model
+            .activity_observations()
+            .activity(&UiActivityId::from("root"))
+            .unwrap()
+            .timing
+            .total_elapsed_ms,
+        2_000
+    );
+}
+
+#[test]
+fn duplicate_or_stale_snapshot_heartbeat_is_rejected() {
+    let mut model = ConversationModel::default();
+    let root = activity("run-1", "root", 1);
+    model.apply(ReplaceActivitySnapshot {
+        snapshot: TuiActivitySnapshot {
+            run_id: UiRunId::from("run-1"),
+            revision: 1,
+            heartbeat_sequence: 2,
+            activities: vec![root.clone()],
+        },
+    });
+
+    for heartbeat_sequence in [2, 1] {
+        let changes = model.apply(ReplaceActivitySnapshot {
+            snapshot: TuiActivitySnapshot {
+                run_id: UiRunId::from("run-1"),
+                revision: 1,
+                heartbeat_sequence,
+                activities: vec![root.clone()],
+            },
+        });
+        assert!(changes.is_empty());
+    }
+}
+
+#[test]
 fn first_increment_above_revision_one_marks_run_stale() {
     let mut model = ConversationModel::default();
 
@@ -63,6 +125,7 @@ fn snapshot_with_same_revision_repairs_stale_run() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 1,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-1", "snapshot-activity", 1)],
         },
     });
@@ -194,6 +257,7 @@ fn snapshot_atomically_replaces_one_run_and_clears_stale_marker() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 4,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-1", "new-activity", 4)],
         },
     });
@@ -224,6 +288,7 @@ fn older_snapshot_cannot_roll_back_newer_run_mirror() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 5,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-1", "activity-5", 5)],
         },
     });
@@ -232,6 +297,7 @@ fn older_snapshot_cannot_roll_back_newer_run_mirror() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 4,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-1", "activity-4", 4)],
         },
     });
@@ -250,6 +316,7 @@ fn snapshot_rejects_activity_revision_newer_than_snapshot_revision() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 2,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-1", "future-activity", 3)],
         },
     });
@@ -266,6 +333,7 @@ fn snapshot_rejects_foreign_run_activity_without_mutating_model() {
         snapshot: TuiActivitySnapshot {
             run_id: UiRunId::from("run-1"),
             revision: 1,
+            heartbeat_sequence: 0,
             activities: vec![activity("run-2", "foreign", 1)],
         },
     });

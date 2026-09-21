@@ -3,9 +3,13 @@
 //! 设计文档：`docs/design/02-modules/context-management/02-compact.md`
 
 mod autocompact;
+mod budget_sources;
+mod context_read_candidate;
 mod continuation_checkpoint;
 mod microcompact;
 mod restore;
+mod snip;
+mod structured_facts;
 
 // 显式 re-export token_budget 的预算/估算函数（#1486：排除
 // FALLBACK_PREVIOUS_SUMMARY_CAP，避免与 compact_summary 的 glob
@@ -16,15 +20,24 @@ pub use crate::domain::token_budget::{
     estimate_tool_schemas_tokens, summary_budget,
 };
 pub use autocompact::*;
+pub use budget_sources::CompactBudgetSources;
+pub use context_read_candidate::{
+    ContextReadCandidate, ContextReadRun, ContextReadStep, ProtectedRunPolicy,
+};
 pub use continuation_checkpoint::*;
-pub use microcompact::{microcompact_chain, microcompact_messages};
+pub use microcompact::microcompact_exploration;
 pub use restore::*;
+pub use snip::snip_superseded_exploration;
+pub use structured_facts::*;
 
-/// Compact 进度阶段。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Compact 操作阶段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactStage {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
 }
 
@@ -32,26 +45,31 @@ impl CompactStage {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Preparing => "preparing",
-            Self::Summarizing => "summarizing",
+            Self::Generating => "generating",
+            Self::Mapping => "mapping",
+            Self::Reducing => "reducing",
+            Self::Refreshing => "refreshing",
             Self::Finalizing => "finalizing",
         }
     }
 }
 
-/// Compact 进度回调（domain 单一真相，#1500 由 adapters 上移）。
-///
-/// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
-/// 调用此回调通知调用方。map-reduce 模式下，每个 chunk 处理前也会调用，
-/// 携带 `(current, total)` chunk 计数。闭包形式可自动实现（F: Fn）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactWork {
+    Indeterminate,
+    Determinate { completed: usize, total: usize },
+}
+
+/// Compact 进度回调（domain 单一真相）。
 pub trait CompactProgressFn: Send + Sync {
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>);
+    fn emit(&self, stage: CompactStage, work: CompactWork);
 }
 
 impl<F> CompactProgressFn for F
 where
-    F: Fn(CompactStage, Option<usize>, Option<usize>) + Send + Sync,
+    F: Fn(CompactStage, CompactWork) + Send + Sync,
 {
-    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
-        self(stage, current, total)
+    fn emit(&self, stage: CompactStage, work: CompactWork) {
+        self(stage, work)
     }
 }

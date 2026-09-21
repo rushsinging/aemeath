@@ -178,6 +178,8 @@ impl RuntimeContextFactory {
                 policy,
                 reflection_history,
                 task,
+                published_state:
+                    crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
                 usage_sink,
             },
@@ -459,12 +461,10 @@ impl RuntimeContextFactory {
             .ok_or(RunCreationError::ContextAssembly)?
             .clone();
         Ok(ContextSelection {
-            port: context::isolated_context_with_skill(
+            port: context::isolated_context_with_workspace_skills(
                 session.snapshot.session_id(),
                 skill_catalog,
-                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
-                    workspace.views().read(),
-                )),
+                workspace.views().read(),
             ),
         })
     }

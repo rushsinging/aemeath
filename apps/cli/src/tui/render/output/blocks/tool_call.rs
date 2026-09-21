@@ -331,11 +331,11 @@ mod tests {
         view.streaming_preview = Some(vec![
             AgentActivityLineView {
                 kind: AgentActivityKindView::ToolCall,
-                content: "2".to_string(),
+                content: "2".into(),
             },
             AgentActivityLineView {
                 kind: AgentActivityKindView::Message,
-                content: "still running".to_string(),
+                content: "still running".into(),
             },
         ]);
 

@@ -26,40 +26,65 @@ async fn compact_progress_view_updates_activity_with_chunk_counts() {
             .activities
             .iter()
             .find_map(|activity| match &activity.detail {
-                sdk::ActivityDetailView::Compact {
-                    stage,
-                    current,
-                    total,
-                } => Some((*stage, *current, *total)),
+                sdk::ActivityDetailView::Compact { stage, work } => Some((*stage, *work)),
                 _ => None,
             })
             .expect("compaction activity must be observed")
     };
 
     // 模拟 Context map-reduce 管线上报的进度序列，每步后立即断言 activity 状态
-    progress_view.emit(sdk::CompactStageView::Preparing, None, None);
+    progress_view.emit(
+        sdk::CompactStageView::Preparing,
+        sdk::CompactWorkView::Indeterminate,
+    );
     assert_eq!(
         compaction_detail(&activities),
-        (sdk::CompactStageView::Preparing, None, None)
+        (
+            sdk::CompactStageView::Preparing,
+            sdk::CompactWorkView::Indeterminate,
+        )
     );
 
-    progress_view.emit(sdk::CompactStageView::Summarizing, Some(2), Some(5));
+    progress_view.emit(
+        sdk::CompactStageView::Mapping,
+        sdk::CompactWorkView::Determinate {
+            completed: 2,
+            total: 5,
+        },
+    );
     assert_eq!(
         compaction_detail(&activities),
-        (sdk::CompactStageView::Summarizing, Some(2), Some(5)),
-        "chunk 计数 2/5 必须实时到达 activity（#1500）"
+        (
+            sdk::CompactStageView::Mapping,
+            sdk::CompactWorkView::Determinate {
+                completed: 2,
+                total: 5,
+            },
+        ),
+        "chunk 完成计数 2/5 必须实时到达 activity"
     );
 
-    progress_view.emit(sdk::CompactStageView::Summarizing, Some(4), Some(5));
+    progress_view.emit(
+        sdk::CompactStageView::Reducing,
+        sdk::CompactWorkView::Indeterminate,
+    );
     assert_eq!(
         compaction_detail(&activities),
-        (sdk::CompactStageView::Summarizing, Some(4), Some(5)),
-        "chunk 计数 4/5 必须实时到达 activity（#1500）"
+        (
+            sdk::CompactStageView::Reducing,
+            sdk::CompactWorkView::Indeterminate,
+        ),
     );
 
-    progress_view.emit(sdk::CompactStageView::Finalizing, None, None);
+    progress_view.emit(
+        sdk::CompactStageView::Finalizing,
+        sdk::CompactWorkView::Indeterminate,
+    );
     assert_eq!(
         compaction_detail(&activities),
-        (sdk::CompactStageView::Finalizing, None, None)
+        (
+            sdk::CompactStageView::Finalizing,
+            sdk::CompactWorkView::Indeterminate,
+        )
     );
 }

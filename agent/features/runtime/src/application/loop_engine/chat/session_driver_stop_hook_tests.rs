@@ -62,7 +62,7 @@ async fn test_run_session_command_driver_stop_hook_blocked_continues_until_succe
         .expect("blocked Stop hook feedback should publish message state");
     let hook_activity = events
         .iter()
-        .position(|event| event.starts_with("HookActivityChanged:Finished:"))
+        .position(|event| event.starts_with("HookActivitySnapshot:Terminal:"))
         .expect("blocked Stop hook should finish its activity");
     let second_text = events
         .iter()
@@ -135,7 +135,7 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
             if driver_sink
                 .events()
                 .iter()
-                .any(|event| event.starts_with("HookActivityChanged:Started:"))
+                .any(|event| event.starts_with("HookActivitySnapshot:Live:"))
             {
                 break;
             }
@@ -369,7 +369,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     };
     // 从主仓 wire；prepare_restore + commit_restore 后 workspace_root 切换为 linked worktree
     // （与主仓路径不同），这正是本测试要验证的 stop hook env 来源。
-    let workspace = project::wire_production_workspace(main_repo.clone())
+    let workspace = project::wire_production_workspace(main_repo.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let prepared = workspace
@@ -444,13 +444,152 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     assert!(sink
         .events()
         .iter()
-        .any(|event| event.starts_with("HookActivityChanged:Finished:")));
+        .any(|event| event.starts_with("HookActivitySnapshot:Terminal:")));
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);
     let expected = workspace_root.clone();
     for part in parts {
         assert_eq!(std::fs::canonicalize(part).unwrap(), expected);
+    }
+}
+
+struct ExitWorktreeBeforeStopProvider {
+    workspace: project::WorkspaceViews,
+}
+
+#[async_trait]
+impl LlmProvider for ExitWorktreeBeforeStopProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        self.workspace
+            .control()
+            .exit()
+            .expect("同一 Run 内退出 worktree");
+        Ok(text_completion_stream("final response", 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[tokio::test]
+async fn stop_hook_uses_workspace_restored_during_the_same_run() {
+    let repository = tempfile::tempdir().unwrap();
+    let run_git = |args: &[&str], cwd: &std::path::Path| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run_git(&["init", "--initial-branch=main"], repository.path()));
+    assert!(run_git(&["config", "user.name", "test"], repository.path()));
+    assert!(run_git(
+        &["config", "user.email", "test@example.com"],
+        repository.path()
+    ));
+    assert!(run_git(
+        &["config", "commit.gpgsign", "false"],
+        repository.path()
+    ));
+    std::fs::write(repository.path().join("README.md"), "init").unwrap();
+    assert!(run_git(&["add", "-A"], repository.path()));
+    assert!(run_git(&["commit", "-m", "init"], repository.path()));
+    let linked_root = repository.path().join("linked");
+    assert!(run_git(
+        &["worktree", "add", linked_root.to_str().unwrap(), "-b", "linked"],
+        repository.path()
+    ));
+    let main_root = repository.path().canonicalize().unwrap();
+    let workspace = project::wire_production_workspace(main_root.clone(), None)
+        .expect("workspace 初始化成功")
+        .into_views();
+    workspace
+        .control()
+        .enter(Some(linked_root), None, None)
+        .expect("Run 启动前进入 linked worktree");
+
+    let marker = repository.path().join("stop-hook-after-exit.txt");
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: format!(
+                "printf '%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"$PWD\" > \"{}\"",
+                marker.display()
+            ),
+            timeout: 5,
+        }],
+    );
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        while !driver_sink
+            .events()
+            .iter()
+            .any(|event| event == "DoneWithDuration")
+        {
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let mut shell = test_shell_with_hooks(Arc::new(
+        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+            share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
+                },
+                ..share::config::Config::default()
+            },
+        ))
+        .unwrap(),
+    ));
+    shell.workspace = workspace.clone();
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            ExitWorktreeBeforeStopProvider { workspace },
+        )),
+    );
+    shell.set_test_session_id("test-stop-hook-after-exit-worktree");
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(test_session_driver_input(
+            sink.clone(),
+            input_events,
+            shell,
+        )),
+    )
+    .await
+    .expect("session driver 应结束");
+    driver.await.unwrap();
+
+    let output = std::fs::read_to_string(marker).unwrap();
+    for path in output.split('|') {
+        assert_eq!(std::fs::canonicalize(path).unwrap(), main_root);
     }
 }
 

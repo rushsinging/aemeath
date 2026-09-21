@@ -429,7 +429,7 @@ async fn terminate_run_during_compaction_finishes_as_terminated() {
     assert_eq!(
         port.events()
             .iter()
-            .filter(|event| matches!(event, RunDomainEvent::Terminated { .. }))
+            .filter(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. }))
             .count(),
         1,
         "Run termination must emit exactly one terminal domain event"
@@ -463,11 +463,11 @@ async fn cancel_step_during_model_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::StepCancelled { .. })));
 }
 
 #[tokio::test]
@@ -528,11 +528,11 @@ async fn cancel_step_during_tools_finalizes_then_returns_to_drain() {
     assert!(!port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::StepCancelled { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::StepCancelled { .. })));
 }
 
 #[tokio::test]
@@ -591,7 +591,7 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Terminated { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Terminated { .. })));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -645,7 +645,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -699,7 +702,7 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "approve now")],
                 allow_multi: false,
             }],
         };
@@ -734,13 +737,23 @@ mod interaction_routing {
             InteractionContinuation::CompleteToolCall(call_id)
         );
 
-        // Verify published interaction has UserQuestions body
+        // Verify published interaction has UserQuestions body and the option
+        // description survives the engine boundary (issue: description must
+        // flow tools → runtime → sdk without loss).
         let published = port.published_interactions.lock().unwrap();
         assert_eq!(published.len(), 1);
-        assert!(matches!(
-            published[0].body,
-            sdk::InteractionRequestBody::UserQuestions(_)
-        ));
+        match &published[0].body {
+            sdk::InteractionRequestBody::UserQuestions(questions) => {
+                assert_eq!(questions.len(), 1);
+                assert_eq!(questions[0].options.len(), 1);
+                assert_eq!(questions[0].options[0].title, "a");
+                assert_eq!(
+                    questions[0].options[0].description.as_deref(),
+                    Some("approve now")
+                );
+            }
+            other => panic!("expected UserQuestions body, got {other:?}"),
+        }
     }
 
     // ── L2: ToolApproval: AwaitingToolApproval → coordinator ──
@@ -799,7 +812,7 @@ mod interaction_routing {
             call: call1.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q1".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "first")],
                 allow_multi: false,
             }],
         };
@@ -807,7 +820,7 @@ mod interaction_routing {
             call: call2.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q2".to_string(),
-                options: vec!["b".to_string()],
+                options: vec![sdk::OptionItem::new("b", "second")],
                 allow_multi: false,
             }],
         };
@@ -1070,7 +1083,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1148,7 +1164,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1241,7 +1260,10 @@ mod interaction_routing {
             call: call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "continue?".to_string(),
-                options: vec!["yes".to_string(), "no".to_string()],
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
                 allow_multi: false,
             }],
         };
@@ -1308,11 +1330,11 @@ mod interaction_routing {
         assert!(!port
             .events()
             .iter()
-            .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+            .any(|event| matches!(event, RuntimeLifecycleEvent::Resumed { .. })));
         assert_eq!(
             port.events()
                 .iter()
-                .filter(|event| matches!(event, RunDomainEvent::Completed { .. }))
+                .filter(|event| matches!(event, RuntimeLifecycleEvent::Completed { .. }))
                 .count(),
             1
         );
@@ -1336,7 +1358,7 @@ mod interaction_routing {
             call: call1.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q1".to_string(),
-                options: vec!["a".to_string()],
+                options: vec![sdk::OptionItem::new("a", "first")],
                 allow_multi: false,
             }],
         };
@@ -1344,7 +1366,7 @@ mod interaction_routing {
             call: call2.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "q2".to_string(),
-                options: vec!["b".to_string()],
+                options: vec![sdk::OptionItem::new("b", "second")],
                 allow_multi: false,
             }],
         };
@@ -1500,7 +1522,7 @@ mod interaction_routing {
             call: question_call.clone(),
             questions: vec![SuspendedQuestion {
                 prompt: "go?".to_string(),
-                options: vec!["yes".to_string()],
+                options: vec![sdk::OptionItem::new("yes", "approve")],
                 allow_multi: false,
             }],
         };

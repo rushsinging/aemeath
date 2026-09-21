@@ -67,7 +67,7 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
 |---|---|---|
 | `specs/3.2-rust-coding.md` | 横切，任意 `**/*.rs`、`**/Cargo.toml` —— 编码 / 测试 / 日志 / 验证门禁 / 错误处理 | 跑验证门禁、新增任何核心逻辑、调试构建或测试失败 |
 | `specs/3.3-tui-cli.md` | `apps/cli/src/**` —— TUI（ratatui）、旧版 REPL（rustyline）、主题色板（Catppuccin Macchiato） | 改输入 / 渲染 / 快捷键 / 选区复制，或新增工具显示（`ToolDisplayEntry`），或改颜色 / 主题 |
-| `specs/3.4-runtime.md` | `agent/features/runtime/**` —— Agent 循环、tool 执行编排、token budget、compact、成本、slash 命令 | 改暂停 / 恢复 / 重试（同步更新 `token_estimation`）、成本追踪（同步更新 `pricing.rs`）、新增 slash 命令 |
+| `specs/3.4-runtime.md` | `agent/features/runtime/**` —— Agent 循环、tool 执行编排、token budget、compact、Usage 事实关联、slash 命令 | 改暂停 / 恢复 / 重试（同步检查 `token_estimation`）、Usage 事实关联、新增 slash 命令 |
 | `specs/3.5-tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/3.6-provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `specs/3.9-config-compat.md` 补默认值） |
 | `specs/3.7-prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |

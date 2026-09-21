@@ -73,7 +73,8 @@ where
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
-            let mut messages = Vec::new();            let mut initial_git_context = (!initial_git_context.is_empty())
+            let mut messages = Vec::new();
+            let mut initial_git_context = (!initial_git_context.is_empty())
                 .then_some(Message::system_generated_user(initial_git_context));
             // Interval and PreCompact share this single session-scoped slot.
             let reflection_tasks =
@@ -126,8 +127,7 @@ where
                         }
                     };
                     let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
-                    // #1537：idle 手动 compact 同样拼接 Task 状态。
-                    let task_context = crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+                    let task_snapshot = crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                         task_access.as_ref(),
                     );
                     let request = crate::ports::ManualCompactRequest {
@@ -136,7 +136,7 @@ where
                         system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
                         context_size,
                         progress: None,
-                        task_context,
+                        task_snapshot,
                     };
                     log::debug!(
                         target: crate::LOG_TARGET,
@@ -172,24 +172,48 @@ where
                                 dyn context::compact::CompactProgressFn,
                             > = std::sync::Arc::new(
                                 move |stage: context::compact::CompactStage,
-                                      current: Option<usize>,
-                                      total: Option<usize>| {
+                                      work: context::compact::CompactWork| {
                                     let view_stage = match stage {
                                         context::compact::CompactStage::Preparing => {
                                             sdk::CompactStageView::Preparing
                                         }
-                                        context::compact::CompactStage::Summarizing => {
-                                            sdk::CompactStageView::Summarizing
+                                        context::compact::CompactStage::Generating => {
+                                            sdk::CompactStageView::Generating
+                                        }
+                                        context::compact::CompactStage::Mapping => {
+                                            sdk::CompactStageView::Mapping
+                                        }
+                                        context::compact::CompactStage::Reducing => {
+                                            sdk::CompactStageView::Reducing
+                                        }
+                                        context::compact::CompactStage::Refreshing => {
+                                            sdk::CompactStageView::Refreshing
                                         }
                                         context::compact::CompactStage::Finalizing => {
                                             sdk::CompactStageView::Finalizing
                                         }
                                     };
+                                    let view_work = match work {
+                                        context::compact::CompactWork::Indeterminate => {
+                                            sdk::CompactWorkView::Indeterminate
+                                        }
+                                        context::compact::CompactWork::Determinate {
+                                            completed,
+                                            total,
+                                        } => {
+                                            let (Ok(completed), Ok(total)) = (
+                                                u32::try_from(completed),
+                                                u32::try_from(total),
+                                            ) else {
+                                                return;
+                                            };
+                                            sdk::CompactWorkView::Determinate { completed, total }
+                                        }
+                                    };
                                     let _ = coordinator.update_compaction(
                                         activity_id.clone(),
                                         view_stage,
-                                        current.and_then(|value| u32::try_from(value).ok()),
-                                        total.and_then(|value| u32::try_from(value).ok()),
+                                        view_work,
                                     );
                                 },
                             );
@@ -215,8 +239,7 @@ where
                                 if let Err(error) = activity_coordinator.update_compaction(
                                     activity_id.clone(),
                                     sdk::CompactStageView::Finalizing,
-                                    None,
-                                    None,
+                                    sdk::CompactWorkView::Indeterminate,
                                 ) {
                                     log::warn!(
                                         target: crate::LOG_TARGET,
@@ -234,7 +257,7 @@ where
                                 }
                             }
                             messages = result.recent_messages.clone();
-                            sink.send_event(RuntimeStreamEvent::CompactFinished {
+                            sink.send_event(RuntimeStreamEvent::CompactOperationCompleted {
                                 messages: result.recent_messages,
                                 notice: "✓ 上下文压缩完成".to_string(),
                             }).await;
@@ -673,6 +696,33 @@ where
                 let spec = run_instance.run().spec().clone();
 
                 let cancel = runtime_context.cancel().token().clone();
+                let heartbeat_cancel = tokio_util::sync::CancellationToken::new();
+                let heartbeat_task = {
+                    let heartbeat_cancel = heartbeat_cancel.clone();
+                    let registry = runtime_context.published_state();
+                    let sink = runtime_context.event_sink();
+                    let activities = runtime_context.activities().clone();
+                    tokio::spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(std::time::Duration::from_secs(1));
+                        interval.tick().await;
+                        loop {
+                            tokio::select! {
+                                _ = heartbeat_cancel.cancelled() => break,
+                                _ = interval.tick() => {
+                                    if let Some(status) = registry.heartbeat() {
+                                        activities.publish_heartbeat();
+                                        sink.try_send_event(RuntimeStreamEvent::RuntimeStatusChanged {
+                                            status: Box::new(status),
+                                        });
+                                    } else {
+                                        activities.publish_heartbeat();
+                                    }
+                                }
+                            }
+                        }
+                    })
+                };
                 let cacheable_system_prompt = system_blocks
                     .iter()
                     .map(|block| block.text())
@@ -805,7 +855,6 @@ where
                     tool_result_materializer.clone(),
                 );
 
-                let tool_workspace_root = workspace.read().current_workspace_root();
                 // #1494：边流边执行句柄——流中 ToolCallCompleted 即旁路执行工具。
                 // 与工具轮次共享 policy/hook/并发编排；结果缓冲由 engine Tools 阶段统一汇总。
                 let streaming_tool =
@@ -815,7 +864,7 @@ where
                         turn_context.clone(),
                         run_id.clone(),
                         language.clone(),
-                        tool_workspace_root.clone(),
+                        workspace.read(),
                         max_tool_concurrency,
                     ));
                 let model_observer = main_run_port::ChatModelObserver {
@@ -857,7 +906,7 @@ where
                     crate::application::loop_engine::run_services::RuntimeStopHook::new(
                         crate::application::hook::stop_coordination::StopHookExecutionContext::new(
                             runtime_context.hooks(),
-                            workspace.read().current_workspace_root(),
+                            workspace.read(),
                             session_id.clone(),
                             language.clone(),
                         ),
@@ -866,13 +915,12 @@ where
                             continuation: input_continuation.clone(),
                         },
                     );
-                let tool_workspace_root = workspace.read().current_workspace_root();
                 let tool_context = crate::application::tool::coordination::ToolRoundContext {
                     runtime_context: &runtime_context,
                     agent: tool_agent,
                     turn_context: turn_context.clone(),
                     language: &language,
-                    workspace_root: tool_workspace_root.clone(),
+                    workspace_read: workspace.read(),
                     session_id: &session_id,
                     materializer: tool_result_materializer.as_ref(),
                     log_patch: logging::LogContextPatch::default(),
@@ -882,12 +930,13 @@ where
                         tool_context,
                         main_run_port::ChatToolRoundObserver {
                             runtime_context: runtime_context.clone(),
-                            workspace_root: tool_workspace_root,
+                            workspace_read: workspace.read(),
                             turn_context: turn_context.clone(),
                             session_id: session_id.clone(),
                             materializer: tool_result_materializer.clone(),
                         },
-                    );                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
+                    );
+                let control = crate::application::loop_engine::run_ports::ActiveRunControl::new(
                     active_run.as_ref(),
                     &run_id,
                 );
@@ -928,6 +977,8 @@ where
                     ),
                 )
                 .await;
+                heartbeat_cancel.cancel();
+                let _ = heartbeat_task.await;
 
                   // #1385 Task 7: Guard is dropped when the block ends,
                   // clearing only the generation we installed.

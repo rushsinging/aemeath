@@ -43,6 +43,99 @@ fn reasoning_level_from_options(
     }
 }
 
+/// 解析 driver 字符串与 API style；无效输入显式报 Configuration 错误。
+fn parse_driver_spec(
+    options: &LlmConfigOptions,
+) -> Result<crate::domain::driver_acl::DriverSpec, crate::LlmError> {
+    crate::domain::driver_acl::DriverSpec::parse(&options.driver, options.api_style.as_deref())
+        .map_err(|error| crate::LlmError::Config(error.to_string()))
+}
+
+/// 从构造配置推导 transport key；model / max_tokens / reasoning 是
+/// invocation 配置，MUST NOT 进入 key。
+fn transport_key_for(
+    options: &LlmConfigOptions,
+    spec: &crate::domain::driver_acl::DriverSpec,
+) -> crate::adapters::transport::TransportKey {
+    crate::adapters::transport::TransportKey {
+        driver_kind: spec.kind(),
+        api_style: options.api_style.clone(),
+        base_url: options.base_url.clone(),
+        api_key: options.api_key.clone(),
+        // 与 driver 构造相同的 user-agent 解析，保证 key 语义一致。
+        user_agent: options
+            .user_agent
+            .clone()
+            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
+        timeout_secs: options.timeout_secs,
+    }
+}
+
+/// 按 protocol family 构造 driver（注入给定 HTTP client）与默认 scope；
+/// `from_config` 与 `from_config_with_pool` 的共用实现。
+fn build_provider_and_scope(
+    spec: crate::domain::driver_acl::DriverSpec,
+    options: LlmConfigOptions,
+    http: reqwest::Client,
+) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScope), crate::LlmError> {
+    use crate::domain::driver_acl::{ApiStyle, ProtocolFamily};
+
+    let driver = spec.kind();
+    let requested_reasoning =
+        reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
+    let model = options.model.clone();
+    let resolved_user_agent = options
+        .user_agent
+        .unwrap_or_else(|| share::config::Config::default().api.user_agent);
+    let provider_impl: Arc<dyn LlmProvider> = match spec.family() {
+        ProtocolFamily::AnthropicMessages => {
+            Arc::new(crate::adapters::AnthropicProvider::from_shared_http(
+                options.api_key,
+                options.base_url,
+                Some(options.model),
+                options.timeout_secs,
+                resolved_user_agent,
+                http,
+            ))
+        }
+        ProtocolFamily::OllamaNative => {
+            Arc::new(crate::adapters::OllamaProvider::from_shared_http(
+                options.api_key,
+                options.base_url,
+                Some(options.model),
+                options.timeout_secs,
+                resolved_user_agent,
+                http,
+            ))
+        }
+        ProtocolFamily::OpenAi(api_style) => {
+            let config = OpenAIProviderConfig::from_driver(driver, &options.source_key)
+                .with_responses_api(api_style == ApiStyle::Responses);
+            Arc::new(crate::adapters::OpenAICompatibleProvider::from_shared_http(
+                config,
+                options.api_key,
+                options.base_url,
+                Some(options.model),
+                options.reasoning_config,
+                resolved_user_agent,
+                http,
+            ))
+        }
+    };
+    let effective_reasoning = requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
+    let default_scope = crate::InvocationScope::new(
+        model,
+        if options.max_tokens == 0 {
+            share::config::models::DEFAULT_MAX_TOKENS
+        } else {
+            options.max_tokens
+        },
+        requested_reasoning,
+        effective_reasoning,
+    )?;
+    Ok((provider_impl, default_scope))
+}
+
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
@@ -125,6 +218,8 @@ pub struct LlmConfigOptions {
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
     default_scope: crate::InvocationScope,
+    /// 底层共享 transport 的诊断 id；`None` 表示独占（非 pool）HTTP client。
+    transport_id: Option<u64>,
 }
 
 impl LlmClient {
@@ -139,6 +234,7 @@ impl LlmClient {
         Self {
             provider,
             default_scope,
+            transport_id: None,
         }
     }
 }
@@ -232,80 +328,39 @@ impl LlmClient {
         Self {
             provider: provider_impl,
             default_scope,
+            transport_id: None,
         }
     }
 
     pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
-        use crate::domain::driver_acl::{ApiStyle, DriverSpec, ProtocolFamily};
-
-        let spec = DriverSpec::parse(&options.driver, options.api_style.as_deref())
-            .map_err(|error| crate::LlmError::Config(error.to_string()))?;
-        let driver = spec.kind();
-        let requested_reasoning =
-            reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
-        let model = options.model.clone();
-        let provider_impl: Arc<dyn LlmProvider> = match spec.family() {
-            ProtocolFamily::AnthropicMessages => {
-                Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    Some(options.model),
-                    options.max_tokens,
-                    crate::ports::ReasoningLevel::Off,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProtocolFamily::OllamaNative => {
-                Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    Some(options.model),
-                    options.max_tokens,
-                    options.reasoning,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProtocolFamily::OpenAi(api_style) => {
-                let config = OpenAIProviderConfig::from_driver(driver, &options.source_key)
-                    .with_responses_api(api_style == ApiStyle::Responses);
-                Arc::new(
-                    crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
-                        config,
-                        options.api_key,
-                        options.base_url,
-                        Some(options.model),
-                        options.max_tokens,
-                        options.reasoning,
-                        options.reasoning_config,
-                        options.timeout_secs,
-                        options
-                            .user_agent
-                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                    ),
-                )
-            }
-        };
-        let effective_reasoning =
-            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-        let default_scope = crate::InvocationScope::new(
-            model,
-            if options.max_tokens == 0 {
-                share::config::models::DEFAULT_MAX_TOKENS
-            } else {
-                options.max_tokens
-            },
-            requested_reasoning,
-            effective_reasoning,
-        )?;
+        let spec = parse_driver_spec(&options)?;
+        let http =
+            crate::adapters::transport::build_http_client_for_endpoint(options.base_url.as_deref());
+        let (provider, default_scope) = build_provider_and_scope(spec, options, http)?;
         Ok(Self {
-            provider: provider_impl,
+            provider,
             default_scope,
+            transport_id: None,
+        })
+    }
+
+    /// 与 [`Self::from_config`] 相同，但 HTTP client 经 `TransportPool` 按
+    /// transport key 复用：同 key（同 driver/endpoint/认证域/user-agent/timeout）
+    /// 的多次构造共享同一连接池；model / max_tokens / reasoning 属于
+    /// invocation 配置，不影响 transport 复用。
+    pub fn from_config_with_pool(
+        options: LlmConfigOptions,
+        pool: &crate::adapters::pool::TransportPool,
+    ) -> Result<Self, crate::LlmError> {
+        let spec = parse_driver_spec(&options)?;
+        let key = transport_key_for(&options, &spec);
+        let transport = pool.acquire(key);
+        let (provider, default_scope) =
+            build_provider_and_scope(spec, options, transport.http().clone())?;
+        Ok(Self {
+            provider,
+            default_scope,
+            transport_id: Some(transport.id()),
         })
     }
 
@@ -397,6 +452,12 @@ impl LlmClient {
 
     pub fn default_scope(&self) -> &crate::InvocationScope {
         &self.default_scope
+    }
+
+    /// 底层共享 transport 的诊断 id；`None` 表示独占（非 pool）HTTP client。
+    /// 用于日志与契约测试断言"同 key 复用同一 transport 真相"。
+    pub fn transport_id(&self) -> Option<u64> {
+        self.transport_id
     }
 
     pub fn invocation_scope(

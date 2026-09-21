@@ -1,5 +1,5 @@
 use crate::application::loop_engine::chat::events::{
-    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent, RuntimeToolCallStatus,
+    ChatEventSink, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::RawUsageSnapshot;
@@ -284,10 +284,11 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     fn on_text(&mut self, text: &str) {
         self.mark_visible_event("text", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Text);
-        self.sink.try_send_event(RuntimeStreamEvent::Text {
-            context: self.context.clone(),
-            text: text.to_string(),
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::AssistantTextDelta {
+                context: self.context.clone(),
+                delta: text.to_string(),
+            });
         let now = std::time::Instant::now();
         if self.first_text_time.is_none() {
             self.first_text_time = Some(now);
@@ -320,20 +321,21 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         );
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
-        self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
-            context: self.context.clone(),
-            id,
-            provider_id: provider_id.map(str::to_string),
-            name: name.to_string(),
-            index,
-        });
+        self.sink
+            .try_send_event(RuntimeStreamEvent::ToolCallStarted {
+                context: self.context.clone(),
+                id,
+                provider_id: provider_id.map(str::to_string),
+                name: name.to_string(),
+                index,
+            });
     }
     fn on_thinking(&mut self, text: &str) {
         self.mark_visible_event("thinking", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Thinking);
-        self.sink.try_send_event(RuntimeStreamEvent::Thinking {
+        self.sink.try_send_event(RuntimeStreamEvent::ThinkingDelta {
             context: self.context.clone(),
-            text: text.to_string(),
+            delta: text.to_string(),
         });
     }
 
@@ -356,15 +358,13 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink
-            .try_send_event(RuntimeStreamEvent::ToolCallUpdate {
+            .try_send_event(RuntimeStreamEvent::ToolCallArgumentsDelta {
                 context: self.context.clone(),
                 id,
                 provider_id: provider_id.map(str::to_string),
                 name: name.to_string(),
                 index,
-                arguments_delta: Some(partial_args.to_string()),
-                arguments: None,
-                status: RuntimeToolCallStatus::PendingArgs,
+                delta: partial_args.to_string(),
             });
     }
 
@@ -436,7 +436,7 @@ mod invocation_reducer_tests {
         assert_eq!(response.usage.input_tokens, Some(2));
         assert!(matches!(
             events.lock().unwrap().first(),
-            Some(RuntimeStreamEvent::Text { text, .. }) if text == "hi"
+            Some(RuntimeStreamEvent::AssistantTextDelta { delta, .. }) if delta == "hi"
         ));
     }
 

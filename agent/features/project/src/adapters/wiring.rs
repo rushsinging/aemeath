@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::adapters::git::GitCli;
@@ -67,9 +67,12 @@ impl WorkspaceViews {
     }
 }
 
-pub fn wire_production_workspace(cwd: PathBuf) -> Result<WorkspaceWiring, WorkspaceInitError> {
+pub fn wire_production_workspace(
+    cwd: PathBuf,
+    worktrees_dir: Option<PathBuf>,
+) -> Result<WorkspaceWiring, WorkspaceInitError> {
     log::info!(target: crate::LOG_TARGET, "wire_production_workspace enter");
-    match build_workspace(cwd) {
+    match build_workspace(cwd, worktrees_dir) {
         Ok((wiring, kind)) => {
             log::info!(
                 target: crate::LOG_TARGET,
@@ -100,7 +103,10 @@ fn init_error_category(error: &WorkspaceInitError) -> &'static str {
 }
 
 /// 不含日志副作用的构造逻辑；行为与错误类型与重构前完全一致。
-fn build_workspace(cwd: PathBuf) -> Result<(WorkspaceWiring, WorktreeKind), WorkspaceInitError> {
+fn build_workspace(
+    cwd: PathBuf,
+    worktrees_dir: Option<PathBuf>,
+) -> Result<(WorkspaceWiring, WorktreeKind), WorkspaceInitError> {
     let metadata = std::fs::metadata(&cwd).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => WorkspaceInitError::PathNotFound { path: cwd.clone() },
         std::io::ErrorKind::PermissionDenied => {
@@ -145,6 +151,7 @@ fn build_workspace(cwd: PathBuf) -> Result<(WorkspaceWiring, WorktreeKind), Work
             share::session_types::WorktreeKind::NonGit,
         ),
     };
+    let worktrees_root = resolve_worktrees_root(worktrees_dir, &workspace_root);
     Ok((
         WorkspaceWiring {
             service: WorkspaceService::with_verified_git(
@@ -152,9 +159,21 @@ fn build_workspace(cwd: PathBuf) -> Result<(WorkspaceWiring, WorktreeKind), Work
                 workspace_root,
                 canonical_path_base,
                 kind,
+                worktrees_root,
                 git,
             ),
         },
         kind,
     ))
+}
+
+/// 解析 worktree 默认根目录：未配置时用全局 `~/.agents/worktrees`；
+/// 相对路径相对当前 workspace root（可配 `.worktrees` 恢复仓库内布局）；
+/// 绝对路径原样生效。project 自身不读 env / config，只消费注入值。
+fn resolve_worktrees_root(worktrees_dir: Option<PathBuf>, workspace_root: &Path) -> PathBuf {
+    match worktrees_dir {
+        Some(dir) if dir.is_absolute() => dir,
+        Some(dir) => workspace_root.join(dir),
+        None => share::config::paths::global_worktrees_dir(),
+    }
 }

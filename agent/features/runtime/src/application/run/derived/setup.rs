@@ -443,6 +443,18 @@ impl AgentRunner for CliAgentRunner {
                     .expect("DerivedRun must retain workspace")
                     .persist(),
                 tool_result_materializer: self.tool_result_materializer.clone(),
+                committed_side_effects:
+                    crate::application::loop_engine::chat::committed_side_effect::task_dispatcher(
+                        derived.instance.context(),
+                        derived.session_id.clone(),
+                        derived
+                            .instance
+                            .workspace()
+                            .expect("DerivedRun must retain workspace")
+                            .views()
+                            .read()
+                            .current_workspace_root(),
+                    ),
                 runtime_cancellation: runtime_token.clone(),
             };
 
@@ -482,7 +494,7 @@ impl AgentRunner for CliAgentRunner {
             let session_id = derived.session_id;
             let runtime_context = derived.instance.context().clone();
             let tool_execution_context = agent.ctx.clone();
-            let tool_workspace_root = agent.ctx.workspace_read().current_workspace_root();
+            let workspace_read = agent.ctx.workspace_read();
             let turn_context = crate::application::loop_engine::chat::RuntimeRunContext::new(
                 sdk::ChatId::from_legacy_or_new(&session_id),
                 sdk::ChatRunId::new_v7(),
@@ -563,7 +575,7 @@ impl AgentRunner for CliAgentRunner {
             let stop_hook = crate::application::loop_engine::run_services::RuntimeStopHook::new(
                 crate::application::hook::stop_coordination::StopHookExecutionContext::new(
                     runtime_context.hooks(),
-                    workspace_root.clone(),
+                    workspace_read.clone(),
                     session_id.clone(),
                     language.clone(),
                 ),
@@ -574,7 +586,7 @@ impl AgentRunner for CliAgentRunner {
                 agent,
                 turn_context,
                 language: &language,
-                workspace_root: tool_workspace_root,
+                workspace_read,
                 session_id: &session_id,
                 materializer: self.tool_result_materializer.as_ref(),
                 log_patch: logging::LogContextPatch::default(),

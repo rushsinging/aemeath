@@ -90,8 +90,10 @@ struct ContextAppend {
 }
 struct CompactRequest {
     run_id: RunId,
-    source: ContextRequest,             // 与 build_window 内的 compaction_decision 计算使用同一冻结输入
+    source_revision: SessionRevision,   // 与 build_window 使用同一冻结 revision
+    source: ContextRequest,
     trigger: CompactTrigger,            // Automatic | Manual
+    cancellation: CancellationToken,    // Run cancellation 的合作式传播；取消后不得 fallback/commit
 }
 struct CompactionDecision {
     needed: bool,
@@ -125,8 +127,9 @@ enum CompactOutcome {
 }
 enum CompactSkipReason {
     ResumeProtection,               // resume 第一轮保护
-    HookBlocked,                    // Future：PreCompact Hook 接线后的跳过原因
-    CircuitBreakerOpen,             // 连续失败次数达上限
+    HookBlocked,                    // PreCompact Hook 阻断
+    Cancelled,                      // Run 已取消；不得提交生成结果或本地 fallback
+    CircuitBreakerOpen,             // 自动 compact 连续失败次数达配置上限
 }
 struct AppendReceipt {
     run_id: RunId,
@@ -368,62 +371,48 @@ threshold = effective * 0.8
 L5 的 Target 摘要生成已经演进为**持久化增量摘要树**：平时在
 `append_and_persist` 后按 finalized RunStep 增量构建 Leaf / Branch，compact
 时优先本地激活 warm projection。领域模型、16K / 24K 分块、recent 3 Run
-保护区、per-session 1 / global 5 scheduler、checkpoint 恢复、第一次与第二次
-compact 生命周期以及 usage 总账的唯一真相见
-[06-persistent-summary-tree.md](06-persistent-summary-tree.md)。
-下面的同步单次 / map-reduce 流程只描述迁移期 Current 与 #1119 的 legacy
-backfill 来源，**NEVER** 再作为 Target 主路径：
+ 保护区、per-session 1 / global 5 scheduler、checkpoint 恢复、第一次与第二次
+ compact 生命周期以及 usage 总账的唯一真相见
+ [06-persistent-summary-tree.md](06-persistent-summary-tree.md)。这些仍属独立 Target；当前 L5 **NEVER** 引入 scheduler、第二 backing 或并行路径。
+下面的同步单次 / map-reduce 流程描述当前唯一 L5 管线；持久化增量摘要树与
+scheduler 不在本路径内，**NEVER** 作为第二套 compact backing 或并行 L5 路径接入：
 ```rust
 async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError> {
-    // 1. 从自身稳定 Session backing 取得一致性快照并切分窗口
-    let source = self.session.compaction_source()?;
-    let window = compact_window(&source.structured_history, req.source.context_size);
-    // early = 进入 summary 的完整 RunStep；tail = 不超过 window 30% 的近期完整 RunStep
-    // 2. 选择策略
-    let result = if early_tokens > 30_000 {
-        // 大窗口：map-reduce 分块摘要
-        compact_messages_map_reduce(&window.early, req).await?
-    } else {
-        // 小窗口：单次 LLM 调用
-        llm_compact(&window.early, req).await?
-    };
-    // 3. tail 已按完整 Step 切分，不需要按 message 猜测 / 修复边界
-    let recent = window.tail;
-    // 4. CAS 校验：确认 backing revision 未变（compact 跨多个 LLM await，期间可能有并发写入）
-    let current_revision = self.session.backing_revision();
-    if current_revision != source.revision {
-        return Err(CompactError::BackingChanged {
-            expected: source.revision,
-            actual: current_revision,
-        });
-    }
-    // 5. ChatChain::compact 一次性提交（三参数版：summary, recent_runs, source_revision）
-    //    内部完成 freeze_active → 创建 Compact segment → 记录 source_revision
-    //    定义见 01-session.md §3.1
-    self.session.compact(result.summary.clone(), recent.clone(), source.revision);
-    Ok(CompactResult {
-        summary: result.summary,
-        recent_runs: recent,
-        source_revision: source.revision,
-    })
+    // 1. 短暂持有 Session mutation gate，冻结 revision、visible steps、messages 与 previous summary
+    let source = self.freeze_compact_source(&req.source.session_id, req.source_revision).await?;
+    // 2. 释放 mutation gate 后才执行全部 CompactGenerator await；Context 不依赖具体 Provider/DTO
+    let result = self.generate_compact(&source, req).await?;
+    // 3. 取消在 fallback 前和 durable commit 前均重新检查；取消不得产生 fallback 或 commit
+    req.cancellation.ensure_not_cancelled()?;
+    // 4. 仅为 revision/CAS 校验与 durable commit/publish 重新取得 mutation gate
+    //    revision 已变化时返回 typed CAS conflict，绝不覆盖 freeze 后新增的 Session history
+    self.commit_generated_compact(&req.source.session_id, &source, result).await
 }
 ```
-**Legacy map-reduce 策略**：
-- `early_tokens > 30,000` 时分块（每块 ≤ 30,000 tokens）
-- 每块独立 LLM 摘要 → 合并后再 LLM 摘要
+**Typed map / Rust-owned reduce 策略**：
+- `early_tokens > 30,000` 时分块（每块 ≤ 30,000 tokens）。
+- 每块 LLM 只输出 `CompactFactBatch` typed JSON；Context 按 chunk index 与 fact sequence 合并 facts，并由 `reduce_compact_facts` 确定性构造权威 `ContinuationCheckpoint`。
+- checkpoint 超预算时，LLM Refresh 只输出 `CheckpointCompressionPatch` typed JSON，且只能改写 committed facts、working set、risks、resume context、required revalidation 与 archived milestones；Context 应用 patch 并保留全部 protected semantics。
 - LLM 摘要失败返回结构化 `CompactError`；若产品选择本地降级，结果 **MUST** 带显式 quality / fallback 标记，**NEVER** 静默伪装成 LLM 摘要成功。
-- #1119 负责把该同步路径迁移为持久化 checkpoint backfill；**NEVER** 实施单
-  session 并发 3。最终并发语义固定为 per-session 1、不同 session 全局 5。
+- 同步路径保持 bounded map 并发；**NEVER** 引入 persistent-summary-tree scheduler、第二 compact backing 或并行 L5 路径。
 **Summary 保真度不变量**：
 - `early` **MUST** 覆盖所有将从 active messages 移除、且未进入 recent tail 的消息；**NEVER** 存在既不保留、也不进入 summary 的 head gap。
 - Summary **MUST** 按时间顺序汇总影响当前工作的全部用户输入；相邻输入 **MAY** 合并表达，但后续修正 **MUST** 覆盖更早的冲突要求。
 - Summary **MUST** 精确保留用户要求的动作层级，**NEVER** 把 inspect / diagnose / explain / review / design 升级为 implement / edit / commit / push / merge。
 - Summary **MUST** 使用固定顺序的九分区 continuation checkpoint：`Immutable Constraints`、`Current Objective`、`Committed Facts`、`Uncommitted Working Set`、`Open Decisions / Risks`、`Resume Cursor`、`Required Revalidation`、`Archived Milestones`、`Continuation Status`。`Resume Cursor` **MUST** 恰好包含一个 `Next action`。
+- `Immutable Constraints` **MUST** 只允许来自真实主用户的持久会话约束；Map/Reduce/Refresh 的 prompt、JSON schema、repair instruction、typed JSON 输出格式要求及其他 `system_generated`/`subagent_instruction` 协议文本 **MUST NEVER** 进入任何持久化 checkpoint 分区。Reduce 与 canonical decoder **MUST** 使用同一协议文本过滤边界清理历史污染，同时保留合法用户约束；已污染的旧 summary **MUST NOT** 继续影响后续模型的输出协议。
+- LLM **MUST** 只通过 typed JSON 参与 compact：Map 输出带来源顺序、约束作用域、生命周期与 action 的 `CompactFactBatch`；非约束 fact 在历史提供稳定对象时 **MAY** 携带 `entity + key + dimension + lifecycle` identity。Context 只对 identity 完整且 lifecycle 为 dynamic 的同实体同维度观察按 source order 执行 supersession；缺失或不确定 identity 时 fail closed 保留。Reduce 由 Context 在 Rust 中确定性完成；Refresh 只输出不包含受保护字段的 `CheckpointCompressionPatch`。Markdown **NEVER** 作为 Map / Reduce / Refresh 的阶段间协议；最终 `active_summary` 只能由 Context 的单一确定性 renderer 模板化生成。
+- Map 或 Refresh 的输出若因 JSON 语法、字段类型、未知字段、缺失必填字段或领域 invariant 不合规，Context **MUST** 将原始非法输出与精确校验错误发送给 LLM 进行一次有界格式修复；若 provider Completed 但没有文本，Runtime **MUST** 通过 Context-owned typed generation outcome 保留 completion reason 与 text/non-text delta 计数，Context **MUST** 使用同一原始 history 追加纠错指令后只重试该请求一次。修复请求 **MUST** 保留事实、来源、顺序、authority、scope、lifecycle、约束动作、目标和 resume intent，**NEVER** 借格式修复创造新事实或扩大权限。Map chunk重试仍失败时 **MUST** 只对该 chunk 构造 local typed facts，保留其他成功 chunk，并按 chunk index 与 fact sequence 继续单一 Rust-owned Reduce；取消立即终止，Provider/Timeout/RateLimit 不在 Context 重试。Refresh 修复耗尽、provider 不可用或多轮不收敛时，Context **MUST** 从最后一个有效 typed checkpoint 执行确定性预算降级，而不是返回超预算 summary。Rust-owned Reduce 不消费 LLM 输出，因此不存在 Reduce repair 路径。
+- Repair/fallback 的质量目标 **MUST** 优先保留可执行连续性：`Current Objective` 保留最新主用户具体请求，`Committed Facts` 纳入 ToolResult 支持的证据，`Uncommitted Working Set` 保留明确的进行中/未提交工作，唯一 `Next action` 直接引用最新主用户的下一步要求。裸 ToolUse 不再逐项扩写为风险清单，因为它只证明调用意图且会显著降低 checkpoint 信息密度。
+- `Current Objective` **MUST** 具备确定性来源，**NEVER** 因 LLM 分类缺失或降级而退化为占位符：Rust-owned Reduce 在 facts 不含 `kind=objective` 且 `source=main_user` 时 **MUST** 使用原始 messages 中最后一条真实主用户请求兜底；兜底来源 **MUST** 排除 system-generated、hook 与 skill request 文本，空白值视为缺失。`Continuation Status` **MUST** 依据"是否存在目标"这一显式事实判定，**NEVER** 依据占位符文本匹配；只有 facts 与消息兜底都无法确立目标时才允许 `Waiting for User`。上一轮 checkpoint 的占位符目标 **MUST NOT** 向下传播。兜底触发时 **MUST** 记录 warn（原因与来源计数，**NEVER** 记录正文），以便统计 LLM 分类失败率。
+- Map/Refresh 的 typed 契约 **MUST** 显式约束 `kind` 的位置与目标语义：`kind` 恒为字段取值，**NEVER** 作为字段名；主用户仍有待完成请求时 **MUST** 输出 `kind=objective`，**NEVER** 降级为 `working_set`、`committed_fact` 或 `risk`。格式修复 **MUST NOT** 改变任一 fact 的 kind 语义。
+- 约束作用域 **MUST** 区分 `session`、`task`、`phase`、`tool_call` 与 `unknown`。只有明确的主 Session 用户输入才能建立或修订 `session` 约束；子代理 prompt、tool-call 参数、系统生成消息与来源不明文本中的限制 **NEVER** 提升为主 Session 长期权限边界。`grant`、`restrict`、`revoke` 与 `supersede` 按来源顺序和同一 scope 确定性归并，跨 scope 不得相互扩大权限。
+- Refresh patch **MUST NOT** 包含 immutable constraints、当前目标、唯一 `Next action`、显式 prohibited actions、continuation status 或 waiting reason；这些受保护字段始终由 Context 从当前 checkpoint 原样保留。任何包含未知字段、字段类型错误或应用后违反领域 invariant 的 patch 必须拒绝，并保留上一版有效 checkpoint。previous checkpoint、typed facts、compression patch 与 local fallback **MUST** 汇入同一领域类型后再归一化和渲染。
 - Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型在一次简短动态状态重验证后直接执行 `Next action`；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
-- `Committed Facts` **MUST** 只承载由 tool result、commit、测试或持久化状态支持的事实。assistant 文本和 ToolUse 本身 **NEVER** 直接成为 committed fact，只能进入风险区或带 `unverified` 标记的 working set。PR、CI、worktree、remote branch 等动态当前态 **MUST** 进入 `Required Revalidation`。
-- 连续 compact 时，上一轮 active checkpoint **MUST** 作为 authoritative previous checkpoint 显式进入下一轮 compact 输入；Context **MUST** 按语义分区预算收敛，**NEVER** 对整份 previous checkpoint 做 authoritative head/tail 截断。Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 checkpoint 前丢弃旧 checkpoint。
-- `Current Task State` 是九分区之外的 typed companion：它 **MUST** 在 checkpoint 定稿后由 Context canonical commit 路径追加；连续 compact **MUST** 丢弃旧 companion，只追加当前请求的 `task_context`，且 **NEVER** 将 companion 送入 LLM、混入 checkpoint 或在 Runtime 建立第二 owner。
-- 单次 LLM compact 请求 **MUST** 只有一份带真实 history 的 compact prompt；**NEVER** 在尾部追加一条没有 history 的重复指令。
+- `Committed Facts` **MUST** 只承载由 tool result、commit、测试或持久化状态支持的稳定事实。assistant 文本和 ToolUse 本身 **NEVER** 直接成为 committed fact。PR、CI、worktree、remote branch、测试与部署的动态当前态 **MUST** 使用 typed dynamic identity 进入 `Required Revalidation`；同 `entity + key + dimension` 只保留 source order 最新观察。旧 objective/cursor 在存在更高 authority 的 main-user objective/cursor 后 **MUST** 淘汰，不能作为普通 risk 累积。预算处理 **MUST** 分成无损语义规范化、LLM typed Refresh 和确定性应急降级：先做 supersession、owner 规范化与精确去重；Refresh 负责合并改写非保护内容；仍超预算时，应急降级按候选行的恢复价值与 token 收益选择，优先淘汰 archived milestones 和体积最大的低保护历史内容，最后才淘汰 active risks/working set。保护分区与唯一 Next action永不裁剪；保护内容本身超预算时 **MUST** 返回明确领域错误。
+- 连续 compact 时，上一轮 active checkpoint **MUST** 作为 authoritative previous checkpoint 显式进入下一轮 compact 输入；Context **MUST** 按语义分区预算收敛，**NEVER** 对整份 previous checkpoint 做 authoritative head/tail 截断。Compact 成功结果 **MUST** 同时满足 canonical 与预算内不变量；Context window 注入层只验证该不变量，**NEVER** 再通过裸字符串 head/tail 截断修改 checkpoint。Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 checkpoint 前丢弃旧 checkpoint。
+- `Current Task State` 是九分区之外的非权威 typed companion：Runtime **MUST** 从 `TaskAccess` 冻结单一 `CompactTaskSnapshot` 并随 compact request 传入；Context **MUST** 在 Rust-owned Reduce 中仅用 active batch 与唯一 in-progress task 协调陈旧 working set 和唯一 Next action，main-user objective 保持更高 authority，再由同一 snapshot 确定性渲染 companion。所有读取完整 canonical summary 的生产路径 **MUST** 通过单一领域 decoder 一次性拆分并严格解析九分区权威 checkpoint，同时将 companion 保持为非权威文本；**NEVER** 将带 companion 的完整 summary 直接交给 checkpoint parser。连续 compact **MUST** 丢弃旧 companion；Task snapshot **NEVER** 作为授权来源、解析自 Markdown、送入 LLM，或在 Runtime 建立第二 owner。权威主体中的未知分区仍 **MUST** fail closed，不能因 companion 解码而放宽。
+- 单次 LLM compact 请求 **MUST** 只有一份带真实 history 的 compact prompt；**NEVER** 在尾部追加一条没有 history 的重复指令。Compact 诊断日志只记录 stage、chunk/attempt、消息/token/fact/delta 计数、completion reason、failure kind 与成功/局部降级计数；per-chunk 和中间重试用 debug，最终 chunk降级用 warn，总体生命周期用 info，**NEVER** 记录 prompt、响应正文或敏感值。
 - 本地 fallback **MUST** 把 assistant 文本和 ToolUse 标为未验证报告 / 已观察调用，**NEVER** 直接据此声称工作完成；只有最新 unresolved user request 可输出 `Continue`，assistant 的等待、普通报告或完成报告都保守输出 `Waiting for User`。`Completed` 只允许语义摘要在确认交付事实后输出。
 - Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
 ### 8.4 compact_window 切分
@@ -470,40 +459,26 @@ prompt、memory 和 tool schemas。选择单位是完整 finalized RunStep：
 - Future 接线必须覆盖 auto/manual compact、Block 后状态保持、context/message 消费、取消与 Resume 相邻边界；在这些证据完成前 **NEVER** 把 PL/Config 存在性描述为生产支持。
 - **PreCompact Reflection** 是 Memory/Runtime 的独立现有机制，不等于 Hook `PreCompact`，其当前行为见 [05-memory-injection.md](05-memory-injection.md) §9。
 ### 8.6 Circuit Breaker
-```rust
-struct AutoCompactState {
-    consecutive_failures: u32,
-    max_failures: u32,                 // 默认 3
-    compaction_count: u64,
-}
-impl AutoCompactState {
-    fn should_attempt(&self) -> bool {
-        self.consecutive_failures < self.max_failures
-    }
-    fn record_success(&mut self) { self.consecutive_failures = 0; self.compaction_count += 1; }
-    fn record_failure(&mut self) { self.consecutive_failures += 1; }
-}
-```
-- `auto_compact` 调用前检查 `should_attempt()`
-- LLM 失败后调 `record_failure()`
-- 成功后调 `record_success()`
-- Circuit breaker 触发后，跳过 compact，直接进入 InvokingModel（由 provider 报 context error 再触发）
+- `AutoCompactState` 是 session repository 拥有的自动 compact 运行态，记录 `compaction_count`、`consecutive_failures` 与 `circuit_broken`。
+- 失败上限来自 `ContextConfig.auto_compact_failure_limit`，默认 `3`，Config snapshot 将非法 `0` 收敛为 `1`；Composition 只消费 `ConfigWiring` 发布的窄视图，不建立第二配置状态。
+- 每次自动 compact 开始前申请 attempt permit；breaker 已打开时返回 `CompactSkipReason::CircuitBreakerOpen`，不进入生成。
+- durable commit 成功后记录 success 并清零连续失败；返回 `ContextPortError` 或 attempt 在未完成时被丢弃记录 failure；typed skip（包括取消、resume protection、hook block、CAS 之前的中性跳过）不增加失败计数。
+- LLM 失败后成功提交显式 `LocalFallback(failure_kind)` 属于本次 durable compact 成功；quality 元数据保留原始失败种类，不能伪装为 LLM summary。
+- manual compact 复用同一个 freeze/generate/CAS/commit mechanics，但**必须绕过自动 breaker**；它仍受 resume protection、hook、durable-save-before-publish 与 revision/CAS 约束。
+
 ### 8.7 Compact 提交协议（统一入口）
-Compact 提交由 `ChatChain::compact(summary, recent_runs, source_revision)` 一次性完成（三参数版，定义见 [01-session.md](01-session.md) §3.1）：
-```rust
-// ChatChain 唯一提交入口——不再有 apply_compact_outcome 或 commit_compaction 独立函数
-chain.compact(result.summary, result.recent_runs, source.revision);
-// 内部等价于：freeze_active() → 创建 Compact segment → 记录 source_revision
-// 幂等保护：若 compact_source_revision + compact_committed marker 匹配则跳过（见 03-token-budget.md §5.5）
-```
-- summary 作为 `CompactSegment.summary`（走 system 通道，不会被 future compact 二次损耗）
-- recent_runs 保留在新 Compact segment 的结构化 `runs/steps` 中
-- 旧 segment 冻结保留供审计
-- `ChatChain::compact` 是唯一提交入口——`apply_compact_outcome`、`commit_compaction` 等独立函数皆已退役
+`CanonicalSessionRepository` 是唯一提交 owner：
+1. 在 mutation gate 内冻结 `CompactSource { revision, messages, visible_steps, previous_summary }`；
+2. 释放 gate，经 `CompactGenerator` 执行 prompt、单次或 map/reduce、parse、取消与 fallback；
+3. 再次取得 gate，校验当前 revision 等于 source revision，构造 `ActiveCompactMarker`；
+4. 先 durable persist candidate，成功后才 publish 新 generation。
+
+任一 Provider/LLM `await` **NEVER** 持有 Session mutation gate。CAS 冲突必须保留 freeze 后新增历史并返回 typed conflict，禁止 stale generation 覆盖当前 Session。durable save 失败时不得 publish；publish 只能发生在保存成功之后。
 ### 8.8 Manual Compact
 用户 `/compact` 命令触发：
 - **绕过 token 阈值检查**，但必须存在至少一个可进入 summary 的 finalized RunStep
 - manual compact 不经过 `compaction_decision` 判定，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
+- manual compact 与 automatic compact 共享 Context-owned generation/commit mechanics，但不读取或修改 automatic circuit breaker；manual 请求当前没有 Run cancellation 字段时使用独立未取消 token。
 ### 8.9 Current 落地边界与 Deferred 迁移
 当前生产 `ChatChain` 只保留 Run/segment 边界，并在 compact 前调用
 `messages_flat()`；因此现状**无法正确按 RunStep 裁 recent tail**。在
@@ -545,6 +520,20 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Run/Invocation binding |
 | `reserved_context` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | threshold safety ratio | 0.8 | `token_budget::autocompact_threshold` |
+| compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver`（经 `CompactGenerator::compact_context_window`） |
+
+Compact 涉及两个语义不同的窗口，**MUST** 分开计算：
+
+| 窗口 | 来源 | 决定的预算 |
+|---|---|---|
+| 注入窗口 | 本 Run 已解析的 `context_size`（summary 注入的主对话模型） | 持久化 summary 上限 `summary_budget` |
+| compact 模型窗口 | `CompactGenerator::compact_context_window()` | Map 单块目标与 previous checkpoint 嵌入预算 |
+
+- 未配置 `context.compact_model`（缺省或空串）时两窗口相同：compact 使用当前会话模型，`/model` 切换在**下一次** compact 生效。
+- 配置后 compact 模型窗口 **MUST** 只收紧 Map 分块与 previous checkpoint 嵌入量，**NEVER** 缩小持久化 summary 预算——summary 的消费方始终是主对话模型。
+- compact 模型窗口缺失或非法时 **MUST** fail closed（使用保守窗口或注入窗口），**NEVER** 因未知而放大预算。
+- 模型选择与窗口解析 **MUST** 只有单一 owner（Runtime `CompactModelResolver`）；Context **NEVER** 直接读取模型目录或 Config 推导 compact 模型，也 **NEVER** 为 compact 单独解析 selection。
+- 已配置的 compact selection 解析失败时 **MUST** 显式报错并走既有 local fallback，**NEVER** 静默回退到主对话模型。
 ## 11. 与 #547 的映射
 | #547 子 issue | 策略 | 目标契约位置 |
 |---|---|---|
@@ -577,3 +566,6 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | 2026-07-17 | 补充 L5 summary 保真度：所有被移除消息必须进入 summary；按序汇总用户输入且后续修正覆盖前述冲突要求；禁止动作层级升级；增加 continuation 三态 | [#671](https://github.com/rushsinging/aemeath/issues/671) |
 | 2026-07-18 | L5 Target 改为持久化增量摘要树；同步 map-reduce 降为 legacy backfill，冻结 per-session 1 / global 5 与 compact usage 总账 | [#1162](https://github.com/rushsinging/aemeath/issues/1162) |
 | 2026-07-19 | #876 回写实际四方法 ContextPort、`ContextRequest.step_id`、ContextWindow backing revision、Main/Sub execution 单向消费，以及 append/compact/resume 共用 mutation gate | [#876](https://github.com/rushsinging/aemeath/issues/876) |
+| 2026-07-21 | L5 唯一生产管线改为短锁 freeze、无锁 `CompactGenerator` 生成、revision/CAS durable commit 后 publish；补 typed cancellation/fallback quality，并将可配置 session 级自动熔断与 manual bypass 纳入同一 Context-owned mechanics | L5 compact CAS/cancellation |
+| 2026-08-10 | L5 compact 生成契约改为 typed JSON：map 局部事实、reduce/refresh typed checkpoint、scope/lifecycle 权限归并与单一 Markdown renderer，禁止阶段性只读约束升级为主 Session 长期边界 | [#1582](https://github.com/rushsinging/aemeath/issues/1582) |
+| 2026-09-18 | `Current Objective` 增加确定性兜底：facts 缺 objective 时用最后一条真实主用户请求恢复；`Continuation Status` 改按显式事实判定；map/repair typed 契约显式约束 `kind` 位置与目标语义 | Compact objective fallback |

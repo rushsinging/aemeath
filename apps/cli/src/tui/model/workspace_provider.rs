@@ -42,6 +42,7 @@ impl WorkspaceProvider {
         self.cwd.as_deref()
     }
 
+    #[cfg(test)]
     pub(crate) fn worktree(&self) -> Option<&str> {
         self.worktree.as_deref()
     }
@@ -62,6 +63,7 @@ impl WorkspaceProvider {
         self.kind
     }
 
+    #[cfg(test)]
     pub(crate) fn revision(&self) -> u64 {
         self.revision
     }

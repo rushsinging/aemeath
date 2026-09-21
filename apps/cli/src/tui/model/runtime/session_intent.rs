@@ -1,24 +1,6 @@
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionIntent {
-    SetCurrentSession {
-        id: String,
-    },
-    MarkDirty,
-    MessagesSynced {
-        message_count: usize,
-    },
-    MessageStateChanged {
-        message_count: usize,
-        revision: u64,
-    },
-    SaveStarted,
-    SaveFinished,
-    SaveFailed {
-        message: String,
-    },
-    ResumeCandidatesLoaded {
-        candidates: Vec<SessionResumeCandidate>,
-    },
+    SetCurrentSession { id: String },
+    MessagesSynced { message_count: usize },
+    MessageStateChanged { message_count: usize, revision: u64 },
 }
-
-use super::session_resume::SessionResumeCandidate;

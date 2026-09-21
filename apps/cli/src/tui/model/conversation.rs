@@ -2,13 +2,12 @@ pub mod activity_observation;
 #[cfg(test)]
 #[path = "conversation/activity_observation_tests.rs"]
 mod activity_observation_tests;
-pub mod agent_progress;
+pub mod agent_activity;
 pub mod ask_user;
 pub mod block;
 pub mod change;
 pub mod chat;
 pub mod chat_turn;
-pub mod compact_progress;
 pub mod history_parse;
 pub mod ids;
 pub mod intent;
@@ -24,7 +23,6 @@ mod model_extra_tests;
 mod model_tests;
 pub mod notice;
 pub(crate) mod output_view_change;
-pub mod processing_job;
 pub mod queued_submission;
 #[cfg(test)]
 #[path = "conversation/resume_performance_tests.rs"]
@@ -38,7 +36,6 @@ mod resumed_history_tests;
 mod retained_state_tests;
 pub mod runtime_state;
 pub mod status_notice;
-pub mod stream;
 pub mod streaming_preview;
 pub mod system_reminder;
 pub mod task_status;

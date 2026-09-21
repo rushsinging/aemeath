@@ -7,9 +7,8 @@ use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PreToolUseInput, TaskInput};
+use hook::{HookInvocation, HookPort, PreToolUseInput};
 use policy::PolicyPort;
-use std::path::Path;
 use std::sync::Arc;
 use tools::ToolOutcome;
 
@@ -24,7 +23,7 @@ pub(super) async fn execute_non_agent<S>(
     activities: &ActivityCoordinator,
     non_agent_calls: &[PreparedToolCall],
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
@@ -55,7 +54,7 @@ where
             activities,
             other_calls[0],
             language,
-            workspace_root,
+            workspace_read,
             policy,
             run_id,
             step_id,
@@ -73,7 +72,7 @@ where
         activities,
         &other_calls,
         language,
-        workspace_root,
+        workspace_read,
         policy,
         run_id,
         step_id,
@@ -92,7 +91,7 @@ async fn execute_multiple_non_agent<S>(
     activities: &ActivityCoordinator,
     other_calls: &[&PreparedToolCall],
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
@@ -116,7 +115,7 @@ where
                 let hook_port = hook_port.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
-                let workspace_root = workspace_root.to_path_buf();
+                let workspace_read = workspace_read.clone();
                 async move {
                     if cancel.is_cancelled() {
                         return (pos, Vec::new());
@@ -130,7 +129,7 @@ where
                         activities,
                         call,
                         language,
-                        &workspace_root,
+                        &workspace_read,
                         policy,
                         run_id,
                         step_id,
@@ -164,7 +163,7 @@ where
                 activities,
                 call,
                 language,
-                workspace_root,
+                workspace_read,
                 policy,
                 run_id,
                 step_id,
@@ -226,7 +225,7 @@ async fn execute_one_non_agent<S>(
     activities: &ActivityCoordinator,
     prepared: &PreparedToolCall,
     language: &str,
-    workspace_root: &Path,
+    workspace_read: &Arc<dyn project::WorkspaceRead>,
     policy: &dyn PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
@@ -237,6 +236,7 @@ where
     S: ChatEventSink,
 {
     let call = &prepared.call;
+    let workspace_root = workspace_read.current_workspace_root();
     // #1515: 不再构造 PermissionRequest 伪事件——permission hook 的触发
     // 由授权决策流自然产生（allow_all 下无决策 → 无事件），无需授权开关。
     let owned_call = ToolCall {
@@ -264,7 +264,7 @@ where
             tool_name: owned_call.name.clone(),
             tool_input: owned_call.input.clone(),
         }),
-        workspace_root,
+        &workspace_root,
         cancel,
     )
     .await;
@@ -310,7 +310,7 @@ where
         policy,
         run_id,
         step_id,
-        workspace_root,
+        &workspace_root,
     );
     let (effective_call, effective_authorization, _hook_context) = match hook_outcome {
         HookDirectiveOutcome::Continue { call, context } => (call, prepared.authorization, context),
@@ -434,10 +434,10 @@ where
         let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
             while let Some(event) = prog_rx.recv().await {
                 let _ = stream_sink
-                    .send_event(RuntimeStreamEvent::ToolProgress {
+                    .send_event(RuntimeStreamEvent::ToolOutputDelta {
                         context: stream_context.clone(),
                         tool_id: call_id.clone(),
-                        event,
+                        delta: event.text,
                     })
                     .await;
             }
@@ -497,21 +497,13 @@ where
             &effective_call,
             &ex,
             cancel,
-            workspace_root,
+            workspace_read,
         )
         .await;
-        run_task_hooks(
-            hook_port,
-            activities,
-            step_id,
-            &effective_call,
-            &ex.outcome,
-            workspace_root,
-            cancel,
-        )
-        .await;
-        // Task state 由 loop runner 在 materialization 后依据 typed committed change 统一发布。
-        // 不再在此处发 TasksChanged 通知。
+        agent
+            .committed_side_effects
+            .observe(&effective_call, &ex, step_id, cancel)
+            .await;
         send_tool_result(
             sink,
             context,
@@ -523,41 +515,6 @@ where
         out.push(ex);
     }
     out
-}
-
-async fn run_task_hooks(
-    hook_port: &Arc<dyn HookPort>,
-    activities: &ActivityCoordinator,
-    step_id: &sdk::RunStepId,
-    call: &ToolCall,
-    outcome: &tools::ToolOutcome,
-    workspace_root: &Path,
-    cancel: &tokio_util::sync::CancellationToken,
-) {
-    let Some(task_change) = outcome.task_change.as_ref() else {
-        return;
-    };
-    for fact in task_change.facts() {
-        let invocation = match fact {
-            tools::TaskChangeFact::Created { .. } => HookInvocation::TaskCreated(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: outcome.text.clone(),
-            }),
-            tools::TaskChangeFact::Completed { .. } => HookInvocation::TaskCompleted(TaskInput {
-                tool_input: call.input.clone(),
-                tool_output: outcome.text.clone(),
-            }),
-        };
-        let _ = dispatch_hook(
-            hook_port,
-            activities,
-            step_id,
-            invocation,
-            workspace_root,
-            cancel,
-        )
-        .await;
-    }
 }
 
 #[cfg(test)]

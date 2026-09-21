@@ -208,7 +208,7 @@ impl crate::tui::app::App {
                     // 据 view_state 已记录的 row/width 折算拖拽列 → char_idx，写入 view_state。
                     let sel = &self.view_state.status_sel;
                     let status_view = self.status_view_model();
-                    let char_idx = self.status_bar.screen_col_to_char_idx(
+                    let char_idx = self.status_bar.screen_col_to_selection_end(
                         sel.selection_row,
                         col.saturating_sub(status_bar.x),
                         sel.selection_width,

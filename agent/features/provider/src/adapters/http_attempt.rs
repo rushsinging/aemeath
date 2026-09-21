@@ -275,14 +275,16 @@ pub(crate) enum HttpAttemptFailure {
     Network {
         source: reqwest::Error,
         kind: NetworkFailureKind,
-        receipt: DiagnosticReceipt,
+        // clippy(result_large_err)：DiagnosticReceipt 内联 6 个 String（约 152B），
+        // 是 Network/Http 两个 variant 超过 200B 阈值的主因；装箱后签名与消费方不变。
+        receipt: Box<DiagnosticReceipt>,
     },
     Http {
         status: reqwest::StatusCode,
         kind: HttpFailureKind,
         headers: SafeResponseHeaders,
-        body: BoundedErrorBody,
-        receipt: DiagnosticReceipt,
+        body: Box<BoundedErrorBody>,
+        receipt: Box<DiagnosticReceipt>,
     },
 }
 
@@ -429,7 +431,7 @@ impl HttpAttemptExecutor {
             _ = cancel.cancelled() => return Err(HttpAttemptFailure::Cancelled),
             result = request.send() => result.map_err(|source| {
                 let kind = NetworkFailureKind::classify(&source);
-                let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+                let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
                 HttpAttemptFailure::Network { source, kind, receipt }
             })?,
         };
@@ -452,12 +454,12 @@ impl HttpAttemptExecutor {
         )
         .await?;
         let kind = refine_http_failure_kind(classify_http_status(status), body.text());
-        let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+        let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
         Err(HttpAttemptFailure::Http {
             status,
             kind,
             headers,
-            body,
+            body: Box::new(body),
             receipt,
         })
     }
@@ -496,12 +498,12 @@ impl HttpAttemptExecutor {
                     body.observed_bytes = observed;
                     body.truncated = true;
                     body.read_error = Some(source.to_string());
-                    let receipt = DiagnosticReceipt::capture(context, started.elapsed());
+                    let receipt = Box::new(DiagnosticReceipt::capture(context, started.elapsed()));
                     return Err(HttpAttemptFailure::Http {
                         status,
                         kind,
                         headers: headers.clone(),
-                        body,
+                        body: Box::new(body),
                         receipt,
                     });
                 }
@@ -608,10 +610,11 @@ mod tests {
 
     #[tokio::test]
     async fn network_failure_classifies_reqwest_error_categories() {
-        let timeout = reqwest::Client::builder()
-            .timeout(std::time::Duration::ZERO)
-            .build()
-            .unwrap();
+        let timeout =
+            crate::adapters::transport::http_builder_for_endpoint(Some("http://127.0.0.1:9"))
+                .timeout(std::time::Duration::ZERO)
+                .build()
+                .unwrap();
         let error = timeout.get("http://127.0.0.1:9").send().await.unwrap_err();
         assert!(matches!(
             NetworkFailureKind::classify(&error),
@@ -751,7 +754,7 @@ mod tests {
             let server = TestServer::start(&response).await;
             let url = server.url();
             let failure = HttpAttemptExecutor::execute(
-                reqwest::Client::new().get(&url),
+                crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
                 &test_context(&url),
                 &tokio_util::sync::CancellationToken::new(),
             )
@@ -797,7 +800,8 @@ mod tests {
         );
         let server = TestServer::start(&response).await;
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(server.url()),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(server.url().as_str()))
+                .get(server.url()),
             &test_context(&server.url()),
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -824,7 +828,8 @@ mod tests {
         );
         let server = TestServer::start(&response).await;
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(server.url()),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(server.url().as_str()))
+                .get(server.url()),
             &test_context(&server.url()),
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -854,7 +859,7 @@ mod tests {
             context.api = mode;
 
             let failure = HttpAttemptExecutor::execute(
-                reqwest::Client::new().get(&url),
+                crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
                 &context,
                 &tokio_util::sync::CancellationToken::new(),
             )
@@ -881,7 +886,7 @@ mod tests {
         let context = test_context(&url);
 
         let success = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(&url),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
             &context,
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -907,7 +912,7 @@ mod tests {
         let context = test_context(&url);
 
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(&url),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
             &context,
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -956,7 +961,7 @@ mod tests {
         let context = test_context(&url);
 
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(&url),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
             &context,
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -981,10 +986,11 @@ mod tests {
 
     #[tokio::test]
     async fn network_failure_log_emits_unified_receipt_without_panicking() {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::ZERO)
-            .build()
-            .unwrap();
+        let client =
+            crate::adapters::transport::http_builder_for_endpoint(Some("http://127.0.0.1:9"))
+                .timeout(std::time::Duration::ZERO)
+                .build()
+                .unwrap();
         let context = test_context("http://127.0.0.1:9");
 
         let failure = HttpAttemptExecutor::execute(
@@ -1015,7 +1021,7 @@ mod tests {
         let context = test_context(&url);
 
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(&url),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
             &context,
             &tokio_util::sync::CancellationToken::new(),
         )
@@ -1044,7 +1050,7 @@ mod tests {
         });
 
         let failure = HttpAttemptExecutor::execute(
-            reqwest::Client::new().get(&url),
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
             &test_context(&url),
             &cancel,
         )
@@ -1157,7 +1163,7 @@ mod tests {
             let context = test_context(&url);
 
             let failure = HttpAttemptExecutor::execute(
-                reqwest::Client::new().get(&url),
+                crate::adapters::transport::build_http_client_for_endpoint(Some(&url)).get(&url),
                 &context,
                 &tokio_util::sync::CancellationToken::new(),
             )

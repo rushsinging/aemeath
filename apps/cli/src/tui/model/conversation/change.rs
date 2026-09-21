@@ -1,16 +1,9 @@
-use super::interaction::{InteractionCommandFailure, UiInteractionReply, UiInteractionRequestId};
+use super::interaction::{InteractionCommandFailure, UiInteractionRequestId};
 use super::tool_call::ToolCallStatus;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConversationChange {
     // ── 原 conversation changes ──
-    ChatStarted {
-        chat_id: String,
-    },
-    ChatTurnStarted {
-        chat_id: String,
-        run_id: String,
-    },
     UserMessageAppended {
         block_id: String,
     },
@@ -53,7 +46,7 @@ pub enum ConversationChange {
     QueuedSubmissionsCleared {
         count: usize,
     },
-    AgentProgressRecorded {
+    AgentActivitiesRecorded {
         block_id: String,
         tool_id: String,
     },
@@ -70,9 +63,6 @@ pub enum ConversationChange {
     ChatCompleting {
         chat_id: String,
     },
-    ChatCompleted {
-        chat_id: String,
-    },
     OrphanToolResultObserved {
         id: String,
     },
@@ -82,20 +72,7 @@ pub enum ConversationChange {
     AskUserUpdated {
         id: String,
     },
-    AskUserDismissed {
-        id: String,
-    },
     InteractionShown {
-        request_id: UiInteractionRequestId,
-    },
-    InteractionUpdated {
-        request_id: UiInteractionRequestId,
-    },
-    InteractionReplyRequested {
-        request_id: UiInteractionRequestId,
-        reply: UiInteractionReply,
-    },
-    InteractionCancelRequested {
         request_id: UiInteractionRequestId,
     },
     InteractionCompleted {
@@ -125,37 +102,16 @@ pub enum ConversationChange {
     UsageChanged {
         input_tokens: u64,
         output_tokens: u64,
-        cost_usd: f64,
     },
     LiveTpsChanged {
         tps: f64,
     },
-    TaskStatusChanged {
-        total: usize,
-        completed: usize,
-        in_progress: usize,
-    },
-    ProcessingJobChanged {
-        id: String,
-    },
-    /// Compact 进度条嵌入 spinner 行（output 区），与 phase 变化解耦——单独归类为 output_dirty，
-    /// 避免依赖 SpinnerTick 每 90ms 兜底 mark_output_dirty 的不可靠时序（#540）。
-    CompactProgressChanged,
     QueuedSubmissionsSynced {
         count: usize,
     },
     CompactRuntimeCleared,
     TaskLinesChanged,
     StatusNoticeChanged,
-    GraphPhaseChanged,
 }
 
-impl ConversationChange {
-    pub(crate) fn is_interaction_conflict(&self) -> bool {
-        matches!(self, Self::InteractionConflict { .. })
-    }
-
-    pub(crate) fn is_interaction_reply_requested(&self) -> bool {
-        matches!(self, Self::InteractionReplyRequested { .. })
-    }
-}
+impl ConversationChange {}

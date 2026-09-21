@@ -1,14 +1,11 @@
-use super::intent::{
-    ConfirmInteraction, ConversationIntent, InteractionCancelRejected, InteractionReplyRejected,
-    ShowInteraction, UpdateInteractionDraft,
-};
+use super::change::ConversationChange;
+use super::intent::{ConversationIntent, InteractionCancelRejected, InteractionReplyRejected};
 use super::interaction::{
-    InteractionBody, InteractionCommandFailure, InteractionDraftAction, InteractionPhase,
-    InteractionRequest, UiApprovalPrompt, UiInteractionRequestId, UiPlanApprovalPrompt,
-    UiRiskLevel, UiRunId, UiStuckDiagnostic, UiUserQuestion,
+    InteractionBody, InteractionCommandFailure, InteractionRequest, UiApprovalPrompt,
+    UiInteractionRequestId, UiOptionItem, UiRiskLevel, UiRunId, UiUserQuestion,
 };
 use super::model::ConversationModel;
-use super::update::ConversationUpdate;
+
 use crate::tui::model::conversation::block::{AskUserCompletion, AskUserSlot};
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
@@ -31,21 +28,12 @@ fn tool_approval_request(id: &str) -> InteractionRequest {
     }
 }
 
-fn interaction_request_for(body: InteractionBody) -> InteractionRequest {
-    InteractionRequest {
-        request_id: UiInteractionRequestId::from("request-body"),
-        run_id: UiRunId::from("run-1"),
-        tool_call_id: None,
-        body,
-    }
-}
-
 fn ask_user_slot(id: &str, question: &str) -> AskUserSlot {
     AskUserSlot {
         id: id.to_string(),
         question_seq: 0,
         question: question.to_string(),
-        options: vec![sdk::OptionItem::title_only("日料".to_string())],
+        options: vec![sdk::OptionItem::new("日料", "日料的描述")],
         llm_option_count: 1,
         multi_select: false,
         default: None,
@@ -107,55 +95,6 @@ fn start_ask_user_tool(model: &mut ConversationModel, tool_call_id: &ToolCallId)
 }
 
 #[test]
-fn show_interaction_stores_first_request_in_collecting_phase() {
-    let mut model = ConversationModel::default();
-    let request = tool_approval_request("request-1");
-
-    model.show_interaction(request.clone());
-
-    let interaction = model.active_interaction().expect("active interaction");
-    assert_eq!(interaction.request_id(), &request.request_id);
-    assert_eq!(interaction.phase(), InteractionPhase::Collecting);
-}
-
-#[test]
-fn show_interaction_initializes_typed_drafts_for_all_bodies() {
-    let bodies = vec![
-        InteractionBody::UserQuestions(vec![UiUserQuestion {
-            prompt: "继续？".to_string(),
-            options: vec!["是".to_string()],
-            allow_multi: false,
-        }]),
-        InteractionBody::ToolApproval(UiApprovalPrompt {
-            title: "Bash".to_string(),
-            detail: "cargo test".to_string(),
-            risk: UiRiskLevel::Low,
-        }),
-        InteractionBody::PlanApproval(UiPlanApprovalPrompt {
-            title: "迁移计划".to_string(),
-            steps: vec!["实现".to_string()],
-        }),
-        InteractionBody::HardPause(UiStuckDiagnostic {
-            reason: "需要确认".to_string(),
-            recent_actions: Vec::new(),
-        }),
-    ];
-
-    for body in bodies {
-        let mut model = ConversationModel::default();
-        let request = interaction_request_for(body);
-        model.show_interaction(request.clone());
-        assert_eq!(
-            model
-                .active_interaction()
-                .expect("interaction")
-                .request_id(),
-            &request.request_id
-        );
-    }
-}
-
-#[test]
 fn show_interaction_rejects_second_request_without_replacing_active_request() {
     let mut model = ConversationModel::default();
     let first = tool_approval_request("request-1");
@@ -166,7 +105,7 @@ fn show_interaction_rejects_second_request_without_replacing_active_request() {
 
     assert!(changes
         .iter()
-        .any(|change| change.is_interaction_conflict()));
+        .any(|change| matches!(change, ConversationChange::InteractionConflict { .. })));
     assert_eq!(
         model
             .active_interaction()
@@ -174,39 +113,6 @@ fn show_interaction_rejects_second_request_without_replacing_active_request() {
             .request_id(),
         &first.request_id
     );
-}
-
-#[test]
-fn confirm_interaction_requests_reply_without_changing_runtime_phase() {
-    let mut model = ConversationModel::default();
-    let request = tool_approval_request("request-1");
-    let before_runtime = model.runtime.clone();
-    ConversationIntent::ShowInteraction(ShowInteraction {
-        request: request.clone(),
-    })
-    .update(&mut model);
-    ConversationIntent::UpdateInteractionDraft(UpdateInteractionDraft {
-        request_id: request.request_id.clone(),
-        action: InteractionDraftAction::Approve,
-    })
-    .update(&mut model);
-
-    let changes = ConversationIntent::ConfirmInteraction(ConfirmInteraction {
-        request_id: request.request_id.clone(),
-    })
-    .update(&mut model);
-
-    assert!(changes
-        .iter()
-        .any(|change| change.is_interaction_reply_requested()));
-    assert_eq!(
-        model
-            .active_interaction()
-            .expect("interaction kept pending")
-            .phase(),
-        InteractionPhase::ReplyPending
-    );
-    assert_eq!(model.runtime, before_runtime);
 }
 
 #[test]
@@ -234,18 +140,13 @@ fn accepted_reply_completes_only_the_ask_tool_bound_to_the_matching_request() {
         tool_call_id: Some(completed_tool_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
-    model.update_interaction_draft(
-        &completed_request_id,
-        InteractionDraftAction::SetUserAnswer {
-            index: 0,
-            answer: "日料".to_string(),
-        },
-    );
-    model.confirm_interaction(&completed_request_id);
     assert_eq!(
         ask_user_completion(&model, &completed_request_id),
         AskUserCompletion::ReplyPending
@@ -311,16 +212,13 @@ fn accepted_cancel_cancels_only_the_ask_tool_bound_to_the_matching_request() {
         tool_call_id: Some(cancelled_tool_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
-    model.cancel_interaction(&cancelled_request_id);
-    assert_eq!(
-        ask_user_completion(&model, &cancelled_request_id),
-        AskUserCompletion::CancelPending
-    );
-
     model.apply(ConversationIntent::InteractionCancelAccepted(
         InteractionCancelAccepted {
             request_id: cancelled_request_id,
@@ -358,19 +256,13 @@ fn rejected_reply_keeps_the_ask_tool_running() {
         tool_call_id: Some(tool_call_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
-    model.update_interaction_draft(
-        &request_id,
-        InteractionDraftAction::SetUserAnswer {
-            index: 0,
-            answer: "日料".to_string(),
-        },
-    );
-    model.confirm_interaction(&request_id);
-
     model.apply(ConversationIntent::InteractionReplyRejected(
         InteractionReplyRejected {
             request_id: request_id.clone(),
@@ -382,10 +274,7 @@ fn rejected_reply_keeps_the_ask_tool_running() {
         ask_user_tool_status(&model, &tool_call_id),
         ToolCallStatus::Running
     );
-    assert_eq!(
-        model.active_interaction().expect("retryable").phase(),
-        InteractionPhase::Collecting
-    );
+    assert!(model.active_interaction().is_some());
     assert_eq!(
         ask_user_completion(&model, &request_id),
         AskUserCompletion::Active
@@ -408,16 +297,13 @@ fn rejected_cancel_restores_the_ask_batch_for_retry() {
         tool_call_id: Some(tool_call_id.as_str().to_string()),
         body: InteractionBody::UserQuestions(vec![UiUserQuestion {
             prompt: "明天想吃什么？".to_string(),
-            options: vec!["日料".to_string()],
+            options: vec![UiOptionItem {
+                title: "日料".to_string(),
+                description: Some("日料的描述".to_string()),
+            }],
             allow_multi: false,
         }]),
     });
-    model.cancel_interaction(&request_id);
-    assert_eq!(
-        ask_user_completion(&model, &request_id),
-        AskUserCompletion::CancelPending
-    );
-
     model.apply(ConversationIntent::InteractionCancelRejected(
         InteractionCancelRejected {
             request_id: request_id.clone(),
@@ -429,10 +315,7 @@ fn rejected_cancel_restores_the_ask_batch_for_retry() {
         ask_user_tool_status(&model, &tool_call_id),
         ToolCallStatus::Running
     );
-    assert_eq!(
-        model.active_interaction().expect("retryable").phase(),
-        InteractionPhase::Collecting
-    );
+    assert!(model.active_interaction().is_some());
     assert_eq!(
         ask_user_completion(&model, &request_id),
         AskUserCompletion::Active

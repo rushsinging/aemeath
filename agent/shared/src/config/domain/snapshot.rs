@@ -4,6 +4,7 @@
 //! a mutable reference to `Config`. Field-level accessors expose only
 //! what consumers need.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -87,6 +88,15 @@ pub struct ToolResultPolicy {
 }
 
 impl ToolResultPolicy {
+    /// 截断阈值占 context window 的比例上限（1/20 = 5%）。
+    ///
+    /// 定量阈值只对大窗口合理：128k 窗口下单条 50k chars（中文场景约
+    /// 50k tokens）即占 40%，会直接把启发式估算顶到 auto-compact 阈值。
+    const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 20;
+
+    /// 窗口收紧后的阈值下限：过小的 preview 无法容纳有效的 head/tail 提示。
+    const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 4_000;
+
     fn from_config(config: &ToolResultConfig) -> Self {
         let valid = config.threshold_chars > 0
             && config.preview_head_chars + config.preview_tail_chars <= config.threshold_chars;
@@ -99,6 +109,28 @@ impl ToolResultPolicy {
             threshold_chars: config.threshold_chars,
             preview_head_chars: config.preview_head_chars,
             preview_tail_chars: config.preview_tail_chars,
+        }
+    }
+
+    /// 按 context window 收紧截断阈值。
+    ///
+    /// - `threshold = min(配置值, 窗口 × 5%)`，下限 4k chars；配置值语义
+    ///   是"大窗口下的上限"
+    /// - head/tail 等比收紧到 threshold 的 1/4、1/8，收紧后仍满足
+    ///   `head + tail ≤ threshold` 不变式（1/4 + 1/8 = 3/8 < 1）
+    /// - `context_size == 0`（窗口未知）时不收紧，避免误伤大窗口
+    pub fn scaled_for_context_window(self, context_size: usize) -> Self {
+        if context_size == 0 {
+            return self;
+        }
+        let ratio_cap = context_size / Self::WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR;
+        let threshold_chars = self
+            .threshold_chars
+            .min(ratio_cap.max(Self::MIN_WINDOW_SCALED_THRESHOLD_CHARS));
+        Self {
+            threshold_chars,
+            preview_head_chars: self.preview_head_chars.min(threshold_chars / 4),
+            preview_tail_chars: self.preview_tail_chars.min(threshold_chars / 8),
         }
     }
 
@@ -243,6 +275,33 @@ impl ConfigSnapshot {
         self.inner.model.context_size
     }
 
+    // ── Context read reduction ────────────────────────────────
+
+    pub fn context_snip_enabled(&self) -> bool {
+        self.inner.context.snip_enabled
+    }
+
+    pub fn context_microcompact_enabled(&self) -> bool {
+        self.inner.context.microcompact_enabled
+    }
+
+    pub fn auto_compact_failure_limit(&self) -> u8 {
+        self.inner.context.auto_compact_failure_limit.max(1)
+    }
+
+    /// Compact 专用模型 selection；`None` 表示跟随当前会话模型。
+    ///
+    /// 再次归一化空白，避免绕过 `ContextConfig` 反序列化的程序化构造
+    /// 让空白 selection 被误当成"已配置"。
+    pub fn context_compact_model(&self) -> Option<&str> {
+        self.inner
+            .context
+            .compact_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|selection| !selection.is_empty())
+    }
+
     // ── Permissions ──────────────────────────────────────────
 
     pub fn permission_mode(&self) -> PermissionModeConfig {
@@ -275,8 +334,12 @@ impl ConfigSnapshot {
         }
     }
 
-    pub fn tool_result_policy(&self) -> ToolResultPolicy {
+    /// 构造 tool result 截断策略：先按配置校验归一，再按 `context_size`
+    /// 比例收紧（见 [`ToolResultPolicy::scaled_for_context_window`]）。
+    /// 调用方必须传入已解析的 context window；传 0 视为窗口未知，不收紧。
+    pub fn tool_result_policy(&self, context_size: usize) -> ToolResultPolicy {
         ToolResultPolicy::from_config(&self.inner.tools.tool_result)
+            .scaled_for_context_window(context_size)
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -358,6 +421,15 @@ impl ConfigSnapshot {
         self.inner.storage.persist_sessions
     }
 
+    /// Configured root directory for EnterWorktree defaults.
+    ///
+    /// Returns the raw configured value: relative paths resolve against the
+    /// workspace root at wiring time (config layer has no workspace knowledge).
+    /// `None` means the default `<agents dir>/worktrees` applies.
+    pub fn worktrees_dir(&self) -> Option<&Path> {
+        self.inner.storage.worktrees_dir.as_deref()
+    }
+
     // ── Guidance ─────────────────────────────────────────────
 
     pub fn guidance_reload_policy(&self) -> crate::config::GuidanceReloadPolicy {
@@ -374,6 +446,11 @@ impl ConfigSnapshot {
     ///
     /// Priority: CLI explicit (non-zero) > snapshot (env > file already merged) >
     /// provider model context_window > default 128000.
+    ///
+    /// When the snapshot value is adopted but is suspiciously smaller than the
+    /// model registry window (see [`Self::context_size_mismatch_hint`]), a
+    /// warning is logged — the configured value still wins (explicit user
+    /// intent), but the mismatch stays observable (#1626).
     pub fn resolve_context_size(
         &self,
         cli_override: Option<usize>,
@@ -387,6 +464,16 @@ impl ConfigSnapshot {
         }
         // snapshot value (already env > file merged)
         if self.inner.model.context_size > 0 {
+            if let Some((configured, registry)) =
+                self.context_size_mismatch_hint(model_context_window)
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[config] 配置的 context_size {} 明显小于模型 registry 窗口 {}（低于 50%）——若非有意限制，请检查 aemeath.json 的 model.context_size / max_output_tokens 是否与模型真实窗口匹配，否则短窗口会频繁触发 auto-compact",
+                    configured,
+                    registry,
+                );
+            }
             return self.inner.model.context_size;
         }
         // provider model contextWindow
@@ -395,6 +482,20 @@ impl ConfigSnapshot {
         }
         // fallback default
         128_000
+    }
+
+    /// 检测 snapshot `context_size` 与 model registry 窗口的疑似误配（#1626）。
+    ///
+    /// 返回 `Some((configured, registry))` 当且仅当：snapshot 显式配置了
+    /// `context_size > 0`、registry 窗口已知，且配置值低于 registry 窗口的
+    /// 50%。只提供提示信号，不改变 resolve 优先级。
+    pub fn context_size_mismatch_hint(
+        &self,
+        model_context_window: usize,
+    ) -> Option<(usize, usize)> {
+        let configured = self.inner.model.context_size;
+        (configured > 0 && model_context_window > 0 && configured * 2 < model_context_window)
+            .then_some((configured, model_context_window))
     }
 
     /// 返回完整 `ModelsConfig`，供消费方读取 providers / guidance / model entries 等。
@@ -529,6 +630,29 @@ mod tests {
         assert_eq!(snap.resolve_context_size(Some(0), 0), 32000);
     }
 
+    /// #1626：snapshot context_size 明显小于 model registry 真实窗口
+    /// （< 50%）时视为疑似误配——返回值仍以 snapshot 为准（尊重显式配置），
+    /// 但必须留下可观测提示（warn + 独立可测的 hint 方法）。
+    #[test]
+    fn test_context_size_mismatch_hint_flags_suspiciously_small_window() {
+        let mut config = Config::default();
+        config.model.context_size = 8192;
+        let snap = ConfigSnapshot::new(config);
+
+        // 8192 < 200_000 / 2 → 疑似误配，hint 返回 registry 窗口供提示
+        assert_eq!(
+            snap.context_size_mismatch_hint(200_000),
+            Some((8192, 200_000))
+        );
+        // 接近真实窗口（8192 ≥ 16384/2，不低于 50%）不提示
+        assert_eq!(snap.context_size_mismatch_hint(16_384), None);
+        // 未配置 snapshot 值（0 = 未设置）不提示
+        let unset = ConfigSnapshot::new(Config::default());
+        assert_eq!(unset.context_size_mismatch_hint(200_000), None);
+        // registry 窗口未知（0）不提示
+        assert_eq!(snap.context_size_mismatch_hint(0), None);
+    }
+
     #[test]
     fn test_substructure_accessors_return_config_fields() {
         let config = Config::default();
@@ -624,6 +748,17 @@ mod tests {
 
         // Act & Assert
         assert_eq!(snap.context_size(), 32000);
+    }
+
+    #[test]
+    fn snapshot_auto_compact_failure_limit_defaults_and_normalizes_zero() {
+        let default_snapshot = ConfigSnapshot::new(Config::default());
+        assert_eq!(default_snapshot.auto_compact_failure_limit(), 3);
+
+        let mut config = Config::default();
+        config.context.auto_compact_failure_limit = 0;
+        let normalized_snapshot = ConfigSnapshot::new(config);
+        assert_eq!(normalized_snapshot.auto_compact_failure_limit(), 1);
     }
 
     /// Config.model.max_tokens=8192 时，消费方调 snapshot.max_tokens() 应得 8192。
@@ -777,7 +912,7 @@ mod tests {
         config.tools.tool_result.preview_tail_chars = 250;
         let snap = ConfigSnapshot::new(config);
 
-        let policy = snap.tool_result_policy();
+        let policy = snap.tool_result_policy(1_000_000);
         assert_eq!(policy.threshold_chars(), 8_000);
         assert_eq!(policy.preview_head_chars(), 1_000);
         assert_eq!(policy.preview_tail_chars(), 250);
@@ -791,7 +926,49 @@ mod tests {
         config.tools.tool_result.preview_tail_chars = 9_000;
         let snap = ConfigSnapshot::new(config);
 
-        let policy = snap.tool_result_policy();
+        let policy = snap.tool_result_policy(1_000_000);
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    /// tool_result 截断阈值必须随 context window 比例收紧：
+    /// `threshold = min(配置值, 窗口×5%)`，下限 4k chars；
+    /// head/tail 等比收紧（threshold 的 1/4、1/8）且收紧后仍满足
+    /// `head + tail ≤ threshold` 不变式；窗口未知（0）时不收紧。
+    /// 配置值语义是"大窗口下的上限"——1M 窗口下默认 50k 占 5% 合理，
+    /// 128k 窗口下单条 50k chars（中文场景约 50k tokens）即占 40%，
+    /// 会直接把启发式估算顶到 auto-compact 阈值。
+    #[test]
+    fn tool_result_policy_scales_threshold_with_context_window() {
+        let snap = ConfigSnapshot::new(Config::default());
+
+        // 1M 窗口：5% = 50k，与默认配置相等，不收紧
+        let policy = snap.tool_result_policy(1_000_000);
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 200k 窗口：5% = 10k 收紧；head/tail 低于等比上限，保持原值
+        let policy = snap.tool_result_policy(200_000);
+        assert_eq!(policy.threshold_chars(), 10_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 128k 窗口：5% = 6.4k；head 收紧到 6400/4 = 1600
+        let policy = snap.tool_result_policy(128_000);
+        assert_eq!(policy.threshold_chars(), 6_400);
+        assert_eq!(policy.preview_head_chars(), 1_600);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 32k 窗口：5% = 1600 低于下限，取 4k；head = 4000/4 = 1000
+        let policy = snap.tool_result_policy(32_000);
+        assert_eq!(policy.threshold_chars(), 4_000);
+        assert_eq!(policy.preview_head_chars(), 1_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+
+        // 窗口未知（0）：不收紧，避免误伤
+        let policy = snap.tool_result_policy(0);
         assert_eq!(policy.threshold_chars(), 50_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);

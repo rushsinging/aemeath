@@ -261,7 +261,7 @@ Activity 是 Runtime 应用层的观测实体集合，不是 Run 聚合的替代
 | Run Step / Model Invocation | Step / Model Activity | Run / Model 协作器；ActivityCoordinator 统一登记与变更 |
 | Tool Call | Tool Activity | ToolCall 实体与 ToolRoundCoordinator |
 | Hook / Compaction / Interaction | 对应 typed Activity | Hook、Context、Interaction 协作器产生事实，Runtime 统一观测 |
-| Child Run | Child Run Activity | 子 Run；父子关系由 `parent_activity_id` / `parent_run_id` 关联 |
+| Sub Run | Sub Run Activity | 子 Run；父子关系由 `parent_activity_id` / `parent_run_id` 关联 |
 
 `ActivityCoordinator` 是完整 Activity 观测的唯一创建与变更入口。每次 mutation 生成新的 `ActivityObservation`，并在同一 Run revision 下发布 `ActivityChanged`；初始化、重连或 revision gap 修复使用 `ActivitySnapshot`。Activity 事件只描述事实，**NEVER** 直接决定下一 Run 状态、接受控制命令或写入 Session。
 

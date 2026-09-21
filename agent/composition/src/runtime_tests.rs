@@ -56,7 +56,7 @@ fn temp_workspace() -> (tempfile::TempDir, project::WorkspaceWiring) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root dir");
-    let wiring = project::wire_production_workspace(root).expect("wire workspace");
+    let wiring = project::wire_production_workspace(root, None).expect("wire workspace");
     (temp, wiring)
 }
 
@@ -141,6 +141,8 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
         tools::composition::wire_skills().loader(),
         &snapshot,
         env_temp.path(),
+        // 大窗口下比例收紧不生效，保持该测试原有的默认策略语义
+        1_000_000,
     )
     .expect("wire_runtime_tool_assembly must succeed");
 

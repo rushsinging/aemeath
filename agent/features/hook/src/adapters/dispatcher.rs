@@ -561,6 +561,8 @@ impl Dispatcher {
                                 exit_code: raw.exit_code,
                                 stdout: raw.stdout,
                                 stderr: raw.stderr,
+                                stdout_file: raw.stdout_file,
+                                stderr_file: raw.stderr_file,
                                 duration,
                             };
                             // 成功也必须保留 prior executions（此前失败的 attempt 明细），
@@ -590,6 +592,8 @@ impl Dispatcher {
                                 exit_code: raw.exit_code,
                                 stdout: raw.stdout,
                                 stderr: raw.stderr,
+                                stdout_file: raw.stdout_file,
+                                stderr_file: raw.stderr_file,
                                 duration,
                             };
                             executions.push(execution);
@@ -614,6 +618,8 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
@@ -637,6 +643,8 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
@@ -659,10 +667,17 @@ impl Dispatcher {
                         exit_code: None,
                         stdout: String::new(),
                         stderr: String::new(),
+                        stdout_file: None,
+                        stderr_file: None,
                         duration,
                     };
                     executions.push(execution);
-                    if attempts >= self.execution_policy.max_attempts() {
+                    // #1614：超时是确定性失败——同输入重跑只会再次超时，
+                    // 重试仅把调用方等待放大 max_attempts 倍（实测 Stop hook
+                    // 600s×3≈30 分钟）。Timeout 单次终判，不进入重试循环。
+                    if matches!(fault, ExecutionFault::Timeout)
+                        || attempts >= self.execution_policy.max_attempts()
+                    {
                         Self::observe_subscription_execution(
                             subscription_execution_observer,
                             HookSubscriptionExecutionEvent::Finished {

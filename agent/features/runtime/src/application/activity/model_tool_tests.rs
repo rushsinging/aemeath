@@ -132,9 +132,11 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
     coordinator
         .update_compaction(
             compact_id.clone(),
-            CompactStageView::Summarizing,
-            Some(2),
-            Some(4),
+            CompactStageView::Mapping,
+            sdk::CompactWorkView::Determinate {
+                completed: 2,
+                total: 4,
+            },
         )
         .expect("update compaction");
     coordinator
@@ -189,9 +191,11 @@ fn hook_compaction_and_interaction_activities_preserve_typed_detail_and_lifecycl
     assert_eq!(
         compact.detail,
         ActivityDetailView::Compact {
-            stage: CompactStageView::Summarizing,
-            current: Some(2),
-            total: Some(4),
+            stage: CompactStageView::Mapping,
+            work: sdk::CompactWorkView::Determinate {
+                completed: 2,
+                total: 4,
+            },
         }
     );
 
@@ -235,8 +239,7 @@ fn manual_compaction_uses_run_root_without_a_step() {
         compact.detail,
         ActivityDetailView::Compact {
             stage: CompactStageView::Preparing,
-            current: None,
-            total: None,
+            work: sdk::CompactWorkView::Indeterminate,
         }
     );
 }

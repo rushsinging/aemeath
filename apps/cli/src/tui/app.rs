@@ -38,8 +38,6 @@ const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(50);
 const SLOW_FRAME_LOG_COOLDOWN: Duration = Duration::from_secs(5);
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
-#[cfg(test)]
-use event::StatusContextUpdate;
 pub use event::UiEvent;
 
 /// `refresh_output_document_from_model` 的增量装配结果 owner。
@@ -138,6 +136,7 @@ pub struct App {
     pub command_router: Option<Arc<dyn sdk::CommandRouterPort>>,
     pub(crate) skill_completion_catalog: SkillCompletionCatalog,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+    pub run_control_client: Option<Arc<dyn sdk::RunControlClient>>,
     pub(crate) display_history_query: Option<Arc<dyn sdk::DisplayHistoryQuery>>,
     /// Session 初始化时固定的 HTTP User-Agent。
     pub user_agent: String,
@@ -167,28 +166,6 @@ pub(crate) fn display_status_path(path: &Path) -> String {
     } else {
         raw
     }
-}
-
-#[cfg(test)]
-pub(crate) fn status_context_for_paths(path_base: &Path, workspace_root: &Path) -> UiEvent {
-    status_context_for_workspace(sdk::WorkspaceContextView {
-        path_base: path_base.to_path_buf(),
-        workspace_root: workspace_root.to_path_buf(),
-        context_stack: Vec::new(),
-    })
-}
-
-#[cfg(test)]
-pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
-    let path_base = workspace.path_base.clone();
-    let workspace_root = workspace.workspace_root.clone();
-    UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
-        path_base: display_status_path(&path_base),
-        workspace_root: display_status_path(&workspace_root),
-        raw_path_base: path_base,
-        raw_workspace_root: workspace_root,
-        workspace,
-    })
 }
 
 impl App {
@@ -255,6 +232,7 @@ impl App {
             skill_completion_catalog: SkillCompletionCatalog::default(),
             config_view: sdk::ConfigView::default(),
             agent_client: None,
+            run_control_client: None,
             display_history_query: None,
             user_agent: composition::update::default_user_agent(),
         }
@@ -514,8 +492,6 @@ mod tests {
 #[cfg(test)]
 mod scenario_tests;
 pub mod slash;
-#[cfg(test)]
-mod slash_effect_tests;
 #[cfg(test)]
 mod slash_tests;
 #[cfg(test)]

@@ -1,3 +1,4 @@
+pub(crate) mod lexical_search;
 mod model;
 mod persistence;
 mod policy;

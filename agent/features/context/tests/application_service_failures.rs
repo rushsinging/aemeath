@@ -23,6 +23,7 @@ impl SessionRepository for Session {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(0),
             messages: vec![].into(),
+            structured_history: None,
             active_summary: None,
         })
     }
@@ -50,6 +51,7 @@ impl SessionRepository for Session {
                 summary: "manual".into(),
                 recent_messages: vec![],
                 source_revision: SessionRevision::new(1),
+                quality: context::domain::CompactSummaryQuality::LocalOnly,
             },
         ))
     }
@@ -107,6 +109,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }

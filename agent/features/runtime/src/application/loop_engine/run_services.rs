@@ -148,6 +148,15 @@ where
             .await
     }
 
+    async fn load_step_receipts(
+        &mut self,
+        request: &ContextRequest,
+    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
+            .load_step_receipts(request)
+            .await
+    }
+
     async fn persist_step_commit(&mut self, commit: &StepCommit) -> Result<(), LoopEngineError> {
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .persist_step_commit(commit)
@@ -189,16 +198,21 @@ where
     async fn compact(
         &mut self,
         execution: &mut RunExecutionState,
-        _cancel: &CancellationToken,
+        cancel: &CancellationToken,
         progress: std::sync::Arc<dyn CompactProgressView>,
     ) -> Result<(), LoopEngineError> {
-        // #1537：渲染当前 Task 状态，compact summary 定稿后拼接到末尾。
-        let task_context =
-            crate::application::loop_engine::chat::task_snapshot::build_task_snapshot_text(
+        let task_snapshot =
+            crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                 &*self.runtime_context.task_ref().clone(),
             );
         CompactionCoordinator::from_context(self.runtime_context)
-            .compact(execution, &mut self.observer, progress, task_context)
+            .compact(
+                execution,
+                &mut self.observer,
+                progress,
+                task_snapshot,
+                cancel.clone(),
+            )
             .await
     }
 }

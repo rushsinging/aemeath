@@ -409,7 +409,7 @@ impl InteractionPort for InteractionBridge {
 /// Child-scoped adapter that routes interaction commands through the parent
 /// capability without sharing the parent's port identity.
 pub struct ParentMediatedInteractionPort {
-    child_run_id: Mutex<Option<RunId>>,
+    sub_run_id: Mutex<Option<RunId>>,
     parent: std::sync::Arc<dyn InteractionPort>,
     owned: Mutex<HashSet<InteractionRequestId>>,
 }
@@ -417,7 +417,7 @@ pub struct ParentMediatedInteractionPort {
 impl ParentMediatedInteractionPort {
     pub fn new(parent: std::sync::Arc<dyn InteractionPort>) -> Self {
         Self {
-            child_run_id: Mutex::new(None),
+            sub_run_id: Mutex::new(None),
             parent,
             owned: Mutex::new(HashSet::new()),
         }
@@ -436,15 +436,15 @@ impl InteractionPort for ParentMediatedInteractionPort {
         &self,
         request: InteractionRequest,
     ) -> Result<oneshot::Receiver<InteractionCompletion>, InteractionPortError> {
-        let mut child_run_id = self
-            .child_run_id
+        let mut sub_run_id = self
+            .sub_run_id
             .lock()
             .expect("parent-mediated run identity poisoned");
-        match child_run_id.as_ref() {
+        match sub_run_id.as_ref() {
             Some(expected) if expected != &request.run_id => {
                 return Err(InteractionPortError::WrongRun);
             }
-            None => *child_run_id = Some(request.run_id.clone()),
+            None => *sub_run_id = Some(request.run_id.clone()),
             _ => {}
         }
         let request_id = request.id.clone();
@@ -496,7 +496,7 @@ impl InteractionPort for ParentMediatedInteractionPort {
 
     fn drain_run(&self, run_id: &RunId, reason: InteractionCancelReason) -> usize {
         if self
-            .child_run_id
+            .sub_run_id
             .lock()
             .expect("parent-mediated run identity poisoned")
             .as_ref()

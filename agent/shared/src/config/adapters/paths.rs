@@ -15,11 +15,11 @@ pub const LOGS_DIR_NAME: &str = "logs";
 pub const GUIDANCE_DIR_NAME: &str = "guidance";
 pub const MEMORY_DIR_NAME: &str = "memory";
 pub const SESSIONS_DIR_NAME: &str = "sessions";
+pub const WORKTREES_DIR_NAME: &str = "worktrees";
 pub const HOOKS_DIR_NAME: &str = "hooks";
 pub const TOOL_RESULTS_DIR_NAME: &str = "tool-results";
 pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
-pub const COST_HISTORY_FILE: &str = "cost_history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
 
 /// 解析 home 目录（读取 `$HOME`）。
@@ -144,6 +144,11 @@ pub fn global_sessions_dir() -> PathBuf {
     global_agents_dir().join(SESSIONS_DIR_NAME)
 }
 
+/// `~/.agents/worktrees/` — EnterWorktree 默认创建 worktree 的根目录。
+pub fn global_worktrees_dir() -> PathBuf {
+    global_agents_dir().join(WORKTREES_DIR_NAME)
+}
+
 /// `~/.agents/tool-results/` — 超长工具结果的落盘根目录。
 pub fn global_tool_results_dir() -> PathBuf {
     global_agents_dir().join(TOOL_RESULTS_DIR_NAME)
@@ -166,10 +171,6 @@ pub fn global_mcp_config_path() -> PathBuf {
 
 pub fn global_history_path() -> PathBuf {
     global_agents_dir().join(HISTORY_FILE)
-}
-
-pub fn global_cost_history_path() -> PathBuf {
-    global_agents_dir().join(COST_HISTORY_FILE)
 }
 
 pub fn global_settings_path() -> PathBuf {
@@ -290,13 +291,10 @@ mod tests {
         assert_eq!(global_guidance_dir(), temp_agents_dir.join("guidance"));
         assert_eq!(global_memory_dir(), temp_agents_dir.join("memory"));
         assert_eq!(global_sessions_dir(), temp_agents_dir.join("sessions"));
+        assert_eq!(global_worktrees_dir(), temp_agents_dir.join("worktrees"));
         assert_eq!(global_hooks_dir(), temp_agents_dir.join("hooks"));
         assert_eq!(global_mcp_config_path(), temp_agents_dir.join("mcp.json"));
         assert_eq!(global_history_path(), temp_agents_dir.join("history.json"));
-        assert_eq!(
-            global_cost_history_path(),
-            temp_agents_dir.join("cost_history.json")
-        );
         assert_eq!(
             global_settings_path(),
             temp_agents_dir.join("settings.json")

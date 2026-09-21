@@ -17,6 +17,8 @@ my $tui = "$root/apps/cli/src/tui";
 my $coordinator = "$runtime/application/activity/coordinator.rs";
 my $model = "$runtime/application/activity/model.rs";
 my $root_reducer = "$tui/update/root_reducer.rs";
+my $runtime_activity_events = "$runtime/application/loop_engine/chat/events.rs";
+my $sdk_event_sink = "$runtime/adapters/sdk_event_sink.rs";
 my @violations;
 
 sub rust_files {
@@ -102,6 +104,12 @@ for my $path (rust_files($tui)) {
       "legacy Activity display symbol $symbol: " . relative_path($path)
       if index($source, $symbol) >= 0;
   }
+}
+
+my $runtime_activity_source = production_text($runtime_activity_events) . production_text($sdk_event_sink);
+for my $symbol ('RuntimeActivityEvent::Changed', 'publish_change(') {
+  push @violations, "Runtime production Activity must publish logical-commit Snapshot only: $symbol"
+    if index($runtime_activity_source, $symbol) >= 0;
 }
 
 my @hook_parallel_symbols = (

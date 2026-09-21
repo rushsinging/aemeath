@@ -1,8 +1,7 @@
 use super::*;
 use crate::tui::adapter::runtime_view::TuiChatMessage;
 use crate::tui::model::conversation::intent::{
-    ConversationIntent, ResumeConversation, SetCompactProgress, StartChat, ToolCallStart,
-    ToolCallUpdate,
+    AppendUserMessage, ConversationIntent, ResumeConversation, ToolCallStart, ToolCallUpdate,
 };
 
 use crate::tui::model::conversation::runtime_state::RuntimeState;
@@ -90,8 +89,12 @@ fn running_tool_update_does_not_mutate_runtime_presentation_state() {
 #[test]
 fn test_reduce_agent_event_tool_call_updates_conversation() {
     let mut model = TuiModel::default();
-    model.conversation.apply(StartChat {
-        submission: "read".to_string(),
+    model.conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    model.conversation.apply(AppendUserMessage {
+        text: "read".to_string(),
     });
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
     let run_id = crate::tui::model::conversation::ids::ChatRunId::new("turn-1");
@@ -203,33 +206,4 @@ fn error_change_requests_hook_effect_through_coordinator() {
         effect,
         Effect::RunHook { name, message } if name == "error" && message == "坏了"
     )));
-}
-#[test]
-fn set_compact_progress_marks_output_dirty_not_status_only() {
-    let mut model = TuiModel::default();
-    let result = reduce_agent_event(
-        &mut model,
-        AgentEventMapping {
-            conversation: vec![ConversationIntent::SetCompactProgress(SetCompactProgress {
-                stage: "summarizing".into(),
-                current: Some(2),
-                total: Some(10),
-            })],
-            ..Default::default()
-        },
-    );
-    assert!(
-        result.dirty.output,
-        "SetCompactProgress 必须 mark output_dirty（进度条嵌在 spinner 行）"
-    );
-    assert_eq!(
-        model
-            .conversation
-            .runtime
-            .compact_progress
-            .as_ref()
-            .map(|p| p.stage.as_str()),
-        Some("summarizing"),
-        "apply 后 model 应保存 progress 状态"
-    );
 }

@@ -15,45 +15,11 @@ pub use crate::chat_event::{
 };
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView,
-    ChildRunActivityEventView, ChildRunActivityKindView, ChildRunIdentityView,
-    ChildRunTerminalOutcomeView, OptionItem, ToolProgressEventView, WorkspaceContextView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, OptionItem,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolProgressEventView, WorkspaceContextView,
     WorkspaceStackEntryView,
 };
-
-/// AskUserQuestion 批量事件中的单个问题项。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskUserQuestionItem {
-    /// 对应的 tool_call_id（用于 TUI 关联 ToolCall 状态）。
-    pub id: String,
-    /// 同一 tool call 内的问题序号，从 0 开始。
-    pub question_seq: usize,
-    /// 问题文本。
-    pub question: String,
-    /// 预设选项（LLM 选项，不含内建选项）。
-    pub options: Vec<OptionItem>,
-    /// 是否多选。
-    pub multi_select: bool,
-    /// 是否允许自由输入。
-    pub allow_free_input: bool,
-    /// 默认值（用户跳过时使用）。
-    pub default: Option<String>,
-}
-
-/// 带身份的 AskUserQuestion 回答。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskUserAnswer {
-    pub tool_call_id: String,
-    pub question_seq: usize,
-    pub answer: String,
-}
-
-/// AskUser 批量交互的显式终结结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AskUserReply {
-    Answers(Vec<AskUserAnswer>),
-    Cancelled,
-}
 
 /// 用户发送给 Agent 的一次 Chat 输入。
 #[derive(Debug, Clone)]

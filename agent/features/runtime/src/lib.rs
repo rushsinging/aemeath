@@ -7,7 +7,7 @@ pub mod composition;
 pub(crate) mod domain;
 pub(crate) mod ports;
 
-pub use adapters::sdk_event_mapper::map_domain_event;
+pub use adapters::sdk_event_mapper::map_lifecycle_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
 pub use application::run::active_registry::ActiveRunRegistry;
 pub use application::tool::tool_result_materializer::{
@@ -17,10 +17,11 @@ pub use application::tool::tool_result_materializer::{
 pub use application::client::{
     build_agent_runner, config_snapshot_to_sdk, from_args_with_workspace,
     resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
-    AgentClientImpl, AgentRunnerAssembly, InitialProviderAssembly, ModelRuntimeSettings,
+    AgentClientImpl, AgentRunnerAssembly, CompactModelOrigin, CompactModelResolveError,
+    CompactModelResolver, CompactModelTarget, InitialProviderAssembly, ModelRuntimeSettings,
     PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
     RuntimeIngressAssembly, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
-    SkillBootstrapAssembly,
+    SessionModelSlot, SkillBootstrapAssembly,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
@@ -35,14 +36,13 @@ pub use application::reflection::{
 };
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
-pub use domain::agent_run::RunDomainEvent;
+pub use domain::agent_run::RuntimeLifecycleEvent;
 pub use ports::{
     ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
     ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
 };
 pub use sdk::{
-    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
-    TaskSummary,
+    AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, ProjectContext, TaskSummary,
 };
 
 #[cfg(test)]
@@ -62,6 +62,7 @@ mod boundary_tests {
             "loop_engine",
             "model",
             "prompt",
+            "published_state",
             "reflection",
             "run",
             "session",

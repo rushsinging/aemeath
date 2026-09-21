@@ -76,7 +76,9 @@ mod tests {
         app.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertText(
             "/he now".to_string(),
         ));
-        app.handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursor(3));
+        for _ in 0..4 {
+            app.handle_input_intent(crate::tui::model::input::intent::InputIntent::MoveCursorLeft);
+        }
         app.handle_input_intent(
             crate::tui::model::input::intent::InputIntent::SetCompletions {
                 query: "/he now".to_string(),

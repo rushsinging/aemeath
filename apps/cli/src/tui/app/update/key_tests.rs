@@ -6,7 +6,7 @@ use crate::tui::model::input::completion_item::CompletionItem;
 /// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
 /// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
 #[test]
-fn busy_slash_routes_through_pending_slash_without_placeholder() {
+fn busy_slash_dispatches_synchronously_without_placeholder() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -21,10 +21,17 @@ fn busy_slash_routes_through_pending_slash_without_placeholder() {
 
     let result = app.update_key(key, &spawn_refs);
 
-    assert_eq!(result.pending_slash.as_deref(), Some("/compact"));
+    // busy slash 同步分发：App::new 注入真实 builtin router，/compact 产出
+    // Compact 事件 effect；不降级为 ControlCommand，也不建占位 QueuedUserMessage。
     assert!(
-        result.effects.is_empty(),
-        "busy slash 不得降级为无法执行的 ControlCommand"
+        result.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::Compact
+            }
+        )),
+        "busy slash 应同步产出 Compact 事件 effect，实际: {:?}",
+        result.effects
     );
     assert!(
         app.model.conversation.queued_submissions.is_empty(),
@@ -33,7 +40,7 @@ fn busy_slash_routes_through_pending_slash_without_placeholder() {
 }
 
 #[test]
-fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
+fn esc_and_ctrl_c_without_active_step_do_not_fall_back_to_identity_free_cancel() {
     let mut esc_app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -57,8 +64,58 @@ fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
         &spawn_refs,
     );
 
-    assert_eq!(esc.effects, vec![Effect::CancelCurrentRun]);
-    assert_eq!(ctrl_c.effects, vec![Effect::CancelCurrentRun]);
+    assert!(esc.effects.is_empty());
+    assert!(ctrl_c.effects.is_empty());
+}
+
+#[test]
+fn esc_and_ctrl_c_target_the_active_run_step_identity() {
+    let active_run_id = sdk::RunId::from_legacy_or_new("run-1");
+    let active_step_id = sdk::RunStepId::from_legacy_or_new("step-1");
+    let expected = Effect::CancelRunStep {
+        run_id: active_run_id.clone(),
+        step_id: active_step_id.clone(),
+    };
+
+    let mut esc_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    esc_app.chat.start_processing();
+    esc_app.chat.active_run_step = Some((active_run_id, active_step_id));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+
+    let result = esc_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![expected]);
+    assert!(esc_app.chat.is_processing);
+}
+
+#[test]
+fn cancel_command_ack_does_not_publish_or_apply_terminal() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    let timeline_before_ack = app.model.conversation.timeline.items().len();
+    app.chat.start_cancelling();
+
+    assert!(app.chat.is_processing, "ACK 不能结束 processing");
+    assert!(
+        app.chat.is_cancelling,
+        "accepted ACK 只进入 cancelling 展示态"
+    );
+    assert_eq!(
+        app.model.conversation.timeline.items().len(),
+        timeline_before_ack,
+        "ACK 不能伪造 Runtime terminal"
+    );
 }
 
 #[test]

@@ -194,8 +194,15 @@ enum InteractionRequestBody {
 
 struct UserQuestion {
     prompt: String,                 // 向用户展示的问题文本
-    options: Vec<String>,           // 可选选项；空 = 自由文本回答
+    options: Vec<OptionItem>,       // 预设选项；协议层 OptionItem 的 description 为 Option，
+                                    // 以兼容历史会话落盘与系统内建自由输入项；
+                                    // 工具入参边界强制 title/description 必填
     allow_multi: bool,              // 是否允许多选
+}
+
+struct OptionItem {
+    title: String,                  // 选项标题
+    description: Option<String>,    // 选项描述（工具入参边界必填）
 }
 
 struct ToolApprovalPrompt {
@@ -289,7 +296,9 @@ ActivityCoordinator
   ViewAssembler → low-noise Activity Summary
 ```
 
-增量和快照共享同一 Run identity 与 revision 序列。消费者发现 revision gap 时不得从现有事实猜测缺失变化；应保留上一个可信镜像并等待快照。Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
+Runtime production 只发布完整 `ActivitySnapshot`。logical business commit 推进 revision 并把 heartbeat sequence 归零；fixed heartbeat 保持 revision、递增 sequence，并用单一 monotonic observation point 刷新 timing。TUI 按 `(revision, heartbeat_sequence)` 原子替换同一 Run 的 Activity fact mirror。SDK `ActivityChanged` 仅保留 public compatibility ingress；Runtime production **NEVER** 发送增量 Activity，也不再依赖 revision gap repair。
+
+Activity 发布属于纯观测，不影响 Run terminal return、Interaction continuation、UsageSink 或 Session commit。
 
 
 Runtime 拥有 Reflection 的执行编排；Memory 拥有 prompt/parse/apply 领域能力与 history append/query。Interval、PreCompact、Manual 三种 trigger **MUST** 全部提交到同一个 Runtime 单槽后台 adapter：
@@ -464,7 +473,7 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 
 - **唯一生产对象图入口**：`agent/composition`。Runtime 的 `domain/application/ports/adapters` 定义领域行为、应用用例、能力选择规则、Runtime-owned factory/port contracts 与转换；Composition 实例化具体实现并把 object graph 注入 Runtime。Runtime application 在业务时机调用统一 `RuntimeContextFactory`，但不触发供应 BC 的 concrete constructor。
 - `agent/composition` 持有各 Port 的具体实现或供应模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），并实现 Runtime-owned factory contracts。动态 Catalog 与 MCP lifecycle 仍由对应供应边界管理，不能泄漏 concrete wiring 给 Runtime。
-- **Provider 构造独占（#907）**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider`）。`check-provider-construction-ownership.sh` 守卫以零白名单与负向探针锁定此边界。
+- **Provider 构造独占（#907）**：Composition 实现 Runtime-owned `ProviderFactory`，经 Provider crate 的 `provider::composition` 模块独占具体 provider client / driver / transport 构造。非 Composition crate **NEVER** 引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`）。`check-provider-construction-ownership.sh` 守卫以零白名单与负向探针锁定此边界。#1645 起生产 factory 持有进程级 `TransportPool`（不可变 transport 缓存），Runtime 仍只见 `ProviderFactory` / `ProviderBinding` / `ProviderPort`，**NEVER** 直接持有 pool。
 - Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按单一 `agent_execution` 能力的六边形职责归位。
 - `RuntimeContext` 属 application：它只传递本 Run 的活契约，**NEVER** 进入 domain 或通用 shared，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
 - Runtime 当前只有一个完整业务能力，因此 **NEVER** 添加单元素 `capabilities/agent_execution` 包装；没有真实跨 capability 复用内容时也 **NEVER** 创建 `shared/`。

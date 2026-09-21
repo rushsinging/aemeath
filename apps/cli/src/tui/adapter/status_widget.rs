@@ -38,7 +38,6 @@ mod tests {
                         input_tokens: 12_400,
                         output_tokens: 1_800,
                         last_input_tokens: 74_000,
-                        cost_usd: 0.0,
                     },
                 ),
             ),
@@ -71,7 +70,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(true)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: true,
+                level: crate::tui::view_model::status::ReasoningLevelView::High,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
@@ -86,7 +88,7 @@ mod tests {
         assert_eq!(view.runtime.model.as_deref(), Some("glm-5.1"));
         assert_eq!(view.runtime.input_tokens, 12_400);
         assert_eq!(view.runtime.output_tokens, 1_800);
-        assert_eq!(view.runtime.last_input_tokens, 74_000);
+        assert_eq!(view.runtime.context_usage_permille, None);
         assert_eq!(view.runtime.context_size, 200_000);
         assert_eq!(view.runtime.api_calls, 1);
         assert_eq!(view.runtime.session_id.as_deref(), Some("s-1"));
@@ -108,7 +110,10 @@ mod tests {
         );
         reduce_intent(
             &mut model,
-            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking(false)),
+            AgentIntent::RuntimePresentation(RuntimePresentationIntent::Thinking {
+                enabled: false,
+                level: crate::tui::view_model::status::ReasoningLevelView::Off,
+            }),
         );
 
         let view = StatusViewAssembler::assemble_status_view(
@@ -130,10 +135,6 @@ mod tests {
         assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::ready()).kind,
             StatusNoticeViewKind::Normal
-        );
-        assert_eq!(
-            StatusViewAssembler::assemble_notice_view(&StatusNotice::running("Thinking")).kind,
-            StatusNoticeViewKind::Running
         );
         assert_eq!(
             StatusViewAssembler::assemble_notice_view(&StatusNotice::success("Copied")).kind,
@@ -174,13 +175,10 @@ mod tests {
     #[test]
     fn test_status_view_projects_diagnostic_severity() {
         let mut model = TuiModel::default();
-        reduce_intent(
-            &mut model,
-            AgentIntent::Diagnostic(DiagnosticIntent::RecordNotice {
-                severity: DiagnosticSeverity::Error,
-                message: "boom".to_string(),
-            }),
-        );
+        model.diagnostic.apply(DiagnosticIntent::RecordNotice {
+            severity: DiagnosticSeverity::Error,
+            message: "boom".to_string(),
+        });
 
         let view = StatusViewAssembler::assemble_status_view(
             &model.conversation,

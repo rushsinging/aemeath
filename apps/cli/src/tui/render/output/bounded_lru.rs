@@ -30,6 +30,7 @@ where
         self.entries.get(key)
     }
 
+    #[cfg(test)]
     pub(crate) fn peek(&self, key: &K) -> Option<&V> {
         self.entries.get(key)
     }
@@ -47,6 +48,7 @@ where
         self.entries.remove_entry(&oldest)
     }
 
+    #[cfg(test)]
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &V) -> bool) -> usize {
         let before = self.entries.len();
         self.entries.retain(|key, value| keep(key, value));
@@ -54,10 +56,7 @@ where
         before.saturating_sub(self.entries.len())
     }
 
-    pub(crate) fn contains_key(&self, key: &K) -> bool {
-        self.entries.contains_key(key)
-    }
-
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }

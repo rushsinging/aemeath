@@ -136,9 +136,12 @@ Token Budget 不建立聚合全部配置的大型 struct。预算由两类单一
 | `context_size` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
 | `max_output_tokens` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
 | `reserved_context` | `context_size * 2%`（动态） | `token_budget::summary_budget` |
+| compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver` |
 | compact threshold ratio | 0.8 | `token_budget::autocompact_threshold` |
 | 文本 / JSON / 图像估算 | Context-owned 纯函数与局部常量 | `token_budget` |
 | compact family 最近窗口 | 最近 3 个完整 Run | compact 读模型策略 |
+
+compact 的两个窗口 **MUST** 分开归属：`summary_budget` 由**注入窗口**（本 Run `context_size`，即 summary 最终注入的主对话模型）决定；Map 单块目标 `compact_chunk_target_tokens` 与 previous checkpoint 嵌入预算由 **compact 调用模型窗口**决定。两者相同时（未配置 `context.compact_model`）语义与既有行为一致。compact 模型窗口由 Runtime 解析并经 `CompactGenerator::compact_context_window()` 暴露，Context **NEVER** 自行读取模型目录或 Config 推导该窗口。
 
 ## 4. Effective Context Window
 

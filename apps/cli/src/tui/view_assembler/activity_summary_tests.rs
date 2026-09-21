@@ -76,6 +76,66 @@ fn model_with_leaf(leaf: TuiActivityObservation) -> ActivityObservationModel {
 }
 
 #[test]
+fn live_root_without_primary_keeps_outer_summary() {
+    let mut root = activity(
+        "root",
+        3,
+        TuiActivityKind::Run,
+        TuiActivityState::Running,
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Main,
+        },
+        TuiActivityAudience::User,
+    );
+    root.run_step_id = None;
+    root.timing.total_elapsed_ms = 12_000;
+    let mut model = ActivityObservationModel::default();
+    model.replace_for_test(UiRunId::from("run"), 3, vec![root]);
+
+    let summary = ActivitySummaryAssembler::assemble(&model).expect("root summary");
+
+    assert_eq!(summary.total_elapsed_ms, 12_000);
+    assert!(summary.primary.is_none());
+}
+
+#[test]
+fn summary_exposes_independent_root_and_phase_timing_revisions() {
+    let mut root = activity(
+        "root",
+        3,
+        TuiActivityKind::Run,
+        TuiActivityState::Running,
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Main,
+        },
+        TuiActivityAudience::User,
+    );
+    root.run_step_id = None;
+    root.timing.total_elapsed_ms = 12_000;
+    let mut phase = activity(
+        "phase",
+        7,
+        TuiActivityKind::RunPhase(TuiRunPhaseKind::PreparingContext),
+        TuiActivityState::Running,
+        TuiActivityDetail::Phase {
+            phase: TuiRunPhaseKind::PreparingContext,
+        },
+        TuiActivityAudience::User,
+    );
+    phase.parent_activity_id = Some(root.id.clone());
+    phase.timing.state_elapsed_ms = 2_000;
+    let mut model = ActivityObservationModel::default();
+    model.replace_for_test(UiRunId::from("run"), 9, vec![root, phase]);
+
+    let summary = ActivitySummaryAssembler::assemble(&model).expect("activity summary");
+
+    assert_eq!(summary.root_timing_revision, 3);
+    assert_eq!(summary.primary.as_ref().unwrap().timing_revision, 7);
+    assert_eq!(summary.total_elapsed_ms, 12_000);
+    assert_eq!(summary.primary.as_ref().unwrap().elapsed_ms, 2_000);
+}
+
+#[test]
 fn operational_running_and_waiting_hooks_are_visible_without_opening_other_operational_activities()
 {
     let hook = activity(
@@ -91,7 +151,10 @@ fn operational_running_and_waiting_hooks_are_visible_without_opening_other_opera
         TuiActivityAudience::Operational,
     );
     let summary = ActivitySummaryAssembler::assemble(&model_with_leaf(hook)).expect("summary");
-    assert_eq!(summary.phase_text, "PreToolUse · check-policy.sh");
+    assert_eq!(
+        summary.primary.as_ref().unwrap().phase_text,
+        "PreToolUse · check-policy.sh"
+    );
 
     let waiting_hook = activity(
         "hook-waiting",
@@ -108,7 +171,7 @@ fn operational_running_and_waiting_hooks_are_visible_without_opening_other_opera
     let summary =
         ActivitySummaryAssembler::assemble(&model_with_leaf(waiting_hook)).expect("summary");
     assert_eq!(
-        summary.phase_text,
+        summary.primary.as_ref().unwrap().phase_text,
         "PermissionRequest · check-permission.sh"
     );
 
@@ -124,7 +187,10 @@ fn operational_running_and_waiting_hooks_are_visible_without_opening_other_opera
     );
     let summary = ActivitySummaryAssembler::assemble(&model_with_leaf(operational_interaction))
         .expect("phase summary remains");
-    assert_eq!(summary.phase_text, "Calling tools…");
+    assert_eq!(
+        summary.primary.as_ref().unwrap().phase_text,
+        "Calling tools…"
+    );
 }
 
 #[test]
@@ -143,7 +209,10 @@ fn failed_hook_remains_visible_but_fast_success_does_not_pollute_status() {
     );
     let summary =
         ActivitySummaryAssembler::assemble(&model_with_leaf(failed_hook)).expect("summary");
-    assert_eq!(summary.phase_text, "Stop failed · check-agent-stop.sh");
+    assert_eq!(
+        summary.primary.as_ref().unwrap().phase_text,
+        "Stop failed · check-agent-stop.sh"
+    );
 
     let succeeded_hook = activity(
         "hook-succeeded",
@@ -159,5 +228,8 @@ fn failed_hook_remains_visible_but_fast_success_does_not_pollute_status() {
     );
     let summary = ActivitySummaryAssembler::assemble(&model_with_leaf(succeeded_hook))
         .expect("phase summary remains");
-    assert_eq!(summary.phase_text, "Calling tools…");
+    assert_eq!(
+        summary.primary.as_ref().unwrap().phase_text,
+        "Calling tools…"
+    );
 }

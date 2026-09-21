@@ -14,11 +14,14 @@ pub(crate) fn default_interval_run_steps() -> usize {
     10
 }
 
-/// 默认注入条数。当前按 recency/pin 排序取 top N，相关性不高，
-/// 故默认值保守（5 条 ≈ 300 token）。
-/// 后续 #551 落地语义检索后应提高此值或改为动态决定。
+/// 默认注入条数。自动注入按 pin/确认/新鲜度稳定排序，
+/// 与显式 BM25 search 相互独立。
 pub(crate) fn default_inject_count() -> usize {
     5
+}
+
+pub(crate) fn default_inject_token_budget() -> usize {
+    300
 }
 
 /// Memory system configuration.
@@ -40,11 +43,14 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub reflection: ReflectionConfig,
 
-    /// 每轮 LLM 调用前注入 system prompt 的 memory 条目数。
-    /// 当前按 recency/pin 排序，非语义相关性——默认值保守。
-    /// #551（语义检索）落地后应提高或改为动态。
+    /// 每轮 LLM 调用前注入的稳定优先级 Memory 条目数。
+    /// 显式 search 使用 BM25；自动注入不 query-aware。
     #[serde(default = "default_inject_count")]
     pub inject_count: usize,
+
+    /// 自动 Memory 注入的独立估算 token 预算；0 禁用自动注入。
+    #[serde(default = "default_inject_token_budget")]
+    pub inject_token_budget: usize,
 }
 
 impl Default for MemoryConfig {
@@ -55,6 +61,7 @@ impl Default for MemoryConfig {
             similarity_threshold: default_similarity_threshold(),
             reflection: ReflectionConfig::default(),
             inject_count: default_inject_count(),
+            inject_token_budget: default_inject_token_budget(),
         }
     }
 }

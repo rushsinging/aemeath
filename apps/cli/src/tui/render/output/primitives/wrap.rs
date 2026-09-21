@@ -197,6 +197,7 @@ fn collapse_to_spans(chars: Vec<(char, ratatui::style::Style)>) -> Vec<Span<'sta
 }
 
 /// 将纯文本按指定显示宽度断行为多行字符串（String 级入口，供 display 等使用）。
+#[cfg(test)]
 pub fn wrap_text_to_strings(text: &str, max_width: usize, mode: WrapMode) -> Vec<String> {
     let lines = wrap_spans_with_prefix(vec![Span::raw(text.to_string())], max_width, None, mode);
     lines.into_iter().map(|l| l.plain).collect()

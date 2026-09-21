@@ -7,8 +7,6 @@ use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -49,15 +47,7 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
         TuiMsg::Resize { .. } => "Resize",
         TuiMsg::SpinnerTick => "SpinnerTick",
         TuiMsg::Ui(_) => "Ui",
-        TuiMsg::Runtime(_) => "Runtime",
         TuiMsg::RuntimeBatch(_) => "RuntimeBatch",
-        TuiMsg::TerminalKey(_) => "TerminalKey",
-        TuiMsg::TerminalMouse(_) => "TerminalMouse",
-        TuiMsg::TerminalResize { .. } => "TerminalResize",
-        TuiMsg::AgentEvent(_) => "AgentEvent",
-        TuiMsg::EffectCompleted(_) => "EffectCompleted",
-        TuiMsg::TimerTick { .. } => "TimerTick",
-        TuiMsg::RenderTick => "RenderTick",
     }
 }
 
@@ -68,18 +58,14 @@ impl App {
     /// `chat.input_event_tx`，port 随 `ChatRequest.ingress` 传给 runtime），
     /// 以当前历史 `messages` 调一次 `chat()` 并 spawn 长生命周期流消费任务。
     /// 已存在通道（`input_event_tx` 为 Some）时为 no-op，调用安全幂等。
-    fn ensure_persistent_processing(
-        &mut self,
-        ui_tx: &mpsc::Sender<UiEvent>,
-        runtime_tx: &mpsc::Sender<TuiRuntimeEvent>,
-    ) {
+    fn ensure_persistent_processing(&mut self, runtime_tx: &mpsc::Sender<TuiRuntimeEvent>) {
         if self.chat.input_event_tx.is_some() {
             return;
         }
         let spawn_refs = processing::SpawnContextRefs {
             agent_client: self.agent_client.clone(),
         };
-        match self.build_spawn_context(ui_tx, runtime_tx, &spawn_refs) {
+        match self.build_spawn_context(runtime_tx, &spawn_refs) {
             Some(spawn_ctx) => {
                 let handle = processing::spawn_processing(spawn_ctx);
                 self.chat.set_processing_handle(handle);
@@ -91,7 +77,6 @@ impl App {
     pub(crate) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        interrupted: Arc<AtomicBool>,
     ) -> io::Result<()> {
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
         let (runtime_tx, mut runtime_rx) = mpsc::channel::<TuiRuntimeEvent>(256);
@@ -127,7 +112,7 @@ impl App {
         // 直到首条 UserMessage 经 input_events 通道到达；此后每次提交（首条 / 插话）
         // 都复用此通道，不再 per-submit spawn。messages 为当前历史（新会话为空，
         // resume 为已加载历史）。
-        self.ensure_persistent_processing(&ui_tx, &runtime_tx);
+        self.ensure_persistent_processing(&runtime_tx);
 
         loop {
             let loop_now = Instant::now();
@@ -216,11 +201,10 @@ impl App {
             let update_start = Instant::now();
             let result = self.drive_frame(msg, &ui_tx, &spawn_refs);
             crate::tui::log_trace!(
-                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={}",
+                "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} run_activity_active={} spinner_frame={}",
                 update_start.elapsed().as_millis(),
                 result.effects.len(),
                 result.spawn_effect.is_some(),
-                result.pending_slash.is_some(),
                 self.view_state.dirty.output,
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
@@ -228,26 +212,6 @@ impl App {
                 self.view_state.run_activity.is_active(),
                 self.view_state.animation.spinner_frame
             );
-            // --- Handle pending slash commands (async) ---
-            if let Some(input) = result.pending_slash {
-                let review_prompt = self
-                    .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
-                    .await;
-                if let Some(prompt) = review_prompt {
-                    // #390 A1：slash 命令产出的 LLM prompt（如 /review）改为经常驻
-                    // input_events 通道发往 loop，不再 spawn 新 chat。回显由 runtime 的
-                    // MessagesSync 单一真相驱动（与普通提交一致）。
-                    interrupted.store(false, Ordering::Relaxed);
-                    self.chat.clear_tool_activity();
-                    self.chat.start_processing();
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::UserMessage {
-                            id: sdk::InputId::new_v7(),
-                            text: prompt,
-                            images: Vec::new(),
-                        });
-                }
-            }
 
             if let Some(spawn_effect) = result.spawn_effect {
                 self.execute_spawn_effect(spawn_effect);
@@ -266,7 +230,7 @@ impl App {
             // 变 None，此处检测并重建，使后续提交仍可经事件通道驱动。正常 /clear 不再
             // drop tx（#391 S2 已统一为 runtime gate 清 messages，loop 存活）。
             if !self.layout.should_exit && self.chat.input_event_tx.is_none() {
-                self.ensure_persistent_processing(&ui_tx, &runtime_tx);
+                self.ensure_persistent_processing(&runtime_tx);
             }
         }
 

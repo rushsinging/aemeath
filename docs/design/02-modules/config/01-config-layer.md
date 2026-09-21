@@ -333,6 +333,7 @@ impl ConfigSnapshot {
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
 - **accessor 返回最终有效值**——`max_tool_concurrency()` / `max_agent_concurrency()` 将底层 `0` 归一为 Config domain 的唯一默认值；Runtime 只叠加非零 CLI override，**NEVER** 复制 `10` / `4` 等业务默认值
+- `context_compact_model() -> Option<&str>` 返回 compact 专用模型 selection（`<source>/<model>`，配置字段 `context.compact_model`，接受 `compactModel` 别名）；空串与纯空白归一化为 `None` 表示"跟随当前会话模型"。该值 **MUST NOT** 被视为 Run 级冻结字段：compact **每次**从 committed 快照读取，配置更新与 `/model` 切换在下一次 compact 生效。
 - `usage_worker_config() -> UsageWorkerConfig` 返回 validated value：native 配置 schema 为 `audit.usage_queue_capacity`（usize）与 `audit.usage_shutdown_timeout_ms`（u64）；默认 `1024 / 5000ms`，显式 0 作为兼容 sentinel 回退默认。global 与 project FileAdapter 使用字段级 patch 合并，因此两层可分别覆盖 capacity/timeout；Compatibility/Env/CLI/RuntimeOverride 不产出这两个字段。Composition 只在进程 bootstrap 捕获一次并启动 Audit worker，运行期 Config commit 不重启 worker；Audit **NEVER** 持有 ConfigReader/ConfigQuery/裸 Config。
 
 ### 4.2 active state 与 watch channel

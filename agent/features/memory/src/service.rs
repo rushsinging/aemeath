@@ -169,12 +169,12 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             let now = dataset
                 .active()
                 .iter()
-                .map(|entry| entry.accessed_at)
+                .map(|entry| entry.last_confirmed_at)
                 .max()
                 .unwrap_or(0);
             let ids = eviction_candidates(dataset.active(), excess, now)
                 .into_iter()
-                .map(|entry| entry.id)
+                .map(|candidate| candidate.entry.id)
                 .collect::<Vec<_>>();
             let mut moved = Vec::new();
             dataset.active_mut().retain(|entry| {
@@ -203,6 +203,18 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
 impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
         let (global, project) = self.snapshot();
+        let eligible_global = global
+            .active()
+            .iter()
+            .filter(|entry| matches_filters(entry, query.layer, query.category))
+            .filter(|entry| is_injection_eligible(entry, query.now))
+            .count();
+        let eligible_project = project
+            .active()
+            .iter()
+            .filter(|entry| matches_filters(entry, query.layer, query.category))
+            .filter(|entry| is_injection_eligible(entry, query.now))
+            .count();
         let mut entries = global
             .active()
             .iter()
@@ -211,8 +223,21 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             .filter(|entry| is_injection_eligible(entry, query.now))
             .cloned()
             .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| std::cmp::Reverse(injection_score(entry, query.now)));
+        entries.sort_by(|left, right| {
+            injection_score(right, query.now)
+                .cmp(&injection_score(left, query.now))
+                .then_with(|| left.id.cmp(&right.id))
+        });
         entries.truncate(query.limit);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "memory_injection candidates={} hits={} global_candidates={} project_candidates={} limit={}",
+            eligible_global.saturating_add(eligible_project),
+            entries.len(),
+            eligible_global,
+            eligible_project,
+            query.limit
+        );
         MemorySearchResult {
             mode: MemoryRetrievalMode::InjectionPriority,
             hits: entries
@@ -240,35 +265,38 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             .iter()
             .chain(project.archive())
             .map(|entry| (entry, MemoryLocation::Archive));
-        let mut hits = if query.include_archive {
+        let candidates = if query.include_archive {
             active.chain(archive).collect::<Vec<_>>()
         } else {
             active.collect::<Vec<_>>()
         }
         .into_iter()
-        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-        .filter_map(|(entry, location)| {
-            relevance(entry, &query.text).map(|score| MemorySearchHit {
-                entry: entry.clone(),
-                location,
-                outdated: entry.outdated,
-                ttl_expired: entry.is_ttl_expired(query.now),
-                relevance: Some(score),
-            })
-        })
-        .collect::<Vec<_>>();
-        hits.sort_by(|left, right| {
-            right
-                .relevance
-                .partial_cmp(&left.relevance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    search_tie_break_score(&right.entry, query.now)
-                        .cmp(&search_tie_break_score(&left.entry, query.now))
-                })
-                .then_with(|| left.entry.id.cmp(&right.entry.id))
-        });
-        hits.truncate(query.limit);
+        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        let candidate_count = candidates.clone().count();
+        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
+        let min_relevance = hits
+            .iter()
+            .filter_map(|hit| hit.relevance)
+            .reduce(f64::min)
+            .unwrap_or(0.0);
+        let max_relevance = hits
+            .iter()
+            .filter_map(|hit| hit.relevance)
+            .reduce(f64::max)
+            .unwrap_or(0.0);
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "memory_search query_chars={} candidates={} hits={} empty={} layer_filter={} category_filter={} include_archive={} relevance_min={:.6} relevance_max={:.6}",
+            query.text.chars().count(),
+            candidate_count,
+            hits.len(),
+            hits.is_empty(),
+            query.layer.is_some(),
+            query.category.is_some(),
+            query.include_archive,
+            min_relevance,
+            max_relevance
+        );
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
@@ -278,46 +306,61 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
         validate_content(&entry.content)?;
         let policy = self.policy;
-        self.mutate_layer(entry.layer, move |dataset| {
-            if dataset
-                .active()
-                .iter()
-                .chain(dataset.archive())
-                .any(|stored| stored.id == entry.id)
-            {
-                return Err(MemoryError::InvalidEntry {
-                    message: "记忆 ID 必须唯一".to_string(),
-                });
-            }
-            if let Some(existing) = dataset.active_mut().iter_mut().find(|stored| {
-                jaccard_similarity(&stored.content, &entry.content) >= policy.similarity_threshold
-            }) {
-                let mut tags = entry.tags.clone();
-                existing.tags.append(&mut tags);
-                existing.tags.sort();
-                existing.tags.dedup();
-                existing.accessed_at = entry.created_at;
-                existing.access_count = existing.access_count.saturating_add(1);
-                return Ok((
-                    WriteResult::Merged {
-                        existing_id: existing.id,
-                    },
-                    true,
-                ));
-            }
-            if dataset.active().len() >= policy.max_entries {
-                return Ok((
-                    WriteResult::NeedsEviction {
-                        candidates: eviction_candidates(dataset.active(), 3, entry.created_at),
-                    },
-                    false,
-                ));
-            }
-            let id = entry.id;
-            dataset.active_mut().push(entry.clone());
-            Ok((WriteResult::Added { id }, true))
-        })
-        .await
+        let result = self
+            .mutate_layer(entry.layer, move |dataset| {
+                if dataset
+                    .active()
+                    .iter()
+                    .chain(dataset.archive())
+                    .any(|stored| stored.id == entry.id)
+                {
+                    return Err(MemoryError::InvalidEntry {
+                        message: "记忆 ID 必须唯一".to_string(),
+                    });
+                }
+                if let Some(existing) = dataset.active_mut().iter_mut().find(|stored| {
+                    jaccard_similarity(&stored.content, &entry.content)
+                        >= policy.similarity_threshold
+                }) {
+                    let mut tags = entry.tags.clone();
+                    existing.tags.append(&mut tags);
+                    existing.tags.sort();
+                    existing.tags.dedup();
+                    existing.last_confirmed_at = entry.created_at;
+                    existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+                    return Ok((
+                        WriteResult::Merged {
+                            existing_id: existing.id,
+                        },
+                        true,
+                    ));
+                }
+                if dataset.active().len() >= policy.max_entries {
+                    return Ok((
+                        WriteResult::NeedsEviction {
+                            candidates: eviction_candidates(dataset.active(), 3, entry.created_at),
+                        },
+                        false,
+                    ));
+                }
+                let id = entry.id;
+                dataset.active_mut().push(entry.clone());
+                Ok((WriteResult::Added { id }, true))
+            })
+            .await?;
+        let (outcome, eviction_candidates) = match &result {
+            WriteResult::Added { .. } => ("added", 0),
+            WriteResult::Merged { .. } => ("merged", 0),
+            WriteResult::NeedsEviction { candidates } => ("needs_eviction", candidates.len()),
+            WriteResult::NoOp => ("noop", 0),
+        };
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "memory_write outcome={} eviction_candidates={}",
+            outcome,
+            eviction_candidates
+        );
+        Ok(result)
     }
 
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError> {
@@ -424,28 +467,69 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         Ok(result)
     }
 
-    async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError> {
+    async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         // The ids may span both layers; archive each layer as its own observable
         // mutation so a stale-CAS conflict is scoped to a single layer.
+        let mut archived = false;
         for layer in [MemoryLayer::Global, MemoryLayer::Project] {
             let ids = ids.to_vec();
-            self.mutate_layer(layer, move |dataset| {
-                let mut moved = Vec::new();
-                dataset.active_mut().retain(|entry| {
-                    if ids.contains(&entry.id) && !entry.pinned {
-                        moved.push(entry.clone());
-                        false
-                    } else {
-                        true
-                    }
-                });
-                let changed = !moved.is_empty();
-                dataset.archive_mut().extend(moved);
-                Ok(((), changed))
-            })
-            .await?;
+            let layer_archived = self
+                .mutate_layer(layer, move |dataset| {
+                    let mut moved = Vec::new();
+                    dataset.active_mut().retain(|entry| {
+                        if ids.contains(&entry.id) && !entry.pinned {
+                            moved.push(entry.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    let changed = !moved.is_empty();
+                    dataset.archive_mut().extend(moved);
+                    Ok((changed, changed))
+                })
+                .await?;
+            archived |= layer_archived;
         }
-        Ok(())
+        Ok(archived)
+    }
+
+    async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+        let id = *id;
+        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
+            let policy = self.policy;
+            let outcome = self
+                .mutate_layer(layer, move |dataset| {
+                    let Some(archived) = dataset
+                        .archive()
+                        .iter()
+                        .find(|entry| entry.id == id)
+                        .cloned()
+                    else {
+                        return Ok((RestoreResult::NotFound, false));
+                    };
+                    if dataset.active().len() >= policy.max_entries {
+                        return Ok((
+                            RestoreResult::NeedsEviction {
+                                candidates: eviction_candidates(
+                                    dataset.active(),
+                                    3,
+                                    archived.last_confirmed_at,
+                                ),
+                            },
+                            false,
+                        ));
+                    }
+                    dataset.archive_mut().retain(|entry| entry.id != id);
+                    dataset.active_mut().push(archived);
+                    Ok((RestoreResult::Restored { id }, true))
+                })
+                .await?;
+            if !matches!(outcome, RestoreResult::NotFound) {
+                return Ok(outcome);
+            }
+        }
+        Ok(RestoreResult::NotFound)
     }
 
     async fn compact(&self) -> Result<CompactResult, MemoryError> {
@@ -539,8 +623,8 @@ fn apply_reflection_entry(
         existing.tags.append(&mut tags);
         existing.tags.sort();
         existing.tags.dedup();
-        existing.accessed_at = entry.created_at;
-        existing.access_count = existing.access_count.saturating_add(1);
+        existing.last_confirmed_at = entry.created_at;
+        existing.confirmation_count = existing.confirmation_count.saturating_add(1);
         return Ok((
             WriteResult::Merged {
                 existing_id: existing.id,
@@ -552,7 +636,7 @@ fn apply_reflection_entry(
         let candidates = eviction_candidates(dataset.active(), 3, entry.created_at);
         let ids = candidates
             .iter()
-            .map(|candidate| candidate.id)
+            .map(|candidate| candidate.entry.id)
             .collect::<Vec<_>>();
         let mut moved = Vec::new();
         dataset.active_mut().retain(|stored| {
@@ -642,30 +726,6 @@ fn matches_filters(
 ) -> bool {
     layer.is_none_or(|layer| entry.layer == layer)
         && category.is_none_or(|category| entry.category == category)
-}
-
-fn relevance(entry: &MemoryEntry, text: &str) -> Option<f64> {
-    let text = text.trim().to_lowercase();
-    if text.is_empty() {
-        return None;
-    }
-    let content = entry.content.to_lowercase();
-    let category = format!("{:?}", entry.category).to_lowercase();
-    let layer = format!("{:?}", entry.layer).to_lowercase();
-    if content == text {
-        Some(1.0)
-    } else if content.contains(&text)
-        || entry
-            .tags
-            .iter()
-            .any(|tag| tag.to_lowercase().contains(&text))
-        || category.contains(&text)
-        || layer.contains(&text)
-    {
-        Some(0.5)
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -1007,6 +1067,315 @@ mod tests {
         assert_eq!(stats.global_archive_count, 1);
         assert_eq!(stats.project_count, 2);
         assert_eq!(stats.project_archive_count, 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "rust ownership memory safety"),
+                        entry(MemoryLayer::Project, "rust ownership"),
+                        entry(MemoryLayer::Project, "python memory safety"),
+                    ],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "rust safety".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+
+        let contents = result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contents,
+            vec![
+                "rust ownership memory safety",
+                "rust ownership",
+                "python memory safety"
+            ]
+        );
+        assert!(
+            result.hits[0].relevance > result.hits[1].relevance,
+            "matching both query terms must outrank matching one"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "用户偏好使用中文回复"),
+                        entry(MemoryLayer::Project, "MemoryPort 支持中文检索"),
+                        entry(MemoryLayer::Project, "用户偏好启用英文日志"),
+                    ],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let chinese = service.search(&MemorySearchQuery {
+            text: "中文回复".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+        assert_eq!(chinese.hits.len(), 2);
+        assert_eq!(chinese.hits[0].entry.content, "用户偏好使用中文回复");
+        assert_eq!(chinese.hits[1].entry.content, "MemoryPort 支持中文检索");
+        assert!(chinese.hits[0].relevance > chinese.hits[1].relevance);
+
+        let mixed = service.search(&MemorySearchQuery {
+            text: "MemoryPort 中文".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        });
+        assert_eq!(mixed.hits[0].entry.content, "MemoryPort 支持中文检索");
+        assert!(
+            mixed.hits[0].relevance > mixed.hits[1].relevance,
+            "matching the Latin identifier and Chinese bigram must rank first"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
+        let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
+        let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+        let mut first = entry(MemoryLayer::Project, "始终使用中文回答");
+        first.id = first_id;
+        let mut second = entry(MemoryLayer::Project, "始终使用中文回答");
+        second.id = second_id;
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+        let query = MemorySearchQuery {
+            text: "中文回答".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        };
+
+        let first_result = service.search(&query);
+        let second_result = service.search(&query);
+        let first_ids = first_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        let second_ids = second_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_ids, vec![first_id, second_id]);
+        assert_eq!(first_ids, second_ids);
+        assert_eq!(
+            first_result.hits[0].relevance,
+            second_result.hits[0].relevance
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
+        let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
+        let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+        let mut first = entry(MemoryLayer::Project, "stable lexical match");
+        first.id = first_id;
+        let mut second = entry(MemoryLayer::Project, "stable lexical match");
+        second.id = second_id;
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+        let query = MemorySearchQuery {
+            text: "stable lexical".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        };
+
+        let first_result = service.search(&query);
+        let second_result = service.search(&query);
+        let first_ids = first_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        let second_ids = second_result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.id)
+            .collect::<Vec<_>>();
+        assert_eq!(first_ids, second_ids);
+        assert_eq!(first_ids, vec![first_id, second_id]);
+
+        let empty = service.search(&MemorySearchQuery {
+            text: "  ".to_string(),
+            ..query
+        });
+        assert!(empty.hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_search_filters_by_tag_category_and_layer() {
+        let matching = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000010").unwrap(),
+            4_000,
+            MemoryLayer::Project,
+            MemoryCategory::Pattern,
+            "workspace validation",
+            MemorySource::User,
+        )
+        .map(|mut entry| {
+            entry.tags = vec!["clippy".to_string()];
+            entry
+        })
+        .unwrap();
+        let filtered_by_category = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000011").unwrap(),
+            4_000,
+            MemoryLayer::Project,
+            MemoryCategory::Fact,
+            "clippy fact",
+            MemorySource::User,
+        )
+        .unwrap();
+        let filtered_by_layer = MemoryEntry::new(
+            MemoryId::new("01890f3c-7c00-7000-8000-000000000012").unwrap(),
+            4_000,
+            MemoryLayer::Global,
+            MemoryCategory::Pattern,
+            "clippy global",
+            MemorySource::User,
+        )
+        .unwrap();
+        let store = ScriptedStore::new(
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Global,
+                    vec![filtered_by_layer],
+                ))],
+                vec![],
+            ),
+            layer_script(
+                vec![Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![matching, filtered_by_category],
+                ))],
+                vec![],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "clippy".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: Some(MemoryCategory::Pattern),
+            include_archive: false,
+            now: 4_242,
+        });
+
+        assert_eq!(result.hits.len(), 1);
+        assert_eq!(result.hits[0].entry.tags, vec!["clippy"]);
+        assert_eq!(result.hits[0].entry.layer, MemoryLayer::Project);
+        assert_eq!(result.hits[0].entry.category, MemoryCategory::Pattern);
+    }
+
+    #[tokio::test]
+    async fn explicit_search_includes_archive_status_without_mutation() {
+        let active = entry(MemoryLayer::Project, "archive query active");
+        let mut archived = entry(MemoryLayer::Project, "archive query historical");
+        archived.outdated = true;
+        archived.ttl = Some(std::time::Duration::from_secs(1));
+        let dataset =
+            MemoryDataset::new(MemoryLayer::Project, vec![active], vec![archived.clone()]).unwrap();
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(CommittedMemoryDataset {
+                    dataset,
+                    revision: 1,
+                })],
+                vec![],
+            ),
+        );
+        let observer = store.clone();
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+            .await
+            .unwrap();
+
+        let result = service.search(&MemorySearchQuery {
+            text: "archive query".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 4_242,
+        });
+
+        assert_eq!(result.hits.len(), 2);
+        let archived_hit = result
+            .hits
+            .iter()
+            .find(|hit| hit.location == MemoryLocation::Archive)
+            .unwrap();
+        assert!(archived_hit.outdated);
+        assert!(archived_hit.ttl_expired);
+        assert_eq!(archived_hit.entry.id, archived.id);
+        assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
     }
 
     fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {

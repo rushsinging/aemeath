@@ -121,17 +121,6 @@ impl StrSlice for str {
     }
 }
 
-/// 成本信息（Atomic 读取，纳秒级）。
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct CostInfo {
-    /// 输入 token 数。
-    pub input_tokens: u64,
-    /// 输出 token 数。
-    pub output_tokens: u64,
-    /// 估算费用（USD）。
-    pub cost_usd: f64,
-}
-
 /// 权限确认请求。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionPrompt {

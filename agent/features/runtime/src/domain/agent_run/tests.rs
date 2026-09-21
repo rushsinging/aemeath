@@ -22,8 +22,8 @@ fn run_domain_exposes_step_cancel_and_termination_only() {
     for forbidden in [
         "request_cancellation",
         "finish_cancellation",
-        "RunDomainEvent::CancellationRequested",
-        "RunDomainEvent::Cancelled",
+        "RuntimeLifecycleEvent::CancellationRequested",
+        "RuntimeLifecycleEvent::Cancelled",
     ] {
         assert!(
             !domain_source.contains(forbidden) && !event_source.contains(forbidden),
@@ -59,7 +59,7 @@ fn pending_interaction_enters_awaiting_user_and_emits_request_identity() {
     );
     assert!(run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::AwaitingUser {
+        RuntimeLifecycleEvent::AwaitingUser {
             request_id: emitted,
             ..
         } if emitted == &request_id
@@ -128,7 +128,7 @@ fn cancelling_interaction_restores_working_status_without_emitting_resumed() {
     assert!(!run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Resumed { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Resumed { .. })));
     assert_eq!(
         run.cancel_interaction(&request_id),
         Err(RunTransitionError::NoPendingInteraction)
@@ -291,7 +291,7 @@ fn scenario_terminate_discards_controlled_step_and_closes_run() {
     );
     assert!(run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Terminated {
+        RuntimeLifecycleEvent::Terminated {
             reason: sdk::RunTerminationReason::SessionShutdown,
             ..
         }
@@ -374,7 +374,7 @@ fn run_follows_the_happy_path_to_completed() {
     assert!(run.is_terminal());
     assert!(matches!(
         run.events().last(),
-        Some(RunDomainEvent::Completed { result, .. }) if result == "final answer"
+        Some(RuntimeLifecycleEvent::Completed { result, .. }) if result == "final answer"
     ));
 }
 
@@ -389,7 +389,7 @@ fn every_state_change_emits_transitioned_with_reason() {
         .events()
         .iter()
         .filter_map(|event| match event {
-            RunDomainEvent::Transitioned {
+            RuntimeLifecycleEvent::Transitioned {
                 from, to, reason, ..
             } => Some((*from, *to, *reason)),
             _ => None,
@@ -425,7 +425,7 @@ fn termination_and_completion_use_the_same_transition_event() {
 
     assert!(terminated.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Transitioned {
+        RuntimeLifecycleEvent::Transitioned {
             from: RunStatus::DrainingInput,
             to: RunStatus::Terminating,
             reason: RunTransitionReason::TerminationRequested,
@@ -434,7 +434,7 @@ fn termination_and_completion_use_the_same_transition_event() {
     )));
     assert!(terminated.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Transitioned {
+        RuntimeLifecycleEvent::Transitioned {
             from: RunStatus::Terminating,
             to: RunStatus::Terminated,
             reason: RunTransitionReason::TerminationFinished,
@@ -455,7 +455,7 @@ fn transition_event_reports_runtime_owned_total_and_phase_elapsed() {
         .iter()
         .rev()
         .find_map(|event| match event {
-            RunDomainEvent::Transitioned {
+            RuntimeLifecycleEvent::Transitioned {
                 to: RunStatus::PreparingContext,
                 timing,
                 ..
@@ -477,7 +477,7 @@ fn rejected_transition_does_not_emit_transitioned_event() {
     assert!(!run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Transitioned { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Transitioned { .. })));
 }
 #[test]
 fn run_rejects_illegal_transition_without_mutating_status() {
@@ -528,27 +528,27 @@ fn termination_is_two_phase_and_idempotent() {
     let lifecycle: Vec<_> = run
         .events()
         .iter()
-        .filter(|event| !matches!(event, RunDomainEvent::Transitioned { .. }))
+        .filter(|event| !matches!(event, RuntimeLifecycleEvent::Transitioned { .. }))
         .cloned()
         .collect();
     assert_eq!(
         lifecycle,
         vec![
-            RunDomainEvent::Started {
+            RuntimeLifecycleEvent::Started {
                 run_id: run.id().clone(),
                 parent_run_id: None,
             },
-            RunDomainEvent::DrainingInput {
+            RuntimeLifecycleEvent::DrainingInput {
                 run_id: run.id().clone(),
                 parent_run_id: None,
             },
-            RunDomainEvent::TerminationRequested {
+            RuntimeLifecycleEvent::TerminationRequested {
                 run_id: run.id().clone(),
                 parent_run_id: None,
                 reason: sdk::RunTerminationReason::SessionShutdown,
                 deadline,
             },
-            RunDomainEvent::Terminated {
+            RuntimeLifecycleEvent::Terminated {
                 run_id: run.id().clone(),
                 parent_run_id: None,
                 reason: sdk::RunTerminationReason::SessionShutdown,
@@ -1529,11 +1529,11 @@ fn created_only_transitions_into_draining_input() {
     assert!(run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Started { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Started { .. })));
     assert!(run
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::DrainingInput { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::DrainingInput { .. })));
 }
 
 #[test]
@@ -1634,7 +1634,7 @@ fn draining_input_empty_and_sealed_emits_completed_via_domain_only() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "final"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "final"
         )),
         "domain should publish Completed on EmptyAndSealed, not the engine"
     );
@@ -1688,7 +1688,7 @@ fn set_pending_completion_result_is_used_by_empty_and_sealed() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "explicit result"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "explicit result"
         )),
         "Completed event must carry the result set via set_pending_completion_result"
     );
@@ -1707,7 +1707,7 @@ fn empty_and_sealed_without_explicit_result_emits_empty_completed() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result.is_empty()
+            RuntimeLifecycleEvent::Completed { result, .. } if result.is_empty()
         )),
         "Completed event must still be emitted with an empty result"
     );
@@ -1725,7 +1725,7 @@ fn terminal_text_still_works_for_backward_compat() {
     assert!(
         run.events().iter().any(|event| matches!(
             event,
-            RunDomainEvent::Completed { result, .. } if result == "legacy text"
+            RuntimeLifecycleEvent::Completed { result, .. } if result == "legacy text"
         )),
         "terminal_text parameter must still work for backward compat"
     );
@@ -1743,7 +1743,7 @@ fn set_pending_completion_result_is_consumed_and_not_reused() {
 
     assert!(!run.events().iter().any(|event| matches!(
         event,
-        RunDomainEvent::Completed { result, .. } if result.is_empty()
+        RuntimeLifecycleEvent::Completed { result, .. } if result.is_empty()
     )));
 }
 

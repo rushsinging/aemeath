@@ -11,10 +11,10 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::{CompactProgressFn, CompactStage};
+pub use compact::{CompactProgressFn, CompactStage, CompactWork};
 pub use token_budget::{
-    autocompact_threshold, effective_context_window, estimate_message_tokens,
-    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
+    autocompact_threshold, clamped_max_output, effective_context_window, estimate_message_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
 pub use tool_receipt::{
     CleanupConfirmation, ToolCallIdentity, ToolCallReceipt, ToolCallState, ToolReceiptMutation,
@@ -160,6 +160,11 @@ pub struct ContextRequest {
     /// The most recent API-reported total tokens: normalized input plus output.
     /// `None` while no run has completed yet (first run or after baseline reset).
     pub last_api_total_tokens: Option<u64>,
+    /// Heuristic 估算滑动校准系数（#1626）：provider 上报 usage 与当轮
+    /// heuristic 估算的 EMA 比值，由 runtime 维护并注入。仅作用于
+    /// [`DecisionReason::HeuristicFallback`] 路径；`None` 或超出
+    /// `[0.5, 2.0]` 的值按 1.0（不校准）处理。
+    pub heuristic_calibration: Option<f64>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub tool_schema_tokens: usize,
 }
@@ -321,6 +326,10 @@ pub enum DecisionReason {
     ActualProviderUsage,
     /// No provider usage available; full candidate heuristic estimate used.
     HeuristicFallback,
+    /// Effective window below [`MIN_EFFECTIVE_WINDOW`] even after the output
+    /// reservation clamp — the context window itself is misconfigured and
+    /// autocompact is disabled to prevent a compaction storm (#1626).
+    MisconfiguredWindow,
     Manual,
 }
 
@@ -329,10 +338,12 @@ pub struct CompactionDecision {
     pub needed: bool,
     pub urgency: Urgency,
     /// Token count used for the decision — either provider-reported actual usage
-    /// or the heuristic candidate estimate.  Named `decision_token_count` to
-    /// distinguish it from SDK UI estimates.
+    /// or the heuristic candidate estimate. Named to distinguish it from
+    /// operation progress.
     pub decision_token_count: usize,
     pub threshold: usize,
+    pub context_size: usize,
+    pub effective_window: usize,
     pub reason: DecisionReason,
 }
 
@@ -351,9 +362,11 @@ pub struct CompactRequest {
     /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 Task 状态文本（#1537）：compact summary 定稿后拼接到末尾，
-    /// 防止递进压缩后 task 上下文丢失。`None` 表示无活跃 task。
-    pub task_context: Option<String>,
+    /// 当前 typed Task 快照：参与 Rust-owned checkpoint 协调，并由同一快照
+    /// 确定性渲染非权威 `Current Task State` companion。
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
+    /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl std::fmt::Debug for CompactRequest {
@@ -365,9 +378,16 @@ impl std::fmt::Debug for CompactRequest {
             .field("trigger", &self.trigger)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
             .field(
-                "task_context",
-                &self.task_context.as_ref().map(|_| "<text>"),
+                "task_snapshot",
+                &self.task_snapshot.as_ref().map(|snapshot| {
+                    (
+                        snapshot.revision(),
+                        snapshot.batch_id(),
+                        snapshot.items().len(),
+                    )
+                }),
             )
+            .field("cancelled", &self.cancellation.is_cancelled())
             .finish()
     }
 }
@@ -380,8 +400,8 @@ pub struct ManualCompactRequest {
     pub context_size: usize,
     /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 Task 状态文本（#1537），语义同 [`CompactRequest::task_context`]。
-    pub task_context: Option<String>,
+    /// 当前 typed Task 快照，语义同 [`CompactRequest::task_snapshot`]。
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
 }
 
 impl std::fmt::Debug for ManualCompactRequest {
@@ -393,11 +413,120 @@ impl std::fmt::Debug for ManualCompactRequest {
             .field("context_size", &self.context_size)
             .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
             .field(
-                "task_context",
-                &self.task_context.as_ref().map(|_| "<text>"),
+                "task_snapshot",
+                &self.task_snapshot.as_ref().map(|snapshot| {
+                    (
+                        snapshot.revision(),
+                        snapshot.batch_id(),
+                        snapshot.items().len(),
+                    )
+                }),
             )
             .finish()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactGenerationOutput {
+    text: String,
+    completion_reason: Option<String>,
+    text_delta_count: usize,
+    non_text_delta_count: usize,
+    completed: bool,
+}
+
+impl CompactGenerationOutput {
+    pub fn completed(
+        text: impl Into<String>,
+        completion_reason: Option<impl Into<String>>,
+        text_delta_count: usize,
+        non_text_delta_count: usize,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            completion_reason: completion_reason.map(Into::into),
+            text_delta_count,
+            non_text_delta_count,
+            completed: true,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    pub fn into_text(self) -> String {
+        self.text
+    }
+
+    pub fn completion_reason(&self) -> Option<&str> {
+        self.completion_reason.as_deref()
+    }
+
+    pub const fn text_delta_count(&self) -> usize {
+        self.text_delta_count
+    }
+
+    pub const fn non_text_delta_count(&self) -> usize {
+        self.non_text_delta_count
+    }
+
+    pub const fn stream_completed(&self) -> bool {
+        self.completed
+    }
+}
+
+impl From<String> for CompactGenerationOutput {
+    fn from(text: String) -> Self {
+        Self::completed(text, None::<String>, 0, 0)
+    }
+}
+
+impl From<&str> for CompactGenerationOutput {
+    fn from(text: &str) -> Self {
+        Self::completed(text, None::<String>, 0, 0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactGenerationFailureKind {
+    Cancelled,
+    RateLimited,
+    ContextTooLong,
+    Timeout,
+    Provider,
+    InvalidSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactGenerationFailure {
+    pub kind: CompactGenerationFailureKind,
+    pub message: String,
+}
+
+impl CompactGenerationFailure {
+    pub fn new(kind: CompactGenerationFailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    pub const fn permits_local_fallback(&self) -> bool {
+        !matches!(self.kind, CompactGenerationFailureKind::Cancelled)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactSummaryQuality {
+    Llm,
+    LlmWithLocalBudgetDegradation,
+    PartialMapFallback {
+        degraded_chunks: usize,
+        failure: CompactGenerationFailureKind,
+    },
+    LocalFallback(CompactGenerationFailureKind),
+    LocalOnly,
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +534,7 @@ pub struct CompactResult {
     pub summary: String,
     pub recent_messages: Vec<ContextMessage>,
     pub source_revision: SessionRevision,
+    pub quality: CompactSummaryQuality,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,6 +542,7 @@ pub enum CompactSkipReason {
     ResumeProtection,
     HookBlocked,
     CircuitBreakerOpen,
+    Cancelled,
 }
 
 #[derive(Debug, Clone)]

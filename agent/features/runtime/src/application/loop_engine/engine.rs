@@ -11,8 +11,8 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::domain::agent_run::{
-    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunDomainEvent, RunStatus,
-    RunTransition, RunTransitionError, StopHookBlockResult, ToolCallStatus,
+    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunStatus, RunTransition,
+    RunTransitionError, RuntimeLifecycleEvent, StopHookBlockResult, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};

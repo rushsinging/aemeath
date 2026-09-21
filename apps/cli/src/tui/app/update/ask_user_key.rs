@@ -229,7 +229,6 @@ impl App {
         Some(UpdateResult {
             effects: vec![Effect::ReplyInteraction { request_id, reply }],
             spawn_effect: None,
-            pending_slash: None,
         })
     }
 
@@ -252,7 +251,6 @@ impl App {
                     reason: crate::tui::model::conversation::interaction::UiInteractionCancelReason::UserCancelled,
                 }],
                 spawn_effect: None,
-                pending_slash: None,
             })
         } else {
             Some(UpdateResult::none())

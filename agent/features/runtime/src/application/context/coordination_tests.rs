@@ -54,6 +54,8 @@ impl ContextPort for RecordingPort {
                 urgency: Urgency::None,
                 decision_token_count: 0,
                 threshold: 1,
+                context_size: 200_000,
+                effective_window: 180_000,
                 reason: DecisionReason::HeuristicFallback,
             },
         })
@@ -69,6 +71,8 @@ impl ContextPort for RecordingPort {
             urgency: Urgency::Must,
             decision_token_count: 100,
             threshold: 90,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::ActualProviderUsage,
         })
     }
@@ -80,6 +84,7 @@ impl ContextPort for RecordingPort {
             summary: "summary".to_string(),
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -92,6 +97,7 @@ impl ContextPort for RecordingPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -147,6 +153,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -164,8 +171,9 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
         .compact(
             &frozen,
             SessionRevision::new(1),
-            std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+            std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
             None,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -215,7 +223,7 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
             system_prompt: frozen.system_prompt.clone(),
             context_size: frozen.context_size,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -539,8 +547,9 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
             .compact(
                 &request(),
                 SessionRevision::new(0),
-                std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {}),
+                std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
                 None,
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .unwrap(),
@@ -560,6 +569,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             summary: "summary".to_string(),
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }),
         &usage,
         &mut window,
@@ -594,19 +604,25 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
     let coordinator = ContextCoordinator::new(port.clone());
     let frozen = request();
 
-    type CompactProgressRecord = (sdk::CompactStageView, Option<u32>, Option<u32>);
+    type CompactProgressRecord = (sdk::CompactStageView, sdk::CompactWorkView);
     let received: Arc<Mutex<Vec<CompactProgressRecord>>> = Arc::new(Mutex::new(Vec::new()));
     let view = {
         let received = received.clone();
         std::sync::Arc::new(
-            move |stage: sdk::CompactStageView, current: Option<u32>, total: Option<u32>| {
-                received.lock().unwrap().push((stage, current, total));
+            move |stage: sdk::CompactStageView, work: sdk::CompactWorkView| {
+                received.lock().unwrap().push((stage, work));
             },
         )
     };
 
     coordinator
-        .compact(&frozen, SessionRevision::new(1), view, None)
+        .compact(
+            &frozen,
+            SessionRevision::new(1),
+            view,
+            None,
+            tokio_util::sync::CancellationToken::new(),
+        )
         .await
         .unwrap();
 
@@ -618,20 +634,40 @@ async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks()
         .expect("compact progress 必须接线到 CompactRequest");
 
     // 触发 context 侧进度 → 视图收到映射后的 stage/chunk 计数
-    progress.emit(context::compact::CompactStage::Preparing, None, None);
     progress.emit(
-        context::compact::CompactStage::Summarizing,
-        Some(2),
-        Some(5),
+        context::compact::CompactStage::Preparing,
+        context::compact::CompactWork::Indeterminate,
     );
-    progress.emit(context::compact::CompactStage::Finalizing, None, None);
+    progress.emit(
+        context::compact::CompactStage::Mapping,
+        context::compact::CompactWork::Determinate {
+            completed: 2,
+            total: 5,
+        },
+    );
+    progress.emit(
+        context::compact::CompactStage::Finalizing,
+        context::compact::CompactWork::Indeterminate,
+    );
 
     assert_eq!(
         *received.lock().unwrap(),
         vec![
-            (sdk::CompactStageView::Preparing, None, None),
-            (sdk::CompactStageView::Summarizing, Some(2), Some(5)),
-            (sdk::CompactStageView::Finalizing, None, None),
+            (
+                sdk::CompactStageView::Preparing,
+                sdk::CompactWorkView::Indeterminate,
+            ),
+            (
+                sdk::CompactStageView::Mapping,
+                sdk::CompactWorkView::Determinate {
+                    completed: 2,
+                    total: 5,
+                },
+            ),
+            (
+                sdk::CompactStageView::Finalizing,
+                sdk::CompactWorkView::Indeterminate,
+            ),
         ],
         "domain 进度必须原样映射到 SDK 视图（#1500）"
     );

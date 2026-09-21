@@ -181,6 +181,11 @@ impl From<Args> for sdk::ChatBootstrapArgs {
             } else {
                 sdk::LoggingOutputMode::File
             },
+            native_stderr: if args.quiet {
+                sdk::NativeStderrMode::Preserve
+            } else {
+                sdk::NativeStderrMode::RouteToLogs
+            },
         }
     }
 }
@@ -188,6 +193,31 @@ impl From<Args> for sdk::ChatBootstrapArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tui_and_quiet_modes_map_native_stderr_ownership() {
+        let tui = Cli::try_parse_from(["aemeath"]).unwrap();
+        let quiet = Cli::try_parse_from(["aemeath", "--quiet"]).unwrap();
+        let tui_verbose = Cli::try_parse_from(["aemeath", "--verbose"]).unwrap();
+        let quiet_verbose = Cli::try_parse_from(["aemeath", "--quiet", "--verbose"]).unwrap();
+
+        assert_eq!(
+            sdk::ChatBootstrapArgs::from(Args::from(tui.run_args)).native_stderr,
+            sdk::NativeStderrMode::RouteToLogs
+        );
+        assert_eq!(
+            sdk::ChatBootstrapArgs::from(Args::from(tui_verbose.run_args)).native_stderr,
+            sdk::NativeStderrMode::RouteToLogs
+        );
+        assert_eq!(
+            sdk::ChatBootstrapArgs::from(Args::from(quiet.run_args)).native_stderr,
+            sdk::NativeStderrMode::Preserve
+        );
+        assert_eq!(
+            sdk::ChatBootstrapArgs::from(Args::from(quiet_verbose.run_args)).native_stderr,
+            sdk::NativeStderrMode::Preserve
+        );
+    }
 
     #[test]
     fn yolo_and_allow_all_alias_project_same_runtime_bootstrap_acl() {

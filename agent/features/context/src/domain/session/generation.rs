@@ -193,6 +193,23 @@ impl DisplayHistoryStepIndex {
         }
     }
 
+    /// 按 `/clear` 逻辑断点截断的 display history：边界（含）之前的 step
+    /// 不进入 TUI 回看索引；磁盘上的成员与 manifest 引用不受影响。
+    pub fn from_manifest_after_clear(
+        manifest: &SessionGenerationManifest,
+        cleared_after: Option<&RunStepCursor>,
+    ) -> Self {
+        let mut index = Self::from_manifest(manifest);
+        if let Some(cleared) = cleared_after {
+            if let Some(position) = index.steps.iter().position(|step| {
+                step.run_id() == cleared.run_id && step.step_id() == cleared.step_id
+            }) {
+                index.steps.drain(..=position);
+            }
+        }
+        index
+    }
+
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
@@ -488,6 +505,9 @@ pub struct SessionStateMember {
     workspace: SnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     compact: Option<ActiveCompactMarker>,
+    /// `/clear` 逻辑断点：最后被清除的 step cursor；旧代 state 无此字段。
+    #[serde(default)]
+    cleared_after: Option<RunStepCursor>,
     #[serde(default)]
     committed_steps: CommittedStepLedger,
     #[serde(default)]
@@ -502,6 +522,7 @@ impl SessionStateMember {
             tasks: session.tasks.clone(),
             workspace: session.workspace.clone(),
             compact: session.compact.clone(),
+            cleared_after: session.cleared_after.clone(),
             committed_steps: session.committed_steps.clone(),
             skill_load_records: session.skill_load_records.clone(),
         }
@@ -521,6 +542,11 @@ impl SessionStateMember {
         self.compact.as_ref().map(|marker| marker.summary.as_str())
     }
 
+    /// `/clear` 逻辑断点：最后被清除的 step；`None` 表示从未 clear。
+    pub fn cleared_after(&self) -> Option<&RunStepCursor> {
+        self.cleared_after.as_ref()
+    }
+
     pub fn into_session(
         self,
         metadata: SessionMetadataMember,
@@ -536,6 +562,7 @@ impl SessionStateMember {
             workspace: self.workspace,
             revision: metadata.revision,
             compact: self.compact,
+            cleared_after: self.cleared_after,
             run_slices,
             committed_steps: self.committed_steps,
             skill_load_records: self.skill_load_records,
@@ -587,6 +614,7 @@ impl SessionCommitPlan {
             workspace: SnapshotState::Missing,
             revision: 0,
             compact: None,
+            cleared_after: None,
             run_slices: Default::default(),
             committed_steps: Default::default(),
             skill_load_records: Vec::new(),
@@ -919,6 +947,29 @@ impl SessionCommitPlan {
                 actual_revision: 0,
             });
         }
+        self.validate_target_manifest(session_id, expected_revision)
+    }
+
+    /// 数据集被外部清空后的全量重建计划：以内存完整状态生成
+    /// target revision = session.revision 的全量成员（reused 为空）。
+    ///
+    /// 与 [`Self::initial`] 共享生成逻辑，但配套的
+    /// [`Self::validate_rebuild_boundary`] 不要求 `expected_revision == 0`，
+    /// 允许内存修订号 N > 0 的长驻进程在空数据集上重建。
+    pub fn complete_snapshot(
+        session: &CanonicalSession,
+    ) -> Result<Self, SessionGenerationWireError> {
+        Self::initial(session)
+    }
+
+    /// 全量重建提交边界：不要求 `expected_revision == 0`（内存修订号可为任意
+    /// N > 0），但仍要求 target manifest 恰好递增一次，维持修订号单调不变量，
+    /// 重建后磁盘修订号与内存自然对齐。
+    pub fn validate_rebuild_boundary(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), SessionGenerationWireError> {
         self.validate_target_manifest(session_id, expected_revision)
     }
 

@@ -201,6 +201,84 @@ async fn openai_complete_malformed_body_emits_fatal_protocol_failure() {
     assert!(!error.retryable);
 }
 
+/// #1581：不同 call_id 复用同一 `output_index`（SSE 重放 / 网关异常）时，
+/// 静默覆盖会丢失前一个 tool_use 而保留其旁路执行的 tool_result，产出孤儿
+/// 配对被 Responses API 以 400 拒绝。必须 fail-fast 为可重试的流中断错误。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_duplicate_output_index_fails_fast_as_retryable_interruption() {
+    let body = concat!(
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_first\",\"name\":\"Read\"}}\n\n",
+        "event: response.function_call_arguments.done\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{}\"}\n\n",
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_second\",\"name\":\"Read\"}}\n\n",
+        "event: response.function_call_arguments.done\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{}\"}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiResponses,
+    )
+    .collect()
+    .await;
+
+    let Some(InvocationEvent::Failed(error)) = events.last() else {
+        panic!("duplicate output_index must fail fast instead of completing: {events:?}");
+    };
+    assert!(error.retryable, "must be retryable: {error:?}");
+    assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
+    let message = error.safe_message.to_ascii_lowercase();
+    assert!(
+        message.contains("output_index"),
+        "failure must name the duplicated output_index: {message}"
+    );
+}
+
+/// 同一 call_id 重复 `output_item.added`（幂等重放）不构成协议违规，正常完成。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_repeated_added_for_same_call_id_is_idempotent() {
+    let body = concat!(
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_same\",\"name\":\"Read\"}}\n\n",
+        "event: response.function_call_arguments.done\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{}\"}\n\n",
+        "event: response.output_item.added\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_same\",\"name\":\"Read\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiResponses,
+    )
+    .collect()
+    .await;
+
+    assert!(
+        events
+            .iter()
+            .all(|event| !matches!(event, InvocationEvent::Failed(_))),
+        "idempotent replay of the same call_id must not fail: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            InvocationEvent::Completed(completion)
+                if completion.stop_reason == crate::published_language::StopReason::ToolUse
+        )),
+        "the single function_call must still produce a ToolUse completion: {events:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_during_stream_emits_failed_cancelled_then_ends() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

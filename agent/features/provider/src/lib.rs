@@ -17,6 +17,7 @@ pub(crate) use domain::invoke::InvocationScope;
 /// Composition Root 专用构造面；业务消费者不得引用。
 pub mod composition {
     pub use crate::adapters::client::{LlmClient, LlmConfigOptions};
+    pub use crate::adapters::pool::TransportPool;
     pub use crate::domain::capability::ProviderDriverKind;
     pub use crate::domain::invoke::{InvocationScope, SystemBlock};
     pub use crate::ports::LlmProvider;

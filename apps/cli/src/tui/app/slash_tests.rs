@@ -1,47 +1,21 @@
 use super::App;
-use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use crate::tui::effect::effect::Effect;
 
-#[allow(dead_code)]
-pub(super) struct BlockingReflectionClient {
-    pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
-    pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
-}
-
-#[async_trait]
-impl sdk::AgentClient for BlockingReflectionClient {
-    async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
-        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        Ok(sdk::ChatStream::new(rx))
-    }
-}
-
-pub(super) fn app_with_blocking_reflection_client(
-) -> (App, oneshot::Receiver<()>, oneshot::Sender<()>) {
-    let (app, started_rx, finish_tx, _) = app_with_blocking_reflection_client_handle();
-    (app, started_rx, finish_tx)
-}
-
-pub(super) fn app_with_blocking_reflection_client_handle() -> (
-    App,
-    oneshot::Receiver<()>,
-    oneshot::Sender<()>,
-    Arc<BlockingReflectionClient>,
-) {
-    let (started_tx, started_rx) = oneshot::channel();
-    let (finish_tx, finish_rx) = oneshot::channel();
-    let client = Arc::new(BlockingReflectionClient {
-        started_tx: Mutex::new(Some(started_tx)),
-        finish_rx: Mutex::new(Some(finish_rx)),
-    });
-    let mut app = App::new(
+/// App::new 注入真实 builtin CommandRouter（`wire_commands()`），
+/// 因此这里的分发测试直接对真实 specs 表生效（含退役命令回归）。
+fn app_with_builtin_router() -> App {
+    App::new(
         "test-session".to_string(),
         std::env::temp_dir(),
         "test-model".to_string(),
-    );
-    app.agent_client = Some(client.clone());
-    (app, started_rx, finish_tx, client)
+    )
+}
+
+fn sent_chat_event(result: &crate::tui::app::update::UpdateResult) -> Option<&sdk::ChatInputEvent> {
+    result.effects.iter().find_map(|effect| match effect {
+        crate::tui::effect::effect::Effect::SendChatInputEvent { event } => Some(event),
+        _ => None,
+    })
 }
 
 fn system_texts(app: &App) -> Vec<&str> {
@@ -59,33 +33,55 @@ fn system_texts(app: &App) -> Vec<&str> {
         .collect()
 }
 
-fn apply_ui_event(app: &mut App, event: super::event::UiEvent) {
+fn error_texts(app: &App) -> Vec<&str> {
+    app.model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn apply_runtime_event(
+    app: &mut App,
+    event: crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent,
+) {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     let spawn_refs =
         crate::tui::effect::session::processing::SpawnContextRefs { agent_client: None };
-    app.update(crate::tui::update::msg::TuiMsg::Ui(event), &tx, &spawn_refs);
+    app.update(
+        crate::tui::update::msg::TuiMsg::RuntimeBatch(vec![event]),
+        &tx,
+        &spawn_refs,
+    );
 }
 
-#[tokio::test]
-async fn compact_slash_command_enqueues_runtime_compact_request() {
-    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-    let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
-    app.chat.input_event_tx = Some(input_tx);
+#[test]
+fn compact_slash_command_returns_send_event_effect() {
+    let mut app = app_with_builtin_router();
 
-    let prompt = app.handle_slash_command_with_events("/compact", None).await;
+    let result = app.handle_slash_command("/compact");
 
-    assert!(prompt.is_none());
-    assert!(matches!(
-        input_rx.try_recv(),
-        Ok(sdk::ChatInputEvent::Compact)
-    ));
+    assert!(
+        matches!(sent_chat_event(&result), Some(sdk::ChatInputEvent::Compact)),
+        "/compact 应产出 SendChatInputEvent{{Compact}} effect，实际: {:?}",
+        result.effects
+    );
 }
 
-#[tokio::test]
-async fn startup_skill_snapshot_routes_archify_before_runtime_refresh() {
-    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-    let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
-    app.chat.input_event_tx = Some(input_tx);
+#[test]
+fn skill_request_routes_to_send_event_effect() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::env::temp_dir(),
+        "test-model".to_string(),
+    );
     app.set_skill_snapshot(sdk::SkillsUpdatedEvent {
         revision: "startup-r1".to_string(),
         skills: vec![sdk::SkillView {
@@ -104,18 +100,114 @@ async fn startup_skill_snapshot_routes_archify_before_runtime_refresh() {
         }],
     });
 
-    let prompt = app
-        .handle_slash_command_with_events("/archify runtime flow", None)
-        .await;
+    let result = app.handle_slash_command("/archify runtime flow");
 
-    assert!(prompt.is_none());
-    assert!(matches!(
-        input_rx.try_recv(),
-        Ok(sdk::ChatInputEvent::SkillRequest(request))
-            if request.skill == "archify"
-                && request.arguments == "runtime flow"
-                && request.raw_input == "/archify runtime flow"
-    ));
+    match sent_chat_event(&result) {
+        Some(sdk::ChatInputEvent::SkillRequest(request)) => {
+            assert_eq!(request.skill, "archify");
+            assert_eq!(request.arguments, "runtime flow");
+            assert_eq!(request.raw_input, "/archify runtime flow");
+        }
+        other => panic!(
+            "/archify 应产出 SkillRequest 事件 effect，实际: {:?}（effects: {:?}）",
+            other, result.effects
+        ),
+    }
+}
+
+/// 退役回归：/status、/images、/clear-images、/save、/paste、/rewind
+/// 已从 builtin 表删除，router 返回 UnknownCommand，分发只给 error notice、零 effect。
+#[test]
+fn retired_slash_commands_are_rejected_with_error_notice() {
+    for input in [
+        "/status",
+        "/images",
+        "/clear-images",
+        "/save",
+        "/paste",
+        "/rewind 3",
+    ] {
+        let mut app = app_with_builtin_router();
+        let result = app.handle_slash_command(input);
+
+        assert!(
+            result.effects.is_empty(),
+            "退役命令 {input} 不应产出 effect，实际: {:?}",
+            result.effects
+        );
+        let errors = error_texts(&app);
+        assert!(
+            errors.iter().any(|text| text.contains("未知命令")),
+            "退役命令 {input} 应显示 router 错误，实际 notices: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn reflect_slash_command_returns_query_effect() {
+    let mut app = app_with_builtin_router();
+
+    let result = app.handle_slash_command("/reflect 3");
+
+    assert!(
+        result.effects.iter().any(|effect| matches!(
+            effect,
+            crate::tui::effect::effect::Effect::QueryReflectionHistory { limit: 3 }
+        )),
+        "/reflect 3 应产出 QueryReflectionHistory{{limit:3}} effect，实际: {:?}",
+        result.effects
+    );
+}
+
+#[test]
+fn memory_remind_slash_command_returns_fetch_effect() {
+    let mut app = app_with_builtin_router();
+
+    let result = app.handle_slash_command("/memory remind");
+
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::FetchMemoryList)),
+        "/memory remind 应产出 FetchMemoryList effect，实际: {:?}",
+        result.effects
+    );
+}
+
+#[test]
+fn update_slash_command_returns_self_update_effect() {
+    let mut app = app_with_builtin_router();
+
+    let result = app.handle_slash_command("/update");
+
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::RunSelfUpdate)),
+        "/update 应产出 RunSelfUpdate effect，实际: {:?}",
+        result.effects
+    );
+}
+
+#[test]
+fn test_clear_command_clears_task_store_and_task_window() {
+    let mut app = app_with_builtin_router();
+    app.model
+        .conversation
+        .apply(crate::tui::model::conversation::intent::UpdateTaskLines(
+            vec!["━━ Tasks: 1/1 ━━".to_string(), "□ #1 existing".to_string()],
+        ));
+    app.refresh_live_status_from_model();
+
+    let result = app.handle_slash_command("/clear");
+    app.refresh_live_status_from_model();
+
+    // loop 未运行（无 input_event_tx）：本地同步 reset，零 effect。
+    assert!(result.effects.is_empty());
+    assert!(app.model.conversation.runtime.task_status.lines.is_empty());
+    assert!(app.live_status_view_model().task_lines.is_empty());
 }
 
 #[test]
@@ -125,9 +217,8 @@ fn reflection_history_displays_safe_metadata_without_body() {
         std::env::temp_dir(),
         "test-model".to_string(),
     );
-    apply_ui_event(
-        &mut app,
-        super::event::UiEvent::ReflectionHistory {
+    let event = crate::tui::adapter::event_mapping::sdk_event_to_tui_event(
+        sdk::ChatEvent::ReflectionHistory {
             records: vec![sdk::ReflectionHistoryView {
                 id: "reflection-secret-body-must-not-appear".to_string(),
                 timestamp: 1_700_000_000,
@@ -146,6 +237,10 @@ fn reflection_history_displays_safe_metadata_without_body() {
             }],
         },
     );
+    let crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) = event else {
+        panic!("reflection history must map to one runtime event");
+    };
+    apply_runtime_event(&mut app, event);
 
     let rendered = system_texts(&app).join("\n");
     assert!(rendered.contains("timestamp=1700000000"));
@@ -159,20 +254,106 @@ fn reflection_history_displays_safe_metadata_without_body() {
     assert!(!rendered.contains("reflection-secret-body-must-not-appear"));
 }
 
-#[tokio::test]
-async fn test_clear_command_clears_task_store_and_task_window() {
-    let (mut app, _started_rx, finish_tx, _client) = app_with_blocking_reflection_client_handle();
-    app.model
-        .conversation
-        .apply(crate::tui::model::conversation::intent::UpdateTaskLines(
-            vec!["━━ Tasks: 1/1 ━━".to_string(), "□ #1 existing".to_string()],
-        ));
-    app.refresh_live_status_from_model();
+/// #1092 缺口回归：`/memory remind` 的结果（ReminderList 回传）必须渲染为
+/// 系统 notice——active/done 状态与 content 可见，空列表有明确反馈。
+#[test]
+fn memory_remind_renders_returned_reminder_list_as_system_notice() {
+    let mut app = app_with_builtin_router();
 
-    app.handle_slash_command_with_events("/clear", None).await;
-    app.refresh_live_status_from_model();
+    let result = app.handle_slash_command("/memory remind");
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::FetchMemoryList)),
+        "/memory remind 应产出 FetchMemoryList effect，实际: {:?}",
+        result.effects
+    );
 
-    assert!(app.model.conversation.runtime.task_status.lines.is_empty());
-    assert!(app.live_status_view_model().task_lines.is_empty());
-    let _ = finish_tx.send(());
+    let mapping =
+        crate::tui::adapter::event_mapping::sdk_event_to_tui_event(sdk::ChatEvent::ReminderList {
+            reminders: vec![
+                sdk::ReminderView {
+                    id: "reminder-1".to_owned(),
+                    content: "drink water".to_owned(),
+                    done: false,
+                    created_at: 1_700_000_000,
+                },
+                sdk::ReminderView {
+                    id: "reminder-2".to_owned(),
+                    content: "ship release".to_owned(),
+                    done: true,
+                    created_at: 1_700_000_100,
+                },
+            ],
+        });
+    let crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(event) = mapping else {
+        panic!("ReminderList must map to one runtime event");
+    };
+    apply_runtime_event(&mut app, event);
+
+    let rendered = system_texts(&app).join("\n");
+    assert!(
+        rendered.contains("drink water"),
+        "active reminder 内容应可见"
+    );
+    assert!(
+        rendered.contains("ship release"),
+        "done reminder 内容应可见"
+    );
+    assert!(rendered.contains("Reminders"), "应有列表标题");
+
+    // 空列表反馈。
+    let empty_mapping =
+        crate::tui::adapter::event_mapping::sdk_event_to_tui_event(sdk::ChatEvent::ReminderList {
+            reminders: Vec::new(),
+        });
+    let crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(empty_event) = empty_mapping
+    else {
+        panic!("empty ReminderList must map to one runtime event");
+    };
+    apply_runtime_event(&mut app, empty_event);
+    let rendered_after_empty = system_texts(&app).join("\n");
+    assert!(
+        rendered_after_empty.contains("No reminders"),
+        "空列表应有明确反馈，实际: {rendered_after_empty}"
+    );
+}
+
+/// A 类 slash 命令（纯本地状态写入）表驱动回归：本地 notice / 退出标志 +
+/// 零 effect、零输入事件——#947 纯化后这些命令不得触发任何 I/O。
+#[test]
+fn local_slash_commands_render_notices_without_side_effects() {
+    let cases: &[(&str, &str)] = &[
+        ("/help", "Commands:"),
+        ("/usage", "API calls:"),
+        ("/cost", "API calls:"),
+        ("/context", "Messages:"),
+        ("/config", "Model:"),
+        ("/stats", "API calls:"),
+        ("/version", "aemeath v"),
+        ("/doctor", "Doctor"),
+    ];
+    for (input, expected_fragment) in cases {
+        let mut app = app_with_builtin_router();
+
+        let result = app.handle_slash_command(input);
+
+        assert!(
+            result.effects.is_empty(),
+            "A 类命令 {input} 不应产出 effect，实际: {:?}",
+            result.effects
+        );
+        let rendered = system_texts(&app).join("\n");
+        assert!(
+            rendered.contains(expected_fragment),
+            "{input} 应渲染包含 {expected_fragment:?} 的 notice，实际: {rendered}"
+        );
+    }
+
+    // /exit：同步设置退出标志，零 effect。
+    let mut app = app_with_builtin_router();
+    let result = app.handle_slash_command("/exit");
+    assert!(result.effects.is_empty());
+    assert!(app.layout.should_exit, "/exit 应设置退出标志");
 }

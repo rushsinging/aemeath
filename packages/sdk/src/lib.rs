@@ -40,24 +40,25 @@ pub mod wire;
 
 pub mod ids;
 pub mod interaction;
+mod runtime_status;
 
 pub use activity::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
-    CompactStageView, HookPointView, InteractionKindView, ModelStreamStateView, RunPhaseKindView,
-    RunPurposeView,
+    CompactStageView, CompactWorkView, HookPointView, InteractionKindView, ModelStreamStateView,
+    RunPhaseKindView, RunPurposeView,
 };
-pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
+pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode, NativeStderrMode};
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserAnswer,
-    AskUserQuestionItem, AskUserReply, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent,
-    ChatInputImage, ChatRequest, ChatResult, ChatStream, ChildRunActivityEventView,
-    ChildRunActivityKindView, ChildRunIdentityView, ChildRunTerminalOutcomeView, OptionItem,
-    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
-    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
-    ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest, ToolCallStatusView,
-    ToolProgressEventView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
+    ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest, ChatResult,
+    ChatStream, OptionItem, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ResumedSessionStep, ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest,
+    SubRunActivityEventView, SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView,
+    SubRunTerminalOutcomeView, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{AgentClient, DisplayHistoryQuery, RunControlClient};
 pub use commands::{
@@ -85,9 +86,10 @@ pub use interaction::{
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
-    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
-    TerminateRunOutcome,
+    CancelCurrentRunOutcome, CancelRunStepOutcome, ControlDeadline, RunStepCancellationTerminal,
+    RunTerminationReason, TerminateRunOutcome,
 };
+pub use runtime_status::{ContextBudgetView, ContextDecisionSourceView, RuntimeStatusView};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
     SessionSnapshot, SessionSummary, SkillRequestMetadataView,
@@ -98,19 +100,21 @@ pub use share::message::{
     Message as LocalResumeMessage, MessageSource as LocalResumeMessageSource,
     Role as LocalResumeRole,
 };
+/// Reasoning 深度枚举（#1616：CLI/TUI 状态栏展示经 SDK 转出，避免 cli 直依赖 share）。
+pub use share::reasoning::ReasoningLevel;
 pub use task::{
     TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
     TaskStateView,
 };
 pub use tui::{
-    classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
+    classify_paste, resolve_local_image_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
     ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
     TuiLaunchContext,
 };
 pub use types::{
-    char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
-    StrSlice, TaskState, TaskSummary,
+    char_to_byte, format_tokens, ByteIdx, CharIdx, PermissionPrompt, StatusInfo, StrSlice,
+    TaskState, TaskSummary,
 };
 pub use update::{UpdateResult, UpdateService, VersionCheck};
 pub use utils::{slice_head, slice_tail};

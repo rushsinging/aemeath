@@ -68,11 +68,6 @@ pub(crate) fn reduce_intent(model: &mut TuiModel, intent: AgentIntent) -> TuiUpd
             result.input_changes = model.input.apply(intent);
             result.dirty.mark_input();
         }
-        AgentIntent::Diagnostic(intent) => {
-            model.diagnostic.apply(intent);
-            result.dirty.mark_status();
-            result.dirty.mark_dialog();
-        }
         AgentIntent::Session(intent) => {
             model.session.apply(intent);
             result.dirty.mark_status();
@@ -195,17 +190,13 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ErrorAppended { .. }
             | ConversationChange::QueuedSubmissionAdded { .. }
             | ConversationChange::QueuedSubmissionsCleared { .. }
-            | ConversationChange::AgentProgressRecorded { .. }
+            | ConversationChange::AgentActivitiesRecorded { .. }
             | ConversationChange::ToolStreamingOutputRecorded { .. }
             | ConversationChange::AgentMetaUpdated { .. }
             | ConversationChange::BlockCompleted { .. }
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
-            | ConversationChange::AskUserDismissed { .. }
             | ConversationChange::InteractionShown { .. }
-            | ConversationChange::InteractionUpdated { .. }
-            | ConversationChange::InteractionReplyRequested { .. }
-            | ConversationChange::InteractionCancelRequested { .. }
             | ConversationChange::InteractionCompleted { .. }
             | ConversationChange::InteractionCommandRejected { .. }
             | ConversationChange::InteractionConflict { .. }
@@ -214,21 +205,14 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::ActivitySnapshotReplaced { .. } => {
                 ModelChange::output_and_status_dirty()
             }
-            ConversationChange::CompactProgressChanged
-            | ConversationChange::QueuedSubmissionsSynced { .. }
+            ConversationChange::QueuedSubmissionsSynced { .. }
             | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
-            ConversationChange::ChatStarted { .. }
-            | ConversationChange::ChatTurnStarted { .. }
-            | ConversationChange::ChatCompleting { .. }
-            | ConversationChange::ChatCompleted { .. }
+            ConversationChange::ChatCompleting { .. }
             | ConversationChange::UsageChanged { .. }
             | ConversationChange::LiveTpsChanged { .. }
-            | ConversationChange::TaskStatusChanged { .. }
-            | ConversationChange::ProcessingJobChanged { .. }
             | ConversationChange::TaskLinesChanged
-            | ConversationChange::StatusNoticeChanged
-            | ConversationChange::GraphPhaseChanged => ModelChange::status_dirty(),
+            | ConversationChange::StatusNoticeChanged => ModelChange::status_dirty(),
         }
     }
 }

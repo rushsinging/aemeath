@@ -8,7 +8,10 @@ use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
 use crate::domain::types::{GitProbeError, WorkspaceError, WorkspaceFrame, WorkspaceRestoreError};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
+/// 测试构造器默认：repo 根下 `.worktrees`（生产链路由 wiring 注入配置值）。
+#[cfg(test)]
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
+const UNNAMED_WORKSPACE_SEGMENT: &str = "workspace";
 
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -16,6 +19,8 @@ pub struct WorkspaceState {
     pub workspace_root: PathBuf,
     pub path_base: PathBuf,
     pub worktree_kind: WorktreeKind,
+    /// 已解析的 worktree 默认创建根目录（生产由 wiring 注入配置值）。
+    pub worktrees_root: PathBuf,
     pub stack: Vec<WorkspaceFrame>,
 }
 
@@ -29,8 +34,9 @@ impl WorkspaceState {
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
             cwd.clone(),
-            cwd,
+            cwd.clone(),
             WorktreeKind::Primary,
+            cwd.join(DEFAULT_WORKTREE_DIR),
         )
     }
 
@@ -39,12 +45,14 @@ impl WorkspaceState {
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
+        worktrees_root: PathBuf,
     ) -> Self {
         Self {
             project_identity,
             workspace_root,
             path_base,
             worktree_kind,
+            worktrees_root,
             stack: Vec::new(),
         }
     }
@@ -83,6 +91,17 @@ fn sanitize_branch_for_path(branch: &str) -> Result<String, WorkspaceError> {
     Ok(s)
 }
 
+/// 按 worktree 根目录下的隔离段对仓库命名：取 workspace_root 的目录名并做与
+/// 分支相同的字符白名单清洗，避免不同仓库的同名分支在共享根目录下冲突。
+fn workspace_repo_segment(state: &WorkspaceState) -> Result<String, WorkspaceError> {
+    let repo_dir_name = state
+        .workspace_root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| UNNAMED_WORKSPACE_SEGMENT.to_string());
+    sanitize_branch_for_path(&repo_dir_name)
+}
+
 fn resolve_worktree_path(
     state: &WorkspaceState,
     path: Option<PathBuf>,
@@ -93,8 +112,8 @@ fn resolve_worktree_path(
         Some(p) => Ok(state.path_base.join(p)),
         None => match branch {
             Some(b) if !b.trim().is_empty() => Ok(state
-                .path_base
-                .join(DEFAULT_WORKTREE_DIR)
+                .worktrees_root
+                .join(workspace_repo_segment(state)?)
                 .join(sanitize_branch_for_path(b)?)),
             _ => Err(WorkspaceError::MissingPathAndBranch),
         },
@@ -371,7 +390,7 @@ fn validate_git_location(
 }
 
 pub fn prepare_restore(
-    _live_state: &WorkspaceState,
+    live_state: &WorkspaceState,
     dto: &PersistedWorkspaceContext,
     git: &dyn GitWorktreeOps,
 ) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
@@ -381,7 +400,24 @@ pub fn prepare_restore(
 
     let initial_cwd = restore_path(&dto.project_identity.initial_cwd)?;
     let workspace_root = restore_path(&dto.workspace_root)?;
-    let path_base = restore_path(&dto.path_base)?;
+    // path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部替换为
+    // 嵌套仓库、删除或移动后，对无 worktree 历史的普通会话（Primary + 空栈）
+    // 回退 workspace_root，与「shell cwd 被删回退 HOME」同语义，不丢任何会话
+    // 数据；worktree 上下文损坏必须走显式 exit 协议，保持 fail-closed。
+    let path_base_fallback_eligible =
+        dto.worktree_kind == WorktreeKind::Primary && dto.context_stack.is_empty();
+    let path_base = match restore_path(&dto.path_base) {
+        Ok(path) => path,
+        Err(WorkspaceRestoreError::PathNotFound { path }) if path_base_fallback_eligible => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "workspace restore path_base fallback: persisted path_base={path} 不存在，回退 workspace_root={}",
+                workspace_root.display()
+            );
+            workspace_root.clone()
+        }
+        Err(restore_error) => return Err(restore_error),
+    };
     validate_containment(&path_base, &workspace_root)?;
 
     let mut stack = Vec::with_capacity(dto.context_stack.len());
@@ -396,6 +432,7 @@ pub fn prepare_restore(
         });
     }
 
+    let mut restored_path_base = path_base.clone();
     let canonical_identity = match dto.project_identity.git_common_dir.as_deref() {
         Some(common) if !common.is_empty() => {
             let common = PathBuf::from(common);
@@ -418,13 +455,30 @@ pub fn prepare_restore(
                 &common,
                 Some(dto.worktree_kind),
             )?;
-            validate_git_location(
+            // path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部
+            // 替换为嵌套仓库、删除或移动后，回退 workspace_root 与「shell cwd
+            // 被删回退 HOME」同语义，不丢任何会话数据。仅对无 worktree 历史
+            // 的普通会话（Primary + 空栈）放行回退；worktree 上下文损坏必须
+            // 走显式 exit 协议，保持 fail-closed。
+            if let Err(restore_error) = validate_git_location(
                 git,
                 &path_base,
                 Some(&workspace_root),
                 &common,
                 Some(dto.worktree_kind),
-            )?;
+            ) {
+                if path_base_fallback_eligible {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "workspace restore path_base fallback: persisted path_base={} 校验失败（{restore_error}），回退 workspace_root={}",
+                        path_base.display(),
+                        workspace_root.display()
+                    );
+                    restored_path_base = workspace_root.clone();
+                } else {
+                    return Err(restore_error);
+                }
+            }
             for frame in &stack {
                 validate_git_location(
                     git,
@@ -475,8 +529,10 @@ pub fn prepare_restore(
         candidate: WorkspaceState {
             project_identity: canonical_identity,
             workspace_root,
-            path_base,
+            path_base: restored_path_base,
             worktree_kind: dto.worktree_kind,
+            // 恢复不改变运行中进程的 worktree 目录配置：继承 live state。
+            worktrees_root: live_state.worktrees_root.clone(),
             stack,
         },
     })

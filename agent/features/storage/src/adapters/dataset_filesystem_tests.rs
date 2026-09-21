@@ -180,10 +180,37 @@ async fn incremental_commit_persists_only_changed_member_content() {
         .expect("incremental commit");
 
     let content_files_after = dataset_member_content_file_count(&dataset_path);
+    let member_store = dataset_path.join("members");
+    // 替换一个成员恰好持久化一个新内容文件、回收一个被两代丢弃的最旧内容；
+    // 历史成员内容永不重写，净增量归零而非无限累积。
     assert_eq!(
         content_files_after - content_files_before,
-        1,
-        "replacing one member must persist exactly one new immutable content file regardless of historical member count"
+        0,
+        "replacing one member must persist exactly one new immutable content file and collect the single orphaned predecessor regardless of historical member count"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"changed-again"))
+            .exists(),
+        "the replaced member's new content must be persisted"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"changed"))
+            .exists(),
+        "content referenced by the previous generation must survive collection"
+    );
+    assert!(
+        !member_store
+            .join(super::proto::digest_bytes(b"payload-0"))
+            .exists(),
+        "content dropped by both primary and previous generations must be collected"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"payload-63"))
+            .exists(),
+        "reused historical member content must survive collection"
     );
     assert!(
         !dataset_path.join("primary/blobs").exists(),
@@ -772,5 +799,177 @@ async fn commit_recovery_pending_emits_warn() {
     );
 
     drop(adapter);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[allow(
+    clippy::await_holding_lock,
+    reason = "故障环境变量是进程全局状态，孤儿回收测试在多次异步提交期间必须排除故障注入"
+)]
+#[tokio::test(flavor = "current_thread")]
+async fn incremental_commit_collects_member_content_orphaned_by_older_generation() {
+    let _fault_env = without_fault_env();
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let dataset_path = root.join("memory").join("conv-log");
+    let member_store = dataset_path.join("members");
+
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"v1"), member("pinned", b"keep")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+    let digest_v1 = super::proto::digest_bytes(b"v1");
+    assert!(
+        member_store.join(&digest_v1).exists(),
+        "seed generation must publish v1 content"
+    );
+
+    let second_revision = {
+        let current = adapter
+            .read_manifest(&key)
+            .await
+            .expect("read manifest after seed");
+        let revision = current.revision().clone();
+        let changes = DatasetChangeSet::new(
+            revision,
+            vec![DatasetMemberChange::Replace(member("active", b"v2"))],
+            vec![member_reference(
+                &current.revision().clone(),
+                "pinned",
+                b"keep",
+            )],
+        )
+        .expect("valid second change set");
+        adapter
+            .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+            .await
+            .expect("second commit");
+        adapter
+            .read_manifest(&key)
+            .await
+            .expect("read manifest after second commit")
+            .revision()
+            .clone()
+    };
+
+    // 第二次提交后 previous 代仍引用 v1，成员内容必须保留。
+    assert!(
+        member_store.join(&digest_v1).exists(),
+        "content referenced by the previous generation must survive collection"
+    );
+
+    let current_manifest = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read manifest after second commit");
+    let changes = DatasetChangeSet::new(
+        second_revision,
+        vec![DatasetMemberChange::Replace(member("active", b"v3"))],
+        vec![member_reference(
+            current_manifest.revision(),
+            "pinned",
+            b"keep",
+        )],
+    )
+    .expect("valid third change set");
+    adapter
+        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .await
+        .expect("third commit");
+
+    // 第三次提交后 primary 引用 v3、previous 引用 v2，v1 成为孤儿必须被回收。
+    assert!(
+        !member_store.join(&digest_v1).exists(),
+        "content orphaned by both primary and previous generations must be collected"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"v2"))
+            .exists(),
+        "content referenced by the previous generation must survive collection"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"v3"))
+            .exists(),
+        "content referenced by the primary generation must survive collection"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"keep"))
+            .exists(),
+        "reused member content must survive collection"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[allow(
+    clippy::await_holding_lock,
+    reason = "故障环境变量是进程全局状态，存量孤儿清理测试在读入口期间必须排除故障注入"
+)]
+#[tokio::test(flavor = "current_thread")]
+async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
+    let _fault_env = without_fault_env();
+    let root = root();
+    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let key = key();
+    let dataset_path = root.join("memory").join("conv-log");
+    let member_store = dataset_path.join("members");
+
+    let empty_revision = adapter
+        .read_manifest(&key)
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+    adapter
+        .commit_atomic(
+            &key,
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptions::new(Durability::BestEffort),
+        )
+        .await
+        .expect("seed generation");
+
+    // 模拟历史版本泄漏的孤儿内容文件：任何 manifest 均不引用。
+    let orphan_digest = super::proto::digest_bytes(b"leaked-legacy-content");
+    std::fs::write(member_store.join(&orphan_digest), b"leaked-legacy-content")
+        .expect("plant pre-existing orphan content");
+
+    let requested = [SafePathSegment::from_str("active").expect("safe member name")];
+    let DatasetReadOutcome::Found(read) = adapter
+        .read_consistent(&key, &requested)
+        .await
+        .expect("read after planting orphan")
+    else {
+        panic!("generation should be found");
+    };
+    assert_eq!(read.members(), &[member("active", b"a1")]);
+
+    assert!(
+        !member_store.join(&orphan_digest).exists(),
+        "pre-existing orphan content must be collected on the next dataset entry"
+    );
+    assert!(
+        member_store
+            .join(super::proto::digest_bytes(b"a1"))
+            .exists(),
+        "referenced member content must survive collection"
+    );
+
     let _ = std::fs::remove_dir_all(&root);
 }

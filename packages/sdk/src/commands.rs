@@ -33,4 +33,6 @@ pub struct ModelSwitchResult {
     pub display_name: String,
     pub context_window: usize,
     pub reasoning_active: Option<bool>,
+    /// 切换后生效的 reasoning 深度（#1616 状态栏展示）。旧构造方缺省为 `None`。
+    pub reasoning_level: Option<share::reasoning::ReasoningLevel>,
 }

@@ -29,7 +29,7 @@ pub const DEFAULT_FILES_EN: &[(&str, &str)] = &[
 - Tool call JSON parameters must be strictly valid JSON. Double-check before sending.
 - When editing code, always show the exact old_string and new_string — never approximate.
 - AskUserQuestion enables free-text input by default. When predefined options are present, the system provides "Type something..." as the built-in free-text entry; do NOT include a similar option yourself. Set `allow_free_input: false` only when answers must be limited to the supplied options.
-- When using AskUserQuestion with options, prefer object format { "title": "...", "description": "..." } over plain strings. Use description to provide additional context or explanation for each choice.
+- When using AskUserQuestion with options, every option must be an object of the form { "title": "...", "description": "..." } with both fields required and non-empty. Plain string options are rejected. Use description to provide additional context or explanation for each choice.
 "#,
     ),
     (
@@ -74,7 +74,7 @@ pub const DEFAULT_FILES_ZH: &[(&str, &str)] = &[
 - Tool call JSON 参数必须是严格有效的 JSON。发送前请仔细检查。
 - 编辑代码时，必须显示精确的 old_string 和 new_string — 不要近似。
 - AskUserQuestion 默认启用自由输入。存在预设选项时，系统会固定提供 "Type something..." 作为内建自由输入入口；不要自行在 options 中包含类似选项。只有答案必须限制为所给选项时，才设置 `allow_free_input: false`。
-- 使用 AskUserQuestion 带选项时，优先使用对象格式 { "title": "...", "description": "..." } 而非纯字符串。使用 description 为每个选项提供额外上下文或解释。
+- 使用 AskUserQuestion 带选项时，每个选项必须是 { "title": "...", "description": "..." } 对象，title 与 description 均必填且非空；不接受纯字符串选项。使用 description 为每个选项提供额外上下文或解释。
 "#,
     ),
     (

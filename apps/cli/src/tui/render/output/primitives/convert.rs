@@ -1,5 +1,6 @@
 //! SpanPart(现有 diff/syntax 着色单元) 与 RenderedLine 互转。
 
+#[cfg(test)]
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::output_area::types::SpanPart;
 use ratatui::style::Style;
@@ -12,6 +13,7 @@ pub fn spanparts_to_spans(parts: &[SpanPart]) -> Vec<Span<'static>> {
         .collect()
 }
 
+#[cfg(test)]
 pub fn rendered_line_from_spanparts(parts: &[SpanPart]) -> RenderedLine {
     RenderedLine::new(spanparts_to_spans(parts))
 }

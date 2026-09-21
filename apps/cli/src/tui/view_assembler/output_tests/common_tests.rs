@@ -1,5 +1,6 @@
 use crate::tui::model::conversation::ids::ToolCallId;
-use crate::tui::model::conversation::agent_progress::AgentActivityLine;
+use crate::tui::adapter::tui_runtime_event::TuiSubRunActivityKind;
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -26,9 +27,11 @@ fn add_tool_after_thinking(
     output: &str,
     is_error: bool,
 ) {
-    conversation.apply(StartChat {
-        submission: "search".to_string(),
-    });
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(AppendUserMessage { text: "search".to_string() });
     conversation.apply(ThinkingText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),

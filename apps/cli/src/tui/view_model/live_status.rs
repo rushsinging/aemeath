@@ -14,7 +14,7 @@ pub struct SpinnerLineView {
     /// Runtime 发布的当前 Run 总耗时。
     pub elapsed_secs: u64,
     /// Runtime 发布的当前状态阶段耗时。
-    pub phase_elapsed_secs: u64,
+    pub phase_elapsed_secs: Option<u64>,
     /// 细分阶段文案（已由 phase 语义转换；None 表示无括号阶段）。
     pub phase_text: Option<String>,
     /// 最多一条通过稳定性门槛的用户可见 Activity 摘要。
@@ -63,13 +63,13 @@ mod tests {
             frame: 9,
             verb: "Thinking".to_string(),
             elapsed_secs: 0,
-            phase_elapsed_secs: 0,
+            phase_elapsed_secs: Some(0),
             phase_text: Some("Thinking...".to_string()),
             detail_text: None,
         };
         assert_eq!(view.frame, 9);
         assert_eq!(view.elapsed_secs, 0);
-        assert_eq!(view.phase_elapsed_secs, 0);
+        assert_eq!(view.phase_elapsed_secs, Some(0));
         assert_eq!(view.phase_text.as_deref(), Some("Thinking..."));
     }
 
@@ -80,7 +80,7 @@ mod tests {
                 frame: 1,
                 verb: "Brewing".to_string(),
                 elapsed_secs: 0,
-                phase_elapsed_secs: 0,
+                phase_elapsed_secs: Some(0),
                 phase_text: None,
                 detail_text: None,
             }),

@@ -21,22 +21,4 @@ impl DialogViewAssembler {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::tui::model::diagnostic::intent::DiagnosticIntent;
-    use crate::tui::model::diagnostic::model::DiagnosticModel;
-
-    use super::DialogViewAssembler;
-
-    #[test]
-    fn test_dialog_assembler_maps_active_prompt() {
-        let mut diagnostic = DiagnosticModel::default();
-        diagnostic.apply(DiagnosticIntent::OpenPrompt {
-            id: "prompt-1".to_string(),
-            question: "继续?".to_string(),
-        });
-
-        let vm = DialogViewAssembler::assemble_from_diagnostic(&diagnostic).expect("dialog");
-        assert_eq!(vm.body, "继续?");
-        assert_eq!(vm.default_action.as_deref(), Some("submit"));
-    }
-}
+mod tests {}

@@ -26,6 +26,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -56,6 +57,8 @@ impl ContextPort for FakeContextPort {
             urgency: Urgency::None,
             decision_token_count: 0,
             threshold: 1,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         })
     }
@@ -72,6 +75,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
+            quality: context::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -105,7 +109,7 @@ async fn runtime_fake_compiles_against_context_owned_port() {
             system_prompt: request.system_prompt.clone(),
             context_size: request.context_size,
             progress: None,
-            task_context: None,
+            task_snapshot: None,
         })
         .await
         .unwrap();

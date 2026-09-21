@@ -20,34 +20,20 @@ impl OutputRenderWindow {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OutputViewModel {
     pub roots: Vec<Arc<BlockNode>>,
     pub version: u64,
-    pub follow_tail_hint: bool,
     pub source_total_lines: Option<usize>,
     pub folded_earlier_lines: usize,
 }
 
 impl OutputViewModel {
     #[cfg(test)]
-    pub fn from_roots(roots: Vec<BlockNode>, version: u64, follow_tail_hint: bool) -> Self {
+    pub fn from_roots(roots: Vec<BlockNode>, version: u64) -> Self {
         Self {
             roots: roots.into_iter().map(Arc::new).collect(),
             version,
-            follow_tail_hint,
-            source_total_lines: None,
-            folded_earlier_lines: 0,
-        }
-    }
-}
-
-impl Default for OutputViewModel {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            version: 0,
-            follow_tail_hint: true,
             source_total_lines: None,
             folded_earlier_lines: 0,
         }
@@ -142,16 +128,37 @@ pub enum AgentActivityKindView {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum AgentActivityContentView {
+    Text(String),
+    ToolCall {
+        name: String,
+        input: serde_json::Value,
+    },
+}
+
+impl From<String> for AgentActivityContentView {
+    fn from(content: String) -> Self {
+        Self::Text(content)
+    }
+}
+
+impl From<&str> for AgentActivityContentView {
+    fn from(content: &str) -> Self {
+        Self::Text(content.to_string())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct AgentActivityLineView {
     pub kind: AgentActivityKindView,
-    pub content: String,
+    pub content: AgentActivityContentView,
 }
 
 impl AgentActivityLineView {
     pub fn message(content: impl Into<String>) -> Self {
         Self {
             kind: AgentActivityKindView::Message,
-            content: content.into(),
+            content: AgentActivityContentView::Text(content.into()),
         }
     }
 }
@@ -164,7 +171,7 @@ impl From<&str> for AgentActivityLineView {
 
 impl PartialEq<&str> for AgentActivityLineView {
     fn eq(&self, other: &&str) -> bool {
-        self.content == *other
+        matches!(&self.content, AgentActivityContentView::Text(content) if content == *other)
     }
 }
 
@@ -223,6 +230,7 @@ pub struct ToolResultBlockView {
     pub args_preview: Option<String>,
     pub result_text: String,
     pub activity_lines: Option<Vec<AgentActivityLineView>>,
+    pub workspace_root: Option<std::path::PathBuf>,
     pub data: Option<serde_json::Value>,
     pub style: SemanticStyle,
 }
@@ -236,6 +244,7 @@ impl std::hash::Hash for ToolResultBlockView {
         self.args_preview.hash(state);
         self.result_text.hash(state);
         self.activity_lines.hash(state);
+        self.workspace_root.hash(state);
         self.style.hash(state);
     }
 }
@@ -247,7 +256,6 @@ pub enum ToolSemanticStatus {
     Success,
     Error,
     Cancelled,
-    Orphaned,
 }
 
 #[cfg(test)]

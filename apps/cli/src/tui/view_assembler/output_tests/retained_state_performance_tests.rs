@@ -1,7 +1,7 @@
 use super::super::assemble_output_view;
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::intent::{
-    AppendUserMessage, AssistantText, RecordAgentProgress, ToolCallStart, ToolResult,
+    AppendUserMessage, AssistantText, ToolCallStart, ToolResult,
 };
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
@@ -30,12 +30,16 @@ fn build_retained_state_workload(scale: usize) -> ConversationModel {
             name: "Agent".to_string(),
             index: 0,
         });
-        model.apply(RecordAgentProgress {
-            chat_id: chat_id.clone(),
-            run_id: run_id.clone(),
-            tool_id: tool_id.clone(),
-            message: format!("progress-{index}"),
-        });
+        model.record_agent_activities(
+            chat_id.clone(),
+            run_id.clone(),
+            tool_id.clone(),
+            vec![
+                crate::tui::model::conversation::agent_activity::AgentActivityLine::message(
+                    format!("progress-{index}"),
+                ),
+            ],
+        );
         model.apply(ToolResult {
             chat_id: chat_id.clone(),
             run_id: run_id.clone(),
@@ -58,16 +62,17 @@ fn retained_state_workload_is_deterministic_at_representative_scales() {
         let retained = model.retained_state_snapshot();
         let vm = assemble_output_view(&model, None);
         let mut renderer = OutputDocumentRenderer::default();
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default());
         let cold = renderer.retained_cache_capacity();
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal());
-        renderer.render_model_document(&vm, 120, 120, 2, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default());
+        renderer.render_model_document(&vm, 120, 120, 2, MarkdownSpacingPolicy::default());
         let warm_resized = renderer.retained_cache_capacity();
 
         assert_eq!(retained.chats, scale);
         assert_eq!(retained.runs, scale);
         assert_eq!(retained.tool_calls, scale);
-        assert_eq!(retained.agent_progress_entries, scale);
+        assert_eq!(retained.sub_run_watermarks, 0);
+        assert!(!retained.has_legacy_activity_history);
         assert_eq!(retained.timeline_items, scale * 4);
         assert!(retained.output_view_journal_entries <= 256);
         assert!(retained.output_view_journal_item_id_bytes <= 256 * 64);
@@ -91,19 +96,20 @@ fn retained_state_release_workload() {
         let assemble_ns = assemble_started.elapsed().as_nanos();
         let mut renderer = OutputDocumentRenderer::default();
         let cold_started = std::time::Instant::now();
-        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 0, MarkdownSpacingPolicy::default());
         let cold_ns = cold_started.elapsed().as_nanos();
         let warm_started = std::time::Instant::now();
-        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::normal());
+        renderer.render_model_document(&vm, 100, 100, 1, MarkdownSpacingPolicy::default());
         let warm_ns = warm_started.elapsed().as_nanos();
         let cache = renderer.retained_cache_capacity();
 
         println!(
-            "scale={scale:>4} timeline={} progress={} progress_bytes={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
+            "scale={scale:>4} timeline={} sub_run_watermarks={} has_legacy_activity_history={} view_journal={} view_id_bytes={} roots={} assemble_ms={:.2} cold_ms={:.2} warm_ms={:.2} cache(block/gutted)={}/{} peak={}/{}",
             retained.timeline_items,
-            retained.agent_progress_entries,
-            retained.agent_progress_bytes,
-            retained.output_view_journal_entries,            retained.output_view_journal_item_id_bytes,
+            retained.sub_run_watermarks,
+            retained.has_legacy_activity_history,
+            retained.output_view_journal_entries,
+            retained.output_view_journal_item_id_bytes,
             vm.roots.len(),
             assemble_ns as f64 / 1_000_000.0,
             cold_ns as f64 / 1_000_000.0,

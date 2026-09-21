@@ -123,8 +123,9 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | **Accepted User Input** | Runtime 在 Session gate 接纳后、绑定 Run Step 前的唯一 typed 用户输入事实；穷举 `UserMessage { input_id, text, images }` 与 `SkillRequest { input_id, skill, arguments, raw_input }`。它统一 admission、FIFO、drain、freeze、持久化与 adoption 生命周期；**NEVER** 并行维护 message/event 两套 adopted 数据，也 **NEVER** 从模型正文重建 typed intent。 | Agent Runtime |
 | **Provider** | LLM 供应商适配器，内部 ACL 吸收各家差异。 | Provider |
 | **Policy Decision** | 工具执行前的权限判断结果。 | Policy |
-| **Audit Event** | 审计事件（执行 / 成本 / 用量）。 | Audit |
-| **Cost / Usage** | 成本与 token 用量追踪，含 pricing。 | Audit |
+| **Audit Event** | 不可变审计事实；v0.1.0 仅发布 Model Usage metadata。 | Audit |
+| **Usage** | 成功 logical Model Invocation 的 provider-neutral token 用量事实，带 Session/Run/RunStep/Invocation 关联 ID。 | Audit |
+| **Cost / Pricing** | 从 Usage 派生的 Future 能力；v0.1.0 不定义 Price、Cost 或迁移语义。 | Audit（Future） |
 | **Hook** | 生命周期钩子脚本。 | Hook |
 | **Config Snapshot** | 只读配置快照（Config 的 Published Language）。 | Config |
 | **Domain ID** | 由所属 BC 发布的强类型标识；需要全局时间有序的新实体可采用 UUIDv7，但格式不是全域 Shared Kernel。TaskId / BatchId 在 v0.1.0 是单 Session 十进制标识，WorkspaceId 是 Project 派生的 opaque 标识。 | 各 BC Published Language |

@@ -21,12 +21,6 @@ impl InputModel {
             InputIntent::InsertText(text) => self.insert_text(text),
             InputIntent::InsertPastedText(text) => self.insert_pasted_text(text),
             InputIntent::ReplaceText(text) => self.replace_text(text),
-            InputIntent::MoveCursor(cursor) => {
-                self.document.move_cursor(cursor);
-                vec![InputChange::CursorMoved {
-                    cursor: self.document.cursor,
-                }]
-            }
             InputIntent::MoveCursorLeft => {
                 self.document.move_left();
                 vec![InputChange::CursorMoved {
@@ -82,13 +76,6 @@ impl InputModel {
                 self.document.delete_word_before_cursor();
                 self.text_changed()
             }
-            InputIntent::DeleteForward => {
-                self.completion.clear();
-                self.document.delete_forward();
-                self.text_changed()
-            }
-            InputIntent::MoveHistoryPrevious => self.history_previous(),
-            InputIntent::MoveHistoryNext => self.history_next(),
             InputIntent::ReplaceHistory(entries) => {
                 self.history.entries = entries;
                 self.history.selected_index = None;
@@ -116,18 +103,11 @@ impl InputModel {
                 vec![self.completion_changed()]
             }
             InputIntent::AcceptCompletion => self.accept_completion(),
-            InputIntent::AcceptCompletionValue(replacement) => {
-                self.accept_completion_replacement(replacement)
-            }
             InputIntent::InsertImage(image) => {
                 self.completion.clear();
                 self.history.selected_index = None;
                 self.document.insert_image(image);
                 self.text_changed()
-            }
-            InputIntent::SetMode(mode) => {
-                self.mode = mode;
-                vec![InputChange::ModeChanged { mode }]
             }
             InputIntent::Submit => self.submit(),
             InputIntent::Clear => {

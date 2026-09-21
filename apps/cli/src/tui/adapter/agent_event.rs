@@ -1,7 +1,4 @@
-use crate::tui::adapter::tui_runtime_event::{
-    TuiAgentProgressKind, TuiRuntimeEvent, TuiToolCallStatus,
-};
-use crate::tui::app::event::{StatusContextUpdate, UiEvent};
+use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
@@ -11,20 +8,13 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 
-mod progress;
 mod sanitize;
 
 #[cfg(test)]
 #[path = "agent_event_runtime_tests.rs"]
 mod runtime_tests;
-#[cfg(test)]
-mod tests;
 
-use progress::format_agent_progress;
-use sanitize::{
-    json_value_kind, sanitize_tool_arguments_delta, sanitize_tool_output,
-    sanitize_tool_result_content,
-};
+use sanitize::{sanitize_tool_arguments_delta, sanitize_tool_output, sanitize_tool_result_content};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
@@ -35,342 +25,11 @@ pub struct AgentEventMapping {
     pub ui_preferences: Vec<crate::tui::model::ui_preferences::UiPreferencesIntent>,
 }
 
-#[cfg(test)]
-fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String {
-    let raw = match input {
-        serde_json::Value::String(s) => s.clone(),
-        value => value.to_string(),
-    };
-    if raw.is_empty() {
-        crate::tui::view_model::tool_name::tool_display_name(name).to_string()
-    } else {
-        format!(
-            "{} {}",
-            crate::tui::view_model::tool_name::tool_display_name(name),
-            truncate_agent_progress_json(&raw)
-        )
-    }
-}
-
-#[cfg(test)]
-fn truncate_agent_progress_json(raw: &str) -> String {
-    const MAX_CHARS: usize = 100;
-    if raw.chars().count() <= MAX_CHARS {
-        return raw.to_string();
-    }
-    let mut output: String = raw.chars().take(MAX_CHARS.saturating_sub(3)).collect();
-    output.push_str("...");
-    output
-}
-
-fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
-    match status {
-        sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
-        sdk::ToolCallStatusView::Ready => ToolCallStatus::Ready,
-        sdk::ToolCallStatusView::Running => ToolCallStatus::Running,
-    }
-}
-
-#[cfg(test)]
-pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
-    map_agent_event_with_tool_header(event, default_subagent_tool_header)
-}
-
-pub fn map_agent_event_with_tool_header<F>(
-    event: &UiEvent,
-    mut format_subagent_tool_header: F,
-) -> AgentEventMapping
-where
-    F: FnMut(&str, &serde_json::Value) -> String,
-{
-    match event {
-        // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
-        UiEvent::Text { context, text } => {
-            conversation(ConversationIntent::AssistantText(AssistantText {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-                text: text.clone(),
-            }))
-        }
-        UiEvent::Thinking { context, text } => {
-            conversation(ConversationIntent::ThinkingText(ThinkingText {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-                text: text.clone(),
-            }))
-        }
-        UiEvent::BlockComplete { context, .. } => {
-            conversation(ConversationIntent::CompleteBlock(CompleteBlock {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-            }))
-        }
-        UiEvent::ToolCallStart {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-        } => {
-            crate::tui::log_debug!(
-                "map tool_call_start chat_id={} run_id={} id={} provider_id={:?} name={} index={}",
-                context.chat_id,
-                context.run_id,
-                id,
-                provider_id,
-                name,
-                index,
-            );
-            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-                id: ToolCallId::new(id.as_str()),
-                provider_id: provider_id.clone(),
-                name: name.clone(),
-                index: *index,
-            }))
-        }
-        UiEvent::ToolCallUpdate {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-            arguments_delta,
-            arguments,
-            status,
-        } => {
-            let args = arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(|value| value.to_string()));
-            crate::tui::log_debug!(
-                "map tool_call_update chat_id={} run_id={} id={} provider_id={:?} name={} index={} args_len={}",
-                context.chat_id,
-                context.run_id,
-                id,
-                provider_id,
-                name,
-                index,
-                args.as_ref().map(|s| s.len()).unwrap_or(0),
-            );
-            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-                id: ToolCallId::new(id.as_str()),
-                provider_id: provider_id.clone(),
-                name: name.clone(),
-                index: *index,
-                arguments: args
-                    .as_ref()
-                    .map(|value| sanitize_tool_arguments_delta(name, value)),
-                status: tool_call_status_from_sdk(*status),
-            }))
-        }
-        UiEvent::ToolResult {
-            context,
-            id,
-            provider_id,
-            tool_name,
-            output,
-            content,
-            is_error,
-            images,
-        } => {
-            crate::tui::log_debug!(
-                "map tool_result chat_id={} run_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
-                context.chat_id,
-                context.run_id,
-                id,
-                provider_id,
-                tool_name,
-                output.len(),
-                json_value_kind(content),
-                is_error,
-                images.len(),
-            );
-            conversation(ConversationIntent::ToolResult(ToolResult {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-                id: ToolCallId::new(id.as_str()),
-                provider_id: provider_id.clone(),
-                tool_name: tool_name.clone(),
-                output: sanitize_tool_output(tool_name, output),
-                content: sanitize_tool_result_content(tool_name, content.clone()),
-                is_error: *is_error,
-                image_count: images.len(),
-            }))
-        }
-        UiEvent::AgentProgress {
-            attachment_context,
-            tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            sdk::AgentProgressKindView::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: attachment_context.chat_id.clone(),
-                    run_id: attachment_context.run_id.clone(),
-                    tool_id: ToolCallId::new(tool_id.as_str()),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
-            _ => {
-                let activities = format_agent_progress(event, &mut format_subagent_tool_header);
-                let kind_name = match &event.kind {
-                    sdk::AgentProgressKindView::Started { .. } => "Started",
-                    sdk::AgentProgressKindView::Message { .. } => "Message",
-                    sdk::AgentProgressKindView::ToolCalls { .. } => "ToolCalls",
-                    sdk::AgentProgressKindView::ToolOutput { .. } => "ToolOutput",
-                };
-                let source_preview = match &event.kind {
-                    sdk::AgentProgressKindView::Message { text } => {
-                        text.chars().take(200).collect::<String>()
-                    }
-                    sdk::AgentProgressKindView::ToolCalls { calls } => calls
-                        .iter()
-                        .map(|call| format!("{}:{}", call.id, call.name))
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    sdk::AgentProgressKindView::Started { role, model } => {
-                        format!("role={role:?} model={model}")
-                    }
-                    sdk::AgentProgressKindView::ToolOutput { tool_name, text } => format!(
-                        "tool_name={tool_name} text_len={} text_preview={:?}",
-                        text.len(),
-                        text.chars().take(120).collect::<String>()
-                    ),
-                };
-                crate::tui::log_debug!(
-                    "agent_progress_format kind={} seq={} source_preview={:?} activity_count={}",
-                    kind_name,
-                    event.sequence,
-                    source_preview,
-                    activities.len(),
-                );
-                conversation(ConversationIntent::RecordAgentActivities(
-                    RecordAgentActivities {
-                        chat_id: attachment_context.chat_id.clone(),
-                        run_id: attachment_context.run_id.clone(),
-                        tool_id: ToolCallId::new(tool_id.as_str()),
-                        activities,
-                    },
-                ))
-            }
-        },
-        UiEvent::Done { context }
-        | UiEvent::DoneWithDuration { context, .. }
-        | UiEvent::Cancelled { context, .. } => {
-            conversation(ConversationIntent::CompleteChat(CompleteChat {
-                chat_id: context.chat_id.clone(),
-                run_id: context.run_id.clone(),
-            }))
-        }
-
-        // ── Usage / LiveTps → ConversationIntent ──
-        UiEvent::Usage {
-            input,
-            output,
-            last_input,
-            elapsed_secs,
-        } => {
-            let mut intents = vec![ConversationIntent::RecordUsage(RecordUsage {
-                input_tokens: u64::from(*input),
-                output_tokens: u64::from(*output),
-                last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
-            })];
-            if *elapsed_secs > 0.0 {
-                intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
-                    tps: f64::from(*output) / elapsed_secs,
-                }));
-            }
-            AgentEventMapping {
-                conversation: intents,
-                ..AgentEventMapping::default()
-            }
-        }
-        UiEvent::LiveTps(tps) => conversation(ConversationIntent::RecordLiveTps(RecordLiveTps {
-            tps: *tps,
-        })),
-
-        // ── Error ──
-        UiEvent::Error(message) => {
-            let mut mapping = conversation(ConversationIntent::AppendError(AppendError {
-                text: message.clone(),
-            }));
-            mapping.diagnostic.push(DiagnosticIntent::RecordNotice {
-                severity: DiagnosticSeverity::Error,
-                message: message.clone(),
-            });
-            mapping
-        }
-
-        // ── System messages ──
-        // runtime 允许发空 SystemMessage——hook 的 additional_context / system_message
-        // 只判 `Option` 不判空串（`looping/tools.rs`、`post_batch.rs`、`compact.rs`）。
-        // ACL 层在此丢弃，否则空 block 会各吃掉 2 行（空内容 + depth0 前置空行，#1106）。
-        // 判空前先剥离信封：`<system-reminder></system-reminder>` 剥离后即为空。
-        // 启动横幅经 `seed_banner` 直接注入 model，不走本路径，其空行不受影响。
-        UiEvent::SystemMessage(text) => {
-            if strip_system_reminder_envelope(text).trim().is_empty() {
-                crate::tui::log_debug!(
-                    "drop empty system message from runtime raw_len={}",
-                    text.len()
-                );
-                return AgentEventMapping::default();
-            }
-            conversation(ConversationIntent::AppendSystemMessage(
-                AppendSystemMessage { text: text.clone() },
-            ))
-        }
-        UiEvent::TurnStarted { messages }
-        | UiEvent::MicrocompactDone { messages, .. }
-        | UiEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
-        UiEvent::SessionMessageStateChanged {
-            message_count,
-            revision,
-        } => session(SessionIntent::MessageStateChanged {
-            message_count: *message_count,
-            revision: *revision,
-        }),
-        UiEvent::CompactFinished { messages, notice } => {
-            let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
-                AppendSystemMessage {
-                    text: notice.clone(),
-                },
-            ));
-            mapping.session.push(SessionIntent::MessagesSynced {
-                message_count: messages.len(),
-            });
-            mapping
-        }
-        UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
-
-        UiEvent::WorkingDirectoryChanged(update) => map_status_context(update),
-        UiEvent::WorkspaceMetadataResolved(metadata) => AgentEventMapping {
-            workspace: vec![WorkspaceIntent::ApplyMetadata {
-                root: metadata.root.clone(),
-                revision: metadata.revision,
-                branch: metadata.branch.clone(),
-                kind: metadata.kind,
-            }],
-            ..AgentEventMapping::default()
-        },
-        _ => AgentEventMapping::default(),
-    }
-}
-
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
-        InteractionBody, InteractionRequest, UiApprovalPrompt, UiPlanApprovalPrompt, UiRiskLevel,
-        UiStuckDiagnostic, UiUserQuestion,
+        InteractionBody, InteractionRequest, UiApprovalPrompt, UiOptionItem, UiPlanApprovalPrompt,
+        UiRiskLevel, UiStuckDiagnostic, UiUserQuestion,
     };
 
     match event {
@@ -387,18 +46,18 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }),
         ),
         TuiRuntimeEvent::SkillsUpdated { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::Text { context, text } => {
+        TuiRuntimeEvent::AssistantTextDelta { context, delta } => {
             conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
-        TuiRuntimeEvent::Thinking { context, text } => {
+        TuiRuntimeEvent::ThinkingDelta { context, delta } => {
             conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
-                text: text.clone(),
+                text: delta.clone(),
             }))
         }
         TuiRuntimeEvent::BlockComplete { context, .. } => {
@@ -407,7 +66,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
             }))
         }
-        TuiRuntimeEvent::ToolCallStart {
+        TuiRuntimeEvent::ToolCallStarted {
             context,
             id,
             provider_id,
@@ -421,19 +80,33 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             name: name.clone(),
             index: *index,
         })),
-        TuiRuntimeEvent::ToolCallUpdate {
+        TuiRuntimeEvent::ToolCallArgumentsDelta {
             context,
             id,
             provider_id,
             name,
             index,
-            arguments_delta,
+            delta,
+        } => conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
+            run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
+            id: ToolCallId::new(id),
+            provider_id: provider_id.clone(),
+            name: name.clone(),
+            index: *index,
+            arguments: Some(sanitize_tool_arguments_delta(name, delta)),
+            status: ToolCallStatus::PendingArgs,
+        })),
+        TuiRuntimeEvent::ToolCallStateChanged {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
             arguments,
             status,
         } => {
-            let args = arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(ToString::to_string));
+            let args = arguments.as_ref().map(ToString::to_string);
             conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
@@ -481,7 +154,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
-                cost_usd: 0.0,
             })];
             if *elapsed_secs > 0.0 {
                 intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
@@ -526,10 +198,12 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }))
         }
         TuiRuntimeEvent::TurnStarted { messages }
-        | TuiRuntimeEvent::MicrocompactDone { messages, .. }
-        | TuiRuntimeEvent::CompactRollback { messages } => session(SessionIntent::MessagesSynced {
-            message_count: messages.len(),
-        }),
+        | TuiRuntimeEvent::MicrocompactCompleted { messages, .. }
+        | TuiRuntimeEvent::CompactOperationRolledBack { messages } => {
+            session(SessionIntent::MessagesSynced {
+                message_count: messages.len(),
+            })
+        }
         TuiRuntimeEvent::SessionMessageStateChanged {
             message_count,
             revision,
@@ -537,7 +211,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             message_count: *message_count,
             revision: *revision,
         }),
-        TuiRuntimeEvent::CompactFinished { messages, notice } => {
+        TuiRuntimeEvent::CompactOperationCompleted { messages, notice } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
                     text: notice.clone(),
@@ -597,12 +271,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ],
             ..AgentEventMapping::default()
         },
-        TuiRuntimeEvent::GraphPhaseChanged { node, .. } => {
-            conversation(ConversationIntent::SetGraphPhase(SetGraphPhase(
-                (node != "idle").then(|| node.clone()),
-            )))
-        }
-        TuiRuntimeEvent::CompactProgress { .. } => AgentEventMapping::default(),
+        TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
+            ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
+        ),
         TuiRuntimeEvent::TaskStateChanged { state } => conversation(
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),
@@ -621,72 +292,39 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             },
         )),
         TuiRuntimeEvent::RunChanged(_) => AgentEventMapping::default(),
-        TuiRuntimeEvent::AgentProgress {
-            attachment_context,
-            tool_id,
-            event,
-            ..
-        } => match &event.kind {
-            TuiAgentProgressKind::Started { role, model } => {
-                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    role: role.clone(),
-                    model: model.clone(),
-                }))
-            }
-            TuiAgentProgressKind::Message { text } => conversation(
-                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    activities: format_agent_progress_text(text),
-                }),
-            ),
-            TuiAgentProgressKind::ToolCalls { calls } => conversation(
-                ConversationIntent::RecordAgentActivities(RecordAgentActivities {
-                    chat_id: crate::tui::model::conversation::ids::ChatId::new(
-                        &attachment_context.chat_id,
-                    ),
-                    run_id: crate::tui::model::conversation::ids::ChatRunId::new(
-                        &attachment_context.run_id,
-                    ),
-                    tool_id: ToolCallId::new(tool_id),
-                    activities: format_agent_progress_calls(calls),
-                }),
-            ),
-            // sub-agent 内部工具输出（ToolOutput）不进入 conversation activity——
-            // 顶层工具 stdout 走独立 ToolProgressEvent 通道（ToolProgress 分支）。
-            TuiAgentProgressKind::ToolOutput { .. } => AgentEventMapping::default(),
-        },
-        TuiRuntimeEvent::ToolProgress {
+        TuiRuntimeEvent::ToolOutputDelta {
             context,
             tool_id,
-            event,
+            delta,
         } => conversation(ConversationIntent::RecordToolStreamingOutput(
             RecordToolStreamingOutput {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new(&context.chat_id),
                 run_id: crate::tui::model::conversation::ids::ChatRunId::new(&context.run_id),
                 tool_id: ToolCallId::new(tool_id),
-                text: event.text.clone(),
+                text: delta.clone(),
             },
         )),
-        TuiRuntimeEvent::ChildRunActivity(event) => conversation(
-            ConversationIntent::RecordChildRunActivity(RecordChildRunActivity {
+        TuiRuntimeEvent::SubRunStarted(event) => {
+            conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                chat_id: crate::tui::model::conversation::ids::ChatId::new(
+                    &event.identity.parent_chat_id,
+                ),
+                run_id: crate::tui::model::conversation::ids::ChatRunId::new(
+                    event.identity.parent_run_id.as_str(),
+                ),
+                tool_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
+                role: event.role.clone(),
+                model: event.model.clone(),
+            }))
+        }
+        TuiRuntimeEvent::SubRunActivity(event) => conversation(
+            ConversationIntent::RecordSubRunActivity(RecordSubRunActivity {
                 agent_id: event.identity.agent_id.clone(),
-                child_run_id: event.identity.run_id.as_str().to_string(),
+                sub_run_id: event.identity.run_id.as_str().to_string(),
                 parent_run_id: event.identity.parent_run_id.as_str().to_string(),
                 spawned_by_tool_call_id: ToolCallId::new(&event.identity.spawned_by_tool_call_id),
                 sequence: event.sequence,
+                sequence_index: event.sequence_index,
                 kind: event.kind.clone(),
             }),
         ),
@@ -736,7 +374,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::ReminderList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ProjectInfo { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::CostUpdate { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::Run { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::RunStep {
             run_id,
@@ -744,7 +381,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             step_id,
             event,
         } => match event {
-            TuiRunStepEvent::Cancelled { confirmed } if parent_run_id.is_none() => {
+            TuiRunStepEvent::Cancelled { terminal } if parent_run_id.is_none() => {
+                let confirmed = matches!(
+                    terminal,
+                    crate::tui::adapter::tui_runtime_event::TuiRunStepCancellationTerminal::Cancelled
+                );
                 crate::tui::log_debug!(
                     "cancelled step terminal consumed: run_id={:?} step_id={:?} confirmed={}",
                     run_id,
@@ -752,9 +393,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                     confirmed
                 );
                 conversation(ConversationIntent::PresentCancelledStep(
-                    PresentCancelledStep {
-                        confirmed: *confirmed,
-                    },
+                    PresentCancelledStep { confirmed },
                 ))
             }
             TuiRunStepEvent::Started
@@ -770,7 +409,14 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                         .iter()
                         .map(|question| UiUserQuestion {
                             prompt: question.prompt.clone(),
-                            options: question.options.clone(),
+                            options: question
+                                .options
+                                .iter()
+                                .map(|option| UiOptionItem {
+                                    title: option.title.clone(),
+                                    description: option.description.clone(),
+                                })
+                                .collect(),
                             allow_multi: question.allow_multi,
                         })
                         .collect(),
@@ -826,44 +472,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }],
             ..AgentEventMapping::default()
         },
-    }
-}
-
-fn format_agent_progress_text(
-    text: &str,
-) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
-    text.lines()
-        .filter(|line| !line.is_empty())
-        .map(crate::tui::model::conversation::agent_progress::AgentActivityLine::message)
-        .collect()
-}
-
-fn format_agent_progress_calls(
-    calls: &[crate::tui::adapter::tui_runtime_event::TuiAgentToolCall],
-) -> Vec<crate::tui::model::conversation::agent_progress::AgentActivityLine> {
-    calls
-        .iter()
-        .map(|call| {
-            let name = crate::tui::view_model::tool_name::tool_display_name(&call.name);
-            let preview =
-                crate::tui::view_model::tool_name::tool_input_preview(&call.name, &call.input);
-            let content = if preview.is_empty() {
-                name.to_string()
-            } else {
-                format!("{name} {preview}")
-            };
-            crate::tui::model::conversation::agent_progress::AgentActivityLine::tool_call(content)
-        })
-        .collect()
-}
-
-fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
-    AgentEventMapping {
-        workspace: vec![WorkspaceIntent::ApplySnapshot {
-            path_base: Some(update.raw_path_base.to_string_lossy().to_string()),
-            workspace_root: Some(update.raw_workspace_root.to_string_lossy().to_string()),
-        }],
-        ..AgentEventMapping::default()
     }
 }
 

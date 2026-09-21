@@ -161,6 +161,8 @@ Run 的差异分成两个正交维度：
 
 Run 创建时捕获窄的 session snapshot。Factory 不长期借用动态 `SessionState`；模型切换、配置刷新或 workspace 变化只影响后续 Run。
 
+Compact 调用模型同属 session 级事实：`CompactModelResolver` 是"本次 compact 使用哪个模型与输入窗口"的唯一 owner。未配置 `context.compact_model`（缺省或空串）时它读取会话当前模型，配置时按 committed 快照解析 selection 并按 selection 缓存 binding；配置更新与 `/model` 切换在下一次 compact 生效。该解析器由 Composition 装配一次，同时交给 Context 的 Compact 生成器与 Runtime 的会话模型槽；**NEVER** 在 Context 内解析模型目录或 Config，**NEVER** 为 compact 建立第二份模型选择状态。
+
 ## 4. 核心类型边界
 
 ### 4.1 `RunSpec`：能力声明与上限
@@ -650,7 +652,7 @@ attachment_context + tool_id
 1. 派生 Run 创建自己的 `source_context`；同一派生 Run 的 Started、Message、ToolCalls 和 ToolOutput 事件都保留该身份。
 2. 父 Run 执行 Agent ToolCall 时创建 `attachment_context + tool_id`；进度转发器只补充挂载信息，不得改写 `source_context`。
 3. Runtime 出站事件同时携带 `source_context` 与 `attachment_context`。SDK 和 Consumer Adapter 只做逐字段映射，禁止把二者折叠为单一 `context`。
-4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentProgress`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
+4. TUI adapter 只使用 `attachment_context + tool_id` 生成 `UpdateAgentMeta` / `RecordAgentActivities`，确保内容进入父 Agent ToolCall block；`source_context` 保留给日志、诊断及未来嵌套展示。
 5. Conversation Model 必须按显式 `attachment_context + tool_id` 定位 ToolCall，禁止按 active turn 或全局 `tool_id` 回退搜索。并发 Agent ToolCall 必须保持隔离。
 6. Agent progress 不进入根级 timeline；它只更新 Agent ToolCall 的 `agent_meta` 与 `activities`。工具完成后由既有 ToolResult 渲染规则接管。
 
@@ -684,19 +686,25 @@ Runtime application 回答“何时发生什么业务动作”：
 - 在 Run 创建点调用 `RunFactory::create` 取得 `RunInstance`；
 - 驱动 Loop 和领域状态迁移。
 
-### 7.3 退役 `from_args.rs` 大装配器
+### 7.3 Runtime bootstrap 已收敛且按职责分层
 
-当前 `from_args.rs` 同时承担参数解析、Session 恢复、模型绑定、Tool/Skill 查询、Prompt 构建、并发配置、Agent runner 创建、基础设施创建和 Client 构造，已形成 Runtime 内第二个 Composition Root。
+当前 `application/client/from_args.rs` 不再构造供应 BC 的具体 adapter；Composition 通过 `RuntimeBootstrapDependencies` 注入 opaque wiring、ports、窄 factory 与唯一 `RuntimeContextFactory`，Main/Derived Run 都经 `RunFactory` → `RunLauncher`。因此它已经不是第二个 Composition Root。
 
-目标不是把整个文件移动到 `agent/composition`，而是按职责拆解：
+该文件的职责分层现状（#1067 测试审查定稿）：
 
-- 入站边界先将 CLI/SDK args 标准化为 typed bootstrap request；
-- Composition 完成具体 adapter/object graph；
-- Runtime bootstrap 只执行 Session 启动用例并创建 `SessionState`；
-- Provider、Prompt、Skill 初始化委托各自 application service；
-- Run 创建统一提交 `RunCreationRequest`。
+- **Session 恢复**已拆出 `client/startup_resume.rs`：`resolve_startup_session` 与 `map_resume_view_to_sdk_backing` 承担 resume 解析与 SDK backing 逐字段映射，L1 字段完整性由 `startup_resume_tests.rs` 锁定（steps、display history index、created_at 解析与降级、compacted、session id）。
+- **模型/Prompt/Skill 绑定**（`SessionModelState` 绑定、`compact_model_slot`、typed assembly 解包）由 `from_args_tests.rs` 的 `startup_snapshot_reads_current_model_state` 与 `model_switch_affects_only_next_assembler` 覆盖。
+- **typed bootstrap request 处理**（committed_config 读取顺序、并发上限）由 `startup_resume_precedes_current_project_config_read` 覆盖：resume 先于 snapshot 读取，跨项目 resume 由 Context 拒绝且不改变 committed snapshot。
+- **Client 构造**（`SessionRuntime::new` 单一来源、accessors、interaction bridge）由 `accessors_read_from_shell_single_source`、`interaction_bridge_is_single_source_on_shell` 等覆盖。
 
-最终 `from_args.rs` 应删除，或收敛为很薄的 `bootstrap_runtime(request, services)` 入口。
+后续拆分仍属可维护性工作：
+
+- 入站边界继续将 CLI/SDK args 标准化为 typed bootstrap request；
+- Composition 保持具体 adapter/object graph 的唯一装配所有者（由 `check-cross-bc-construction-registry.sh` fail-closed 注册表机械保护）；
+- Runtime bootstrap 按 Session、模型、Prompt/Skill 与 Client construction 拆成窄 application services；
+- Run 创建继续唯一提交 `RunCreationRequest`，不得恢复 Main/Sub 分叉装配。
+
+`from_args.rs` 的退出标准是收敛为薄的 `bootstrap_runtime(request, services)` 编排入口；文件大小本身不是恢复第二 Composition Root 的证据。
 
 ## 8. Workspace、Prompt、Skills 与 Config
 

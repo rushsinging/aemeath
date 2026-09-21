@@ -244,3 +244,92 @@ async fn load_one_preserves_typed_io_error() {
     .expect_err("missing file must fail");
     assert!(matches!(error, SkillError::ReadFailed { .. }));
 }
+
+// ── 无关入口错误不得阻断 load ──────────────────────────────────────────
+
+/// 在 Skill 根目录创建一个指向不存在目标的符号链接，模拟已删除 Skill 的残留入口。
+#[cfg(unix)]
+fn write_dangling_symlink(root: &std::path::Path, name: &str) -> std::path::PathBuf {
+    std::fs::create_dir_all(root).unwrap();
+    let link = root.join(name);
+    std::os::unix::fs::symlink("definitely-missing-skill-target", &link).unwrap();
+    link
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn load_succeeds_when_unrelated_entry_is_dangling_symlink() {
+    let project = fresh_project();
+    write_skill(
+        &skills_dir(&project),
+        "wanaka-dev",
+        "wanaka-dev",
+        "",
+        "dev body",
+    );
+    write_dangling_symlink(&skills_dir(&project), "stale-skill");
+    let adapter = FilesystemSkillAdapter::new(fresh_global());
+
+    let loaded = adapter
+        .load(load_query(project, "wanaka-dev"))
+        .await
+        .expect("unrelated dangling entry must not block loading");
+    assert_eq!(loaded.name(), "wanaka-dev");
+    assert_eq!(loaded.content(), "dev body");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn load_package_skill_succeeds_despite_unrelated_dangling_entry() {
+    let project = fresh_project();
+    let package_root = skills_dir(&project).join("superpowers/skills");
+    write_skill(
+        &package_root,
+        "brainstorming",
+        "brainstorming",
+        "",
+        "brainstorm body",
+    );
+    write_dangling_symlink(&skills_dir(&project), "wanaka-template-engine-migrate");
+    let adapter = FilesystemSkillAdapter::new(fresh_global());
+
+    let loaded = adapter
+        .load(load_query(project, "superpowers:brainstorming"))
+        .await
+        .expect("package Skill must load despite unrelated dangling entry");
+    assert_eq!(loaded.name(), "superpowers:brainstorming");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn load_reports_read_error_when_requested_entry_is_dangling_symlink() {
+    let project = fresh_project();
+    write_dangling_symlink(&skills_dir(&project), "wanaka-dev");
+    let adapter = FilesystemSkillAdapter::new(fresh_global());
+
+    let error = adapter
+        .load(load_query(project, "wanaka-dev"))
+        .await
+        .expect_err("requested dangling entry must surface its own read error");
+    assert!(
+        matches!(error, SkillError::ReadFailed { ref path, .. } if path.ends_with("wanaka-dev")),
+        "unexpected error: {error:?}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn load_returns_not_found_when_identity_absent_amid_unrelated_errors() {
+    let project = fresh_project();
+    write_dangling_symlink(&skills_dir(&project), "stale-skill");
+    let adapter = FilesystemSkillAdapter::new(fresh_global());
+
+    let error = adapter
+        .load(load_query(project, "missing-skill"))
+        .await
+        .expect_err("absent identity must stay not found");
+    assert!(
+        matches!(error, SkillError::NotFound { ref identity } if identity == "missing-skill"),
+        "unexpected error: {error:?}"
+    );
+}

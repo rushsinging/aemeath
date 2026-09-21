@@ -153,9 +153,7 @@ impl OutputWindowIndex {
             OutputTimelineItem::OrphanToolResult { output, .. } => {
                 output.lines().count().max(1).saturating_add(1)
             }
-            OutputTimelineItem::ToolCall { .. }
-            | OutputTimelineItem::ToolResult { .. }
-            | OutputTimelineItem::AgentProgress { .. } => 10,
+            OutputTimelineItem::ToolCall { .. } | OutputTimelineItem::ToolResult { .. } => 10,
         }
     }
 

@@ -439,6 +439,64 @@ fn run_usage_tracker_new_runs_are_isolated() {
     assert_eq!(tracker2.get(), Some(200));
 }
 
+/// #1626：校准系数从 1.0 出发，只在 provider usage 观测到达后移动；
+/// EMA 平滑后收敛到 上报值/估算值 的滑动比值。
+#[test]
+fn run_usage_tracker_calibration_starts_neutral_and_converges() {
+    let tracker = RunUsageTracker::new();
+    assert_eq!(tracker.calibration_factor(), 1.0);
+
+    // 上报 800 / 估算 1000 → observed 0.8：factor = 0.7×1.0 + 0.3×0.8 = 0.94
+    tracker.update_with_heuristic(800, 1_000);
+    assert!((tracker.calibration_factor() - 0.94).abs() < 1e-9);
+
+    // 持续同比例观测收敛到 0.8
+    for _ in 0..30 {
+        tracker.update_with_heuristic(800, 1_000);
+    }
+    let converged = tracker.calibration_factor();
+    assert!(
+        (converged - 0.8).abs() < 0.01,
+        "应收敛到 0.8，实际 {converged}"
+    );
+}
+
+/// #1626：脏观测（比值超出 clamp 区间 2 倍）不污染系数；估算为 0 跳过。
+#[test]
+fn run_usage_tracker_calibration_ignores_dirty_observations() {
+    let tracker = RunUsageTracker::new();
+    tracker.update_with_heuristic(4_000, 1_000); // observed 4.0 > 2.0×2 → 丢弃
+    assert_eq!(tracker.calibration_factor(), 1.0);
+    tracker.update_with_heuristic(100, 1_000); // observed 0.1 < 0.5/2 → 丢弃
+    assert_eq!(tracker.calibration_factor(), 1.0);
+    tracker.update_with_heuristic(500, 0); // 估算为 0 → 跳过
+    assert_eq!(tracker.calibration_factor(), 1.0);
+    // usage 本身仍被记录
+    assert_eq!(tracker.get(), Some(500));
+}
+
+/// #1626：系数 clamp 在 [0.5, 2.0]；reset（compact 后）清除 usage 但保留系数。
+#[test]
+fn run_usage_tracker_calibration_clamps_and_survives_reset() {
+    let tracker = RunUsageTracker::new();
+    // observed 1.5（区间内）：factor = 0.7 + 0.45 = 1.15
+    tracker.update_with_heuristic(1_500, 1_000);
+    assert!((tracker.calibration_factor() - 1.15).abs() < 1e-9);
+
+    tracker.reset();
+    assert_eq!(tracker.get(), None);
+    assert!((tracker.calibration_factor() - 1.15).abs() < 1e-9);
+}
+
+/// #1626：clone 共享同一校准系数（loop engine 与 observer 看到一致视图）。
+#[test]
+fn run_usage_tracker_clone_shares_calibration() {
+    let tracker = RunUsageTracker::new();
+    let clone = tracker.clone();
+    tracker.update_with_heuristic(800, 1_000);
+    assert!((clone.calibration_factor() - 0.94).abs() < 1e-9);
+}
+
 #[test]
 fn run_usage_tracker_recovers_from_poison() {
     let tracker = RunUsageTracker::new();

@@ -134,6 +134,12 @@ impl EnvAdapter {
                 level: Some(level),
                 ..Default::default()
             });
+        let storage = source.get("AEMEATH_WORKTREES_DIR").map(|directory| {
+            share::config::domain::merge::StorageConfigPatch {
+                worktrees_dir: Some(directory.into()),
+                ..Default::default()
+            }
+        });
         ConfigPatch {
             api: (api.provider.is_some() || api.key.is_some() || api.base_url.is_some())
                 .then_some(api),
@@ -147,6 +153,7 @@ impl EnvAdapter {
             agents,
             ui,
             logging,
+            storage,
             ..Default::default()
         }
     }
@@ -623,6 +630,7 @@ mod tests {
             ("AEMEATH_VERBOSE".into(), "1".into()),
             ("NO_COLOR".into(), "1".into()),
             ("AEMEATH_LOG_LEVEL".into(), "debug".into()),
+            ("AEMEATH_WORKTREES_DIR".into(), "/custom/worktrees".into()),
         ]));
         let patch = EnvAdapter::read(&source);
         assert_eq!(
@@ -642,6 +650,22 @@ mod tests {
         assert_eq!(ui.verbose, Some(true));
         assert_eq!(ui.color, Some(false));
         assert_eq!(patch.logging.unwrap().level.as_deref(), Some("debug"));
+        assert_eq!(
+            patch.storage.unwrap().worktrees_dir,
+            Some(std::path::PathBuf::from("/custom/worktrees"))
+        );
+    }
+
+    #[test]
+    fn env_adapter_omits_storage_patch_without_worktrees_dir() {
+        let source = FakeEnv(HashMap::from([(
+            "AEMEATH_LOG_LEVEL".into(),
+            "debug".into(),
+        )]));
+
+        let patch = EnvAdapter::read(&source);
+
+        assert!(patch.storage.is_none());
     }
 
     #[test]

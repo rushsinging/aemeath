@@ -79,6 +79,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
             reasoning: false,
             reasoning_effort: None,
         },
+        runtime::SessionModelSlot::new(),
     )
 }
 
@@ -215,7 +216,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     )
     .await
     .unwrap();
-    let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
         .unwrap()
         .into_views();
     let task = task::wire_task();

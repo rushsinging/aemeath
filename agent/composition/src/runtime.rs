@@ -32,6 +32,7 @@ fn wire_runtime_tool_assembly(
     skill_loader: Arc<dyn tools::SkillLoadPort>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
+    context_size: usize,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
@@ -40,7 +41,9 @@ fn wire_runtime_tool_assembly(
         skill_loader,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let policy = snapshot.tool_result_policy();
+    // 截断阈值按窗口比例收紧：短窗口下单条大结果会直接顶到
+    // auto-compact 阈值，配置值语义是"大窗口下的上限"。
+    let policy = snapshot.tool_result_policy(context_size);
     let agents_dir_buf = agents_dir.to_path_buf();
     let blobs = Arc::new(runtime::AtomicBlobToolResultStore::new(
         Arc::new(
@@ -164,17 +167,24 @@ pub(crate) async fn from_args_with_gateways(
         .provider
         .build(provider_spec)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let initial_provider =
-        runtime::InitialProviderAssembly::new(initial_binding, resolved_model, runtime_settings);
-
-    // #1486：compact 走 LLM 语义压缩 —— 注入 ProviderCompactGenerator
-    // （包装主 provider binding）。context_factory 依赖 initial_binding，
-    // 因此 MainSession 装配延后到 provider 构建之后。
-    let agents_dir_buf = agents_dir.to_path_buf();
-    let compact_generator = runtime::ProviderCompactGenerator::new(
-        initial_provider.binding().provider.clone(),
-        initial_provider.binding().model.clone(),
+    let compact_model_slot = runtime::SessionModelSlot::new();
+    let initial_provider = runtime::InitialProviderAssembly::new(
+        initial_binding,
+        resolved_model,
+        runtime_settings,
+        compact_model_slot,
     );
+
+    // #1486/#1621：compact 走 LLM 语义压缩，并按 `context.compact_model`
+    // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
+    // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
+    let agents_dir_buf = agents_dir.to_path_buf();
+    let compact_generator =
+        runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
+            config.reader(),
+            gateways.provider.clone(),
+            initial_provider.compact_model_slot(),
+        )));
     let deps = context::MainSessionDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
@@ -213,6 +223,12 @@ pub(crate) async fn from_args_with_gateways(
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
 
+    // context window 需先于 tool assembly 解析：tool_result 截断阈值
+    // 按窗口比例收紧，依赖此处解析出的最终 context_size。
+    let context_size = snapshot.resolve_context_size(
+        Some(args.context_size),
+        initial_provider.resolved_model().model.context_window,
+    );
     let tool_assembly = wire_runtime_tool_assembly(
         task_wiring.access(),
         Arc::new(WiringMemoryPortSource {
@@ -222,6 +238,7 @@ pub(crate) async fn from_args_with_gateways(
         skill_loader.clone(),
         &config.reader().committed_snapshot(),
         agents_dir,
+        context_size,
     )?;
 
     let (usage_sink, session_audit): (
@@ -255,10 +272,6 @@ pub(crate) async fn from_args_with_gateways(
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let context_size = snapshot.resolve_context_size(
-        Some(args.context_size),
-        initial_provider.resolved_model().model.context_window,
-    );
     let session_bootstrap = runtime::SessionBootstrapAssembly::new(
         cwd,
         context_size,

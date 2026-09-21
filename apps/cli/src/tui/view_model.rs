@@ -60,7 +60,6 @@ mod tests {
         let model = OutputViewModel {
             roots: vec![node.into()],
             version: 1,
-            follow_tail_hint: true,
             source_total_lines: None,
             folded_earlier_lines: 0,
         };

@@ -766,7 +766,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     assert!(
         events
             .iter()
-            .all(|event| !event.starts_with("CompactRollback")),
+            .all(|event| !event.starts_with("CompactOperationRolledBack")),
         "finalized partial Step 由 Context append 保存，取消不得恢复旧 rollback 路径: {events:?}"
     );
 }
@@ -945,7 +945,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     assert!(
         events
             .iter()
-            .all(|event| !event.starts_with("CompactRollback")),
+            .all(|event| !event.starts_with("CompactOperationRolledBack")),
         "回合 2 取消应提交 finalized partial Step，禁止恢复旧 rollback 路径: {events:?}"
     );
 

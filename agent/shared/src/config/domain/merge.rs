@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::{
     audit::AuditConfig,
+    context::ContextConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -37,6 +38,8 @@ pub struct ConfigPatch {
     pub model: Option<ModelConfigPatch>,
     #[serde(default)]
     pub models: Option<ModelsConfigPatch>,
+    #[serde(default)]
+    pub context: Option<ContextConfigPatch>,
     #[serde(default)]
     pub tools: Option<ToolsConfigPatch>,
     #[serde(default)]
@@ -75,6 +78,7 @@ impl ConfigPatch {
         self.api.is_none()
             && self.model.is_none()
             && self.models.is_none()
+            && self.context.is_none()
             && self.tools.is_none()
             && self.agents.is_none()
             && self.ui.is_none()
@@ -137,6 +141,20 @@ pub struct ModelsConfigPatch {
     pub fallback_api_key: Option<String>,
     #[serde(default)]
     pub guidance: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextConfigPatch {
+    #[serde(default)]
+    pub snip_enabled: Option<bool>,
+    #[serde(default)]
+    pub microcompact_enabled: Option<bool>,
+    #[serde(default)]
+    pub auto_compact_failure_limit: Option<u8>,
+    /// `Some("")`（或纯空白）表示清除已配置的 compact 模型。
+    #[serde(default, alias = "compactModel")]
+    pub compact_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -275,6 +293,8 @@ pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
     #[serde(default)]
+    pub worktrees_dir: Option<PathBuf>,
+    #[serde(default)]
     pub persist_sessions: Option<bool>,
     #[serde(default)]
     pub max_sessions: Option<usize>,
@@ -294,6 +314,8 @@ pub struct MemoryConfigPatch {
     pub similarity_threshold: Option<f64>,
     #[serde(default)]
     pub inject_count: Option<usize>,
+    #[serde(default)]
+    pub inject_token_budget: Option<usize>,
     #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
@@ -363,6 +385,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(models) = patch.models {
         base.models = apply_models_patch(base.models, models);
+    }
+    if let Some(context) = patch.context {
+        base.context = apply_context_patch(base.context, context);
     }
     if let Some(tools) = patch.tools {
         base.tools = apply_tools_patch(base.tools, tools);
@@ -483,6 +508,25 @@ pub(crate) fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatc
         for (k, v) in guidance {
             base.guidance.insert(k, v);
         }
+    }
+    base
+}
+
+pub(crate) fn apply_context_patch(
+    mut base: ContextConfig,
+    patch: ContextConfigPatch,
+) -> ContextConfig {
+    if let Some(value) = patch.snip_enabled {
+        base.snip_enabled = value;
+    }
+    if let Some(value) = patch.microcompact_enabled {
+        base.microcompact_enabled = value;
+    }
+    if let Some(value) = patch.auto_compact_failure_limit {
+        base.auto_compact_failure_limit = value;
+    }
+    if let Some(value) = patch.compact_model {
+        base.compact_model = crate::config::context::normalize_compact_model_selection(value);
     }
     base
 }
@@ -686,6 +730,9 @@ pub(crate) fn apply_storage_patch(
     if let Some(v) = patch.sessions_dir {
         base.sessions_dir = Some(v);
     }
+    if let Some(v) = patch.worktrees_dir {
+        base.worktrees_dir = Some(v);
+    }
     if let Some(v) = patch.persist_sessions {
         base.persist_sessions = v;
     }
@@ -725,6 +772,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     }
     if let Some(v) = patch.inject_count {
         base.inject_count = v;
+    }
+    if let Some(v) = patch.inject_token_budget {
+        base.inject_token_budget = v;
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);
@@ -858,6 +908,34 @@ mod tests {
     use crate::config::ui::MarkdownSpacingMode;
 
     #[test]
+    fn storage_worktrees_dir_patch_overrides_lower_layer_value() {
+        let global: ConfigPatch =
+            serde_json::from_str(r#"{"storage":{"worktrees_dir":"/global/wt"}}"#).unwrap();
+        let env_layer = ConfigPatch {
+            storage: Some(StorageConfigPatch {
+                worktrees_dir: Some(PathBuf::from("/env/wt")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(
+            snapshot.worktrees_dir(),
+            Some(PathBuf::from("/env/wt").as_path())
+        );
+    }
+
+    #[test]
+    fn storage_worktrees_dir_defaults_to_none_without_patch() {
+        let snapshot = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snapshot.worktrees_dir(), None);
+    }
+
+    #[test]
     fn hook_runtime_limit_patch_preserves_unspecified_lower_layer_values() {
         let global: ConfigPatch = serde_json::from_str(
             r#"{
@@ -944,11 +1022,37 @@ mod tests {
         .unwrap();
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
-        let policy = snapshot.tool_result_policy();
+        // 大窗口（1M）下比例收紧不生效，验证的就是 patch 后的原始策略值
+        let policy = snapshot.tool_result_policy(1_000_000);
 
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);
         assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
+    #[test]
+    fn auto_compact_failure_limit_patch_preserves_unspecified_context_values() {
+        let base = Config {
+            context: ContextConfig {
+                snip_enabled: false,
+                auto_compact_failure_limit: 7,
+                ..ContextConfig::default()
+            },
+            ..Config::default()
+        };
+        let merged = apply_patch(
+            base,
+            ConfigPatch {
+                context: Some(ContextConfigPatch {
+                    auto_compact_failure_limit: Some(2),
+                    ..ContextConfigPatch::default()
+                }),
+                ..ConfigPatch::default()
+            },
+        );
+
+        assert!(!merged.context.snip_enabled);
+        assert_eq!(merged.context.auto_compact_failure_limit, 2);
     }
 
     #[test]

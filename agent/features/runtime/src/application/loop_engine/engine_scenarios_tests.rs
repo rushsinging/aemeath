@@ -83,7 +83,7 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
     assert!(port
         .events()
         .iter()
-        .any(|event| matches!(event, RunDomainEvent::Completed { .. })));
+        .any(|event| matches!(event, RuntimeLifecycleEvent::Completed { .. })));
 }
 
 #[tokio::test]

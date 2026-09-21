@@ -15,12 +15,6 @@ use crate::domain::{
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionSaveIntent {
-    CommitPartialHistory,
-    ReplaceCompleteHistory,
-}
-
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
     async fn commit(
@@ -29,6 +23,33 @@ pub trait CanonicalSessionWriter: Send + Sync {
         expected_revision: u64,
         plan: SessionCommitPlan,
     ) -> Result<(), String>;
+
+    /// `/clear` 逻辑断点提交：磁盘 step 成员全部保留，state 记录 clear
+    /// 边界（clear 时刻磁盘 generation 的最后一个 step）。
+    ///
+    /// 返回写入 clear 边界后的 session 快照（与磁盘一致），调用方必须以
+    /// 返回值发布内存 generation。默认实现面向无磁盘增量的 backing：
+    /// 无未加载成员需要保留，边界保持 `after` 原样。
+    async fn commit_clearing_history(
+        &self,
+        before: &CanonicalSession,
+        after: CanonicalSession,
+    ) -> Result<CanonicalSession, String> {
+        let plan = SessionCommitPlan::between(before, &after).map_err(|error| error.to_string())?;
+        self.commit(after.id.as_str(), before.revision, plan)
+            .await?;
+        Ok(after)
+    }
+
+    /// 数据集为空集时以内存全量快照重建持久化状态；数据集非空时必须
+    /// fail-closed，防止覆盖并发写者。重建后磁盘修订号与内存对齐。
+    async fn rebuild_empty_dataset(
+        &self,
+        _session_id: &str,
+        _session: &crate::domain::session::CanonicalSession,
+    ) -> Result<(), String> {
+        Err("Session writer 不支持空数据集全量重建".to_string())
+    }
 }
 
 #[async_trait]
@@ -315,6 +336,56 @@ impl MainContextFactory for ProductionMainContextFactory {
     }
 }
 
+#[derive(Clone)]
+struct CompactSource {
+    revision: SessionRevision,
+    messages: Vec<share::message::Message>,
+    visible_steps: Vec<(
+        crate::domain::session::RunStepCursor,
+        Vec<share::message::Message>,
+    )>,
+    previous_summary: Option<String>,
+}
+
+struct GeneratedCompact {
+    summary: String,
+    recent_messages: Vec<share::message::Message>,
+    quality: crate::domain::CompactSummaryQuality,
+}
+
+struct AutoCompactAttemptPermit {
+    state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
+    failure_limit: u8,
+    finished: bool,
+}
+
+impl AutoCompactAttemptPermit {
+    fn finish(mut self, outcome: &Result<CompactOutcome, ContextPortError>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match outcome {
+            Ok(CompactOutcome::Committed(_)) => state.record_success(),
+            Ok(CompactOutcome::Skipped(_)) => {}
+            Err(_) => state.record_failure(self.failure_limit),
+        }
+        self.finished = true;
+    }
+}
+
+impl Drop for AutoCompactAttemptPermit {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .record_failure(self.failure_limit);
+    }
+}
+
 pub struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
@@ -326,6 +397,7 @@ pub struct CanonicalSessionRepository {
     /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
     /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
     generator: Option<Arc<dyn CompactGenerator>>,
+    auto_compact_state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
 }
 
 impl CanonicalSessionRepository {
@@ -345,6 +417,9 @@ impl CanonicalSessionRepository {
             writer,
             mutation_gate,
             generator: None,
+            auto_compact_state: Arc::new(std::sync::Mutex::new(
+                crate::domain::compact::AutoCompactState::default(),
+            )),
         }
     }
 
@@ -401,7 +476,9 @@ impl CanonicalSessionRepository {
         previous_summary: Option<&str>,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-    ) -> Option<(String, Vec<share::message::Message>)> {
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Option<crate::adapters::compact_summary::CompactResult> {
         match &self.generator {
             Some(generator) => {
                 let result = compact_messages_with_llm(
@@ -410,49 +487,268 @@ impl CanonicalSessionRepository {
                     context_size,
                     Some(generator.as_ref()),
                     progress.as_deref(),
-                    &tokio_util::sync::CancellationToken::new(),
+                    task_snapshot,
+                    cancellation,
                 )
                 .await;
-                result.map(|compacted| {
+                result.inspect(|compacted| {
                     log::info!(
                         target: crate::LOG_TARGET,
-                        "[compact] LLM 路径提交：summary={} chars recent={}",
+                        "[compact] LLM 路径生成完成：summary={} chars recent={} quality={:?}",
                         compacted.summary.len(),
                         compacted.recent_messages.len(),
+                        compacted.quality,
                     );
-                    (compacted.summary, compacted.recent_messages)
                 })
             }
             None => {
-                let compacted = crate::adapters::compact_summary::compact_messages(messages)?;
+                let mut compacted = crate::adapters::compact_summary::compact_messages(messages)?;
                 let window = crate::adapters::compact_summary::compact_window(messages.len())?;
                 let early = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
-                let summary =
+                compacted.summary =
                     crate::adapters::compact_summary::build_summary_text(early, previous_summary);
                 log::info!(
                     target: crate::LOG_TARGET,
-                    "[compact] 本地路径提交：summary={} chars recent={}",
-                    summary.len(),
+                    "[compact] 本地路径生成完成：summary={} chars recent={}",
+                    compacted.summary.len(),
                     compacted.recent_messages.len(),
                 );
-                Some((summary, compacted.recent_messages))
+                Some(compacted)
             }
         }
     }
 
-    /// #1537：将当前 Task 状态段落拼接到 compact summary 末尾。
-    ///
-    /// task 状态不经过 LLM 压缩（递进管线的 map/reduce/refresh 均不感知），
-    /// 只在 summary 定稿后追加，保证 compact 后 Agent 仍能看到任务进度。
-    /// `task_context` 为 `None` 或空时原样返回 summary。
-    fn append_task_context(summary: &str, task_context: &Option<String>) -> String {
-        let (checkpoint, _) = crate::domain::compact::split_checkpoint_and_task_state(summary);
-        match task_context {
-            Some(context) if !context.trim().is_empty() => {
-                format!("{checkpoint}\n\n## Current Task State\n{context}")
+    /// 将 typed Task snapshot 确定性渲染为非权威 companion，并将完整 summary
+    /// 收敛到同一 Context-owned summary budget。
+    fn append_task_snapshot_companion(
+        summary: &str,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        budget: usize,
+    ) -> Result<String, crate::domain::compact::CheckpointError> {
+        let checkpoint =
+            crate::domain::compact::CanonicalCompactSummary::decode(summary)?.into_checkpoint();
+        let Some(snapshot) = task_snapshot.filter(|snapshot| !snapshot.items().is_empty()) else {
+            return checkpoint
+                .degrade_to_budget(budget)
+                .map(|checkpoint| checkpoint.render());
+        };
+
+        let mut item_limit = snapshot.items().len();
+        loop {
+            let companion = snapshot.render_companion_with_limit(item_limit);
+            let companion_tokens = crate::domain::token_budget::estimate_tokens(&format!(
+                "\n\n## Current Task State\n{companion}"
+            ));
+            if companion_tokens < budget {
+                if let Ok(bounded_checkpoint) = checkpoint
+                    .clone()
+                    .degrade_to_budget(budget - companion_tokens)
+                {
+                    return Ok(format!(
+                        "{}\n\n## Current Task State\n{companion}",
+                        bounded_checkpoint.render()
+                    ));
+                }
             }
-            _ => checkpoint.to_string(),
+            if item_limit == 0 {
+                break;
+            }
+            item_limit -= 1;
         }
+
+        checkpoint
+            .degrade_to_budget(budget)
+            .map(|checkpoint| checkpoint.render())
+    }
+
+    async fn commit_automatic_compaction(
+        &self,
+        request: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let source = self
+            .freeze_compact_source(&request.source.session_id, Some(request.source_revision))
+            .await?;
+        let generated = match self
+            .generate_compact(
+                &source,
+                request.source.context_size,
+                request.progress.clone(),
+                request.task_snapshot.as_ref(),
+                &request.cancellation,
+            )
+            .await
+        {
+            Ok(Some(generated)) => generated,
+            Ok(None) => {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+            }
+            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+        };
+        self.commit_generated_compact(&request.source.session_id, &source, generated)
+            .await
+    }
+
+    fn begin_auto_compact_attempt(&self, failure_limit: u8) -> Option<AutoCompactAttemptPermit> {
+        let state = self
+            .auto_compact_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.should_attempt() {
+            return None;
+        }
+        drop(state);
+        Some(AutoCompactAttemptPermit {
+            state: Arc::clone(&self.auto_compact_state),
+            failure_limit: failure_limit.max(1),
+            finished: false,
+        })
+    }
+
+    async fn freeze_compact_source(
+        &self,
+        session_id: &SessionId,
+        expected_revision: Option<SessionRevision>,
+    ) -> Result<CompactSource, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+        }
+        let revision = SessionRevision::new(current.revision);
+        if let Some(expected_revision) = expected_revision {
+            if expected_revision != revision {
+                return Err(Self::compact_revision_conflict(expected_revision, revision));
+            }
+        }
+        let visible_steps = current.flattened_steps_from_marker();
+        let messages = visible_steps
+            .iter()
+            .flat_map(|(_, messages)| messages.iter().cloned())
+            .collect();
+        Ok(CompactSource {
+            revision,
+            messages,
+            visible_steps,
+            previous_summary: current
+                .compact
+                .as_ref()
+                .map(|marker| marker.summary.clone()),
+        })
+    }
+
+    async fn generate_compact(
+        &self,
+        source: &CompactSource,
+        context_size: usize,
+        progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
+        let Some(compacted) = self
+            .compact_visible_messages(
+                &source.messages,
+                source.previous_summary.as_deref(),
+                context_size,
+                progress,
+                task_snapshot,
+                cancellation,
+            )
+            .await
+        else {
+            return if cancellation.is_cancelled() {
+                Err(crate::domain::CompactSkipReason::Cancelled)
+            } else {
+                Ok(None)
+            };
+        };
+        let reconciled_summary =
+            crate::domain::compact::CanonicalCompactSummary::decode(&compacted.summary)
+                .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
+                .and_then(|checkpoint| {
+                    crate::domain::compact::reconcile_checkpoint_with_task_snapshot(
+                        checkpoint,
+                        task_snapshot,
+                    )
+                })
+                .map(|checkpoint| checkpoint.render())
+                .unwrap_or_else(|_| compacted.summary.clone());
+        let summary = Self::append_task_snapshot_companion(
+            &reconciled_summary,
+            task_snapshot,
+            crate::domain::token_budget::summary_budget(context_size),
+        )
+        .map_err(|_| crate::domain::CompactSkipReason::CircuitBreakerOpen)?;
+        Ok(Some(GeneratedCompact {
+            summary,
+            recent_messages: compacted.recent_messages,
+            quality: compacted.quality,
+        }))
+    }
+
+    async fn commit_generated_compact(
+        &self,
+        session_id: &SessionId,
+        source: &CompactSource,
+        generated: GeneratedCompact,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+        }
+        let actual_revision = SessionRevision::new(current.revision);
+        if actual_revision != source.revision {
+            return Err(Self::compact_revision_conflict(
+                source.revision,
+                actual_revision,
+            ));
+        }
+        let keep_messages = generated.recent_messages.len();
+        let mut retained = 0usize;
+        let mut start_at = None;
+        for (cursor, step_messages) in source.visible_steps.iter().rev() {
+            retained += step_messages.len();
+            start_at = Some(cursor.clone());
+            if retained >= keep_messages {
+                break;
+            }
+        }
+        let mut candidate = (*current).clone();
+        candidate.compact = Some(ActiveCompactMarker {
+            summary: generated.summary.clone(),
+            start_at,
+            source_revision: source.revision.get(),
+        });
+        candidate.revision += 1;
+        candidate.updated_at = crate::domain::session::now_iso();
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextPortError::Compact)?;
+        self.publish_generation(&current, candidate)
+            .map_err(ContextPortError::SessionRepository)?;
+        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
+            summary: generated.summary,
+            recent_messages: generated.recent_messages,
+            source_revision: source.revision,
+            quality: generated.quality,
+        }))
+    }
+
+    fn compact_revision_conflict(
+        expected: SessionRevision,
+        actual: SessionRevision,
+    ) -> ContextPortError {
+        ContextPortError::Compact(format!(
+            "Session revision 冲突：期望 {expected:?}，实际 {actual:?}"
+        ))
     }
 
     fn receipt(append: &ContextAppend, revision: SessionRevision) -> AppendReceipt {
@@ -479,43 +775,47 @@ impl CanonicalSessionRepository {
     fn build_commit_plan(
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<SessionCommitPlan, String> {
-        match intent {
-            SessionSaveIntent::CommitPartialHistory => {
-                let manifest = crate::domain::session::SessionGenerationManifest::new(
-                    before.id.clone(),
-                    before.revision,
-                    before
-                        .run_slices
+        let manifest = crate::domain::session::SessionGenerationManifest::new(
+            before.id.clone(),
+            before.revision,
+            before
+                .run_slices
+                .iter()
+                .flat_map(|slice| {
+                    slice
+                        .steps
                         .iter()
-                        .flat_map(|slice| {
-                            slice
-                                .steps
-                                .iter()
-                                .map(|step| crate::domain::session::RunStepCursor {
-                                    run_id: slice.run_id.clone(),
-                                    step_id: step.step_id.clone(),
-                                })
+                        .map(|step| crate::domain::session::RunStepCursor {
+                            run_id: slice.run_id.clone(),
+                            step_id: step.step_id.clone(),
                         })
-                        .collect(),
-                )
-                .map_err(|error| error.to_string())?;
-                SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
-            }
-            SessionSaveIntent::ReplaceCompleteHistory => SessionCommitPlan::between(before, after),
-        }
-        .map_err(|error| error.to_string())
+                })
+                .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+        SessionCommitPlan::between_preserving_unloaded_steps(before, after, &manifest)
+            .map_err(|error| error.to_string())
     }
 
     async fn persist_candidate(
         &self,
         before: &CanonicalSession,
         after: &CanonicalSession,
-        intent: SessionSaveIntent,
     ) -> Result<(), String> {
-        let plan = Self::build_commit_plan(before, after, intent)?;
-        self.writer.commit(&after.id, before.revision, plan).await
+        let plan = Self::build_commit_plan(before, after)?;
+        match self.writer.commit(&after.id, before.revision, plan).await {
+            Ok(()) => Ok(()),
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。
+                match self.writer.rebuild_empty_dataset(&after.id, after).await {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(commit_error),
+                }
+            }
+        }
     }
 
     fn publish_generation(
@@ -540,17 +840,24 @@ impl SessionRepository for CanonicalSessionRepository {
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
         }
+        let structured_history = session.visible_history();
         let messages = crate::domain::ContextMessages::from_committed_steps(
-            session
-                .visible_message_steps()
-                .into_iter()
-                .map(|messages| messages.as_arc())
+            structured_history
+                .iter()
+                .flat_map(|slice| slice.steps.iter())
+                .flat_map(|step| {
+                    step.accepted_input
+                        .iter()
+                        .map(|input| input.messages.as_arc())
+                        .chain(step.outcome.iter().map(|outcome| outcome.messages.as_arc()))
+                })
                 .collect(),
             Vec::new(),
         );
         Ok(SessionSnapshot {
             revision: SessionRevision::new(session.revision),
             messages,
+            structured_history: Some(structured_history),
             active_summary: session.active_summary().map(str::to_string),
         })
     }
@@ -669,6 +976,25 @@ impl SessionRepository for CanonicalSessionRepository {
         });
     }
 
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        let current = self
+            .session
+            .read()
+            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+            .clone();
+        if current.id != session_id.as_str() {
+            return Err(ToolReceiptMutationError::SessionNotFound(
+                session_id.clone(),
+            ));
+        }
+        Ok(current.step_receipts(run_id.as_ref(), step_id.as_str()))
+    }
+
     async fn compare_and_record_skill_load(
         &self,
         mutation: tools::SkillLoadMutation,
@@ -697,13 +1023,9 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(tools::SkillLoadStateError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(tools::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(tools::SkillLoadStateError::Storage)?;
         Ok(decision)
@@ -794,13 +1116,9 @@ impl SessionRepository for CanonicalSessionRepository {
             committed_revision: candidate.revision,
         });
 
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextAppendError::Storage)?;
+        self.persist_candidate(&current, &candidate)
+            .await
+            .map_err(ContextAppendError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
@@ -817,153 +1135,46 @@ impl SessionRepository for CanonicalSessionRepository {
         &self,
         request: &CompactRequest,
     ) -> Result<CompactOutcome, ContextPortError> {
-        let _mutation = self.mutation_gate.lock().await;
-        let current = self
-            .session
-            .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
-            .clone();
-        if current.id != request.source.session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(
-                request.source.session_id.clone(),
+        let Some(attempt) = self.begin_auto_compact_attempt(
+            request.source.config_snapshot.auto_compact_failure_limit(),
+        ) else {
+            return Ok(CompactOutcome::Skipped(
+                CompactSkipReason::CircuitBreakerOpen,
             ));
-        }
-        let source_revision = request.source_revision;
-        let actual_revision = SessionRevision::new(current.revision);
-        if source_revision != actual_revision {
-            return Err(ContextPortError::Compact(format!(
-                "Session revision 冲突：期望 {source_revision:?}，实际 {actual_revision:?}"
-            )));
-        }
-        let visible_steps = current.flattened_steps_from_marker();
-        let messages: Vec<_> = visible_steps
-            .iter()
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect();
-        let previous_summary = current
-            .compact
-            .as_ref()
-            .map(|marker| marker.summary.as_str());
-        let Some((summary, recent_messages)) = self
-            .compact_visible_messages(
-                &messages,
-                previous_summary,
-                request.source.context_size,
-                request.progress.clone(),
-            )
-            .await
-        else {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         };
-        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
-        let summary = Self::append_task_context(&summary, &request.task_context);
-        let mut candidate = (*current).clone();
-        let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = recent_messages.len();
-        let mut retained = 0usize;
-        let mut start_at = None;
-        for (cursor, step_messages) in visible_steps.iter().rev() {
-            retained += step_messages.len();
-            start_at = Some(cursor.clone());
-            if retained >= keep_messages {
-                break;
-            }
-        }
-        candidate.compact = Some(ActiveCompactMarker {
-            summary: summary.clone(),
-            start_at,
-            source_revision: source_revision.get(),
-        });
-        candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
-        self.publish_generation(&current, candidate)
-            .map_err(ContextPortError::SessionRepository)?;
-        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary,
-            recent_messages,
-            source_revision,
-        }))
+        let result = self.commit_automatic_compaction(request).await;
+        attempt.finish(&result);
+        result
     }
+
     async fn commit_manual_compaction(
         &self,
         request: &ManualCompactRequest,
     ) -> Result<CompactOutcome, ContextPortError> {
-        let _mutation = self.mutation_gate.lock().await;
-        let current = self
-            .session
-            .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
-            .clone();
-        if current.id != request.session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(
-                request.session_id.clone(),
-            ));
-        }
-        let visible_steps = current.flattened_steps_from_marker();
-        let messages: Vec<_> = visible_steps
-            .iter()
-            .flat_map(|(_, messages)| messages.iter().cloned())
-            .collect();
-        if messages.len() <= 4 {
+        let source = self
+            .freeze_compact_source(&request.session_id, None)
+            .await?;
+        if source.messages.len() <= 4 {
             return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
         }
-        let previous_summary = current
-            .compact
-            .as_ref()
-            .map(|marker| marker.summary.as_str());
-        let Some((summary, recent_messages)) = self
-            .compact_visible_messages(
-                &messages,
-                previous_summary,
+        let generated = match self
+            .generate_compact(
+                &source,
                 request.context_size,
                 request.progress.clone(),
+                request.task_snapshot.as_ref(),
+                &tokio_util::sync::CancellationToken::new(),
             )
             .await
-        else {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-        };
-        // #1537：summary 定稿后拼接当前 Task 状态，防止压缩后上下文丢失。
-        let summary = Self::append_task_context(&summary, &request.task_context);
-        let mut candidate = (*current).clone();
-        let source_revision = SessionRevision::new(candidate.revision);
-        let keep_messages = recent_messages.len();
-        let mut retained = 0usize;
-        let mut start_at = None;
-        for (cursor, step_messages) in visible_steps.iter().rev() {
-            retained += step_messages.len();
-            start_at = Some(cursor.clone());
-            if retained >= keep_messages {
-                break;
+        {
+            Ok(Some(generated)) => generated,
+            Ok(None) => {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
             }
-        }
-        candidate.compact = Some(ActiveCompactMarker {
-            summary: summary.clone(),
-            start_at,
-            source_revision: source_revision.get(),
-        });
-        candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::CommitPartialHistory,
-        )
-        .await
-        .map_err(ContextPortError::Compact)?;
-        self.publish_generation(&current, candidate)
-            .map_err(ContextPortError::SessionRepository)?;
-        Ok(CompactOutcome::Committed(crate::domain::CompactResult {
-            summary,
-            recent_messages,
-            source_revision,
-        }))
+            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+        };
+        self.commit_generated_compact(&request.session_id, &source, generated)
+            .await
     }
 
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
@@ -986,14 +1197,30 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
-        self.persist_candidate(
-            &current,
-            &candidate,
-            SessionSaveIntent::ReplaceCompleteHistory,
-        )
-        .await
-        .map_err(ContextPortError::SessionRepository)?;
-        self.publish_generation(&current, candidate)
+        // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear
+        // 边界，由 writer 按 persisted manifest 计算并返回对齐后的快照。
+        let fallback = candidate.clone();
+        let cleared = match self
+            .writer
+            .commit_clearing_history(&current, candidate)
+            .await
+        {
+            Ok(cleared) => cleared,
+            Err(commit_error) => {
+                // 数据集可能被外部清空（空集 + 内存修订号 N > 0）：磁盘是空集、
+                // 内存是唯一真相源，尝试以全量快照重建一次。writer 对非空
+                // 数据集 fail-closed，普通 IO 错误不会被此兜底掩盖。空数据集
+                // 没有可截断的持久化 step，边界保持 None。
+                let mut fallback = fallback;
+                fallback.cleared_after = None;
+                self.writer
+                    .rebuild_empty_dataset(&current.id, &fallback)
+                    .await
+                    .map_err(|_| ContextPortError::SessionRepository(commit_error))?;
+                fallback
+            }
+        };
+        self.publish_generation(&current, cleared)
             .map_err(ContextPortError::SessionRepository)?;
         self.accepted_input_writer
             .delete_all(&current.id)

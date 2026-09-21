@@ -671,3 +671,173 @@ fn provider_build_spec_is_clone_and_debug() {
     let _cloned = spec.clone();
     let _ = format!("{spec:?}");
 }
+
+// ─── Transport pool reuse contract ────────────────────────────────────
+
+fn spec_with(
+    model: &str,
+    driver: &str,
+    api_key: &str,
+    base_url: Option<&str>,
+    user_agent: &str,
+) -> ProviderBuildSpec {
+    ProviderBuildSpec {
+        driver: driver.to_string(),
+        source_key: "test-source".to_string(),
+        api_style: None,
+        api_key: api_key.to_string(),
+        base_url: base_url.map(str::to_string),
+        model: ModelId {
+            provider: "Anthropic".to_string(),
+            model: model.to_string(),
+        },
+        max_tokens: 8192,
+        requested_reasoning: ReasoningLevel::Off,
+        context_window: Some(200_000),
+        timeout: std::time::Duration::from_secs(60),
+        user_agent: user_agent.to_string(),
+    }
+}
+
+#[test]
+fn model_switch_reuses_pooled_transport_for_same_endpoint_auth_driver() {
+    let factory = super::provider_factory();
+    let pool = factory.shared_pool().clone();
+
+    let first = factory
+        .build(spec_with(
+            "claude-a",
+            "anthropic",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("first build must succeed");
+    let second = factory
+        .build(spec_with(
+            "claude-b",
+            "anthropic",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("second build must succeed");
+
+    assert_eq!(
+        pool.distinct_transport_count(),
+        1,
+        "model switch must not build a second transport"
+    );
+    assert_ne!(
+        first.provider.as_ref() as *const dyn ProviderPort,
+        second.provider.as_ref() as *const dyn ProviderPort,
+        "each build returns its own frozen binding port"
+    );
+}
+
+#[test]
+fn endpoint_driver_or_auth_change_builds_distinct_transport() {
+    let factory = super::provider_factory();
+    let pool = factory.shared_pool().clone();
+
+    factory
+        .build(spec_with(
+            "claude-a",
+            "anthropic",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("baseline build must succeed");
+
+    factory
+        .build(spec_with(
+            "claude-a",
+            "anthropic",
+            "sk-test-key",
+            Some("https://proxy.example.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("endpoint variant must succeed");
+    assert_eq!(pool.distinct_transport_count(), 2);
+
+    factory
+        .build(spec_with(
+            "claude-a",
+            "anthropic",
+            "sk-rotated-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("auth variant must succeed");
+    assert_eq!(pool.distinct_transport_count(), 3);
+
+    factory
+        .build(spec_with(
+            "gpt-x",
+            "openai",
+            "sk-test-key",
+            Some("https://api.openai.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("driver variant must succeed");
+    assert_eq!(pool.distinct_transport_count(), 4);
+}
+
+#[test]
+fn rebuild_keeps_prior_binding_port_frozen() {
+    let factory = super::provider_factory();
+    let first = factory
+        .build(spec_with(
+            "claude-a",
+            "anthropic",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("first build must succeed");
+    let first_port = std::sync::Arc::clone(&first.provider);
+
+    factory
+        .build(spec_with(
+            "claude-b",
+            "anthropic",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect("second build must succeed");
+
+    assert!(
+        std::sync::Arc::ptr_eq(&first_port, &first.provider),
+        "rebuilding must never rewrite a prior binding's port in place"
+    );
+    let capability = first
+        .provider
+        .capabilities(&first.model)
+        .expect("prior binding port must stay usable");
+    assert_eq!(capability.model, first.model);
+}
+
+#[test]
+fn invalid_driver_reports_configuration_error_without_pool_growth() {
+    let factory = super::provider_factory();
+    let pool = factory.shared_pool().clone();
+
+    let error = factory
+        .build(spec_with(
+            "claude-a",
+            "no-such-driver",
+            "sk-test-key",
+            Some("https://api.anthropic.com"),
+            "aemeath-test/1.0",
+        ))
+        .expect_err("unknown driver must fail explicitly");
+
+    assert_eq!(error.kind, ProviderErrorKind::Configuration);
+    assert_eq!(
+        pool.distinct_transport_count(),
+        0,
+        "failed builds must not seed pool entries"
+    );
+}

@@ -18,17 +18,17 @@ Memory BC **不拥有**：记忆在 Context Window 中的注入位置、token �
 
 ## 2. 核心决策
 
-1. **Memory 是数据 BC，不是状态机**：Memory 没有执行生命周期状态机；它守护 MemoryEntry 聚合的局部不变量（id 唯一、layer 不可变、access_count 单调递增、outdated 不可逆）。
+1. **Memory 是数据 BC，不是状态机**：Memory 没有执行生命周期状态机；它守护 MemoryEntry 聚合的局部不变量（id 唯一、layer 不可变、confirmation_count 单调递增、outdated 不可逆）。
 2. **双层记忆**：Global（跨项目通用偏好）+ Project（项目特定决策/模式/陷阱）。两层独立存储、独立检索、统一排序。
 3. **检索与注入分离**：Memory BC 负责 filtering、scoring 与 relevance ranking；Context Management 负责 render、注入时机、位置、预算与跨轮去重。
 4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `ProviderPort` 和管理单槽任务生命周期。Memory BC **不依赖** ProviderPort，也不隐式选择 store。
-5. **去重基于 Jaccard 相似度**：写入时与同 layer 条目比较，超过 `similarity_threshold` 则合并 tags + touch，不新增。
-6. **淘汰基于评分**：pinned 条目不可淘汰；其余按 `eviction_score`（recency + access_count）排序，取最低分候选归档。
+5. **去重基于 Jaccard 相似度**：写入时与同 layer 条目比较，超过 `similarity_threshold` 则合并 tags + confirmation，不新增。
+6. **淘汰基于评分**：pinned 条目不可淘汰；其余按 `eviction_score`（recency + confirmation_count）排序，取最低分候选归档。
 7. **Archive 不删除**：归档条目移到 `_archive.json`，保留可审计性；search 可跨 active + archive 检索。
 8. **Sub Run 默认不读写 Memory**：默认装配 `NoOpMemory`；Main 显式 share 时 clone 父 Run 当前 Arc 并继承 shared lease，**NEVER** 在同一 Composition / 进程的 active Main slot 为同 identity 新开第二个 service。独立进程 writer 则经 revision CAS 协调。
 9. **检索能力分层**：Tier 1 BM25 是 v0.1.0 primary；Tier 0 子串只作显式 fallback；Tier 2 embedding 属 Future 且需真实收益证据。
 10. **Reflection 异步执行**：Interval 和 Pre-compact 触发的 Reflection 不阻塞主循环——Runtime `tokio::spawn` 后台任务，结果通过 channel 回传。Forced（`/reflection`）保持同步。单一后台 slot 并发控制，前一个未完成时跳过本次。Pre-compact 在 compact 前抓 messages 快照交给后台任务，compact 立即继续。
-11. **查询只读已验证内存态**：open 完成 dataset recovery 与 eager-read；retrieve / search / list / stats 不做 I/O 或 touch。mutation 先构造 candidate，再经 Storage dataset transaction durable commit，最后无失败发布。
+11. **查询只读已验证内存态**：open 完成 dataset recovery 与 eager-read；retrieve / search / list / stats 不做 I/O 或确认。mutation 先构造 candidate，再经 Storage dataset transaction durable commit，最后无失败发布。
 12. **Active + archive 共同换代**：archive / compact 对受影响成员使用同一 `AtomicDatasetPort` journal / commit primitive；失败或 crash 后只能恢复完整旧代或新代，**NEVER** 暴露半迁移。
 13. **跨实例用 revision CAS 防丢更新**：open 持有 Storage 返回的 opaque dataset revision；每次 mutation 以它作为 expected revision 提交。冲突时重新读取、验证并重算一次，**NEVER** 让跨进程锁掩盖 stale-writer overwrite。
 14. **committed warning 仍发布**：Storage `Err` 只表示未提交；`Visible` / `RecoveryPending` receipt 都表示 durable truth 已是 candidate，Memory 必须发布新内存态，warning 只作诊断。
@@ -87,7 +87,7 @@ Storage BC 提供**物理机制**（单 blob 原子写、多 member dataset tran
 
 ### Config
 
-Config 通过只读 ConfigSnapshot 提供 MemoryConfig（enabled / max_entries / similarity_threshold / inject_count / reflection 配置）。Memory BC 不绕过快照读取裸配置。
+Config 通过只读 ConfigSnapshot 提供 MemoryConfig（enabled / max_entries / similarity_threshold / inject_count / inject_token_budget / reflection 配置）。Memory BC 不绕过快照读取裸配置。
 
 ### Tool & Skill & Command
 
@@ -99,7 +99,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 - **NEVER** 让 Memory BC 决定注入位置或 token 预算——归 Context Management。
 - **NEVER** 让 Memory BC 直接操作文件系统——经 Storage adapter。
 - **NEVER** 把所有历史消息自动视为记忆——Memory Entry 是显式写入或 Reflection 产出的。
-- **MUST** MemoryEntry 的 id 唯一、layer 创建后不可变、access_count 单调递增、outdated 标记不可逆。
+- **MUST** MemoryEntry 的 id 唯一、layer 创建后不可变、confirmation_count 单调递增、outdated 标记不可逆。
 - **MUST** Sub Run 默认装配 NoOpMemory；显式 share 时 clone 父 Run 当前 Arc 并由父 shared lease 覆盖其生命周期。
 - **MUST** pinned 条目不可被 compact/evict 淘汰。
 - **MUST** 去重和淘汰基于纯函数评分，不依赖外部状态。
@@ -109,7 +109,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 | 文档 | 内容 |
 |---|---|
 | [01-domain-model.md](01-domain-model.md) | MemoryEntry 聚合、Layer/Category/Source、不变量、scoring/dedup/eviction/archive |
-| [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略、BM25 升级路径(#551)、注入格式、similarity_threshold 双重用途 |
+| [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略、BM25 升级路径(#551)、注入格式、similarity_threshold 单一去重用途 |
 | [03-reflection.md](03-reflection.md) | ReflectionEngine、MemorySuggestion、触发条件、prompt/output/apply、与 Runtime 职责边界 |
 | [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionWorkflow / ReflectionHistoryStore、NoOpMemory、Storage 边界、project-aware Composition 装配 |
 

@@ -29,6 +29,7 @@ fn context_request(step_id: &str) -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -46,6 +47,8 @@ fn context_window(revision: u64) -> ContextWindow {
             urgency: Urgency::None,
             decision_token_count: 0,
             threshold: 0,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
     }

@@ -8,6 +8,7 @@ pub struct CompletionItem {
 }
 
 impl CompletionItem {
+    #[cfg(test)]
     pub fn new(label: impl Into<String>, replacement: impl Into<String>) -> Self {
         Self::with_type(label, replacement, SuggestionType::Command)
     }

@@ -113,6 +113,7 @@ impl WorkspaceService {
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
+        worktrees_root: PathBuf,
         git: Arc<dyn GitWorktreeOps>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -121,6 +122,7 @@ impl WorkspaceService {
                 workspace_root,
                 path_base,
                 worktree_kind,
+                worktrees_root,
             )),
             control_operation: Mutex::new(()),
             git,
@@ -134,8 +136,9 @@ impl WorkspaceService {
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
             cwd.clone(),
-            cwd,
+            cwd.clone(),
             WorktreeKind::Primary,
+            cwd.join(".worktrees"),
             git,
         )
     }
@@ -149,6 +152,7 @@ impl WorkspaceService {
                 workspace_root: s.workspace_root.clone(),
                 path_base: s.path_base.clone(),
                 worktree_kind: s.worktree_kind,
+                worktrees_root: s.worktrees_root.clone(),
                 stack: Vec::new(),
             }),
             control_operation: Mutex::new(()),
@@ -559,6 +563,7 @@ mod tests {
             root.to_path_buf(),
             root.to_path_buf(),
             WorktreeKind::Primary,
+            root.join(".worktrees"),
             Arc::new(git),
         )
     }
@@ -621,11 +626,14 @@ mod tests {
 
     #[test]
     fn prepare_restore_via_port_rejects_missing_path_and_keeps_live_state() {
+        // 身份路径（workspace_root）缺失保持 PathNotFound；path_base 缺失已按
+        // cwd 语义回退 workspace_root（见 state_tests 的 fallback 用例）。
         let root = unique_temp_dir("port_missing_root");
         let common = "/repo/.git";
         let service = git_service_at(&root, common);
         let mut dto = valid_dto_with_subdir(&root, common).0;
-        dto.path_base = root.join("nope_missing").display().to_string();
+        dto.workspace_root = root.join("nope_missing").display().to_string();
+        dto.path_base = valid_dto_with_subdir(&root, common).1.display().to_string();
 
         let before = service.current_path_base();
         let result = service.prepare_restore(&dto);

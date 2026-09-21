@@ -31,6 +31,7 @@ mod tests {
             args_preview: None,
             result_text: "done".into(),
             activity_lines: None,
+            workspace_root: None,
             data: None,
             style: SemanticStyle::Success,
         })

@@ -6,6 +6,7 @@ use crate::tui::model::conversation::interaction::UiRunId;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct ActivityObservationModel {
     revision_by_run: Vec<(UiRunId, u64)>,
+    heartbeat_sequence_by_run: Vec<(UiRunId, u64)>,
     stale_runs: Vec<UiRunId>,
     activities: Vec<TuiActivityObservation>,
 }
@@ -28,6 +29,12 @@ impl ActivityObservationModel {
             .find_map(|(stored_run_id, revision)| (stored_run_id == run_id).then_some(*revision))
     }
 
+    pub(crate) fn heartbeat_sequence_for(&self, run_id: &UiRunId) -> Option<u64> {
+        self.heartbeat_sequence_by_run
+            .iter()
+            .find_map(|(stored_run_id, sequence)| (stored_run_id == run_id).then_some(*sequence))
+    }
+
     pub(crate) fn is_stale(&self, run_id: &UiRunId) -> bool {
         self.stale_runs
             .iter()
@@ -44,6 +51,7 @@ impl ActivityObservationModel {
         self.activities.retain(|activity| activity.run_id != run_id);
         self.activities.extend(activities);
         self.set_revision(run_id.clone(), revision);
+        self.set_heartbeat_sequence(run_id.clone(), 0);
         self.clear_stale(&run_id);
     }
 
@@ -69,21 +77,24 @@ impl ActivityObservationModel {
 
     pub(crate) fn replace_snapshot(&mut self, snapshot: TuiActivitySnapshot) -> bool {
         let current_revision = self.revision_for(&snapshot.run_id).unwrap_or(0);
+        let current_heartbeat_sequence = self.heartbeat_sequence_for(&snapshot.run_id).unwrap_or(0);
         if snapshot.revision < current_revision
+            || (snapshot.revision == current_revision
+                && snapshot.heartbeat_sequence <= current_heartbeat_sequence
+                && !self.is_stale(&snapshot.run_id))
             || snapshot.activities.iter().any(|activity| {
                 activity.run_id != snapshot.run_id || activity.revision > snapshot.revision
             })
         {
             return false;
         }
-        if snapshot.revision == current_revision && !self.is_stale(&snapshot.run_id) {
-            return false;
-        }
 
         let run_id = snapshot.run_id;
+        let heartbeat_sequence = snapshot.heartbeat_sequence;
         self.activities.retain(|activity| activity.run_id != run_id);
         self.activities.extend(snapshot.activities);
         self.set_revision(run_id.clone(), snapshot.revision);
+        self.set_heartbeat_sequence(run_id.clone(), heartbeat_sequence);
         self.clear_stale(&run_id);
         true
     }
@@ -109,6 +120,19 @@ impl ActivityObservationModel {
             *stored_revision = revision;
         } else {
             self.revision_by_run.push((run_id, revision));
+        }
+    }
+
+    fn set_heartbeat_sequence(&mut self, run_id: UiRunId, heartbeat_sequence: u64) {
+        if let Some((_, stored_sequence)) = self
+            .heartbeat_sequence_by_run
+            .iter_mut()
+            .find(|(stored_run_id, _)| stored_run_id == &run_id)
+        {
+            *stored_sequence = heartbeat_sequence;
+        } else {
+            self.heartbeat_sequence_by_run
+                .push((run_id, heartbeat_sequence));
         }
     }
 

@@ -14,6 +14,7 @@ const DIFF_REMOVE_FG: Color = theme::DIFF_REMOVE_FG;
 ///
 /// `file_ext` 用于推断语言进行语法高亮（如 `"rs"`、`"py"`），None 则不进行语法高亮。
 /// 每行产出一组 `SpanPart`（着色原语），由调用方转为 `RenderedLine`。
+#[cfg(test)]
 pub fn build_diff_lines(
     old_content: &str,
     new_content: &str,

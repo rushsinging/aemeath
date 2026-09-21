@@ -13,10 +13,6 @@ macro_rules! tui_id {
                 Self(value.as_ref().to_string())
             }
 
-            pub fn new_v7() -> Self {
-                Self(uuid::Uuid::new_v4().to_string())
-            }
-
             pub fn from_legacy_or_new(value: &str) -> Self {
                 Self::new(value)
             }
@@ -43,6 +39,18 @@ macro_rules! tui_id {
 tui_id!(ChatId);
 tui_id!(ChatRunId);
 tui_id!(ToolCallId);
+
+impl ChatId {
+    pub fn new_v7() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+}
+
+impl ChatRunId {
+    pub fn new_v7() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+}
 
 /// Tool stream key for identifying tool call streams.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

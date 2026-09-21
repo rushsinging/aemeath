@@ -6,13 +6,4 @@ pub enum DiagnosticChange {
         id: String,
         severity: DiagnosticSeverity,
     },
-    PromptOpened {
-        id: String,
-    },
-    PromptAnswered {
-        answer: String,
-    },
-    NoticeDismissed {
-        id: String,
-    },
 }

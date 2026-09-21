@@ -74,6 +74,44 @@ fn event_mapping_is_the_only_sdk_chat_event_match_point() {
 }
 
 #[test]
+fn tui_internal_domains_exclude_sdk_compatibility_progress_naming() {
+    let cli_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    for relative_path in [
+        "model/conversation/intent.rs",
+        "model/conversation/change.rs",
+        "model/conversation/block.rs",
+        "model/output_timeline/item.rs",
+    ] {
+        let source = std::fs::read_to_string(cli_src.join(relative_path))
+            .unwrap_or_else(|error| panic!("read {relative_path}: {error}"));
+        assert!(
+            !source.contains("AgentProgress"),
+            "{relative_path} must use presentation-owned AgentActivities naming"
+        );
+    }
+}
+
+#[test]
+fn sdk_compatibility_progress_stops_at_the_first_tui_acl() {
+    let app_event_source = include_str!("../app/event.rs");
+    let second_layer_source = include_str!("agent_event.rs");
+    let processing_source = include_str!("../effect/session/processing.rs");
+
+    assert!(
+        !app_event_source.contains("AgentProgress"),
+        "UiEvent must not recreate the SDK compatibility event"
+    );
+    assert!(
+        !second_layer_source.contains("AgentProgress"),
+        "the TUI second-layer mapper must consume only canonical Sub Run facts"
+    );
+    assert!(
+        !processing_source.contains("sdk_event_to_ui_event"),
+        "session processing must use the sole sdk_event_to_tui_event ACL"
+    );
+}
+
+#[test]
 fn second_layer_mapper_has_no_sdk_dependencies() {
     let source = include_str!("agent_event.rs");
     // The second-layer mapper must consume TuiRuntimeEvent / Tui DTO only.

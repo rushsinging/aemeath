@@ -57,9 +57,27 @@ impl ContextApplicationService {
         }
         #[cfg(test)]
         let messages_started = std::time::Instant::now();
-        let mut messages = snapshot
-            .messages
-            .with_pending(request.pending_messages.clone());
+        let committed_messages = if let Some(history) = snapshot.structured_history.as_ref() {
+            let candidate = crate::domain::compact::ContextReadCandidate::from_history(
+                history,
+                request.run_id.as_ref(),
+                crate::domain::compact::ProtectedRunPolicy::latest_complete_runs(3),
+            );
+            let candidate = if request.config_snapshot.context_snip_enabled() {
+                crate::domain::compact::snip_superseded_exploration(&candidate)
+            } else {
+                candidate
+            };
+            let candidate = if request.config_snapshot.context_microcompact_enabled() {
+                crate::domain::compact::microcompact_exploration(&candidate)
+            } else {
+                candidate
+            };
+            candidate.messages()
+        } else {
+            snapshot.messages.clone()
+        };
+        let mut messages = committed_messages.with_pending(request.pending_messages.clone());
         let reminder_payloads = invocation_reminder_log_payloads(
             request.language.as_str(),
             &request.invocation_reminders,
@@ -126,23 +144,42 @@ impl ContextApplicationService {
         let mut blocks = prompt.cacheable;
         blocks.extend(memory.blocks);
         if let Some(summary) = snapshot.active_summary {
-            // #1486 系统护栏：任何来源的 active_summary 注入 system 前都必须
-            // 有界。历史缺陷曾让 summary 膨胀到 92 万字符撑爆 system prompt；
-            // 此处按预算校验，超限只保留关键尾部并告警。
             let budget = crate::domain::token_budget::summary_budget(request.context_size);
-            let summary = if crate::domain::token_budget::estimate_tokens(&summary) > budget {
-                let tail = share::string_idx::slice_tail(
-                    &summary,
-                    crate::domain::token_budget::FALLBACK_PREVIOUS_SUMMARY_CAP,
-                )
-                .to_string();
+            let estimated_tokens = crate::domain::token_budget::estimate_tokens(&summary);
+            let summary = if estimated_tokens > budget {
+                let decoded = crate::domain::compact::CanonicalCompactSummary::decode(&summary)
+                    .map_err(|error| {
+                        ContextPortError::Compact(format!(
+                            "active_summary 超出预算且无法解析为 canonical checkpoint：{error}"
+                        ))
+                    })?;
+                let task_state_companion = decoded.task_state_companion().map(str::to_string);
+                let bounded_checkpoint = decoded
+                    .into_checkpoint()
+                    .degrade_to_budget(budget)
+                    .map_err(|error| {
+                        ContextPortError::Compact(format!(
+                            "active_summary 超出预算且无法安全降级：{error}"
+                        ))
+                    })?;
+                let bounded_summary = match task_state_companion {
+                    Some(companion) => format!(
+                        "{}\n\n## Current Task State\n{companion}",
+                        bounded_checkpoint.render()
+                    ),
+                    None => bounded_checkpoint.render(),
+                };
+                let bounded_tokens = crate::domain::token_budget::estimate_tokens(&bounded_summary);
+                if bounded_tokens > budget {
+                    return Err(ContextPortError::Compact(format!(
+                        "active_summary 结构化降级后仍超出预算：{bounded_tokens} tokens > budget {budget}"
+                    )));
+                }
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "active_summary 超出预算（{} tokens > budget {budget}），截断为 {} chars 尾部",
-                    crate::domain::token_budget::estimate_tokens(&summary),
-                    tail.len(),
+                    "active_summary 超出预算，按 checkpoint 语义降级：{estimated_tokens} -> {bounded_tokens} tokens（预算 {budget}）",
                 );
-                tail
+                bounded_summary
             } else {
                 summary
             };
@@ -197,6 +234,56 @@ impl ContextApplicationService {
         #[cfg(test)]
         crate::application::performance::record_build(build_started.elapsed());
         Ok(window)
+    }
+
+    /// compact 提交后的占用体检报告（防震荡观测信号）。
+    pub(crate) async fn post_compaction_usage_check(
+        &self,
+        source: &ContextRequest,
+    ) -> Option<PostCompactionUsageReport> {
+        // compact 刚重置 usage baseline，source 里携带的 provider 旧值
+        // 不代表提交后的状态，强制走 heuristic 估算路径。
+        let mut source = source.clone();
+        source.last_api_total_tokens = None;
+        match self.build_candidate(&source).await {
+            Ok(candidate) => Some(PostCompactionUsageReport {
+                decision_token_count: candidate.compaction_decision.decision_token_count,
+                threshold: candidate.compaction_decision.threshold,
+            }),
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "compact 后占用体检失败（不阻断）：{error}"
+                );
+                None
+            }
+        }
+    }
+}
+
+/// compact 提交后的占用体检结果。
+///
+/// 估算仍高于 threshold 的 50% 视为贴线：保留消息 + system/tool schema
+/// 固定底盘几轮后将再次触发 auto-compact（震荡循环）。体检只产出
+/// 报告与告警，不阻断 compact、不自动二次压缩。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PostCompactionUsageReport {
+    decision_token_count: usize,
+    threshold: usize,
+}
+
+impl PostCompactionUsageReport {
+    pub fn decision_token_count(&self) -> usize {
+        self.decision_token_count
+    }
+
+    pub fn threshold(&self) -> usize {
+        self.threshold
+    }
+
+    /// 估算是否仍高于 threshold 的一半（贴线，震荡风险）。
+    pub fn exceeds_half_threshold(&self) -> bool {
+        self.decision_token_count > self.threshold / 2
     }
 }
 
@@ -386,7 +473,21 @@ impl ContextPort for ContextApplicationService {
     }
 
     async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
-        self.session.commit_compaction(request).await
+        let outcome = self.session.commit_compaction(request).await?;
+        // 仅在真实提交后体检：Skipped 时会话状态未变，重建无意义。
+        if matches!(outcome, CompactOutcome::Committed(_)) {
+            if let Some(report) = self.post_compaction_usage_check(&request.source).await {
+                if report.exceeds_half_threshold() {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "compact 提交后估算仍贴线（{} > threshold/2 = {}）：保留消息与固定底盘几轮后将再次触发 auto-compact；若频繁出现，考虑增大 context window 或调小保留窗口",
+                        report.decision_token_count(),
+                        report.threshold() / 2
+                    );
+                }
+            }
+        }
+        Ok(outcome)
     }
 
     async fn manual_compact(
@@ -412,6 +513,17 @@ impl ContextPort for ContextApplicationService {
         mutation: ToolReceiptMutation,
     ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
         self.session.advance_tool_receipt(mutation).await
+    }
+
+    async fn step_receipts(
+        &self,
+        session_id: &SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+        self.session
+            .step_receipts(session_id, run_id, step_id)
+            .await
     }
 
     async fn compare_and_record_skill_load(

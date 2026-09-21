@@ -121,7 +121,7 @@ agent/features/runtime/src/
 
 ### activity_observation（横切应用观测）
 
-- **职责**：由 `ActivityCoordinator` 统一创建、变更并发布 Run 内 Activity 事实；把 Run、Run Step、Model Invocation、Tool Call、Hook、Compaction、Interaction 与 Child Run 的执行观测收口为稳定 identity、父子关系、类型、状态、detail、revision 与 timing。
+- **职责**：由 `ActivityCoordinator` 统一创建、变更并发布 Run 内 Activity 事实；把 Run、Run Step、Model Invocation、Tool Call、Hook、Compaction、Interaction 与 Sub Run 的执行观测收口为稳定 identity、父子关系、类型、状态、detail、revision 与 timing。
 - **状态所有权**：Activity 是应用层观测实体集合，不拥有 Run 控制权、不改变 Run 状态机、不持久化 Session，也不承载 Audit Usage 所有权；Run 聚合仍是唯一生命周期状态机。
 - **发布**：Runtime 通过 SDK Published Language 发布 `ActivityChanged` 增量和 `ActivitySnapshot` 快照；增量按 Run 维度递增 revision，快照用于初始化、重连和 revision gap 修复。
 - **边界**：Activity 事实可被 TUI、父 Run 诊断 sink 或其他交付适配器消费；TUI 经 ACL 转为 TUI-owned Activity 镜像，再由 root reducer 写入 Model。Activity Summary 只由 TUI ViewAssembler 从事实镜像派生，**NEVER** 回流 Runtime 或成为第二业务状态源。

@@ -175,15 +175,20 @@ async fn run_single_turn(
 
 fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
     match event {
+        sdk::ChatEvent::AssistantTextDelta { delta, .. } => print_stdout(&delta)?,
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::SkillsUpdated { .. }
+        | sdk::ChatEvent::ThinkingDelta { .. }
         | sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }
+        | sdk::ChatEvent::MicrocompactCompleted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
         | sdk::ChatEvent::SessionMessageStateChanged { .. }
         | sdk::ChatEvent::HookNotice { .. }
+        | sdk::ChatEvent::CompactOperationRolledBack { .. }
+        | sdk::ChatEvent::CompactOperationCompleted { .. }
         | sdk::ChatEvent::CompactRollback { .. }
         | sdk::ChatEvent::CompactFinished { .. }
         | sdk::ChatEvent::UserMessagesAdopted { .. }
@@ -239,28 +244,15 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::Done { .. }
         | sdk::ChatEvent::DoneWithDurationMs { .. }
         | sdk::ChatEvent::Cancelled { .. } => {}
-        sdk::ChatEvent::ToolCallStart { name, .. } => {
+        sdk::ChatEvent::ToolCallStarted { name, .. }
+        | sdk::ChatEvent::ToolCallStart { name, .. } => {
             eprintln!("[tool:start] {name}");
-        }
-        sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
-            let mut answers = Vec::new();
-            for item in items {
-                let answer = read_ask_user_reply(
-                    &item.question,
-                    &item.options,
-                    item.allow_free_input,
-                    item.default.as_deref(),
-                )?;
-                answers.push(sdk::AskUserAnswer {
-                    tool_call_id: item.id,
-                    question_seq: item.question_seq,
-                    answer,
-                });
-            }
-            let _ = reply_tx.send(sdk::AskUserReply::Answers(answers));
         }
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");
+        }
+        sdk::ChatEvent::ToolOutputDelta { delta, .. } => {
+            eprintln!("[tool] {delta}");
         }
         sdk::ChatEvent::ToolProgress { event, .. } => {
             eprintln!("[tool] {}", event.text);
@@ -292,55 +284,6 @@ fn truncate_tool_output(output: &str) -> String {
         truncated.push_str("... (truncated)");
     }
     truncated
-}
-
-fn read_ask_user_reply(
-    question: &str,
-    options: &[sdk::OptionItem],
-    allow_free_input: bool,
-    default: Option<&str>,
-) -> Result<String, sdk::SdkError> {
-    eprintln!("[ask-user] {question}");
-    for (index, option) in options.iter().enumerate() {
-        eprintln!("  {}. {}", index + 1, option.title);
-        if let Some(description) = &option.description {
-            if !description.is_empty() {
-                eprintln!("     {description}");
-            }
-        }
-    }
-    if let Some(default) = default {
-        eprintln!("default: {default}");
-    }
-    if allow_free_input || options.is_empty() {
-        eprint!("answer> ");
-    } else {
-        eprint!("choice> ");
-    }
-    std::io::Write::flush(&mut std::io::stderr())
-        .map_err(|e| sdk::SdkError::Internal(format!("刷新 stderr 失败: {e}")))?;
-
-    let mut answer = String::new();
-    std::io::stdin()
-        .read_line(&mut answer)
-        .map_err(|e| sdk::SdkError::Internal(format!("读取 stdin 失败: {e}")))?;
-    let answer = answer.trim().to_string();
-    if answer.is_empty() {
-        return Ok(default.unwrap_or_default().to_string());
-    }
-    if allow_free_input || options.is_empty() {
-        return Ok(answer);
-    }
-    parse_option_answer(&answer, options)
-        .or_else(|| default.map(ToOwned::to_owned))
-        .ok_or_else(|| sdk::SdkError::Internal(format!("无效选项: {answer}")))
-}
-
-fn parse_option_answer(answer: &str, options: &[sdk::OptionItem]) -> Option<String> {
-    let index = answer.parse::<usize>().ok()?;
-    options
-        .get(index.checked_sub(1)?)
-        .map(|option| option.title.clone())
 }
 
 #[cfg(test)]
@@ -383,25 +326,5 @@ mod tests {
         let output = "x".repeat(MAX_TOOL_OUTPUT_CHARS + 1);
 
         assert!(truncate_tool_output(&output).ends_with("... (truncated)"));
-    }
-
-    #[test]
-    fn test_parse_option_answer_returns_title_by_one_based_index() {
-        let options = vec![sdk::OptionItem {
-            title: "yes".to_string(),
-            description: None,
-        }];
-
-        assert_eq!(parse_option_answer("1", &options).as_deref(), Some("yes"));
-    }
-
-    #[test]
-    fn test_parse_option_answer_rejects_invalid_index() {
-        let options = vec![sdk::OptionItem {
-            title: "yes".to_string(),
-            description: None,
-        }];
-
-        assert_eq!(parse_option_answer("2", &options), None);
     }
 }

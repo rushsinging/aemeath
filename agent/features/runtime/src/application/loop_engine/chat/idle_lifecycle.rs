@@ -32,11 +32,11 @@ where
 {
     let level = requested_level_for_thinking(reasoning, desired);
     let enabled = !matches!(level, ReasoningLevel::Off);
-    let label = if enabled { "ON" } else { "OFF" };
-    sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled })
+    sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled, level })
         .await;
     sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
-        "[thinking mode: {label}]"
+        "[thinking mode: {}]",
+        level.as_str()
     )))
     .await;
     level

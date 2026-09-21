@@ -18,9 +18,9 @@ fn seed_history(harness: &mut TuiScenarioHarness, count: usize) {
     for index in 0..count {
         let context = context(index);
         let text = format!("HISTORY-{index:04}");
-        harness.runtime_event(TuiRuntimeEvent::Text {
+        harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
             context: context.clone(),
-            text: text.clone(),
+            delta: text.clone(),
         });
         harness.runtime_event(TuiRuntimeEvent::BlockComplete { context, text });
     }
@@ -38,20 +38,19 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
         .map(|line| format!("new-{index}-{line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    harness.runtime_event(TuiRuntimeEvent::ToolCallStart {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStarted {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),
         name: "Edit".into(),
         index: 0,
     });
-    harness.runtime_event(TuiRuntimeEvent::ToolCallUpdate {
+    harness.runtime_event(TuiRuntimeEvent::ToolCallStateChanged {
         context: context.clone(),
         id: id.clone(),
         provider_id: Some(id.clone()),
         name: "Edit".into(),
         index: 0,
-        arguments_delta: None,
         arguments: Some(serde_json::json!({
             "file_path": format!("src/edit-{index}.rs"),
             "old_string": old,
@@ -735,9 +734,9 @@ fn adopted_user_message_after_resumed_history_returns_to_latest_window() {
     assert!(harness.screen().contains("RESUME-ADOPTED-NEW-USER"));
 
     let context = context(9_999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
+        delta: "RESUME-ADOPTED-NEXT-ASSISTANT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,
@@ -806,9 +805,9 @@ fn streaming_output_does_not_move_scrolled_viewport() {
     let before_offset = harness.app.view_state.output.scroll_offset;
 
     let context = context(9999);
-    harness.runtime_event(TuiRuntimeEvent::Text {
+    harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {
         context: context.clone(),
-        text: "STREAMING-NEW-CONTENT".into(),
+        delta: "STREAMING-NEW-CONTENT".into(),
     });
     harness.runtime_event(TuiRuntimeEvent::BlockComplete {
         context,

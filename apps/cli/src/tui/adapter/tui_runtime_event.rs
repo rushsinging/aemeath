@@ -6,11 +6,10 @@
 //! Some structs are not yet exercised by production; retained as DTO reserves
 //! for #1246 / #944 5B.
 
-#![allow(dead_code)]
-
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
 use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
+use crate::tui::view_model::status::ReasoningLevelView;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UiActivityId(String);
@@ -43,7 +42,7 @@ pub(crate) enum TuiActivitySource {
     HookDispatch(UiActivityId),
     Compaction(UiActivityId),
     Interaction(String),
-    ChildRun(UiRunId),
+    SubRun(UiRunId),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,7 +66,7 @@ pub(crate) enum TuiActivityKind {
     HookDispatch,
     Compaction,
     Interaction,
-    ChildRun,
+    SubRun,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,8 +133,17 @@ pub(crate) enum TuiHookPoint {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TuiCompactStage {
     Preparing,
-    Summarizing,
+    Generating,
+    Mapping,
+    Reducing,
+    Refreshing,
     Finalizing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiCompactWork {
+    Indeterminate,
+    Determinate { completed: u32, total: u32 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -171,13 +179,12 @@ pub(crate) enum TuiActivityDetail {
     },
     Compact {
         stage: TuiCompactStage,
-        current: Option<u32>,
-        total: Option<u32>,
+        work: TuiCompactWork,
     },
     Interaction {
         kind: TuiInteractionKind,
     },
-    ChildRun {
+    SubRun {
         role: String,
         model: String,
     },
@@ -211,6 +218,7 @@ pub(crate) struct TuiActivityObservation {
 pub(crate) struct TuiActivitySnapshot {
     pub(crate) run_id: UiRunId,
     pub(crate) revision: u64,
+    pub(crate) heartbeat_sequence: u64,
     pub(crate) activities: Vec<TuiActivityObservation>,
 }
 
@@ -225,12 +233,6 @@ pub(crate) enum TuiToolCallStatus {
     PendingArgs,
     Ready,
     Running,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiToolCallImage {
-    pub(crate) base64: String,
-    pub(crate) media_type: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -273,7 +275,15 @@ pub(crate) enum TuiRunStepEvent {
     Completed,
     CancellationRequested,
     FinalizationStarted,
-    Cancelled { confirmed: bool },
+    Cancelled {
+        terminal: TuiRunStepCancellationTerminal,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiRunStepCancellationTerminal {
+    Cancelled,
+    CancellationUnconfirmed,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -293,9 +303,15 @@ pub(crate) enum TuiInteractionBody {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiOptionItem {
+    pub(crate) title: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiUserQuestion {
     pub(crate) prompt: String,
-    pub(crate) options: Vec<String>,
+    pub(crate) options: Vec<TuiOptionItem>,
     pub(crate) allow_multi: bool,
 }
 
@@ -450,15 +466,16 @@ pub(crate) struct TuiConfigView {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiChildRunIdentity {
+pub(crate) struct TuiSubRunIdentity {
     pub(crate) agent_id: String,
     pub(crate) run_id: UiRunId,
+    pub(crate) parent_chat_id: String,
     pub(crate) parent_run_id: UiRunId,
     pub(crate) spawned_by_tool_call_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TuiChildRunActivityKind {
+pub(crate) enum TuiSubRunActivityKind {
     Text {
         text: String,
     },
@@ -482,48 +499,31 @@ pub(crate) enum TuiChildRunActivityKind {
         is_error: bool,
     },
     Terminal {
-        outcome: TuiChildRunTerminalOutcome,
+        outcome: TuiSubRunTerminalOutcome,
     },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum TuiChildRunTerminalOutcome {
+pub(crate) enum TuiSubRunTerminalOutcome {
     Completed,
     Failed { error: String },
     Cancelled,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiChildRunActivity {
-    pub(crate) identity: TuiChildRunIdentity,
+pub(crate) struct TuiSubRunStarted {
+    pub(crate) identity: TuiSubRunIdentity,
     pub(crate) sequence: u64,
-    pub(crate) kind: TuiChildRunActivityKind,
+    pub(crate) role: Option<String>,
+    pub(crate) model: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum TuiAgentProgressKind {
-    Started { role: Option<String>, model: String },
-    Message { text: String },
-    ToolCalls { calls: Vec<TuiAgentToolCall> },
-    ToolOutput { tool_name: String, text: String },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiToolProgressEvent {
-    pub(crate) text: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiAgentToolCall {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) input: serde_json::Value,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TuiAgentProgress {
-    pub(crate) sequence: usize,
-    pub(crate) kind: TuiAgentProgressKind,
+pub(crate) struct TuiSubRunActivity {
+    pub(crate) identity: TuiSubRunIdentity,
+    pub(crate) sequence: u64,
+    pub(crate) sequence_index: u32,
+    pub(crate) kind: TuiSubRunActivityKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -557,32 +557,39 @@ pub(crate) enum TuiRuntimeEvent {
         skills: Vec<TuiSkillView>,
         slash_routes: Vec<TuiSkillSlashRoute>,
     },
-    Text {
+    AssistantTextDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
-    Thinking {
+    ThinkingDelta {
         context: TuiRunContext,
-        text: String,
+        delta: String,
     },
     BlockComplete {
         context: TuiRunContext,
         text: String,
     },
-    ToolCallStart {
+    ToolCallStarted {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
     },
-    ToolCallUpdate {
+    ToolCallArgumentsDelta {
         context: TuiRunContext,
         id: String,
         provider_id: Option<String>,
         name: String,
         index: usize,
-        arguments_delta: Option<String>,
+        delta: String,
+    },
+    ToolCallStateChanged {
+        context: TuiRunContext,
+        id: String,
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
         arguments: Option<serde_json::Value>,
         status: TuiToolCallStatus,
     },
@@ -612,7 +619,7 @@ pub(crate) enum TuiRuntimeEvent {
     TurnStarted {
         messages: Vec<TuiChatMessage>,
     },
-    MicrocompactDone {
+    MicrocompactCompleted {
         messages: Vec<TuiChatMessage>,
         cleared_count: usize,
     },
@@ -625,10 +632,10 @@ pub(crate) enum TuiRuntimeEvent {
         messages: Vec<TuiChatMessage>,
         error: String,
     },
-    CompactRollback {
+    CompactOperationRolledBack {
         messages: Vec<TuiChatMessage>,
     },
-    CompactFinished {
+    CompactOperationCompleted {
         messages: Vec<TuiChatMessage>,
         notice: String,
     },
@@ -655,18 +662,13 @@ pub(crate) enum TuiRuntimeEvent {
         event: TuiRunStepEvent,
     },
     InteractionRequested(TuiInteractionRequest),
-    AgentProgress {
-        source_context: TuiRunContext,
-        attachment_context: TuiRunContext,
-        tool_id: String,
-        event: TuiAgentProgress,
-    },
-    ToolProgress {
+    ToolOutputDelta {
         context: TuiRunContext,
         tool_id: String,
-        event: TuiToolProgressEvent,
+        delta: String,
     },
-    ChildRunActivity(TuiChildRunActivity),
+    SubRunStarted(TuiSubRunStarted),
+    SubRunActivity(TuiSubRunActivity),
     Cancelled {
         context: TuiRunContext,
         duration_ms: u64,
@@ -678,18 +680,10 @@ pub(crate) enum TuiRuntimeEvent {
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },
-    GraphPhaseChanged {
-        node: String,
-        effort: String,
-        previous: String,
-    },
-    CompactProgress {
-        stage: String,
-        current: Option<u32>,
-        total: Option<u32>,
-    },
     ThinkingChanged {
         enabled: bool,
+        /// 切换后的 reasoning 深度（#1616 状态栏直接显示）。
+        level: ReasoningLevelView,
     },
     CommandResultText {
         text: String,
@@ -699,6 +693,8 @@ pub(crate) enum TuiRuntimeEvent {
         display_name: String,
         context_window: usize,
         reasoning_active: Option<bool>,
+        /// 切换后生效的 reasoning 深度（#1616 状态栏直接显示）。
+        reasoning_level: Option<ReasoningLevelView>,
     },
     ContextEstimated {
         estimated_tokens: usize,
@@ -734,13 +730,11 @@ pub(crate) enum TuiRuntimeEvent {
     ProjectInfo {
         project: TuiProjectInfo,
     },
+    RuntimeStatusChanged {
+        status: Box<super::runtime_status::TuiRuntimeStatus>,
+    },
     TaskStateChanged {
         state: Box<super::runtime_view::TuiTaskState>,
-    },
-    CostUpdate {
-        input_tokens: u64,
-        output_tokens: u64,
-        cost_usd: f64,
     },
     ConfigChanged {
         cause: TuiConfigChangeCause,

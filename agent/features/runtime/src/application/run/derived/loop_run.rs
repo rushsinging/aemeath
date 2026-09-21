@@ -16,7 +16,7 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::creation::RunInstance;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::Agent;
-use crate::domain::agent_run::RunDomainEvent;
+use crate::domain::agent_run::RuntimeLifecycleEvent;
 use crate::ports::StopReason;
 
 pub(super) type ProgressReporter = Arc<dyn Fn(Option<usize>, &str) + Send + Sync>;
@@ -150,7 +150,7 @@ impl EventSinkPort for DerivedEventPort {
     async fn emit(
         &mut self,
         execution: &mut RunExecutionState,
-        events: Vec<RunDomainEvent>,
+        events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
         let step_count = execution.step_count();
         ProgressTerminalObserver {
@@ -486,7 +486,7 @@ impl SubRunFinalizer {
 #[cfg(test)]
 mod tests {
     use crate::application::loop_engine::event_strategy::terminal_from_domain_event;
-    use crate::domain::agent_run::{RunDomainEvent, RunId};
+    use crate::domain::agent_run::{RunId, RuntimeLifecycleEvent};
 
     #[test]
     fn terminal_domain_events_project_to_all_agent_terminal_variants() {
@@ -494,7 +494,7 @@ mod tests {
         let parent_run_id = Some(RunId::new_v7());
         let cases = [
             (
-                RunDomainEvent::Completed {
+                RuntimeLifecycleEvent::Completed {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     result: "done".to_string(),
@@ -505,7 +505,7 @@ mod tests {
                 }),
             ),
             (
-                RunDomainEvent::Failed {
+                RuntimeLifecycleEvent::Failed {
                     run_id: run_id.clone(),
                     parent_run_id: parent_run_id.clone(),
                     error: "boom".to_string(),
@@ -515,7 +515,7 @@ mod tests {
                 }),
             ),
             (
-                RunDomainEvent::Terminated {
+                RuntimeLifecycleEvent::Terminated {
                     run_id,
                     parent_run_id,
                     reason: sdk::RunTerminationReason::ParentStepCancelled,
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn nonterminal_domain_event_does_not_create_agent_terminal() {
-        let event = RunDomainEvent::Started {
+        let event = RuntimeLifecycleEvent::Started {
             run_id: RunId::new_v7(),
             parent_run_id: Some(RunId::new_v7()),
         };

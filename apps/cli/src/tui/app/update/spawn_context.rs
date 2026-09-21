@@ -1,5 +1,5 @@
 use crate::tui::adapter::tui_runtime_event::{TuiRunContext, TuiRuntimeEvent};
-use crate::tui::app::{App, UiEvent};
+use crate::tui::app::App;
 use crate::tui::effect::session::processing::{SpawnContext, SpawnContextRefs};
 use tokio::sync::mpsc;
 
@@ -7,7 +7,6 @@ impl App {
     /// Build an owned SpawnContext from borrowed refs
     pub(crate) fn build_spawn_context(
         &mut self,
-        ui_tx: &mpsc::Sender<UiEvent>,
         runtime_tx: &mpsc::Sender<TuiRuntimeEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> Option<SpawnContext> {
@@ -15,7 +14,6 @@ impl App {
         let input_event_port = self.chat.start_input_event_buffer();
         Some(SpawnContext {
             runtime_tx: runtime_tx.clone(),
-            local_tx: ui_tx.clone(),
             input_event_port,
             agent_client,
             fallback_context: self.fallback_runtime_context(),

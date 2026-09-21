@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::audit::AuditConfig;
+use crate::config::context::ContextConfig;
 use crate::config::hooks::HooksConfig;
 use crate::config::legacy::{ApiConfig, ModelConfig};
 use crate::config::logging::LoggingConfig;
@@ -77,6 +78,10 @@ pub struct Config {
     #[serde(default)]
     pub models: ModelsConfig,
 
+    /// Context read-model reduction configuration
+    #[serde(default)]
+    pub context: ContextConfig,
+
     /// Tool configuration
     #[serde(default)]
     pub tools: ToolsConfig,
@@ -138,6 +143,7 @@ impl Default for Config {
             api: ApiConfig::default(),
             model: ModelConfig::default(),
             models: ModelsConfig::default(),
+            context: ContextConfig::default(),
             tools: ToolsConfig::default(),
             agents: AgentsConfig::default(),
             ui: UiConfig::default(),

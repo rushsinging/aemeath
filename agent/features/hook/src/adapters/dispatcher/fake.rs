@@ -54,6 +54,8 @@ impl ScriptStep {
             exit_code: Some(exit),
             stdout: stdout.to_string(),
             stderr: String::new(),
+            stdout_file: None,
+            stderr_file: None,
         })
     }
 
@@ -73,6 +75,8 @@ impl ScriptStep {
             exit_code: Some(0),
             stdout: stdout.to_string(),
             stderr: String::new(),
+            stdout_file: None,
+            stderr_file: None,
         })
     }
 
@@ -85,6 +89,8 @@ impl ScriptStep {
             exit_code: None,
             stdout: String::new(),
             stderr: String::new(),
+            stdout_file: None,
+            stderr_file: None,
         })
     }
 

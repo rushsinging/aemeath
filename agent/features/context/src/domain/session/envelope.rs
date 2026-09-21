@@ -558,6 +558,12 @@ pub struct CanonicalSession {
     pub revision: u64,
     #[serde(default)]
     pub compact: Option<ActiveCompactMarker>,
+    /// `/clear` 逻辑断点：clear 时刻磁盘 generation 中最后一个被清除的
+    /// step。clear 前的 step 成员仍在磁盘上无限保留（排查用），但 resume
+    /// 的 active 加载与 display history 都从该边界之后开始。`None` 表示
+    /// 该 session 从未 clear。
+    #[serde(default)]
+    pub cleared_after: Option<RunStepCursor>,
     #[serde(default)]
     pub run_slices: SessionHistory,
     #[serde(default)]
@@ -777,14 +783,15 @@ impl CanonicalSession {
             .collect()
     }
 
-    pub fn visible_message_steps(&self) -> Vec<CommittedStepMessages> {
+    pub fn visible_history(&self) -> SessionHistory {
         let start_at = self
             .compact
             .as_ref()
             .and_then(|marker| marker.start_at.as_ref());
         let mut visible = self.compact.is_none();
-        let mut steps = Vec::new();
+        let mut slices = Vec::new();
         for slice in &self.run_slices {
+            let mut visible_steps = Vec::new();
             for step in &slice.steps {
                 if !visible
                     && start_at.is_some_and(|cursor| {
@@ -794,16 +801,27 @@ impl CanonicalSession {
                     visible = true;
                 }
                 if visible {
-                    if let Some(input) = &step.accepted_input {
-                        steps.push(input.messages.clone());
-                    }
-                    if let Some(outcome) = &step.outcome {
-                        steps.push(outcome.messages.clone());
-                    }
+                    visible_steps.push(step.clone());
                 }
             }
+            if !visible_steps.is_empty() {
+                slices.push(CommittedRunSlice::new(slice.run_id.clone(), visible_steps));
+            }
         }
-        steps
+        SessionHistory::from_slices(slices)
+    }
+
+    pub fn visible_message_steps(&self) -> Vec<CommittedStepMessages> {
+        self.visible_history()
+            .iter()
+            .flat_map(|slice| slice.steps.iter())
+            .flat_map(|step| {
+                step.accepted_input
+                    .iter()
+                    .map(|input| input.messages.clone())
+                    .chain(step.outcome.iter().map(|outcome| outcome.messages.clone()))
+            })
+            .collect()
     }
 
     pub fn structured_messages(&self) -> Vec<Message> {
@@ -828,6 +846,7 @@ impl CanonicalSession {
             workspace: SnapshotState::Missing,
             revision: 0,
             compact: None,
+            cleared_after: None,
             run_slices: Default::default(),
             committed_steps: Default::default(),
             skill_load_records: Vec::new(),
@@ -900,6 +919,7 @@ impl From<V2CanonicalSession> for CanonicalSession {
             workspace: session.workspace,
             revision: session.revision,
             compact: session.compact,
+            cleared_after: None,
             run_slices: session
                 .run_slices
                 .into_iter()
@@ -1154,6 +1174,7 @@ impl SessionCodec {
                         workspace: legacy.workspace,
                         revision: legacy.revision,
                         compact,
+                        cleared_after: None,
                         run_slices: run_slices.into(),
                         committed_steps: legacy.committed_steps.into(),
                         skill_load_records: Vec::new(),
@@ -1250,6 +1271,7 @@ impl SessionCodec {
                 workspace: workspace.map_or(SnapshotState::Missing, SnapshotState::Captured),
                 revision: 0,
                 compact,
+                cleared_after: None,
                 run_slices: run_slices.into(),
                 committed_steps: Default::default(),
                 skill_load_records: Vec::new(),

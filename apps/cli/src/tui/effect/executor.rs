@@ -24,13 +24,6 @@ fn interaction_reply_summary(reply: &UiInteractionReply) -> String {
                 answers.len()
             )
         }
-        UiInteractionReply::ToolApproval { approved, .. } => {
-            format!("tool_approval approved={approved}")
-        }
-        UiInteractionReply::PlanApproval { approved, .. } => {
-            format!("plan_approval approved={approved}")
-        }
-        UiInteractionReply::ContinueHardPause => "continue_hard_pause".to_string(),
     }
 }
 
@@ -39,21 +32,6 @@ fn interaction_reply_to_sdk(reply: UiInteractionReply) -> sdk::InteractionReply 
         UiInteractionReply::UserAnswers(answers) => {
             sdk::InteractionReply::UserQuestions(answers.into_iter().map(sdk::UserAnswer).collect())
         }
-        UiInteractionReply::ToolApproval { approved, reason } => {
-            sdk::InteractionReply::ToolApproval(if approved {
-                sdk::ApprovalDecision::Approve
-            } else {
-                sdk::ApprovalDecision::Deny { reason }
-            })
-        }
-        UiInteractionReply::PlanApproval { approved, reason } => {
-            sdk::InteractionReply::PlanApproval(if approved {
-                sdk::ApprovalDecision::Approve
-            } else {
-                sdk::ApprovalDecision::Deny { reason }
-            })
-        }
-        UiInteractionReply::ContinueHardPause => sdk::InteractionReply::HardPauseContinue,
     }
 }
 
@@ -75,23 +53,23 @@ fn interaction_failure_from_sdk(
     }
 }
 
-fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
-    let branch = std::process::Command::new("git")
-        .args(["branch", "--show-current"])
-        .current_dir(root)
+fn git_output(root: &str, args: &[&str]) -> Option<std::process::Output> {
+    let mut command = std::process::Command::new("git");
+    command.args(args).current_dir(root);
+    utils::configure_std_noninteractive(&mut command).ok()?;
+    command
         .output()
         .ok()
         .filter(|output| output.status.success())
+}
+
+fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
+    let branch = git_output(root, &["branch", "--show-current"])
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
 
-    let kind = std::process::Command::new("git")
-        .args(["rev-parse", "--git-dir", "--git-common-dir"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
+    let kind = git_output(root, &["rev-parse", "--git-dir", "--git-common-dir"])
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|stdout| {
             let mut lines = stdout.lines().map(str::trim);
@@ -118,19 +96,18 @@ impl App {
 
     pub(crate) async fn execute_effect(&mut self, effect: Effect, ui_tx: &mpsc::Sender<UiEvent>) {
         match effect {
-            Effect::None | Effect::RequestRender => {}
+            Effect::RequestRender => {}
             Effect::QuitApplication => {
                 // #390 A1 常驻 loop shutdown：drop input_event_tx → loop 干净退出 →
                 // spawn task 执行 auto-save。退出路径在 session_lifecycle.rs 中 await 完成。
                 self.chat.clear_input_event_buffer();
                 self.layout.request_exit();
             }
-            Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::LoadDisplayHistoryWindow { request } => {
                 self.load_display_history_window_effect(request, ui_tx)
             }
-            Effect::CancelCurrentRun => self.cancel_current_run(),
+            Effect::CancelRunStep { run_id, step_id } => self.cancel_run_step(&run_id, &step_id),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
             }
@@ -140,18 +117,17 @@ impl App {
             Effect::ResolveWorkspaceMetadata { root, revision } => {
                 self.resolve_workspace_metadata_effect(root, revision, ui_tx)
             }
-            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
-            Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
-            Effect::SetCurrentRun { run_step } => self.set_current_run_effect(run_step),
-            Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
+            Effect::ProcessImageFile {
+                path,
+                fallback_text,
+            } => self.process_image_file_effect(path, fallback_text, ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
-            Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
-            Effect::ResetRuntimeState => self.reset_runtime_state().await,
+            Effect::ResetRuntimeState => self.reset_runtime_state(),
             Effect::OpenUrl { url } => self.open_url_effect(&url),
         }
     }
@@ -300,28 +276,20 @@ impl App {
         self.apply_agent_intent(AgentIntent::Conversation(intent));
     }
 
-    fn cancel_current_run(&mut self) {
-        let processing_handle_present = self.chat.processing_handle.is_some();
-        crate::tui::log_debug!(
-            "cancel_current_run effect started: processing_handle_present={} is_processing={} is_cancelling={}",
-            processing_handle_present,
-            self.chat.is_processing,
-            self.chat.is_cancelling
+    fn cancel_run_step(&mut self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+        let deadline = sdk::ControlDeadline::from_unix_millis(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64 + 10_000)
+                .unwrap_or(0),
         );
         let outcome = self
-            .chat
-            .processing_handle
+            .run_control_client
             .as_ref()
-            .map(|handle| handle.cancel_current_run())
-            .unwrap_or(sdk::CancelCurrentRunOutcome::NoActiveRun);
-        crate::tui::log_debug!(
-            "cancel_current_run effect completed: processing_handle_present={} outcome={:?}",
-            processing_handle_present,
-            outcome
-        );
+            .map(|client| client.cancel_run_step(run_id, Some(step_id), deadline))
+            .unwrap_or(sdk::CancelRunStepOutcome::NotFound);
         match outcome {
-            sdk::CancelCurrentRunOutcome::Accepted
-            | sdk::CancelCurrentRunOutcome::AlreadyCancelling => {
+            sdk::CancelRunStepOutcome::Accepted | sdk::CancelRunStepOutcome::AlreadyCancelling => {
                 self.chat.start_cancelling();
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
@@ -329,19 +297,18 @@ impl App {
                     ))),
                 ));
             }
-            sdk::CancelCurrentRunOutcome::RunTerminating => {
+            sdk::CancelRunStepOutcome::RunTerminating => {
                 self.chat.start_cancelling();
                 self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
             }
-            sdk::CancelCurrentRunOutcome::NoActiveStep => {
+            sdk::CancelRunStepOutcome::NoActiveStep => {
                 self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
             }
-            sdk::CancelCurrentRunOutcome::NoActiveRun => {
-                self.set_transient_notice(StatusNotice::warning("No active run to cancel"));
-            }
-            sdk::CancelCurrentRunOutcome::RunTerminal => {
-                self.chat.stop_processing();
+            sdk::CancelRunStepOutcome::RunTerminal => {
                 self.set_transient_notice(StatusNotice::warning("Current run already finished"));
+            }
+            sdk::CancelRunStepOutcome::NotFound => {
+                self.set_transient_notice(StatusNotice::warning("Current run step was not found"));
             }
         }
     }
@@ -405,18 +372,6 @@ impl App {
         self.chat.push_input_event(event);
     }
 
-    /// `/save` 命令——仅 UX 反馈。Runtime 已有 run_step-level auto-save + loop-exit auto-save，
-    /// TUI 不再发 ChatInputEvent::SaveSession。
-    fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
-        if notify {
-            let id = self.session.session_id().to_string();
-            let tx = ui_tx.clone();
-            crate::tui::effect::spawn_guard::spawn_guarded("save_notify", async move {
-                let _ = tx.send(UiEvent::SessionSaved { id }).await;
-            });
-        }
-    }
-
     fn fetch_memory_list_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
         // #567：list_reminders 走事件流（ChatInputEvent::ListReminders）。
         // runtime idle 分支查询，结果通过 ReminderList 事件回传。
@@ -452,10 +407,23 @@ impl App {
         });
     }
 
-    fn process_image_file_effect(&mut self, path: String, ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567 S10：process_image_file 迁移到 TUI 本地
+    fn process_image_file_effect(
+        &mut self,
+        path: String,
+        fallback_text: String,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
         let tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
+            if !std::path::Path::new(&path).is_file() {
+                // 终端粘贴的转义路径、已被清理的临时文件：回填原始文本，不丢用户输入。
+                let _ = tx
+                    .send(UiEvent::PasteFallbackToText {
+                        text: fallback_text,
+                    })
+                    .await;
+                return;
+            }
             match crate::tui::render::input::clipboard::process_image_file(&path) {
                 Ok(img) => {
                     use base64::Engine;
@@ -469,7 +437,11 @@ impl App {
                     };
                     let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                 }
-                Err(e) => crate::tui::log_warn!("image process failed: {e}"),
+                Err(error) => {
+                    let _ = tx
+                        .send(UiEvent::Error(format!("图片加载失败：{error}")))
+                        .await;
+                }
             }
         });
     }
@@ -485,10 +457,6 @@ impl App {
                 self.set_transient_notice(StatusNotice::warning(err));
             }
         }
-    }
-
-    fn set_current_run_effect(&mut self, _turn: usize) {
-        // #567：set_current_run 删除——runtime loop 内部自维护 run_step 计数器。
     }
 
     fn query_reflection_history_effect(&mut self, limit: usize) {
@@ -556,13 +524,6 @@ impl App {
         });
     }
 
-    fn fetch_reminder_recap_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567：list_reminders 走事件流。reminder recap 由 ReminderList 事件回传后处理。
-        // 暂时发 ListReminders 事件，recap 在 UiEvent 处理中生成。
-        self.chat
-            .push_input_event(sdk::ChatInputEvent::ListReminders);
-    }
-
     /// 用系统默认程序打开 URL 或本地文件路径（Cmd+Click markdown link / 行内代码路径）。
     fn open_url_effect(&mut self, url: &str) {
         // 安全校验：允许 http/https URL 和本地文件路径
@@ -601,17 +562,14 @@ impl App {
         #[cfg(target_os = "windows")]
         let cmd = "cmd";
 
-        let result = {
-            #[cfg(target_os = "windows")]
-            {
-                std::process::Command::new(cmd)
-                    .args(["/C", "start", target])
-                    .spawn()
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                std::process::Command::new(cmd).arg(target).spawn()
-            }
+        let mut command = std::process::Command::new(cmd);
+        #[cfg(target_os = "windows")]
+        command.args(["/C", "start", target]);
+        #[cfg(not(target_os = "windows"))]
+        command.arg(target);
+        let result = match utils::configure_std_noninteractive(&mut command) {
+            Ok(()) => command.spawn(),
+            Err(error) => Err(error),
         };
 
         match result {
@@ -635,49 +593,9 @@ mod workspace_tests;
 mod interaction_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "executor_image_tests.rs"]
+mod image_tests;
 
-    #[test]
-    fn test_effect_runtime_ignores_noop_effect() {
-        let app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        assert!(!app.layout.should_exit);
-    }
-
-    #[test]
-    fn test_effect_runtime_quit_effect_sets_exit_flag() {
-        let mut app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        app.layout.request_exit();
-        assert!(app.layout.should_exit);
-    }
-
-    #[test]
-    fn test_effect_runtime_accepts_pending_image() {
-        let mut app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        // accept_pending_clipboard_image 已移除（#497 spawn_guarded 化），
-        // 图片经 UiEvent::ClipboardImage → InsertImage intent 注入。
-        app.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertImage(
-            sdk::ClipboardImageView {
-                base64: "abc".to_string(),
-                media_type: "image/png".to_string(),
-                final_size: 3,
-                display_path: None,
-                width: None,
-                height: None,
-            },
-        ));
-        assert_eq!(app.model.input.document.image_spans.len(), 1);
-    }
-}
+#[cfg(test)]
+#[path = "executor_effect_tests.rs"]
+mod effect_tests;

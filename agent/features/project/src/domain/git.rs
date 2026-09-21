@@ -54,6 +54,7 @@ pub(crate) mod tests {
         pub added: Mutex<Vec<WorktreeAddCall>>,
         pub branches: HashMap<PathBuf, String>,
         pub non_git: HashSet<PathBuf>,
+        pub probe_failures: HashSet<PathBuf>,
     }
 
     impl FakeGit {
@@ -70,6 +71,9 @@ pub(crate) mod tests {
 
     impl GitWorktreeOps for FakeGit {
         fn probe_repository(&self, path: &Path) -> Result<RepositoryProbe, GitProbeError> {
+            if self.probe_failures.contains(path) {
+                return Err(GitProbeError::CommandFailed { exit_code: None });
+            }
             if self.non_git.contains(path) {
                 return Ok(RepositoryProbe::NonGit);
             }

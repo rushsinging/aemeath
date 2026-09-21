@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn build_agent_runner_constructs_without_panic() {
-        let workspace = project::wire_production_workspace(std::env::temp_dir())
+        let workspace = project::wire_production_workspace(std::env::temp_dir(), None)
             .expect("wire test workspace")
             .into_views();
 

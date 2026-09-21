@@ -36,6 +36,7 @@ pub mod mcp_manager;
 pub mod mcp_tool; // McpTool is dynamically created, not statically registered
 pub mod memory_tool;
 pub mod plan_mode;
+pub(crate) mod process_cleanup;
 // 同 list_mcp_resources：尚未注册的 MCP 资源读取 Tool，保留实现（refs #61 D3）。
 #[allow(dead_code)]
 pub mod read_mcp_resource;

@@ -62,7 +62,6 @@ fn namespace_previous_policy_is_explicit() {
         StorageNamespace::ToolResult,
         StorageNamespace::Config,
         StorageNamespace::Workspace,
-        StorageNamespace::Cost,
     ] {
         assert_eq!(namespace.previous_policy(), PreviousPolicy::Retain);
     }

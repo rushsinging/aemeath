@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # 功能：锁定 #907 Provider 构造所有权——Provider 的具体构造符号
-#       （LlmClient / LlmConfigOptions / InvocationScope / SystemBlock / LlmProvider）
+#       （LlmClient / LlmConfigOptions / InvocationScope / SystemBlock / LlmProvider /
+#        TransportPool）
 #       以及 `provider::composition` 构造面，仅允许 Composition Root 生产引用。
 # 作用：Runtime / Context / CLI 及任何非 composition crate 不得直接构造 provider
 #       客户端或穿透 composition 模块；它们只能经 Published Language 或 Runtime
@@ -21,8 +22,10 @@ import sys
 root = Path.cwd()
 
 # #907 具体构造符号——已从 provider crate-root 退役，现仅经 provider::composition 暴露。
+# #1645 新增 TransportPool：pool 的构造与持有只允许 Composition Root。
 CONSTRUCTION_SYMBOLS = {
     "LlmClient", "LlmConfigOptions", "InvocationScope", "SystemBlock", "LlmProvider",
+    "TransportPool",
 }
 provider_root_symbol = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?provider\s*::\s*("

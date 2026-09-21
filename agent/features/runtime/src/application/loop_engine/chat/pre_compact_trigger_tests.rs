@@ -66,6 +66,7 @@ fn frozen_request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -88,6 +89,8 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
             urgency: Urgency::Must,
             decision_token_count: 0,
             threshold: 0,
+            context_size: 200_000,
+            effective_window: 180_000,
             reason: DecisionReason::HeuristicFallback,
         },
     }
@@ -367,6 +370,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     });
     let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
 
@@ -519,6 +523,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
+        quality: context::domain::CompactSummaryQuality::LocalOnly,
     })));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
@@ -527,8 +532,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
@@ -568,8 +572,7 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_ok(),
@@ -604,8 +607,7 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let mut port = build_compact_test_port(&harness);
 
     let cancel = CancellationToken::new();
-    let noop_progress =
-        std::sync::Arc::new(|_: sdk::CompactStageView, _: Option<u32>, _: Option<u32>| {});
+    let noop_progress = std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {});
     let result = port.compact(&mut execution, &cancel, noop_progress).await;
     assert!(
         result.is_err(),

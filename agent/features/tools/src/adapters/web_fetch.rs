@@ -187,23 +187,30 @@ impl TypedTool for WebFetchTool {
         }
 
         // Use curl as it's universally available and handles redirects/TLS
-        let result = tokio::time::timeout(
-            Duration::from_millis(timeout_ms),
-            Command::new("curl")
-                .args([
-                    "-sL", // silent, follow redirects
-                    "--max-time",
-                    &(timeout_ms / 1000).max(5).to_string(),
-                    "-A",
-                    "aemeath/0.1.0",
-                    // Limit redirect count to reduce SSRF surface
-                    "--max-redirs",
-                    "5",
-                    url.as_str(),
-                ])
-                .output(),
-        )
-        .await;
+        let mut command = Command::new("curl");
+        command.args([
+            "-sL", // silent, follow redirects
+            "--max-time",
+            &(timeout_ms / 1000).max(5).to_string(),
+            "-A",
+            "aemeath/0.1.0",
+            // Limit redirect count to reduce SSRF surface
+            "--max-redirs",
+            "5",
+            url.as_str(),
+        ]);
+        if let Err(error) = utils::configure_tokio_noninteractive(&mut command) {
+            return TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("failed to isolate curl: {error}"),
+                    "data": { "url": url.as_str() }
+                })
+                .to_string(),
+            );
+        }
+        let result =
+            tokio::time::timeout(Duration::from_millis(timeout_ms), command.output()).await;
 
         match result {
             Ok(Ok(output)) => {

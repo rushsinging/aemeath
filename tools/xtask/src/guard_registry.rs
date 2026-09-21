@@ -18,7 +18,22 @@ const CLASSIFICATIONS: [&str; 5] = [
 struct Registry {
     version: u32,
     budgets: Budgets,
+    #[serde(default)]
+    construction_symbols: Vec<ConstructionSymbol>,
     entries: Vec<Entry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConstructionSymbol {
+    id: String,
+    symbol: String,
+    owner_crate: String,
+    kind: String,
+    allowed_paths: Vec<String>,
+    guard: String,
+    reason: String,
+    tracking_issue: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +70,7 @@ struct Scope {
 #[derive(Debug)]
 pub struct RegistryReport {
     pub migration_debt: usize,
+    pub construction_symbols: usize,
     pub by_classification: BTreeMap<String, usize>,
     by_module: BTreeMap<String, usize>,
     by_guard: BTreeMap<String, usize>,
@@ -73,6 +89,10 @@ struct ReportEntry {
 impl RegistryReport {
     pub fn render(&self) -> String {
         let mut output = format!("migration_debt: {}\n", self.migration_debt);
+        output.push_str(&format!(
+            "construction_symbols: {}\n",
+            self.construction_symbols
+        ));
         for (classification, count) in &self.by_classification {
             output.push_str(&format!("classification.{classification}: {count}\n"));
         }
@@ -206,6 +226,49 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
         });
     }
 
+    let mut construction_ids = ids;
+    for symbol in &registry.construction_symbols {
+        if symbol.id.trim().is_empty() {
+            violations.push("construction_symbols: stable id 不能为空".to_owned());
+        } else if !construction_ids.insert(symbol.id.as_str()) {
+            violations.push(format!(
+                "construction_symbols: stable id 重复: {}",
+                symbol.id
+            ));
+        }
+        if !symbol.id.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '-')
+        }) {
+            violations.push(format!("{}: stable id 格式非法", symbol.id));
+        }
+        if !matches!(symbol.kind.as_str(), "adapter" | "wire") {
+            violations.push(format!("{}: kind 非法: {}", symbol.id, symbol.kind));
+        }
+        if symbol.allowed_paths.is_empty() {
+            violations.push(format!("{}: allowed_paths 不能为空", symbol.id));
+        }
+        if symbol.tracking_issue == 0 {
+            violations.push(format!("{}: tracking_issue 必须为正整数", symbol.id));
+        }
+        for (field, value) in [
+            ("symbol", symbol.symbol.as_str()),
+            ("owner_crate", symbol.owner_crate.as_str()),
+            ("guard", symbol.guard.as_str()),
+            ("reason", symbol.reason.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                violations.push(format!("{}: {field} 不能为空", symbol.id));
+            }
+        }
+        for allowed in &symbol.allowed_paths {
+            if allowed.trim().is_empty() {
+                violations.push(format!("{}: allowed_paths 含空路径", symbol.id));
+            }
+        }
+    }
+
     let migration_debt = module_debt.values().sum();
     if migration_debt > registry.budgets.repository_migration_debt {
         violations.push(format!(
@@ -227,6 +290,7 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
     report_entries.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(RegistryReport {
         migration_debt,
+        construction_symbols: registry.construction_symbols.len(),
         by_classification,
         by_module,
         by_guard,

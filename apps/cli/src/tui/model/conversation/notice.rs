@@ -123,8 +123,12 @@ mod tests {
     #[test]
     fn test_append_system_message_resets_active_text_block() {
         let mut model = ConversationModel::default();
-        model.apply(StartChat {
-            submission: "hi".to_string(),
+        model.ensure_runtime_turn(
+            crate::tui::model::conversation::ids::ChatId::new("session-1"),
+            crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        );
+        model.apply(AppendUserMessage {
+            text: "hi".to_string(),
         });
         model.apply(AssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),

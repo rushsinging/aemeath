@@ -99,11 +99,12 @@ impl super::OutputArea {
                 phase.to_string(),
                 Style::default().fg(theme::WARNING),
             ));
-            let phase_elapsed = s.phase_elapsed_secs;
-            spans.push(Span::styled(
-                format!("  ⏱ {}", format_duration(phase_elapsed)),
-                Style::default().fg(theme::TEXT_DIM),
-            ));
+            if let Some(phase_elapsed) = s.phase_elapsed_secs {
+                spans.push(Span::styled(
+                    format!("  ⏱ {}", format_duration(phase_elapsed)),
+                    Style::default().fg(theme::TEXT_DIM),
+                ));
+            }
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
 

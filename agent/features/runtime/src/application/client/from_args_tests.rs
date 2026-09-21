@@ -231,7 +231,7 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let task_wiring = task::wire_task();
@@ -527,7 +527,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let original = workspace.clone();
@@ -598,6 +598,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     )
     .expect("build initial binding");
     let initial_snapshot = config.reader().committed_snapshot();
+    let compact_model_slot = crate::SessionModelSlot::new();
     let initial_provider = InitialProviderAssembly::new(
         initial_binding,
         initial_snapshot
@@ -610,6 +611,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             reasoning: false,
             reasoning_effort: None,
         },
+        compact_model_slot.clone(),
     );
     struct NoopRunner;
     #[async_trait::async_trait]
@@ -669,6 +671,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             &hook_runner
         ),
         "Main Run 必须保留 Composition 注入的同一 HookRunner 实例"
+    );
+    assert!(
+        compact_model_slot.current().is_some(),
+        "Runtime 装配必须把会话模型绑定到 Compact 模型槽"
     );
     assert_eq!(
         client.inner.shell.workspace.read().current_path_base(),
@@ -788,19 +794,19 @@ fn startup_resume_precedes_current_project_config_read() {
         .find("startup resume")
         .expect("source should contain 'startup resume'");
     let resume_call_pos = source
-        .find("resume_session_to_backing")
-        .expect("source should contain resume_session_to_backing");
+        .find("resolve_startup_session")
+        .expect("source should contain resolve_startup_session");
     let snapshot_pos = source
         .rfind("let snapshot = wiring.committed_config()")
         .expect("source should contain committed_config read");
 
     assert!(
         resume_pos < resume_call_pos,
-        "startup resume comment should precede resume_session_to_backing call"
+        "startup resume comment should precede resolve_startup_session call"
     );
     assert!(
         resume_call_pos < snapshot_pos,
-        "resume_session_to_backing must precede the committed_config snapshot read — \
-           Context rejects cross-project sessions before this snapshot can change"
+        "resolve_startup_session must precede the committed_config snapshot read — \
+            Context rejects cross-project sessions before this snapshot can change"
     );
 }

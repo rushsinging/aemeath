@@ -3,8 +3,8 @@ use super::model::{
     ActivityTiming,
 };
 use sdk::{
-    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityTimingView,
-    ActivityView, RunId, RunStepId,
+    ActivityAudienceView, ActivityChangeKind, ActivityId, ActivityKindView, ActivitySnapshotView,
+    ActivityStateView, ActivityTimingView, ActivityView, RunId, RunStepId,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,10 +104,21 @@ struct ActivityRegistry {
     activities: HashMap<ActivityId, ActivityObservation>,
 }
 
+#[derive(Default)]
+struct ActivityPublicationState {
+    transaction_depth: usize,
+    dirty: bool,
+    published_revision: u64,
+    heartbeat_sequence: u64,
+}
+
+const MAX_RETAINED_TERMINAL_ACTIVITIES: usize = 64;
+
 #[allow(dead_code)]
 pub(crate) struct ActivitySnapshot {
     pub(crate) run_id: RunId,
     pub(crate) revision: u64,
+    pub(crate) heartbeat_sequence: u64,
     pub(crate) activities: Vec<ActivityView>,
 }
 
@@ -125,6 +136,7 @@ impl From<ActivitySnapshot> for ActivitySnapshotView {
         Self {
             run_id: snapshot.run_id,
             revision: snapshot.revision,
+            heartbeat_sequence: snapshot.heartbeat_sequence,
             activities: snapshot.activities,
         }
     }
@@ -148,17 +160,28 @@ fn log_activity_change(kind: ActivityChangeKind, activity: &ActivityView) {
 }
 
 fn log_activity_snapshot(snapshot: &ActivitySnapshotView) {
+    let root = snapshot.activities.iter().find(|activity| {
+        activity.kind == ActivityKindView::Run
+            && activity.parent_activity_id.is_none()
+            && matches!(
+                activity.state,
+                ActivityStateView::Running | ActivityStateView::Waiting
+            )
+    });
     log::debug!(
         target: crate::LOG_TARGET,
-        "activity_snapshot run_id={} revision={} activity_count={}",
+        "[ACTIVITY_TIMING] runtime_snapshot run_id={} snapshot_revision={} heartbeat_sequence={} activity_count={} root_activity_id={} root_revision={} total_elapsed_ms={}",
         snapshot.run_id,
         snapshot.revision,
+        snapshot.heartbeat_sequence,
         snapshot.activities.len(),
+        root.map_or("-", |activity| activity.id.as_str()),
+        root.map_or(0, |activity| activity.revision),
+        root.map_or(0, |activity| activity.timing.total_elapsed_ms),
     );
 }
 
 pub(crate) trait ActivityChangePublisher: Send + Sync {
-    fn publish_change(&self, kind: ActivityChangeKind, activity: ActivityView);
     fn publish_snapshot(&self, snapshot: ActivitySnapshotView);
 }
 
@@ -167,8 +190,6 @@ struct NoopActivityChangePublisher;
 
 #[cfg(test)]
 impl ActivityChangePublisher for NoopActivityChangePublisher {
-    fn publish_change(&self, _kind: ActivityChangeKind, _activity: ActivityView) {}
-
     fn publish_snapshot(&self, _snapshot: ActivitySnapshotView) {}
 }
 
@@ -180,6 +201,7 @@ pub(crate) struct ActivityCoordinator {
     publisher: Arc<dyn ActivityChangePublisher>,
     registry: Arc<parking_lot::Mutex<ActivityRegistry>>,
     revision: Arc<parking_lot::Mutex<u64>>,
+    publication: Arc<parking_lot::Mutex<ActivityPublicationState>>,
 }
 
 impl ActivityCoordinator {
@@ -205,6 +227,7 @@ impl ActivityCoordinator {
             publisher,
             registry: Arc::new(parking_lot::Mutex::new(ActivityRegistry::default())),
             revision: Arc::new(parking_lot::Mutex::new(0)),
+            publication: Arc::new(parking_lot::Mutex::new(ActivityPublicationState::default())),
         }
     }
 
@@ -353,10 +376,10 @@ impl ActivityCoordinator {
         };
         let published = observation.to_sdk(now);
         registry.activities.insert(activity_id.clone(), observation);
+        prune_terminal_activities(&mut registry);
         drop(registry);
         log_activity_change(ActivityChangeKind::Started, &published);
-        self.publisher
-            .publish_change(ActivityChangeKind::Started, published);
+        self.publish_after_mutation();
         Ok(activity_id)
     }
 
@@ -377,8 +400,7 @@ impl ActivityCoordinator {
         let published = activity.to_sdk(self.clock.now_monotonic_ms());
         drop(registry);
         log_activity_change(ActivityChangeKind::Updated, &published);
-        self.publisher
-            .publish_change(ActivityChangeKind::Updated, published);
+        self.publish_after_mutation();
         Ok(())
     }
 
@@ -422,10 +444,10 @@ impl ActivityCoordinator {
         activity.state = terminal.state();
         activity.revision = self.next_revision();
         let published = activity.to_sdk(now);
+        prune_terminal_activities(&mut registry);
         drop(registry);
         log_activity_change(ActivityChangeKind::Finished, &published);
-        self.publisher
-            .publish_change(ActivityChangeKind::Finished, published);
+        self.publish_after_mutation();
         Ok(())
     }
 
@@ -444,8 +466,7 @@ impl ActivityCoordinator {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn snapshot(&self) -> ActivitySnapshot {
+    fn snapshot_with_ordering(&self, revision: u64, heartbeat_sequence: u64) -> ActivitySnapshot {
         let now = self.clock.now_monotonic_ms();
         let registry = self.registry.lock();
         let mut activities = registry
@@ -456,13 +477,77 @@ impl ActivityCoordinator {
         activities.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
         ActivitySnapshot {
             run_id: self.run_id.clone(),
-            revision: *self.revision.lock(),
+            revision,
+            heartbeat_sequence,
             activities,
         }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn snapshot(&self) -> ActivitySnapshot {
+        let revision = *self.revision.lock();
+        let heartbeat_sequence = self.publication.lock().heartbeat_sequence;
+        self.snapshot_with_ordering(revision, heartbeat_sequence)
+    }
+
+    pub(crate) fn transaction<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, ActivityError>,
+    ) -> Result<T, ActivityError> {
+        self.publication.lock().transaction_depth += 1;
+        let result = operation();
+        let should_publish = {
+            let mut publication = self.publication.lock();
+            publication.transaction_depth = publication.transaction_depth.saturating_sub(1);
+            publication.transaction_depth == 0 && std::mem::take(&mut publication.dirty)
+        };
+        if should_publish {
+            self.publish_snapshot();
+        }
+        result
+    }
+
+    fn publish_after_mutation(&self) {
+        let should_publish = {
+            let mut publication = self.publication.lock();
+            if publication.transaction_depth > 0 {
+                publication.dirty = true;
+                false
+            } else {
+                true
+            }
+        };
+        if should_publish {
+            self.publish_snapshot();
+        }
+    }
+
+    pub(crate) fn heartbeat_snapshot(&self) -> ActivitySnapshotView {
+        let (revision, heartbeat_sequence) = {
+            let mut publication = self.publication.lock();
+            publication.heartbeat_sequence = publication.heartbeat_sequence.saturating_add(1);
+            (
+                publication.published_revision,
+                publication.heartbeat_sequence,
+            )
+        };
+        ActivitySnapshotView::from(self.snapshot_with_ordering(revision, heartbeat_sequence))
+    }
+
+    pub(crate) fn publish_heartbeat(&self) {
+        let snapshot = self.heartbeat_snapshot();
+        log_activity_snapshot(&snapshot);
+        self.publisher.publish_snapshot(snapshot);
+    }
+
     pub(crate) fn publish_snapshot(&self) {
-        let snapshot = ActivitySnapshotView::from(self.snapshot());
+        let revision = *self.revision.lock();
+        {
+            let mut publication = self.publication.lock();
+            publication.published_revision = revision;
+            publication.heartbeat_sequence = 0;
+        }
+        let snapshot = ActivitySnapshotView::from(self.snapshot_with_ordering(revision, 0));
         log_activity_snapshot(&snapshot);
         self.publisher.publish_snapshot(snapshot);
     }
@@ -503,8 +588,7 @@ impl ActivityCoordinator {
         let published = activity.to_sdk(now);
         drop(registry);
         log_activity_change(ActivityChangeKind::Updated, &published);
-        self.publisher
-            .publish_change(ActivityChangeKind::Updated, published);
+        self.publish_after_mutation();
         Ok(())
     }
 
@@ -512,6 +596,28 @@ impl ActivityCoordinator {
         let mut revision = self.revision.lock();
         *revision += 1;
         *revision
+    }
+}
+
+fn prune_terminal_activities(registry: &mut ActivityRegistry) {
+    let terminal_count = registry
+        .activities
+        .values()
+        .filter(|activity| activity.state.is_terminal())
+        .count();
+    let remove_count = terminal_count.saturating_sub(MAX_RETAINED_TERMINAL_ACTIVITIES);
+    if remove_count == 0 {
+        return;
+    }
+    let mut terminal_ids = registry
+        .activities
+        .values()
+        .filter(|activity| activity.state.is_terminal())
+        .map(|activity| (activity.revision, activity.id.clone()))
+        .collect::<Vec<_>>();
+    terminal_ids.sort_by_key(|(revision, _)| *revision);
+    for (_, activity_id) in terminal_ids.into_iter().take(remove_count) {
+        registry.activities.remove(&activity_id);
     }
 }
 

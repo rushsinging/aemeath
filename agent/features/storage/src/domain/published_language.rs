@@ -34,7 +34,6 @@ pub enum StorageNamespace {
     AuditUsage,
     Config,
     Workspace,
-    Cost,
 }
 
 impl StorageNamespace {
@@ -48,7 +47,6 @@ impl StorageNamespace {
             Self::AuditUsage => "audit-usage",
             Self::Config => "config",
             Self::Workspace => "workspace",
-            Self::Cost => "cost",
         }
     }
 
@@ -61,8 +59,7 @@ impl StorageNamespace {
             | Self::History
             | Self::ToolResult
             | Self::Config
-            | Self::Workspace
-            | Self::Cost => PreviousPolicy::Retain,
+            | Self::Workspace => PreviousPolicy::Retain,
         }
     }
 
@@ -75,8 +72,7 @@ impl StorageNamespace {
             | Self::History
             | Self::ToolResult
             | Self::Config
-            | Self::Workspace
-            | Self::Cost => Durability::ProcessCrashSafe,
+            | Self::Workspace => Durability::ProcessCrashSafe,
         }
     }
 

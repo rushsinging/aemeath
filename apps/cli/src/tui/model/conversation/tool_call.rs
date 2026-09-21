@@ -1,7 +1,7 @@
-use super::agent_progress::AgentActivityLine;
 use super::ids::{ToolCallId, ToolStreamKey};
 use super::streaming_preview::ToolStreamingPreviewBuffer;
 use super::tool_result_payload::ToolResultPayload;
+use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCall {
@@ -16,14 +16,14 @@ pub struct ToolCall {
     pub activities: Vec<AgentActivityLine>,
     pub streaming_preview: Option<ToolStreamingPreviewBuffer>,
     /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时由
-    /// `AgentProgressKind::Started` 事件填充，用于 header 渲染
+    /// `Started activity` 事件填充，用于 header 渲染
     /// `Agent - [role] - Provider/model`。prompt 不在此处重复存储，
     /// 渲染时从 `args_preview` 取（已在 ToolCallUpdate status=Ready 时填充）。
     pub agent_meta: Option<AgentMeta>,
 }
 
 /// Agent 工具的元数据（issue #499）。
-/// 由 runtime 的 `AgentProgressKind::Started` 事件携带，
+/// 由 runtime 的 `Started activity` 事件携带，
 /// 携带 sub-agent 实际 resolve 后的 role/model（而非 args 原始值）。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AgentMeta {
@@ -74,14 +74,6 @@ impl ToolCall {
         }
         changes
     }
-    pub fn bind(&mut self) -> Vec<ToolCallChange> {
-        if self.status == ToolCallStatus::PendingArgs {
-            self.status = ToolCallStatus::Running;
-            vec![ToolCallChange::Bound, ToolCallChange::Running]
-        } else {
-            vec![ToolCallChange::Bound]
-        }
-    }
     pub fn complete(&mut self, result: ToolResultPayload) {
         let is_error = result.is_error;
         self.result = Some(result);
@@ -95,19 +87,12 @@ impl ToolCall {
     pub fn cancel(&mut self) -> bool {
         if matches!(
             self.status,
-            ToolCallStatus::Success
-                | ToolCallStatus::Error
-                | ToolCallStatus::Cancelled
-                | ToolCallStatus::Orphaned
+            ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
         ) {
             return false;
         }
         self.status = ToolCallStatus::Cancelled;
         true
-    }
-
-    pub fn orphan(&mut self) {
-        self.status = ToolCallStatus::Orphaned;
     }
 }
 
@@ -119,7 +104,6 @@ pub enum ToolCallStatus {
     Success,
     Error,
     Cancelled,
-    Orphaned,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,22 +127,15 @@ mod tests {
         ToolCall::pending(ToolCallId::new("tool-1"), stream_key())
     }
 
-    #[test]
-    fn test_tool_call_binds_id_and_runs() {
-        let mut call = pending_call();
-        let changes = call.bind();
-        assert!(call.id.as_ref().is_some(), "id should be set after bind");
-        assert_eq!(call.status, ToolCallStatus::Running);
-        assert_eq!(
-            changes,
-            vec![ToolCallChange::Bound, ToolCallChange::Running]
-        );
+    fn bound_call() -> ToolCall {
+        let mut call = ToolCall::pending(ToolCallId::new("tool-1"), stream_key());
+        call.update(None, ToolCallStatus::Running);
+        call
     }
 
     #[test]
     fn test_tool_call_completes_success() {
-        let mut call = pending_call();
-        call.bind();
+        let mut call = bound_call();
         let payload = ToolResultPayload::new(
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
@@ -177,8 +154,7 @@ mod tests {
 
     #[test]
     fn test_tool_call_completes_error() {
-        let mut call = pending_call();
-        call.bind();
+        let mut call = bound_call();
         call.complete(ToolResultPayload::new(
             "failed".to_string(),
             serde_json::json!({ "text": "failed" }),

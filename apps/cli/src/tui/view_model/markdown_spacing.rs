@@ -38,6 +38,8 @@ pub struct MarkdownSpacingPolicy {
 }
 
 impl MarkdownSpacingPolicy {
+    /// `Default` 的常量形态（测试 const fn 求值需要）。
+    #[cfg(test)]
     pub const fn normal() -> Self {
         Self {
             mode: MarkdownSpacingMode::Normal,

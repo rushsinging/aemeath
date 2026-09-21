@@ -7,6 +7,284 @@
       "tui": 1
     }
   },
+  "construction_symbols": [
+    {
+      "id": "construction.storage.filesystemblobadapter",
+      "symbol": "FileSystemBlobAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Blob filesystem adapter is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.storage.filesystemdatasetadapter",
+      "symbol": "FileSystemDatasetAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset filesystem adapter is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.memory.datasetmemoryopener",
+      "symbol": "DatasetMemoryOpener",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Memory opener is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.memory.filelegacymemorysourcefactory",
+      "symbol": "FileLegacyMemorySourceFactory",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Legacy memory source factory is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.memory.atomicdatasetreflectionhistorystore",
+      "symbol": "AtomicDatasetReflectionHistoryStore",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Reflection history store is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.atomicblobacceptedinputwriter",
+      "symbol": "AtomicBlobAcceptedInputWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Accepted input writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.atomicblobtoolreceiptwriter",
+      "symbol": "AtomicBlobToolReceiptWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Tool receipt writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.datasetsessionmanagement",
+      "symbol": "DatasetSessionManagement",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset session management is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.datasetcanonicalsessionwriter",
+      "symbol": "DatasetCanonicalSessionWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Canonical session writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.productionmaincontextfactory",
+      "symbol": "ProductionMainContextFactory",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Main context factory is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.workspaceskillqueryfactory",
+      "symbol": "WorkspaceSkillQueryFactory",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Skill query factory is assembled only by the Composition Root or inside the Context adapters (#1067)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.nativeconfigstore",
+      "symbol": "NativeConfigStore",
+      "owner_crate": "config",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Config native store is assembled only by the Composition Root (#861/#949)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.policy.configuredpolicy",
+      "symbol": "ConfiguredPolicy",
+      "owner_crate": "policy",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Policy adapter is assembled only by the Composition Root (#861)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.wire-main-session",
+      "symbol": "wire_main_session",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Main session wiring is invoked only by the Composition Root (#861/#1292)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.project.wire-production-workspace",
+      "symbol": "wire_production_workspace",
+      "owner_crate": "project",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Production workspace wiring is invoked only by the Composition Root (#893)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-commands",
+      "symbol": "wire_commands",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Command catalog wiring is invoked only by the Composition Root (#861)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.runtime.atomicblobtoolresultstore",
+      "symbol": "AtomicBlobToolResultStore",
+      "owner_crate": "runtime",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Tool Result store is assembled only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.wire-project-config-with-cli",
+      "symbol": "wire_project_config_with_cli",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Project config wiring is invoked only by the Composition Root (#949)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.task.wire-task",
+      "symbol": "wire_task",
+      "owner_crate": "task",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Task wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-builtin-catalog-execution",
+      "symbol": "wire_builtin_catalog_execution",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Builtin catalog/execution wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-skills",
+      "symbol": "wire_skills",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Skill wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.runtime.wire-sdk-chat-ingress",
+      "symbol": "wire_sdk_chat_ingress",
+      "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "SDK chat ingress wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.provider.transportpool",
+      "symbol": "TransportPool",
+      "owner_crate": "provider",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
+      "tracking_issue": 1645
+    }
+  ],
   "entries": [
     {
       "id": "policy.composition.cross-bc-construction-ownership",
@@ -150,22 +428,6 @@
       "tracking_issue": 1022,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
-      "status": "active"
-    },
-    {
-      "id": "migration.tui.tea-slash-dispatch",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "path",
-        "value": "apps/cli/src/tui/app/slash.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "tui",
-      "reason": "Slash dispatch still performs asynchronous request-response work instead of Effect round-trips",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when slash I/O is driven through Effect and authoritative events",
       "status": "active"
     },
     {
@@ -358,22 +620,6 @@
       "tracking_issue": 947,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-test-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "slash_tests.rs,slash_effect_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Test mocks are outside production TEA purity",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while these files are test-only",
       "status": "active"
     },
     {
@@ -633,6 +879,22 @@
       "status": "active"
     },
     {
+      "id": "policy.audit.cost-retirement",
+      "guard": "check-cost-tracker-retirement.sh",
+      "module": "audit",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent"
+      },
+      "classification": "target_capability_policy",
+      "owner": "audit",
+      "reason": "Usage-only Audit MVP keeps Runtime pricing, legacy Cost history paths, Cost DTO/events, Cost presentation state and the unused Storage Cost namespace retired",
+      "tracking_issue": 932,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only after a separately approved Audit-owned Cost/Pricing design defines new Published Language and migration semantics",
+      "status": "active"
+    },
+    {
       "id": "policy.runtime.activity-observation",
       "guard": "check-runtime-activity-observation.sh",
       "module": "runtime",
@@ -646,6 +908,22 @@
       "tracking_issue": 742,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent unified Runtime Activity observation policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.runtime.event-naming",
+      "guard": "check-runtime-event-naming.sh",
+      "module": "runtime",
+      "scope": {
+        "kind": "path",
+        "value": ".agents/runtime-event-naming-baseline.json"
+      },
+      "classification": "target_capability_policy",
+      "owner": "runtime",
+      "reason": "Runtime, SDK and TUI event variants are explicitly cataloged, indexed and checked for cross-layer fact-name stability without breaking compatibility wire names",
+      "tracking_issue": 945,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent structured event catalog and naming policy",
       "status": "active"
     },
     {
@@ -726,6 +1004,38 @@
       "tracking_issue": 1558,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while tests lock verbatim Runtime consumption",
+      "status": "active"
+    },
+    {
+      "id": "policy.process.noninteractive-child-session",
+      "guard": "check-noninteractive-child-session.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "path",
+        "value": "packages/global/utils/src/process.rs"
+      },
+      "classification": "target_capability_policy",
+      "owner": "architecture",
+      "reason": "All production noninteractive external processes must enter a detached Unix session through the single utils boundary",
+      "tracking_issue": 1577,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent cross-platform controlling-terminal isolation policy",
+      "status": "active"
+    },
+    {
+      "id": "policy.cross-bc.construction-registry",
+      "guard": "check-cross-bc-construction-registry.sh",
+      "module": "composition",
+      "scope": {
+        "kind": "symbol",
+        "value": "construction_symbols"
+      },
+      "classification": "target_capability_policy",
+      "owner": "composition",
+      "reason": "Fail-closed registry over cross-BC concrete adapter constructions and feature wire functions; the Composition Root is the sole production construction site",
+      "tracking_issue": 1067,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent registry-driven policy that preserves symbol discovery and allowlist semantics",
       "status": "active"
     }
   ]

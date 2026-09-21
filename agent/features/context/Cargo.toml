@@ -10,6 +10,7 @@ dev = []
 
 [dependencies]
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 storage = { path = "../storage" }
 task = { path = "../task" }
 project = { path = "../project" }

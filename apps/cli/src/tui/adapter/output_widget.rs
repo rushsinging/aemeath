@@ -31,7 +31,7 @@ mod tests {
         let roots: Vec<BlockNode> = (0..lines)
             .map(|i| leaf(&format!("b-{i}"), &format!("line {i}")))
             .collect();
-        OutputViewModel::from_roots(roots, 1, true)
+        OutputViewModel::from_roots(roots, 1)
     }
 
     #[test]
@@ -50,7 +50,6 @@ mod tests {
                 children: Vec::new(),
             }],
             1,
-            true,
         );
 
         let document = renderer.render_model_document(
@@ -58,7 +57,7 @@ mod tests {
             1,
             80,
             0,
-            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
         );
         // 每个 root block 前有 1 空行（视觉分隔），故 assistant block = 空行 + 内容 = 2 行。
         assert_eq!(document.total_lines(), 2);
@@ -75,7 +74,7 @@ mod tests {
             1,
             0,
             0,
-            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
         );
         assert_eq!(document.total_lines(), 2);
     }
@@ -88,14 +87,14 @@ mod tests {
             40,
             80,
             0,
-            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
         );
         let _ = renderer.render_model_document(
             &vm(1),
             40,
             80,
             1,
-            crate::tui::render::output::spacing::MarkdownSpacingPolicy::normal(),
+            crate::tui::render::output::spacing::MarkdownSpacingPolicy::default(),
         );
         assert_eq!(
             renderer.render_count(),

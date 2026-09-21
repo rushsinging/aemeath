@@ -18,7 +18,7 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
             frame: 0,
             verb: "Thinking".to_string(),
             elapsed_secs: 0,
-            phase_elapsed_secs: 0,
+            phase_elapsed_secs: Some(0),
             phase_text: None,
             detail_text: None,
         }),

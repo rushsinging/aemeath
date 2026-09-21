@@ -50,27 +50,40 @@ fn response(usage: RawUsageSnapshot) -> InvocationResponse {
 }
 
 #[test]
-fn successful_reported_usage_records_once_and_ignores_queue_full() {
+fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
     let sink = RecordingSink::new(UsageEmitOutcome::Dropped(UsageDropReason::QueueFull));
 
+    let expected_context = context();
     record_successful_usage(
         &sink,
-        context(),
+        expected_context.clone(),
         &response(RawUsageSnapshot {
             input_tokens: Some(10),
             output_tokens: Some(2),
-            ..RawUsageSnapshot::default()
+            cache_write_tokens: Some(3),
+            cache_read_tokens: Some(4),
+            reasoning_tokens: Some(5),
         }),
         || 99,
     );
 
     let records = sink.records.lock().expect("record lock");
     assert_eq!(records.len(), 1);
+    assert_eq!(records[0].recorded_at_unix_ms, 99);
+    assert_eq!(records[0].session_id, expected_context.session_id);
+    assert_eq!(records[0].run_id, expected_context.run_id);
+    assert_eq!(records[0].run_step_id, expected_context.run_step_id);
     assert_eq!(
-        records[0].model_invocation_id.as_str(),
-        "01900000-0000-7000-8000-000000000004"
+        records[0].model_invocation_id,
+        expected_context.model_invocation_id
     );
+    assert_eq!(records[0].provider, "provider");
+    assert_eq!(records[0].model, "model");
     assert_eq!(records[0].input_tokens, 10);
+    assert_eq!(records[0].output_tokens, 2);
+    assert_eq!(records[0].cache_write_tokens, Some(3));
+    assert_eq!(records[0].cache_read_tokens, Some(4));
+    assert_eq!(records[0].reasoning_tokens, Some(5));
 }
 
 #[test]

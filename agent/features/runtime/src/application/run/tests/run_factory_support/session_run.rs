@@ -272,7 +272,7 @@ impl SessionRunFixtureBuilder {
             self.config.clone(),
         );
         let session_snapshot = session_state.snapshot_for_run();
-        let workspace = project::wire_production_workspace(self.workspace_root.clone())
+        let workspace = project::wire_production_workspace(self.workspace_root.clone(), None)
             .expect("wire fixture workspace")
             .into_views();
         let workspace_access =
@@ -302,6 +302,7 @@ impl SessionRunFixtureBuilder {
                     ),
                     revision: session_snapshot.revision(),
                     compact: None,
+                    cleared_after: None,
                     run_slices: Vec::new().into(),
                     committed_steps: Default::default(),
                     skill_load_records: Vec::new(),

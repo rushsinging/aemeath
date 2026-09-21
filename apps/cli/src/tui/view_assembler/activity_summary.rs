@@ -6,14 +6,22 @@ use crate::tui::model::conversation::activity_observation::ActivityObservationMo
 use crate::tui::model::conversation::interaction::UiRunId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ActivitySummary {
-    pub(crate) run_id: UiRunId,
-    pub(crate) revision: u64,
+pub(crate) struct PrimaryActivitySummary {
+    pub(crate) activity_id: String,
+    pub(crate) timing_revision: u64,
     pub(crate) phase_text: String,
-    pub(crate) total_elapsed_ms: u64,
-    pub(crate) phase_elapsed_ms: u64,
+    pub(crate) elapsed_ms: u64,
     pub(crate) detail: Option<String>,
     pub(crate) invoking_model: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ActivitySummary {
+    pub(crate) run_id: UiRunId,
+    pub(crate) root_activity_id: String,
+    pub(crate) root_timing_revision: u64,
+    pub(crate) total_elapsed_ms: u64,
+    pub(crate) primary: Option<PrimaryActivitySummary>,
 }
 
 pub(crate) struct ActivitySummaryAssembler;
@@ -41,30 +49,37 @@ impl ActivitySummaryAssembler {
             .filter(|activity| activity.run_id == run_id && is_visible_leaf(activity))
             .max_by_key(|activity| activity.revision);
         let primary = match (phase, leaf) {
-            (Some(phase), Some(leaf)) if leaf.revision > phase.revision => leaf,
-            (Some(phase), _) => phase,
-            (None, Some(leaf)) => leaf,
-            (None, None) => return None,
+            (Some(phase), Some(leaf)) if leaf.revision > phase.revision => Some(leaf),
+            (Some(phase), _) => Some(phase),
+            (None, Some(leaf)) => Some(leaf),
+            (None, None) => None,
         };
-        let phase_text = phase_label(primary)?;
+        let primary = primary.and_then(|primary| {
+            Some(PrimaryActivitySummary {
+                activity_id: primary.id.as_str().to_string(),
+                timing_revision: primary.revision,
+                phase_text: phase_label(primary)?,
+                elapsed_ms: primary.timing.state_elapsed_ms,
+                detail: stable_detail(leaf),
+                invoking_model: matches!(
+                    primary.detail,
+                    TuiActivityDetail::Model {
+                        stream: TuiModelStreamState::Invoking
+                            | TuiModelStreamState::WaitingForFirstToken
+                            | TuiModelStreamState::Streaming
+                            | TuiModelStreamState::Retrying,
+                        ..
+                    }
+                ),
+            })
+        });
 
         Some(ActivitySummary {
-            revision: model.revision_for(&run_id).unwrap_or(root.revision),
+            root_activity_id: root.id.as_str().to_string(),
+            root_timing_revision: root.revision,
             run_id,
-            phase_text,
             total_elapsed_ms: root.timing.total_elapsed_ms,
-            phase_elapsed_ms: primary.timing.state_elapsed_ms,
-            detail: stable_detail(leaf),
-            invoking_model: matches!(
-                primary.detail,
-                TuiActivityDetail::Model {
-                    stream: TuiModelStreamState::Invoking
-                        | TuiModelStreamState::WaitingForFirstToken
-                        | TuiModelStreamState::Streaming
-                        | TuiModelStreamState::Retrying,
-                    ..
-                }
-            ),
+            primary,
         })
     }
 }
@@ -133,7 +148,7 @@ fn phase_label(activity: &TuiActivityObservation) -> Option<String> {
         }
         TuiActivityDetail::Compact { .. } => "Compacting…",
         TuiActivityDetail::Interaction { .. } => "Waiting for input…",
-        TuiActivityDetail::ChildRun { .. } => "Running agent…",
+        TuiActivityDetail::SubRun { .. } => "Running agent…",
         TuiActivityDetail::Run { .. } => return None,
     };
     Some(label.to_string())
@@ -192,7 +207,7 @@ fn stable_detail(activity: Option<&TuiActivityObservation>) -> Option<String> {
                     .or_else(|| Some(name.clone()))
             }
         }
-        TuiActivityDetail::ChildRun { role, .. } => Some(format!("Running {role}")),
+        TuiActivityDetail::SubRun { role, .. } => Some(format!("Running {role}")),
         _ => None,
     }
 }
