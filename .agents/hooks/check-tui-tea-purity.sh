@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# guard-registry:migration.tui.tea-slash-dispatch
+# guard-registry:scope.tui.tea-slash-file-exemption
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export ROOT
@@ -36,7 +36,7 @@ TUI_PURE_DIRS=(
 # 注：A1-A4 已 Effect 化/转纯的文件（dialog.rs、suggestions.rs、已删除的
 # save.rs、memory.rs）已移出本名单，受严格纯度检查约束。
 # ---------------------------------------------------------------------------
-# guard-registry:migration.tui.tea-slash-dispatch
+# guard-registry:scope.tui.tea-slash-file-exemption
 # guard-registry:scope.tui.tea-runtime-files
 # guard-registry:scope.tui.tea-test-files
 EXEMPT_FILES=(

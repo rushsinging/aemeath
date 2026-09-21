@@ -137,7 +137,7 @@ O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于�
 | ApplicationControl | `ChatInputEvent` 与 Runtime `PendingCommand` 承担第二次业务路由，参数多为原始字符串 | Catalog schema 解析参数；handler 调目标 BC 应用 Command Port并保留 typed Outcome；迁移期 PendingCommand 若存在，不再解析命令名 |
 | 结果与展示 | Runtime `idle_commands.rs` 混有 emoji、英文终端文本、`[action:*]` / `[confirm:*]` 控制字符串 | 业务层返回 owner PL/Outcome；terminal formatting 与交互映射留在 delivery ACL，特殊字符串协议零生产依赖或登记精确承接项 |
 | 装配与依赖 | Composition 无 Command wiring；CLI 依赖 SDK 静态函数 | Composition 装配唯一 Command capability；CLI 继续只依赖 `composition + sdk`，不直连 Tools |
-| 防退化 | `migration.tui.tea-slash-dispatch` 允许 TUI slash 异步 I/O，尚无 Command 唯一真相守卫 | L0 Guard 禁止交付层恢复 builtin 清单/业务 parser、禁止 Runtime 定义 Command PL 副本；#947 承接 Effect 化与该迁移例外最终删除 |
+| 防退化 | `scope.tui.tea-slash-file-exemption`（#59 S5-gap 裁定 wontfix 文件豁免）允许 TUI slash 保持 request-response I/O；Command 唯一真相由 L0 Guard 防退化 | L0 Guard 禁止交付层恢复 builtin 清单/业务 parser、禁止 Runtime 定义 Command PL 副本；若未来重建 slash dispatch 于 Effect 回流，则删除该豁免 |
 
 验证按 [测试架构](04-testing-and-coverage.md#2-六层测试模型) 分层：L1 覆盖名称、alias、schema、typed error 与机制映射；L2 覆盖 Catalog/Router 和 handler→fake port；L3 覆盖 PL/Port、SDK/Composition 投影；L4 覆盖三类用户旅程、alias 一致性、未知命令不触发 LLM 与 CLI/TUI 等价结果。#913 不新增真实 PTY、平台或发布资产职责，因此不新增专属 L5，以既有 CLI smoke 作为系统层回归证据。
 

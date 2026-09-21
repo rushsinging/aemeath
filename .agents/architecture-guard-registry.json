@@ -1,7 +1,7 @@
 {
   "version": 1,
   "budgets": {
-    "repository_migration_debt": 1,
+    "repository_migration_debt": 0,
     "modules": {
       "runtime": 0,
       "tui": 1
@@ -153,19 +153,19 @@
       "status": "active"
     },
     {
-      "id": "migration.tui.tea-slash-dispatch",
+      "id": "scope.tui.tea-slash-file-exemption",
       "guard": "check-tui-tea-purity.sh",
       "module": "tui",
       "scope": {
         "kind": "path",
         "value": "apps/cli/src/tui/app/slash.rs"
       },
-      "classification": "migration_exception",
+      "classification": "scope_exclusion",
       "owner": "tui",
-      "reason": "Slash dispatch still performs asynchronous request-response work instead of Effect round-trips",
+      "reason": "Wontfix file exemption (#59 S5-gap ruling): slash command dispatch stays request-response with Option<String> control flow; an Effect rewrite would add pending-state machinery and break direct Some(prompt) returns for marginal benefit",
       "tracking_issue": 947,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when slash I/O is driven through Effect and authoritative events",
+      "exit_condition": "remove only if slash dispatch is ever rebuilt on Effect round-trips and authoritative events",
       "status": "active"
     },
     {
