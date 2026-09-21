@@ -140,11 +140,39 @@ impl ProviderPort for ProviderAdapter {
 /// `ProviderBuildSpec` through the Provider-owned Composition construction API,
 /// building a `ModelCapability` from the client's max reasoning level and spec
 /// limits, and wrapping the client in the existing `ProviderAdapter`.
-pub struct DefaultProviderFactory;
+///
+/// 持有进程级 `TransportPool`：同 transport key（driver/endpoint/认证域/
+/// user-agent/timeout）的多次 build 复用同一不可变 transport；model /
+/// max_tokens / reasoning 属于 invocation 配置，不参与复用判定。
+pub struct DefaultProviderFactory {
+    pool: Arc<provider::composition::TransportPool>,
+}
 
-/// Convenience constructor: returns a boxed `ProviderFactory`.
-pub fn provider_factory() -> Arc<dyn ProviderFactoryTrait> {
-    Arc::new(DefaultProviderFactory)
+impl DefaultProviderFactory {
+    pub fn new() -> Self {
+        Self {
+            pool: Arc::new(provider::composition::TransportPool::new()),
+        }
+    }
+
+    /// 共享的 transport pool；诊断与契约测试用。
+    pub fn shared_pool(&self) -> &Arc<provider::composition::TransportPool> {
+        &self.pool
+    }
+}
+
+impl Default for DefaultProviderFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Convenience constructor: returns a pooled provider factory.
+///
+/// 调用方应装配一次并复用（pool 生命周期与 factory 实例一致）；重复调用
+/// 会产生独立 pool，失去跨调用复用。
+pub fn provider_factory() -> Arc<DefaultProviderFactory> {
+    Arc::new(DefaultProviderFactory::new())
 }
 
 impl ProviderFactoryTrait for DefaultProviderFactory {
@@ -163,21 +191,22 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        let client = LlmClient::from_config(config).map_err(|err| {
-            let kind = match &err {
-                LlmError::Cancelled => ProviderErrorKind::Cancelled,
-                LlmError::RateLimited => ProviderErrorKind::RateLimited,
-                LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-                LlmError::Network(_) => ProviderErrorKind::Network,
-                LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-                LlmError::Stream(_) => ProviderErrorKind::Protocol,
-                LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
-                    ProviderErrorKind::StreamTruncated
-                }
-                LlmError::Config(_) => ProviderErrorKind::Configuration,
-            };
-            ProviderError::fatal(kind, err.to_string())
-        })?;
+        let client =
+            LlmClient::from_config_with_pool(config, self.pool.as_ref()).map_err(|err| {
+                let kind = match &err {
+                    LlmError::Cancelled => ProviderErrorKind::Cancelled,
+                    LlmError::RateLimited => ProviderErrorKind::RateLimited,
+                    LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
+                    LlmError::Network(_) => ProviderErrorKind::Network,
+                    LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
+                    LlmError::Stream(_) => ProviderErrorKind::Protocol,
+                    LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
+                        ProviderErrorKind::StreamTruncated
+                    }
+                    LlmError::Config(_) => ProviderErrorKind::Configuration,
+                };
+                ProviderError::fatal(kind, err.to_string())
+            })?;
 
         let client = Arc::new(
             client

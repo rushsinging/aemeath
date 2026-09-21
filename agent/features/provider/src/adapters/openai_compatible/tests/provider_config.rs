@@ -441,7 +441,7 @@ fn volcengine_provider_uses_max_output_tokens_field() {
 fn openai_streaming_http_client_uses_connect_timeout() {
     let debug = format!(
         "{:?}",
-        super::super::provider::build_streaming_http_client_builder(30)
+        crate::adapters::transport::http_builder_for_endpoint(None)
     );
 
     assert!(debug.contains("connect_timeout"), "{debug}");
