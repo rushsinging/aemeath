@@ -236,7 +236,7 @@ async fn build_facade_harness(
             fail,
         }),
         session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+            storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
@@ -270,7 +270,7 @@ async fn build_no_store_harness() -> FacadeHarness {
 /// Convenience: harness *with* `native_store` (persist_update → Committed).
 async fn build_with_store_harness() -> FacadeHarness {
     let tmp = TempDir::new("facade-store");
-    let storage = Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap());
+    let storage = storage::file_system_blob(tmp.path()).unwrap();
     let config_service = Arc::new(
         ConfigAppService::with_global_path(None, tmp.path().join("global.json"))
             .with_native_store(NativeConfigStore::new(storage)),

@@ -14,7 +14,7 @@ use memory::{
 };
 use share::config::MemoryConfig;
 use std::sync::Arc;
-use storage::api as storage_api;
+use storage as storage_api;
 
 fn unique_root(case: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -40,7 +40,7 @@ fn key(path: &str) -> ProjectMemoryKey {
 }
 
 fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    Arc::new(storage::FileSystemDatasetAdapter::new(root).unwrap())
+    storage::file_system_dataset(root).unwrap()
 }
 
 /// Legacy source that always reports no legacy members.

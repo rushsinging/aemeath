@@ -6,8 +6,8 @@ use std::sync::Arc;
 #[tokio::test]
 async fn overlay_does_not_advance_canonical_session_revision() {
     let root = tempfile::tempdir().expect("temporary storage root");
-    let blob: Arc<dyn storage::api::AtomicBlobPort> =
-        Arc::new(storage::FileSystemBlobAdapter::new(root.path()).expect("blob adapter"));
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::file_system_blob(root.path()).expect("blob adapter");
     let ledger = AtomicBlobAcceptedInputLedger::new(blob, "019fa1be-bab3-7c47-ad94-c2952813dee8")
         .expect("accepted input ledger");
     ledger
@@ -34,8 +34,8 @@ async fn overlay_does_not_advance_canonical_session_revision() {
 #[tokio::test]
 async fn finalized_acknowledgement_removes_only_matching_input() {
     let root = tempfile::tempdir().expect("temporary storage root");
-    let blob: Arc<dyn storage::api::AtomicBlobPort> =
-        Arc::new(storage::FileSystemBlobAdapter::new(root.path()).expect("blob adapter"));
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::file_system_blob(root.path()).expect("blob adapter");
     let ledger =
         AtomicBlobAcceptedInputLedger::new(blob, "session").expect("accepted input ledger");
     for (revision, run_id, step_id) in [

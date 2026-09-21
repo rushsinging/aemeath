@@ -20,7 +20,14 @@ runtime = root / "agent/features/runtime/src"
 composition = root / "agent/composition/src/runtime.rs"
 violations = []
 
+TEST_FILE_PATTERN = re.compile(r"_tests\.rs$|(^|/)tests\.rs$|(^|/)tests/")
+
 for path in sorted(context.rglob("*.rs")):
+    if TEST_FILE_PATTERN.search(str(path)):
+        # 测试夹具构造真实 blob backing 注入被测对象，不参与生产权限判断
+        # （与 check-hook-target-facade / check-task-persistence-capability 的
+        # scope exclusion 惯例一致）；生产代码仍禁止构造。
+        continue
     text = path.read_text()
     if re.search(r"\b(?:storage::api::)?file_system_blob\s*\(", text):
         violations.append(f"{path.relative_to(root)}: Context Session code must consume injected AtomicBlobPort, not construct file_system_blob")

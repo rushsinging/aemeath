@@ -104,11 +104,11 @@ pub trait ToolReceiptWriter: Send + Sync {
 }
 
 pub struct AtomicBlobAcceptedInputWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobAcceptedInputWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 }
@@ -156,11 +156,11 @@ impl AcceptedInputWriter for AtomicBlobAcceptedInputWriter {
 }
 
 pub struct AtomicBlobToolReceiptWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobToolReceiptWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 }
@@ -197,11 +197,11 @@ impl ToolReceiptWriter for NoOpToolReceiptWriter {
 }
 
 pub struct AtomicBlobCanonicalSessionWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobCanonicalSessionWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::api::{AtomicBlobPort, AtomicDatasetPort, StorageNamespace};
+use storage::{AtomicBlobPort, AtomicDatasetPort, StorageNamespace};
 
 use crate::adapters::{
     AtomicBlobSessionManagement, DatasetCanonicalSessionWriter, DatasetSessionReader,
@@ -193,7 +193,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let outcome = self
             .dataset
-            .delete_all_generations(&dataset_key, storage::api::DeleteOptions::default())
+            .delete_all_generations(&dataset_key, storage::DeleteOptions::default())
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();

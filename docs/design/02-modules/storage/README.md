@@ -43,7 +43,7 @@ Storage 采用 Hexagonal + Clean 组织（`domain + ports + adapters`）。三�
 
 ```text
 src/
-├── lib.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS，composition-only wiring
+├── lib.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS 与 file_system_blob / file_system_dataset composition wiring 构造函数
 ├── domain.rs                    # 领域策略入口
 ├── domain/
 │   ├── safe_path.rs             #   SafePathSegment 纯路径段 PL
@@ -59,7 +59,7 @@ src/
     └── dataset_filesystem.rs    #   dataset lock / journal 文件系统实现
 ```
 
-- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型（含 `SafeStorageRoot`），**NEVER** 转发 blob/dataset adapter 内部结构。
+- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型（含 `SafeStorageRoot`），并发布 `file_system_blob` / `file_system_dataset` 两个 composition wiring 构造函数（返回 `Arc<dyn Port>`）；concrete adapter 类型（`FileSystemBlobAdapter` / `FileSystemDatasetAdapter`）是 crate 私有，**NEVER** 转发 blob/dataset adapter 内部结构，**NEVER** 重建 `storage::api` 之类第二 façade（#1647 删除过渡模块并由 `check_storage_facade` 锁定）。
 - #883 已删除 Storage-owned `memory_store` / `task_store` 及其领域 schema、scoring、dependency graph 与 façade；Memory legacy reader/migration 由 Memory adapter 拥有，Task snapshot codec/restore 由 Task BC 拥有。
 - `ports/` 只定义 Storage-owned `AtomicBlobPort` / `AtomicDatasetPort` OHS，并依赖 `domain` Published Language；它 **NEVER** 成为所有 trait 的垃圾桶，也不容纳消费方的 Session/Memory/Audit 出站端口。
 - `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；dataset 的 adapter-private manifest/journal schema 留在 `adapters/dataset_protocol.rs`。这正是 §3.5 所述“Storage 私有 backend SPI”的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
@@ -520,6 +520,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-21 | #1647 收口 crate-root 唯一稳定公开面：物理删除 `storage::api` 过渡 façade（27 文件 / 61 行消费者全部迁至 crate root）；`FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 退出公开面改为 crate 私有，Composition 经 `file_system_blob` / `file_system_dataset` 构造函数装配；`check-crate-api-boundary.sh` 的 `ROOT_ACCESS_ALLOW.storage` 与 lib.rs 公开面 exact-match，`storage::api` 与跨 crate adapter 访问被硬拒，stale 的 `memory_base_dir` / `project_file_name*` 一并移出 | [#1647](https://github.com/rushsinging/aemeath/issues/1647) |
 | 2026-07-20 | #1057 完成测试完整性审查：补齐 SafeStorageRoot 路径安全契约、Session AtomicBlob 相邻映射、owning-layer 外置与跨进程锁确定性；公开面双 façade 与 `list_primary` 文档—代码漂移由 #1263 承接并阻断父项关闭 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-20 | #1263 将已实现的 `AtomicBlobPort::list_primary(namespace)` 与 `StorageEntry` 对齐 Target：只枚举 namespace 顶层 primary regular blob，隐藏协议文件、symlink 与嵌套目录；Session 管理以此 OHS 列表，不把 `StorageKey` 放宽为目录 prefix | [#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-17 | #928 发布 `SafeStorageRoot` / `SafeStorageDir` capability-root 路径安全 PL，并冻结其只负责 no-follow 打开安全句柄；Audit 自有 append/write/sync/read/list 语义，Storage 不新增 AppendLog OHS | [#928](https://github.com/rushsinging/aemeath/issues/928) |

@@ -14,11 +14,11 @@
       "owner_crate": "storage",
       "kind": "adapter",
       "allowed_paths": [
-        "agent/composition/src"
+        "agent/features/storage/src/lib.rs"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Blob filesystem adapter is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
+      "reason": "Blob filesystem adapter is crate-private; the sole construction site is the file_system_blob composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
     },
     {
       "id": "construction.storage.filesystemdatasetadapter",
@@ -26,11 +26,11 @@
       "owner_crate": "storage",
       "kind": "adapter",
       "allowed_paths": [
-        "agent/composition/src"
+        "agent/features/storage/src/lib.rs"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Dataset filesystem adapter is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
+      "reason": "Dataset filesystem adapter is crate-private; the sole construction site is the file_system_dataset composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
     },
     {
       "id": "construction.memory.datasetmemoryopener",

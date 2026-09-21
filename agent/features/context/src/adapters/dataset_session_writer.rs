@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use storage::api::{
+use storage::{
     AtomicDatasetPort, DatasetChangeSet, DatasetKey, DatasetMember, DatasetMemberChange,
     DatasetMemberReference, Durability, SafePathSegment, StorageError, StorageErrorKind,
     StorageNamespace, WriteOptions,
@@ -102,7 +102,7 @@ impl DatasetCanonicalSessionWriter {
             .read_consistent(dataset_key, std::slice::from_ref(&manifest_member_name))
             .await
             .map_err(|error| error.to_string())?;
-        let storage::api::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
+        let storage::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
             return Err("Session generation manifest 不存在".to_string());
         };
         SessionGenerationCodec::decode_manifest(
@@ -204,7 +204,7 @@ impl DatasetCanonicalSessionWriter {
     async fn commit_with_manifest(
         &self,
         dataset_key: &DatasetKey,
-        manifest: &storage::api::DatasetManifest,
+        manifest: &storage::DatasetManifest,
         changes: SessionCommitPlan,
     ) -> Result<(), String> {
         let dataset_changes =
@@ -229,7 +229,7 @@ pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKey, Storag
 }
 
 fn promote_missing_reuse_evidence(
-    manifest: &storage::api::DatasetManifest,
+    manifest: &storage::DatasetManifest,
     plan: &mut SessionCommitPlan,
 ) -> Result<(), String> {
     plan.promote_reuse_fallbacks(|name| {
@@ -249,7 +249,7 @@ fn promote_missing_reuse_evidence(
 }
 
 fn map_session_changes(
-    manifest: &storage::api::DatasetManifest,
+    manifest: &storage::DatasetManifest,
     changes: SessionCommitPlan,
 ) -> Result<DatasetChangeSet, StorageError> {
     let changed_members = changes

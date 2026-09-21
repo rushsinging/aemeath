@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use storage::api::{
+use storage::{
     AtomicDatasetPort, DatasetKey, DatasetMember, DatasetReadOutcome, Generation, SafePathSegment,
     StorageError,
 };
@@ -25,13 +25,13 @@ pub struct PreparedDatasetResume {
 
 pub struct DatasetSessionReader {
     dataset: Arc<dyn AtomicDatasetPort>,
-    legacy_blob: Option<Arc<dyn storage::api::AtomicBlobPort>>,
+    legacy_blob: Option<Arc<dyn storage::AtomicBlobPort>>,
 }
 
 impl DatasetSessionReader {
     pub fn new(
         dataset: Arc<dyn AtomicDatasetPort>,
-        legacy_blob: Option<Arc<dyn storage::api::AtomicBlobPort>>,
+        legacy_blob: Option<Arc<dyn storage::AtomicBlobPort>>,
     ) -> Self {
         Self {
             dataset,

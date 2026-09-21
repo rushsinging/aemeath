@@ -353,13 +353,13 @@ fn patch_for_update(
     }
 }
 
-fn map_commit_warning(warning: storage::api::CommitWarning) -> ConfigCommitWarning {
+fn map_commit_warning(warning: storage::CommitWarning) -> ConfigCommitWarning {
     match warning {
-        storage::api::CommitWarning::PreviousPromotionPending => {
+        storage::CommitWarning::PreviousPromotionPending => {
             ConfigCommitWarning::PreviousPromotionPending
         }
-        storage::api::CommitWarning::JournalCleanupPending
-        | storage::api::CommitWarning::MemberPublishRecoveryPending => {
+        storage::CommitWarning::JournalCleanupPending
+        | storage::CommitWarning::MemberPublishRecoveryPending => {
             ConfigCommitWarning::JournalCleanupPending
         }
     }
@@ -655,7 +655,7 @@ mod tests {
     #[tokio::test]
     async fn update_replaces_committed_snapshot_even_without_receiver() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage));
@@ -674,7 +674,7 @@ mod tests {
     #[tokio::test]
     async fn consecutive_updates_preserve_previously_committed_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage));
@@ -701,9 +701,9 @@ mod tests {
         );
         let rebuilt =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
-                .with_native_store(NativeConfigStore::new(std::sync::Arc::new(
-                    storage::FileSystemBlobAdapter::new(dir.path()).unwrap(),
-                )));
+                .with_native_store(NativeConfigStore::new(
+                    storage::file_system_blob(dir.path()).unwrap(),
+                ));
         rebuilt.load().await.unwrap();
         let snapshot = rebuilt.committed_snapshot();
         assert_eq!(snapshot.models().default, "provider/model");
@@ -716,7 +716,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_updates_are_serialized_without_losing_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service = std::sync::Arc::new(
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage)),
@@ -756,7 +756,7 @@ mod tests {
     async fn runtime_override_is_restored_after_service_rebuild() {
         let dir = tempfile::tempdir().unwrap();
         let global = dir.path().join("config.json");
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let store = NativeConfigStore::new(storage);
         let service = ConfigAppService::with_global_path(None, global.clone())
             .with_native_store(store.clone());
@@ -780,7 +780,7 @@ mod tests {
     #[tokio::test]
     async fn prepare_update_does_not_publish_before_commit() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage));
@@ -803,7 +803,7 @@ mod tests {
     #[tokio::test]
     async fn env_permission_override_remains_above_dynamic_local_update() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage))
@@ -831,7 +831,7 @@ mod tests {
     #[tokio::test]
     async fn cli_permission_override_remains_highest_after_dynamic_update() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage));
@@ -868,9 +868,7 @@ mod tests {
             r#"{"model":{"name":"project"}}"#,
         )
         .unwrap();
-        let storage = std::sync::Arc::new(
-            storage::FileSystemBlobAdapter::new(dir.path().join("storage")).unwrap(),
-        );
+        let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
         let store = NativeConfigStore::new(storage);
         let runtime = ConfigPatch {
             model: Some(share::config::domain::merge::ModelConfigPatch {
@@ -924,7 +922,7 @@ mod tests {
     #[tokio::test]
     async fn committed_update_notifies_subscription_with_same_snapshot() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let service =
             ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
                 .with_native_store(NativeConfigStore::new(storage));
@@ -961,9 +959,7 @@ mod tests {
         let root = project.canonicalize().unwrap();
         let location =
             ProjectConfigLocation::try_from_project_identity(root, b"project-a").unwrap();
-        let storage = std::sync::Arc::new(
-            storage::FileSystemBlobAdapter::new(dir.path().join("storage")).unwrap(),
-        );
+        let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
         let service = ConfigAppService::with_global_path(None, dir.path().join("global.json"))
             .with_native_store(NativeConfigStore::new(storage));
 
@@ -1061,10 +1057,10 @@ mod tests {
     }
 
     fn test_native_store(root: &std::path::Path) -> NativeConfigStore {
-        NativeConfigStore::new(std::sync::Arc::new(
-            storage::FileSystemBlobAdapter::new(root.join("config-overrides"))
+        NativeConfigStore::new(
+            storage::file_system_blob(root.join("config-overrides"))
                 .expect("create test config override blob"),
-        ))
+        )
     }
 
     impl AgentsDirEnvGuard {
