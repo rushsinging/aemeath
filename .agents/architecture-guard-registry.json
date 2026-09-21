@@ -271,6 +271,18 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "SDK chat ingress wiring is invoked only by the Composition Root",
       "tracking_issue": 1067
+    },
+    {
+      "id": "construction.provider.transportpool",
+      "symbol": "TransportPool",
+      "owner_crate": "provider",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
+      "tracking_issue": 1645
     }
   ],
   "entries": [
