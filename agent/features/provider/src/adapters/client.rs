@@ -334,11 +334,9 @@ impl LlmClient {
 
     pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
         let spec = parse_driver_spec(&options)?;
-        let (provider, default_scope) = build_provider_and_scope(
-            spec,
-            options,
-            crate::adapters::transport::build_http_client(),
-        )?;
+        let http =
+            crate::adapters::transport::build_http_client_for_endpoint(options.base_url.as_deref());
+        let (provider, default_scope) = build_provider_and_scope(spec, options, http)?;
         Ok(Self {
             provider,
             default_scope,

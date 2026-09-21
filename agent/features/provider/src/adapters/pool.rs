@@ -51,7 +51,10 @@ impl TransportPool {
         if let Some(transport) = state.entries.get(&key) {
             return Arc::clone(transport);
         }
-        let transport = Arc::new(ProviderTransport::new(state.next_transport_id));
+        let transport = Arc::new(ProviderTransport::new(
+            state.next_transport_id,
+            key.base_url.as_deref(),
+        ));
         state.next_transport_id += 1;
         state.entries.insert(key, Arc::clone(&transport));
         transport

@@ -38,10 +38,10 @@ pub(crate) struct ProviderTransport {
 }
 
 impl ProviderTransport {
-    pub(crate) fn new(id: u64) -> Self {
+    pub(crate) fn new(id: u64, base_url: Option<&str>) -> Self {
         Self {
             id,
-            http: build_http_client(),
+            http: build_http_client_for_endpoint(base_url),
         }
     }
 
@@ -56,10 +56,51 @@ impl ProviderTransport {
     }
 }
 
+/// 判断 endpoint 是否指向 loopback（localhost / 127.0.0.1 / ::1）。
+///
+/// reqwest 默认在 macOS 读取系统代理（`macos-system-configuration`），
+/// 开启代理软件的机器上发往本地服务的请求会被代理截获并偶发返回
+/// 502 等伪响应；loopback 流量走代理几乎从不是调用方意图，因此对
+/// loopback endpoint 强制绕过代理。无法解析的输入保守返回 false，
+/// 不改变现有行为。
+pub(crate) fn endpoint_uses_loopback(base_url: Option<&str>) -> bool {
+    let raw_url = match base_url {
+        Some(url) => url,
+        None => return false,
+    };
+    match reqwest::Url::parse(raw_url) {
+        Ok(url) => {
+            let host = url.host_str().unwrap_or_default();
+            // IPv6 字面量的 host_str 可能带方括号，统一剥掉再比较。
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            matches!(host, "localhost" | "127.0.0.1" | "::1")
+        }
+        Err(_) => false,
+    }
+}
+
+/// 按当前所有 driver 一致的构造参数建立 HTTP client builder；
+/// loopback endpoint 额外禁用系统/环境代理。
+pub(crate) fn http_builder_for_endpoint(base_url: Option<&str>) -> reqwest::ClientBuilder {
+    let builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(crate::CONNECT_TIMEOUT_SECS));
+    if endpoint_uses_loopback(base_url) {
+        // loopback 流量走代理几乎从不是调用方意图；reqwest 默认在
+        // macOS 读取系统代理，会把本地请求交给代理并偶发返回 502
+        // 之类伪响应，因此对 loopback endpoint 彻底禁用代理。
+        builder.no_proxy()
+    } else {
+        builder
+    }
+}
+
 /// 按当前所有 driver 一致的构造参数建立 HTTP client。
-pub(crate) fn build_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
+pub(crate) fn build_http_client_for_endpoint(base_url: Option<&str>) -> reqwest::Client {
+    http_builder_for_endpoint(base_url)
         .build()
         .expect("failed to create HTTP client")
 }
+
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;

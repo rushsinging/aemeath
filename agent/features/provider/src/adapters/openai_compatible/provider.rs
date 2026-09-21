@@ -14,11 +14,6 @@ pub struct OpenAICompatibleProvider {
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
 
-pub(crate) fn build_streaming_http_client_builder(_timeout_secs: u64) -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
-}
-
 impl OpenAICompatibleProvider {
     #[allow(clippy::too_many_arguments, dead_code)]
     pub fn new(
@@ -53,9 +48,13 @@ impl OpenAICompatibleProvider {
         _max_tokens: u32,
         _reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
-        timeout_secs: u64,
+        // 历史 signature 兼容占位：timeout 不进入本 driver 的 client 构造。
+        _timeout_secs: u64,
         user_agent: String,
     ) -> Self {
+        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(
+            base_url.as_deref().unwrap_or("https://api.openai.com"),
+        ));
         Self::from_shared_http(
             config,
             api_key,
@@ -63,9 +62,7 @@ impl OpenAICompatibleProvider {
             model,
             reasoning_config,
             user_agent,
-            build_streaming_http_client_builder(timeout_secs)
-                .build()
-                .expect("failed to create HTTP client"),
+            http,
         )
     }
 
