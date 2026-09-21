@@ -25,9 +25,8 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use storage::{
     AtomicDatasetPort, CommitWarning, DatasetCommitVisibility, DatasetKey, DatasetMember,
-    DatasetReadOutcome, Durability, FileSystemDatasetAdapter, QuarantineDisposition,
-    SafePathSegment, StorageError, StorageErrorKind, StorageNamespace, TransactionScope,
-    WriteOptions,
+    DatasetReadOutcome, Durability, QuarantineDisposition, SafePathSegment, StorageError,
+    StorageErrorKind, StorageNamespace, TransactionScope, WriteOptions,
 };
 use uuid::Uuid;
 
@@ -115,8 +114,8 @@ fn dataset_dir(root: &Path, dataset: &str) -> PathBuf {
     root.join("memory").join(dataset)
 }
 
-fn adapter(root: &Path) -> FileSystemDatasetAdapter {
-    FileSystemDatasetAdapter::new(root).expect("adapter root must initialize")
+fn adapter(root: &Path) -> std::sync::Arc<dyn AtomicDatasetPort> {
+    storage::file_system_dataset(root).expect("adapter root must initialize")
 }
 
 fn runtime() -> tokio::runtime::Runtime {

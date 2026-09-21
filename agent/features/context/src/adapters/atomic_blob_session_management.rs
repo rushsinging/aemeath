@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::api::{AtomicBlobPort, StorageNamespace};
+use storage::{AtomicBlobPort, StorageNamespace};
 
 use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::{SessionLoadError, SessionPersistenceService};

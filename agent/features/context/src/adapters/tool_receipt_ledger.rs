@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use storage::api::{
+use storage::{
     AtomicBlobPort, DeleteOptions, Durability, Generation, ReadOutcome, SafePathSegment,
     StorageKey, StorageNamespace, WriteOptions,
 };

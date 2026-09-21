@@ -2,9 +2,9 @@
 use std::os::unix::fs::symlink;
 use std::str::FromStr;
 use storage::{
-    AtomicBlobPort, DeleteOptions, Durability, FileSystemBlobAdapter, Generation, PromoteOutcome,
-    QuarantineOutcome, QuarantineReason, ReadOutcome, SafePathSegment, StorageErrorKind,
-    StorageKey, StorageNamespace, TransactionScope, WriteOptions,
+    AtomicBlobPort, DeleteOptions, Durability, Generation, PromoteOutcome, QuarantineOutcome,
+    QuarantineReason, ReadOutcome, SafePathSegment, StorageErrorKind, StorageKey, StorageNamespace,
+    TransactionScope, WriteOptions,
 };
 use uuid::Uuid;
 
@@ -153,7 +153,7 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
     std::fs::write(&outside_file, b"outside").expect("write outside file");
     symlink(&outside_file, root.join("session/unsafe")).expect("create symlink");
 
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
     let error = adapter
         .list_primary(StorageNamespace::Session)
         .await
@@ -175,7 +175,7 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
 #[tokio::test]
 async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
     let root = unique_root("list-primary");
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
     let first = StorageKey::new(
         StorageNamespace::Session,
         vec![SafePathSegment::from_str("first").expect("valid entry")],
@@ -226,9 +226,9 @@ async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
 #[tokio::test]
 async fn filesystem_adapter_satisfies_atomic_blob_contract() {
     let root = unique_root("contract");
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
 
-    assert_atomic_blob_contract(&adapter).await;
+    assert_atomic_blob_contract(&*adapter).await;
 
     std::fs::remove_dir_all(root).expect("temporary root should be removable");
 }
@@ -236,7 +236,7 @@ async fn filesystem_adapter_satisfies_atomic_blob_contract() {
 #[tokio::test]
 async fn filesystem_adapter_replaces_primary_with_complete_value() {
     let root = unique_root("replace");
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
     let key = key();
 
     adapter
@@ -274,7 +274,7 @@ async fn filesystem_adapter_replaces_primary_with_complete_value() {
 #[tokio::test]
 async fn filesystem_adapter_quarantine_moves_only_requested_generation() {
     let root = unique_root("quarantine-layout");
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
     let key = key();
     adapter
         .write_atomic(&key, b"old", WriteOptions::new(Durability::BestEffort))
@@ -322,7 +322,7 @@ async fn filesystem_adapter_rejects_symlink_target_without_touching_outside_file
     let outside_file = outside.join("target");
     std::fs::write(&outside_file, b"outside").unwrap();
     symlink(&outside_file, root.join("session/session-1")).unwrap();
-    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter root should initialize");
+    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
 
     let error = adapter
         .write_atomic(&key(), b"new", WriteOptions::new(Durability::BestEffort))

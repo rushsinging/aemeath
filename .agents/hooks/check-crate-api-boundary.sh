@@ -239,19 +239,60 @@ ROOT_ACCESS_ALLOW = {
         "MemorySource", "MemoryStats", "MemoryStorageErrorKind", "ProjectMemoryKey",
         "ReflectionApplyResult", "ReflectionOutput", "WriteResult", "map_storage_error",
     },
-    # Storage publishes only generic persistence mechanisms after #883/#884.
+    # Storage crate-root is the sole stable PL/OHS entry after #1647:
+    # concrete adapters are crate-private; composition wiring goes through
+    # file_system_blob / file_system_dataset constructor functions only.
     "storage": {
+        "AtomicBlobPort",
+        "AtomicDatasetPort",
+        "BlobRead",
+        "CommitWarning",
+        "CorruptTransactionError",
+        "CorruptionReason",
+        "DatasetChangeSet",
+        "DatasetCommitReceipt",
+        "DatasetCommitVisibility",
+        "DatasetKey",
+        "DatasetManifest",
+        "DatasetMember",
+        "DatasetMemberChange",
+        "DatasetMemberReference",
+        "DatasetRead",
+        "DatasetReadOutcome",
+        "DatasetRevision",
+        "DeleteOptions",
+        "DeleteOutcome",
+        "DigestObservation",
+        "Durability",
+        "Generation",
+        "JournalPhase",
+        "PreviousPolicy",
+        "PromoteOutcome",
+        "QuarantineDisposition",
+        "QuarantineOutcome",
+        "QuarantineReason",
+        "QuarantineReceipt",
+        "ReadOutcome",
+        "RecoveryDecision",
         "SafeOpenOptions",
         "SafePathSegment",
         "SafeStorageDir",
         "SafeStorageEntry",
         "SafeStorageFileType",
         "SafeStorageRoot",
-        "FileSystemBlobAdapter",
-        "FileSystemDatasetAdapter",
-        "memory_base_dir",
-        "project_file_name",
-        "project_file_name_from_path",
+        "StorageEntry",
+        "StorageError",
+        "StorageErrorKind",
+        "StorageKey",
+        "StorageNamespace",
+        "TransactionDigest",
+        "TransactionScope",
+        "WriteOptions",
+        "WriteReceipt",
+        "decide_blob_recovery",
+        "decide_orphan_previous",
+        "file_system_blob",
+        "file_system_dataset",
     },
 }
 
@@ -385,7 +426,7 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target in {"audit", "policy", "provider", "project", "runtime", "task", "tools"}:
+        if target in {"audit", "policy", "provider", "project", "runtime", "storage", "task", "tools"}:
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
@@ -416,7 +457,7 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target in {"audit", "policy", "provider", "project", "runtime", "task", "tools"}:
+            if target in {"audit", "policy", "provider", "project", "runtime", "storage", "task", "tools"}:
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )
@@ -569,6 +610,44 @@ def check_tools_facade() -> list[str]:
     return errors
 
 
+def check_storage_facade() -> list[str]:
+    path = root / "agent/features/storage/src/lib.rs"
+    if not path.exists():
+        return ["agent/features/storage/src/lib.rs: storage crate-root facade is missing"]
+    text = path.read_text()
+    errors: list[str] = []
+    if (root / "agent/features/storage/src/api.rs").exists() or re.search(r"\bpub\s+mod\s+api\b", text):
+        errors.append("agent/features/storage/src: storage::api is forbidden after crate-root facade migration (#1647)")
+    for module in ("adapters", "domain", "ports"):
+        if not re.search(rf"(?m)^\s*mod\s+{module}\s*;", text):
+            errors.append(f"agent/features/storage/src/lib.rs: internal module `{module}` must remain private")
+        if re.search(rf"\bpub(?:\([^)]*\))?\s+mod\s+{module}\b", text):
+            errors.append(f"agent/features/storage/src/lib.rs: internal module `{module}` must not be public")
+
+    def braced_names(source: str) -> set[str]:
+        match = re.search(rf"pub\s+use\s+{source}::\s*\{{(.*?)\}}\s*;", text, re.S)
+        if not match:
+            return set()
+        return {item.strip().split(" as ", 1)[-1].strip() for item in match.group(1).split(",") if item.strip()}
+
+    actual_adapters = braced_names("adapters")
+    actual_domain = braced_names("domain")
+    actual_ports = braced_names("ports")
+    actual_fns = {
+        name
+        for name in ("file_system_blob", "file_system_dataset")
+        if re.search(rf"\bpub\s+fn\s+{name}\s*\(", text)
+    }
+    actual_root = actual_adapters | actual_domain | actual_ports | actual_fns
+    if actual_root != ROOT_ACCESS_ALLOW["storage"]:
+        errors.append(
+            "ROOT_ACCESS_ALLOW[storage] must exactly match storage/src/lib.rs public facade; drift: "
+            + "unregistered=" + str(sorted(ROOT_ACCESS_ALLOW["storage"] - actual_root))
+            + ", missing=" + str(sorted(actual_root - ROOT_ACCESS_ALLOW["storage"]))
+        )
+    return errors
+
+
 
 def run_sanity() -> None:
     allowed = [
@@ -578,6 +657,8 @@ def run_sanity() -> None:
         ("provider", "use crate::adapters::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
+        ("composition", "use storage::{AtomicBlobPort, StorageKey};"),
+        ("composition", "let blob = storage::file_system_blob(root)?;"),
         ("runtime", "use task::TaskAccess;"),    ]
     blocked = [
         ("runtime", "use provider::api::LlmClient;"),
@@ -586,6 +667,8 @@ def run_sanity() -> None:
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
         ("runtime", "use storage::memory_store::MemoryStore;"),
         ("runtime", "use storage::HistoryManager;"),
+        ("context", "use storage::api::AtomicBlobPort;"),
+        ("runtime", "use storage::FileSystemBlobAdapter;"),
         ("runtime", "use task::adapters::TaskStore;"),    ]
     for current, line in allowed:
         if check_cross_crate_line(current, line):
@@ -628,6 +711,7 @@ pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 run_sanity()
 violations: list[str] = []
 violations.extend(check_tools_facade())
+violations.extend(check_storage_facade())
 for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():

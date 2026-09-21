@@ -237,9 +237,9 @@ async fn make_test_shell(
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path()).expect("create config blob"),
-        )),
+        config::NativeConfigStore::new(
+            storage::file_system_blob(temp.path()).expect("create config blob"),
+        ),
     )
     .await
     .expect("wire config");
@@ -546,9 +546,9 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     };
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(&agents_dir).expect("create config blob"),
-        )),
+        config::NativeConfigStore::new(
+            storage::file_system_blob(&agents_dir).expect("create config blob"),
+        ),
     )
     .await
     .expect("wire config");

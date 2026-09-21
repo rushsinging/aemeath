@@ -4,7 +4,7 @@ use memory::{
     ReflectionTrigger,
 };
 use std::{str::FromStr, sync::Arc};
-use storage::api as storage_api;
+use storage as storage_api;
 
 fn unique_root(case: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -18,7 +18,7 @@ fn project_key() -> ProjectMemoryKey {
 }
 
 fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    Arc::new(storage::FileSystemDatasetAdapter::new(root).unwrap())
+    storage::file_system_dataset(root).unwrap()
 }
 
 fn store(root: &std::path::Path) -> AtomicDatasetReflectionHistoryStore {

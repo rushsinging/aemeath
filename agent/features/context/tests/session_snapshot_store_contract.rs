@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use context::adapters::AtomicBlobSessionStore;
 use context::ports::{SessionGeneration, SessionSnapshotStore};
-use storage::api::{
+use storage::{
     AtomicBlobPort, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome, QuarantineOutcome,
     QuarantineReason, ReadOutcome, StorageError, StorageKey, TransactionScope, WriteOptions,
     WriteReceipt,
@@ -75,8 +75,8 @@ impl AtomicBlobPort for RecordingBlob {
 
     async fn list_primary(
         &self,
-        _namespace: storage::api::StorageNamespace,
-    ) -> Result<Vec<storage::api::StorageEntry>, StorageError> {
+        _namespace: storage::StorageNamespace,
+    ) -> Result<Vec<storage::StorageEntry>, StorageError> {
         Ok(Vec::new())
     }
 }
@@ -98,7 +98,7 @@ async fn adapter_maps_context_operations_to_session_atomic_blob_contract() {
     assert_eq!(writes[0].0, b"canonical");
     assert_eq!(
         writes[0].1.durability(),
-        storage::api::Durability::ProcessCrashSafe
+        storage::Durability::ProcessCrashSafe
     );
     assert_eq!(
         *blob.quarantines.lock().unwrap(),

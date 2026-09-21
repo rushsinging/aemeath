@@ -230,7 +230,7 @@ fn build_harness() -> Harness {
             fail: Arc::clone(&memory_opener.fail),
         }),
         session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+            storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,

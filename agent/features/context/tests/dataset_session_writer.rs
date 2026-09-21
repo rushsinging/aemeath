@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use context::adapters::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
 use context::domain::session::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
@@ -7,10 +5,7 @@ use context::domain::session::{
     SessionGenerationCodec,
 };
 use share::message::Message;
-use storage::api::{
-    AtomicDatasetPort, DatasetKey, DatasetReadOutcome, SafePathSegment, StorageNamespace,
-};
-use storage::FileSystemDatasetAdapter;
+use storage::{DatasetKey, DatasetReadOutcome, SafePathSegment, StorageNamespace};
 
 fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -47,7 +42,7 @@ fn dataset_key(session_id: &str) -> DatasetKey {
 #[tokio::test]
 async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
 
@@ -138,7 +133,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 #[tokio::test]
 async fn commit_clearing_history_keeps_every_persisted_step_member() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     // 磁盘持久化完整历史：compact 边界前的 step-a 与边界后的 step-b。
     let persisted = session_with_steps(
@@ -190,7 +185,7 @@ async fn commit_clearing_history_keeps_every_persisted_step_member() {
 #[tokio::test]
 async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let persisted = session_with_steps("overlay-session", 1, &[("run-a", "step-a", "a")]);
     writer
@@ -225,7 +220,7 @@ async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
 #[tokio::test]
 async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let steps = (0..256)
         .map(|index| {
@@ -297,7 +292,7 @@ async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() 
 #[tokio::test]
 async fn active_resume_append_reuses_compact_history_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut complete = session_with_steps(
         "resumed",
@@ -371,7 +366,7 @@ async fn active_resume_append_reuses_compact_history_members() {
 #[tokio::test]
 async fn active_resume_finalize_reuses_compact_history_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut complete = session_with_steps(
         "finalized-resume",
@@ -435,7 +430,7 @@ async fn active_resume_finalize_reuses_compact_history_members() {
 #[tokio::test]
 async fn partial_history_commit_intent_cannot_remove_persisted_step_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps(
         "partial-history",
@@ -475,7 +470,7 @@ async fn incremental_save_with_cleared_memory_keeps_persisted_step_members() {
     // 物理删除路径已退役（/clear 改为逻辑断点）：内存清空历史的增量
     // 提交保留磁盘全部 step 成员，由 state 的 clear 边界负责截断。
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps(
         "cleared",
@@ -511,7 +506,7 @@ async fn incremental_save_with_cleared_memory_keeps_persisted_step_members() {
 #[tokio::test]
 async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("new-session", 0, &[]);
     let mut after = before.clone();
@@ -548,7 +543,7 @@ async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
 #[tokio::test]
 async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "before")]);
     writer
@@ -592,7 +587,7 @@ async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() 
 #[tokio::test]
 async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revision() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "before")]);
     writer
@@ -627,7 +622,7 @@ async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revi
 #[tokio::test]
 async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "a")]);
     writer
@@ -676,7 +671,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
 #[tokio::test]
 async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
 
     // 模拟外部清空：先落一代，再删除数据集目录。
@@ -730,7 +725,7 @@ async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
 #[tokio::test]
 async fn rebuild_empty_dataset_fails_closed_when_dataset_is_not_empty() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
 
     let seeded = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);

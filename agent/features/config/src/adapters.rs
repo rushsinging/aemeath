@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use storage::api::{
+use storage::{
     AtomicBlobPort, CommitWarning, Durability, Generation, ReadOutcome, SafePathSegment,
     StorageErrorKind, StorageKey, StorageNamespace, WriteOptions,
 };
@@ -545,7 +545,7 @@ impl NativeConfigStore {
     }
 }
 
-fn map_storage_error(error: storage::api::StorageError) -> ConfigAdapterError {
+fn map_storage_error(error: storage::StorageError) -> ConfigAdapterError {
     match error.kind() {
         StorageErrorKind::PermissionDenied => ConfigAdapterError::PermissionDenied,
         StorageErrorKind::UnsupportedDurability => ConfigAdapterError::UnsupportedDurability,
@@ -836,7 +836,7 @@ mod tests {
     #[tokio::test]
     async fn native_store_round_trips_patch_and_maps_commit_warning() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let store = NativeConfigStore::new(storage);
         let bytes = br#"{"models":{"default":"local/model"}}"#;
         assert_eq!(store.write_override("project", bytes).await.unwrap(), None);
@@ -850,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn native_store_contract_reports_missing_and_invalid_payload() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let storage = storage::file_system_blob(dir.path()).unwrap();
         let store = NativeConfigStore::new(storage);
         assert!(store.read_override("missing").await.unwrap().is_none());
         store.write_override("invalid", b"not-json").await.unwrap();

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use runtime::{AtomicBlobToolResultStore, ToolResultBlobPort};
-use storage::api::{
+use storage::{
     AtomicBlobPort, BlobRead, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
     QuarantineOutcome, QuarantineReason, ReadOutcome, StorageError, StorageKey, TransactionScope,
     WriteOptions, WriteReceipt,
@@ -39,10 +39,7 @@ impl AtomicBlobPort for FakeBlobPort {
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError> {
         if let Some(message) = self.write_failure.lock().unwrap().clone() {
-            return Err(StorageError::new(
-                storage::api::StorageErrorKind::Io,
-                message,
-            ));
+            return Err(StorageError::new(storage::StorageErrorKind::Io, message));
         }
         self.values
             .lock()
@@ -83,8 +80,8 @@ impl AtomicBlobPort for FakeBlobPort {
 
     async fn list_primary(
         &self,
-        _namespace: storage::api::StorageNamespace,
-    ) -> Result<Vec<storage::api::StorageEntry>, StorageError> {
+        _namespace: storage::StorageNamespace,
+    ) -> Result<Vec<storage::StorageEntry>, StorageError> {
         Ok(Vec::new())
     }
 }
@@ -107,7 +104,7 @@ async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent(
     assert_eq!(blob.writes.lock().unwrap().len(), 1);
     let writes = blob.writes.lock().unwrap();
     let (key, bytes, options) = &writes[0];
-    assert_eq!(key.namespace(), storage::api::StorageNamespace::ToolResult);
+    assert_eq!(key.namespace(), storage::StorageNamespace::ToolResult);
     assert_eq!(
         key.segments()
             .iter()
@@ -116,10 +113,7 @@ async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent(
         vec!["session-1", "tool-1"]
     );
     assert_eq!(bytes, b"full output");
-    assert_eq!(
-        options.durability(),
-        storage::api::Durability::ProcessCrashSafe
-    );
+    assert_eq!(options.durability(), storage::Durability::ProcessCrashSafe);
 }
 
 #[tokio::test]

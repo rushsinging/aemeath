@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::api::{
+use storage::{
     AtomicBlobPort, Durability, Generation, ReadOutcome, SafePathSegment, StorageKey,
     StorageNamespace, WriteOptions,
 };

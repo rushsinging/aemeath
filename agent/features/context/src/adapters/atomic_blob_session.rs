@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::api::{
+use storage::{
     AtomicBlobPort, Durability, Generation, PromoteOutcome, QuarantineReason, ReadOutcome,
     SafePathSegment, StorageKey, StorageNamespace, TransactionScope, WriteOptions,
 };
@@ -30,9 +30,9 @@ impl AtomicBlobSessionStore {
         }
     }
 
-    pub async fn delete_all(&self) -> Result<storage::api::DeleteOutcome, SessionStoreError> {
+    pub async fn delete_all(&self) -> Result<storage::DeleteOutcome, SessionStoreError> {
         self.blob
-            .delete_all_generations(&self.key, storage::api::DeleteOptions::default())
+            .delete_all_generations(&self.key, storage::DeleteOptions::default())
             .await
             .map_err(|error| SessionStoreError(error.to_string()))
     }
