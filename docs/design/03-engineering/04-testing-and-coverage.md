@@ -1,8 +1,12 @@
 # 测试架构与覆盖率治理
 
 > 层级：03-engineering（工程守则）
-> 状态：Target（测试组织规范已落地，覆盖率/生产可达性/场景实现待后续 Issue）｜Milestone：v0.1.0｜对应 Issue：[#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006)、[#1013](https://github.com/rushsinging/aemeath/issues/1013)
+> 状态：Target（测试组织规范已落地；#1092 已完成 TUI 域 L0–L5 行为—证据矩阵终审并补齐缺口）｜Milestone：v0.1.0｜对应 Issue：[#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006)、[#1013](https://github.com/rushsinging/aemeath/issues/1013)、[#1092](https://github.com/rushsinging/aemeath/issues/1092)
 > 本文定义 workspace 统一测试分层、目录组织、fixture/替身、覆盖率、生产可达性与 CI 门禁。Rust 代码变更的可执行约束以 [`specs/3.2-rust-coding.md`](../../../specs/3.2-rust-coding.md) 为准。
+
+## 0. TUI 域终审结论（#1092）
+
+#860 全部执行叶子（#943/#944/#742/#612/#946/#945/#947/#1534 及历史 #1001）的 L0–L5 证据矩阵见 #1092 追踪评论。终审结论：各层证据可追溯、无未解释空白；L5 仅保留单一 PTY smoke。终审修复两项：`ReminderList` 事件的显式渲染消费（此前 reducer 空映射导致 `/memory remind` 结果静默丢弃）、A 类 slash 命令表驱动回归。Run 控制的权威表述为**单一 `CancelRunStep` Effect + runtime `CancelRunStepOutcome::RunTerminating` 升级语义**（SDK PL 层保留 `TerminateRun` outcome 契约）；TUI Effect 枚举不设独立 `TerminateRun` 变体。
 
 ## 1. 目标与非目标
 

@@ -879,3 +879,37 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
             && context.run_id == expected_run_id.as_str()
     ));
 }
+
+/// #1092 缺口回归：`ChatEvent::ReminderList` 必须映射为 TUI-owned
+/// `TuiReminder`（`/memory remind` 的结果回传），字段逐项完整。
+#[test]
+fn reminder_list_maps_every_field_to_tui_owned_dto() {
+    let mapping = sdk_event_to_tui_event(sdk::ChatEvent::ReminderList {
+        reminders: vec![
+            sdk::ReminderView {
+                id: "reminder-1".to_owned(),
+                content: "drink water".to_owned(),
+                done: false,
+                created_at: 1_700_000_000,
+            },
+            sdk::ReminderView {
+                id: "reminder-2".to_owned(),
+                content: "ship release".to_owned(),
+                done: true,
+                created_at: 1_700_000_100,
+            },
+        ],
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ReminderList { reminders }) = mapping else {
+        panic!("ReminderList must map to one runtime event");
+    };
+    assert_eq!(reminders.len(), 2);
+    assert_eq!(reminders[0].id, "reminder-1");
+    assert_eq!(reminders[0].content, "drink water");
+    assert!(!reminders[0].done);
+    assert_eq!(reminders[0].created_at, 1_700_000_000);
+    assert_eq!(reminders[1].id, "reminder-2");
+    assert!(reminders[1].done);
+    assert_eq!(reminders[1].created_at, 1_700_000_100);
+}
