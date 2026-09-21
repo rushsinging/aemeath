@@ -794,19 +794,19 @@ fn startup_resume_precedes_current_project_config_read() {
         .find("startup resume")
         .expect("source should contain 'startup resume'");
     let resume_call_pos = source
-        .find("resume_session_to_backing")
-        .expect("source should contain resume_session_to_backing");
+        .find("resolve_startup_session")
+        .expect("source should contain resolve_startup_session");
     let snapshot_pos = source
         .rfind("let snapshot = wiring.committed_config()")
         .expect("source should contain committed_config read");
 
     assert!(
         resume_pos < resume_call_pos,
-        "startup resume comment should precede resume_session_to_backing call"
+        "startup resume comment should precede resolve_startup_session call"
     );
     assert!(
         resume_call_pos < snapshot_pos,
-        "resume_session_to_backing must precede the committed_config snapshot read — \
-           Context rejects cross-project sessions before this snapshot can change"
+        "resolve_startup_session must precede the committed_config snapshot read — \
+            Context rejects cross-project sessions before this snapshot can change"
     );
 }

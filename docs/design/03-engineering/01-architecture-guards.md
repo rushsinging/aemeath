@@ -73,6 +73,7 @@
 | 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
 | 19b | `check-config-store-ownership.sh` | Config / Composition 构造权 | Composition 唯一选择 `config-overrides` filesystem backing 并注入 `NativeConfigStore`；Config application 禁止构造 blob adapter，且 wiring 必须显式要求 injected store |
 | 19c | `check-composition-construction-ownership.sh` | Composition 跨 BC 验收 | 汇总验证 Session、Config Store、Runtime Tool 与 Hook 四个 leaf ownership Guard 已注册、编排、active policy 且三侧代表性 concrete constructor 不回流；不替代 leaf Guard，也不拥有 MCP lifecycle |
+| 19d | `check-cross-bc-construction-registry.sh` + `check-cross-bc-construction-registry-tests.sh` | Composition 构造注册表 | 以 `.agents/architecture-guard-registry.json` 的 `construction_symbols` 段做 fail-closed 注册表：feature crate adapters 模块导出的 concrete adapter 与 feature `wire_*` 装配函数，凡在跨 crate 生产代码构造/调用即必须登记，未登记（含新增 adapter）或越出 `allowed_paths` 均 exit 2；同 crate 内部构造与 `cfg(test)`/dev 门控段不拦截 |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns`；测试 fixture 必须位于显式 `tests/` 目录，生产 Session 边界扫描仅排除该目录与 `*_tests.rs` |
@@ -673,6 +674,16 @@
 - **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
 - **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
 - **执行策略**：source guard 同时进入通用 Git pre-commit（仅 staged 路径命中时）与完整 pre-push profile；#1018 实测热耗时约 3.1-6s，不进入 Agent Stop 的快速 profile，也不新增在线 workflow。
+
+## 26. check-cross-bc-construction-registry.sh
+
+- **位置**：`.agents/hooks/check-cross-bc-construction-registry.sh`（主守卫）与 `.agents/hooks/check-cross-bc-construction-registry-tests.sh`（探针自测）。
+- **功能**：注册表驱动的跨 BC 构造守卫（fail-closed），补齐 #1296 聚合 Guard"代表性覆盖"之外的全部构造符号机械闭环。保护对象为两类：feature crate `adapters` 模块（`src/adapters.rs` 与 `src/adapters/**`）定义或导出的 concrete adapter 类型；feature crate 定义的 `pub fn wire_*` 装配函数。
+- **数据源**：`.agents/architecture-guard-registry.json` 顶层 `construction_symbols` 段，条目字段为 `id`（`construction.<owner>.<symbol>`）、`symbol`、`owner_crate`、`kind`（`adapter` / `wire`）、`allowed_paths`（默认 `agent/composition/src`）、`guard`、`reason`、`tracking_issue`。
+- **检查方式**：自动收集 feature crate adapters 候选符号与 wire 函数全集，扫描 `agent/features`、`agent/composition`、`apps`、`packages` 生产段（剥离 `#[cfg(...test...)]` 门控 item，包括 `cfg(any(test, feature = "dev"))` 模块）；对 `Type::new/default/with_*` 构造与 `path::wire_*` 调用判定跨 crate 归属：未登记 → 违例（新增 adapter 自动纳入保护），已登记但越出 `allowed_paths` → 违例。
+- **边界**：同 crate 内部构造是 BC 内部事务，不拦截；`agent/composition` 自身定义的 `wire_*` 被 apps 消费是设计意图，不登记；feature 反向依赖 composition 由 `check-cargo-dependency-graph.sh` 管。
+- **失败模式**：`cross-BC construction registry guard FAILED`，exit 2；探针自测覆盖 clean 基线、未登记 adapter、越界构造、`cfg(test)` 豁免、wire 越界、注册段缺失与恢复 clean 七类用例。
+- **治理**：注册为 `policy.cross-bc.construction-registry`；新增条目 **MUST** 附 `reason` 与 `tracking_issue`，**NEVER** 通过删除条目消除违例——要么移动构造点回 Composition，要么以设计文档评审后的豁免理由登记。
 
 ### Git pre-commit（本地钩子，非架构守卫）
 

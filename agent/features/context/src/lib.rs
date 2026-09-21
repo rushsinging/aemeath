@@ -8,7 +8,9 @@ pub mod application;
 pub mod domain;
 pub mod ports;
 
-pub use adapters::{isolated_context, isolated_context_with_skill};
+pub use adapters::{
+    isolated_context, isolated_context_with_skill, isolated_context_with_workspace_skills,
+};
 #[cfg(any(test, feature = "dev"))]
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
 pub use domain::session::{

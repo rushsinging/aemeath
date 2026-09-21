@@ -353,82 +353,9 @@ pub async fn from_args_with_workspace(
 
     // 3. Session — startup resume is scoped to the current project identity.
     // A rejected cross-project id leaves the committed snapshot unchanged.
-    let (session_id, startup_resume) = if let Some(resume_id) = resume.as_ref() {
-        match crate::application::client::resume_helper::resume_session_to_backing(
-            resume_id, &wiring,
-        )
-        .await
-        {
-            Ok(resume_view) => {
-                log::info!(target: crate::LOG_TARGET, "startup resume: {}", resume_view.session_id);
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "resume_lifecycle boundary=startup_view stage=view_created session_id={} display_index_steps={} legacy_steps={} active_messages={}",
-                    resume_view.session_id,
-                    resume_view
-                        .display_history
-                        .as_ref()
-                        .map_or(0, |index| index.steps().len()),
-                    resume_view.display_steps.len(),
-                    resume_view.active_messages.len(),
-                );
-                let session_id = resume_view.session_id.clone();
-                let startup_resume = sdk::LocalSessionResumeBacking {
-                    steps: resume_view
-                        .display_steps
-                        .into_iter()
-                        .map(|step| sdk::LocalResumedSessionStep {
-                            run_id: step.run_id,
-                            step_id: step.step_id,
-                            message_segments: step.message_segments,
-                            finalize_cause: step
-                                .finalize_cause
-                                .map(super::mapping::map_finalize_cause_to_sdk),
-                            duration_ms: step.duration_ms,
-                        })
-                        .collect(),
-                    display_history: resume_view.display_history.map(|index| {
-                        sdk::DisplayHistoryIndex {
-                            session_id: index.session_id().to_string(),
-                            generation_revision: index.generation_revision(),
-                            steps: index
-                                .steps()
-                                .iter()
-                                .map(|step| sdk::DisplayHistoryStepReference {
-                                    run_id: step.run_id().to_string(),
-                                    step_id: step.step_id().to_string(),
-                                    member_name: step.member_name().to_string(),
-                                    estimated_lines: step.estimated_lines(),
-                                    user_input_history: step.user_input_history().to_vec(),
-                                    finalize_cause: step
-                                        .finalize_cause()
-                                        .map(super::mapping::map_finalize_cause_to_sdk),
-                                    duration_ms: step.duration_ms(),
-                                })
-                                .collect(),
-                        }
-                    }),
-                    session_id: resume_view.session_id,
-                    created_at: chrono::DateTime::parse_from_rfc3339(&resume_view.created_at)
-                        .map(|dt| dt.timestamp_millis() as u64)
-                        .unwrap_or(0),
-                    compacted: resume_view.compacted,
-                };
-                (session_id, Some(startup_resume))
-            }
-            Err(error) => {
-                return Err(SdkError::Init(format!(
-                    "startup resume of session {resume_id} failed: {error}"
-                )));
-            }
-        }
-    } else {
-        // Non-resume: use the wiring's committed session id so Runtime
-        // and the Context coordinator share the same canonical session.
-        let session_id = wiring.committed_session().id.clone();
-        log::info!(target: crate::LOG_TARGET, "session started");
-        (session_id, None)
-    };
+    // 职责 1（resume 解析与 SDK backing 映射）由 startup_resume 模块承担。
+    let (session_id, startup_resume) =
+        super::startup_resume::resolve_startup_session(resume.as_deref(), &wiring).await?;
     // Session id determined above; committed_config remains bound to the
     // current project because cross-project resume is rejected.
 

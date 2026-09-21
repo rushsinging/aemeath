@@ -478,3 +478,18 @@ fn parent_value_facts_without_parent_bindings_fail_closed_at_request_boundary() 
         .expect("RunCreationRequest definition")
         .contains("ParentRunBindings"));
 }
+
+#[test]
+fn run_context_factory_does_not_construct_context_concrete_adapters() {
+    // context_factory.rs 无内嵌测试模块（#[cfg(test)] 仅修饰单个测试辅助方法），
+    // 因此直接对全文件断言，避免 split 截断漏检后段生产代码。
+    let source = include_str!("context_factory.rs");
+    assert!(
+        !source.contains("WorkspaceSkillQueryFactory"),
+        "RuntimeContextFactory 必须消费 Context 窄装配入口，不得原地构造 Context concrete adapter"
+    );
+    assert!(
+        !source.contains("context::adapters::"),
+        "RuntimeContextFactory 不得触达 Context adapters 内部模块路径"
+    );
+}

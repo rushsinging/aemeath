@@ -81,3 +81,21 @@ pub fn isolated_context_with_skill(
         Arc::new(NoOpContextMemorySource),
     ))
 }
+
+/// Build an isolated (in-memory) context whose skill queries resolve against
+/// the given workspace read view.
+///
+/// Unlike [`isolated_context_with_skill`], callers pass only the workspace
+/// port; the concrete [`WorkspaceSkillQueryFactory`] construction stays inside
+/// the Context adapters so consumers never assemble cross-BC concrete types.
+pub fn isolated_context_with_workspace_skills(
+    session_id: &str,
+    catalog: Arc<dyn tools::SkillCatalogPort>,
+    workspace: Arc<dyn project::WorkspaceRead>,
+) -> Arc<dyn crate::ports::ContextPort> {
+    isolated_context_with_skill(
+        session_id,
+        catalog,
+        Arc::new(WorkspaceSkillQueryFactory::new(workspace)),
+    )
+}
