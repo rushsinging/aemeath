@@ -207,7 +207,7 @@ fn snapshot_with_one_task() -> task::TaskSnapshot {
 }
 
 fn shell_workspace_snapshot() -> share::session_types::PersistedWorkspaceContext {
-    project::wire_production_workspace(std::env::current_dir().unwrap())
+    project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace")
         .into_views()
         .persist()

@@ -78,7 +78,7 @@ fn write_skill(root: &std::path::Path, name: &str, body: &str) {
 async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
     let temp = tempfile::tempdir().unwrap();
     write_skill(temp.path(), "commit", "SKILL_BODY_SENTINEL");
-    let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
         .unwrap()
         .into_views();
     let skill = wire_skills();
@@ -180,7 +180,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
     ] {
         let temp = tempfile::tempdir().unwrap();
         write_skill(temp.path(), "review", "BODY_SENTINEL");
-        let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+        let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
             .unwrap()
             .into_views();
         let skill = wire_skills();
@@ -239,7 +239,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
 async fn deleted_skill_returns_failure_without_panicking() {
     let temp = tempfile::tempdir().unwrap();
     write_skill(temp.path(), "gone", "body");
-    let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
         .unwrap()
         .into_views();
     let skill = wire_skills();

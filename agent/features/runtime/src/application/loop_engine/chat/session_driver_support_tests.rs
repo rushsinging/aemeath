@@ -154,7 +154,7 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 }
 
 fn test_wiring() -> Arc<context::MainSessionWiring> {
-    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let persist = workspace.persist();
@@ -291,7 +291,7 @@ fn test_shell_with_catalog(
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
-    let workspace = project::wire_production_workspace(cwd.clone())
+    let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
 
@@ -387,7 +387,7 @@ fn test_shell_with_task_store(
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
-    let workspace = project::wire_production_workspace(cwd.clone())
+    let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();

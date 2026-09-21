@@ -177,7 +177,7 @@ fn build_harness() -> Harness {
     let tmp = TempDir::new("harness");
 
     // Real workspace (non-git).
-    let workspace = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+    let workspace = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
     let workspace_read = workspace.read();
     let workspace_persist = workspace.persist();
 
@@ -739,7 +739,7 @@ async fn cross_project_resume_is_rejected() {
 
     // Build a session from a *different* project's workspace.
     let tmp2 = TempDir::new("cross-project");
-    let ws2 = project::wire_production_workspace(tmp2.path().to_path_buf())
+    let ws2 = project::wire_production_workspace(tmp2.path().to_path_buf(), None)
         .unwrap()
         .persist()
         .snapshot();
@@ -951,7 +951,7 @@ async fn missing_cross_project_workspace_remains_rejected() {
     let h = build_harness();
     let pre_session_id = h.wiring.committed_session().id.clone();
     let tmp2 = TempDir::new("missing-cross-project");
-    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf())
+    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf(), None)
         .unwrap()
         .persist()
         .snapshot();

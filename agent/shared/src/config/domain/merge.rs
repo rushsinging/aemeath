@@ -293,6 +293,8 @@ pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
     #[serde(default)]
+    pub worktrees_dir: Option<PathBuf>,
+    #[serde(default)]
     pub persist_sessions: Option<bool>,
     #[serde(default)]
     pub max_sessions: Option<usize>,
@@ -728,6 +730,9 @@ pub(crate) fn apply_storage_patch(
     if let Some(v) = patch.sessions_dir {
         base.sessions_dir = Some(v);
     }
+    if let Some(v) = patch.worktrees_dir {
+        base.worktrees_dir = Some(v);
+    }
     if let Some(v) = patch.persist_sessions {
         base.persist_sessions = v;
     }
@@ -901,6 +906,34 @@ mod tests {
     use super::*;
     use crate::config::domain::snapshot::ConfigSnapshot;
     use crate::config::ui::MarkdownSpacingMode;
+
+    #[test]
+    fn storage_worktrees_dir_patch_overrides_lower_layer_value() {
+        let global: ConfigPatch =
+            serde_json::from_str(r#"{"storage":{"worktrees_dir":"/global/wt"}}"#).unwrap();
+        let env_layer = ConfigPatch {
+            storage: Some(StorageConfigPatch {
+                worktrees_dir: Some(PathBuf::from("/env/wt")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(
+            snapshot.worktrees_dir(),
+            Some(PathBuf::from("/env/wt").as_path())
+        );
+    }
+
+    #[test]
+    fn storage_worktrees_dir_defaults_to_none_without_patch() {
+        let snapshot = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snapshot.worktrees_dir(), None);
+    }
 
     #[test]
     fn hook_runtime_limit_patch_preserves_unspecified_lower_layer_values() {

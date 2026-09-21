@@ -78,6 +78,15 @@ fn markdown_spacing_changes_are_immediate_without_misclassifying_other_ui_fields
 }
 
 #[test]
+fn worktrees_dir_change_requires_session_restart() {
+    let scopes = changed(|config| {
+        config.storage.worktrees_dir = Some(std::path::PathBuf::from("/custom/worktrees"));
+    });
+
+    assert_eq!(scopes, vec![ConfigApplicationScope::SessionRestartRequired]);
+}
+
+#[test]
 fn scopes_are_stably_deduplicated() {
     let scopes = changed(|config| {
         config.ui.tui = false;

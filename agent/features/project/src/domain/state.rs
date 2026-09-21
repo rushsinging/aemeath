@@ -8,7 +8,10 @@ use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
 use crate::domain::types::{GitProbeError, WorkspaceError, WorkspaceFrame, WorkspaceRestoreError};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
+/// 测试构造器默认：repo 根下 `.worktrees`（生产链路由 wiring 注入配置值）。
+#[cfg(test)]
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
+const UNNAMED_WORKSPACE_SEGMENT: &str = "workspace";
 
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -16,6 +19,8 @@ pub struct WorkspaceState {
     pub workspace_root: PathBuf,
     pub path_base: PathBuf,
     pub worktree_kind: WorktreeKind,
+    /// 已解析的 worktree 默认创建根目录（生产由 wiring 注入配置值）。
+    pub worktrees_root: PathBuf,
     pub stack: Vec<WorkspaceFrame>,
 }
 
@@ -29,8 +34,9 @@ impl WorkspaceState {
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
             cwd.clone(),
-            cwd,
+            cwd.clone(),
             WorktreeKind::Primary,
+            cwd.join(DEFAULT_WORKTREE_DIR),
         )
     }
 
@@ -39,12 +45,14 @@ impl WorkspaceState {
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
+        worktrees_root: PathBuf,
     ) -> Self {
         Self {
             project_identity,
             workspace_root,
             path_base,
             worktree_kind,
+            worktrees_root,
             stack: Vec::new(),
         }
     }
@@ -83,6 +91,17 @@ fn sanitize_branch_for_path(branch: &str) -> Result<String, WorkspaceError> {
     Ok(s)
 }
 
+/// 按 worktree 根目录下的隔离段对仓库命名：取 workspace_root 的目录名并做与
+/// 分支相同的字符白名单清洗，避免不同仓库的同名分支在共享根目录下冲突。
+fn workspace_repo_segment(state: &WorkspaceState) -> Result<String, WorkspaceError> {
+    let repo_dir_name = state
+        .workspace_root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| UNNAMED_WORKSPACE_SEGMENT.to_string());
+    sanitize_branch_for_path(&repo_dir_name)
+}
+
 fn resolve_worktree_path(
     state: &WorkspaceState,
     path: Option<PathBuf>,
@@ -93,8 +112,8 @@ fn resolve_worktree_path(
         Some(p) => Ok(state.path_base.join(p)),
         None => match branch {
             Some(b) if !b.trim().is_empty() => Ok(state
-                .path_base
-                .join(DEFAULT_WORKTREE_DIR)
+                .worktrees_root
+                .join(workspace_repo_segment(state)?)
                 .join(sanitize_branch_for_path(b)?)),
             _ => Err(WorkspaceError::MissingPathAndBranch),
         },
@@ -371,7 +390,7 @@ fn validate_git_location(
 }
 
 pub fn prepare_restore(
-    _live_state: &WorkspaceState,
+    live_state: &WorkspaceState,
     dto: &PersistedWorkspaceContext,
     git: &dyn GitWorktreeOps,
 ) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
@@ -512,6 +531,8 @@ pub fn prepare_restore(
             workspace_root,
             path_base: restored_path_base,
             worktree_kind: dto.worktree_kind,
+            // 恢复不改变运行中进程的 worktree 目录配置：继承 live state。
+            worktrees_root: live_state.worktrees_root.clone(),
             stack,
         },
     })

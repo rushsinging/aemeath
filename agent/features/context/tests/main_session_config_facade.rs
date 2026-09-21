@@ -174,7 +174,7 @@ async fn build_facade_harness(
     config_service: Arc<ConfigAppService>,
     memory_opener: Arc<TrackingMemoryOpener>,
 ) -> FacadeHarness {
-    let workspace = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+    let workspace = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
     let workspace_read = workspace.read();
     let workspace_persist = workspace.persist();
 
@@ -320,7 +320,8 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
 
     // Target project (project A) — different temp dir.
     let tmp_target = TempDir::new("target");
-    let target_workspace = wire_production_workspace(tmp_target.path().to_path_buf()).unwrap();
+    let target_workspace =
+        wire_production_workspace(tmp_target.path().to_path_buf(), None).unwrap();
 
     // Place a project config file in project A so we can detect which
     // search_root was used during prepare_for_project.

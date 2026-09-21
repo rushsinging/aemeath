@@ -113,6 +113,7 @@ impl WorkspaceService {
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
+        worktrees_root: PathBuf,
         git: Arc<dyn GitWorktreeOps>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -121,6 +122,7 @@ impl WorkspaceService {
                 workspace_root,
                 path_base,
                 worktree_kind,
+                worktrees_root,
             )),
             control_operation: Mutex::new(()),
             git,
@@ -134,8 +136,9 @@ impl WorkspaceService {
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
             cwd.clone(),
-            cwd,
+            cwd.clone(),
             WorktreeKind::Primary,
+            cwd.join(".worktrees"),
             git,
         )
     }
@@ -149,6 +152,7 @@ impl WorkspaceService {
                 workspace_root: s.workspace_root.clone(),
                 path_base: s.path_base.clone(),
                 worktree_kind: s.worktree_kind,
+                worktrees_root: s.worktrees_root.clone(),
                 stack: Vec::new(),
             }),
             control_operation: Mutex::new(()),
@@ -559,6 +563,7 @@ mod tests {
             root.to_path_buf(),
             root.to_path_buf(),
             WorktreeKind::Primary,
+            root.join(".worktrees"),
             Arc::new(git),
         )
     }

@@ -56,7 +56,7 @@ fn temp_workspace() -> (tempfile::TempDir, project::WorkspaceWiring) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root dir");
-    let wiring = project::wire_production_workspace(root).expect("wire workspace");
+    let wiring = project::wire_production_workspace(root, None).expect("wire workspace");
     (temp, wiring)
 }
 

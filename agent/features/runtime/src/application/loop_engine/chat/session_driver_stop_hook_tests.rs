@@ -369,7 +369,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     };
     // 从主仓 wire；prepare_restore + commit_restore 后 workspace_root 切换为 linked worktree
     // （与主仓路径不同），这正是本测试要验证的 stop hook env 来源。
-    let workspace = project::wire_production_workspace(main_repo.clone())
+    let workspace = project::wire_production_workspace(main_repo.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let prepared = workspace
@@ -514,7 +514,7 @@ async fn stop_hook_uses_workspace_restored_during_the_same_run() {
         repository.path()
     ));
     let main_root = repository.path().canonicalize().unwrap();
-    let workspace = project::wire_production_workspace(main_root.clone())
+    let workspace = project::wire_production_workspace(main_root.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     workspace

@@ -231,7 +231,7 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let task_wiring = task::wire_task();
@@ -527,7 +527,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let original = workspace.clone();

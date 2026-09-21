@@ -167,7 +167,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = wire_config_with_agents_dir(
@@ -249,7 +249,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
@@ -350,7 +350,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = wire_config_with_agents_dir(
@@ -553,7 +553,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
@@ -632,5 +632,103 @@ fn production_session_wiring_uses_dataset_writer_instead_of_blob_writer() {
     assert!(
         !source.contains("AtomicBlobCanonicalSessionWriter::new"),
         "production Session wiring must not construct the retired full-blob writer"
+    );
+}
+
+/// 跨层契约：global config json 的 `storage.worktrees_dir` 进入 committed
+/// snapshot 并注入 production workspace——EnterWorktree 省略 path 时默认落到
+/// 配置根目录下的 `<仓库名>/<安全分支名>`（config json → ConfigSnapshot →
+/// workspace wiring 的完整注入链，与 app.rs 生产装配序列一致）。
+#[tokio::test(flavor = "current_thread")]
+async fn config_storage_worktrees_dir_drives_workspace_default_derivation() {
+    let temp = tempfile::tempdir().expect("create temp root");
+    let repo_root = temp.path().join("repo");
+    let agents_dir = make_agents_dir(&temp);
+    let configured_root = temp.path().join("configured-worktrees");
+    std::fs::create_dir_all(&repo_root).expect("create repo dir");
+    std::fs::write(
+        agents_dir.join("aemeath.json"),
+        serde_json::json!({
+            "models": {
+                "default": "local/test-model",
+                "providers": {
+                    "local": {
+                        "baseUrl": "http://127.0.0.1:1/v1",
+                        "apiKey": "test-api-key",
+                        "driver": "openai",
+                        "models": [{
+                            "id": "test-model",
+                            "name": "Test Model",
+                            "input": ["text"],
+                            "contextWindow": 8192,
+                            "max_tokens": 1024
+                        }]
+                    }
+                }
+            },
+            "storage": { "worktrees_dir": configured_root.display().to_string() }
+        })
+        .to_string(),
+    )
+    .expect("write global config");
+    for args in [
+        vec!["init", "--initial-branch=main"],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-m",
+            "seed",
+            "--allow-empty",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&repo_root)
+            .status()
+            .expect("git must be installed");
+        assert!(status.success(), "unexpected exit for git {args:?}");
+    }
+
+    let config =
+        wire_config_with_agents_dir(&repo_root, &agents_dir, config::CliConfigInput::default())
+            .await
+            .expect("config wiring");
+    assert_eq!(
+        config
+            .reader()
+            .committed_snapshot()
+            .worktrees_dir()
+            .map(std::path::Path::to_path_buf),
+        Some(configured_root.clone()),
+        "storage.worktrees_dir must reach the committed snapshot"
+    );
+
+    let workspace = project::wire_production_workspace(
+        repo_root.clone(),
+        config
+            .reader()
+            .committed_snapshot()
+            .worktrees_dir()
+            .map(std::path::Path::to_path_buf),
+    )
+    .expect("workspace wiring")
+    .into_views();
+
+    workspace
+        .control()
+        .enter(None, Some("feat/cfg-dir".to_string()), None)
+        .expect("enter linked worktree");
+
+    let repo_dir = repo_root.file_name().unwrap().to_string_lossy();
+    assert_eq!(
+        workspace.read().current_path_base(),
+        configured_root
+            .canonicalize()
+            .expect("configured root exists after enter")
+            .join(repo_dir.trim_matches(|c| matches!(c, '.' | '_' | '-')))
+            .join("feat-cfg-dir")
     );
 }

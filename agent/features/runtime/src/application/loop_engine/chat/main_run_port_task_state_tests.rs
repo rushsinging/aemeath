@@ -120,7 +120,7 @@ fn observer_with_task_store(
 
     ChatToolRoundObserver {
         runtime_context: instance.context().clone(),
-        workspace_read: project::wire_production_workspace(std::env::temp_dir())
+        workspace_read: project::wire_production_workspace(std::env::temp_dir(), None)
             .expect("workspace 初始化成功")
             .read(),
         turn_context: RuntimeRunContext::new(
