@@ -94,11 +94,10 @@ pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusVi
     (area_height as usize).saturating_sub(reserved)
 }
 
-/// Return type for update: effects plus optional slash command continuation.
+/// Return type for update: effects plus optional spawn continuation.
 pub struct UpdateResult {
     pub effects: Vec<Effect>,
     pub spawn_effect: Option<SpawnAgentChatEffect>,
-    pub pending_slash: Option<String>,
 }
 
 impl UpdateResult {
@@ -106,7 +105,6 @@ impl UpdateResult {
         Self {
             effects: Vec::new(),
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 
@@ -114,7 +112,6 @@ impl UpdateResult {
         Self {
             effects: vec![effect],
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 
@@ -123,10 +120,6 @@ impl UpdateResult {
         debug_assert!(
             other.spawn_effect.is_none(),
             "runtime events must not emit spawn effects"
-        );
-        debug_assert!(
-            other.pending_slash.is_none(),
-            "runtime events must not emit slash continuations"
         );
     }
 
@@ -190,7 +183,6 @@ impl App {
                 UpdateResult {
                     effects,
                     spawn_effect: None,
-                    pending_slash: None,
                 }
             }
             TuiMsg::Paste(text) => self.route_paste(text),
@@ -498,7 +490,6 @@ impl App {
                 return UpdateResult {
                     effects: Vec::new(),
                     spawn_effect: None,
-                    pending_slash: None,
                 };
             }
             TuiRuntimeEvent::SessionResumeFailed { kind, id, message } => {
@@ -606,7 +597,6 @@ impl App {
         UpdateResult {
             effects: model_result.effects,
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 

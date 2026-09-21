@@ -39,9 +39,6 @@ impl App {
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::SessionSaved { id } => {
-                self.append_system_notice(format!("[session saved: {id}]"));
-            }
             UiEvent::WorkspaceMetadataResolved(metadata) => {
                 self.apply_agent_intent(AgentIntent::Workspace(
                     crate::tui::model::workspace_provider::WorkspaceIntent::ApplyMetadata {
@@ -85,7 +82,6 @@ impl App {
         UpdateResult {
             effects,
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 }

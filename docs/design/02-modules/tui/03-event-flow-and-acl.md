@@ -148,7 +148,7 @@ enum AgentIntent {
 | Diagnostic | `SessionResumeFailed` / `UpdateAvailable` / `CommandResultText` | 显示可定位 notice 或命令结果；需要改变 Session 的事件同时生成 Session Intent |
 | Session | `TurnStarted` / `MicrocompactCompleted` / `StopHookBlocked` / `PostToolExecutionSync` / `CompactOperationRolledBack` / `CompactOperationCompleted` | `MessagesSynced` 与 session dirty/save 投影；SDK `MicrocompactDone` / `CompactRollback` / `CompactFinished` 只在第一层 compatibility dual-read 后归一化 |
 | Session + Conversation | `SessionResumed` | **MUST** 同时产生 `SessionIntent::SetCurrentSession` 与 `ConversationIntent::ResumeConversation`；每个恢复 Step 保留 `run_id`、`step_id` 与 `finalize_cause`。`UserCancelledStep` / `RunTerminated` 显式投影终态提示，NEVER 把取消历史伪装为 `Completed`，也 NEVER 由 helper 绕过 reducer 改写模型 |
-| Session | `SessionReset` / `UserMessagesWithdrawn` / `SessionResumeFailed` / `TaskStatusChanged` / `SessionSaved` / `CurrentTurnChanged` / `CommandResultText` | 更新 session id、resume/save/task/current-turn 投影；失败 / 文本事件按上表同时进入 Diagnostic |
+| Session | `SessionReset` / `UserMessagesWithdrawn` / `SessionResumeFailed` / `TaskStatusChanged` / `CurrentTurnChanged` / `CommandResultText` | 更新 session id、resume/task/current-turn 投影；失败 / 文本事件按上表同时进入 Diagnostic |
 | Config | `ModelSwitched` / `ContextEstimated` | 更新 provider/model/context-capacity 投影 |
 | Workspace | `WorkingDirectoryChanged` | `ApplySnapshot` → `SnapshotApplied { root, revision }`；Coordinator 再产生异步 `ResolveWorkspaceMetadata` Effect |
 | Conversation / Session | `ReflectionDone` / `ReflectionApplyDone` | 显式记录 reflection job 终态与 session dirty 状态；若协议不再发布该事件，应从封闭枚举删除而非保留空分支 |

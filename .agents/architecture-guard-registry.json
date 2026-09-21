@@ -153,22 +153,6 @@
       "status": "active"
     },
     {
-      "id": "migration.tui.tea-slash-dispatch",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "path",
-        "value": "apps/cli/src/tui/app/slash.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "tui",
-      "reason": "Slash dispatch still performs asynchronous request-response work instead of Effect round-trips",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when slash I/O is driven through Effect and authoritative events",
-      "status": "active"
-    },
-    {
       "id": "scope.tui.arch.inline-exclusions",
       "guard": "check-architecture-guards.sh",
       "module": "tui",
@@ -358,22 +342,6 @@
       "tracking_issue": 947,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-test-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "slash_tests.rs,slash_effect_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Test mocks are outside production TEA purity",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while these files are test-only",
       "status": "active"
     },
     {

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# guard-registry:migration.tui.tea-slash-dispatch
+# guard-registry:scope.tui.tea-runtime-files
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export ROOT
@@ -17,35 +17,22 @@ TUI_PURE_DIRS=(
 # ---------------------------------------------------------------------------
 # 豁免名单（EXEMPT）：tui/app/ 下属于 runtime / 命令执行层、预期含副作用
 # （async、block_on、spawn、Command 等）的文件。严格 TEA 纯度检查仍作用于
-# update/ 与 state/ 子目录以及纯数据模块（event.rs、msg.rs、resize.rs）。
+# update/ 与 state/ 子目录、slash 分发以及纯数据模块（event.rs、msg.rs、resize.rs）。
 #
 # 各项豁免理由（#59 S5-gap 裁定）：
 #   mod.rs              — 同步 git 元数据探测（Command::new），非 update 副作用。
 #   run_loop.rs         — runtime 编排层（事件循环 .await），TEA 副作用执行器所在。
 #   runtime.rs          — runtime 编排层 / Effect executor 本身，.await 为其职责。
-#   slash.rs            — B 块 wontfix：命令主分发为 request-response + 返回
-#                         Option<String> 控制流语义（命令需 IO 返回值做即时同步
-#                         UI 反馈与 prompt 注入决策）。Effect 化需把每命令拆成
-#                         "发 Effect + UiEvent 回流续接"状态机，引入大量 pending
-#                         状态、破坏 Some(prompt) 直返、重写 slash_tests，收益仅
-#                         guard 名单少一项、成本高 → 整文件豁免，行级豁免亦不引入
-#                         （14 处 .await 散布于 do-not-touch 分发逻辑，徒增噪声）。
-#   slash_tests.rs      — 测试 mock。
-#   slash_effect_tests.rs — 测试 mock。
 #
-# 注：A1-A4 已 Effect 化/转纯的文件（dialog.rs、suggestions.rs、已删除的
-# save.rs、memory.rs）已移出本名单，受严格纯度检查约束。
+# 注：slash 分发已纯化为同步 update（返回 Effect，#947），连同其测试文件
+# 一并移出本名单；A1-A4 已 Effect 化/转纯的文件（dialog.rs、suggestions.rs、
+# 已删除的 save.rs、memory.rs）同样受严格纯度检查约束。
 # ---------------------------------------------------------------------------
-# guard-registry:migration.tui.tea-slash-dispatch
 # guard-registry:scope.tui.tea-runtime-files
-# guard-registry:scope.tui.tea-test-files
 EXEMPT_FILES=(
   "apps/cli/src/tui/app/mod.rs"
   "apps/cli/src/tui/app/run_loop.rs"
   "apps/cli/src/tui/app/runtime.rs"
-  "apps/cli/src/tui/app/slash.rs"
-  "apps/cli/src/tui/app/slash_tests.rs"
-  "apps/cli/src/tui/app/slash_effect_tests.rs"
 )
 
 is_exempt() {

@@ -21,9 +21,6 @@ pub enum UiEvent {
         text: String,
     },
     SystemMessage(String),
-    SessionSaved {
-        id: String,
-    },
     WorkspaceMetadataResolved(WorkspaceMetadataResolved),
     UpdateAvailable {
         current: String,
