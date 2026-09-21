@@ -686,14 +686,21 @@ Runtime application 回答“何时发生什么业务动作”：
 - 在 Run 创建点调用 `RunFactory::create` 取得 `RunInstance`；
 - 驱动 Loop 和领域状态迁移。
 
-### 7.3 Runtime bootstrap 已收敛但仍待拆薄
+### 7.3 Runtime bootstrap 已收敛且按职责分层
 
 当前 `application/client/from_args.rs` 不再构造供应 BC 的具体 adapter；Composition 通过 `RuntimeBootstrapDependencies` 注入 opaque wiring、ports、窄 factory 与唯一 `RuntimeContextFactory`，Main/Derived Run 都经 `RunFactory` → `RunLauncher`。因此它已经不是第二个 Composition Root。
 
-该文件仍承担 Session 恢复、模型/Prompt/Skill 绑定进 Client shell、typed bootstrap request 处理和 Client 构造等多个 Runtime application bootstrap 职责。后续拆分属于可维护性工作：
+该文件的职责分层现状（#1067 测试审查定稿）：
+
+- **Session 恢复**已拆出 `client/startup_resume.rs`：`resolve_startup_session` 与 `map_resume_view_to_sdk_backing` 承担 resume 解析与 SDK backing 逐字段映射，L1 字段完整性由 `startup_resume_tests.rs` 锁定（steps、display history index、created_at 解析与降级、compacted、session id）。
+- **模型/Prompt/Skill 绑定**（`SessionModelState` 绑定、`compact_model_slot`、typed assembly 解包）由 `from_args_tests.rs` 的 `startup_snapshot_reads_current_model_state` 与 `model_switch_affects_only_next_assembler` 覆盖。
+- **typed bootstrap request 处理**（committed_config 读取顺序、并发上限）由 `startup_resume_precedes_current_project_config_read` 覆盖：resume 先于 snapshot 读取，跨项目 resume 由 Context 拒绝且不改变 committed snapshot。
+- **Client 构造**（`SessionRuntime::new` 单一来源、accessors、interaction bridge）由 `accessors_read_from_shell_single_source`、`interaction_bridge_is_single_source_on_shell` 等覆盖。
+
+后续拆分仍属可维护性工作：
 
 - 入站边界继续将 CLI/SDK args 标准化为 typed bootstrap request；
-- Composition 保持具体 adapter/object graph 的唯一装配所有者；
+- Composition 保持具体 adapter/object graph 的唯一装配所有者（由 `check-cross-bc-construction-registry.sh` fail-closed 注册表机械保护）；
 - Runtime bootstrap 按 Session、模型、Prompt/Skill 与 Client construction 拆成窄 application services；
 - Run 创建继续唯一提交 `RunCreationRequest`，不得恢复 Main/Sub 分叉装配。
 

@@ -6,8 +6,10 @@
 
 use std::sync::Arc;
 
+use context::domain::session::DisplayHistoryStepIndex;
+use context::domain::session::SessionRestoreStep;
 use context::domain::FinalizeCause;
-use context::{DisplayHistoryStepIndex, SessionRestoreStep, SessionResumeView};
+use context::SessionResumeView;
 use share::message::{Message, Role};
 
 use super::map_resume_view_to_sdk_backing;
@@ -126,5 +128,5 @@ fn map_resume_view_without_display_history_keeps_none() {
     view.display_history = None;
     let backing = map_resume_view_to_sdk_backing(view);
     assert!(backing.display_history.is_none());
-    assert_eq!(backing.compacted, true);
+    assert!(backing.compacted);
 }
