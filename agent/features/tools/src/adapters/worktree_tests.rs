@@ -448,7 +448,16 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
 
     let ctx = build_ctx(tmp.path().to_path_buf());
     let main_canonical = tmp.path().canonicalize().unwrap();
-    let expected_wt = main_canonical.join(".worktrees").join("default-from-main");
+    let expected_wt = main_canonical
+        .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
+        .join("default-from-main");
 
     // Pre-state：primary、空栈
     let before = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
@@ -526,11 +535,16 @@ async fn enter_worktree_with_blank_path_and_base_derives_path_from_branch() {
     let tmp = tempfile::tempdir().unwrap();
     init_main_repo(tmp.path());
     let ctx = build_ctx(tmp.path().to_path_buf());
-    let expected_wt = tmp
-        .path()
-        .canonicalize()
-        .unwrap()
+    let main_canonical = tmp.path().canonicalize().unwrap();
+    let expected_wt = main_canonical
         .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
         .join("fix-example");
 
     let result = enter_tool(&ctx)
@@ -568,11 +582,16 @@ async fn enter_worktree_with_explicit_base_starts_at_base_commit() {
     );
 
     let ctx = build_ctx(tmp.path().to_path_buf());
-    let expected_wt = tmp
-        .path()
-        .canonicalize()
-        .unwrap()
+    let main_canonical = tmp.path().canonicalize().unwrap();
+    let expected_wt = main_canonical
         .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
         .join("from-explicit-base");
     let result = enter_tool(&ctx)
         .call(
@@ -619,7 +638,16 @@ async fn exit_worktree_empty_input_restores_primary_and_pops_stack() {
         crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
     assert_eq!(pre_exit.worktree_kind, WorktreeKind::Linked);
     assert_eq!(pre_exit.context_stack.len(), 1);
-    let linked_root = main_canonical.join(".worktrees").join("to-exit");
+    let linked_root = main_canonical
+        .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
+        .join("to-exit");
     assert_eq!(pre_exit.path_base, linked_root.display().to_string());
     assert_eq!(pre_exit.workspace_root, linked_root.display().to_string());
 
@@ -758,7 +786,16 @@ async fn exit_worktree_switch_to_another_linked_worktree_does_not_push_stack() {
         .call(serde_json::json!({ "branch": "linked-a" }), &ctx)
         .await;
     assert!(!enter.is_error, "Enter linked-a 必须成功: {}", enter.text);
-    let linked_a = main_canonical.join(".worktrees").join("linked-a");
+    let linked_a = main_canonical
+        .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
+        .join("linked-a");
     let snapshot_after_enter =
         crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
     assert_eq!(

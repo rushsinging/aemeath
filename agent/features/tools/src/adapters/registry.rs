@@ -299,7 +299,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
         let workspace = tempfile::tempdir().expect("workspace");
-        let control = project::wire_production_workspace(workspace.path().to_path_buf())
+        let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
             .expect("workspace wiring")
             .into_views()
             .control();

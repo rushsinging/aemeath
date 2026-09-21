@@ -61,7 +61,7 @@ async fn make_wiring_and_workspace(
 ) -> (Arc<MainSessionWiring>, project::WorkspaceViews) {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = config::wire_project_config(
@@ -232,7 +232,7 @@ async fn config_query_and_writer_come_from_wiring() {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = config::wire_project_config(
@@ -376,7 +376,7 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
 
     // Project B — resume target with disabled memory and inject_count=3.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone())
+    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
         .expect("wire workspace B")
         .into_views();
     seed_session(&wiring, &workspace_b, "cross-project-memory-target").await;
@@ -432,7 +432,7 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
 
     // Project B — target with a distinct model and disabled memory.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone())
+    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
         .expect("wire workspace B")
         .into_views();
     seed_session(&wiring, &workspace_b, "cross-project-config-target").await;

@@ -4,6 +4,7 @@
 //! a mutable reference to `Config`. Field-level accessors expose only
 //! what consumers need.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -418,6 +419,15 @@ impl ConfigSnapshot {
 
     pub fn persist_sessions(&self) -> bool {
         self.inner.storage.persist_sessions
+    }
+
+    /// Configured root directory for EnterWorktree defaults.
+    ///
+    /// Returns the raw configured value: relative paths resolve against the
+    /// workspace root at wiring time (config layer has no workspace knowledge).
+    /// `None` means the default `<agents dir>/worktrees` applies.
+    pub fn worktrees_dir(&self) -> Option<&Path> {
+        self.inner.storage.worktrees_dir.as_deref()
     }
 
     // ── Guidance ─────────────────────────────────────────────

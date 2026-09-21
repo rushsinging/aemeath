@@ -61,6 +61,7 @@ fn session_restart_required_changed(before: &Config, after: &Config) -> bool {
         )
         || value_changed(&before.skills.dirs, &after.skills.dirs)
         || value_changed(&before.storage.sessions_dir, &after.storage.sessions_dir)
+        || value_changed(&before.storage.worktrees_dir, &after.storage.worktrees_dir)
         || value_changed(&before.storage.history_file, &after.storage.history_file)
 }
 

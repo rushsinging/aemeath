@@ -79,6 +79,30 @@ mod tests {
                 .expect("git init 失败（git 是否已安装？）");
             assert!(status.success(), "git init 退出码非 0");
         }
+
+        /// 在空仓库上创建 main 的初始 commit，使 `git worktree add ... main` 可用。
+        fn commit_seed(&self) {
+            std::fs::write(self.path.join("seed.txt"), "seed\n").unwrap();
+            for args in [
+                vec!["add", "seed.txt"],
+                vec![
+                    "-c",
+                    "user.name=Project Test",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "commit",
+                    "-m",
+                    "seed",
+                ],
+            ] {
+                let status = std::process::Command::new("git")
+                    .args(&args)
+                    .current_dir(&self.path)
+                    .status()
+                    .expect("git 命令执行失败");
+                assert!(status.success(), "git {args:?} 退出码非 0");
+            }
+        }
     }
 
     impl Drop for TempDir {
@@ -92,7 +116,7 @@ mod tests {
     #[test]
     fn production_wiring_exposes_three_views_from_one_backing() {
         let tmp = TempDir::new("views");
-        let wiring = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+        let wiring = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
 
         let read = wiring.read();
         let control = wiring.control();
@@ -110,7 +134,7 @@ mod tests {
     #[test]
     fn derived_wiring_has_isolated_state() {
         let tmp = TempDir::new("derived");
-        let parent = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+        let parent = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
         let child = parent.derive_isolated();
         let child_path = tmp.path().join("child-only");
 
@@ -132,8 +156,8 @@ mod tests {
     fn production_wiring_returns_result_and_exposes_identity() {
         let tmp = TempDir::new("identity");
         tmp.init_git();
-        let wiring: WorkspaceWiring =
-            wire_production_workspace(tmp.path().to_path_buf()).expect("git repo 应初始化成功");
+        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+            .expect("git repo 应初始化成功");
         let read = wiring.read();
         assert!(
             read.project_identity().git_common_dir.is_some(),
@@ -145,12 +169,41 @@ mod tests {
         );
     }
 
+    /// 相对 `worktrees_dir` 注入值相对 workspace root 解析：EnterWorktree 省略
+    /// path 时推导为 `<workspace root>/<worktrees_dir>/<仓库名>/<安全分支名>`。
+    #[test]
+    fn relative_worktrees_dir_resolves_against_workspace_root() {
+        let tmp = TempDir::new("relative_worktrees");
+        tmp.init_git();
+        tmp.commit_seed();
+        let wiring = wire_production_workspace(
+            tmp.path().to_path_buf(),
+            Some(std::path::PathBuf::from(".wt")),
+        )
+        .expect("git repo 应初始化成功");
+
+        wiring
+            .control()
+            .enter(None, Some("feat/rel-dir".to_string()), None)
+            .expect("enter linked worktree");
+
+        let repo_dir = tmp.path().file_name().unwrap().to_string_lossy();
+        assert_eq!(
+            wiring.read().current_path_base(),
+            tmp.path()
+                .join(".wt")
+                .join(repo_dir.as_ref())
+                .join("feat-rel-dir")
+        );
+        let _ = std::fs::remove_dir_all(tmp.path().join(".wt"));
+    }
+
     /// #894: 不存在的路径必须返回结构化 `WorkspaceInitError`，
     /// NEVER 以未校验路径建立 wiring。
     #[test]
     fn production_wiring_rejects_missing_path_with_structured_error() {
         let missing = PathBuf::from("/definitely/not/here/aemeath-894-xyz");
-        let result = wire_production_workspace(missing);
+        let result = wire_production_workspace(missing, None);
         assert!(
             matches!(result, Err(WorkspaceInitError::PathNotFound { .. })),
             "缺失路径应返回结构化 PathNotFound 错误"
@@ -163,7 +216,7 @@ mod tests {
         let tmp = TempDir::new("nondir");
         let file_path = tmp.path().join("a_file.txt");
         std::fs::write(&file_path, "content").unwrap();
-        let result = wire_production_workspace(file_path);
+        let result = wire_production_workspace(file_path, None);
         assert!(
             matches!(result, Err(WorkspaceInitError::NotDirectory { .. })),
             "文件路径应返回结构化 NotDirectory 错误"
@@ -175,8 +228,8 @@ mod tests {
     #[test]
     fn production_wiring_initializes_non_git_directory() {
         let tmp = TempDir::new("nongit");
-        let wiring: WorkspaceWiring =
-            wire_production_workspace(tmp.path().to_path_buf()).expect("普通目录应初始化成功");
+        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+            .expect("普通目录应初始化成功");
         let read = wiring.read();
         assert!(
             read.project_identity().git_common_dir.is_none(),
@@ -235,7 +288,7 @@ mod tests {
         install_project_capturing_logger();
         let _ = drain_project_logs();
         let tmp = TempDir::new("log-success");
-        let wiring = wire_production_workspace(tmp.path().to_path_buf());
+        let wiring = wire_production_workspace(tmp.path().to_path_buf(), None);
         assert!(wiring.is_ok(), "普通目录应初始化成功");
         drop(wiring);
 
@@ -275,7 +328,7 @@ mod tests {
         install_project_capturing_logger();
         let _ = drain_project_logs();
         let missing = PathBuf::from("/definitely/not/here/aemeath-941-log-fail");
-        let result = wire_production_workspace(missing.clone());
+        let result = wire_production_workspace(missing.clone(), None);
         assert!(result.is_err());
 
         let logs = drain_project_logs();

@@ -36,9 +36,10 @@ fn workspace_ports() -> &'static Mutex<HashMap<String, WorkspaceTestPorts>> {
 
 /// Adapter integration fixture backed by the real Project production wiring.
 pub(crate) fn production_execution_context(root: PathBuf) -> ToolExecutionContext {
-    let views = project::wire_production_workspace(root)
-        .expect("workspace initialization")
-        .into_views();
+    let views =
+        project::wire_production_workspace(root, Some(std::path::PathBuf::from(".worktrees")))
+            .expect("workspace initialization")
+            .into_views();
     let read = views.read();
     let workspace_id = read.workspace_id();
     let workspace_root = read.current_workspace_root();
