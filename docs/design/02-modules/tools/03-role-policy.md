@@ -25,7 +25,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 | D3 | **白名单语义，未配置 = 继承现状** | 向后兼容：不写 policy 的 role 与既有 Sub scope 行为逐字节等价 |
 | D4 | **内置 5 role，config 同名整条覆盖**（不做字段级合并） | 开箱即用 + 用户完全控制权；避免半内置半自定义的组合不可预期 |
 | D5 | **有效工具集 = 注册池 ∩ role 名单 ∩ role capability 位 ⊆ 父 ceiling** | 名单与 capability 位正交且都只收缩，复用 `ToolProfile::derive_restricted` 防提权 |
-| D6 | **可见性裁剪 + Policy 兜底双层执行** | LLM 看不到不可用工具（省 token、防误调用）；Policy 在执行前 evaluate 兜底 deny（防绕过） |
+| D6 | **可见性裁剪即硬边界** | LLM 看不到不可用工具（省 token、防误调用）；catalog 外调用走现有 deny 路径（`prepare_tool_round` 的 catalog-miss deny），Policy 层零改动 |
 
 ## 3. 配置 schema（Config BC）
 
@@ -110,7 +110,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 | **tester** | Read, Write, Edit, Bash, Grep, Glob, ToolSearch | 测试编写与运行 |
 | **reviewer** | Read, Grep, Glob, WebSearch, ToolSearch | 只读审查 |
 
-内置 role 的 capability 位由 allowed_tools 对应工具的 required capabilities 推导，不单独声明。用户要给某 role 加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖即可——机制支持一切名单，内置默认从简。
+内置 role 的 capability 位由 allowed_tools 对应工具的 required capabilities 推导，不单独声明；内置定义不含 model——role 缺 model 时 fallback 继承 main 当前模型（开箱即用），用户在 config 覆盖即可指定。用户要给某 role 加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖即可——机制支持一切名单，内置默认从简。
 
 ## 5. 分层装配与执行
 
@@ -123,8 +123,8 @@ config.json
                  │    ToolProfile 扩展 allowed_tool_names: Option<BTreeSet<ToolName>>
                  │    （None = 不过滤名单，兼容现状）
                  ├─ 可见性裁剪：发给 LLM 的 tools schema 列表按 ToolFilter 过滤
-                 └─ Policy 兜底：执行前 evaluate，未过 ToolFilter 的调用
-                      Deny(PolicyReason::RestrictedTool)（复用现有 reason）
+                 └─ 硬边界：被裁工具的调用（幻觉/绕过）走现有 catalog-miss deny
+                    （prepare_tool_round："Tool is not present in the catalog"）
 ```
 
 关键约束：
@@ -153,12 +153,12 @@ config.json
 | tools PL | ToolFilter 编译（名单∩capability）、derive_restricted 名单扩张报 CapabilityEscalation、is_authorized 名单维度 |
 | runtime | resolve_derived_role 装配 ToolFilter、内置 role fallback、config 覆盖整条替换、等价迁移（无 policy sub = 现状名单） |
 | 可见性 | LLM schema 列表按 filter 裁剪；被裁工具调用产生 Deny 而非 not found |
-| policy | evaluate 按 ToolFilter deny，reason 为 RestrictedTool |
+| policy | evaluate 按 ToolFilter deny，reason 为 RestrictedTool（本期零改动；catalog-miss deny 已覆盖被裁工具调用） |
 | TUI | sub run 被拒工具调用的展示（复用现有 deny 渲染，不新增状态） |
 
 ## 8. 分期
 
 | 期 | 内容 |
 |---|---|
-| P1 | RolePolicyConfig + 内置 5 role + ToolFilter 编译 + sub run 名单裁剪与 Policy 兜底（等价迁移保证） |
+| P1 | RolePolicyConfig + 内置 5 role + ToolFilter 编译 + sub run 名单裁剪（等价迁移保证；catalog-miss deny 天然兜底） |
 | P2（后续独立立项） | bash 命令白名单（复用 is_readonly_command）、可写路径 glob、sub 交互代理（AskUserQuestion 冒泡） |
