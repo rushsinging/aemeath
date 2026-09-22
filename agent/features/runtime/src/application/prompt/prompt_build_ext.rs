@@ -46,7 +46,7 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
     };
     let role_lines: Vec<String> = snap
         .agents()
-        .roles
+        .merged_roles()
         .iter()
         .filter(|(_, role)| role.enabled)
         .map(|(name, role)| {
@@ -165,10 +165,10 @@ mod tests {
         );
     }
 
-    /// ConfigSnapshot 含 agents.roles 空 HashMap，调 append_agent_roles 后
-    /// prompt 不应包含任何 role 段（保持为空）。
+    /// ConfigSnapshot 含 agents.roles 空 HashMap 时，内置 role fallback 仍应
+    /// 注入主 LLM（planner/coder/searcher/tester/reviewer 开箱可用）。
     #[test]
-    fn test_append_agent_roles_empty_snapshot() {
+    fn test_append_agent_roles_empty_snapshot_lists_builtins() {
         // Arrange
         let snap = make_snapshot(HashMap::new(), "en");
         let mut prompt = String::from("base");
@@ -176,8 +176,13 @@ mod tests {
         // Act
         append_agent_roles(&mut prompt, Some(&snap), "en");
 
-        // Assert — 空 roles 时函数应提前返回，prompt 不追加任何内容
-        assert_eq!(prompt, "base", "空 roles 时 prompt 不应追加任何 role 段");
+        // Assert — 内置 role 全部出现在提示中
+        for builtin in ["planner", "coder", "searcher", "tester", "reviewer"] {
+            assert!(
+                prompt.contains(builtin),
+                "空 config 时内置 role {builtin} 仍应注入 prompt"
+            );
+        }
     }
 
     /// config_file 为 None 时，append_agent_roles 应直接返回，不追加任何内容。

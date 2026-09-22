@@ -493,7 +493,7 @@ impl AgentRunner for CliAgentRunner {
             let language = config_snapshot.language().to_string();
             let agent_roles = config_snapshot
                 .agents()
-                .roles
+                .merged_roles()
                 .iter()
                 .filter(|(_, role)| role.enabled)
                 .map(|(name, role)| (name.clone(), role.clone()))

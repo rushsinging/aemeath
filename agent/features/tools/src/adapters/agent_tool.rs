@@ -16,7 +16,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously. `role` is required and must name a configured entry in `config.agents.roles`; the sub-agent model, context window, and output budget come from that role's `config.models` entry. Multiple Agent calls in the SAME response run concurrently."
+        "Launch a new agent to handle a focused, scoped task autonomously. `role` is required and must name a configured entry in `config.agents.roles` or one of the builtin roles (planner, coder, searcher, tester, reviewer); the sub-agent model, context window, and output budget come from that role's config, and its toolset is narrowed by the role policy when one is configured. Multiple Agent calls in the SAME response run concurrently."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
