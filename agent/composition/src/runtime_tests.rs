@@ -206,6 +206,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        Vec::new(),
     )
     .expect("wire_builtin_catalog_execution");
 
@@ -251,4 +252,83 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         sub_names.contains(&"Read"),
         "sub-agent scope must include Read"
     );
+}
+
+/// Role policies passed to `wire_builtin_catalog_execution` must surface as
+/// queryable `role:<name>` profiles that narrow the sub-agent catalog.
+#[tokio::test]
+async fn role_policies_surface_as_role_profiles() {
+    let (_temp, workspace) = temp_workspace();
+    let task_wiring = task::wire_task();
+    let role_policies = vec![(
+        "searcher".to_string(),
+        share::config::RolePolicyConfig {
+            allowed_tools: vec![
+                "Read".to_string(),
+                "Grep".to_string(),
+                "Glob".to_string(),
+                "WebSearch".to_string(),
+                "WebFetch".to_string(),
+                "ToolSearch".to_string(),
+            ],
+            capabilities: Vec::new(),
+        },
+    )];
+    let tools_wiring = tools::composition::wire_builtin_catalog_execution(
+        task_wiring.access(),
+        noop_memory_source(),
+        workspace.control(),
+        tools::composition::wire_skills().loader(),
+        role_policies,
+    )
+    .expect("wire_builtin_catalog_execution");
+
+    let catalog = tools_wiring.catalog();
+    let snapshot = catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("sub-agent"),
+            &tools::ToolProfileName::new("role:searcher"),
+        )
+        .expect("role:searcher snapshot");
+    let names: Vec<&str> = snapshot.tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        names.contains(&"Read"),
+        "searcher must see Read, got: {names:?}"
+    );
+    assert!(names.contains(&"Grep"), "searcher must see Grep");
+    assert!(
+        !names.contains(&"Write"),
+        "searcher must not see Write, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"Agent"),
+        "searcher must not see Agent, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"TaskCreate"),
+        "searcher must not see TaskCreate, got: {names:?}"
+    );
+}
+
+/// A role policy naming an unregistered tool must fail wiring loudly instead
+/// of silently producing a broken profile.
+#[tokio::test]
+async fn role_policy_with_unknown_tool_fails_wiring() {
+    let (_temp, workspace) = temp_workspace();
+    let task_wiring = task::wire_task();
+    let role_policies = vec![(
+        "ghost".to_string(),
+        share::config::RolePolicyConfig {
+            allowed_tools: vec!["NoSuchTool".to_string()],
+            capabilities: Vec::new(),
+        },
+    )];
+    let result = tools::composition::wire_builtin_catalog_execution(
+        task_wiring.access(),
+        noop_memory_source(),
+        workspace.control(),
+        tools::composition::wire_skills().loader(),
+        role_policies,
+    );
+    assert!(result.is_err(), "unknown tool name must fail wiring");
 }

@@ -71,12 +71,25 @@ pub(crate) fn wire_catalog_execution(
     })
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum BuiltinWiringError {
+    #[error(transparent)]
+    Backing(#[from] ToolBackingError),
+    #[error("role policy for '{role}' failed to compile: {source}")]
+    RolePolicy {
+        role: String,
+        #[source]
+        source: crate::domain::role_policy::RolePolicyCompileError,
+    },
+}
+
 pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
-) -> Result<CatalogExecutionWiring, ToolBackingError> {
+    role_policies: Vec<(String, share::config::RolePolicyConfig)>,
+) -> Result<CatalogExecutionWiring, BuiltinWiringError> {
     let registry = Arc::new(ToolRegistry::new());
     let main_profile = ToolProfile::baseline(ToolCapabilities::all());
     let mut scopes = HashMap::new();
@@ -98,7 +111,25 @@ pub fn wire_builtin_catalog_execution(
         scopes.insert(scope.name().clone(), scope);
         profiles.insert(profile_name, profile);
     }
-    wire_catalog_execution(registry, scopes, profiles)
+    let main_scope = scopes
+        .get(&RegistryScopeName::new("main"))
+        .expect("the main scope is assembled above");
+    for (role, policy) in role_policies {
+        let profile = crate::domain::role_policy::compile_role_profile(&policy, &|tool| {
+            main_scope
+                .get(&crate::domain::ToolName::new(tool))
+                .map(|spec| spec.required_capabilities())
+        })
+        .map_err(|source| BuiltinWiringError::RolePolicy {
+            role: role.clone(),
+            source,
+        })?;
+        profiles.insert(
+            crate::domain::role_policy::role_profile_name(&role),
+            profile,
+        );
+    }
+    wire_catalog_execution(registry, scopes, profiles).map_err(BuiltinWiringError::Backing)
 }
 
 /// Production Skill Catalog / Load wiring over one stateless adapter.
