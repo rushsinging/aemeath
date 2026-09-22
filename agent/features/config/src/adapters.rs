@@ -579,3 +579,10 @@ fn map_storage_error(error: storage::StorageError) -> ConfigAdapterError {
 #[cfg(test)]
 #[path = "adapters_tests.rs"]
 mod tests;
+
+mod app_service;
+pub use app_service::ConfigAppService;
+
+#[cfg(test)]
+#[path = "adapters/app_service_tests.rs"]
+mod app_service_tests;

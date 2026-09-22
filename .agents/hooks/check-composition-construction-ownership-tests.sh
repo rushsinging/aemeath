@@ -14,7 +14,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/.agents/hooks" \
   "$TMP/agent/features/runtime/src/application/client" \
-  "$TMP/agent/features/config/src" \
+  "$TMP/agent/features/config/src/adapters" \
   "$TMP/agent/features/context/src/adapters"
 
 for guard in \
@@ -46,7 +46,7 @@ JSON
 cat >"$TMP/agent/features/runtime/src/application/client/from_args.rs" <<'RS'
 fn injected_resources() {}
 RS
-cat >"$TMP/agent/features/config/src/application.rs" <<'RS'
+cat >"$TMP/agent/features/config/src/adapters/app_service.rs" <<'RS'
 fn injected_store() {}
 RS
 cat >"$TMP/agent/features/context/src/adapters/atomic_blob_session_management.rs" <<'RS'
@@ -91,10 +91,10 @@ expect_failure runtime-storage 'Runtime must not construct FileSystemBlobAdapter
 sed -i.bak '$d' "$TMP/agent/features/runtime/src/application/client/from_args.rs"
 mv "$TMP/agent/features/runtime/src/application/client/from_args.rs.bak" "$TMP/agent/features/runtime/src/application/client/from_args.rs"
 
-printf '%s\n' 'fn bad() { storage::api::file_system_blob(); }' >>"$TMP/agent/features/config/src/application.rs"
+printf '%s\n' 'fn bad() { storage::api::file_system_blob(); }' >>"$TMP/agent/features/config/src/adapters/app_service.rs"
 expect_failure config-storage 'Config must not construct file_system_blob'
-sed -i.bak '$d' "$TMP/agent/features/config/src/application.rs"
-mv "$TMP/agent/features/config/src/application.rs.bak" "$TMP/agent/features/config/src/application.rs"
+sed -i.bak '$d' "$TMP/agent/features/config/src/adapters/app_service.rs"
+mv "$TMP/agent/features/config/src/adapters/app_service.rs.bak" "$TMP/agent/features/config/src/adapters/app_service.rs"
 
 printf '%s\n' 'fn bad() { storage::api::file_system_blob(); }' >>"$TMP/agent/features/context/src/adapters/atomic_blob_session_management.rs"
 expect_failure context-storage 'Context must not construct file_system_blob'

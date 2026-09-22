@@ -301,6 +301,7 @@ Out-of-scope 必须保留精确 owner：TUI slash I/O 全 Effect 化已由 #947 
 | Runtime `idle_commands` 命令聚合 | 三种 Slash 机制混在 Runtime idle 流程 | Command Router 接线后拆除旧生产入口 | S5/S7 |
 | MCP 旧 wrapper / diff 孤立路径 | 多套 wrapper、diff/refresh/health check 未形成完整生命周期 | MCP Ready 后统一至 McpConnection + ACL；无消费者代码删除 | MCP Ready 后 |
 | 共享 client 的 `set_*` / restore 路径（已退役 #902） | Provider 与 Runtime 已无调用期 setter、shared-client lock、previous/restore 字段；每次调用读取不可变 Invocation Scope | `check-provider-invocation-scope.sh` 阻止 atomics、setter、restore 与 serialization lock 回流 | 已完成（#902） |
+| COLA 固定层规则（`check-cola-layer-purity.sh` 的 `@FEATURE_LAYERS` fallback 与 business/utils/contract/gateway 方向矩阵） | #1022 正式化：13 个 Hexagonal crate 全部进入 `%hex_layers` R8 检查，COLA 矩阵退役；守卫更名 `check-hexagonal-layer-purity.sh`；唯一例外 update 登记 `exception.update.cola-layout` | R8 方向 + retired 层名防复活 + update 显式分支 | 已完成（#1022） |
 | Provider-private `InvocationSink` | #907 已删除旧 `LegacyStreamSink` / callback wrapper；当前 `InvocationSink` 仅在 Provider adapter 内把 vendor stream 归一为 `InvocationDelta` | 保持 crate-private；跨 crate 引用由 crate-root 窄 façade（私有 `mod` + `pub use` 白名单）结构性阻断（#1021 退役 `check-provider-pull-stream.sh` 黑名单后） | 已完成（#907） |
 | Provider wire DTO 公共 re-export | #907 已把 request/response/SSE DTO、client config 和具体 driver 收回 adapter；crate-root 只留 PL，构造面仅 `provider::composition` | crate façade与 construction ownership Guard 防回流 | 已完成（#907） |
 | Provider 内部 retry / non-stream fallback | #905 已迁至 Runtime attempt 编排；Provider 入口单 attempt、只分类错误 | `check-provider-retry-ownership.sh` 防回流 | 已完成（#905） |

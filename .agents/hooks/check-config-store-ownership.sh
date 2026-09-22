@@ -13,11 +13,11 @@ import json, re, sys
 
 root = Path.cwd()
 # Config application 层自 #1654 起拆分为 mod 根 + wiring/app_service；
-# 守卫按层内全部源文件拼接扫描（wiring 函数在 wiring.rs，for_project 在 app_service.rs）。
+# 守卫按 crate 源文件拼接扫描（wiring 在 crate 根 lib.rs，ConfigAppService 在 adapters/app_service.rs）。
 config_layer_paths = [
-    root / "agent/features/config/src/application.rs",
-    root / "agent/features/config/src/application/wiring.rs",
-    root / "agent/features/config/src/application/app_service.rs",
+    root / "agent/features/config/src/lib.rs",
+    root / "agent/features/config/src/adapters.rs",
+    root / "agent/features/config/src/adapters/app_service.rs",
 ]
 config_layer_files = [p for p in config_layer_paths if p.is_file()]
 composition_app = root / "agent/composition/src/app.rs"
