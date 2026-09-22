@@ -50,8 +50,8 @@ impl App {
         let args = arguments.join(" ");
 
         if command == "model" && !has_args {
-            self.open_model_selection_dialog();
-            return UpdateResult::none();
+            // #740：用已回填缓存呈现对话框（或挂起等待），并附带 ListModels 刷新。
+            return UpdateResult::one(self.open_model_selection_dialog());
         }
 
         match command {
