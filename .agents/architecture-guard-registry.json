@@ -577,7 +577,7 @@
     },
     {
       "id": "scope.tui.render-tests-and-display-bridge",
-      "guard": "check-render-pure.sh",
+      "guard": "check-tui-render-pure.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -662,7 +662,7 @@
     },
     {
       "id": "scope.tui.safe-text-owners",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -679,7 +679,7 @@
     },
     {
       "id": "false-positive.tui.unsafe-text-inline-allow",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -968,7 +968,7 @@
     },
     {
       "id": "policy.runtime.capability-assembly",
-      "guard": "check-runtime-capability-assembly.sh",
+      "guard": "check-runtime-capability-assembly-ownership.sh",
       "module": "runtime",
       "scope": {
         "kind": "path_prefix",
@@ -1002,7 +1002,7 @@
     },
     {
       "id": "scope.all.unsafe-text-long-statement-files",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "shared",
       "scope": {
         "kind": "pattern",

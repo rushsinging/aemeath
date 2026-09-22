@@ -500,7 +500,7 @@ Runtime 的创建链必须保持：`RunCreationRequest + SessionRunBindings / Pa
 
 | 层级 | 稳定证据 | 证明范围 |
 |---|---|---|
-| L0 | `check-runtime-capability-assembly.sh` 与 deliberate probes | Context 构造、assembly token、Factory/RunInstance 调用点唯一；纯值 request/facts 无 live capability；Main/Derived 不绕过 Factory 与 Launcher |
+| L0 | `check-runtime-capability-assembly-ownership.sh` 与 deliberate probes | Context 构造、assembly token、Factory/RunInstance 调用点唯一；纯值 request/facts 无 live capability；Main/Derived 不绕过 Factory 与 Launcher |
 | L1 | RunSpec ceiling、RunCreationRequest、SessionSnapshot 测试 | parent capability ceiling、纯值创建请求、committed session/config revision 冻结 |
 | L2 | Session/Derived production-chain fixture | 两种 Run 都由 production `RunFactory::create` 返回完整 `RunInstance`，字段无丢失、覆写或第二装配算法 |
 | L3 | Composition same-factory 契约 | 同一 `RuntimeContextFactory` 实例注入 Main Session 与 Derived runner，供应 BC concrete adapter 只在 Composition 构造 |
@@ -732,7 +732,7 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
 |---|---|---|---|
-| Runtime 单一 `agent_execution` 六边形、RuntimeContext 私有构造、RunFactory/RunLauncher 唯一路径、Main/Derived 只由 RunSpec/capability binding 区分 | L0-L4 | `application/run/{context_factory,creation,launcher}_tests.rs`、`application/loop_engine/engine_architecture_tests.rs`、`application/run/scenario_tests/{main_run,derived_run}.rs`、`check-runtime-capability-assembly.sh` | 已覆盖构造 owner、父 capability ceiling、Context assembly failure、Main/Derived 同 launcher 与禁用生产角色类型；Design 与实现一致。 |
+| Runtime 单一 `agent_execution` 六边形、RuntimeContext 私有构造、RunFactory/RunLauncher 唯一路径、Main/Derived 只由 RunSpec/capability binding 区分 | L0-L4 | `application/run/{context_factory,creation,launcher}_tests.rs`、`application/loop_engine/engine_architecture_tests.rs`、`application/run/scenario_tests/{main_run,derived_run}.rs`、`check-runtime-capability-assembly-ownership.sh` | 已覆盖构造 owner、父 capability ceiling、Context assembly failure、Main/Derived 同 launcher 与禁用生产角色类型；Design 与实现一致。 |
 | Run/RunStep 状态机、非法转换、CancelRunStep、TerminateRun、deadline、terminal 抢占与 cleanup receipt | L1-L4 | `domain/agent_run/tests.rs`、`application/loop_engine/{engine_control,engine_scenarios}_tests.rs`、`application/run/scenario_tests/*`、`application/loop_engine/chat/session_driver_session_lifecycle_tests.rs` | 已覆盖状态不变量、阶段取消、terminate 抢占、timeout、exactly-one terminal 与真实 Session driver 路径；Activity 不驱动 lifecycle。 |
 | accepted input durable、finalized outcome/receipts、normal/control drain-or-seal 与 Resume | L1-L4 | `application/context/coordination_tests.rs`、`application/loop_engine/{engine_control,engine_input,engine_scenarios,llm_strategy}_tests.rs`、Context `session_recovery_scenarios.rs`、TUI resume/scenario tests | #1277/#1278/#1272/#1247/#1502 链已覆盖 save-before-next-phase、失败停止、结构化 outcome、幂等/conflict、live/resume typed terminal 等价。 |
 | model/context/tool coordinators 只经窄 Port 协作，Port failure、policy、schema、并发、取消、timeout、materialization 不绕过 | L1-L4 | `application/{model,context,tool}/**/*tests.rs`、`tests/{sdk_event_mapper_contract,tool_result_blob_contract,bootstrap_dependencies}.rs`、Main/Derived scenario tests | 已覆盖成功与失败 seam；Tools 保留 descriptor producer contract，Runtime 不取得 ToolRegistry/Tool concrete。 |
