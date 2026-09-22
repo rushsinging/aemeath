@@ -30,7 +30,7 @@ use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
-use share::config::AgentRoleConfig;
+use share::config::AgentRoleDefinition;
 pub use share::message::Message as ContextMessage;
 
 macro_rules! string_value_object {
@@ -153,7 +153,7 @@ pub struct ContextRequest {
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
     pub language: Language,
-    pub agent_roles: HashMap<String, AgentRoleConfig>,
+    pub agent_roles: HashMap<String, AgentRoleDefinition>,
     pub config_snapshot: ConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,

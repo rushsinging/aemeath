@@ -121,12 +121,17 @@ fn make_parent_context_with_event_sink(
     event_sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
 ) -> RuntimeContext {
     let mut config = share::config::Config::default();
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config.models.default = "test-provider/test-model".to_string();
     config.models.providers.insert(
@@ -167,7 +172,7 @@ async fn derived_context_does_not_publish_raw_child_events_to_parent_sink() {
         &make_parent_workspace(),
         crate::domain::agent_run::RunId::new_v7(),
         &super::super::setup::SubRunRequest {
-            role: "coder".to_string(),
+            agent_name: "coder".to_string(),
             timeout: Duration::from_secs(30),
         },
         Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
@@ -212,29 +217,29 @@ pub(super) fn make_parent_context_with_config(
 pub(super) fn make_parent_context() -> RuntimeContext {
     let mut config = share::config::Config::default();
     // coder → test-provider/test-model
+    // 具名实例引用无 policy 的自定义职能 "generic"，保持旧测试的
+    // sub-agent-restricted fallback 语义。
     config.agents.roles.insert(
-        "coder".to_string(),
-        share::config::AgentRoleConfig {
-            model: "test-provider/test-model".to_string(),
-            ..Default::default()
+        "generic".to_string(),
+        share::config::AgentRoleDefinition {
+            description: "Generic sub agent without policy".to_string(),
+            policy: None,
         },
     );
-    // role-a → role-a/model-a
-    config.agents.roles.insert(
-        "role-a".to_string(),
-        share::config::AgentRoleConfig {
-            model: "role-a/model-a".to_string(),
-            ..Default::default()
-        },
-    );
-    // role-b → role-b/model-b
-    config.agents.roles.insert(
-        "role-b".to_string(),
-        share::config::AgentRoleConfig {
-            model: "role-b/model-b".to_string(),
-            ..Default::default()
-        },
-    );
+    for (name, model) in [
+        ("coder", "test-provider/test-model"),
+        ("role-a", "role-a/model-a"),
+        ("role-b", "role-b/model-b"),
+    ] {
+        config.agents.names.insert(
+            name.to_string(),
+            share::config::AgentInstanceConfig {
+                role: "generic".to_string(),
+                model: model.to_string(),
+                ..Default::default()
+            },
+        );
+    }
     config.models.default = "test-provider/test-model".to_string();
     // test-provider → model test-model, driver openai
     config.models.providers.insert(
@@ -336,7 +341,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -386,7 +391,7 @@ fn sub_context_derivation_restricts_tool_catalog() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -428,7 +433,7 @@ fn sub_context_derivation_disables_memory_by_default() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -459,7 +464,7 @@ fn sub_context_derivation_uses_isolated_context() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -496,7 +501,7 @@ fn sub_context_derivation_does_not_widen_policy_or_interaction() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -534,7 +539,7 @@ fn sub_launcher_uses_derived_spec() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -580,7 +585,7 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -671,7 +676,7 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -712,14 +717,22 @@ fn make_parent_context_with_policy_role(
     recording_catalog: Arc<dyn ToolCatalogPort>,
 ) -> RuntimeContext {
     let mut config = share::config::Config::default();
+    // 覆盖内置 coder 职能（带 policy），coder 实例引用之。
     config.agents.roles.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
-            model: "test-provider/test-model".to_string(),
+        share::config::AgentRoleDefinition {
+            description: String::new(),
             policy: Some(share::config::RolePolicyConfig {
                 allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
                 capabilities: Vec::new(),
             }),
+        },
+    );
+    config.agents.names.insert(
+        "coder".to_string(),
+        share::config::AgentInstanceConfig {
+            role: "coder".to_string(),
+            model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
     );
@@ -754,7 +767,7 @@ fn sub_derivation_with_role_policy_queries_role_profile() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 
@@ -810,7 +823,7 @@ fn sub_derivation_fails_closed_when_parent_catalog_errors() {
     let parent_spec = RunSpec::main();
     let workspace = make_parent_workspace();
     let request = super::super::setup::SubRunRequest {
-        role: "coder".to_string(),
+        agent_name: "coder".to_string(),
         timeout: Duration::from_secs(30),
     };
 

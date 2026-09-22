@@ -303,11 +303,12 @@ impl SessionRuntime {
 
 /// 子 Run 派生 façade 的错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[allow(clippy::enum_variant_names)] // Sub* 前缀统一表达子 Run 派生域
 pub enum RuntimeContextAssemblyError {
-    #[error("sub-agent role `{role}` not found in config")]
-    SubRoleNotFound { role: String },
-    #[error("sub-agent role `{role}` is disabled")]
-    SubRoleDisabled { role: String },
+    #[error("sub-agent instance `{agent}` not found in config")]
+    SubAgentNotFound { agent: String },
+    #[error("sub-agent instance `{agent}` is disabled")]
+    SubAgentDisabled { agent: String },
     #[error("sub derivation failed: {reason}")]
     SubDerivationFailed { reason: String },
 }

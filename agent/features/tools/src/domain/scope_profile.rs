@@ -200,6 +200,6 @@ pub fn is_authorized(spec: &ToolRegistrationSpec, profile: &ToolProfile) -> bool
     let name_authorized = profile
         .allowed_tool_names
         .as_ref()
-        .map_or(true, |names| names.contains(spec.name()));
+        .is_none_or(|names| names.contains(spec.name()));
     capabilities_authorized && name_authorized
 }

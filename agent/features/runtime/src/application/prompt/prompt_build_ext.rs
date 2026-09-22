@@ -44,21 +44,31 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
     let Some(snap) = config_file else {
         return;
     };
-    let role_lines: Vec<String> = snap
-        .agents()
-        .merged_roles()
+    let agents = snap.agents();
+    let merged_roles = agents.merged_roles();
+    // 枚举具名实例（names）；描述取实例值，role 描述仅作 fallback。
+    let role_lines: Vec<String> = agents
+        .names
         .iter()
-        .filter(|(_, role)| role.enabled)
-        .map(|(name, role)| {
-            let desc = if role.description.is_empty() {
-                String::new()
+        .filter(|(_, instance)| instance.enabled)
+        .map(|(name, instance)| {
+            let description = if instance.description.is_empty() {
+                merged_roles
+                    .get(&instance.role)
+                    .map(|role| role.description.as_str())
+                    .unwrap_or("")
             } else {
-                format!(": {}", role.description)
+                instance.description.as_str()
             };
-            let model_info = if role.model.is_empty() {
+            let desc = if description.is_empty() {
                 String::new()
             } else {
-                format!(" (model: {})", role.model)
+                format!(": {}", description)
+            };
+            let model_info = if instance.model.is_empty() {
+                String::new()
+            } else {
+                format!(" (model: {})", instance.model)
             };
             format!("- `{}`{}{}", name, desc, model_info)
         })
@@ -74,16 +84,19 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::config::AgentRoleConfig;
+    use share::config::AgentInstanceConfig;
     use share::config::Config;
     use share::i18n::prompt::discipline::universal_execution_discipline;
     use std::collections::HashMap;
 
-    /// 构造一个 ConfigSnapshot，其中 `agents.roles` 与 `language` 按参数设置。
+    /// 构造一个 ConfigSnapshot，其中 `agents.names` 与 `language` 按参数设置。
     /// 其余字段使用 `Config::default()`，不触碰文件系统。
-    fn make_snapshot(roles: HashMap<String, AgentRoleConfig>, language: &str) -> ConfigSnapshot {
+    fn make_snapshot(
+        names: HashMap<String, AgentInstanceConfig>,
+        language: &str,
+    ) -> ConfigSnapshot {
         let mut config = Config::default();
-        config.agents.roles = roles;
+        config.agents.names = names;
         config.language = language.to_string();
         share::config::domain::snapshot::ConfigSnapshot::new(config)
     }
@@ -116,73 +129,93 @@ mod tests {
 
     // ── append_agent_roles ────────────────────────────────────
 
-    /// ConfigSnapshot 含 2 个 agent roles（coder + reviewer，带 description 与 model），
-    /// 调 append_agent_roles 后 prompt 应包含 role 名 / description / model。
+    /// ConfigSnapshot 含 2 个具名实例（coder-fast + reviewer-glm，带 description 与 model），
+    /// 调 append_agent_roles 后 prompt 应包含实例名 / description / model。
     #[test]
     fn test_append_agent_roles_with_snapshot() {
         // Arrange
-        let mut roles = HashMap::new();
-        roles.insert(
-            "coder".to_string(),
-            AgentRoleConfig {
+        let mut names = HashMap::new();
+        names.insert(
+            "coder-fast".to_string(),
+            AgentInstanceConfig {
+                role: "coder".to_string(),
                 model: "deepseek/deepseek-chat".to_string(),
                 description: "Writes and edits code".to_string(),
                 ..Default::default()
             },
         );
-        roles.insert(
-            "reviewer".to_string(),
-            AgentRoleConfig {
+        names.insert(
+            "reviewer-glm".to_string(),
+            AgentInstanceConfig {
+                role: "reviewer".to_string(),
                 model: "anthropic/claude-sonnet-4".to_string(),
                 description: "Reviews code for quality".to_string(),
                 ..Default::default()
             },
         );
-        let snap = make_snapshot(roles, "en");
+        let snap = make_snapshot(names, "en");
         let mut prompt = String::new();
 
         // Act
         append_agent_roles(&mut prompt, Some(&snap), "en");
 
-        // Assert — role 名、description、model 都应出现在 prompt 中
-        assert!(prompt.contains("`coder`"), "应包含 role 名 coder");
-        assert!(prompt.contains("`reviewer`"), "应包含 role 名 reviewer");
+        // Assert — 实例名、description、model 都应出现在 prompt 中
+        assert!(prompt.contains("`coder-fast`"), "应包含实例名 coder-fast");
+        assert!(
+            prompt.contains("`reviewer-glm`"),
+            "应包含实例名 reviewer-glm"
+        );
         assert!(
             prompt.contains("Writes and edits code"),
-            "应包含 coder 的 description"
+            "应包含 coder-fast 的 description"
         );
         assert!(
             prompt.contains("Reviews code for quality"),
-            "应包含 reviewer 的 description"
+            "应包含 reviewer-glm 的 description"
         );
         assert!(
             prompt.contains("deepseek/deepseek-chat"),
-            "应包含 coder 的 model"
+            "应包含 coder-fast 的 model"
         );
         assert!(
             prompt.contains("anthropic/claude-sonnet-4"),
-            "应包含 reviewer 的 model"
+            "应包含 reviewer-glm 的 model"
         );
     }
 
-    /// ConfigSnapshot 含 agents.roles 空 HashMap 时，内置 role fallback 仍应
-    /// 注入主 LLM（planner/coder/searcher/tester/reviewer 开箱可用）。
+    /// 实例描述为空时回退引用职能的描述（内置 reviewer 的描述填充）。
     #[test]
-    fn test_append_agent_roles_empty_snapshot_lists_builtins() {
-        // Arrange
+    fn test_append_agent_roles_falls_back_to_role_description() {
+        let mut names = HashMap::new();
+        names.insert(
+            "reviewer-ds".to_string(),
+            AgentInstanceConfig {
+                role: "reviewer".to_string(),
+                model: "x/y".to_string(),
+                ..Default::default()
+            },
+        );
+        let snap = make_snapshot(names, "en");
+        let mut prompt = String::new();
+
+        append_agent_roles(&mut prompt, Some(&snap), "en");
+
+        assert!(
+            prompt.contains("Read-only review"),
+            "内置 reviewer 职能描述应作为实例描述 fallback"
+        );
+    }
+
+    /// 空 names 时无任何可派发实例，prompt 不追加任何内容——内置职能
+    /// 不隐式注入（派发必须命中具名实例）。
+    #[test]
+    fn test_append_agent_roles_empty_names_appends_nothing() {
         let snap = make_snapshot(HashMap::new(), "en");
         let mut prompt = String::from("base");
 
-        // Act
         append_agent_roles(&mut prompt, Some(&snap), "en");
 
-        // Assert — 内置 role 全部出现在提示中
-        for builtin in ["planner", "coder", "searcher", "tester", "reviewer"] {
-            assert!(
-                prompt.contains(builtin),
-                "空 config 时内置 role {builtin} 仍应注入 prompt"
-            );
-        }
+        assert_eq!(prompt, "base", "空 names 时 prompt 不应追加任何 role 段");
     }
 
     /// config_file 为 None 时，append_agent_roles 应直接返回，不追加任何内容。
@@ -201,32 +234,34 @@ mod tests {
         );
     }
 
-    /// disabled role 即使保留定义，也不得把它注入主 LLM。
+    /// disabled 实例即使保留定义，也不得把它注入主 LLM。
     #[test]
     fn test_append_agent_roles_omits_disabled_role() {
-        let mut roles = HashMap::new();
-        roles.insert(
-            "coder".to_string(),
-            AgentRoleConfig {
+        let mut names = HashMap::new();
+        names.insert(
+            "coder-fast".to_string(),
+            AgentInstanceConfig {
+                role: "coder".to_string(),
                 enabled: false,
                 description: "编写代码".to_string(),
                 ..Default::default()
             },
         );
-        roles.insert(
-            "reviewer".to_string(),
-            AgentRoleConfig {
+        names.insert(
+            "reviewer-glm".to_string(),
+            AgentInstanceConfig {
+                role: "reviewer".to_string(),
                 description: "审查代码".to_string(),
                 ..Default::default()
             },
         );
-        let snap = make_snapshot(roles, "zh");
+        let snap = make_snapshot(names, "zh");
         let mut prompt = String::from("base");
 
         append_agent_roles(&mut prompt, Some(&snap), "zh");
 
-        assert!(!prompt.contains("`coder`"));
-        assert!(prompt.contains("`reviewer`"));
+        assert!(!prompt.contains("`coder-fast`"));
+        assert!(prompt.contains("`reviewer-glm`"));
     }
 
     /// ConfigSnapshot.language="zh" 且 lang 参数传 "zh" 时，
@@ -239,7 +274,7 @@ mod tests {
         let mut roles = HashMap::new();
         roles.insert(
             "coder".to_string(),
-            AgentRoleConfig {
+            AgentInstanceConfig {
                 description: "编写代码".to_string(),
                 ..Default::default()
             },

@@ -16,7 +16,7 @@ pub(crate) struct ContextRequestSource<'a> {
     pub system_prompt: &'a str,
     pub model_id: &'a str,
     pub language: &'a str,
-    pub agent_roles: HashMap<String, share::config::AgentRoleConfig>,
+    pub agent_roles: HashMap<String, share::config::AgentRoleDefinition>,
     pub config: &'a RunConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,

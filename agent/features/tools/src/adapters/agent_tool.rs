@@ -16,7 +16,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously. `role` is required and must name a configured entry in `config.agents.roles` or one of the builtin roles (planner, coder, searcher, tester, reviewer); the sub-agent model, context window, and output budget come from that role's config, and its toolset is narrowed by the role policy when one is configured. Multiple Agent calls in the SAME response run concurrently."
+        "Launch a new agent to handle a focused, scoped task autonomously. `agent` is required and must name a configured entry in `config.agents.names`; the named instance binds the model and output budget, and its referenced role (builtin: planner, coder, searcher, tester, reviewer) narrows the toolset via the role policy when one is configured. Multiple Agent calls in the SAME response run concurrently."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -59,8 +59,8 @@ impl TypedTool for AgentTool {
         if args.description.is_empty() {
             return TypedToolResult::error("missing required parameter: description");
         }
-        if args.role.trim().is_empty() {
-            return TypedToolResult::error("missing required parameter: role");
+        if args.agent.trim().is_empty() {
+            return TypedToolResult::error("missing required parameter: agent");
         }
         let prompt = args.prompt.as_str();
 
@@ -77,7 +77,7 @@ impl TypedTool for AgentTool {
 
         let cwd_str = cwd.to_string_lossy();
 
-        // Runtime validates that the required role exactly matches AgentsConfig::roles.
+        // Runtime validates that the required agent exactly matches AgentsConfig::names.
 
         let system = format!(
             r#"You are a sub-agent performing a specific task. You have access to tools for running commands, reading and editing files, and searching codebases.
@@ -85,7 +85,7 @@ impl TypedTool for AgentTool {
 Working directory: {cwd_str}
 
 CRITICAL — Context budget:
-- Your context window and output budget come from the model configured for the required role in `config.agents.roles` and `config.models`. Every file you read consumes tokens.
+- Your context window and output budget come from the model bound to the required agent in `config.agents.names`. Every file you read consumes tokens.
 - ALWAYS use `limit` parameter when reading files: `Read(file_path, limit: 100)` for overviews, `limit: 50` for quick checks. Only omit limit for very small files (<100 lines).
 - Use Grep to find specific code instead of reading entire files — this is much more token-efficient.
 - Use Glob to discover files, then read only the most relevant ones.
@@ -113,7 +113,7 @@ Instructions:- Complete the task described in the user message
                 plan_mode: ctx.plan_mode_state(),
                 guidance: ctx.guidance(),
                 timeout,
-                role: args.role.as_str(),
+                agent_name: args.agent.as_str(),
             })
             .await;
 

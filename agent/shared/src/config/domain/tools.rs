@@ -125,6 +125,7 @@ pub struct ToolsConfig {
 /// carried `model`/`enabled` instance fields) with a serde error at parse time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[derive(Default)]
 pub struct AgentRoleDefinition {
     /// Human-readable description of what this role does; used as fallback
     /// when a named instance carries no description of its own.
@@ -135,15 +136,6 @@ pub struct AgentRoleDefinition {
     /// default sub tool set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<RolePolicyConfig>,
-}
-
-impl Default for AgentRoleDefinition {
-    fn default() -> Self {
-        Self {
-            description: String::new(),
-            policy: None,
-        }
-    }
 }
 
 /// Named agent instance — the model-holding half of the role/instance split.
@@ -529,8 +521,10 @@ mod tests {
 
     #[test]
     fn resolve_agent_applies_default_model_fallback() {
-        let mut agents = AgentsConfig::default();
-        agents.default_model = "Zhipu/glm-5.3".to_string();
+        let mut agents = AgentsConfig {
+            default_model: "Zhipu/glm-5.3".to_string(),
+            ..AgentsConfig::default()
+        };
         agents
             .names
             .insert("coder-fast".to_string(), instance("coder", ""));
