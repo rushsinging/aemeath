@@ -606,11 +606,19 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
         )
         .expect("sub-agent/sub-agent-restricted must succeed");
 
-    // Any other scope/profile MUST be rejected.
+    // role:<name> profiles are served too — the snapshot was already narrowed
+    // at derivation time by the role's compiled profile.
+    catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("sub-agent"),
+            &ToolProfileName::new("role:searcher"),
+        )
+        .expect("sub-agent/role profile must succeed");
+
+    // Any non-sub-agent scope MUST be rejected.
     let bad_scopes = [
         ("main", "full"),
         ("general", "standard"),
-        ("sub-agent", "full"),
         ("main", "sub-agent-restricted"),
         ("unknown", "unknown"),
     ];
@@ -696,6 +704,79 @@ fn sub_derivation_only_queries_sub_agent_scope_from_parent_catalog() {
             "call {i}: expected profile 'sub-agent-restricted', got '{profile}'"
         );
     }
+}
+
+// ── Test 8b: a role with a policy narrows the catalog via role:<name> ──
+
+fn make_parent_context_with_policy_role(
+    recording_catalog: Arc<dyn ToolCatalogPort>,
+) -> RuntimeContext {
+    let mut config = share::config::Config::default();
+    config.agents.roles.insert(
+        "coder".to_string(),
+        share::config::AgentRoleConfig {
+            model: "test-provider/test-model".to_string(),
+            policy: Some(share::config::RolePolicyConfig {
+                allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
+                capabilities: Vec::new(),
+            }),
+            ..Default::default()
+        },
+    );
+    config.models.default = "test-provider/test-model".to_string();
+    config.models.providers.insert(
+        "test-provider".to_string(),
+        share::config::models::ProviderModelsConfig {
+            driver: "openai".to_string(),
+            models: vec![share::config::models::ModelEntryConfig {
+                id: "test-model".to_string(),
+                api_style: None,
+                context_window: 128000,
+                max_tokens: 8192,
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    let config_snapshot = crate::application::run::config::RunConfigSnapshot::capture(
+        share::config::domain::snapshot::ConfigSnapshot::new(config),
+    );
+    assemble_parent_context(recording_catalog, Arc::new(FakeToolExec), config_snapshot)
+}
+
+#[test]
+fn sub_derivation_with_role_policy_queries_role_profile() {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recording_catalog: Arc<dyn ToolCatalogPort> = Arc::new(RecordingToolCatalog {
+        calls: calls.clone(),
+    });
+    let parent_ctx = make_parent_context_with_policy_role(recording_catalog);
+    let parent_spec = RunSpec::main();
+    let workspace = make_parent_workspace();
+    let request = super::super::setup::SubRunRequest {
+        role: "coder".to_string(),
+        timeout: Duration::from_secs(30),
+    };
+
+    super::super::setup::derive_sub_run(
+        &parent_spec,
+        &parent_ctx,
+        &workspace,
+        crate::domain::agent_run::RunId::new_v7(),
+        &request,
+        Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
+        tools::composition::wire_skills().catalog(),
+        Arc::new(make_test_factory()),
+    )
+    .expect("derive_sub_run should succeed");
+
+    let recorded = calls.lock().unwrap();
+    assert!(
+        recorded
+            .iter()
+            .any(|(scope, profile)| scope == "sub-agent" && profile == "role:coder"),
+        "role with policy must query sub-agent/role:coder, got {recorded:?}"
+    );
 }
 
 // ── Test 9: derive_sub_run fails closed when parent catalog returns error ──

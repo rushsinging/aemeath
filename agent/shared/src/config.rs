@@ -30,7 +30,8 @@ pub use permissions::{PermissionConfig, PermissionModeConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
 pub use tools::{
-    AgentRoleConfig, AgentsConfig, RolePolicyConfig, ToolResultConfig, ToolSelection, ToolsConfig,
+    AgentRoleConfig, AgentsConfig, ResolvedRole, RolePolicyConfig, ToolResultConfig, ToolSelection,
+    ToolsConfig,
 };
 pub use ui::{
     ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, SpacingLines,

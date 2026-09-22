@@ -122,15 +122,23 @@ pub fn derive_sub_run(
 
     // 2. RuntimeContextFactory binds the derived workspace and live capabilities.
     let config_snapshot = parent_context.config().clone();
-    let role = config_snapshot
+    let role = match config_snapshot
         .config()
         .agents()
-        .roles
-        .get(&request.role)
-        .ok_or_else(|| RuntimeContextAssemblyError::SubRoleNotFound {
-            role: request.role.clone(),
-        })?
-        .clone();
+        .resolve_role(&request.role)
+    {
+        Some(share::config::ResolvedRole::Role(role)) => role,
+        Some(share::config::ResolvedRole::Disabled) => {
+            return Err(RuntimeContextAssemblyError::SubRoleDisabled {
+                role: request.role.clone(),
+            })
+        }
+        None => {
+            return Err(RuntimeContextAssemblyError::SubRoleNotFound {
+                role: request.role.clone(),
+            })
+        }
+    };
     let resolved_spec = role.model.clone();
     let isolated_session_id = sdk::SessionId::new_v7().to_string();
     let session = SessionState::new(

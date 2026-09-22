@@ -306,6 +306,8 @@ impl SessionRuntime {
 pub enum RuntimeContextAssemblyError {
     #[error("sub-agent role `{role}` not found in config")]
     SubRoleNotFound { role: String },
+    #[error("sub-agent role `{role}` is disabled")]
+    SubRoleDisabled { role: String },
     #[error("sub derivation failed: {reason}")]
     SubDerivationFailed { reason: String },
 }

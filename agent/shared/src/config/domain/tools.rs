@@ -347,6 +347,29 @@ impl AgentsConfig {
         }
         merged
     }
+
+    /// Resolve a role by name for a sub run: builtin fallback, enabled check,
+    /// and empty-model fallback to `default_model`. Single source of truth
+    /// consumed by runtime role resolution paths.
+    pub fn resolve_role(&self, name: &str) -> Option<ResolvedRole> {
+        let mut role = self.merged_roles().get(name)?.clone();
+        if !role.enabled {
+            return Some(ResolvedRole::Disabled);
+        }
+        if role.model.trim().is_empty() {
+            role.model = self.default_model.clone();
+        }
+        Some(ResolvedRole::Role(role))
+    }
+}
+
+/// Outcome of [`AgentsConfig::resolve_role`].
+#[derive(Debug, Clone)]
+pub enum ResolvedRole {
+    /// Role resolved; `model` already carries the `default_model` fallback.
+    Role(AgentRoleConfig),
+    /// Role exists but is disabled.
+    Disabled,
 }
 
 #[cfg(test)]
@@ -469,6 +492,58 @@ mod tests {
         let merged = agents.merged_roles();
         assert!(merged.contains_key("refactorer"));
         assert_eq!(merged.len(), 6); // 5 builtin + 1 custom
+    }
+
+    #[test]
+    fn resolve_role_finds_builtin_and_applies_default_model_fallback() {
+        let mut agents = AgentsConfig::default();
+        agents.default_model = "deepseek/deepseek-chat".to_string();
+        let ResolvedRole::Role(resolved) = agents
+            .resolve_role("searcher")
+            .expect("builtin role resolves")
+        else {
+            panic!("builtin role must resolve to Role");
+        };
+        assert_eq!(
+            resolved.model, "deepseek/deepseek-chat",
+            "empty builtin model falls back to default_model"
+        );
+        assert!(resolved.policy.is_some());
+
+        // config 覆盖的 model 优先于 default_model
+        agents.roles.insert(
+            "searcher".to_string(),
+            AgentRoleConfig {
+                model: "qwen/qwen3".to_string(),
+                ..AgentRoleConfig::default()
+            },
+        );
+        let ResolvedRole::Role(resolved) =
+            agents.resolve_role("searcher").expect("override resolves")
+        else {
+            panic!("overridden role must resolve to Role");
+        };
+        assert_eq!(resolved.model, "qwen/qwen3");
+    }
+
+    #[test]
+    fn resolve_role_reports_missing_and_disabled() {
+        let agents = AgentsConfig::default();
+        assert!(agents.resolve_role("no-such-role").is_none());
+
+        let mut agents = AgentsConfig::default();
+        agents.roles.insert(
+            "archived".to_string(),
+            AgentRoleConfig {
+                enabled: false,
+                model: "x/y".to_string(),
+                ..AgentRoleConfig::default()
+            },
+        );
+        assert!(matches!(
+            agents.resolve_role("archived"),
+            Some(ResolvedRole::Disabled)
+        ));
     }
 
     #[test]
