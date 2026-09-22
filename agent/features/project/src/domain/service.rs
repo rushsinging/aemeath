@@ -259,13 +259,6 @@ impl WorkspaceControl for WorkspaceService {
         self.commit(candidate);
         Ok(())
     }
-    fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
-        let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        rules::switch_to(&mut candidate, self.git.as_ref(), path)?;
-        self.commit(candidate);
-        Ok(())
-    }
     fn enter(
         &self,
         path: Option<PathBuf>,
@@ -327,10 +320,11 @@ mod tests {
             &self,
             path: &Path,
         ) -> Result<crate::domain::git::RepositoryProbe, crate::GitProbeError> {
+            // enter() 要求目标是 linked worktree，替身固定报告 Linked。
             Ok(crate::domain::git::RepositoryProbe::Git {
                 canonical_top_level: path.to_path_buf(),
                 canonical_common_dir: self.common_dir.clone(),
-                worktree_kind: WorktreeKind::Primary,
+                worktree_kind: WorktreeKind::Linked,
             })
         }
 
@@ -439,9 +433,10 @@ mod tests {
     }
 
     #[test]
-    fn switch_during_git_io_keeps_committed_state_readable() {
+    fn enter_during_git_io_keeps_committed_state_readable() {
         let root = unique_temp_dir("read_during_io_root");
         let target = unique_temp_dir("read_during_io_target");
+        std::fs::create_dir_all(&target).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let git = Arc::new(BlockingGit {
@@ -455,7 +450,7 @@ mod tests {
         let switching = {
             let workspace = workspace.clone();
             let target = target.clone();
-            thread::spawn(move || workspace.switch_to(target))
+            thread::spawn(move || workspace.enter(Some(target), Some("branch".to_string()), None))
         };
 
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -470,7 +465,7 @@ mod tests {
             .expect("Git I/O 期间 state lock 不应阻塞只读访问");
         assert_eq!(observed, root);
         release_tx.send(()).unwrap();
-        assert_eq!(switching.join().unwrap(), Ok(()));
+        assert!(switching.join().unwrap().is_ok());
         reader.join().unwrap();
         assert_eq!(workspace.current_path_base(), target);
     }
@@ -479,6 +474,7 @@ mod tests {
     fn concurrent_writes_share_one_control_operation_lock() {
         let root = unique_temp_dir("serialized_root");
         let target = unique_temp_dir("serialized_target");
+        std::fs::create_dir_all(&target).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let git = Arc::new(BlockingGit {
@@ -492,7 +488,7 @@ mod tests {
         let first = {
             let workspace = workspace.clone();
             let target = target.clone();
-            thread::spawn(move || workspace.switch_to(target))
+            thread::spawn(move || workspace.enter(Some(target), Some("branch".to_string()), None))
         };
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
@@ -514,7 +510,7 @@ mod tests {
         );
 
         release_tx.send(()).unwrap();
-        assert_eq!(first.join().unwrap(), Ok(()));
+        assert!(first.join().unwrap().is_ok());
         second_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(second.join().unwrap(), Ok(()));
         assert_eq!(workspace.current_path_base(), target);

@@ -98,13 +98,12 @@ Workspace 用例把 candidate-state 规则与 fallible Git / filesystem seam 分
 | `set_path_base` | `(state, path) → Result` | 更新 path_base（bash cd 用） |
 | `set_workspace_root` | `(state, root, path) → Result` | 更新 workspace_root + path_base（worktree enter/exit 用） |
 | `enter` | `(state, git, path, branch, base) → Result<Frame>` | 压栈 + 进入 worktree；base 仅在创建目标时生效 |
-| `exit` | `(state) → Result<Frame>` | 弹栈 + 退出 worktree |
-| `switch_to` | `(state, git, path) → Result` | 切换到指定路径（不压栈，ExitWorktree{path} 用） |
+| `exit` | `(state) → Result<Frame>` | 弹栈 + 退出 worktree（恢复最近一次 EnterWorktree 前的上下文） |
 | `snapshot` | `(state) → PersistedWorkspaceContext` | 生成持久化快照 |
 | `prepare_restore` | `(live_state, dto, git) → Result<PreparedWorkspaceRestore>` | 不修改 live state，完整校验并构造新 state token |
 | `commit_restore` | `(state_slot, prepared) → ()` | session-switch gate 内无失败全量替换 |
 
-`set_workspace_root` 是 Project 内部转换 helper，**NEVER** 进入公开 `WorkspaceControl`；公开的 `switch_to` / `enter` / `exit` 在调用它前必须完成同源、identity 与包含关系校验。
+`set_workspace_root` 是 Project 内部转换 helper，**NEVER** 进入公开 `WorkspaceControl`；公开的 `enter` / `exit` 在调用它前必须完成同源、identity 与包含关系校验。
 
 ### 3.2 规则 / I/O 分离优势
 
@@ -168,15 +167,15 @@ fn fork(&self) -> Arc<Self>:
 
 | 错误 | 语义 | 触发场景 |
 |---|---|---|
-| `PathNotFound(PathBuf)` | 路径不存在或无法访问 | change_directory / enter / switch_to 时路径无效 |
-| `PathOutsideWorkspaceRoot { path: PathBuf, root: PathBuf }` | 路径位于 workspace root 之外 | change_directory / enter / switch_to / restore 时目标路径越出 root 边界 |
+| `PathNotFound(PathBuf)` | 路径不存在或无法访问 | change_directory / enter 时路径无效 |
+| `PathOutsideWorkspaceRoot { path: PathBuf, root: PathBuf }` | 路径位于 workspace root 之外 | change_directory / enter / restore 时目标路径越出 root 边界 |
 | `MissingPathAndBranch` | 未提供可用的 path 或 branch | enter 时 path 为 `None` / empty `PathBuf`，且 branch 缺失或为空 |
 | `InvalidBranch` | branch 名只含分隔符或敏感字符 | sanitize_branch_for_path 返回空 |
 | `NestedWorktree` | 已在 worktree 中尝试再 enter | 栈非空且 in_worktree 为 true |
 | `RepoMismatch` | 路径不属于当前仓库 | validate_in_repo 校验 canonical git common dir 与当前 Project identity 不一致 |
 | `NotLinkedWorktree` | 目标属于当前仓库但不是 linked worktree | validate_in_repo 得到 `Primary` 等非 `Linked` worktree kind |
 | `EmptyStack` | 栈为空时尝试 exit | exit 时 stack 为空 |
-| `UnsupportedForNonGit` | NonGit project 不支持 worktree transition | enter / exit / switch_to；change_directory 仍可在 root 内使用 |
+| `UnsupportedForNonGit` | NonGit project 不支持 worktree transition | enter / exit；change_directory 仍可在 root 内使用 |
 | `GitProbeFailed(GitProbeError)` | git 不可用、权限失败、命令异常或输出损坏 | repository identity 探测 / 校验失败；已取得 top-level 后 probe 返回 `NonGit`，或 probe 的 canonical top-level 与该结果不一致时为 `GitProbeFailed(InvalidOutput)` |
 | `GitOperationFailed(GitOperationError)` | 已确认 Git identity 后的具体命令失败 | branch / worktree add / top-level 查询 |
 
@@ -203,7 +202,7 @@ fn fork(&self) -> Arc<Self>:
 
 - 使用 `std::sync::Mutex`（非 `tokio::sync::Mutex`），因为 workspace 操作是同步的（git CLI 是同步进程）。
 - `lock()` 使用 `unwrap_or_else(|e| e.into_inner())` 处理毒锁——即使持有锁的线程 panic 也能继续。
-- `change_directory` / `switch_to` / `enter` / `exit` / `commit_restore` 等所有写用例 **MUST** 先取得同一 `control_operation` mutex，并持有到整个用例结束；因此同一 workspace context 的写操作严格串行。`fork()` 创建自己的串行器，父子 context 仍彼此隔离。
+- `change_directory` / `enter` / `exit` / `commit_restore` 等所有写用例 **MUST** 先取得同一 `control_operation` mutex，并持有到整个用例结束；因此同一 workspace context 的写操作严格串行。`fork()` 创建自己的串行器，父子 context 仍彼此隔离。
 - `in_worktree()` 只在短 state lock 内读取已提交 `worktree_kind`，**NEVER** spawn git。需要 Git / filesystem I/O 的 control 用例在保持 `control_operation` guard 的同时释放 state lock，完成全部 fallible I/O 后才重新短暂取得 state lock、一次提交 candidate；state lock **NEVER** 跨 I/O，读者在提交前只会看到旧的完整状态。
 - `prepare_restore` / `commit_restore` **MUST** 由 Context Management 的 exclusive session-switch gate 包围；`commit_restore` 仍取得 `control_operation` mutex。exclusive gate 阻止 prepare token 生成与 commit 之间出现外部 Workspace 写入，Project 内部串行器阻止同一提交段内与其他写用例交错。
 
