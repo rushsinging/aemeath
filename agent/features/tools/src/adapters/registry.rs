@@ -9,7 +9,7 @@ use crate::adapters::{
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
 use crate::domain::scope_profile::{
-    is_authorized, RegistryScope, RegistryScopeBuilder, ToolProfile, ToolRegistrationSpec,
+    RegistryScope, RegistryScopeBuilder, ToolProfile, ToolRegistrationSpec,
 };
 use std::sync::Arc;
 use task::TaskAccess;
@@ -31,6 +31,25 @@ impl BuiltinRegistryScope {
     }
 }
 
+/// Legacy sub-agent toolset, carried explicitly by the sub-agent-restricted
+/// profile since the static `[main, sub]` registration booleans retired.
+/// Equivalence guarantee: a sub run without a role policy sees exactly these
+/// tools, byte-for-byte with the pre-role behavior.
+pub(crate) const SUB_AGENT_TOOLSET: &[&str] = &[
+    "Bash",
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "WebFetch",
+    "WebSearch",
+    "Memory",
+    "Brief",
+    "ToolSearch",
+    "Skill",
+];
+
 pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
     let requested = match scope {
         BuiltinRegistryScope::Main => Caps::all(),
@@ -42,20 +61,22 @@ pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile
                 | Caps::WorkspaceControl
         }
     };
+    let requested_names = match scope {
+        BuiltinRegistryScope::Main => None,
+        BuiltinRegistryScope::SubAgent => Some(
+            SUB_AGENT_TOOLSET
+                .iter()
+                .map(|tool| crate::domain::published_language::ToolName::new(*tool))
+                .collect(),
+        ),
+    };
 
     match scope {
         BuiltinRegistryScope::Main => main_parent.clone(),
         BuiltinRegistryScope::SubAgent => {
-            ToolProfile::derive_restricted(main_parent, requested, None)
+            ToolProfile::derive_restricted(main_parent, requested, requested_names)
                 .expect("built-in child profiles must only restrict the main profile")
         }
-    }
-}
-
-fn belongs_to(scope: BuiltinRegistryScope, main: bool, sub: bool) -> bool {
-    match scope {
-        BuiltinRegistryScope::Main => main,
-        BuiltinRegistryScope::SubAgent => sub,
     }
 }
 
@@ -68,80 +89,48 @@ pub(crate) fn register_named_scope(
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
-    let main_profile = ToolProfile::baseline(Caps::all());
-    let profile = profile_for(selected_scope, &main_profile);
 
     // This macro is the single built-in registration specification: each row
-    // declares identity, required capabilities, scope membership, and factory.
+    // declares identity, required capabilities, and factory. Both scopes
+    // register the full pool unconditionally; per-run narrowing (visibility
+    // and executability) is carried solely by ToolProfile at snapshot time
+    // and execution time respectively.
     macro_rules! builtin {
-        ($name:literal, $caps:expr, [$main:literal, $sub:literal], $tool:expr) => {{
-            if belongs_to(selected_scope, $main, $sub) {
-                let spec = ToolRegistrationSpec::new($name, $caps);
-                scope
-                    .register_mut(spec.clone())
-                    .expect("built-in tool registration specification must be valid");
-                if is_authorized(&spec, &profile) {
-                    registry.register_with_capabilities($tool, spec.required_capabilities());
-                }
-            }
+        ($name:literal, $caps:expr, $tool:expr) => {{
+            let spec = ToolRegistrationSpec::new($name, $caps);
+            scope
+                .register_mut(spec.clone())
+                .expect("built-in tool registration specification must be valid");
+            registry.register_with_capabilities($tool, spec.required_capabilities());
         }};
     }
 
     builtin!(
         "Bash",
         Caps::ReadWorkspace | Caps::ExecuteProcess | Caps::WorkspaceControl,
-        [true, true],
         bash::BashTool {
             control: workspace_control.clone()
         }
     );
-    builtin!(
-        "Read",
-        Caps::ReadWorkspace,
-        [true, true],
-        file_read::FileReadTool
-    );
+    builtin!("Read", Caps::ReadWorkspace, file_read::FileReadTool);
     builtin!(
         "Write",
         Caps::ReadWorkspace | Caps::WriteWorkspace,
-        [true, true],
         file_write::FileWriteTool
     );
     builtin!(
         "Edit",
         Caps::ReadWorkspace | Caps::WriteWorkspace,
-        [true, true],
         file_edit::FileEditTool
     );
-    builtin!(
-        "Glob",
-        Caps::ReadWorkspace,
-        [true, true],
-        glob_tool::GlobTool
-    );
-    builtin!("Grep", Caps::ReadWorkspace, [true, true], grep::GrepTool);
-    builtin!(
-        "WebFetch",
-        Caps::NetworkAccess,
-        [true, true],
-        web_fetch::WebFetchTool
-    );
-    builtin!(
-        "WebSearch",
-        Caps::NetworkAccess,
-        [true, true],
-        web_search::WebSearchTool
-    );
-    builtin!(
-        "Agent",
-        Caps::AgentDispatch,
-        [true, false],
-        agent_tool::AgentTool
-    );
+    builtin!("Glob", Caps::ReadWorkspace, glob_tool::GlobTool);
+    builtin!("Grep", Caps::ReadWorkspace, grep::GrepTool);
+    builtin!("WebFetch", Caps::NetworkAccess, web_fetch::WebFetchTool);
+    builtin!("WebSearch", Caps::NetworkAccess, web_search::WebSearchTool);
+    builtin!("Agent", Caps::AgentDispatch, agent_tool::AgentTool);
     builtin!(
         "TaskCreate",
         Caps::TaskMutation,
-        [true, false],
         task_create::TaskCreateTool {
             access: task_access.clone()
         }
@@ -149,7 +138,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskUpdate",
         Caps::TaskMutation,
-        [true, false],
         task_update::TaskUpdateTool {
             access: task_access.clone()
         }
@@ -157,7 +145,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskBlockBy",
         Caps::TaskMutation,
-        [true, false],
         task_block_by::TaskBlockByTool {
             access: task_access.clone()
         }
@@ -165,7 +152,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskListGet",
         Caps::TaskRead,
-        [true, false],
         task_list::TaskListTool {
             access: task_access.clone()
         }
@@ -173,7 +159,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskLists",
         Caps::TaskRead,
-        [true, false],
         task_lists::TaskListsTool {
             access: task_access.clone()
         }
@@ -181,7 +166,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskListCreate",
         Caps::TaskMutation,
-        [true, false],
         task_list_create::TaskListCreateTool {
             access: task_access.clone()
         }
@@ -189,7 +173,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskListComplete",
         Caps::TaskMutation,
-        [true, false],
         task_list_complete::TaskListCompleteTool {
             access: task_access.clone()
         }
@@ -197,7 +180,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskGet",
         Caps::TaskRead,
-        [true, false],
         task_get::TaskGetTool {
             access: task_access.clone()
         }
@@ -205,7 +187,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "TaskStop",
         Caps::TaskMutation,
-        [true, false],
         task_stop::TaskStopTool {
             access: task_access.clone()
         }
@@ -213,7 +194,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "Memory",
         Caps::empty(),
-        [true, true],
         memory_tool::MemoryTool {
             source: memory_source.clone(),
         }
@@ -221,38 +201,28 @@ pub(crate) fn register_named_scope(
     builtin!(
         "Skill",
         Caps::ReadWorkspace,
-        [true, true],
         skill_tool::SkillTool::new(skill_loader)
     );
     builtin!(
         "AskUserQuestion",
         Caps::UserInteraction,
-        [true, false],
         ask_user::AskUserQuestionTool
     );
-    builtin!("Brief", Caps::empty(), [true, true], brief::BriefTool);
-    builtin!(
-        "ToolSearch",
-        Caps::empty(),
-        [true, true],
-        tool_search::ToolSearchTool
-    );
+    builtin!("Brief", Caps::empty(), brief::BriefTool);
+    builtin!("ToolSearch", Caps::empty(), tool_search::ToolSearchTool);
     builtin!(
         "EnterPlanMode",
         Caps::PlanControl,
-        [true, false],
         plan_mode::EnterPlanModeTool
     );
     builtin!(
         "ExitPlanMode",
         Caps::PlanControl,
-        [true, false],
         plan_mode::ExitPlanModeTool
     );
     builtin!(
         "EnterWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
-        [true, false],
         worktree::EnterWorktreeTool {
             control: workspace_control.clone()
         }
@@ -260,7 +230,6 @@ pub(crate) fn register_named_scope(
     builtin!(
         "ExitWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
-        [true, false],
         worktree::ExitWorktreeTool {
             control: workspace_control.clone()
         }
@@ -269,9 +238,6 @@ pub(crate) fn register_named_scope(
     let built_scope = scope.build();
     debug_assert_eq!(built_scope.name().as_str(), selected_scope.name());
     debug_assert!(registry.len() >= built_scope.len());
-    debug_assert!(built_scope
-        .iter()
-        .all(|spec| built_scope.get(spec.name()).is_some()));
     built_scope
 }
 
@@ -355,20 +321,7 @@ mod tests {
         "ExitWorktree",
         "Skill",
     ];
-    const SUB_AGENT: &[&str] = &[
-        "Bash",
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "WebFetch",
-        "WebSearch",
-        "Memory",
-        "Brief",
-        "ToolSearch",
-        "Skill",
-    ];
+    const SUB_AGENT: &[&str] = SUB_AGENT_TOOLSET;
 
     #[test]
     fn production_profiles_are_main_baseline_or_restricted_children() {
@@ -423,13 +376,57 @@ mod tests {
     }
 
     #[test]
+    fn sub_agent_registration_pool_equals_main_pool() {
+        // 注册池统一：静态 [main, sub] 布尔退役，两个 scope 注册同一全量名单；
+        // 等价迁移由 sub-agent-restricted profile 的显式名单承载。
+        assert_eq!(
+            names_for(BuiltinRegistryScope::SubAgent),
+            names_for(BuiltinRegistryScope::Main),
+        );
+    }
+
+    #[test]
+    fn sub_agent_restricted_profile_carries_legacy_toolset_explicitly() {
+        let main = ToolProfile::baseline(Caps::all());
+        let restricted = profile_for(BuiltinRegistryScope::SubAgent, &main);
+        let names = restricted
+            .allowed_tool_names()
+            .expect("restricted profile carries an explicit allowlist");
+        for tool in SUB_AGENT {
+            assert!(
+                names.contains(&crate::domain::published_language::ToolName::new(*tool)),
+                "{tool} missing from restricted profile"
+            );
+        }
+        for absent in [
+            "Agent",
+            "AskUserQuestion",
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskBlockBy",
+            "TaskListCreate",
+            "TaskListComplete",
+            "TaskStop",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "EnterWorktree",
+            "ExitWorktree",
+        ] {
+            assert!(
+                !names.contains(&crate::domain::published_language::ToolName::new(absent)),
+                "{absent} must stay out of the restricted profile"
+            );
+        }
+    }
+
+    #[test]
     fn sub_agent_scope_characterization_is_exact() {
         let main_names = names_for(BuiltinRegistryScope::Main);
         let sub_agent_names = names_for(BuiltinRegistryScope::SubAgent);
 
-        assert_eq!(sub_agent_names, set(SUB_AGENT));
+        assert_eq!(sub_agent_names, main_names);
         assert!(main_names.contains("agent"));
-        assert!(!sub_agent_names.contains("agent"));
+        assert!(sub_agent_names.contains("agent"));
         for ordinary_tool in ["read", "grep", "bash", "skill"] {
             assert!(sub_agent_names.contains(ordinary_tool));
         }
