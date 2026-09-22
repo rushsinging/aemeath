@@ -155,6 +155,11 @@ pub struct AgentRoleConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_tokens: Option<u32>,
+
+    /// Tool policy for sub runs bound to this role. `None` keeps the default
+    /// sub tool set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<RolePolicyConfig>,
 }
 
 impl Default for AgentRoleConfig {
@@ -165,8 +170,117 @@ impl Default for AgentRoleConfig {
             description: String::new(),
             system_suffix: None,
             max_tokens: None,
+            policy: None,
         }
     }
+}
+
+/// Tool policy bound to a role: allowlist plus optional capability restriction.
+///
+/// Both fields are optional; an absent `policy` (or an empty allowlist, which
+/// the Tools-layer compiler rejects) means the role keeps the default sub tool
+/// set. Config-layer stores plain strings only — tool-name and capability-name
+/// validation happens at Tools-layer compilation time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RolePolicyConfig {
+    /// Tool-name allowlist; unlisted tools are invisible to the run and any
+    /// call against them is denied via the catalog-miss path.
+    #[serde(default, rename = "allowed_tools", alias = "allowedTools")]
+    pub allowed_tools: Vec<String>,
+
+    /// Capability-bit restriction intersected with the allowlist-derived
+    /// capabilities at compile time.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// Builtin role fallback consumed via [`AgentsConfig::merged_roles`].
+///
+/// Builtin roles carry a policy and a description only; `model` stays empty so
+/// runtime resolves the sub model from `AgentsConfig::default_model` (or the
+/// main client fallback) unless the user overrides the role in config.
+fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleConfig)> {
+    fn policy_role(allowed_tools: &[&str], description: &str) -> AgentRoleConfig {
+        AgentRoleConfig {
+            description: description.to_string(),
+            policy: Some(RolePolicyConfig {
+                allowed_tools: allowed_tools.iter().map(|tool| tool.to_string()).collect(),
+                capabilities: Vec::new(),
+            }),
+            ..AgentRoleConfig::default()
+        }
+    }
+    vec![
+        (
+            "planner",
+            policy_role(
+                &[
+                    "Read",
+                    "Grep",
+                    "Glob",
+                    "WebSearch",
+                    "WebFetch",
+                    "TaskGet",
+                    "TaskListGet",
+                    "TaskLists",
+                    "ToolSearch",
+                ],
+                "Planning and task breakdown; read-only plus web research",
+            ),
+        ),
+        (
+            "coder",
+            policy_role(
+                &[
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "Glob",
+                    "Grep",
+                    "Bash",
+                    "ToolSearch",
+                    "Skill",
+                ],
+                "Implementation; read/write/execute, no agent dispatch",
+            ),
+        ),
+        (
+            "searcher",
+            policy_role(
+                &[
+                    "Read",
+                    "Grep",
+                    "Glob",
+                    "WebSearch",
+                    "WebFetch",
+                    "ToolSearch",
+                ],
+                "Local and web code retrieval",
+            ),
+        ),
+        (
+            "tester",
+            policy_role(
+                &[
+                    "Read",
+                    "Write",
+                    "Edit",
+                    "Bash",
+                    "Grep",
+                    "Glob",
+                    "ToolSearch",
+                ],
+                "Test authoring and execution",
+            ),
+        ),
+        (
+            "reviewer",
+            policy_role(
+                &["Read", "Grep", "Glob", "WebSearch", "ToolSearch"],
+                "Read-only review",
+            ),
+        ),
+    ]
 }
 
 fn default_agent_role_enabled() -> bool {
@@ -216,6 +330,25 @@ impl Default for AgentsConfig {
     }
 }
 
+impl AgentsConfig {
+    /// Merge builtin roles with config-defined roles.
+    ///
+    /// A config entry with the same name replaces the builtin definition
+    /// wholesale (no field-level merge), keeping builtin roles a pure fallback.
+    /// Single source of truth for runtime role resolution and composition-time
+    /// per-role tool profile assembly.
+    pub fn merged_roles(&self) -> HashMap<String, AgentRoleConfig> {
+        let mut merged: HashMap<String, AgentRoleConfig> = builtin_agent_roles()
+            .into_iter()
+            .map(|(name, role)| (name.to_string(), role))
+            .collect();
+        for (name, role) in &self.roles {
+            merged.insert(name.clone(), role.clone());
+        }
+        merged
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +390,85 @@ mod tests {
     fn test_agent_role_config_max_tokens_camel_case_alias() {
         let config: AgentRoleConfig = serde_json::from_str(r#"{ "maxTokens": 4096 }"#).unwrap();
         assert_eq!(config.max_tokens, Some(4096));
+    }
+
+    #[test]
+    fn role_policy_parses_allowlist_and_capabilities() {
+        let config: AgentRoleConfig = serde_json::from_str(
+            r#"{ "policy": { "allowed_tools": ["Read", "Grep"], "capabilities": ["ReadWorkspace"] } }"#,
+        )
+        .unwrap();
+        let policy = config.policy.expect("policy parsed");
+        assert_eq!(policy.allowed_tools, vec!["Read", "Grep"]);
+        assert_eq!(policy.capabilities, vec!["ReadWorkspace"]);
+    }
+
+    #[test]
+    fn role_policy_supports_camel_case_alias() {
+        let config: AgentRoleConfig =
+            serde_json::from_str(r#"{ "policy": { "allowedTools": ["Read"] } }"#).unwrap();
+        assert_eq!(
+            config.policy.expect("policy parsed").allowed_tools,
+            vec!["Read"]
+        );
+    }
+
+    #[test]
+    fn role_policy_absent_by_default_and_skipped_when_serializing() {
+        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(config.policy.is_none());
+        let serialized = serde_json::to_value(&config).unwrap();
+        assert!(serialized.get("policy").is_none());
+    }
+
+    #[test]
+    fn merged_roles_contains_builtin_roles() {
+        let merged = AgentsConfig::default().merged_roles();
+        for name in ["planner", "coder", "searcher", "tester", "reviewer"] {
+            assert!(merged.contains_key(name), "missing builtin role {name}");
+            assert!(
+                merged[name].policy.is_some(),
+                "builtin role {name} must carry a policy"
+            );
+        }
+    }
+
+    #[test]
+    fn merged_roles_config_overrides_builtin_wholesale() {
+        let mut agents = AgentsConfig::default();
+        agents.roles.insert(
+            "coder".to_string(),
+            AgentRoleConfig {
+                model: "qwen/qwen3-coder".to_string(),
+                ..AgentRoleConfig::default()
+            },
+        );
+        let merged = agents.merged_roles();
+        let coder = &merged["coder"];
+        assert_eq!(coder.model, "qwen/qwen3-coder");
+        assert!(
+            coder.policy.is_none(),
+            "config override must replace the builtin definition wholesale"
+        );
+    }
+
+    #[test]
+    fn merged_roles_keeps_non_builtin_custom_roles() {
+        let mut agents = AgentsConfig::default();
+        agents.roles.insert(
+            "refactorer".to_string(),
+            AgentRoleConfig {
+                model: "x/y".to_string(),
+                policy: Some(RolePolicyConfig {
+                    allowed_tools: vec!["Read".to_string()],
+                    capabilities: Vec::new(),
+                }),
+                ..AgentRoleConfig::default()
+            },
+        );
+        let merged = agents.merged_roles();
+        assert!(merged.contains_key("refactorer"));
+        assert_eq!(merged.len(), 6); // 5 builtin + 1 custom
     }
 
     #[test]
