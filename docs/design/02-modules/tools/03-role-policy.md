@@ -50,9 +50,11 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 
 | 字段 | 语义 |
 |---|---|
-| `allowed_tools: Vec<String>` | 工具名白名单；未列出者不可见且调用必拒 |
-| `denied_tools: Vec<String>` | 黑名单；与白名单同给时 deny 优先（白名单 − 黑名单） |
+| `allowed_tools: Vec<String>` | 白名单模式：只允许列出者，其余不可见且调用必拒 |
+| `denied_tools: Vec<String>` | 黑名单模式：全量减去列出者 |
 | `capabilities: Vec<String>` | capability 位收缩；与名单取交集（名单有 `Bash` 但无 `ExecuteProcess` 仍拦） |
+
+`allowed_tools` 与 `denied_tools` **互斥**，同时出现即配置校验错误——白名单内再减黑名单是冗余表达（`allowed: [A,B,C] + denied: [B]` ≡ `allowed: [A,C]`），且避免引入隐晦的合并优先级规则。两者都不写时仅由 `capabilities` 收缩（capability 也未写则 `None` 走现状路径）。
 
 ### 3.1 用户自定义 role
 
@@ -70,13 +72,23 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
         "system_suffix": "Only refactor, never add features.",
         "max_tokens": 32768,
         "policy": {
-          "allowed_tools": ["Read", "Write", "Edit", "Grep", "Glob"],
-          "denied_tools": ["Bash"]
+          "allowed_tools": ["Read", "Write", "Edit", "Grep", "Glob"]
         }
       }
     }
   }
 }
+```
+
+**黑名单模式**——保留全量能力，仅禁个别工具（如不许派发子 agent、不许动 worktree）：
+
+```json
+{ "agents": { "roles": {
+  "reviewer": {
+    "model": "anthropic/claude-sonnet-4",
+    "policy": { "denied_tools": ["Agent", "EnterWorktree", "ExitWorktree"] }
+  }
+} } }
 ```
 
 **覆盖内置**——同名 key 整条替换（含 model/description 等全部字段），例如收紧内置 tester、去掉其 Bash：
@@ -149,7 +161,7 @@ config.json
 
 | 层 | 测试 |
 |---|---|
-| config | RolePolicyConfig 解析（空 policy = None、deny 优先、非法工具名/capability 报错）、自定义 role 名任意性、同名覆盖内置 |
+| config | RolePolicyConfig 解析（空 policy = None、allowed/denied 互斥校验、非法工具名/capability 报错）、自定义 role 名任意性、同名覆盖内置 |
 | tools PL | ToolFilter 编译（名单∩capability）、derive_restricted 名单扩张报 CapabilityEscalation、is_authorized 名单维度 |
 | runtime | resolve_derived_role 装配 ToolFilter、内置 role fallback、config 覆盖整条替换、等价迁移（无 policy sub = 现状名单） |
 | 可见性 | LLM schema 列表按 filter 裁剪；被裁工具调用产生 Deny 而非 not found |
