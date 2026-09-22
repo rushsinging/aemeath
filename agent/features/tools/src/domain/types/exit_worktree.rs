@@ -18,9 +18,8 @@ pub struct ExitWorktreeResult {
 
 /// Typed input for the `exit_worktree` tool.
 ///
-/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+/// build.rs 由本 struct 生成 `input_schema`。ExitWorktree 无输入字段且
+/// 拒绝未知字段（含已移除的 `path`），防止误用直接切换旁路。
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct ExitWorktreeInput {
-    /// 可选：直接切回指定路径，忽略上下文栈
-    pub path: Option<String>,
-}
+#[serde(deny_unknown_fields)]
+pub struct ExitWorktreeInput {}
