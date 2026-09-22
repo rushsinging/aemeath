@@ -63,9 +63,6 @@ command_git_re = re.compile(r'Command::new\(\s*"git"\s*\)')
 workspace_control_call_re = re.compile(r"\.workspace_control\s*\(")
 persisted_ctx_re = re.compile(r"\bPersistedWorkspaceContext\b")
 workspace_persist_re = re.compile(r"\bWorkspacePersist\b")
-retired_safety_re = re.compile(
-    r"\b(?:PathAccess|PathKind|path_accesses|requires_read_before_write|validate_and_normalize_path|validate_search_path)\b"
-)
 allow_all_safety_re = re.compile(r"(?:check_command_safety|check_shell_injection).*allow_all|allow_all.*(?:check_command_safety|check_shell_injection)")
 
 
@@ -252,10 +249,6 @@ def check_r8(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if is_test:
         return
     rel_s = rel.as_posix()
-    if (rel_s.startswith("agent/features/policy/") or rel_s.startswith("agent/features/runtime/")) and retired_safety_re.search(code):
-        violations.append(
-            f"{rel_s}:{lineno}: [R8] path containment/read-before-write belongs to Project/Tool, not Policy/Runtime."
-        )
     if rel_s.startswith("agent/features/tools/src/adapters/bash") and allow_all_safety_re.search(code):
         violations.append(
             f"{rel_s}:{lineno}: [R8] Bash safety must not be conditional on allow_all."

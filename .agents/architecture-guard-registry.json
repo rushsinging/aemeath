@@ -295,6 +295,7 @@
         "value": "agent/composition/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "composition",
       "reason": "Composition is the sole production construction root for the completed Context Session, Config override, Runtime Tool and Hook adapter boundaries",
       "tracking_issue": 1296,
@@ -311,6 +312,7 @@
         "value": "agent/features/context/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "context",
       "reason": "Session list and resume are restricted to the current ProjectIdentity; Git worktrees match by common-dir and non-git projects by canonical root",
       "tracking_issue": 1295,
@@ -327,6 +329,7 @@
         "value": "agent/features/runtime/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "composition",
       "reason": "Composition alone builds HookRunner from the committed ConfigSnapshot; Runtime Main and Sub consume the injected HookPort",
       "tracking_issue": 1295,
@@ -343,6 +346,7 @@
         "value": "agent/features/runtime/src/application/client"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "composition",
       "reason": "Composition alone assembles Tool Catalog/Execution, Skill ports, Tool Result materializer and ActiveRunRegistry; Runtime bootstrap consumes injected resources",
       "tracking_issue": 1294,
@@ -359,6 +363,7 @@
         "value": "agent/features/config/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "config",
       "reason": "Composition alone selects config override AtomicBlob backing; Config wiring consumes injected NativeConfigStore",
       "tracking_issue": 1293,
@@ -375,6 +380,7 @@
         "value": "agent/features/context/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "context",
       "reason": "Composition alone constructs Session AtomicBlob backing; Context and Runtime consume the same SessionManagementPort Arc",
       "tracking_issue": 1292,
@@ -391,6 +397,7 @@
         "value": "business_allow"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "architecture",
       "reason": "Cargo workspace edges are the machine-enforced capability dependency policy",
       "tracking_issue": 1022,
@@ -407,6 +414,7 @@
         "value": "agent/composition/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "composition",
       "reason": "Composition is the unique production location allowed to assemble shared adapters",
       "tracking_issue": 1002,
@@ -423,6 +431,7 @@
         "value": "FORBIDDEN_LAYER_DEPS"
       },
       "classification": "target_hexagonal_policy",
+      "mechanism_type": "structural",
       "owner": "architecture",
       "reason": "Current Hexagonal dependency directions remain enforced until the capability-first guard replaces legacy COLA rules",
       "tracking_issue": 1022,
@@ -439,6 +448,7 @@
         "value": "agent/features/config/src"
       },
       "classification": "target_hexagonal_policy",
+      "mechanism_type": "structural",
       "owner": "config",
       "reason": "Config uses domain/ports/application/adapters Target and rejects retired COLA layer names (contract.rs legacy removed)",
       "tracking_issue": 1654,
@@ -455,6 +465,7 @@
         "value": "inline grep exclusions in run_tui_single_source_structure_guard"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tui",
       "reason": "Tests, projection owners and comments are outside each narrowly stated TUI invariant",
       "tracking_issue": 1021,
@@ -471,6 +482,7 @@
         "value": "agent/features/config/src/adapters.rs"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
       "owner": "config",
       "reason": "All business environment variables are read only by the Config EnvAdapter",
       "tracking_issue": 935,
@@ -487,6 +499,7 @@
         "value": "comment lines"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "whitelist-backed",
       "owner": "config",
       "reason": "Comment examples are not runtime environment reads",
       "tracking_issue": 1021,
@@ -503,27 +516,12 @@
         "value": "test paths and file-tail cfg(test) inline modules"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "config",
       "reason": "Test-only ConfigAppService construction is outside the production construction rule",
       "tracking_issue": 949,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while tests require direct fixture construction",
-      "status": "active"
-    },
-    {
-      "id": "scope.config.workflow-comments-and-compat-test",
-      "guard": "check-config-workflow-boundary.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "comments and retired compatibility test"
-      },
-      "classification": "scope_exclusion",
-      "owner": "config",
-      "reason": "Comments and the explicit retired-field compatibility test are not active Config ownership",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove compatibility suppression with the retired compatibility fixture",
       "status": "active"
     },
     {
@@ -535,6 +533,7 @@
         "value": "tests directories, *_test.rs, *_tests.rs, tests.rs, and cfg(test) modules"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Test fixtures and guard probes are not production log calls or production owner constants",
       "tracking_issue": 941,
@@ -551,6 +550,7 @@
         "value": "agent/features/provider/src/adapters/error_log.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "provider",
       "reason": "The error logging owner is removed only for the no-self-reference sub-check",
       "tracking_issue": 1033,
@@ -567,6 +567,7 @@
         "value": "tests directory"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "provider",
       "reason": "The invocation production ownership check excludes test fixtures",
       "tracking_issue": 1021,
@@ -583,6 +584,7 @@
         "value": "render tests and display/render.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tui",
       "reason": "Test files and the registered display projection owner are outside the direct-model-read rule",
       "tracking_issue": 947,
@@ -599,6 +601,7 @@
         "value": "*_tests.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "The production shared-run-loop ownership rule excludes test fixtures",
       "tracking_issue": 1021,
@@ -615,6 +618,7 @@
         "value": "LineStyle::ToolCallRunning"
       },
       "classification": "false_positive_suppression",
+      "mechanism_type": "whitelist-backed",
       "owner": "tui",
       "reason": "The single running-indicator write is the guarded intended rendering site",
       "tracking_issue": 1021,
@@ -631,6 +635,7 @@
         "value": "mod.rs,run_loop.rs,runtime.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tui",
       "reason": "TEA purity scans update/model projections, not the registered runtime and Effect executor owners",
       "tracking_issue": 947,
@@ -647,6 +652,7 @@
         "value": "allow tea_side_effect"
       },
       "classification": "false_positive_suppression",
+      "mechanism_type": "whitelist-backed",
       "owner": "tui",
       "reason": "Line-local escape for a proven scanner false positive",
       "tracking_issue": 1021,
@@ -663,6 +669,7 @@
         "value": "safe_text.rs,text.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tui",
       "reason": "Safe text helper implementations are the owner of the operations prohibited to consumers",
       "tracking_issue": 1021,
@@ -679,6 +686,7 @@
         "value": "allow unsafe_text_op"
       },
       "classification": "false_positive_suppression",
+      "mechanism_type": "whitelist-backed",
       "owner": "tui",
       "reason": "Line-local escape only for a proven non-string slice false positive",
       "tracking_issue": 1021,
@@ -695,6 +703,7 @@
         "value": "STATIC_ALLOW"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Only task-local scope and immutable process metadata statics are explicit owners",
       "tracking_issue": 942,
@@ -711,6 +720,7 @@
         "value": "*test*.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Test fixtures are outside production scope context ownership",
       "tracking_issue": 937,
@@ -727,6 +737,7 @@
         "value": "*test*.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Logging settings env scan excludes test fixtures",
       "tracking_issue": 938,
@@ -743,6 +754,7 @@
         "value": "runtime comments and tests"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Runtime logging wiring scan excludes comments and tests",
       "tracking_issue": 938,
@@ -759,6 +771,7 @@
         "value": "bootstrap tests"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Unique production bootstrap count excludes test consumers",
       "tracking_issue": 938,
@@ -775,6 +788,7 @@
         "value": "init import tests"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "logging",
       "reason": "Unique UnifiedLogger production import excludes tests",
       "tracking_issue": 938,
@@ -791,6 +805,7 @@
         "value": "Command boundary test exclusions and unique owner filter"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tools",
       "reason": "Command boundary scans production definitions and excludes tests while selecting the single Tools owner path",
       "tracking_issue": 913,
@@ -807,6 +822,7 @@
         "value": "agent/features/task/src"
       },
       "classification": "target_hexagonal_policy",
+      "mechanism_type": "structural",
       "owner": "task",
       "reason": "Task uses its documented domain/adapters Target and rejects retired COLA layer names",
       "tracking_issue": 891,
@@ -823,6 +839,7 @@
         "value": "agent/shared/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
       "owner": "task",
       "reason": "Task Published Language and behavior are owned exclusively by the Task capability, never Shared Kernel",
       "tracking_issue": 891,
@@ -839,6 +856,7 @@
         "value": "forbidden"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "task",
       "reason": "Runtime and Tools receive only injected TaskAccess while Context and Composition own persistence and backing wiring",
       "tracking_issue": 891,
@@ -855,6 +873,7 @@
         "value": "ROOT_ACCESS_ALLOW.task"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
       "owner": "task",
       "reason": "Task consumers use the registered crate-root Published Language and ports without traversing internal modules",
       "tracking_issue": 891,
@@ -871,6 +890,7 @@
         "value": "agent/features/hook/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "hook",
       "reason": "Hook exposes only its crate-root Published Language and HookPort; Runtime must not restore the legacy api facade",
       "tracking_issue": 926,
@@ -887,6 +907,7 @@
         "value": "ROOT_ACCESS_ALLOW.hook"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
       "owner": "hook",
       "reason": "Cross-feature consumers use only the registered Hook crate-root Published Language",
       "tracking_issue": 926,
@@ -903,6 +924,7 @@
         "value": "agent"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "audit",
       "reason": "Usage-only Audit MVP keeps Runtime pricing, legacy Cost history paths, Cost DTO/events, Cost presentation state and the unused Storage Cost namespace retired",
       "tracking_issue": 932,
@@ -919,6 +941,7 @@
         "value": "agent/features/runtime/src/application/activity"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "ActivityCoordinator exclusively constructs Runtime Activity observations; TUI mutates its fact mirror only through the root reducer; LiveStatus consumes Activity instead of legacy Run status; diagnostics remain structured and payload-free",
       "tracking_issue": 742,
@@ -935,6 +958,7 @@
         "value": ".agents/runtime-event-naming-baseline.json"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "Runtime, SDK and TUI event variants are explicitly cataloged, indexed and checked for cross-layer fact-name stability without breaking compatibility wire names",
       "tracking_issue": 945,
@@ -951,6 +975,7 @@
         "value": "agent/features/runtime/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired; broad Projection naming cannot hide mixed Runtime responsibilities",
       "tracking_issue": 1248,
@@ -967,6 +992,7 @@
         "value": "agent/features/runtime/src/application"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "Runtime post-migration orchestration roots stay narrow and delegate contracts, phases, interaction, control, session commands, Run preparation, assembly and launch to named responsibility owners; giant roots, mod.rs and retired compatibility paths may not return",
       "tracking_issue": 1400,
@@ -983,6 +1009,7 @@
         "value": "tool_result.rs,reflection.rs,conversion.rs,append.rs,routing_guard.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "shared",
       "reason": "Long-statement files where rustfmt reflow moves trailing comments, making line-level allow comments unstable; all slices confirmed find/char_indices offsets or Vec/byte slices",
       "tracking_issue": 1545,
@@ -999,6 +1026,7 @@
         "value": "agent/features/context/src"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "context",
       "reason": "Context exclusively owns compact continuation checkpoint normalization and canonical submission while Runtime only consumes ContextWindow",
       "tracking_issue": 1558,
@@ -1015,6 +1043,7 @@
         "value": "*_tests.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "runtime",
       "reason": "Continuation ownership guard excludes test fixtures that contain checkpoint headings and field probes",
       "tracking_issue": 1558,
@@ -1031,6 +1060,7 @@
         "value": "packages/global/utils/src/process.rs"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "architecture",
       "reason": "All production noninteractive external processes must enter a detached Unix session through the single utils boundary",
       "tracking_issue": 1577,
@@ -1047,6 +1077,7 @@
         "value": "construction_symbols"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "composition",
       "reason": "Fail-closed registry over cross-BC concrete adapter constructions and feature wire functions; the Composition Root is the sole production construction site",
       "tracking_issue": 1067,
