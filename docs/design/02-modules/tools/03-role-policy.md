@@ -88,7 +88,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 |---|---|---|
 | **planner** | Read, Grep, Glob, WebSearch, WebFetch, TaskGet, TaskListGet, TaskLists, ToolSearch | 规划与拆解：只读 + 联网 + Task 读；禁写、禁执行、禁派发 |
 | **coder** | Read, Write, Edit, Glob, Grep, Bash, ToolSearch, Skill | 执行者：读写执行；禁 AgentDispatch（防递归派发） |
-| **searcher** | Read, Grep, Glob, WebSearch, WebFetch, ToolSearch | 检索：本地 + 联网，最瘦 |
+| **explorer** | Read, Grep, Glob, WebSearch, WebFetch, ToolSearch | 检索：本地 + 联网，最瘦 |
 | **tester** | Read, Write, Edit, Bash, Grep, Glob, ToolSearch | 测试编写与运行 |
 | **reviewer** | Read, Grep, Glob, WebSearch, ToolSearch | 只读审查 |
 

@@ -83,7 +83,7 @@ fn compile_role_policy_empty() -> Result<ToolProfile, RolePolicyCompileError> {
 
 #[test]
 fn role_profile_name_uses_stable_prefix() {
-    assert_eq!(role_profile_name("searcher").as_str(), "role:searcher");
+    assert_eq!(role_profile_name("explorer").as_str(), "role:explorer");
     let parsed: ToolProfileName = role_profile_name("planner");
     assert_eq!(parsed.as_str(), "role:planner");
 }

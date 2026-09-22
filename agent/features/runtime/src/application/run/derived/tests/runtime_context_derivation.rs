@@ -616,7 +616,7 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
     catalog
         .snapshot(
             &tools::RegistryScopeName::new("sub-agent"),
-            &ToolProfileName::new("role:searcher"),
+            &ToolProfileName::new("role:explorer"),
         )
         .expect("sub-agent/role profile must succeed");
 

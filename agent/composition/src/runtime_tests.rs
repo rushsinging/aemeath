@@ -261,7 +261,7 @@ async fn role_policies_surface_as_role_profiles() {
     let (_temp, workspace) = temp_workspace();
     let task_wiring = task::wire_task();
     let role_policies = vec![(
-        "searcher".to_string(),
+        "explorer".to_string(),
         share::config::RolePolicyConfig {
             allowed_tools: vec![
                 "Read".to_string(),
@@ -287,26 +287,26 @@ async fn role_policies_surface_as_role_profiles() {
     let snapshot = catalog
         .snapshot(
             &tools::RegistryScopeName::new("sub-agent"),
-            &tools::ToolProfileName::new("role:searcher"),
+            &tools::ToolProfileName::new("role:explorer"),
         )
-        .expect("role:searcher snapshot");
+        .expect("role:explorer snapshot");
     let names: Vec<&str> = snapshot.tools.iter().map(|t| t.name.as_str()).collect();
     assert!(
         names.contains(&"Read"),
-        "searcher must see Read, got: {names:?}"
+        "explorer must see Read, got: {names:?}"
     );
-    assert!(names.contains(&"Grep"), "searcher must see Grep");
+    assert!(names.contains(&"Grep"), "explorer must see Grep");
     assert!(
         !names.contains(&"Write"),
-        "searcher must not see Write, got: {names:?}"
+        "explorer must not see Write, got: {names:?}"
     );
     assert!(
         !names.contains(&"Agent"),
-        "searcher must not see Agent, got: {names:?}"
+        "explorer must not see Agent, got: {names:?}"
     );
     assert!(
         !names.contains(&"TaskCreate"),
-        "searcher must not see TaskCreate, got: {names:?}"
+        "explorer must not see TaskCreate, got: {names:?}"
     );
 }
 

@@ -261,7 +261,7 @@ fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleDefinition)> {
             ),
         ),
         (
-            "searcher",
+            "explorer",
             policy_role(
                 &[
                     "Read",
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn merged_roles_contains_builtin_definitions() {
         let merged = AgentsConfig::default().merged_roles();
-        for name in ["planner", "coder", "searcher", "tester", "reviewer"] {
+        for name in ["planner", "coder", "explorer", "tester", "reviewer"] {
             assert!(merged.contains_key(name), "missing builtin role {name}");
             assert!(
                 merged[name].policy.is_some(),
