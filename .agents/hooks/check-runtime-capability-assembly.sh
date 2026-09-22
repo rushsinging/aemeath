@@ -250,29 +250,8 @@ for source_path in rust_source_paths():
     if re.search(r'RunInstance::new\s*\(', source) and source_path.resolve() != RUN_FACTORY.resolve():
         violations.append(f"2b. RunInstance::new has an unapproved caller: {source_path}")
 
-# ── 3. Retired symbols absent from production code ──
-RETIRED = {
-    r'\bRuntimeContextParts\b': "RuntimeContextParts struct",
-    r'\bRuntimeResources\b': "RuntimeResources container",
-    r'\bChatRuntimeContext\b': "ChatRuntimeContext wrapper",
-    r'\bChatLoopContext\b': "ChatLoopContext compatibility parameter bag",
-    r'\bRunLoopPort\b': "fat RunLoopPort",
-    r'\bMainRunPort\b': "MainRunPort role adapter",
-    r'\bSubAgentRun\b': "SubAgentRun role adapter",
-    r'\bassemble_main_runtime_context\b': "assemble_main_runtime_context function",
-    r'\bModelStep::StopHookBlocked\b': "ModelStep::StopHookBlocked variant",
-    r'\bInteractionBridge::disabled\b': "InteractionBridge::disabled() method",
-}
-for candidate in _glob.glob("agent/**/*.rs", recursive=True):
-    candidate_path = Path(candidate)
-    if "_test" in candidate_path.stem or candidate_path.stem == "tests":
-        continue
-    if "/tests/" in str(candidate_path):
-        continue
-    production_source = production_text(candidate_path)
-    for retired_pattern, retired_name in RETIRED.items():
-        if re.search(retired_pattern, production_source):
-            violations.append(f"3. Retired '{retired_name}' in production: {candidate_path}")
+# ── 3. Retired symbol blacklist retired (#1021): 复活拦截由结构性守卫
+#     （façade 私有 mod、穿透禁令、装配所有权）承担，符号级防复活黑名单删除。──
 
 # ── 3a. Runtime application must not construct concrete adapters ──
 for source_path in rust_source_paths():
@@ -353,9 +332,6 @@ if EMPTY_HOOK.is_file():
 else:
     violations.append("9. Hook capability adapter implementation is missing")
 
-# ── 10. Workflow graph retired ──
-# Reasoning graph ownership is deferred for redesign; no workflow crate or
-# inherited reasoning constructor is required by the current architecture.
 # ── 11. UnavailableInteractionPort exists ──
 if INTERACTION.is_file():
     prod = production_text(INTERACTION)
@@ -388,10 +364,6 @@ if RUN_FACTORY.is_file():
     )
     if not signature_match:
         violations.append("13. RunFactory::create must accept only RunCreationRequest and return RunInstance")
-    for retired in ["RunCapabilityBindings", "RunContextBindings", "RuntimeContextParts", "RunCreationBindings,"]:
-        signature = signature_match.group(0) if signature_match else ""
-        if retired in signature:
-            violations.append(f"13. RunFactory::create signature must not expose {retired}")
 else:
     violations.append("13. RunFactory implementation is missing")
 
@@ -408,17 +380,11 @@ if RUN_LAUNCHER.is_file():
     prod = production_text(RUN_LAUNCHER)
     if not re.search(r'pub\s+async\s+fn\s+launch\s*\(\s*instance:\s*&mut\s+RunInstance', prod):
         violations.append("13. RunLauncher::launch must consume a complete mutable RunInstance")
-    for retired in ["launch_prepared", "mut run: Run", "execution: &mut RunExecutionState"]:
-        if retired in prod:
-            violations.append(f"13. RunLauncher retains split or legacy launch shape: {retired}")
 
 for caller in [*MAIN_CALLERS, DERIVED_CALLER]:
     if not caller.is_file():
         continue
     prod = production_text(caller)
-    for retired in ["RunCapabilityBindings", "RunContextBindings", "RuntimeContextParts", "SubRunCapabilitySource", "RunPreparer", "PreparedRun", "RunPreparationRequest", "PreparedSubRun"]:
-        if retired in prod:
-            violations.append(f"13. Production Run caller retains retired shape {retired}: {caller}")
     if re.search(r'RuntimeContext::new\s*\(', prod):
         violations.append(f"13. Production Run caller constructs RuntimeContext directly: {caller}")
     if "run_instance.into_parts()" in prod:

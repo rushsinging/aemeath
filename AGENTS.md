@@ -71,7 +71,7 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
 | `specs/3.5-tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/3.6-provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `specs/3.9-config-compat.md` 补默认值） |
 | `specs/3.7-prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
-| `specs/3.8-project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、COLA 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `specs/3.10-storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `specs/3.4-runtime.md`） |
+| `specs/3.8-project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、Hexagonal 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `specs/3.10-storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `specs/3.4-runtime.md`） |
 | `specs/3.9-config-compat.md` | `agent/shared/src/config/**` —— 配置分层、provider 默认值 / env / base_url、Claude Code 兼容、运行时路径 | 新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级 |
 | `specs/3.10-storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/3.11-policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
@@ -80,6 +80,8 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
 | `specs/3.14-workflow.md` | 无路径触发 | 任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理；含项目结构、运行时目录、Git 工作流、Milestone 管理 |
 | `specs/3.15-logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
 | `docs/design/03-engineering/01-architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/01-architecture-guards.md` 本身 |
+
+> feature crate 内部统一采用 Hexagonal 分层（`domain ← application ← ports ← adapters`，R8）；依赖方向与代码组织真相源见 `docs/design/01-system/05-dependency-rules.md` 与 `06-code-organization.md`。
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `specs/3.2-rust-coding.md`。
 

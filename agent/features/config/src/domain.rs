@@ -1,7 +1,10 @@
-use async_trait::async_trait;
+//! 领域层：config 的值对象、领域事件、错误分类与 port 间传递的预备状态。
+//!
+//! R8 方向：domain NEVER 依赖 application / ports / adapters。
+use share::config::domain::merge::ConfigPatch;
 use share::config::domain::scope::ConfigApplicationScope;
 use share::config::domain::snapshot::ConfigSnapshot;
-use share::config::{MemoryConfig, PermissionModeConfig};
+use share::config::{Config, MemoryConfig, PermissionModeConfig};
 use std::path::{Path, PathBuf};
 use tokio::sync::watch;
 
@@ -24,13 +27,6 @@ pub struct ConfigChangeSet {
     pub cause: ConfigChangeCause,
     pub fields: Vec<ConfigField>,
     pub snapshot: ConfigSnapshot,
-}
-
-#[async_trait]
-pub trait ConfigReader: Send + Sync {
-    fn committed_snapshot(&self) -> ConfigSnapshot;
-    fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
-    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,12 +59,6 @@ pub enum ConfigQueryError {
     Unavailable,
 }
 
-#[async_trait]
-pub trait ConfigQuery: Send + Sync {
-    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError>;
-    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError>;
-}
-
 #[derive(Debug, Clone)]
 pub enum ConfigUpdate {
     SetModel { model: String },
@@ -80,11 +70,6 @@ pub enum ConfigUpdate {
 pub enum ConfigUpdateError {
     Invalid(String),
     Persist(ConfigPersistError),
-}
-
-#[async_trait]
-pub trait ConfigWriter: Send + Sync {
-    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -157,7 +142,7 @@ fn utils_key(stable_identity: &[u8]) -> String {
 #[derive(Debug, Clone)]
 pub struct PreparedProjectConfig {
     pub(crate) location: ProjectConfigLocation,
-    pub(crate) config: share::config::Config,
+    pub(crate) config: Config,
     pub(crate) snapshot: ConfigSnapshot,
 }
 
@@ -178,8 +163,8 @@ impl PreparedProjectConfig {
 #[derive(Debug, Clone)]
 pub struct PreparedConfigUpdate {
     pub(crate) project_key: String,
-    pub(crate) config: share::config::Config,
-    pub(crate) override_patch: share::config::domain::merge::ConfigPatch,
+    pub(crate) config: Config,
+    pub(crate) override_patch: ConfigPatch,
     pub(crate) snapshot: ConfigSnapshot,
     pub(crate) fields: Vec<ConfigField>,
 }
@@ -211,7 +196,7 @@ pub enum ConfigCommitWarning {
 
 #[derive(Debug, Clone)]
 pub struct ReadyConfigCommit {
-    pub(crate) config: share::config::Config,
+    pub(crate) config: Config,
     pub(crate) snapshot: ConfigSnapshot,
     pub(crate) fields: Vec<ConfigField>,
     pub(crate) warning: Option<ConfigCommitWarning>,
@@ -250,47 +235,6 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-#[async_trait]
-pub trait ProjectConfigParticipant: Send + Sync {
-    async fn prepare_for_project(
-        &self,
-        location: &ProjectConfigLocation,
-    ) -> Result<PreparedProjectConfig, ConfigError>;
-    fn snapshot(&self) -> ConfigSnapshot;
-    async fn commit_project(&self, prepared: PreparedProjectConfig);
-    async fn prepare_update(
-        &self,
-        command: ConfigUpdate,
-    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
-    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome;
-    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet;
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn project_config_location_rejects_relative_path_and_empty_identity() {
-        assert_eq!(
-            ProjectConfigLocation::try_from_project_identity(PathBuf::from("relative"), b"id"),
-            Err(ProjectConfigLocationError::NotAbsolute)
-        );
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        assert_eq!(
-            ProjectConfigLocation::try_from_project_identity(root, b""),
-            Err(ProjectConfigLocationError::EmptyIdentity)
-        );
-    }
-
-    #[test]
-    fn project_config_location_is_stable_for_same_identity() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        let first =
-            ProjectConfigLocation::try_from_project_identity(root.clone(), b"project").unwrap();
-        let second = ProjectConfigLocation::try_from_project_identity(root, b"project").unwrap();
-        assert_eq!(first, second);
-    }
-}
+#[path = "domain_tests.rs"]
+mod tests;

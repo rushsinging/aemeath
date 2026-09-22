@@ -45,7 +45,6 @@
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
-| 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
 | 6d | `check-provider-retry-ownership.sh` | Provider 策略所有权 | Provider 生产 stream adapter 禁止恢复 retry loop、backoff sleep、`FallbackPlanned` 或 stream→non-stream fallback；跨 attempt 策略只属于 Runtime |
 | 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
@@ -87,7 +86,6 @@
 | 23h | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
 | 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
-| 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 | 26 | `check-no-inline-tests.sh` + `check-no-inline-tests-tests.sh` | 测试治理 | 源码禁止内嵌 `#[cfg(test)] mod tests { ... }`，测试必须分离为 `foo.rs ↔ foo_tests.rs`；匹配不受 `{` 与 `;` 后的空白影响，整行 `//` 注释不参与匹配；历史存量由 `.agents/inline-tests-baseline.json` 冻结、只拦截新增，基线失效条目强制收缩 |
 
@@ -222,7 +220,7 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界。
+- **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界；Config 在 #1654 后允许 `domain + ports + application + adapters`（`application/wiring` 依赖 adapters 的例外待 #1022 裁决 wiring 归位后开启 R8 方向检查）。
 - **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
 - **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
@@ -242,6 +240,7 @@
   - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。  - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
   - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
+  - Config 顶层只允许 `lib.rs/domain.rs/ports.rs/application.rs/adapters.rs` 与三个 `*_tests.rs` 分离测试文件，目录只允许 `domain/ports/application/adapters`；重新出现 `contract.rs` / `api/` 等旧 COLA 层名时直接失败（#1654 迁移，`policy.config.target-layout` 登记）。
   - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
   - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
   - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage Hexagonal 层。
@@ -250,12 +249,13 @@
 - **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
+- **#1654 故意违规证据**：临时恢复 `agent/features/config/src/contract.rs` 后，单 Guard 阻断并命中 `Config top-level source files must be [...]`；临时新建 `agent/features/config/src/api/` 后阻断并命中 `Config legacy fixed layer is forbidden`；删除违规项后 clean pass。Config 无路径白名单、整文件豁免或隐式 exclude；inline-tests 基线随迁移净减 3 条（213→210）。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**：无。tools 已完成迁移（`agent/features/tools/src/business/` 已不存在），历史 business→core 例外记录已清理。
 - **实现载体**：perl 单进程核心（`.agents/hooks/check-cola-layer-purity.sh` 内联，含与语义等价的 23 项启动自检）。原 `cargo run -p xtask -- cola-layer-purity` 实现因 Stop Hook 每次触发的编译/运行成本（实测 40~80s，占 fast 总耗时 96%+）于 #1521 退役，xtask 不再提供 `cola-layer-purity` 子命令；perl 版实测 0.22s，与 xtask 版在 clean 仓库及违规样本上输出逐字一致。
 
 - **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：空集合。Runtime application 不得依赖 `crate::adapters`；旧容器、角色 adapter 与兼容参数袋由 `check-runtime-capability-assembly.sh` 同时禁止复活。
 
-- **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
+- **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Bash safety 禁止与 `allow_all` 条件耦合（`tools/src/adapters/bash` 范围）。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。原 Policy/Runtime 范围的 `PathAccess` / `path_accesses` 等 retired 符号墓地黑名单已随 #1021 退役（删除前探针命中，复活把关归 review 与结构性守卫）。
 
 ## 6. check-crate-api-boundary.sh
 
@@ -310,12 +310,11 @@
 - **正向约束**：`LlmProvider::invocation_stream` 必须显式接收 `&InvocationScope`。
 - **故意违规验证**：临时向 Provider source 加入 `set_max_tokens` 标记时脚本退出 2；移除后通过。
 
-### 6b. check-provider-pull-stream.sh
+### 6b. check-provider-pull-stream.sh（已退役，#1021）
 
-- **功能**：锁定 #903 pull-based `InvocationStream` 生产边界，防止 Provider/Runtime/Context 恢复 callback 驱动。
-- **守护**：生产代码禁止 `CallbackHandler`、`StreamHandler`、`RuntimeStreamHandler`、`stream_message_raw` 与 `.stream_message(...)`；Runtime 与 Context 的生产代码和测试替身均禁止引用迁移期 `LegacyStreamSink` / `legacy_stream_message`。
-- **正向约束**：`LlmProvider` 必须公开 `invocation_stream`；Runtime 通过 `InvocationEventReducer` 主动 poll 并投影事件；Provider-private `InvocationSink` 不得进入 Runtime / Context。
-- **范围边界**：#907 已物理删除 legacy sink；Provider 内部 `InvocationSink` 是 crate-private decoder seam，只能在 Provider adapter 内存在，**NEVER** 作为跨 crate 生产入口。
+- **退役决策**：retired 符号防复活黑名单（改名即绕过、无结构兜底）整体退役。#907 迁移完成后该守卫只剩墓地清单语义。
+- **替代覆盖**：Provider-private `InvocationSink` 等内部类型由 crate-root 窄 façade（`mod` 私有 + `pub use` 白名单，见 §6）与跨 crate 穿透禁令结构性保证，改名不可绕过；旧形态复活的把关归 review 与设计文档。
+- **退役证据**：删除前 `CallbackHandler` 探针命中 exit 2；删除后总编排 clean pass。
 
 ### 6c. check-provider-http-attempt.sh
 
@@ -456,9 +455,10 @@
 
 - **功能**：TUI M2 之后的输出区旁路守卫。
 - **检查项**：
-  - 整个 `apps/cli/src/tui` 不得出现 `find_last_running` / `last running` / `最后一个 running`。
   - `apps/cli/src/tui/output_area` + `apps/cli/src/tui/render` 不得在非 `if matches!(line.style, LineStyle::ToolCallRunning)` 上下文中调 `cell.set_char('●')`（防覆盖已完成 tool 的状态图标）。
+  - ConversationModel 不得保留平行 Run 生命周期状态源；Runtime Run 生命周期观察不得修改 ConversationModel。
 - **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身。
+- **已退役（#1021）**：`find_last_running` / `last running` 字符串墓地黑名单删除（删除前探针命中，删除后 clean pass）；复活把关归 review。
 
 ### 13a. check-tui-retained-output-view.sh
 

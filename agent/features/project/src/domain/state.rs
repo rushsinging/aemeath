@@ -249,29 +249,6 @@ pub fn enter(
     Ok(frame)
 }
 
-/// Switch the workspace to `path` without pushing a stack frame.
-/// Validates that the path exists and belongs to the same repo as the current root.
-///
-/// `switch_to` 是直接路径切换（供 `ExitWorktree{path}` 使用），不参与 enter/exit
-/// 的栈管理语义。切换后 MUST 清空 `stack`，维护「stack 非空 ⟺ 处于 Linked
-/// worktree 且有可恢复的 enter 历史」不变量；否则残留栈帧会让 `snapshot` +
-/// `prepare_restore` 因 `InvalidStackShape` 拒绝恢复。
-pub fn switch_to(
-    state: &mut WorkspaceState,
-    git: &dyn GitWorktreeOps,
-    path: PathBuf,
-) -> Result<(), WorkspaceError> {
-    if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit);
-    }
-    let (canonical, worktree_root, kind) = validate_in_repo(state, git, &path)?;
-    state.workspace_root = worktree_root;
-    state.path_base = canonical;
-    state.worktree_kind = kind;
-    state.stack.clear();
-    Ok(())
-}
-
 pub fn exit(
     state: &mut WorkspaceState,
     git: &dyn GitWorktreeOps,

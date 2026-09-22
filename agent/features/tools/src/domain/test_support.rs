@@ -118,9 +118,6 @@ impl WorkspaceControl for FakeWorkspace {
         *self.current.lock().expect("fake workspace lock") = resolved;
         Ok(())
     }
-    fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
-        self.change_directory(path)
-    }
     fn enter(
         &self,
         _path: Option<PathBuf>,

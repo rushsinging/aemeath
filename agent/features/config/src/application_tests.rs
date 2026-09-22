@@ -1,0 +1,688 @@
+//! ConfigAppService 应用层测试（自 application.rs 迁出，行为等价）。
+use super::*;
+use crate::ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
+
+struct FakeEnv(std::collections::HashMap<String, String>);
+
+impl EnvSource for FakeEnv {
+    fn get(&self, name: &str) -> Option<String> {
+        self.0.get(name).cloned()
+    }
+}
+
+#[tokio::test]
+async fn cli_layer_overrides_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("config.json");
+    let service = ConfigAppService::with_global_path(Some(dir.path()), global).with_env_source(
+        std::sync::Arc::new(FakeEnv(std::collections::HashMap::from([(
+            "AEMEATH_MODEL".into(),
+            "env-model".into(),
+        )]))),
+    );
+    service
+        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
+            api_key: Some("cli-key".into()),
+            model: Some("cli-model".into()),
+            ..Default::default()
+        }))
+        .await;
+    service.load().await.unwrap();
+    assert_eq!(service.committed_snapshot().model_name(), "cli-model");
+    assert_eq!(service.committed_snapshot().api_key(), Some("cli-key"));
+}
+
+#[tokio::test]
+async fn update_replaces_committed_snapshot_even_without_receiver() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage));
+    service
+        .update(ConfigUpdate::SetModel {
+            model: "provider/model".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        service.committed_snapshot().models().default,
+        "provider/model"
+    );
+}
+
+#[tokio::test]
+async fn consecutive_updates_preserve_previously_committed_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage));
+
+    service
+        .update(ConfigUpdate::SetModel {
+            model: "provider/model".into(),
+        })
+        .await
+        .unwrap();
+    service
+        .update(ConfigUpdate::SetPermissionMode {
+            mode: share::config::PermissionModeConfig::AllowAll,
+        })
+        .await
+        .unwrap();
+
+    let snapshot = service.committed_snapshot();
+    assert_eq!(snapshot.models().default, "provider/model");
+    assert_eq!(snapshot.model_name(), "provider/model");
+    assert_eq!(
+        snapshot.permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+    let rebuilt =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(
+                storage::file_system_blob(dir.path()).unwrap(),
+            ));
+    rebuilt.load().await.unwrap();
+    let snapshot = rebuilt.committed_snapshot();
+    assert_eq!(snapshot.models().default, "provider/model");
+    assert_eq!(
+        snapshot.permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+}
+
+#[tokio::test]
+async fn concurrent_updates_are_serialized_without_losing_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service = std::sync::Arc::new(
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage)),
+    );
+    let model = {
+        let service = service.clone();
+        tokio::spawn(async move {
+            service
+                .update(ConfigUpdate::SetModel {
+                    model: "concurrent/model".into(),
+                })
+                .await
+        })
+    };
+    let permission = {
+        let service = service.clone();
+        tokio::spawn(async move {
+            service
+                .update(ConfigUpdate::SetPermissionMode {
+                    mode: share::config::PermissionModeConfig::AllowAll,
+                })
+                .await
+        })
+    };
+    model.await.unwrap().unwrap();
+    permission.await.unwrap().unwrap();
+
+    let snapshot = service.committed_snapshot();
+    assert_eq!(snapshot.models().default, "concurrent/model");
+    assert_eq!(
+        snapshot.permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+}
+
+#[tokio::test]
+async fn runtime_override_is_restored_after_service_rebuild() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("config.json");
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let store = NativeConfigStore::new(storage);
+    let service =
+        ConfigAppService::with_global_path(None, global.clone()).with_native_store(store.clone());
+    service
+        .update(ConfigUpdate::SetModel {
+            model: "runtime/model".into(),
+        })
+        .await
+        .unwrap();
+    drop(service);
+
+    let rebuilt = ConfigAppService::with_global_path(None, global).with_native_store(store);
+    rebuilt.load().await.unwrap();
+
+    assert_eq!(
+        rebuilt.committed_snapshot().models().default,
+        "runtime/model"
+    );
+}
+
+#[tokio::test]
+async fn prepare_update_does_not_publish_before_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage));
+    let before = service.committed_snapshot().models().default.clone();
+    let prepared = service
+        .prepare_update(ConfigUpdate::SetModel {
+            model: "local/model".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(service.committed_snapshot().models().default, before);
+    let ready = match service.persist_update(prepared).await {
+        ConfigPersistOutcome::Committed(ready) => ready,
+        ConfigPersistOutcome::NotCommitted(error) => panic!("unexpected {error:?}"),
+    };
+    service.commit_update(*ready);
+    assert_eq!(service.committed_snapshot().models().default, "local/model");
+}
+
+#[tokio::test]
+async fn env_permission_override_remains_above_dynamic_local_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage))
+            .with_env_source(std::sync::Arc::new(FakeEnv(
+                std::collections::HashMap::from([(
+                    "AEMEATH_PERMISSION_MODE".into(),
+                    "allow_all".into(),
+                )]),
+            )));
+    service.load().await.unwrap();
+
+    service
+        .update(ConfigUpdate::SetPermissionMode {
+            mode: share::config::PermissionModeConfig::Ask,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        service.committed_snapshot().permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+}
+
+#[tokio::test]
+async fn cli_permission_override_remains_highest_after_dynamic_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage));
+    service
+        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
+            allow_all: true,
+            ..Default::default()
+        }))
+        .await;
+    service.load().await.unwrap();
+
+    service
+        .update(ConfigUpdate::SetPermissionMode {
+            mode: share::config::PermissionModeConfig::Ask,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        service.committed_snapshot().permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+}
+
+#[tokio::test]
+async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"model":{"name":"global"}}"#).unwrap();
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(project.join(".agents")).unwrap();
+    std::fs::write(
+        project.join(".agents/aemeath.json"),
+        r#"{"model":{"name":"project"}}"#,
+    )
+    .unwrap();
+    let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
+    let store = NativeConfigStore::new(storage);
+    let runtime = ConfigPatch {
+        model: Some(share::config::domain::merge::ModelConfigPatch {
+            name: Some("runtime".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    store
+        .write_override("global", &encode_native_patch(&runtime).unwrap())
+        .await
+        .unwrap();
+    let service = ConfigAppService::with_global_path(Some(&project), global)
+        .with_native_store(store)
+        .with_env_source(std::sync::Arc::new(FakeEnv(
+            std::collections::HashMap::from([("AEMEATH_MODEL".into(), "env".into())]),
+        )));
+    service
+        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
+            model: Some("cli".into()),
+            ..Default::default()
+        }))
+        .await;
+
+    service.load().await.unwrap();
+
+    assert_eq!(service.committed_snapshot().model_name(), "cli");
+}
+
+#[tokio::test]
+async fn persist_failure_does_not_publish_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"));
+    let before = service.committed_snapshot().models().default.clone();
+
+    let error = service
+        .update(ConfigUpdate::SetModel {
+            model: "uncommitted/model".into(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ConfigUpdateError::Persist(ConfigPersistError::UnsupportedDurability)
+    );
+    assert_eq!(service.committed_snapshot().models().default, before);
+}
+
+#[tokio::test]
+async fn committed_update_notifies_subscription_with_same_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(storage));
+    let mut subscription = ConfigQuery::subscribe(&service).await.unwrap();
+
+    service
+        .update(ConfigUpdate::SetModel {
+            model: "notified/model".into(),
+        })
+        .await
+        .unwrap();
+    subscription.changes.changed().await.unwrap();
+
+    assert_eq!(
+        subscription.changes.borrow().models().default,
+        "notified/model"
+    );
+    assert_eq!(
+        subscription.changes.borrow().models().default,
+        service.committed_snapshot().models().default
+    );
+}
+
+#[tokio::test]
+async fn project_commit_becomes_baseline_for_following_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    std::fs::create_dir_all(project.join(".agents")).unwrap();
+    std::fs::write(
+        project.join(".agents/aemeath.json"),
+        r#"{"model":{"name":"project-model"}}"#,
+    )
+    .unwrap();
+    let root = project.canonicalize().unwrap();
+    let location = ProjectConfigLocation::try_from_project_identity(root, b"project-a").unwrap();
+    let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
+    let service = ConfigAppService::with_global_path(None, dir.path().join("global.json"))
+        .with_native_store(NativeConfigStore::new(storage));
+
+    let prepared = service.prepare_for_project(&location).await.unwrap();
+    service.commit_project(prepared).await;
+    service
+        .update(ConfigUpdate::SetPermissionMode {
+            mode: share::config::PermissionModeConfig::AllowAll,
+        })
+        .await
+        .unwrap();
+
+    let snapshot = service.committed_snapshot();
+    assert_eq!(snapshot.model_name(), "project-model");
+    assert_eq!(
+        snapshot.permission_mode(),
+        share::config::PermissionModeConfig::AllowAll
+    );
+}
+
+#[tokio::test]
+async fn subscription_initial_matches_committed_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"));
+    let subscription = ConfigQuery::subscribe(&service).await.unwrap();
+    assert_eq!(
+        subscription.initial.model_name(),
+        service.committed_snapshot().model_name()
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Logging contract for the real assembly entry
+// `wire_project_config_with_cli`.
+//
+// The boundary must:
+//   1. Emit a **debug** "enter" record on entry.
+//   2. Emit an **info/debug** "success" record when the Result is Ok.
+//   3. Emit a **warn** "failure" record when the Result is Err.
+//   4. Never leak sensitive config values (e.g. api_key) into any
+//      log message.
+//   5. Return the original error unchanged (behavior preserved).
+// ─────────────────────────────────────────────────────────────────
+
+thread_local! {
+    static CAPTURED_CONFIG_LOGS: std::cell::RefCell<Vec<(log::Level, String)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct ConfigCapturingLogger;
+
+impl log::Log for ConfigCapturingLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        if record.target().starts_with("aemeath:agent:config") {
+            CAPTURED_CONFIG_LOGS.with(|cell| {
+                cell.borrow_mut()
+                    .push((record.level(), format!("{}", record.args())))
+            });
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Installs the capturing logger exactly once per test process. Safe to
+/// call from every test: `log::set_logger` succeeds only once; later
+/// calls are no-ops via `Once`. Capture storage is thread-local so
+/// parallel tests never observe each other's records.
+fn install_config_capturing_logger() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        log::set_boxed_logger(Box::new(ConfigCapturingLogger))
+            .expect("capturing logger must install exactly once per process");
+        log::set_max_level(log::LevelFilter::Trace);
+    });
+}
+
+fn drain_captured_config_logs() -> Vec<(log::Level, String)> {
+    CAPTURED_CONFIG_LOGS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+}
+
+/// RAII guard that temporarily points `AEMEATH_AGENTS_DIR` at an
+/// isolated tempdir so the real assembly entry never touches the
+/// developer's `~/.agents` during tests.
+static AGENTS_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct AgentsDirEnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+}
+
+fn test_native_store(root: &std::path::Path) -> NativeConfigStore {
+    NativeConfigStore::new(
+        storage::file_system_blob(root.join("config-overrides"))
+            .expect("create test config override blob"),
+    )
+}
+
+impl AgentsDirEnvGuard {
+    fn new() -> Self {
+        let lock = AGENTS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AEMEATH_AGENTS_DIR", dir.path());
+        }
+        Self {
+            _lock: lock,
+            _dir: dir,
+        }
+    }
+}
+
+impl Drop for AgentsDirEnvGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var("AEMEATH_AGENTS_DIR");
+        }
+    }
+}
+
+#[tokio::test]
+async fn wire_entry_logs_debug_enter_then_success_on_ok() {
+    install_config_capturing_logger();
+    drain_captured_config_logs();
+    let _env = AgentsDirEnvGuard::new();
+    let project = tempfile::tempdir().unwrap();
+
+    let result = wire_project_config_with_cli(
+        project.path(),
+        test_native_store(project.path()),
+        crate::CliConfigInput::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "expected wire_project_config_with_cli to succeed"
+    );
+    let logs = drain_captured_config_logs();
+    assert!(
+        logs.iter()
+            .any(|(l, m)| *l == log::Level::Debug && m.contains("enter")),
+        "expected a debug 'enter' record; captured: {logs:?}"
+    );
+    assert!(
+        logs.iter().any(|(l, m)| {
+            (*l == log::Level::Info || *l == log::Level::Debug) && m.contains("success")
+        }),
+        "expected an info/debug 'success' record; captured: {logs:?}"
+    );
+    assert!(
+        !logs.iter().any(|(l, _)| *l == log::Level::Warn),
+        "no warn record expected on success; captured: {logs:?}"
+    );
+}
+
+#[tokio::test]
+async fn wire_entry_logs_debug_enter_then_warn_failure_on_err_and_returns_original_error() {
+    install_config_capturing_logger();
+    drain_captured_config_logs();
+
+    let missing_store_root = tempfile::tempdir().unwrap();
+    let result = wire_project_config_with_cli(
+        std::path::Path::new("/nonexistent/config/does/not/exist"),
+        test_native_store(missing_store_root.path()),
+        crate::CliConfigInput::default(),
+    )
+    .await;
+
+    let error = match result {
+        Ok(_) => panic!("expected failure for nonexistent project dir"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error,
+        ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical),
+        "original error must be returned unchanged"
+    );
+    let logs = drain_captured_config_logs();
+    assert!(
+        logs.iter()
+            .any(|(l, m)| *l == log::Level::Debug && m.contains("enter")),
+        "expected a debug 'enter' record; captured: {logs:?}"
+    );
+    assert!(
+        logs.iter()
+            .any(|(l, m)| *l == log::Level::Warn && m.contains("failure")),
+        "expected a warn 'failure' record; captured: {logs:?}"
+    );
+    assert!(
+        !logs.iter().any(|(_, m)| m.contains("success")),
+        "no success record expected on failure; captured: {logs:?}"
+    );
+}
+
+#[tokio::test]
+async fn wire_entry_never_logs_sensitive_config_values() {
+    install_config_capturing_logger();
+    drain_captured_config_logs();
+    let _env = AgentsDirEnvGuard::new();
+    let project = tempfile::tempdir().unwrap();
+    let secret = "do-not-leak-this-api-key-42";
+
+    let _ = wire_project_config_with_cli(
+        project.path(),
+        test_native_store(project.path()),
+        crate::CliConfigInput {
+            api_key: Some(secret.into()),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let logs = drain_captured_config_logs();
+    for (_, message) in &logs {
+        assert!(
+            !message.contains(secret),
+            "sensitive api_key leaked into log message: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn project_aemeath_overrides_claude_compatibility() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".agents")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+    std::fs::write(
+        dir.path().join(".agents/aemeath.json"),
+        r#"{"model":{"name":"aemeath"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join(".claude/settings.json"),
+        r#"{"model":"claude"}"#,
+    )
+    .unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("global.json"));
+    service.load().await.unwrap();
+
+    assert_eq!(service.committed_snapshot().model_name(), "aemeath");
+}
+
+#[tokio::test]
+async fn refresh_rejects_invalid_source_and_preserves_committed_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+    let before = service.committed_snapshot();
+
+    std::fs::write(&global, "not json").unwrap();
+    assert!(matches!(
+        service.refresh_if_sources_changed().await,
+        ConfigRefreshOutcome::Rejected {
+            error: ConfigRefreshError::Parse
+        }
+    ));
+    assert_eq!(service.committed_snapshot().model_name(), "first");
+    assert_eq!(service.committed_snapshot().revision(), before.revision());
+}
+
+#[tokio::test]
+async fn refresh_does_not_publish_file_change_overridden_by_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone()).with_env_source(
+        std::sync::Arc::new(FakeEnv(std::collections::HashMap::from([(
+            "AEMEATH_MODEL".into(),
+            "env-model".into(),
+        )]))),
+    );
+    service.load().await.unwrap();
+    let before = service.committed_snapshot();
+
+    std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
+    assert!(matches!(
+        service.refresh_if_sources_changed().await,
+        ConfigRefreshOutcome::Unchanged
+    ));
+    assert_eq!(service.committed_snapshot().model_name(), "env-model");
+    assert_eq!(service.committed_snapshot().revision(), before.revision());
+}
+
+#[tokio::test]
+async fn refresh_reports_run_scope_for_allow_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"permissions":{"mode":"ask"}}"#).unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+
+    std::fs::write(&global, r#"{"permissions":{"mode":"allow_all"}}"#).unwrap();
+    let outcome = service.refresh_if_sources_changed().await;
+
+    assert!(matches!(
+        outcome,
+        ConfigRefreshOutcome::Reloaded { scopes, .. }
+            if scopes == vec![share::config::domain::scope::ConfigApplicationScope::Run]
+    ));
+}
+
+#[tokio::test]
+async fn refresh_reports_session_restart_scope_for_tui_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"ui":{"tui":true}}"#).unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+
+    std::fs::write(&global, r#"{"ui":{"tui":false}}"#).unwrap();
+    let outcome = service.refresh_if_sources_changed().await;
+
+    assert!(matches!(
+        outcome,
+        ConfigRefreshOutcome::Reloaded { scopes, .. }
+            if scopes == vec![share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired]
+    ));
+}
+
+#[tokio::test]
+async fn refresh_publishes_to_watch_subscribers_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(&global, r#"{"model":{"name":"first"}}"#).unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+    let mut changes = service.subscribe_committed();
+
+    std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
+    assert!(matches!(
+        service.refresh_if_sources_changed().await,
+        ConfigRefreshOutcome::Reloaded { .. }
+    ));
+    changes.changed().await.unwrap();
+    assert_eq!(changes.borrow().model_name(), "second");
+}

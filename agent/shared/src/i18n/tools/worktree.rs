@@ -16,8 +16,8 @@ pub fn enter_description(lang: &str) -> &'static str {
 /// ExitWorktree description。
 pub fn exit_description(lang: &str) -> &'static str {
     match lang {
-        "zh" => "退出当前 worktree，恢复进入前的上下文（从上下文栈中弹出）。如果提供了 path 参数，则直接切换到指定路径（等效于 EnterWorktree 后立即 pop 栈顶）。如果没有提供 path 参数，则恢复上一次 EnterWorktree 保存的工作目录。当上下文栈为空时返回错误。",
-        _ => "Exit the current worktree, restoring the context from before entry (popping the context stack). If a path argument is provided, switch directly to that path (equivalent to EnterWorktree followed by an immediate stack pop). If no path argument is provided, restore the working directory saved by the last EnterWorktree. Returns an error when the context stack is empty.",
+        "zh" => "退出当前 worktree，恢复最近一次 EnterWorktree 之前的上下文（弹出上下文栈栈顶帧，回到进入前的工作目录）。上下文栈为空时返回错误。本工具不接受任何参数；NEVER 用它切换到任意目录。",
+        _ => "Exit the current worktree, restoring the context saved by the most recent EnterWorktree (popping the top frame of the context stack, returning to the working directory from before entry). Returns an error when the context stack is empty. This tool takes no arguments; NEVER use it to switch to an arbitrary directory.",
     }
 }
 
@@ -48,33 +48,11 @@ pub fn exit_guidance(lang: &str, restored_to: &Path) -> String {
     }
 }
 
-/// switch_to（直接切换路径）后的 guidance（#415 对称）。
-///
-/// `switched_to` 为切换目标的显示文本。
-pub fn switch_guidance(lang: &str, switched_to: &str) -> String {
-    match lang {
-        "zh" => format!(
-            "已切换到 {switched_to}。后续路径以当前 path_base（相对路径解析基）为准；绝对路径必须位于当前 workspace_root（安全边界）之内。"
-        ),
-        _ => format!(
-            "Switched to {switched_to}. Subsequent paths follow the current path_base (relative-path resolution base); absolute paths MUST fall inside the current workspace_root (safety boundary)."
-        ),
-    }
-}
-
 /// 进入 worktree 失败。
 pub fn enter_error(lang: &str, detail: impl std::fmt::Display) -> String {
     match lang {
         "zh" => format!("进入 worktree 失败：{detail}"),
         _ => format!("Failed to enter worktree: {detail}"),
-    }
-}
-
-/// 切换路径失败。
-pub fn switch_error(lang: &str, detail: impl std::fmt::Display) -> String {
-    match lang {
-        "zh" => format!("切换路径失败：{detail}"),
-        _ => format!("Failed to switch path: {detail}"),
     }
 }
 
@@ -130,13 +108,6 @@ mod tests {
         let zh = exit_guidance("zh", std::path::Path::new("/tmp/foo"));
         assert!(zh.contains("/tmp/foo"));
         assert!(zh.contains("path_base"));
-    }
-
-    #[test]
-    fn switch_guidance_includes_target() {
-        let g = switch_guidance("en", "/some/path");
-        assert!(g.contains("/some/path"));
-        assert!(g.contains("path_base"));
     }
 
     #[test]
