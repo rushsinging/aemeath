@@ -141,6 +141,44 @@ pub enum ToolCapability {
     PlanControl,
 }
 
+impl ToolCapability {
+    /// Parse a capability by its canonical variant name; `None` for unknown
+    /// spellings. Consumed by role-policy compilation for config validation.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "ReadWorkspace" => Some(Self::ReadWorkspace),
+            "WriteWorkspace" => Some(Self::WriteWorkspace),
+            "ExecuteProcess" => Some(Self::ExecuteProcess),
+            "NetworkAccess" => Some(Self::NetworkAccess),
+            "UserInteraction" => Some(Self::UserInteraction),
+            "AgentDispatch" => Some(Self::AgentDispatch),
+            "TaskRead" => Some(Self::TaskRead),
+            "TaskMutation" => Some(Self::TaskMutation),
+            "WorkspaceControl" => Some(Self::WorkspaceControl),
+            "PlanControl" => Some(Self::PlanControl),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ToolCapability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 与 parse 对称：canonical 变体名。
+        f.write_str(match self {
+            Self::ReadWorkspace => "ReadWorkspace",
+            Self::WriteWorkspace => "WriteWorkspace",
+            Self::ExecuteProcess => "ExecuteProcess",
+            Self::NetworkAccess => "NetworkAccess",
+            Self::UserInteraction => "UserInteraction",
+            Self::AgentDispatch => "AgentDispatch",
+            Self::TaskRead => "TaskRead",
+            Self::TaskMutation => "TaskMutation",
+            Self::WorkspaceControl => "WorkspaceControl",
+            Self::PlanControl => "PlanControl",
+        })
+    }
+}
+
 // 能力集合（bitflags）。
 //
 // 用于 `ToolDescriptor::required_capabilities` 和 `ToolProfile::allowed_capabilities`。
