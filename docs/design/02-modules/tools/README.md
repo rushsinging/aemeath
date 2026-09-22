@@ -97,6 +97,7 @@ MCP transport、JSON-RPC、认证和协议 DTO 是 Tool BC 的 adapter 私有实
 |---|---|
 | [01-domain-model.md](01-domain-model.md) | Tool、Catalog、Scope/Profile、Outcome、Skill、Command 的领域模型与不变量 |
 | [02-ports-and-lifecycle.md](02-ports-and-lifecycle.md) | 双 Tool 端口、ExecutionScope、取消、Skill/Command 协作、MCP 生命周期 |
+| [03-role-policy.md](03-role-policy.md) | Role 策略绑定：role → 工具名单/capability 裁剪、取代注册表静态归属、main_role 绑定 |
 
 ## 8. 相关文档
 
