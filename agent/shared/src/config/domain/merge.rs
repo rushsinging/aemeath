@@ -17,7 +17,9 @@ use crate::config::{
     permissions::{PermissionConfig, PermissionModeConfig},
     skills::SkillsConfig,
     storage::StorageConfig,
-    tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig},
+    tools::{
+        AgentInstanceConfig, AgentRoleDefinition, AgentsConfig, ToolResultConfig, ToolsConfig,
+    },
     ui::{
         ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, TaskLifecycleConfig,
         TaskListConfig, UiConfig,
@@ -186,7 +188,9 @@ pub struct AgentsConfigPatch {
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
     #[serde(default)]
-    pub roles: Option<HashMap<String, AgentRoleConfig>>,
+    pub roles: Option<HashMap<String, AgentRoleDefinition>>,
+    #[serde(default)]
+    pub names: Option<HashMap<String, AgentInstanceConfig>>,
     #[serde(default, alias = "defaultModel")]
     pub default_model: Option<String>,
 }
@@ -575,6 +579,11 @@ pub(crate) fn apply_agents_patch(mut base: AgentsConfig, patch: AgentsConfigPatc
     if let Some(roles) = patch.roles {
         for (k, v) in roles {
             base.roles.insert(k, v);
+        }
+    }
+    if let Some(names) = patch.names {
+        for (k, v) in names {
+            base.names.insert(k, v);
         }
     }
     if let Some(v) = patch.default_model {
@@ -975,7 +984,14 @@ mod tests {
                 "agents": {
                     "max_concurrency": 6,
                     "default_model": "snake/model",
-                    "roles": { "coder": { "enabled": false, "system_suffix": "snake" } }
+                    "names": {
+                        "coder-fast": {
+                            "role": "coder",
+                            "model": "snake/model",
+                            "enabled": false,
+                            "system_suffix": "snake"
+                        }
+                    }
                 }
             }"#,
         )
@@ -983,12 +999,14 @@ mod tests {
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
 
-        assert!(!snapshot.agents().roles["coder"].enabled);
+        assert!(!snapshot.agents().names["coder-fast"].enabled);
         assert_eq!(snapshot.max_tool_concurrency(), 9);
         assert_eq!(snapshot.max_agent_concurrency(), 6);
         assert_eq!(snapshot.agents().default_model, "snake/model");
         assert_eq!(
-            snapshot.agents().roles["coder"].system_suffix.as_deref(),
+            snapshot.agents().names["coder-fast"]
+                .system_suffix
+                .as_deref(),
             Some("snake")
         );
     }

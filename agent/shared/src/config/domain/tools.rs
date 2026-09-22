@@ -117,36 +117,67 @@ pub struct ToolsConfig {
     pub tool_result: ToolResultConfig,
 }
 
-/// Agent role configuration — binds a named agent role to a specific LLM.
+/// Agent role definition — the policy-holding half of the role/instance split.
 ///
-/// Model protocol and capability settings are owned by the referenced model entry.
-/// Unknown legacy role fields such as `reasoning` are ignored by serde.
+/// A role owns the tool policy and a fallback description; concrete model
+/// bindings live in [`AgentInstanceConfig`] entries under `agents.names`.
+/// `deny_unknown_fields` rejects the retired flat format (role entries that
+/// carried `model`/`enabled` instance fields) with a serde error at parse time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentRoleDefinition {
+    /// Human-readable description of what this role does; used as fallback
+    /// when a named instance carries no description of its own.
+    #[serde(default)]
+    pub description: String,
+
+    /// Tool policy for runs dispatched under this role. `None` keeps the
+    /// default sub tool set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<RolePolicyConfig>,
+}
+
+impl Default for AgentRoleDefinition {
+    fn default() -> Self {
+        Self {
+            description: String::new(),
+            policy: None,
+        }
+    }
+}
+
+/// Named agent instance — the model-holding half of the role/instance split.
 ///
 /// Example in config.json:
 /// ```json
-/// { "agents": { "roles": { "coder": { "model": "deepseek/deepseek-chat", "description": "Writes and edits code" } } } }
+/// { "agents": { "names": { "reviewer-glm": { "role": "reviewer", "model": "Zhipu/glm-5.2" } } } }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRoleConfig {
-    /// Whether this role is available for main-agent dispatch.
+pub struct AgentInstanceConfig {
+    /// Name of the role this instance fulfills; MUST resolve against builtin
+    /// or config-defined `agents.roles`, otherwise config validation fails.
+    #[serde(default)]
+    pub role: String,
+
+    /// LLM for this instance, in "<source>/<model>" format; empty falls back
+    /// to `AgentsConfig::default_model`. Resolved via ModelsConfig::find_model.
+    #[serde(default)]
+    pub model: String,
+
+    /// Whether this instance is available for main-agent dispatch.
     #[serde(default = "default_agent_role_enabled")]
     pub enabled: bool,
 
-    /// LLM to use for this role, in "<source>/<model>" format (e.g. "deepseek/deepseek-chat").
-    /// Resolved via ModelsConfig::find_model at runtime.
-    #[serde(default, rename = "model")]
-    pub model: String,
-
-    /// Human-readable description of what this role does.
-    /// Used to build the main LLM's system prompt so it knows which roles are available.
-    #[serde(default, rename = "description")]
+    /// Instance-level description shown in the main LLM's role list; falls
+    /// back to the referenced role's description when empty.
+    #[serde(default)]
     pub description: String,
 
-    /// Appended to the sub-agent system prompt for role-specific instructions.
+    /// Appended to the sub-agent system prompt for instance-specific instructions.
     #[serde(default, alias = "systemSuffix")]
     pub system_suffix: Option<String>,
 
-    /// Maximum output token budget for sub-agents using this role.
+    /// Maximum output token budget for sub-agents using this instance.
     /// `None` and `Some(0)` both inherit/default; `Some(n > 0)` overrides.
     #[serde(
         default,
@@ -155,22 +186,17 @@ pub struct AgentRoleConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_tokens: Option<u32>,
-
-    /// Tool policy for sub runs bound to this role. `None` keeps the default
-    /// sub tool set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub policy: Option<RolePolicyConfig>,
 }
 
-impl Default for AgentRoleConfig {
+impl Default for AgentInstanceConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            role: String::new(),
             model: String::new(),
+            enabled: true,
             description: String::new(),
             system_suffix: None,
             max_tokens: None,
-            policy: None,
         }
     }
 }
@@ -194,20 +220,18 @@ pub struct RolePolicyConfig {
     pub capabilities: Vec<String>,
 }
 
-/// Builtin role fallback consumed via [`AgentsConfig::merged_roles`].
+/// Builtin role definitions consumed via [`AgentsConfig::merged_roles`].
 ///
-/// Builtin roles carry a policy and a description only; `model` stays empty so
-/// runtime resolves the sub model from `AgentsConfig::default_model` (or the
-/// main client fallback) unless the user overrides the role in config.
-fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleConfig)> {
-    fn policy_role(allowed_tools: &[&str], description: &str) -> AgentRoleConfig {
-        AgentRoleConfig {
+/// Builtin roles carry a policy and a description only — model bindings live
+/// in named instances under `agents.names`.
+fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleDefinition)> {
+    fn policy_role(allowed_tools: &[&str], description: &str) -> AgentRoleDefinition {
+        AgentRoleDefinition {
             description: description.to_string(),
             policy: Some(RolePolicyConfig {
                 allowed_tools: allowed_tools.iter().map(|tool| tool.to_string()).collect(),
                 capabilities: Vec::new(),
             }),
-            ..AgentRoleConfig::default()
         }
     }
     vec![
@@ -287,22 +311,24 @@ fn default_agent_role_enabled() -> bool {
     true
 }
 
-/// Agent configuration
+/// Agent configuration: role definitions (policy) + named instances (models).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     /// Maximum number of concurrent sub-agent executions (default: 4)
     #[serde(default = "default_max_agent_concurrency", alias = "maxConcurrency")]
     pub max_concurrency: usize,
 
-    /// Named agent roles, each optionally bound to a different LLM.
-    ///
-    /// When the `Agent` tool is called with `model` matching a role name,
-    /// the role's LLM config is used. Otherwise `model` is treated as a
-    /// "<source>/<model>" selection directly.
+    /// Role definitions: the policy-holding half. Config entries with the
+    /// same name replace builtin definitions wholesale.
     #[serde(default)]
-    pub roles: HashMap<String, AgentRoleConfig>,
+    pub roles: HashMap<String, AgentRoleDefinition>,
 
-    /// Default LLM for sub-agents when no model is specified.
+    /// Named agent instances: the model-holding half. Each entry references
+    /// a role by name and binds a concrete LLM plus instance-level hints.
+    #[serde(default)]
+    pub names: HashMap<String, AgentInstanceConfig>,
+
+    /// Default LLM for instances that omit `model`.
     /// Format: "<source>/<model>". Falls back to the main agent's client if empty.
     #[serde(default, alias = "defaultModel")]
     pub default_model: String,
@@ -325,20 +351,20 @@ impl Default for AgentsConfig {
         Self {
             max_concurrency: default_max_agent_concurrency(),
             roles: HashMap::new(),
+            names: HashMap::new(),
             default_model: String::new(),
         }
     }
 }
 
 impl AgentsConfig {
-    /// Merge builtin roles with config-defined roles.
+    /// Merge builtin role definitions with config-defined ones.
     ///
     /// A config entry with the same name replaces the builtin definition
-    /// wholesale (no field-level merge), keeping builtin roles a pure fallback.
-    /// Single source of truth for runtime role resolution and composition-time
-    /// per-role tool profile assembly.
-    pub fn merged_roles(&self) -> HashMap<String, AgentRoleConfig> {
-        let mut merged: HashMap<String, AgentRoleConfig> = builtin_agent_roles()
+    /// wholesale (no field-level merge). Single source of truth for runtime
+    /// resolution and composition-time per-role tool profile assembly.
+    pub fn merged_roles(&self) -> HashMap<String, AgentRoleDefinition> {
+        let mut merged: HashMap<String, AgentRoleDefinition> = builtin_agent_roles()
             .into_iter()
             .map(|(name, role)| (name.to_string(), role))
             .collect();
@@ -348,28 +374,64 @@ impl AgentsConfig {
         merged
     }
 
-    /// Resolve a role by name for a sub run: builtin fallback, enabled check,
-    /// and empty-model fallback to `default_model`. Single source of truth
-    /// consumed by runtime role resolution paths.
-    pub fn resolve_role(&self, name: &str) -> Option<ResolvedRole> {
-        let mut role = self.merged_roles().get(name)?.clone();
-        if !role.enabled {
-            return Some(ResolvedRole::Disabled);
+    /// Resolve a named agent instance for a sub run: instance lookup, enabled
+    /// check, role-reference validation, and empty-model fallback to
+    /// `default_model`. Single source of truth consumed by runtime dispatch.
+    pub fn resolve_agent(&self, name: &str) -> Option<ResolveAgentOutcome> {
+        let instance = self.names.get(name)?;
+        if !instance.enabled {
+            return Some(ResolveAgentOutcome::Disabled {
+                instance_name: name.to_string(),
+            });
         }
-        if role.model.trim().is_empty() {
-            role.model = self.default_model.clone();
-        }
-        Some(ResolvedRole::Role(role))
+        let role_name = instance.role.trim().to_string();
+        let role = self.merged_roles().get(&role_name)?.clone();
+        let model = if instance.model.trim().is_empty() {
+            self.default_model.clone()
+        } else {
+            instance.model.clone()
+        };
+        let description = if instance.description.is_empty() {
+            role.description.clone()
+        } else {
+            instance.description.clone()
+        };
+        Some(ResolveAgentOutcome::Agent(ResolvedAgent {
+            instance_name: name.to_string(),
+            role_name,
+            model,
+            description,
+            system_suffix: instance.system_suffix.clone(),
+            max_tokens: instance.max_tokens,
+            policy: role.policy,
+        }))
     }
 }
 
-/// Outcome of [`AgentsConfig::resolve_role`].
+/// Outcome of [`AgentsConfig::resolve_agent`].
 #[derive(Debug, Clone)]
-pub enum ResolvedRole {
-    /// Role resolved; `model` already carries the `default_model` fallback.
-    Role(AgentRoleConfig),
-    /// Role exists but is disabled.
-    Disabled,
+pub enum ResolveAgentOutcome {
+    /// Instance resolved; `model` already carries the `default_model` fallback.
+    Agent(ResolvedAgent),
+    /// Instance exists but is disabled.
+    Disabled { instance_name: String },
+}
+
+/// Fully resolved named agent: instance hints plus its role's policy.
+#[derive(Debug, Clone)]
+pub struct ResolvedAgent {
+    /// The `agents.names` key this resolution started from.
+    pub instance_name: String,
+    /// The referenced role's name (used for `role:<name>` profile selection).
+    pub role_name: String,
+    /// Effective model, with `default_model` fallback applied.
+    pub model: String,
+    /// Instance description with the role description as fallback.
+    pub description: String,
+    pub system_suffix: Option<String>,
+    pub max_tokens: Option<u32>,
+    /// The referenced role's tool policy, if any.
+    pub policy: Option<RolePolicyConfig>,
 }
 
 #[cfg(test)]
@@ -377,47 +439,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_role_config_enabled_defaults_to_true() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
+    fn agent_instance_config_defaults_are_dispatchable() {
+        let config: AgentInstanceConfig = serde_json::from_str(r#"{}"#).unwrap();
         assert!(config.enabled);
-        assert!(AgentRoleConfig::default().enabled);
+        assert!(AgentInstanceConfig::default().enabled);
+        assert_eq!(config.role, "");
+        assert_eq!(config.model, "");
     }
 
     #[test]
-    fn agent_role_config_ignores_legacy_reasoning_field() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{ "reasoning": false }"#).unwrap();
-        let serialized = serde_json::to_value(config).unwrap();
-
-        assert!(serialized.get("reasoning").is_none());
-    }
-
-    #[test]
-    fn test_agent_role_config_max_tokens_snake_case() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{ "max_tokens": 8192 }"#).unwrap();
-        assert_eq!(config.max_tokens, Some(8192));
-    }
-
-    #[test]
-    fn test_agent_role_config_max_tokens_zero_inherits() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{ "max_tokens": 0 }"#).unwrap();
-        assert_eq!(config.max_tokens, Some(0));
-    }
-
-    #[test]
-    fn test_agent_role_config_max_tokens_default_none() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
-        assert_eq!(config.max_tokens, None);
-    }
-
-    #[test]
-    fn test_agent_role_config_max_tokens_camel_case_alias() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{ "maxTokens": 4096 }"#).unwrap();
-        assert_eq!(config.max_tokens, Some(4096));
+    fn role_definition_rejects_retired_flat_format_with_instance_fields() {
+        // 旧扁平格式（role 条目带 model/enabled 等实例字段）必须被
+        // deny_unknown_fields 直接拒绝——breaking，无读时迁移。
+        let result: Result<AgentRoleDefinition, _> =
+            serde_json::from_str(r#"{ "model": "x/y", "enabled": true }"#);
+        assert!(result.is_err(), "flat role format must be rejected");
     }
 
     #[test]
     fn role_policy_parses_allowlist_and_capabilities() {
-        let config: AgentRoleConfig = serde_json::from_str(
+        let config: AgentRoleDefinition = serde_json::from_str(
             r#"{ "policy": { "allowed_tools": ["Read", "Grep"], "capabilities": ["ReadWorkspace"] } }"#,
         )
         .unwrap();
@@ -427,25 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn role_policy_supports_camel_case_alias() {
-        let config: AgentRoleConfig =
-            serde_json::from_str(r#"{ "policy": { "allowedTools": ["Read"] } }"#).unwrap();
-        assert_eq!(
-            config.policy.expect("policy parsed").allowed_tools,
-            vec!["Read"]
-        );
-    }
-
-    #[test]
-    fn role_policy_absent_by_default_and_skipped_when_serializing() {
-        let config: AgentRoleConfig = serde_json::from_str(r#"{}"#).unwrap();
-        assert!(config.policy.is_none());
-        let serialized = serde_json::to_value(&config).unwrap();
-        assert!(serialized.get("policy").is_none());
-    }
-
-    #[test]
-    fn merged_roles_contains_builtin_roles() {
+    fn merged_roles_contains_builtin_definitions() {
         let merged = AgentsConfig::default().merged_roles();
         for name in ["planner", "coder", "searcher", "tester", "reviewer"] {
             assert!(merged.contains_key(name), "missing builtin role {name}");
@@ -461,167 +484,130 @@ mod tests {
         let mut agents = AgentsConfig::default();
         agents.roles.insert(
             "coder".to_string(),
-            AgentRoleConfig {
-                model: "qwen/qwen3-coder".to_string(),
-                ..AgentRoleConfig::default()
+            AgentRoleDefinition {
+                description: "custom coder".to_string(),
+                policy: None,
             },
         );
         let merged = agents.merged_roles();
         let coder = &merged["coder"];
-        assert_eq!(coder.model, "qwen/qwen3-coder");
+        assert_eq!(coder.description, "custom coder");
         assert!(
             coder.policy.is_none(),
             "config override must replace the builtin definition wholesale"
         );
     }
 
-    #[test]
-    fn merged_roles_keeps_non_builtin_custom_roles() {
-        let mut agents = AgentsConfig::default();
-        agents.roles.insert(
-            "refactorer".to_string(),
-            AgentRoleConfig {
-                model: "x/y".to_string(),
-                policy: Some(RolePolicyConfig {
-                    allowed_tools: vec!["Read".to_string()],
-                    capabilities: Vec::new(),
-                }),
-                ..AgentRoleConfig::default()
-            },
-        );
-        let merged = agents.merged_roles();
-        assert!(merged.contains_key("refactorer"));
-        assert_eq!(merged.len(), 6); // 5 builtin + 1 custom
+    fn instance(role: &str, model: &str) -> AgentInstanceConfig {
+        AgentInstanceConfig {
+            role: role.to_string(),
+            model: model.to_string(),
+            ..AgentInstanceConfig::default()
+        }
     }
 
     #[test]
-    fn resolve_role_finds_builtin_and_applies_default_model_fallback() {
+    fn resolve_agent_joins_instance_with_role_policy() {
         let mut agents = AgentsConfig::default();
-        agents.default_model = "deepseek/deepseek-chat".to_string();
-        let ResolvedRole::Role(resolved) = agents
-            .resolve_role("searcher")
-            .expect("builtin role resolves")
-        else {
-            panic!("builtin role must resolve to Role");
-        };
-        assert_eq!(
-            resolved.model, "deepseek/deepseek-chat",
-            "empty builtin model falls back to default_model"
+        agents.names.insert(
+            "reviewer-glm".to_string(),
+            instance("reviewer", "Zhipu/glm-5.2"),
         );
-        assert!(resolved.policy.is_some());
-
-        // config 覆盖的 model 优先于 default_model
-        agents.roles.insert(
-            "searcher".to_string(),
-            AgentRoleConfig {
-                model: "qwen/qwen3".to_string(),
-                ..AgentRoleConfig::default()
-            },
-        );
-        let ResolvedRole::Role(resolved) =
-            agents.resolve_role("searcher").expect("override resolves")
+        let ResolveAgentOutcome::Agent(resolved) = agents
+            .resolve_agent("reviewer-glm")
+            .expect("instance resolves")
         else {
-            panic!("overridden role must resolve to Role");
+            panic!("named instance must resolve to Agent");
         };
-        assert_eq!(resolved.model, "qwen/qwen3");
+        assert_eq!(resolved.role_name, "reviewer");
+        assert_eq!(resolved.model, "Zhipu/glm-5.2");
+        assert!(
+            resolved.policy.is_some(),
+            "builtin reviewer policy is joined in"
+        );
     }
 
     #[test]
-    fn resolve_role_reports_missing_and_disabled() {
+    fn resolve_agent_applies_default_model_fallback() {
+        let mut agents = AgentsConfig::default();
+        agents.default_model = "Zhipu/glm-5.3".to_string();
+        agents
+            .names
+            .insert("coder-fast".to_string(), instance("coder", ""));
+        let ResolveAgentOutcome::Agent(resolved) = agents
+            .resolve_agent("coder-fast")
+            .expect("instance resolves")
+        else {
+            panic!("named instance must resolve to Agent");
+        };
+        assert_eq!(resolved.model, "Zhipu/glm-5.3");
+    }
+
+    #[test]
+    fn resolve_agent_reports_missing_disabled_and_unknown_role() {
         let agents = AgentsConfig::default();
-        assert!(agents.resolve_role("no-such-role").is_none());
+        assert!(agents.resolve_agent("no-such-agent").is_none());
 
         let mut agents = AgentsConfig::default();
-        agents.roles.insert(
-            "archived".to_string(),
-            AgentRoleConfig {
-                enabled: false,
-                model: "x/y".to_string(),
-                ..AgentRoleConfig::default()
-            },
-        );
+        let mut disabled = instance("coder", "x/y");
+        disabled.enabled = false;
+        agents.names.insert("archived".to_string(), disabled);
         assert!(matches!(
-            agents.resolve_role("archived"),
-            Some(ResolvedRole::Disabled)
+            agents.resolve_agent("archived"),
+            Some(ResolveAgentOutcome::Disabled { .. })
         ));
+
+        // 实例引用未定义职能（非内置名且 config roles 未定义）→ 视为未解析
+        agents
+            .names
+            .insert("ghost".to_string(), instance("no-such-role", "x/y"));
+        assert!(agents.resolve_agent("ghost").is_none());
     }
 
     #[test]
-    fn test_tools_config_uses_snake_case_and_accepts_legacy_alias() {
-        let snake: ToolsConfig = serde_json::from_str(r#"{ "max_concurrency": 7 }"#).unwrap();
-        let legacy: ToolsConfig = serde_json::from_str(r#"{ "maxConcurrency": 8 }"#).unwrap();
+    fn resolve_agent_instance_description_wins_over_role_fallback() {
+        let mut agents = AgentsConfig::default();
+        let mut described = instance("reviewer", "x/y");
+        described.description = "Reviews code (GLM)".to_string();
+        agents.names.insert("reviewer-glm".to_string(), described);
+        let ResolveAgentOutcome::Agent(resolved) = agents
+            .resolve_agent("reviewer-glm")
+            .expect("instance resolves")
+        else {
+            panic!("named instance must resolve to Agent");
+        };
+        assert_eq!(resolved.description, "Reviews code (GLM)");
 
-        assert_eq!(snake.max_concurrency, 7);
-        assert_eq!(legacy.max_concurrency, 8);
-        assert_eq!(
-            serde_json::to_value(snake).unwrap()["max_concurrency"],
-            serde_json::json!(7)
+        agents
+            .names
+            .insert("reviewer-ds".to_string(), instance("reviewer", "x/y"));
+        let ResolveAgentOutcome::Agent(fallback) = agents
+            .resolve_agent("reviewer-ds")
+            .expect("instance resolves")
+        else {
+            panic!("named instance must resolve to Agent");
+        };
+        assert!(
+            !fallback.description.is_empty(),
+            "builtin role description fills in"
         );
+    }
+
+    #[test]
+    fn agents_config_accepts_snake_case_and_legacy_aliases() {
+        let config: AgentsConfig =
+            serde_json::from_str(r#"{ "maxConcurrency": 2, "defaultModel": "a/b" }"#).unwrap();
+        assert_eq!(config.max_concurrency, 2);
+        assert_eq!(config.default_model, "a/b");
+        assert!(config.roles.is_empty());
+        assert!(config.names.is_empty());
     }
 
     #[test]
     fn tool_result_config_defaults_preserve_existing_materialization_behavior() {
-        let tools: ToolsConfig = serde_json::from_str("{}").unwrap();
-
-        assert_eq!(tools.tool_result.threshold_chars, 50_000);
-        assert_eq!(tools.tool_result.preview_head_chars, 2_000);
-        assert_eq!(tools.tool_result.preview_tail_chars, 500);
-    }
-
-    #[test]
-    fn tool_result_config_accepts_snake_case_values() {
-        let tools: ToolsConfig = serde_json::from_str(
-            r#"{
-                "tool_result": {
-                    "threshold_chars": 12000,
-                    "preview_head_chars": 900,
-                    "preview_tail_chars": 300
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(tools.tool_result.threshold_chars, 12_000);
-        assert_eq!(tools.tool_result.preview_head_chars, 900);
-        assert_eq!(tools.tool_result.preview_tail_chars, 300);
-    }
-
-    #[test]
-    fn test_agents_config_uses_snake_case_and_accepts_legacy_aliases() {
-        let snake: AgentsConfig = serde_json::from_str(
-            r#"{ "max_concurrency": 7, "default_model": "snake/model", "roles": { "coder": { "enabled": false, "system_suffix": "snake" } } }"#,
-        )
-        .unwrap();
-        let legacy: AgentsConfig = serde_json::from_str(
-            r#"{ "maxConcurrency": 8, "defaultModel": "legacy/model", "roles": { "coder": { "systemSuffix": "legacy" } } }"#,
-        )
-        .unwrap();
-
-        assert!(!snake.roles["coder"].enabled);
-        assert!(legacy.roles["coder"].enabled);
-        assert_eq!(snake.max_concurrency, 7);
-        assert_eq!(snake.default_model, "snake/model");
-        assert_eq!(snake.roles["coder"].system_suffix.as_deref(), Some("snake"));
-        assert_eq!(legacy.max_concurrency, 8);
-        assert_eq!(legacy.default_model, "legacy/model");
-        assert_eq!(
-            legacy.roles["coder"].system_suffix.as_deref(),
-            Some("legacy")
-        );
-
-        let serialized = serde_json::to_value(snake).unwrap();
-        assert_eq!(
-            serialized["roles"]["coder"]["enabled"],
-            serde_json::json!(false)
-        );
-        assert_eq!(serialized["max_concurrency"], serde_json::json!(7));
-        assert_eq!(
-            serialized["default_model"],
-            serde_json::json!("snake/model")
-        );
-        assert_eq!(
-            serialized["roles"]["coder"]["system_suffix"],
-            serde_json::json!("snake")
-        );
+        let config: ToolsConfig = ToolsConfig::default();
+        assert!(config.enabled.is_empty());
+        assert!(config.disabled.is_empty());
+        assert_eq!(config.max_concurrency, default_max_tool_concurrency());
     }
 }
