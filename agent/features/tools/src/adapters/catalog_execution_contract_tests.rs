@@ -73,6 +73,7 @@ fn adapter_factory() -> FactoryFuture {
             ToolProfile::derive_restricted(
                 profiles.get(&ToolProfileName::new("full")).unwrap(),
                 ToolCapabilities::ReadWorkspace,
+                None,
             )
             .unwrap(),
         );

@@ -8,13 +8,14 @@ use super::scope_profile::{
 fn profile_derivation_can_only_shrink_capabilities() {
     let parent = ToolProfile::baseline(ToolCapabilities::all());
     let requested = ToolCapabilities::ReadWorkspace | ToolCapabilities::NetworkAccess;
-    let child = ToolProfile::derive_restricted(&parent, requested).unwrap();
+    let child = ToolProfile::derive_restricted(&parent, requested, None).unwrap();
     assert_eq!(child.allowed_capabilities(), requested);
 
     let read_only = ToolProfile::baseline(ToolCapabilities::ReadWorkspace);
     let error = ToolProfile::derive_restricted(
         &read_only,
         ToolCapabilities::ReadWorkspace | ToolCapabilities::WriteWorkspace,
+        None,
     )
     .unwrap_err();
     assert_eq!(
@@ -23,6 +24,79 @@ fn profile_derivation_can_only_shrink_capabilities() {
             capabilities: ToolCapabilities::WriteWorkspace
         }
     );
+}
+
+#[test]
+fn profile_authorizes_only_allowlisted_tool_names() {
+    let profile = ToolProfile::baseline_with_names(
+        ToolCapabilities::all(),
+        ["Read", "Grep"]
+            .iter()
+            .map(|name| ToolName::new(*name))
+            .collect(),
+    );
+    let read = ToolRegistrationSpec::new(ToolName::new("Read"), ToolCapabilities::ReadWorkspace);
+    let grep = ToolRegistrationSpec::new(ToolName::new("Grep"), ToolCapabilities::ReadWorkspace);
+    let write = ToolRegistrationSpec::new(ToolName::new("Write"), ToolCapabilities::WriteWorkspace);
+    assert!(is_authorized(&read, &profile));
+    assert!(is_authorized(&grep, &profile));
+    assert!(!is_authorized(&write, &profile));
+}
+
+#[test]
+fn profile_without_allowlist_keeps_name_authorization_open() {
+    let profile = ToolProfile::baseline(ToolCapabilities::all());
+    let write = ToolRegistrationSpec::new(ToolName::new("Write"), ToolCapabilities::WriteWorkspace);
+    assert!(is_authorized(&write, &profile));
+}
+
+#[test]
+fn derive_restricted_rejects_tool_name_expansion() {
+    let parent = ToolProfile::baseline_with_names(
+        ToolCapabilities::all(),
+        ["Read"].iter().map(|name| ToolName::new(*name)).collect(),
+    );
+    let requested_names = ["Read", "Write"]
+        .iter()
+        .map(|name| ToolName::new(*name))
+        .collect();
+    let error =
+        ToolProfile::derive_restricted(&parent, ToolCapabilities::all(), Some(requested_names))
+            .unwrap_err();
+    assert!(matches!(
+        error,
+        ProfileExpansionError::ToolNameExpansion { .. }
+    ));
+}
+
+#[test]
+fn derive_restricted_allows_name_shrink_within_parent() {
+    let parent = ToolProfile::baseline_with_names(
+        ToolCapabilities::all(),
+        ["Read", "Write"]
+            .iter()
+            .map(|name| ToolName::new(*name))
+            .collect(),
+    );
+    let requested_names = ["Read"].iter().map(|name| ToolName::new(*name)).collect();
+    let child =
+        ToolProfile::derive_restricted(&parent, ToolCapabilities::all(), Some(requested_names))
+            .unwrap();
+    let names = child.allowed_tool_names().expect("names preserved");
+    assert_eq!(names.len(), 1);
+    assert!(names.contains(&ToolName::new("Read")));
+}
+
+#[test]
+fn derive_restricted_child_without_names_inherits_open_name_authorization() {
+    // 子请求不带名单时保持开放（不继承父名单收缩），capability 语义不变；
+    // 名单只由携带名单的派生收紧。
+    let parent = ToolProfile::baseline_with_names(
+        ToolCapabilities::all(),
+        ["Read"].iter().map(|name| ToolName::new(*name)).collect(),
+    );
+    let child = ToolProfile::derive_restricted(&parent, ToolCapabilities::all(), None).unwrap();
+    assert!(child.allowed_tool_names().is_none());
 }
 
 #[test]

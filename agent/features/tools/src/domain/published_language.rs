@@ -56,6 +56,19 @@ impl PartialEq for ToolName {
 
 impl Eq for ToolName {}
 
+impl PartialOrd for ToolName {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ToolName {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // 与 PartialEq/Hash 同源：按 normalized 键排序。
+        self.normalized.cmp(&other.normalized)
+    }
+}
+
 impl std::hash::Hash for ToolName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.normalized.hash(state);

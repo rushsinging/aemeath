@@ -44,9 +44,11 @@ pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile
     };
 
     match scope {
-        BuiltinRegistryScope::Main => *main_parent,
-        BuiltinRegistryScope::SubAgent => ToolProfile::derive_restricted(main_parent, requested)
-            .expect("built-in child profiles must only restrict the main profile"),
+        BuiltinRegistryScope::Main => main_parent.clone(),
+        BuiltinRegistryScope::SubAgent => {
+            ToolProfile::derive_restricted(main_parent, requested, None)
+                .expect("built-in child profiles must only restrict the main profile")
+        }
     }
 }
 
