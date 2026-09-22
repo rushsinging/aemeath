@@ -222,7 +222,7 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界。
+- **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界；Config 在 #1654 后允许 `domain + ports + application + adapters`（`application/wiring` 依赖 adapters 的例外待 #1022 裁决 wiring 归位后开启 R8 方向检查）。
 - **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
 - **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
@@ -242,6 +242,7 @@
   - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。  - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
   - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
+  - Config 顶层只允许 `lib.rs/domain.rs/ports.rs/application.rs/adapters.rs` 与三个 `*_tests.rs` 分离测试文件，目录只允许 `domain/ports/application/adapters`；重新出现 `contract.rs` / `api/` 等旧 COLA 层名时直接失败（#1654 迁移，`policy.config.target-layout` 登记）。
   - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
   - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
   - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage Hexagonal 层。
@@ -250,6 +251,7 @@
 - **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
+- **#1654 故意违规证据**：临时恢复 `agent/features/config/src/contract.rs` 后，单 Guard 阻断并命中 `Config top-level source files must be [...]`；临时新建 `agent/features/config/src/api/` 后阻断并命中 `Config legacy fixed layer is forbidden`；删除违规项后 clean pass。Config 无路径白名单、整文件豁免或隐式 exclude；inline-tests 基线随迁移净减 3 条（213→210）。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**：无。tools 已完成迁移（`agent/features/tools/src/business/` 已不存在），历史 business→core 例外记录已清理。
 - **实现载体**：perl 单进程核心（`.agents/hooks/check-cola-layer-purity.sh` 内联，含与语义等价的 23 项启动自检）。原 `cargo run -p xtask -- cola-layer-purity` 实现因 Stop Hook 每次触发的编译/运行成本（实测 40~80s，占 fast 总耗时 96%+）于 #1521 退役，xtask 不再提供 `cola-layer-purity` 子命令；perl 版实测 0.22s，与 xtask 版在 clean 仓库及违规样本上输出逐字一致。
 

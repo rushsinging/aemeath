@@ -12,7 +12,14 @@ from pathlib import Path
 import json, re, sys
 
 root = Path.cwd()
-config_app = root / "agent/features/config/src/application.rs"
+# Config application 层自 #1654 起拆分为 mod 根 + wiring/app_service；
+# 守卫按层内全部源文件拼接扫描（wiring 函数在 wiring.rs，for_project 在 app_service.rs）。
+config_layer_paths = [
+    root / "agent/features/config/src/application.rs",
+    root / "agent/features/config/src/application/wiring.rs",
+    root / "agent/features/config/src/application/app_service.rs",
+]
+config_layer_files = [p for p in config_layer_paths if p.is_file()]
 composition_app = root / "agent/composition/src/app.rs"
 violations = []
 
@@ -281,10 +288,10 @@ if self_failures:
 NATIVE_STORE_PARAM = re.compile(r"\bnative_store\s*:\s*NativeConfigStore\b")
 
 # -- Config application -------------------------------------------------
-if not config_app.is_file():
+if not config_layer_files:
     violations.append("agent/features/config/src/application.rs: Config application source is missing")
 else:
-    prod = production_text(config_app.read_text())
+    prod = "\n".join(production_text(path.read_text()) for path in config_layer_files)
     if re.search(r"\b(?:storage::api::)?file_system_blob\s*\(", prod):
         violations.append(
             "agent/features/config/src/application.rs: Config application must consume injected NativeConfigStore, not construct file_system_blob"

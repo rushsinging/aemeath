@@ -2,7 +2,8 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
 mod adapters;
 mod application;
-mod contract;
+mod domain;
+mod ports;
 
 pub use adapters::{
     encode_native_patch, merge_native_patches, CliArgsAdapter, CliConfigInput,
@@ -26,10 +27,11 @@ pub async fn wire_project_config_with_agents_dir(
     application::wire_project_config_with_agents_dir(project_dir, agents_dir, native_store, cli)
         .await
 }
-pub use contract::{
+pub use domain::{
     ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistError, ConfigPersistOutcome, ConfigQuery, ConfigQueryError, ConfigReader,
-    ConfigRefreshError, ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate, ConfigUpdateError,
-    ConfigWriter, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
-    ProjectConfigLocationError, ProjectConfigParticipant, ReadyConfigCommit,
+    ConfigPersistError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshError,
+    ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate, ConfigUpdateError,
+    PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError,
+    ReadyConfigCommit,
 };
+pub use ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
