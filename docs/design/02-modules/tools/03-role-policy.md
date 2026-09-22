@@ -29,76 +29,58 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 
 ## 3. 配置 schema（Config BC）
 
+`agents` 下两个正交集合：**`roles`（职能定义）**与 **`names`（具名 agent 实例）**。职能持有策略，实例持有模型——`reviewer-glm` / `reviewer-ds` 是同一职能 `reviewer` 的两个模型实例，共享一份 policy。
+
 ```json
 {
   "agents": {
     "roles": {
-      "searcher": {
-        "model": "deepseek/deepseek-chat",
-        "description": "Read-only code & web exploration",
-        "policy": {
-          "allowed_tools": ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "ToolSearch"],
-          "capabilities": ["ReadWorkspace", "NetworkAccess"]
-        }
+      "reviewer": {
+        "description": "Reviews code quality",
+        "policy": { "allowed_tools": ["Read", "Grep", "Glob", "WebSearch", "ToolSearch"] }
       }
-    }
+    },
+    "names": {
+      "reviewer-glm": { "role": "reviewer", "model": "Zhipu/glm-5.2", "enabled": true,
+                         "system_suffix": "Focus on correctness.", "max_tokens": 16384 },
+      "reviewer-ds":  { "role": "reviewer", "model": "DeepSeek/deepseek-v4-pro", "enabled": true }
+    },
+    "default_model": "Zhipu/glm-5.3"
   }
 }
 ```
 
-`AgentRoleConfig` 现有字段（model / description / system_suffix / max_tokens）保持不变，新增 `policy: RolePolicyConfig`（全部 `#[serde(default)]`，空 policy 编译为 `None` 走现状路径）：
+**职能定义（`roles`，`AgentRoleDefinition`）**：
+
+| 字段 | 语义 |
+|---|---|
+| `description: String` | 职能说明（实例未带 description 时的 fallback） |
+| `policy: Option<RolePolicyConfig>` | `allowed_tools` 白名单 + `capabilities` 收缩（见下表） |
+
+**具名实例（`names`，`AgentInstanceConfig`）**：
+
+| 字段 | 语义 |
+|---|---|
+| `role: String` | 引用的职能名，MUST 存在于内置或 config `roles`，否则配置校验错 |
+| `model: String` | 模型，空时回退 `agents.default_model` |
+| `enabled: bool` | 默认 true；false 时派发报 disabled |
+| `description / system_suffix / max_tokens` | 实例级提示与预算（沿用旧字段语义） |
+
+`RolePolicyConfig` 字段（全部 `#[serde(default)]`，空 policy = `None` 走现状路径）：
 
 | 字段 | 语义 |
 |---|---|
 | `allowed_tools: Vec<String>` | 白名单：只允许列出者，其余不可见且调用必拒 |
 | `capabilities: Vec<String>` | capability 位收缩；与名单取交集（名单有 `Bash` 但无 `ExecuteProcess` 仍拦） |
 
-只保留白名单，不设黑名单：白名单是显式、可审计的能力声明，黑名单（全量 − 排除项）会随内置工具集增长而隐式扩权——新增工具自动落入每个黑名单 role。未写 `allowed_tools` 时仅由 `capabilities` 收缩（两者都未写则 `None` 走现状路径）。
+只保留白名单，不设黑名单：白名单是显式、可审计的能力声明，黑名单（全量 − 排除项）会随内置工具集增长而隐式扩权。未写 `allowed_tools` 时仅由 `capabilities` 收缩（两者都未写则 `None` 走现状路径）。
 
-### 3.1 用户自定义 role
+### 3.1 派发与自定义
 
-`agents.roles` 的 key 即 role 名，任意命名，无保留字（与内置 role 同名时整条覆盖内置定义）。三种用法：
-
-**从零定义**（最常见）——名字、模型、策略全部自定义：
-
-```json
-{
-  "agents": {
-    "roles": {
-      "refactorer": {
-        "model": "anthropic/claude-sonnet-4",
-        "description": "Large-scale refactoring with edit-only access",
-        "system_suffix": "Only refactor, never add features.",
-        "max_tokens": 32768,
-        "policy": {
-          "allowed_tools": ["Read", "Write", "Edit", "Grep", "Glob"]
-        }
-      }
-    }
-  }
-}
-```
-
-**覆盖内置**——同名 key 整条替换（含 model/description 等全部字段），例如收紧内置 tester、去掉其 Bash：
-
-```json
-{ "agents": { "roles": {
-  "tester": {
-    "model": "deepseek/deepseek-chat",
-    "policy": { "allowed_tools": ["Read", "Grep", "Glob", "ToolSearch"] }
-  }
-} } }
-```
-
-**仅换模型不动策略**——省略 `policy` 字段时：内置 role 名沿用内置 policy；非内置名沿用现有 Sub scope 等价集合：
-
-```json
-{ "agents": { "roles": {
-  "coder": { "model": "qwen/qwen3-coder" }
-} } }
-```
-
-使用方式与现状一致：main 调用 `Agent` 工具时传 `role: "refactorer"`，runtime 经 `resolve_derived_role` 解析出模型 + policy 并装配 ToolFilter；role 名未在 config 定义且非内置名时报现有 unknown-role 错误。
+- **派发传 agent 名**：`Agent` 工具参数为 `agent`（值为 `names` 的 key），runtime `resolve_agent` 解析出实例（model/enabled/suffix/max_tokens）与职能（policy），装配 `role:<职能名>` profile。未知名或 disabled 实例报错。
+- **自定义职能**：`roles` 加任意 key（无保留字），与内置职能同名时整条覆盖内置定义。
+- **自定义实例**：`names` 加任意 key 引用任意职能；多实例共享同一份 policy 与 profile。
+- **Breaking**：旧扁平格式（`agents.roles.<name>` 直接带 `model`/`enabled` 等实例字段）被 `AgentRoleDefinition` 的 `deny_unknown_fields` 直接拒绝，报错附迁移指引；不做读时兼容迁移（自有 schema、pre-release）。
 
 ## 4. 内置 role（fallback，config 同名整条覆盖）
 
@@ -110,7 +92,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 | **tester** | Read, Write, Edit, Bash, Grep, Glob, ToolSearch | 测试编写与运行 |
 | **reviewer** | Read, Grep, Glob, WebSearch, ToolSearch | 只读审查 |
 
-内置 role 的 capability 位由 allowed_tools 对应工具的 required capabilities 推导，不单独声明；内置定义不含 model——role 缺 model 时 fallback 继承 main 当前模型（开箱即用），用户在 config 覆盖即可指定。用户要给某 role 加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖即可——机制支持一切名单，内置默认从简。
+内置 role 是**职能定义**（policy + description），不含 model；内置职能没有隐式实例——派发必须命中 `names` 中的具名实例（model 取实例值或回退 `default_model`）。内置 capability 位由 allowed_tools 对应工具的 required capabilities 推导。用户要给某职能加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖职能即可——机制支持一切名单，内置默认从简。
 
 ## 5. 分层装配与执行
 
