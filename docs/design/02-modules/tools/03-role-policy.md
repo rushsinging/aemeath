@@ -131,7 +131,7 @@ config.json
 
 1. **只收缩**：`ToolFilter` 只能从注册池与父 ceiling 里做减法，任何扩展在 `derive_restricted` 处报 `CapabilityEscalation`。
 2. **单一裁剪点**：注册表 `builtin!` 的 `[main, sub]` 布尔退役，改为统一注册池 + role ToolFilter。迁移期未配置 policy 且非内置 role 名的 sub run，使用现有 Sub scope 名单作为隐式 default ToolFilter（等价迁移，行为零变化）。
-3. **AskUserQuestion 不进任何 role 名单**：sub run 是 NonInteractive + ParentMediated，交互代理链路（问题冒泡→main 转述→答案回灌）不存在；内置 role 均不含 Ask，config 显式给了也在 sub 形态被 capability 校验拦下。
+3. **AskUserQuestion 不进内置名单**：内置 role 均不含 Ask。sub run 是 NonInteractive + ParentMediated，交互代理链路（问题冒泡→main 转述→答案回灌）不存在；config 显式把 Ask 放进自定义 role 名单时工具可见可调用，但挂起后无法在 sub 环境完成恢复（等待至 timeout）——交互代理是 P2 独立特性，落地前不建议任何 role 名单包含 Ask。
 4. **绑定时机固定**：role 在 sub run 创建（`Agent` 工具调用）时解析并冻结进 RunSpec，run 存续期内不变更。
 
 ## 6. 与现有机制的关系
