@@ -2,11 +2,13 @@
 set -euo pipefail
 # guard-registry:policy.hexagonal.current-layer-matrix
 # guard-registry:policy.task.target-layout
+# guard-registry:policy.config.target-layout
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
 #       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
-#       Project/Tools/Task 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层。
+#       Project/Tools/Task 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层；
+#       Config 使用 domain/ports/application/adapters（#1654 迁移；application 依赖 adapters 的 wiring 例外待 #1022 裁决归位后开启 R8 方向检查）。
 # 例外：RUNTIME_LAYER_MIGRATION_EXCEPTIONS 为空集合（当前无迁移期层级倒置）。
 #
 # 实现：perl 单进程核心（issue 1521）。原实现为 xtask 子命令 `cola-layer-purity`
@@ -53,6 +55,9 @@ my @AUDIT_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @HOOK_HEX_LAYERS = qw(domain ports adapters);
 my @HOOK_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs adapters.rs capabilities.rs);
 my @HOOK_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
+my @CONFIG_HEX_LAYERS = qw(domain ports application adapters);
+my @CONFIG_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs application.rs adapters.rs domain_tests.rs application_tests.rs adapters_tests.rs);
+my @CONFIG_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @CONTEXT_HEX_LAYERS = qw(domain application ports adapters);
 my @TOOL_PROFILE_PUBLIC_API = qw(baseline derive_restricted allowed_capabilities);
 my $POLICY_FORBIDDEN_ADAPTER_TYPES = qr/\b(?:struct|enum)\s+(?:Deny|Approval|RequireApproval)\w*Policy\b/;
@@ -301,6 +306,15 @@ sub check_src_layout {
           push @violations, "$rel: Hook source directories must be " . fmt_list(@HOOK_HEX_LAYERS);
         } elsif (!-d $child && !contains($name, @HOOK_ALLOWED_TOP_LEVEL_FILES)) {
           push @violations, "$rel: Hook top-level source files must be " . fmt_list(@HOOK_ALLOWED_TOP_LEVEL_FILES);
+        }
+        next;
+      } elsif ($crate_name eq "config") {
+        if (contains($name, @CONFIG_LEGACY_LAYERS)) {
+          push @violations, "$rel: Config legacy fixed layer is forbidden; use " . fmt_list(@CONFIG_HEX_LAYERS);
+        } elsif (-d $child && !contains($name, @CONFIG_HEX_LAYERS)) {
+          push @violations, "$rel: Config source directories must be " . fmt_list(@CONFIG_HEX_LAYERS);
+        } elsif (!-d $child && !contains($name, @CONFIG_ALLOWED_TOP_LEVEL_FILES)) {
+          push @violations, "$rel: Config top-level source files must be " . fmt_list(@CONFIG_ALLOWED_TOP_LEVEL_FILES);
         }
         next;
       } elsif ($crate_name eq "tools") {

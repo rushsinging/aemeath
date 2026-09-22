@@ -431,6 +431,22 @@
       "status": "active"
     },
     {
+      "id": "policy.config.target-layout",
+      "guard": "check-cola-layer-purity.sh",
+      "module": "config",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "classification": "target_hexagonal_policy",
+      "owner": "config",
+      "reason": "Config uses domain/ports/application/adapters Target and rejects retired COLA layer names (contract.rs legacy removed)",
+      "tracking_issue": 1654,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "application wiring dependency on adapters resolves when #1022 adjudicates wiring ownership; replace only with an equivalent Config Target layout policy",
+      "status": "active"
+    },
+    {
       "id": "scope.tui.arch.inline-exclusions",
       "guard": "check-architecture-guards.sh",
       "module": "tui",

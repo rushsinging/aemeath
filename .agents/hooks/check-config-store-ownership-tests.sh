@@ -43,7 +43,7 @@ expect_failure config-construction 'Config application must consume injected Nat
 rm -f "$TMP/agent/features/config/src/application.rs.bak"
 
 printf '%s\n' 'fn wire_config_override_store() { NativeConfigStore::new(file_system_blob()); }' >>"$TMP/agent/composition/src/app.rs"
-expect_failure duplicate-composition-factory 'Composition must define exactly one config override store factory' sed -i.bak '$d' "$TMP/agent/composition/src/app.rs"
+expect_failure duplicate-composition-factory 'Composition must define exactly one `wire_config_override_store` factory in production' sed -i.bak '$d' "$TMP/agent/composition/src/app.rs"
 rm -f "$TMP/agent/composition/src/app.rs.bak"
 
 run_guard >/dev/null
