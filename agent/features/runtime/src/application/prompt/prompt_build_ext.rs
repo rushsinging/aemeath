@@ -70,7 +70,7 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
             } else {
                 format!(" (model: {})", instance.model)
             };
-            format!("- `{}`{}{}", name, desc, model_info)
+            format!("- `{}` [{}]{}{}", name, instance.role, desc, model_info)
         })
         .collect();
     if role_lines.is_empty() {
@@ -160,7 +160,10 @@ mod tests {
         append_agent_roles(&mut prompt, Some(&snap), "en");
 
         // Assert — 实例名、description、model 都应出现在 prompt 中
-        assert!(prompt.contains("`coder-fast`"), "应包含实例名 coder-fast");
+        assert!(
+            prompt.contains("`coder-fast` [coder]"),
+            "应包含实例名与职能（coder-fast [coder]）"
+        );
         assert!(
             prompt.contains("`reviewer-glm`"),
             "应包含实例名 reviewer-glm"
