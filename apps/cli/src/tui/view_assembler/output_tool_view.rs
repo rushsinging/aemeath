@@ -158,7 +158,10 @@ pub(super) fn display_text_for_tool_result(
 ) -> String {
     // issue #196/#1670：tool result 文本进入 TUI 渲染前走共享控制字符归一化
     // （\t → 4 空格，\n 保留，其余控制字符 → U+FFFD），策略单一真相见
-    // view_model::display_text。
+    // view_model::display_text。渲染层 wrap/RenderedLine 防线（②③）亦会兜底——
+    // 防线① render_self 分发不覆盖 ToolResultBlockView；此处保证 view_model
+    // 数据本身 display-safe（result_text 参与 cache_version 哈希与非渲染消费），
+    // 勿视为冗余删除。
     if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
         let message = content
             .get("message")
@@ -225,5 +228,13 @@ mod tests {
         let content = serde_json::json!({ "display": "a\u{1b}[31m" });
         let text = display_text_for_tool_result(Some("Bash"), "fallback", &content);
         assert_eq!(text, "a\u{fffd}[31m");
+    }
+
+    #[test]
+    fn test_worktree_branch_message_normalized_via_shared_fn() {
+        // 守护提前 return 分支（message+branch 拼接路径）也走共享归一化。
+        let content = serde_json::json!({ "message": "a\tb", "branch": "feat/x" });
+        let text = display_text_for_tool_result(Some("EnterWorktree"), "fallback", &content);
+        assert_eq!(text, "a    b\n当前分支：feat/x");
     }
 }
