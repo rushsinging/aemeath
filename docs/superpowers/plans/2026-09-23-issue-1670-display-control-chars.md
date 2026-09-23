@@ -4,7 +4,7 @@
 
 **Goal:** 收敛共享 display 控制字符归一化入口，根因修复 TUI 渲染吞 tab / 零宽控制字符问题（含 ESC/C1 显示注入阻断），并迁移 tool result 既有 `expand_tabs` 消除重复。
 
-**Architecture:** 单一策略函数 `normalize_display_control_chars`（`view_model/display_text.rs`，纯字符串、无 ratatui 依赖，对 model/render/view_assembler 三方均合法）+ 四道防线：① `render_self` 分发入口归一化 `TextBlockView.text`（源头，先于宽度计算与 markdown/links 解析）；② `wrap_spans_with_prefix` 入口归一化 spans（宽度敏感路径）；③ `RenderedLine` 构造（`new`/`with_plain`/`with_plain_and_links`）归一化（一切直产行的最终防线，保持 `plain == spans` 拼接不变式）；④ tool result assembler 层迁移共享函数并删除本地 `expand_tabs`（DRY）。
+**Architecture:** 单一策略函数 `normalize_display_control_chars`（`view_model/display_text.rs`，纯字符串、无 ratatui 依赖，对 model/render/view_assembler 三方均合法）+ 三道渲染防线 + tool result 层迁移：① `render_self` 分发入口归一化 `TextBlockView.text`（源头，先于宽度计算与 markdown/links 解析）；② `wrap_spans_with_prefix` 入口归一化 spans（宽度敏感路径）；③ `RenderedLine` 构造（`new`/`with_plain`/`with_plain_and_links`）归一化（一切直产行的最终防线，保持 `plain == spans` 拼接不变式）；④ tool result assembler 层迁移共享函数并删除本地 `expand_tabs`（DRY）。
 
 **Tech Stack:** Rust / ratatui / unicode-width；TDD（先红后绿）；cargo fmt / clippy / test 门禁。
 
@@ -656,12 +656,12 @@ git add -A && git commit -m "chore(tui): #1670 cargo fmt 机械格式化" --allo
 
 ### Task 5: 文档门禁与 specs 提案（需用户确认）
 
-- [ ] **Step 5.1: 核对 Target 文档（issue 文档与代码双向校验门禁 · 开发前项）**
+- [x] **Step 5.1: 核对 Target 文档（issue 文档与代码双向校验门禁 · 开发前项）**
 
 Target 文档：`specs/3.3-tui-cli.md`（TUI 分片）。当前不符合点：分片无「显示文本控制字符策略」章节，新策略无文档真相源。
 `docs/design/**` 无 TUI 渲染控制字符相关章节，无矛盾项。
 
-- [ ] **Step 5.2: 向用户提案新增 specs/3.3 小节（Constitution #3：新增规则 MUST 先征得用户同意）**
+- [x] **Step 5.2: 向用户提案新增 specs/3.3 小节（Constitution #3：新增规则 MUST 先征得用户同意）**
 
 提案内容（待用户同意后写入 `specs/3.3-tui-cli.md`，位于 3.3.8 Markdown 间距策略之后新增 3.3.9）：
 
@@ -682,17 +682,17 @@ Target 文档：`specs/3.3-tui-cli.md`（TUI 分片）。当前不符合点：�
 
 ### Task 6: Push 与 PR
 
-- [ ] **Step 6.1: 同步最新主分支（specs/3.14.6 MUST）**
+- [x] **Step 6.1: 同步最新主分支（specs/3.14.6 MUST）**
 
 Run: `git pull origin main`
 Expected: Already up to date 或产生合并提交（有冲突则逐项解决，**NEVER 丢弃任一侧测试**，Constitution #12）。
 
-- [ ] **Step 6.2: Push（pre-push 自动跑 17 个架构守卫 + workspace 单测）**
+- [x] **Step 6.2: Push（pre-push 自动跑 17 个架构守卫 + workspace 单测）**
 
 Run: `git push -u origin fix/1670-display-control-chars`
 Expected: 守卫与单测全过；若被 `--no-verify` 绕过（仅在用户明确要求时），PR Test plan MUST 披露并补跑。阻断时按 `specs/3.14.9` 处理并报告。
 
-- [ ] **Step 6.3: 创建 PR（body-file 方式，PR 模板四段齐全）**
+- [x] **Step 6.3: 创建 PR（body-file 方式，PR 模板四段齐全）**
 
 写 `/tmp/pr-1670.md`：
 
