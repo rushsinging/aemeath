@@ -170,7 +170,7 @@ git commit -m "feat(tui): #1670 共享显示文本控制字符归一化函数"
 - Test（同文件内 `mod tests`）: `wrap.rs` / `rendered.rs` / `blocks/user_message.rs` / `blocks/assistant_message.rs`
 - Test: `apps/cli/src/tui/render/output/document_renderer/tests.rs`（L4 场景 ×2）
 
-- [ ] **Step 2.1: 写 7 个（6 组）失败复现测试（红）**
+- [ ] **Step 2.1: 写 7 个测试（5 组）失败复现测试（红）**
 
 **(a) `primitives/wrap.rs` tests 模块追加：**
 
@@ -637,7 +637,7 @@ Expected: 全部通过；若阻断，按 `specs/3.14.9` 止血并先修复阻断
 - [ ] **Step 4.5: 死代码/废弃路径检查（specs/3.14.7）**
 
 Run: `grep -rn "expand_tabs\|sanitize_for_display" apps/cli/src/`
-Expected: `expand_tabs` 零命中；`sanitize_for_display` 若命中仅剩注释引用，顺手在 Task 3 注释更新中已一并清理（残留则本步清理并 amend 进 Task 3 commit）。
+Expected: `expand_tabs` 仅 1 处测试注释历史提及（`output_tool_view_tests.rs`，非代码调用）；`sanitize_for_display` 零命中。
 
 - [ ] **Step 4.6: 更新 issue 状态为「修复中」**
 
