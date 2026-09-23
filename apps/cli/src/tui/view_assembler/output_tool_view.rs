@@ -1,6 +1,7 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatRunId, ToolCallId};
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use crate::tui::view_model::display_text::normalize_display_control_chars;
 use crate::tui::view_model::output::{AgentActivityKindView, AgentActivityLineView};
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{AgentMetaView, SemanticStyle, ToolCallBlockView, ToolSemanticStatus};
@@ -155,9 +156,9 @@ pub(super) fn display_text_for_tool_result(
     fallback_output: &str,
     content: &serde_json::Value,
 ) -> String {
-    // 建议同步（#196）：Bash/Read 工具结果在进入 TUI 渲染前把 `\t` 展开为 4 空格，
-    // 避免底层 buffer 写入把 `\t` 当控制字符过滤带来的列宽不一致。
-    // 不用 `sanitize_for_display` 是因为它会同时剥掉 `\n`，破坏多行 Read 输出。
+    // issue #196/#1670：tool result 文本进入 TUI 渲染前走共享控制字符归一化
+    // （\t → 4 空格，\n 保留，其余控制字符 → U+FFFD），策略单一真相见
+    // view_model::display_text。
     if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
         let message = content
             .get("message")
@@ -169,9 +170,9 @@ pub(super) fn display_text_for_tool_result(
             .filter(|value| !value.is_empty());
         match (message, branch) {
             (Some(message), Some(branch)) => {
-                return expand_tabs(&format!("{message}\n当前分支：{branch}"));
+                return normalize_display_control_chars(&format!("{message}\n当前分支：{branch}"));
             }
-            (Some(message), None) => return expand_tabs(message).to_string(),
+            (Some(message), None) => return normalize_display_control_chars(message),
             _ => {}
         }
     }
@@ -184,21 +185,7 @@ pub(super) fn display_text_for_tool_result(
         .or_else(|| content.get("text").and_then(|value| value.as_str()))
         .map(str::to_string)
         .unwrap_or_else(|| fallback_output.to_string());
-    expand_tabs(&text).to_string()
-}
-
-/// 把 `\t` 展开为 4 空格（issue #196 建议同步专用）。其它控制字符与换行一律保留，
-/// 不调用 `sanitize_for_display` 以免破坏多行 tool result。
-fn expand_tabs(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if ch == '\t' {
-            out.push_str("    ");
-        } else {
-            out.push(ch);
-        }
-    }
-    out
+    normalize_display_control_chars(&text)
 }
 
 fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {
@@ -218,5 +205,25 @@ fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus,
         ToolCallStatus::Success => ("✓", ToolSemanticStatus::Success, SemanticStyle::Success),
         ToolCallStatus::Error => ("✗", ToolSemanticStatus::Error, SemanticStyle::Error),
         ToolCallStatus::Cancelled => ("✗", ToolSemanticStatus::Cancelled, SemanticStyle::Error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_text_for_tool_result;
+
+    #[test]
+    fn test_tool_result_display_text_expands_tab_via_shared_normalize() {
+        let content = serde_json::json!({ "display": "col1\tcol2" });
+        let text = display_text_for_tool_result(Some("Bash"), "fallback", &content);
+        assert_eq!(text, "col1    col2");
+    }
+
+    #[test]
+    fn test_tool_result_display_text_replaces_escape_via_shared_normalize() {
+        // 共享策略增强：ESC 阻断（原 expand_tabs 会原样保留）。
+        let content = serde_json::json!({ "display": "a\u{1b}[31m" });
+        let text = display_text_for_tool_result(Some("Bash"), "fallback", &content);
+        assert_eq!(text, "a\u{fffd}[31m");
     }
 }
