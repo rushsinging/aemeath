@@ -451,3 +451,42 @@ fn test_render_spinner_does_not_overflow_into_scrollbar_gap_very_narrow_terminal
         }
     }
 }
+
+/// 输出区清除必须把**显式** `bg=BASE` 写进 buffer，绝不把 `Color::Reset`
+/// 送到终端——crossterm 对 Reset bg 处理不正确，ghostty 系终端会保留旧背景
+/// （表现为退格后蓝色光标格残留在屏幕上、持续累积）。与 input area 的
+/// 既有修复（`render/input_area/render.rs` 的 `set_style(bg(BASE))`）同一模式。
+#[test]
+fn test_render_clears_viewport_with_explicit_base_bg_never_reset() {
+    let mut area = OutputArea::new();
+    area.replace_document(RenderedDocument {
+        blocks: vec![RenderedBlock {
+            block_id: "short".into(),
+            lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("hi")])]),
+        }],
+        root_group_block_counts: Vec::new(),
+        block_line_ends: Vec::new(),
+    });
+    let area_rect = Rect::new(0, 0, 8, 4);
+    let view = OutputViewState {
+        last_visible_height: 4,
+        ..Default::default()
+    };
+    let mut buf = Buffer::empty(area_rect);
+    // 模拟上一帧残留：整行脏的 ACCENT 蓝色 bg（Type something 光标色）
+    for x in 0..area_rect.width {
+        buf[(x, 3)].set_bg(theme::ACCENT);
+    }
+
+    area.render(area_rect, &mut buf, &view, &no_live_status());
+
+    for y in 0..area_rect.height {
+        for x in 0..area_rect.width {
+            assert_eq!(
+                buf[(x, y)].bg,
+                theme::BASE,
+                "cell ({x},{y}) 清除后必须携带显式 BASE bg，Color::Reset 会在终端残留"
+            );
+        }
+    }
+}
