@@ -46,6 +46,11 @@ mod tests {
     }
 
     #[test]
+    fn test_carriage_return_replaced_and_newline_kept_in_crlf() {
+        assert_eq!(normalize_display_control_chars("a\r\nb"), "a\u{fffd}\nb");
+    }
+
+    #[test]
     fn test_escape_char_replaced_with_replacement_char() {
         assert_eq!(
             normalize_display_control_chars("a\u{1b}[31m"),
