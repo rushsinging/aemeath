@@ -1,5 +1,6 @@
 pub mod conversation;
 pub mod dialog;
+pub mod display_text;
 pub mod input;
 pub mod live_status;
 pub mod markdown_spacing;
