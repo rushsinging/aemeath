@@ -250,6 +250,8 @@ else
 fi
 run_guard full bash "$HOOKS_DIR/check-runtime-large-file-responsibilities-tests.sh"
 run_guard full bash "$HOOKS_DIR/check-cost-tracker-retirement-tests.sh"
+run_guard full bash "$HOOKS_DIR/check-hexagonal-layer-purity-tests.sh"
+run_guard full bash "$HOOKS_DIR/check-crate-api-boundary-tests.sh"
 run_guard fast "$HOOKS_DIR/check-composition-construction-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-cross-bc-construction-registry.sh"
 run_guard fast "$HOOKS_DIR/check-cross-bc-construction-registry-tests.sh"

@@ -28,6 +28,13 @@
       "owner_issue": 649,
       "risk": "随机 spinner 文案会导致快照不稳定",
       "exit_condition": "场景 Harness 固定文案，生产随机源保持隔离"
+    },
+    {
+      "kind": "wall-clock",
+      "path": "agent/features/runtime/src/application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
+      "owner_issue": 649,
+      "risk": "跨回合 duration 比较在并行全量测试下抖动（#1022 PR-2 全量复现，单测重跑通过）",
+      "exit_condition": "改为注入 Clock/VirtualClock 或放宽比较容差"
     }
   ]
 }
