@@ -82,8 +82,36 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("guard") => {
+            let mut profile = xtask::guards::Profile::Full;
+            let mut rule_filter: Option<String> = None;
+            let mut rest = args;
+            while let Some(flag) = rest.next() {
+                match flag.as_str() {
+                    "--fast" => profile = xtask::guards::Profile::Fast,
+                    "--full" => profile = xtask::guards::Profile::Full,
+                    "--rule" => {
+                        rule_filter =
+                            Some(rest.next().context("--rule 需要规则 id 参数")?);
+                    }
+                    other => anyhow::bail!("未知 guard 参数：{other}"),
+                }
+            }
+            let root = PathBuf::from(env::var("AEMEATH_PROJECT_DIR").unwrap_or_else(|_| ".".into()));
+            let report = xtask::guards::run(&root, profile, rule_filter.as_deref())?;
+            if !report.violations.is_empty() {
+                eprint!("{}", report.render());
+                eprintln!();
+                std::process::exit(2);
+            }
+            println!(
+                "guard: {} rules checked, 0 violations, {:?}",
+                report.rules_run, report.duration
+            );
+            Ok(())
+        }
         _ => anyhow::bail!(
-            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|sdk-wire-schema <write|check> [output]|source-guard [root] [public-surface-output]>"
+            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|sdk-wire-schema <write|check> [output]|source-guard [root] [public-surface-output]|guard [--fast|--full|--rule <id>]>"
         ),
     }
 }

@@ -10,6 +10,18 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 HOOKS_DIR="$ROOT/.agents/hooks"
 
+# 守卫引擎切换（#1675 并存期）：AEMEATH_GUARD_ENGINE=xtask 时薄壳直接转发
+# xtask guard，跳过旧脚本编排；默认留空走旧链路，直至分批迁移完成。
+if [ "${AEMEATH_GUARD_ENGINE:-}" = "xtask" ]; then
+  mode="${1:---full}"
+  case "$mode" in
+    --fast) exec cargo run --quiet -p xtask -- guard --fast ;;
+    --full) exec cargo run --quiet -p xtask -- guard --full ;;
+    *) exec cargo run --quiet -p xtask -- guard "$@" ;;
+  esac
+fi
+
+
 run_tui_single_source_structure_guard() {
   local fail=0
 

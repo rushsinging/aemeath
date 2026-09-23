@@ -1154,5 +1154,7 @@
       "exit_condition": "retire together with the guarded script it verifies",
       "status": "active"
     }
-  ]
+  ],
+  "rules": [],
+  "retired_symbols": []
 }

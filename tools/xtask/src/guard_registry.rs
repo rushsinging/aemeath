@@ -33,6 +33,10 @@ struct Registry {
     #[serde(default)]
     construction_symbols: Vec<ConstructionSymbol>,
     entries: Vec<Entry>,
+    #[serde(default)]
+    rules: Vec<crate::guards_rules::Rule>,
+    #[serde(default)]
+    retired_symbols: Vec<crate::guards_rules::RetiredSymbol>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +88,8 @@ struct Scope {
 pub struct RegistryReport {
     pub migration_debt: usize,
     pub construction_symbols: usize,
+    pub rules: usize,
+    pub retired_symbols: usize,
     pub by_classification: BTreeMap<String, usize>,
     by_module: BTreeMap<String, usize>,
     by_guard: BTreeMap<String, usize>,
@@ -107,6 +113,8 @@ impl RegistryReport {
             "construction_symbols: {}\n",
             self.construction_symbols
         ));
+        output.push_str(&format!("rules: {}\n", self.rules));
+        output.push_str(&format!("retired_symbols: {}\n", self.retired_symbols));
         for (classification, count) in &self.by_classification {
             output.push_str(&format!("classification.{classification}: {count}\n"));
         }
@@ -321,10 +329,21 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
     if !violations.is_empty() {
         anyhow::bail!(violations.join("\n"));
     }
+    let mut rule_ids = BTreeSet::new();
+    for rule in &registry.rules {
+        if !rule_ids.insert(rule.id.as_str()) {
+            violations.push(format!("规则 id 重复：{}", rule.id));
+        }
+    }
+    if !violations.is_empty() {
+        anyhow::bail!(violations.join("\n"));
+    }
     report_entries.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(RegistryReport {
         migration_debt,
         construction_symbols: registry.construction_symbols.len(),
+        rules: registry.rules.len(),
+        retired_symbols: registry.retired_symbols.len(),
         by_classification,
         by_module,
         by_guard,
