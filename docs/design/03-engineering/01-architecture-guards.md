@@ -95,6 +95,17 @@
 
 `check-runtime-capability-assembly-ownership.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
+## -1. 守卫自测（#1074）
+
+守卫是验证者，自身也 **MUST** 有持久化回归测试（"验证验证者"）：守卫重构（如 #1022 对 layer-purity 的大幅重构）一旦使判定逻辑静默失效，仓库自身 clean 时总编排照样绿，只有 fixture 违规仓库能揭出。
+
+| 测试守卫 | 被测守卫 | 场景 |
+|---|---|---|
+| `check-hexagonal-layer-purity-tests.sh` | `check-hexagonal-layer-purity.sh` | R8 两向违规、COLA 目录复活、update 越界、config application 复活、clean 基线 |
+| `check-crate-api-boundary-tests.sh` | `check-crate-api-boundary.sh` | L0 `pub mod` 内部层、L1 层段穿透、L2 未登记符号、登记符号消费 + clean |
+
+实现模式：mktemp 迷你仓库（含 `.agents/hooks` 目录通过 env 有效性检查）+ `AEMEATH_PROJECT_DIR` 注入 + expect_block（非零退出且消息命中）/ clean pass 断言；tools/storage 的全量 façade 精确核对场景直接复制真实 `lib.rs` 文本（守卫为文本解析，无编译依赖，随源自动更新无 stale）。编排接入 full gate；registry 登记 `policy.repository.guard-selftest-*`（structural）。
+
 ## 0. check-guard-registry.sh
 
 - **功能**：调用 `cargo run -p xtask -- guard-registry check`，以 `.agents/architecture-guard-registry.json` 为单一机器可读治理注册表。

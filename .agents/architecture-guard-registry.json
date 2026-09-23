@@ -1119,6 +1119,40 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Context crate-root facade policy",
       "status": "active"
+    },
+    {
+      "id": "policy.repository.guard-selftest-hexagonal",
+      "guard": "check-hexagonal-layer-purity-tests.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "path_prefix",
+        "value": ".agents/hooks"
+      },
+      "classification": "target_capability_policy",
+      "mechanism_type": "structural",
+      "owner": "architecture",
+      "reason": "Guard self-test: fixture mini-repo end-to-end probes for R8 direction, COLA revival, update exception boundary and config layer lockout",
+      "tracking_issue": 1074,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retire together with the guarded script it verifies",
+      "status": "active"
+    },
+    {
+      "id": "policy.repository.guard-selftest-crate-api",
+      "guard": "check-crate-api-boundary-tests.sh",
+      "module": "repository",
+      "scope": {
+        "kind": "path_prefix",
+        "value": ".agents/hooks"
+      },
+      "classification": "target_capability_policy",
+      "mechanism_type": "structural",
+      "owner": "architecture",
+      "reason": "Guard self-test: fixture probes for pub-mod internal layer ban, cross-crate layer-segment penetration and unregistered facade symbols",
+      "tracking_issue": 1074,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "retire together with the guarded script it verifies",
+      "status": "active"
     }
   ]
 }
