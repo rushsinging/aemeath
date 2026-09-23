@@ -299,6 +299,7 @@ impl OutputViewAssembler {
                 output,
                 content,
                 is_error,
+                ..
             } => {
                 let display_output = display_text_for_tool_result(Some(tool_name), output, content);
                 let text =

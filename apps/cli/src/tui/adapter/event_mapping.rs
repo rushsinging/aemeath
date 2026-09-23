@@ -186,6 +186,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             content,
             is_error,
             images,
+            duration_ms,
         } => TuiRuntimeEvent::ToolResult {
             context: turn_context(context),
             id: id.as_str().to_string(),
@@ -194,6 +195,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             output,
             content,
             is_error,
+            duration_ms,
             images: images.into_iter().map(tool_image).collect(),
         },
         ChatEvent::SystemMessage(message) => TuiRuntimeEvent::SystemMessage(message),

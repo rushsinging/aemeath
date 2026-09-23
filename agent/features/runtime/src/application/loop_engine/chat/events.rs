@@ -90,6 +90,9 @@ pub enum RuntimeStreamEvent {
         content: serde_json::Value,
         is_error: bool,
         images: Vec<ImageData>,
+        /// supervisor 测量的工具执行耗时（毫秒）；非 supervisor 路径
+        /// （policy denied / guard blocked / cancelled）为 None（#1666）。
+        duration_ms: Option<u64>,
     },
     SystemMessage(String),
     ModelInvocationRetrying {

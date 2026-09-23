@@ -892,3 +892,52 @@ fn test_task_get_snake_case_task_id_shows_id() {
         "TaskGet header 应包含 task_id '7'，实际: {text}"
     );
 }
+
+// ── issue #1666：tool call 执行耗时展示（supervisor 测量值经事件流透传） ──
+
+#[test]
+fn test_format_tool_call_appends_duration_suffix() {
+    let payload = ToolResultPayload::new(
+        "ok".to_string(),
+        serde_json::json!({ "text": "ok" }),
+        false,
+        0,
+    )
+    .with_duration(Some(1_240));
+
+    let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, Some(&payload), None);
+
+    let text = line_to_string(&header);
+    assert!(
+        text.contains(" · 1.24s"),
+        "header 应追加 supervisor 耗时后缀: {text}"
+    );
+}
+
+#[test]
+fn test_format_tool_call_without_duration_omits_suffix() {
+    let payload = ToolResultPayload::new(
+        "ok".to_string(),
+        serde_json::json!({ "text": "ok" }),
+        false,
+        0,
+    );
+
+    let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, Some(&payload), None);
+
+    let text = line_to_string(&header);
+    assert!(
+        !text.contains(" · "),
+        "duration 为 None 时不得渲染耗时占位: {text}"
+    );
+}
+
+#[test]
+fn test_format_call_duration_ms_and_seconds() {
+    assert_eq!(super::format::format_call_duration(0), "0ms");
+    assert_eq!(super::format::format_call_duration(850), "850ms");
+    assert_eq!(super::format::format_call_duration(999), "999ms");
+    assert_eq!(super::format::format_call_duration(1_000), "1.00s");
+    assert_eq!(super::format::format_call_duration(1_240), "1.24s");
+    assert_eq!(super::format::format_call_duration(12_500), "12.50s");
+}

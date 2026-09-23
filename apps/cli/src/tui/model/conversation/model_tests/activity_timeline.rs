@@ -388,6 +388,7 @@ fn test_timeline_mirrors_blocks_with_inline_agent_activities_only() {
         content: serde_json::json!({ "text": "done" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     // Agent activity 不增加独立 timeline item（防双显示）

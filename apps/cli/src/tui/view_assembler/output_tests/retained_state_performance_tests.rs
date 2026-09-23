@@ -50,6 +50,7 @@ fn build_retained_state_workload(scale: usize) -> ConversationModel {
             content: serde_json::json!({ "text": format!("done-{index}") }),
             is_error: false,
             image_count: 0,
+            duration_ms: None,
         });
     }
     model

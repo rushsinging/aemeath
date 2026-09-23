@@ -35,6 +35,7 @@ fn test_conversation_observes_tool_lifecycle() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     assert!(changes.iter().any(|change| matches!(
@@ -62,6 +63,7 @@ fn test_conversation_reports_orphan_tool_result() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     assert!(changes.iter().any(|change| matches!(
         change,
@@ -199,6 +201,7 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         content: serde_json::json!({ "text": "workspace manifest" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let live_turn_model = model
@@ -288,6 +291,7 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -418,6 +422,7 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -468,5 +473,129 @@ fn test_conversation_late_tool_call_binds_existing_result() {
             .tool_calls[0]
             .status,
         ToolCallStatus::Success
+    );
+}
+
+// ── issue #1666：duration_ms 事件流透传（model 层） ──
+
+/// #1666：ToolResult intent 的 duration_ms 必须落到 ToolCall.result.payload，
+/// NEVER 丢弃——这是 TUI 展示耗时的数据源。
+#[test]
+fn test_tool_result_intent_stores_duration_on_payload() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-dur");
+    let run_id = super::ids::ChatRunId::new("turn-dur");
+    let tool_id = super::ids::ToolCallId::new("tool-dur");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+    model.apply(ToolCallUpdate {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        provider_id: Some("provider-dur".to_string()),
+        id: tool_id.clone(),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+    model.apply(ToolResult {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        provider_id: "provider-dur".to_string(),
+        id: tool_id.clone(),
+        tool_name: "Bash".to_string(),
+        output: "ok".to_string(),
+        content: serde_json::json!({ "text": "ok" }),
+        is_error: false,
+        image_count: 0,
+        duration_ms: Some(1_240),
+    });
+
+    let call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == chat_id)
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == run_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(&tool_id))
+        })
+        .expect("tool call should exist");
+
+    assert_eq!(
+        call.result.as_ref().and_then(|payload| payload.duration_ms),
+        Some(1_240),
+        "payload 必须保留 intent 携带的耗时"
+    );
+}
+
+/// #1666：orphan 链——result 先于 call 到达暂存 timeline，call 到达 promote 时
+/// duration 必须读回，NEVER 丢失。
+#[test]
+fn test_orphan_tool_result_promote_preserves_duration() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-orphan-dur");
+    let run_id = super::ids::ChatRunId::new("turn-orphan-dur");
+    let tool_id = super::ids::ToolCallId::new("tool-late-dur");
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+
+    // result 先到 → orphan 暂存（duration 挂在 item 上）
+    model.apply(ToolResult {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        provider_id: "provider-1".to_string(),
+        id: tool_id.clone(),
+        tool_name: "Read".to_string(),
+        output: "late".to_string(),
+        content: serde_json::json!({ "text": "late" }),
+        is_error: false,
+        image_count: 0,
+        duration_ms: Some(880),
+    });
+
+    // call 后到 → promote 读回 duration（promote 在 ToolCallUpdate 绑定时触发）
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+    model.apply(ToolCallUpdate {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        provider_id: Some("provider-1".to_string()),
+        id: tool_id.clone(),
+        name: "Read".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+
+    let call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == chat_id)
+        .and_then(|chat| chat.runs.iter().find(|turn| turn.id == run_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(&tool_id))
+        })
+        .expect("promoted tool call should exist");
+
+    assert_eq!(
+        call.result.as_ref().and_then(|payload| payload.duration_ms),
+        Some(880),
+        "promote 必须从 orphan item 读回耗时"
     );
 }

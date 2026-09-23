@@ -16,6 +16,9 @@ pub struct ToolExecution {
     pub tool_name: String,
     pub outcome: ToolOutcome,
     pub typed_outcome: ToolExecutionOutcome,
+    /// supervisor 测量的工具执行耗时（毫秒，#1666）；
+    /// 非 supervisor 路径为 None。
+    pub duration_ms: Option<u64>,
 }
 
 impl ToolExecution {
@@ -26,6 +29,7 @@ impl ToolExecution {
             tool_name: call.name.clone(),
             typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
+            duration_ms: None,
         }
     }
 
@@ -36,6 +40,7 @@ impl ToolExecution {
             tool_name: call.name.clone(),
             outcome: legacy_outcome(typed_outcome.clone()),
             typed_outcome,
+            duration_ms: None,
         }
     }
 
@@ -51,6 +56,21 @@ impl ToolExecution {
             tool_name,
             typed_outcome: legacy_tool_execution_outcome(&outcome),
             outcome,
+            duration_ms: None,
+        }
+    }
+
+    /// 附加 supervisor 测量的执行耗时（#1666）。
+    pub fn with_duration(mut self, duration_ms: u64) -> Self {
+        self.duration_ms = Some(duration_ms);
+        self
+    }
+
+    /// 附加可选的 supervisor 测量耗时（#1666）：None 时保持原值。
+    pub fn with_optional_duration(self, duration_ms: Option<u64>) -> Self {
+        match duration_ms {
+            Some(duration_ms) => self.with_duration(duration_ms),
+            None => self,
         }
     }
 }
@@ -240,18 +260,18 @@ impl Agent {
         ctx: &ToolExecutionContext,
         step_id: &sdk::RunStepId,
     ) -> ToolExecution {
-        ToolExecution::new_typed(
-            call,
-            self.execute_one_outcome_with_ctx(call, ctx, step_id).await,
-        )
+        let (outcome, duration_ms) = self.execute_one_outcome_with_ctx(call, ctx, step_id).await;
+        ToolExecution::new_typed(call, outcome).with_optional_duration(duration_ms)
     }
 
+    /// 执行单个工具并返回 outcome 与 supervisor 测量的耗时毫秒
+    /// （#1666；supervisor 错误兜底路径为 None）。
     pub(crate) async fn execute_one_outcome_with_ctx(
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
         step_id: &sdk::RunStepId,
-    ) -> ToolExecutionOutcome {
+    ) -> (ToolExecutionOutcome, Option<u64>) {
         let authorization = ctx.authorization();
         let mut input = call.input.clone();
         tools::strip_runtime_meta(&mut input);
@@ -288,8 +308,15 @@ impl Agent {
                 child_cancellation: child_token,
             })
             .await
+            .map(|(outcome, duration)| (outcome, Some(duration.as_millis() as u64)))
             .unwrap_or_else(|error| {
-                ToolExecutionOutcome::failure(tools::ToolErrorKind::Internal, error.to_string())
+                (
+                    ToolExecutionOutcome::failure(
+                        tools::ToolErrorKind::Internal,
+                        error.to_string(),
+                    ),
+                    None,
+                )
             })
     }
 }

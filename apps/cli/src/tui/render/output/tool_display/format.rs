@@ -51,6 +51,30 @@ pub fn format_subagent_tool_header(
         })
 }
 
+/// #1666：执行耗时展示格式：`850ms`（<1s）/ `1.24s`（≥1s，两位小数）。
+pub(super) fn format_call_duration(duration_ms: u64) -> String {
+    if duration_ms < 1_000 {
+        format!("{duration_ms}ms")
+    } else {
+        format!("{:.2}s", duration_ms as f64 / 1_000.0)
+    }
+}
+
+/// #1666：header 尾部追加 supervisor 耗时后缀 ` · 1.24s`（muted 色）；
+/// duration 为 None（非 supervisor 路径 / 旧数据）时原样返回，NEVER 渲染占位。
+fn append_duration_suffix(
+    mut line: Line<'static>,
+    result_payload: Option<&ToolResultPayload>,
+) -> Line<'static> {
+    if let Some(duration_ms) = result_payload.and_then(|payload| payload.duration_ms) {
+        line.spans.push(Span::styled(
+            format!(" · {}", format_call_duration(duration_ms)),
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
+    }
+    line
+}
+
 /// Format a tool call for human-friendly display.
 pub fn format_tool_call(
     name: &str,
@@ -62,8 +86,10 @@ pub fn format_tool_call(
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        let header =
-            display.format_header_line_with_result(&parsed, result_payload, workspace_root);
+        let header = append_duration_suffix(
+            display.format_header_line_with_result(&parsed, result_payload, workspace_root),
+            result_payload,
+        );
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -72,14 +98,15 @@ pub fn format_tool_call(
     }
 
     let truncated = truncate_json(raw_json);
+    let header = Line::from(vec![
+        Span::raw("● "),
+        Span::styled(
+            tool_display_name(name).to_string(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        ),
+    ]);
     (
-        Line::from(vec![
-            Span::raw("● "),
-            Span::styled(
-                tool_display_name(name).to_string(),
-                Style::default().fg(theme::ACCENT_BRIGHT),
-            ),
-        ]),
+        append_duration_suffix(header, result_payload),
         vec![truncated],
     )
 }

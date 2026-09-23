@@ -80,6 +80,7 @@ fn edit_conversation(edit_count: usize, lines_per_diff: usize) -> ConversationMo
             }),
             is_error: false,
             image_count: 0,
+            duration_ms: None,
         });
     }
     conversation

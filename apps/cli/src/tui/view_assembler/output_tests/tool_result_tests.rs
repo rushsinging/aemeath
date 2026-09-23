@@ -164,6 +164,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         content: serde_json::json!({ "text": "replaced 1 occurrence(s) in docs/bug/active.md\n---DIFF---\nold\n---DIFF---\nnew" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -475,6 +476,7 @@ fn test_output_assembler_hides_streaming_preview_when_tool_completed() {
         content: serde_json::json!({ "text": "子代理最终输出文本" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let vm = assemble_output_view(&conversation, None);
@@ -734,6 +736,7 @@ fn test_output_assembler_completed_tool_has_single_authoritative_result_child() 
         content: serde_json::json!({ "text": "final output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let vm = assemble_output_view(&conversation, None);

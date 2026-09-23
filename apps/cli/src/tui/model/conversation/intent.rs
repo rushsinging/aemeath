@@ -92,6 +92,8 @@ pub struct ToolResult {
     pub content: serde_json::Value,
     pub is_error: bool,
     pub image_count: usize,
+    /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）。
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -305,6 +305,7 @@ mod tests {
             output: "out".to_string(),
             content: serde_json::json!({}),
             is_error: false,
+            duration_ms: None,
         });
         assert!(model.contains_orphan("orphan-1"));
 

@@ -76,6 +76,9 @@ pub enum OutputTimelineItem {
         output: String,
         content: serde_json::Value,
         is_error: bool,
+        /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）；
+        /// result 先于 call 到达时暂存于此，promote 时读回。
+        duration_ms: Option<u64>,
     },
     AskUserBatch {
         id: String,

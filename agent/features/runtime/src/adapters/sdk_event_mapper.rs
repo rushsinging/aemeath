@@ -309,6 +309,7 @@ pub(crate) fn map_stream_event(
             content,
             is_error,
             images,
+            duration_ms,
         } => ChatEvent::ToolResult {
             context: turn_context_to_sdk(context),
             id,
@@ -317,6 +318,7 @@ pub(crate) fn map_stream_event(
             output,
             content,
             is_error,
+            duration_ms,
             images: images
                 .into_iter()
                 .map(|image| ToolResultImage {

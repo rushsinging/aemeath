@@ -60,7 +60,8 @@ pub(super) fn find_tool_view(
                 model_payload.content.clone(),
                 model_payload.is_error,
                 model_payload.image_count,
-            );
+            )
+            .with_duration(model_payload.duration_ms);
             let text = display_text_for_tool_result(
                 Some(&call.name),
                 &model_payload.output,

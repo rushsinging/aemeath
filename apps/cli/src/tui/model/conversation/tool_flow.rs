@@ -74,16 +74,17 @@ impl ConversationModel {
                 output,
                 content,
                 is_error,
+                duration_ms,
                 ..
             } = item
             {
                 if orphan_id == id {
-                    return Some((output.clone(), content.clone(), *is_error));
+                    return Some((output.clone(), content.clone(), *is_error, *duration_ms));
                 }
             }
             None
         });
-        let Some((output, content, is_error)) = orphan_payload else {
+        let Some((output, content, is_error, duration_ms)) = orphan_payload else {
             return;
         };
         if self
@@ -91,7 +92,7 @@ impl ConversationModel {
                 chat_id,
                 run_id,
                 id,
-                ToolResultPayload::new(output, content, is_error, 0),
+                ToolResultPayload::new(output, content, is_error, 0).with_duration(duration_ms),
             )
             .is_some()
         {
@@ -118,13 +119,15 @@ impl ConversationModel {
         content: serde_json::Value,
         is_error: bool,
         image_count: usize,
+        duration_ms: Option<u64>,
     ) -> Vec<ConversationChange> {
         self.ensure_runtime_turn(chat_id.clone(), run_id.clone());
         if let Some(status) = self.complete_tool_in_context(
             &chat_id,
             &run_id,
             id.as_ref(),
-            ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
+            ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count)
+                .with_duration(duration_ms),
         ) {
             self.insert_tool_result_after_tool_call(chat_id.clone(), run_id.clone(), id.clone());
             crate::tui::log_debug!(
@@ -153,6 +156,7 @@ impl ConversationModel {
             output: output.clone(),
             content: content.clone(),
             is_error,
+            duration_ms,
         });
         crate::tui::log_debug!(
             "model observe tool_result orphan id={} is_error={} image_count={} timeline_items_after={}",
