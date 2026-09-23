@@ -269,7 +269,6 @@ async fn role_policies_surface_as_role_profiles() {
                 "Glob".to_string(),
                 "WebSearch".to_string(),
                 "WebFetch".to_string(),
-                "ToolSearch".to_string(),
             ],
             capabilities: Vec::new(),
         },

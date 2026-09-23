@@ -239,7 +239,6 @@ fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleDefinition)> {
                     "TaskGet",
                     "TaskListGet",
                     "TaskLists",
-                    "ToolSearch",
                 ],
                 "Planning and task breakdown; read-only plus web research",
             ),
@@ -247,54 +246,27 @@ fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleDefinition)> {
         (
             "coder",
             policy_role(
-                &[
-                    "Read",
-                    "Write",
-                    "Edit",
-                    "Glob",
-                    "Grep",
-                    "Bash",
-                    "ToolSearch",
-                    "Skill",
-                ],
+                &["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill"],
                 "Implementation; read/write/execute, no agent dispatch",
             ),
         ),
         (
             "explorer",
             policy_role(
-                &[
-                    "Read",
-                    "Grep",
-                    "Glob",
-                    "WebSearch",
-                    "WebFetch",
-                    "ToolSearch",
-                ],
+                &["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
                 "Local and web code retrieval",
             ),
         ),
         (
             "tester",
             policy_role(
-                &[
-                    "Read",
-                    "Write",
-                    "Edit",
-                    "Bash",
-                    "Grep",
-                    "Glob",
-                    "ToolSearch",
-                ],
+                &["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
                 "Test authoring and execution",
             ),
         ),
         (
             "reviewer",
-            policy_role(
-                &["Read", "Grep", "Glob", "WebSearch", "ToolSearch"],
-                "Read-only review",
-            ),
+            policy_role(&["Read", "Grep", "Glob"], "Read-only review"),
         ),
     ]
 }

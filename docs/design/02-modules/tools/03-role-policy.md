@@ -86,11 +86,11 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 
 | Role | allowed_tools | 定位 |
 |---|---|---|
-| **planner** | Read, Grep, Glob, WebSearch, WebFetch, TaskGet, TaskListGet, TaskLists, ToolSearch | 规划与拆解：只读 + 联网 + Task 读；禁写、禁执行、禁派发 |
-| **coder** | Read, Write, Edit, Glob, Grep, Bash, ToolSearch, Skill | 执行者：读写执行；禁 AgentDispatch（防递归派发） |
-| **explorer** | Read, Grep, Glob, WebSearch, WebFetch, ToolSearch | 检索：本地 + 联网，最瘦 |
-| **tester** | Read, Write, Edit, Bash, Grep, Glob, ToolSearch | 测试编写与运行 |
-| **reviewer** | Read, Grep, Glob, WebSearch, ToolSearch | 只读审查 |
+| **planner** | Read, Grep, Glob, WebSearch, WebFetch, TaskGet, TaskListGet, TaskLists | 规划与拆解：只读 + 联网 + Task 读；禁写、禁执行、禁派发 |
+| **coder** | Read, Write, Edit, Glob, Grep, Bash, Skill | 执行者：读写执行；禁 AgentDispatch（防递归派发） |
+| **explorer** | Read, Grep, Glob, WebSearch, WebFetch | 检索：本地 + 联网，最瘦 |
+| **tester** | Read, Write, Edit, Bash, Grep, Glob | 测试编写与运行 |
+| **reviewer** | Read, Grep, Glob | 只读审查 |
 
 内置 role 是**职能定义**（policy + description），不含 model；内置职能没有隐式实例——派发必须命中 `names` 中的具名实例（model 取实例值或回退 `default_model`）。内置 capability 位由 allowed_tools 对应工具的 required capabilities 推导。用户要给某职能加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖职能即可——机制支持一切名单，内置默认从简。
 
