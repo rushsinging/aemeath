@@ -683,6 +683,68 @@ mod interaction_routing {
         );
     }
 
+    /// 单 tool call 多题 suspension 必须原样发布为 UserQuestions 数组
+    /// （engine 不得截断为第一题）。
+    #[tokio::test]
+    async fn multi_question_suspension_publishes_all_questions_in_order() {
+        let call = call(
+            "AskUserQuestion",
+            json!({"questions": [{"question": "q1"}, {"question": "q2"}]}),
+        );
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![
+                SuspendedQuestion {
+                    prompt: "q1".to_string(),
+                    options: vec![sdk::OptionItem::new("a", "first")],
+                    allow_multi: false,
+                },
+                SuspendedQuestion {
+                    prompt: "q2".to_string(),
+                    options: vec![sdk::OptionItem::new("b", "second")],
+                    allow_multi: true,
+                },
+            ],
+        };
+
+        let (mut run, root, mut port) = setup_tool_run(
+            ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            },
+            ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            },
+        );
+
+        let directive = run_loop(
+            &mut run,
+            &mut crate::application::run::execution_state::RunExecutionState::new(),
+            &root,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .unwrap();
+        assert_eq!(directive, LoopDirective::AwaitUser);
+
+        let published = port.published_interactions.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        match &published[0].body {
+            sdk::InteractionRequestBody::UserQuestions(questions) => {
+                assert_eq!(questions.len(), 2, "多题不得被截断");
+                assert_eq!(questions[0].prompt, "q1");
+                assert_eq!(questions[1].prompt, "q2");
+                assert_eq!(questions[0].options[0].description.as_deref(), Some("first"));
+                assert_eq!(questions[1].options[0].description.as_deref(), Some("second"));
+                assert!(!questions[0].allow_multi);
+                assert!(questions[1].allow_multi, "per-question allow_multi 必须保真");
+            }
+            other => panic!("expected UserQuestions body, got {other:?}"),
+        }
+    }
+
     // ── Continuation identity ──
 
     /// InteractionSuspended preserves CompleteToolCall continuation with

@@ -499,3 +499,65 @@ fn restore_answered_batch_appends_confirmed_history() {
         .collect::<Vec<_>>();
     assert_eq!(ids, vec!["ask-user-first", "ask-user-second"]);
 }
+
+// ── 粘贴投递（paste target）回归测试 ──
+
+#[test]
+fn insert_ask_user_chat_text_appends_at_cursor_and_advances_cursor() {
+    let mut model = ConversationModel::default();
+    show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+    enable_chat_input(&mut model);
+
+    model.apply(InsertAskUserChatText {
+        text: "hello".to_string(),
+    });
+    model.apply(MoveAskUserChatCursor { delta: -2 });
+    model.apply(InsertAskUserChatText {
+        text: "XY".to_string(),
+    });
+    if let OutputTimelineItem::AskUserBatch {
+        chat_input_text,
+        chat_input_cursor,
+        ..
+    } = timeline_item(&model)
+    {
+        assert_eq!(*chat_input_text, "helXYlo");
+        assert_eq!(*chat_input_cursor, 5);
+    }
+}
+
+#[test]
+fn insert_ask_user_chat_text_collapses_multiline_paste_to_single_line() {
+    let mut model = ConversationModel::default();
+    show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+    enable_chat_input(&mut model);
+
+    model.apply(InsertAskUserChatText {
+        text: "line one\nline two\nline three\nline four".to_string(),
+    });
+    if let OutputTimelineItem::AskUserBatch {
+        chat_input_text, ..
+    } = timeline_item(&model)
+    {
+        assert_eq!(*chat_input_text, "line one line two line three line four");
+    }
+}
+
+#[test]
+fn insert_ask_user_chat_text_ignored_outside_chat_input_substate() {
+    let mut model = ConversationModel::default();
+    show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
+
+    model.apply(InsertAskUserChatText {
+        text: "junk".to_string(),
+    });
+    if let OutputTimelineItem::AskUserBatch {
+        chat_input_text,
+        chat_input_active,
+        ..
+    } = timeline_item(&model)
+    {
+        assert!(!*chat_input_active);
+        assert!(chat_input_text.is_empty());
+    }
+}

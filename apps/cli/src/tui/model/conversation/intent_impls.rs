@@ -375,6 +375,12 @@ impl ConversationUpdate for AppendAskUserChatChar {
     }
 }
 
+impl ConversationUpdate for InsertAskUserChatText {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.insert_ask_user_chat_text(self.text)
+    }
+}
+
 impl ConversationUpdate for DeleteAskUserChatChar {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.delete_ask_user_chat_char()
@@ -591,6 +597,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToggleAskUserSelected(s) => s.update(model),
             Self::SetAskUserChatInput(s) => s.update(model),
             Self::AppendAskUserChatChar(s) => s.update(model),
+            Self::InsertAskUserChatText(s) => s.update(model),
             Self::DeleteAskUserChatChar(s) => s.update(model),
             Self::MoveAskUserChatCursor(s) => s.update(model),
             Self::MoveAskUserChatCursorEnd(s) => s.update(model),

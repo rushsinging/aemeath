@@ -789,3 +789,400 @@ fn ask_user_esc_during_chat_input_exits_chat_mode_not_cancel() {
     assert!(harness.app.model.conversation.ask_user_snapshot().is_some());
     harness.assert_idle();
 }
+
+/// 单 tool call 多题 batch 主流程：逐题作答 → 第二题必须可选择 → 确认页提交。
+/// 覆盖 issue #1673「多题时第二个问题无法选择」的 model + key + effect 链路。
+#[test]
+fn ask_user_multi_question_batch_answers_both_questions_in_order() {
+    use crate::tui::model::conversation::block::AskUserPhase;
+
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+
+    let request_id = UiInteractionRequestId::from("test-ask-multi");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![
+                TuiUserQuestion {
+                    prompt: "第一题".to_string(),
+                    options: vec![
+                        TuiOptionItem {
+                            title: "甲".to_string(),
+                            description: Some("甲的描述".to_string()),
+                        },
+                        TuiOptionItem {
+                            title: "乙".to_string(),
+                            description: Some("乙的描述".to_string()),
+                        },
+                    ],
+                    allow_multi: false,
+                },
+                TuiUserQuestion {
+                    prompt: "第二题".to_string(),
+                    options: vec![
+                        TuiOptionItem {
+                            title: "X".to_string(),
+                            description: Some("X的描述".to_string()),
+                        },
+                        TuiOptionItem {
+                            title: "Y".to_string(),
+                            description: Some("Y的描述".to_string()),
+                        },
+                    ],
+                    allow_multi: false,
+                },
+            ]),
+        },
+    ));
+    harness.render();
+
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("multi-question batch must be active");
+    assert_eq!(snapshot.active_index, 0);
+    assert_eq!(snapshot.phase, AskUserPhase::Answering);
+
+    // 第一题：选择「乙」
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch must stay active after first answer");
+    assert_eq!(snapshot.active_index, 1, "回答第一题后必须前进到第二题");
+    assert_eq!(
+        snapshot.phase,
+        AskUserPhase::Answering,
+        "第二题尚未作答，不得提前进入确认页"
+    );
+
+    // 第二题必须可选择：↑↓ 移动选项光标
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active while answering second question");
+    assert_eq!(snapshot.cursor, 1, "第二个问题的选项光标必须可移动");
+
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some(request_id.as_str().to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "乙".to_string(),
+                "Y".to_string(),
+            ]),
+        ),
+        replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
+    });
+
+    // 选择「Y」→ 进入确认页
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active on confirm page");
+    assert_eq!(
+        snapshot.phase,
+        AskUserPhase::Confirming,
+        "两题答完必须进入确认页"
+    );
+
+    // 确认页默认停在「全部确认提交」，Enter 提交两题答案
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::ReplyInteraction {
+            reply: crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers),
+            ..
+        } if answers == &vec!["乙".to_string(), "Y".to_string()]
+    )));
+    harness.assert_idle();
+}
+
+/// 第一题经 Type something 自由输入作答后，第二题自由输入必须可继续输入
+/// （chat_input_cursor 不得残留上一题的光标位置）。覆盖 issue #1673。
+#[test]
+fn ask_user_second_question_free_input_accepts_typing_after_first_free_text_answer() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+
+    let request_id = UiInteractionRequestId::from("test-ask-multi-free");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![
+                TuiUserQuestion {
+                    prompt: "第一题".to_string(),
+                    options: vec![TuiOptionItem {
+                        title: "A".to_string(),
+                        description: Some("A的描述".to_string()),
+                    }],
+                    allow_multi: false,
+                },
+                TuiUserQuestion {
+                    prompt: "第二题".to_string(),
+                    options: vec![TuiOptionItem {
+                        title: "B".to_string(),
+                        description: Some("B的描述".to_string()),
+                    }],
+                    allow_multi: false,
+                },
+            ]),
+        },
+    ));
+    harness.render();
+
+    // 第一题：进入 Type something 并自由输入作答
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Char('x'), KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active after first free-text answer");
+    assert_eq!(snapshot.active_index, 1, "必须前进到第二题");
+    assert_eq!(
+        snapshot.chat_input_cursor, 0,
+        "切换题目后自由输入光标必须归零，不得残留上一题位置"
+    );
+
+    // 第二题：进入 Type something 并输入
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Char('y'), KeyModifiers::NONE));
+    assert_eq!(
+        harness
+            .app
+            .model
+            .conversation
+            .ask_user_chat_text()
+            .as_deref(),
+        Some("y"),
+        "第二题自由输入框必须接受字符输入"
+    );
+
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some(request_id.as_str().to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "x".to_string(),
+                "y".to_string(),
+            ]),
+        ),
+        replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
+    });
+    // 第二题自由输入提交 → 确认页 → Enter 提交
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::ReplyInteraction {
+            reply: crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers),
+            ..
+        } if answers == &vec!["x".to_string(), "y".to_string()]
+    )));
+    harness.assert_idle();
+}
+
+/// 无 LLM 选项的问题直接落在 Type something 子态：↑ 与空文本 Enter
+/// 都必须能退出子态回到选项列表，不得把交互卡死。覆盖 issue #1673。
+#[test]
+fn ask_user_chat_input_substate_exits_on_up_arrow_and_empty_enter() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+
+    let request_id = UiInteractionRequestId::from("test-ask-substate");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id,
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "无选项问题".to_string(),
+                options: vec![],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.render();
+
+    // 无 LLM 选项 → cursor 0 即 Type something，Enter 进入子态
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active");
+    assert_eq!(snapshot.cursor, 0);
+    assert!(!snapshot.chat_input_active);
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active in substate");
+    assert!(
+        snapshot.chat_input_active,
+        "Enter 应进入 Type something 子态"
+    );
+
+    // ↑ 必须无条件退出子态（即使选项 cursor 为 0）
+    harness.key(input::press(KeyCode::Up, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active after Up");
+    assert!(
+        !snapshot.chat_input_active,
+        "↑ 必须退出 Type something 子态"
+    );
+
+    // 重新进入子态，空文本 Enter 必须退出子态
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active re-entering substate");
+    assert!(snapshot.chat_input_active);
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("batch active after empty Enter");
+    assert!(
+        !snapshot.chat_input_active,
+        "空文本 Enter 必须退出子态，不得无响应卡死"
+    );
+    harness.assert_idle();
+}
+
+/// 第一个 request 被 accepted 后，runtime 队列的第二个 InteractionRequested
+/// 到达时必须呈现为可选择的新 batch（并行 tool call 场景）。覆盖 issue #1673。
+#[tokio::test]
+async fn ask_user_second_interaction_request_after_first_accepted_is_selectable() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+    harness.app.agent_client = Some(Arc::new(AcceptingInteractionClient));
+
+    // 第一个 request（单题）
+    let first_request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000021");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: first_request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "第一问".to_string(),
+                options: vec![TuiOptionItem {
+                    title: "甲".to_string(),
+                    description: Some("甲的描述".to_string()),
+                }],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some(first_request_id.as_str().to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "甲".to_string(),
+            ]),
+        ),
+        replies: Vec::new(),
+    });
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    harness.execute_last_effect().await; // allow tea_side_effect: scenario drives the production effect executor
+    harness.render();
+    assert!(harness
+        .app
+        .model
+        .conversation
+        .active_interaction()
+        .is_none());
+
+    // 第二个 request 到达
+    let second_request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000022");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: second_request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "第二问".to_string(),
+                options: vec![TuiOptionItem {
+                    title: "乙".to_string(),
+                    description: Some("乙的描述".to_string()),
+                }],
+                allow_multi: false,
+            }]),
+        },
+    ));
+    harness.render();
+
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("第二个 request 必须呈现为可交互 batch");
+    assert_eq!(
+        snapshot.completion,
+        crate::tui::model::conversation::block::AskUserCompletion::Active
+    );
+    assert_eq!(snapshot.active_index, 0);
+
+    // 第二个问题必须可选择并提交
+    harness.expect_effect(ExpectedEffect::ReplyInteraction {
+        request_id: Some(second_request_id.as_str().to_string()),
+        reply: Some(
+            crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(vec![
+                "乙".to_string(),
+            ]),
+        ),
+        replies: vec![TuiMsg::Ui(UiEvent::SystemMessage("answered".into()))],
+    });
+    harness.key(input::press(KeyCode::Down, KeyModifiers::NONE));
+    let snapshot = harness
+        .app
+        .model
+        .conversation
+        .ask_user_snapshot()
+        .expect("第二个问题交互中");
+    assert_eq!(snapshot.cursor, 1, "第二个问题选项光标必须可移动");
+    harness.key(input::press(KeyCode::Up, KeyModifiers::NONE));
+    harness.key(input::press(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(harness.effects().iter().any(|effect| matches!(
+        effect,
+        crate::tui::effect::effect::Effect::ReplyInteraction {
+            reply: crate::tui::model::conversation::interaction::UiInteractionReply::UserAnswers(answers),
+            ..
+        } if answers == &vec!["乙".to_string()]
+    )));
+    harness.assert_idle();
+}

@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 mod agent_activity;
+mod ask_user_paste;
 mod chat;
 mod completion;
 mod config_status;

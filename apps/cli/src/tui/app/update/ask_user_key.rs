@@ -204,11 +204,20 @@ impl App {
             return Some(UpdateResult::none());
         };
 
-        let answers = self
-            .model
-            .conversation
-            .ask_user_batch_answers(&request_id)
-            .unwrap_or_default();
+        let answers = self.model.conversation.ask_user_batch_answers(&request_id);
+        let Some(answers) = answers else {
+            // active_interaction 存在但 batch 答案不完整：静默吞掉会导致
+            // 提交空答案或发不出 reply effect，必须留下可定位证据。
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[ask_user] answers lookup failed request_id={} — reply would be empty",
+                request_id.as_str(),
+            );
+            self.apply_agent_intent(AgentIntent::Conversation(
+                ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch),
+            ));
+            return Some(UpdateResult::none());
+        };
         let answer_lengths: Vec<usize> = answers
             .iter()
             .map(|answer| answer.chars().count())
@@ -261,6 +270,15 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Option<UpdateResult> {
+        // Cmd+V / Ctrl+V：与主输入区共用同一投递决策——读取剪贴板后由
+        // `route_paste` 按焦点把文本送入自由输入框。
+        if key.code == KeyCode::Char('v')
+            && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER)
+            && !self.input.just_pasted
+        {
+            self.input.just_pasted = true;
+            return Some(UpdateResult::one(Effect::ReadClipboardImage));
+        }
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                 let text = self
@@ -291,6 +309,8 @@ impl App {
                     );
                     return result;
                 }
+                // 空文本 Enter：退出自由输入子态回到选项列表，避免交互卡死
+                self.set_ask_user_chat_input(false);
             }
             KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.apply_agent_intent(AgentIntent::Conversation(
@@ -358,14 +378,9 @@ impl App {
                 ));
             }
             KeyCode::Up => {
-                let snapshot = self.model.conversation.ask_user_snapshot();
-                if let Some(snap) = snapshot {
-                    let last = snap.cursor;
-                    if last > 0 {
-                        self.set_ask_user_chat_input(false);
-                        self.set_ask_user_cursor(last);
-                    }
-                }
+                // ↑ 无条件退出自由输入子态回到选项列表（含选项 cursor 为 0 的
+                // 无 LLM 选项问题），避免子态把交互卡死。
+                self.set_ask_user_chat_input(false);
             }
             _ => {}
         }

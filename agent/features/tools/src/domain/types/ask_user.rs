@@ -9,18 +9,40 @@ pub struct AskUserQuestionResult {
     pub text: String,
 }
 
+/// One question inside the `questions` array — same fields as the top-level
+/// single-question form.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct QuestionItem {
+    /// The question prompt only. Do not include selectable choices here; put choices in options.
+    pub question: String,
+    /// Optional list of predefined answer choices. Each choice MUST be an object of the form
+    /// { "title": "...", "description": "..." } where both fields are required and non-empty.
+    /// Plain string choices are NOT accepted.
+    pub options: Option<Vec<Value>>,
+    /// If true, the user may select more than one predefined choice for this question
+    pub multi_select: Option<bool>,
+    /// If true, the user may answer this question with free text (defaults to true)
+    pub allow_free_input: Option<bool>,
+    /// Optional default answer for this question if user skips
+    pub default: Option<String>,
+}
+
 /// Typed input for the `ask_user` tool.
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AskUserQuestionInput {
+    /// The single-question form. Use `questions` instead to ask multiple questions in one
+    /// call; do not provide both.
+    ///
     /// The question prompt only. Do not include selectable choices here; put choices in options.
     ///
     /// Markdown is encouraged: use short paragraphs, `- ` bullet lists, and line breaks to
     /// structure complex confirmations. The TUI renders the full `question` as the body of
     /// the prompt area — it is never truncated or used as a header — so prefer multi-line
     /// Markdown over a single long sentence when the context warrants detail.
-    pub question: String,
+    /// Leave empty (or omit) when using the `questions` array.
+    pub question: Option<String>,
     /// Optional list of predefined answer choices. Each choice MUST be an object of the form
     /// { "title": "...", "description": "..." } where both fields are required and non-empty.
     /// Plain string choices are NOT accepted. Do not combine choices into one string or embed
@@ -35,4 +57,8 @@ pub struct AskUserQuestionInput {
     pub allow_free_input: Option<bool>,
     /// Optional default answer if user skips
     pub default: Option<String>,
+    /// Ask multiple questions in one call. The user answers them in order and all answers
+    /// are returned together. When this array is present, leave the top-level `question`
+    /// empty (never provide both forms).
+    pub questions: Option<Vec<QuestionItem>>,
 }
