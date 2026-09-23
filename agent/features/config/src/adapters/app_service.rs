@@ -65,9 +65,9 @@ impl ConfigAppService {
         Ok(service)
     }
 
-    /// 构造器仅限 config crate 内部：crate 外（Runtime/TUI/CLI/Composition）
-    /// 一律经 crate 根的 `wire_project_config*` 工厂装配，直接构造在编译期不可达。
-    pub(crate) fn with_global_path(project_dir: Option<&Path>, global_path: PathBuf) -> Self {
+    /// 测试可指定独立 global 路径（context 集成测试的 Facade harness 依赖）；
+    /// 生产构造一律经 crate 根 `wire_project_config*` 工厂（内部 `for_project`）。
+    pub fn with_global_path(project_dir: Option<&Path>, global_path: PathBuf) -> Self {
         let project_path = project_dir.map(share::config::paths::project_config_path);
         let claude_project_settings_path =
             project_dir.map(share::config::paths::project_claude_settings_path);
@@ -99,7 +99,9 @@ impl ConfigAppService {
         self
     }
 
-    pub(crate) fn with_native_store(mut self, native_store: NativeConfigStore) -> Self {
+    /// 测试 harness 注入自定义 store（context 集成测试）；生产构造经
+    /// crate 根 `wire_project_config*` 工厂（内部 `for_project`，pub(crate)）。
+    pub fn with_native_store(mut self, native_store: NativeConfigStore) -> Self {
         self.native_store = Some(native_store);
         self
     }
