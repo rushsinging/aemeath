@@ -87,6 +87,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        Vec::new(),
     )
     .unwrap();
 
@@ -189,6 +190,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
             memory_source(),
             workspace.control(),
             skill.loader(),
+            Vec::new(),
         )
         .unwrap();
         let scope = ExecutionScope::builder(
@@ -248,6 +250,7 @@ async fn deleted_skill_returns_failure_without_panicking() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        Vec::new(),
     )
     .unwrap();
     std::fs::remove_dir_all(temp.path().join(".agents/skills/gone")).unwrap();

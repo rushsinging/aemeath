@@ -118,12 +118,17 @@ async fn sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen() {
     assert!(!dispatch_stop_hook(parent.context()).await);
 
     let mut sub_config = blocking_hook_snapshot(2).to_config();
-    sub_config.agents.roles.insert(
+    sub_config.agents.names.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    sub_config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     sub_config.models.default = "test-provider/test-model".to_string();
     sub_config.models.providers.insert(
@@ -240,12 +245,17 @@ fn session_and_sub_runs_share_the_factory_usage_sink() {
 
     let usage_sink: Arc<dyn UsageSink> = Arc::new(RecordingUsageSink);
     let mut config = share::config::Config::default();
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config.models.default = "test-provider/test-model".to_string();
     config.models.providers.insert(

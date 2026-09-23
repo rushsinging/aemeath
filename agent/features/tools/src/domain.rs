@@ -13,6 +13,9 @@ pub mod published_language;
 #[cfg(test)]
 mod published_language_tests;
 pub mod resources;
+pub mod role_policy;
+#[cfg(test)]
+mod role_policy_tests;
 pub mod schema_validator;
 #[cfg(test)]
 mod schema_validator_tests;

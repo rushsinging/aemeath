@@ -63,7 +63,7 @@ fn standard_authorization_preserves_existing_guards() {
 fn standard_policy_returns_allow_with_standard_authorization() {
     let policy: &dyn PolicyPort = &StandardPolicy;
     assert_eq!(
-        policy.evaluate(&request("Read", ToolCapability::ReadWorkspace)),
+        policy.evaluate(&request("Read", ToolCapability::Read)),
         PolicyDecision::Allow(AuthorizationContext::STANDARD)
     );
 }
@@ -81,7 +81,7 @@ impl PolicyModeSource for MutableModeSource {
 fn configured_policy_reads_current_mode_for_every_evaluation() {
     let mode = std::sync::Arc::new(std::sync::RwLock::new(PermissionModeConfig::Ask));
     let policy = ConfiguredPolicy::new(MutableModeSource(mode.clone()));
-    let request = request("Read", ToolCapability::ReadWorkspace);
+    let request = request("Read", ToolCapability::Read);
 
     assert_eq!(
         policy.evaluate(&request),
@@ -113,9 +113,9 @@ fn policy_decision_future_variants_keep_typed_reason_and_subject() {
 fn allow_all_policy_contract_allows_every_valid_request() {
     let policy: &dyn PolicyPort = &AllowAllPolicy;
     for request in [
-        request("Read", ToolCapability::ReadWorkspace),
-        request("Edit", ToolCapability::WriteWorkspace),
-        request("Bash", ToolCapability::ExecuteProcess),
+        request("Read", ToolCapability::Read),
+        request("Edit", ToolCapability::Write),
+        request("Bash", ToolCapability::Execute),
     ] {
         assert_eq!(
             policy.evaluate(&request),
@@ -130,7 +130,7 @@ fn policy_request_rejects_empty_workspace_root() {
         RunId::new_v7(),
         RunStepId::new_v7(),
         ToolName::new("Read"),
-        ToolCapabilities::ReadWorkspace,
+        ToolCapabilities::Read,
         "",
     );
     assert!(result.is_err());

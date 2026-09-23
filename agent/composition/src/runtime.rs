@@ -34,11 +34,20 @@ fn wire_runtime_tool_assembly(
     agents_dir: &std::path::Path,
     context_size: usize,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
+    // 合并内置与 config 定义的角色（config 同名整条覆盖），编译为
+    // role:<name> 工具 profile；无 policy 的角色沿用 sub-agent-restricted。
+    let role_policies = snapshot
+        .agents()
+        .merged_roles()
+        .into_iter()
+        .filter_map(|(role, config)| config.policy.map(|policy| (role, policy)))
+        .collect::<Vec<_>>();
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
         memory_source,
         workspace_control,
         skill_loader,
+        role_policies,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     // 截断阈值按窗口比例收紧：短窗口下单条大结果会直接顶到

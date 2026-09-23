@@ -52,6 +52,9 @@ pub use domain::schema_validator::{
     RUNTIME_META_KEYS,
 };
 
+// Role-policy compilation: config strings → narrowed ToolProfile.
+pub use domain::role_policy::{compile_role_profile, role_profile_name, RolePolicyCompileError};
+
 // Runtime's phase-peel seam delegates to this Tools-owned typed parser.
 pub use adapters::ask_user::ask_user_suspension;
 

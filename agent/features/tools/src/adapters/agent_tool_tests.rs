@@ -7,7 +7,7 @@ struct StubRunner {
     captured_timeout: Mutex<std::time::Duration>,
     captured_system: Mutex<String>,
     captured_parent_run_id: Mutex<Option<String>>,
-    captured_role: Mutex<Option<String>>,
+    captured_agent: Mutex<Option<String>>,
     run_count: Mutex<usize>,
 }
 
@@ -17,7 +17,7 @@ impl AgentRunner for StubRunner {
         *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
         *self.captured_parent_run_id.lock().unwrap() = Some(request.identity.run_id().to_string());
-        *self.captured_role.lock().unwrap() = Some(request.role.to_string());
+        *self.captured_agent.lock().unwrap() = Some(request.agent_name.to_string());
         *self.run_count.lock().unwrap() += 1;
         AgentRunTerminal::Completed {
             result: request.prompt.to_string(),
@@ -46,7 +46,7 @@ async fn test_agent_tool_uses_finite_default_timeout() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
             }),
             &ctx,
         )
@@ -75,7 +75,7 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
                 "timeout": 20000,
             }),
             &ctx,
@@ -112,7 +112,7 @@ async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
             }),
             &ctx,
         )
@@ -136,7 +136,7 @@ async fn test_agent_tool_runs_without_task_id() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
             }),
             &ctx,
         )
@@ -145,25 +145,25 @@ async fn test_agent_tool_runs_without_task_id() {
     assert!(!result.is_error);
     assert_eq!(*runner.run_count.lock().unwrap(), 1);
     assert_eq!(
-        runner.captured_role.lock().unwrap().as_deref(),
+        runner.captured_agent.lock().unwrap().as_deref(),
         Some("coder")
     );
 }
 
 #[test]
-fn agent_tool_schema_requires_role_and_describes_configured_role_constraint() {
+fn agent_tool_schema_requires_agent_and_describes_configured_instance_constraint() {
     let schema = AgentTool.input_schema();
 
     assert!(schema["required"]
         .as_array()
-        .is_some_and(|required| required.contains(&serde_json::json!("role"))));
-    assert!(schema["properties"]["role"]["description"]
+        .is_some_and(|required| required.contains(&serde_json::json!("agent"))));
+    assert!(schema["properties"]["agent"]["description"]
         .as_str()
-        .is_some_and(|description| description.contains("agents.roles")));
+        .is_some_and(|description| description.contains("agents.names")));
 }
 
 #[tokio::test]
-async fn agent_tool_rejects_missing_role_before_dispatch() {
+async fn agent_tool_rejects_missing_agent_before_dispatch() {
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -229,7 +229,7 @@ async fn test_agent_tool_text_contains_subagent_output() {
             serde_json::json!({
                 "prompt": "这是子代理的实际产出内容",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
             }),
             &ctx,
         )
@@ -261,7 +261,7 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
             serde_json::json!({
                 "prompt": "anything",
                 "description": "run task",
-                "role": "coder",
+                "agent": "coder",
             }),
             &ctx,
         )

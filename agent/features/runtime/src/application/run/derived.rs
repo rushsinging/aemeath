@@ -35,7 +35,7 @@ pub struct CliAgentRunner {
 
 impl CliAgentRunner {
     #[cfg(test)]
-    fn role_max_tokens_override(role: &share::config::AgentRoleConfig) -> Option<u32> {
-        role.max_tokens.filter(|tokens| *tokens > 0)
+    fn role_max_tokens_override(instance: &share::config::AgentInstanceConfig) -> Option<u32> {
+        instance.max_tokens.filter(|tokens| *tokens > 0)
     }
 }

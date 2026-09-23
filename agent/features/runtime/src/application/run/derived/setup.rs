@@ -19,7 +19,7 @@ use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 /// determine the derived [`RunSpec`] and [`RuntimeContext`].
 #[derive(Debug, Clone)]
 pub struct SubRunRequest {
-    pub role: String,
+    pub agent_name: String,
     pub timeout: Duration,
 }
 
@@ -32,8 +32,8 @@ pub struct SubRunRequest {
 /// workspace capability retained by `DerivedRun.instance`.
 pub struct DerivedRun {
     pub instance: RunInstance,
-    /// Resolved role config — avoids re-parsing config snapshot in run_agent.
-    pub role_config: share::config::AgentRoleConfig,
+    /// Resolved named agent — avoids re-parsing config snapshot in run_agent.
+    pub resolved_agent: share::config::ResolvedAgent,
     /// Resolved model display string (e.g. "test-provider/test-model").
     pub model_display: String,
     /// Resolved model name (e.g. "test-model").
@@ -115,23 +115,31 @@ pub fn derive_sub_run(
 
     // 1. Derive the RunSpec from parent.
     let spec = parent_spec
-        .derive_sub(&request.role, request.timeout)
+        .derive_sub(&request.agent_name, request.timeout)
         .map_err(|e| RuntimeContextAssemblyError::SubDerivationFailed {
             reason: e.to_string(),
         })?;
 
     // 2. RuntimeContextFactory binds the derived workspace and live capabilities.
     let config_snapshot = parent_context.config().clone();
-    let role = config_snapshot
+    let resolved = match config_snapshot
         .config()
         .agents()
-        .roles
-        .get(&request.role)
-        .ok_or_else(|| RuntimeContextAssemblyError::SubRoleNotFound {
-            role: request.role.clone(),
-        })?
-        .clone();
-    let resolved_spec = role.model.clone();
+        .resolve_agent(&request.agent_name)
+    {
+        Some(share::config::ResolveAgentOutcome::Agent(agent)) => agent,
+        Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
+            return Err(RuntimeContextAssemblyError::SubAgentDisabled {
+                agent: instance_name,
+            })
+        }
+        None => {
+            return Err(RuntimeContextAssemblyError::SubAgentNotFound {
+                agent: request.agent_name.clone(),
+            })
+        }
+    };
+    let resolved_spec = resolved.model.clone();
     let isolated_session_id = sdk::SessionId::new_v7().to_string();
     let session = SessionState::new(
         isolated_session_id,
@@ -167,15 +175,15 @@ pub fn derive_sub_run(
             reason: "子 Run workspace 未完成绑定".to_string(),
         })?;
     let provider = run_instance.context().provider();
-    let model_display = role.model.clone();
-    let model_name = role.model.clone();
+    let model_display = resolved.model.clone();
+    let model_name = resolved.model.clone();
     let max_tokens = provider.max_tokens;
     let reasoning_level = provider.requested_reasoning;
 
     Ok(DerivedRun {
         session_id: run_instance.session().session_id().to_string(),
         instance: run_instance,
-        role_config: role,
+        resolved_agent: resolved,
         model_display,
         model_name,
         max_tokens,
@@ -199,7 +207,7 @@ impl AgentRunner for CliAgentRunner {
         let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
         let timeout = request.timeout;
-        let role_name = request.role;
+        let agent_name = request.agent_name;
         let progress_sink = request_progress.clone();
 
         // ── #1385: Read the parent frame from the shared RAII source ──
@@ -213,7 +221,7 @@ impl AgentRunner for CliAgentRunner {
         };
 
         let sub_request = SubRunRequest {
-            role: role_name.to_string(),
+            agent_name: agent_name.to_string(),
             timeout,
         };
         let mut derived = match derive_sub_run(
@@ -248,8 +256,8 @@ impl AgentRunner for CliAgentRunner {
             });
 
         // Resolved metadata from derived (no config re-parse needed).
-        let role_config = &derived.role_config;
-        let role_name_for_log = role_name.to_string();
+        let resolved_agent = &derived.resolved_agent;
+        let agent_name_for_log = agent_name.to_string();
         let model_display = derived.model_display.clone();
         let model_name = derived.model_name.clone();
         let max_tokens = derived.max_tokens;
@@ -282,26 +290,26 @@ impl AgentRunner for CliAgentRunner {
             derived.instance.run().id().as_ref(),
             &model_name,
             &binding.model.provider,
-            &role_name_for_log,
+            &agent_name_for_log,
         );
 
         logging::instrument(sub_run_context, async move {
             // ── Logging ──
             log::info!(target: crate::LOG_TARGET,
                 "[SubAgent] derived run_spec={} role={} model={} max_tokens={}",
-                derived.instance.run().spec().name, role_name_for_log, model_display, max_tokens
+                derived.instance.run().spec().name, agent_name_for_log, model_display, max_tokens
             );
 
             let hook_port = derived.instance.context().hooks();
 
             // Append role-specific system suffix if configured
-            let system = match role_config.system_suffix.as_ref() {
+            let system = match resolved_agent.system_suffix.as_ref() {
                 Some(suffix) => format!("{}\n\n{}", system, suffix),
                 None => system.to_string(),
             };
 
             let source_context = AgentProgressSourceContext::new(
-                role_name_for_log.clone(),
+                agent_name_for_log.clone(),
                 derived.instance.run().id().to_string(),
             );
             // Call SubagentStart hook — workspace root from derived workspace.
@@ -343,7 +351,7 @@ impl AgentRunner for CliAgentRunner {
             }
 
             // Helper to emit progress
-            let progress_role = role_name_for_log.clone();
+            let progress_role = agent_name_for_log.clone();
             let progress_model = model_display.clone();
             let progress = move |run_step: Option<usize>, msg: &str| {
                 let turn_str = run_step
@@ -463,7 +471,7 @@ impl AgentRunner for CliAgentRunner {
                     source_context.clone(),
                     0,
                     AgentProgressKind::Started {
-                        role: Some(role_name_for_log.clone()),
+                        role: Some(agent_name_for_log.clone()),
                         model: model_display.clone(),
                     },
                 ));
@@ -485,9 +493,8 @@ impl AgentRunner for CliAgentRunner {
             let language = config_snapshot.language().to_string();
             let agent_roles = config_snapshot
                 .agents()
-                .roles
+                .merged_roles()
                 .iter()
-                .filter(|(_, role)| role.enabled)
                 .map(|(name, role)| (name.clone(), role.clone()))
                 .collect();
             let run_id = derived.instance.run().id().clone();
@@ -510,7 +517,7 @@ impl AgentRunner for CliAgentRunner {
                     progress_sink: progress_sink.clone(),
                     source_context: source_context.clone(),
                     runtime_cancellation: runtime_token.clone(),
-                    role_name: role_name_for_log.clone(),
+                    role_name: agent_name_for_log.clone(),
                     model_name: model_name.clone(),
                     context_size,
                     progress: progress.clone(),
@@ -598,14 +605,14 @@ impl AgentRunner for CliAgentRunner {
                         progress_sink: progress_sink.clone(),
                         source_context: source_context.clone(),
                         progress: progress.clone(),
-                        role_name: role_name_for_log.clone(),
+                        role_name: agent_name_for_log.clone(),
                     },
                 );
             let stuck = super::loop_run::DerivedStuckObserver {
                 progress: progress.clone(),
             };
             let finalizer = super::loop_run::SubRunFinalizer {
-                role_name: role_name_for_log,
+                role_name: agent_name_for_log,
                 model_name: model_name.clone(),
                 runtime_context: runtime_context.clone(),
                 workspace_root,

@@ -63,7 +63,7 @@ fn has_multi_provider_or_agent_roles(
     agents: Option<&AgentsConfig>,
     models_config: &share::config::ModelsConfig,
 ) -> bool {
-    models_config.providers.len() > 1 || agents.map(|a| !a.roles.is_empty()).unwrap_or(false)
+    models_config.providers.len() > 1 || agents.map(|a| !a.names.is_empty()).unwrap_or(false)
 }
 
 /// Resolve the effective logs directory from config or an explicit fallback.
@@ -96,7 +96,7 @@ fn expand_tilde_path(path: &str) -> PathBuf {
 mod tests {
     use super::*;
     use share::config::models::ProviderModelsConfig;
-    use share::config::{AgentRoleConfig, AgentsConfig, Config, ModelsConfig};
+    use share::config::{AgentsConfig, Config, ModelsConfig};
     use std::collections::HashMap;
 
     fn snapshot_with_logs_dir(
@@ -239,10 +239,10 @@ mod tests {
     #[test]
     fn test_has_multi_provider_or_agent_roles_detects_agent_roles() {
         let mut agents = AgentsConfig::default();
-        agents.roles.insert(
-            "reviewer".to_string(),
-            AgentRoleConfig {
-                description: "reviews code".to_string(),
+        agents.names.insert(
+            "reviewer-glm".to_string(),
+            share::config::AgentInstanceConfig {
+                role: "reviewer".to_string(),
                 model: "provider/model".to_string(),
                 ..Default::default()
             },

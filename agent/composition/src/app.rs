@@ -449,7 +449,7 @@ mod tests {
                             arguments: serde_json::json!({
                                 "description": "record child usage",
                                 "prompt": "finish successfully",
-                                "role": "coder"
+                                "agent": "coder"
                             }),
                         },
                     )],
@@ -553,8 +553,9 @@ mod tests {
                     }
                 },
                 "agents": {
-                    "roles": {
+                    "names": {
                         "coder": {
+                            "role": "coder",
                             "model": "local/test-model",
                             "description": "test child usage"
                         }

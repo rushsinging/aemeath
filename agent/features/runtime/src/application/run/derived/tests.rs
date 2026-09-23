@@ -11,7 +11,7 @@ use ::logging as scoped_logging;
 use async_trait::async_trait;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
 use provider::{InvocationStream, ProviderError, ProviderErrorKind};
-use share::config::AgentRoleConfig;
+use share::config::AgentInstanceConfig;
 use share::message::Message;
 use std::sync::Arc;
 use tools::AgentProgressKind;
@@ -240,7 +240,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 plan_mode: ctx_a.plan_mode_state(),
                 guidance: ctx_a.guidance(),
                 timeout: std::time::Duration::from_secs(5),
-                role: "role-a",
+                agent_name: "role-a",
             }),
             runner.run_agent(AgentRunRequest {
                 prompt: "b",
@@ -254,7 +254,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 plan_mode: ctx_b.plan_mode_state(),
                 guidance: ctx_b.guidance(),
                 timeout: std::time::Duration::from_secs(5),
-                role: "role-b",
+                agent_name: "role-b",
             }),
         );
         assert!(matches!(a, tools::AgentRunTerminal::Failed { .. }));
@@ -399,23 +399,26 @@ fn sub_request_retry_gets_a_fresh_request_id() {
 
 #[test]
 fn test_role_max_tokens_override() {
-    let role = AgentRoleConfig {
+    let instance = AgentInstanceConfig {
         max_tokens: Some(8192),
         ..Default::default()
     };
-    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), Some(8192));
+    assert_eq!(
+        CliAgentRunner::role_max_tokens_override(&instance),
+        Some(8192)
+    );
 
-    let role = AgentRoleConfig {
+    let instance = AgentInstanceConfig {
         max_tokens: Some(0),
         ..Default::default()
     };
-    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), None);
+    assert_eq!(CliAgentRunner::role_max_tokens_override(&instance), None);
 
-    let role = AgentRoleConfig {
+    let instance = AgentInstanceConfig {
         max_tokens: None,
         ..Default::default()
     };
-    assert_eq!(CliAgentRunner::role_max_tokens_override(&role), None);
+    assert_eq!(CliAgentRunner::role_max_tokens_override(&instance), None);
 }
 
 #[test]
@@ -697,7 +700,7 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -718,7 +721,7 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
         ..Default::default()
     };
     config.api.timeout = 30;
-    config.agents.roles.get_mut("coder").unwrap().enabled = false;
+    config.agents.names.get_mut("coder").unwrap().enabled = false;
     let (runner, _guard) = test_runner(ProviderError::cancelled());
     // #1385: config now comes from parent_context (not config_reader), so
     // install a parent frame with the disabled config.
@@ -749,7 +752,7 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -778,7 +781,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -808,7 +811,7 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -851,7 +854,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         }),
     )
     .await
@@ -889,7 +892,7 @@ impl tools::TypedTool for ReadFixtureTool {
 }
 
 #[tokio::test]
-async fn unknown_sub_agent_role_fails_before_provider_invocation() {
+async fn unknown_sub_agent_name_fails_before_provider_invocation() {
     let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
         "provider must not be invoked",
@@ -909,14 +912,14 @@ async fn unknown_sub_agent_role_fails_before_provider_invocation() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "missing-role",
+            agent_name: "missing-role",
         })
         .await;
 
     assert_eq!(
         result,
         tools::AgentRunTerminal::Failed {
-            error: "sub-agent role `missing-role` not found in config".to_string(),
+            error: "sub-agent instance `missing-role` not found in config".to_string(),
         }
     );
 }
@@ -977,7 +980,7 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1000,13 +1003,17 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
         models: (*test_models_config()).clone(),
         ..Default::default()
     };
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "coder".to_string(),
-        serde_json::from_value(serde_json::json!({
-            "model": "test-provider/test-model",
-            "reasoning": false
-        }))
-        .expect("legacy role config"),
+        AgentInstanceConfig {
+            role: "generic".to_string(),
+            model: "test-provider/test-model".to_string(),
+            ..Default::default()
+        },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config
         .models
@@ -1053,7 +1060,7 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1118,7 +1125,7 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1178,7 +1185,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1225,7 +1232,7 @@ async fn test_started_event_emitted_with_role_and_model() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1268,7 +1275,7 @@ async fn started_event_always_reports_required_role_and_configured_model() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1305,7 +1312,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1335,7 +1342,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1370,7 +1377,7 @@ async fn sub_empty_completion_retries_and_succeeds() {
                 plan_mode: ctx.plan_mode_state(),
                 guidance: ctx.guidance(),
                 timeout: std::time::Duration::from_secs(3_600),
-                role: "coder",
+                agent_name: "coder",
             })
             .await
     });
@@ -1414,7 +1421,7 @@ async fn sub_empty_completion_exhaustion_is_typed_failure() {
                 plan_mode: ctx.plan_mode_state(),
                 guidance: ctx.guidance(),
                 timeout: std::time::Duration::from_secs(3_600),
-                role: "coder",
+                agent_name: "coder",
             })
             .await
     });
@@ -1459,7 +1466,7 @@ async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_nanos(1),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -1494,30 +1501,34 @@ fn test_tool_call_with_id(
 }
 
 fn test_agents_config() -> Arc<share::config::AgentsConfig> {
+    // 具名实例：coder/role-a/role-b 全部引用无 policy 的自定义职能
+    // "generic"（fallback sub-agent-restricted 语义），与旧测试行为一致。
+    let mut names = std::collections::HashMap::new();
+    for (name, model) in [
+        ("role-a", "role-a/model-a"),
+        ("role-b", "role-b/model-b"),
+        ("coder", "test-provider/test-model"),
+    ] {
+        names.insert(
+            name.to_string(),
+            AgentInstanceConfig {
+                role: "generic".to_string(),
+                model: model.to_string(),
+                ..Default::default()
+            },
+        );
+    }
     let mut roles = std::collections::HashMap::new();
     roles.insert(
-        "role-a".to_string(),
-        AgentRoleConfig {
-            model: "role-a/model-a".to_string(),
-            ..Default::default()
-        },
-    );
-    roles.insert(
-        "role-b".to_string(),
-        AgentRoleConfig {
-            model: "role-b/model-b".to_string(),
-            ..Default::default()
-        },
-    );
-    roles.insert(
-        "coder".to_string(),
-        AgentRoleConfig {
-            model: "test-provider/test-model".to_string(),
-            ..Default::default()
+        "generic".to_string(),
+        share::config::AgentRoleDefinition {
+            description: "Generic sub agent without policy".to_string(),
+            policy: None,
         },
     );
     Arc::new(share::config::AgentsConfig {
         roles,
+        names,
         ..Default::default()
     })
 }

@@ -13,12 +13,17 @@ use crate::domain::agent_run::{RunSpec, RunStatus};
 
 fn derived_run_config() -> share::config::domain::snapshot::ConfigSnapshot {
     let mut config = share::config::Config::default();
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "derived".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config.models.default = "test-provider/test-model".to_string();
     config.models.providers.insert(

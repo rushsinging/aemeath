@@ -206,6 +206,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        Vec::new(),
     )
     .expect("wire_builtin_catalog_execution");
 
@@ -223,7 +224,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         .iter()
         .map(|t| t.name.as_str())
         .collect();
-    // TaskCreate (Main-only, Caps::TaskMutation) is an agent-dispatch tool
+    // TaskCreate (Main-only, Caps::TaskWrite) is an agent-dispatch tool
     // that must appear in the main scope.
     assert!(
         main_names.contains(&"TaskCreate"),
@@ -251,4 +252,74 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         sub_names.contains(&"Read"),
         "sub-agent scope must include Read"
     );
+}
+
+/// Role policies passed to `wire_builtin_catalog_execution` must surface as
+/// queryable `role:<name>` profiles that narrow the sub-agent catalog.
+#[tokio::test]
+async fn role_policies_surface_as_role_profiles() {
+    let (_temp, workspace) = temp_workspace();
+    let task_wiring = task::wire_task();
+    let role_policies = vec![(
+        "explorer".to_string(),
+        share::config::RolePolicyConfig {
+            capabilities: vec!["Read".to_string(), "NetworkAccess".to_string()],
+        },
+    )];
+    let tools_wiring = tools::composition::wire_builtin_catalog_execution(
+        task_wiring.access(),
+        noop_memory_source(),
+        workspace.control(),
+        tools::composition::wire_skills().loader(),
+        role_policies,
+    )
+    .expect("wire_builtin_catalog_execution");
+
+    let catalog = tools_wiring.catalog();
+    let snapshot = catalog
+        .snapshot(
+            &tools::RegistryScopeName::new("sub-agent"),
+            &tools::ToolProfileName::new("role:explorer"),
+        )
+        .expect("role:explorer snapshot");
+    let names: Vec<&str> = snapshot.tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(
+        names.contains(&"Read"),
+        "explorer must see Read, got: {names:?}"
+    );
+    assert!(names.contains(&"Grep"), "explorer must see Grep");
+    assert!(
+        !names.contains(&"Write"),
+        "explorer must not see Write, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"Agent"),
+        "explorer must not see Agent, got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"TaskCreate"),
+        "explorer must not see TaskCreate, got: {names:?}"
+    );
+}
+
+/// A role policy naming an unknown capability must fail wiring loudly instead
+/// of silently producing a broken profile.
+#[tokio::test]
+async fn role_policy_with_unknown_capability_fails_wiring() {
+    let (_temp, workspace) = temp_workspace();
+    let task_wiring = task::wire_task();
+    let role_policies = vec![(
+        "ghost".to_string(),
+        share::config::RolePolicyConfig {
+            capabilities: vec!["NotACapability".to_string()],
+        },
+    )];
+    let result = tools::composition::wire_builtin_catalog_execution(
+        task_wiring.access(),
+        noop_memory_source(),
+        workspace.control(),
+        tools::composition::wire_skills().loader(),
+        role_policies,
+    );
+    assert!(result.is_err(), "unknown tool name must fail wiring");
 }

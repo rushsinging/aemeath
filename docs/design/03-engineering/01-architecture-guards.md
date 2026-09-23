@@ -222,6 +222,7 @@
 - **定位**：Hexagonal 正式层界守卫（#1022）：全部 feature crate 的层目录白名单、R8 层内依赖方向（`domain ← application ← ports ← adapters`）与 retired COLA 层名防复活。迁移期 COLA 矩阵（`@FEATURE_LAYERS` fallback、business/utils/contract/gateway 方向规则）已退役；唯一残留例外是 update crate（registry `exception.update.cola-layout`，tracking #989）。
 - **功能**：R8 层内依赖方向统一覆盖全部 Hexagonal crate（含 storage 补入、config 三层收敛后零例外开启）；retired COLA 层名防复活（统一 `@RETIRED_COLA_LAYERS`）；update 显式例外分支；各 crate 层目录与顶层文件白名单维持既有锁定。
 - **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
+- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相（capability-only 组装），公开 API 白名单为 `baseline / derive_restricted / allowed_capabilities`，RegistryScope 内部不从 crate root 导出。
 - **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
 - **结构定义**：Audit 使用 `domain/application/ports/adapters`，#930 只能随真实 query 实现扩展；Policy #917 随真实实现恢复层；其他过渡集合禁止无证据扩张。

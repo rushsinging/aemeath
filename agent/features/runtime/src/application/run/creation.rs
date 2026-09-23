@@ -256,12 +256,12 @@ pub enum RunCreationError {
     CapabilityEscalation,
     #[error("RuntimeContext 装配失败")]
     ContextAssembly,
-    #[error("子 Run 角色不存在：{role}")]
-    SubRoleNotFound { role: String },
-    #[error("sub-agent role disabled: {role}")]
-    SubRoleDisabled { role: String },
-    #[error("子 Run 角色未配置模型：{role}")]
-    SubRoleNoModel { role: String },
+    #[error("子 Run agent 实例不存在：{agent}")]
+    SubAgentNotFound { agent: String },
+    #[error("sub-agent instance disabled: {agent}")]
+    SubAgentDisabled { agent: String },
+    #[error("子 Run agent 实例未配置模型：{agent}")]
+    SubAgentNoModel { agent: String },
     #[error("子 Run 模型不存在：{model}")]
     SubUnknownModel { model: String },
     #[error("子 Run provider 构造失败：{message}")]

@@ -43,7 +43,9 @@ impl ToolCatalogPort for RestrictedToolCatalog {
         scope: &RegistryScopeName,
         profile: &ToolProfileName,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
-        if scope.as_str() != "sub-agent" || profile.as_str() != "sub-agent-restricted" {
+        // sub run 的快照创建时已按其 role profile 裁剪；此处只服务
+        // sub-agent scope（restricted 与 role:<name> profile 均可重复取回）。
+        if scope.as_str() != "sub-agent" {
             return Err(ToolCatalogError::UnknownScope {
                 scope: format!("{scope}/{profile} — restricted catalog only serves sub-agent"),
             });
@@ -226,10 +228,15 @@ impl RuntimeContextFactory {
     > {
         let session = self.resolve_session(request, bindings)?;
         let workspace = self.select_workspace(bindings)?;
-        let provider = self.select_provider(request, bindings)?;
+        // sub run 的 agent 只解析一次，供 provider 选择与 tool catalog 裁剪共用。
+        let derived_agent = match bindings.session() {
+            Some(_) => None,
+            None => Some(self.resolve_derived_agent(request)?),
+        };
+        let provider = self.select_provider(request, bindings, derived_agent.as_ref())?;
         let context = self.select_context(request, bindings, &session, &workspace)?;
         let memory = self.select_memory(bindings)?;
-        let tool_catalog = self.select_tool_catalog(bindings)?;
+        let tool_catalog = self.select_tool_catalog(request, bindings, derived_agent.as_ref())?;
         let parent = bindings.parent().map(|parent| parent.context().clone());
         let interaction =
             self.select_interaction_port(request.spec(), bindings, parent.as_deref())?;
@@ -380,22 +387,31 @@ impl RuntimeContextFactory {
         &self,
         request: &RunCreationRequest,
         bindings: &RunCreationBindings,
+        derived_agent: Option<&share::config::ResolvedAgent>,
     ) -> Result<ProviderSelection, RunCreationError> {
         if let Some(session) = bindings.session() {
             return Ok(ProviderSelection {
                 binding: session.provider().clone(),
             });
         }
-        let role = self.resolve_derived_role(request)?;
+        let agent = match derived_agent {
+            Some(agent) => agent.clone(),
+            None => self.resolve_derived_agent(request)?,
+        };
+        if agent.model.trim().is_empty() {
+            return Err(RunCreationError::SubAgentNoModel {
+                agent: request.spec().name.clone(),
+            });
+        }
         let (source_key, source, model) = request
             .session()
             .config()
             .models()
-            .find_model(&role.model)
+            .find_model(&agent.model)
             .ok_or_else(|| RunCreationError::SubUnknownModel {
-                model: role.model.clone(),
+                model: agent.model.clone(),
             })?;
-        let max_tokens = role
+        let max_tokens = agent
             .max_tokens
             .filter(|tokens| *tokens > 0)
             .or_else(|| (model.max_tokens > 0).then_some(model.max_tokens))
@@ -482,18 +498,25 @@ impl RuntimeContextFactory {
 
     fn select_tool_catalog(
         &self,
+        _request: &RunCreationRequest,
         bindings: &RunCreationBindings,
+        derived_agent: Option<&share::config::ResolvedAgent>,
     ) -> Result<ToolCatalogSelection, RunCreationError> {
         let Some(parent) = bindings.parent() else {
             return Ok(ToolCatalogSelection { port: None });
         };
+        // 实例引用的职能带 policy → role:<职能名> profile（composition 已编译注册）；
+        // 无 policy → 现状 sub-agent-restricted（等价迁移）。
+        let profile_name = match derived_agent.and_then(|agent| agent.policy.as_ref()) {
+            Some(_) => {
+                tools::role_profile_name(&derived_agent.expect("policy implies agent").role_name)
+            }
+            None => ToolProfileName::new("sub-agent-restricted"),
+        };
         let snapshot = parent
             .context()
             .tool_catalog()
-            .snapshot(
-                &RegistryScopeName::new("sub-agent"),
-                &ToolProfileName::new("sub-agent-restricted"),
-            )
+            .snapshot(&RegistryScopeName::new("sub-agent"), &profile_name)
             .map_err(|error| RunCreationError::SubToolCatalog {
                 message: error.to_string(),
             })?;
@@ -624,29 +647,24 @@ impl RuntimeContextFactory {
         }
     }
 
-    fn resolve_derived_role<'a>(
+    fn resolve_derived_agent(
         &self,
-        request: &'a RunCreationRequest,
-    ) -> Result<&'a share::config::AgentRoleConfig, RunCreationError> {
-        let role = request
+        request: &RunCreationRequest,
+    ) -> Result<share::config::ResolvedAgent, RunCreationError> {
+        let agent_name = request.spec().name.clone();
+        match request
             .session()
             .config()
             .agents()
-            .roles
-            .get(&request.spec().name)
-            .ok_or_else(|| RunCreationError::SubRoleNotFound {
-                role: request.spec().name.clone(),
-            })?;
-        if !role.enabled {
-            return Err(RunCreationError::SubRoleDisabled {
-                role: request.spec().name.clone(),
-            });
+            .resolve_agent(&agent_name)
+        {
+            Some(share::config::ResolveAgentOutcome::Agent(agent)) => Ok(agent),
+            Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
+                Err(RunCreationError::SubAgentDisabled {
+                    agent: instance_name,
+                })
+            }
+            None => Err(RunCreationError::SubAgentNotFound { agent: agent_name }),
         }
-        if role.model.trim().is_empty() {
-            return Err(RunCreationError::SubRoleNoModel {
-                role: request.spec().name.clone(),
-            });
-        }
-        Ok(role)
     }
 }
