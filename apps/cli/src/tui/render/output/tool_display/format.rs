@@ -51,12 +51,30 @@ pub fn format_subagent_tool_header(
         })
 }
 
-/// #1666：执行耗时展示格式：`850ms`（<1s）/ `1.24s`（≥1s，两位小数）。
+/// #1666：执行耗时展示格式（自动进位，风格对齐 spinner 的空格分隔/零值省略）：
+/// `850ms`（<1s）→ `1.24s`（<59.5s，百分秒）→ `1m 5s`（<60min，秒四舍五入
+/// 后 ≥60s 升档，NEVER 显示 60.00s）→ `1h 2m`（≥60min，分钟四舍五入升档，
+/// 零分钟省略为 `1h`）。
 pub(super) fn format_call_duration(duration_ms: u64) -> String {
     if duration_ms < 1_000 {
-        format!("{duration_ms}ms")
+        return format!("{duration_ms}ms");
+    }
+    if duration_ms < 59_500 {
+        // 上限 59_499 舍入到百分秒后 < 60.00s，避免秒档显示 60.00s。
+        return format!("{:.2}s", duration_ms as f64 / 1_000.0);
+    }
+    // 自动进位：四舍五入到整秒后跨档（59_600ms → 1m 0s；3_599_700ms → 1h）。
+    let total_seconds = (duration_ms + 500) / 1_000;
+    let total_minutes = total_seconds / 60;
+    if total_minutes < 60 {
+        return format!("{}m {}s", total_minutes, total_seconds % 60);
+    }
+    let hours = total_minutes / 60;
+    let minutes = total_minutes % 60;
+    if minutes == 0 {
+        format!("{hours}h")
     } else {
-        format!("{:.2}s", duration_ms as f64 / 1_000.0)
+        format!("{hours}h {minutes}m")
     }
 }
 
