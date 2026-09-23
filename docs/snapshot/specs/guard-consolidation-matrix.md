@@ -53,6 +53,63 @@
 
 量化口径：入口文件 90 → 2；命令式守卫代码 ~10k 行 → 引擎（一次实现）+ 数据行；新增约束触点 4 处 → 1 处。
 
+## 2.2 执行链路：当前与目标
+
+### 当前（3 个触发点，实测自 `.agents/aemeath.json` 与 `.cargo/hooks/pre-push`）
+
+```
+Agent PreToolUse (Edit/Write)                    Agent Stop (timeout 150s)
+        │                                                │
+        ▼                                                ▼
+reject-main-edit.sh                            check-agent-stop.sh
+（流程防护，保留）                                       │
+                                                        ▼
+git pre-push (.cargo/hooks) ──────────► check-architecture-guards.sh --fast
+        │                                        │（18KB 编排器）
+        ▼                                        ├─ 内嵌 perl 函数（如 run_tui_single_source_structure_guard）
+check-architecture-guards.sh --full             ├─ guarded()/run_guard() 并发调度 + timeout 管理
++ check-unit-tests.sh                           ▼
++ clean-worktree-targets.sh              ~63 个主脚本各自执行
+                                         ├─ grep/perl/python 自由格式输出
+                                         ├─ 4 个壳再转发 xtask 子命令
+                                         │   （source-guard / sdk-wire-schema / guard-registry check）
+                                         └─ registry 仅作元数据被对账，NOT 调度源
+```
+
+缺陷：编排器与 63 脚本各自为政；规则 = 代码；registry 不驱动执行；输出格式不一；新增约束需 4 处同步。
+
+### 目标
+
+```
+PreToolUse (Edit/Write)              Agent Stop                    git pre-push
+        │                                │                             │
+        ▼                                ▼                             ▼
+reject-main-edit.sh                 薄壳（唯一保留的 .sh）         薄壳 + xtask test-runner
+（流程防护，不变）                        │                             │
+                                         └──────────┬──────────────────┘
+                                                    ▼
+                                        xtask guard --fast | --full | --rule <id>
+                                                    │
+                                        ① registry 启动自检（原 guard-registry check）
+                                                    ▼
+                                        引擎：cargo metadata + syn 解析 use 树
+                                                    │
+                                    ┌───────────┬───┴────────┬───────────┐
+                                    ▼           ▼            ▼           ▼
+                            forbidden_     facade_       layer_order/   pattern_
+                            segments       whitelist     layout         exclusion
+                                    └───── registry 数据行（唯一规则来源，含豁免）
+                                                    ▼
+                                        统一输出：rule_id + file:line + remediation
+```
+
+两条旁路（**NEVER** 进入 guard 链路）：
+
+- **① 类型化（D 组 15 条）**：`cargo build` 即守卫，违规编译不过；
+- **② 测试化（E 组 8 项 + 25 自测）**：`cargo test` 即守卫。
+
+执行映射：引擎落地（建链路）→ 退役壳收敛 + 数据化迁移（换链路、删旧）→ 类型化 + 测试化（旁路化）。
+
 ## 3. 逐条清单
 
 ### 3.1 A 组：转发壳与编排器（7 文件）
