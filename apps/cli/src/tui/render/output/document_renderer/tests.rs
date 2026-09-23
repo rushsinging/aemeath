@@ -996,3 +996,106 @@ fn test_assistant_code_block_tab_renders_as_visible_spaces_scene() {
     );
     assert!(code_line.plain.contains("wanaka_session    9892"));
 }
+
+#[test]
+fn test_markdown_link_offsets_align_after_control_char_normalization() {
+    // issue #1670：link 偏移必须基于归一化后 plain（tab → 4 空格）对齐，
+    // 否则点击命中错位。
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "a".into(),
+        text: "a\tb [example](https://example.com) end".into(),
+        style: SemanticStyle::Normal,
+    });
+    let assistant = BlockNode {
+        block_id: "a".into(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    };
+    let vm = vm_with_roots(vec![assistant]);
+    let mut renderer = OutputDocumentRenderer::default();
+    let doc = renderer.render_tree(&vm, 80);
+
+    let link_line = doc.blocks[0]
+        .lines
+        .iter()
+        .find(|line| !line.links.is_empty())
+        .expect("应渲染出含 link 的行");
+    let plain = &link_line.plain;
+    assert!(!plain.contains('\t'), "plain 不应残留 tab: {plain:?}");
+    let link = &link_line.links[0];
+    assert_eq!(
+        &plain[link.col_start..link.col_end],
+        "example",
+        "link 偏移应命中归一化后 plain 的锚文本"
+    );
+    assert!(plain.contains("a    b"), "tab 应已展开: {plain:?}");
+}
+
+#[test]
+fn test_tool_result_control_chars_normalized_end_to_end_scene() {
+    // issue #1670 场景：tool result 含 tab/ESC，端到端输出无控制字符残留。
+    // （构造方式对齐本文件既有 ToolResult 测试先例：ToolCall root + ToolResult 子块。）
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "tool".into(),
+        chat_id: None,
+        run_id: None,
+        tool_call_id: Some("tool".into()),
+        title: "Bash".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Success,
+        args_preview: None,
+        streaming_preview: None,
+        result_summary: None,
+        result_payload: None,
+        workspace_root: None,
+        collapsible: false,
+        collapsed: false,
+        agent_meta: None,
+    });
+    let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+        key: "tool-result".into(),
+        tool_title: "Bash".into(),
+        args_preview: None,
+        result_text: "col1\tcol2\u{1b}[0m".into(),
+        activity_lines: None,
+        workspace_root: None,
+        data: None,
+        style: SemanticStyle::Success,
+    });
+    let tool_node = BlockNode {
+        block_id: "tool".into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![BlockNode {
+            block_id: "tool-result".into(),
+            block_version: result_kind.cache_version(),
+            kind: result_kind,
+            children: Vec::new(),
+        }],
+    };
+    let vm = vm_with_roots(vec![tool_node]);
+    let mut renderer = OutputDocumentRenderer::default();
+    let doc = renderer.render_tree(&vm, 80);
+
+    let result_block = doc
+        .blocks
+        .iter()
+        .find(|b| b.block_id == "tool-result")
+        .expect("tool result block 存在");
+    for line in result_block.lines.iter() {
+        assert!(
+            !line.plain.contains('\t') && !line.plain.contains('\u{1b}'),
+            "tool result 行残留控制字符: {:?}",
+            line.plain
+        );
+    }
+    assert!(
+        result_block
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("col1    col2")),
+        "tab 应展开为 4 空格"
+    );
+}

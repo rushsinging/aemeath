@@ -121,7 +121,7 @@ pub mod display_text;
 - [ ] **Step 1.3: 运行测试确认失败（红）**
 
 Run: `cargo test -p cli display_text`
-Expected: FAIL — 8 个测试全部 `not implemented` panic（编译通过、断言阶段失败）。
+Expected: FAIL — 9 个测试全部 `not implemented` panic（编译通过、断言阶段失败）。
 
 - [ ] **Step 1.4: 实现最小通过代码**
 
@@ -170,7 +170,7 @@ git commit -m "feat(tui): #1670 共享显示文本控制字符归一化函数"
 - Test（同文件内 `mod tests`）: `wrap.rs` / `rendered.rs` / `blocks/user_message.rs` / `blocks/assistant_message.rs`
 - Test: `apps/cli/src/tui/render/output/document_renderer/tests.rs`（L4 场景 ×2）
 
-- [ ] **Step 2.1: 写 6 组失败复现测试（红）**
+- [ ] **Step 2.1: 写 7 个（6 组）失败复现测试（红）**
 
 **(a) `primitives/wrap.rs` tests 模块追加：**
 
