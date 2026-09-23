@@ -2,12 +2,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use context::application::ContextApplicationService;
-use context::domain::{
+use context::ContextApplicationService;
+use context::{
     ContextAppend, ContextRequest, ContextRequestId, Language, SessionId, SessionRevision,
     SystemPromptSpec,
 };
-use context::ports::{
+use context::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     SessionRepository, SessionSnapshot,
 };
@@ -31,35 +31,30 @@ impl SessionRepository for Session {
     async fn append_finalized(
         &self,
         _append: &ContextAppend,
-    ) -> Result<context::domain::AppendReceipt, context::domain::ContextAppendError> {
+    ) -> Result<context::AppendReceipt, context::ContextAppendError> {
         unreachable!()
     }
 
     async fn commit_compaction(
         &self,
-        _request: &context::domain::CompactRequest,
-    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
+        _request: &context::CompactRequest,
+    ) -> Result<context::CompactOutcome, context::ContextPortError> {
         unreachable!()
     }
 
     async fn commit_manual_compaction(
         &self,
-        _request: &context::domain::ManualCompactRequest,
-    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
-        Ok(context::domain::CompactOutcome::Committed(
-            context::domain::CompactResult {
-                summary: "manual".into(),
-                recent_messages: vec![],
-                source_revision: SessionRevision::new(1),
-                quality: context::domain::CompactSummaryQuality::LocalOnly,
-            },
-        ))
+        _request: &context::ManualCompactRequest,
+    ) -> Result<context::CompactOutcome, context::ContextPortError> {
+        Ok(context::CompactOutcome::Committed(context::CompactResult {
+            summary: "manual".into(),
+            recent_messages: vec![],
+            source_revision: SessionRevision::new(1),
+            quality: context::CompactSummaryQuality::LocalOnly,
+        }))
     }
 
-    async fn clear(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<(), context::domain::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), context::ContextPortError> {
         Ok(())
     }
 }
@@ -70,8 +65,8 @@ impl ContextPromptSource for FailingPrompt {
     async fn materialize(
         &self,
         _request: &ContextRequest,
-    ) -> Result<PromptMaterialization, context::ports::PromptMaterializationError> {
-        Err(context::ports::PromptMaterializationError::Baseline(
+    ) -> Result<PromptMaterialization, context::PromptMaterializationError> {
+        Err(context::PromptMaterializationError::Baseline(
             "guidance unavailable".into(),
         ))
     }
@@ -97,7 +92,7 @@ fn request() -> ContextRequest {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
-        step_id: context::domain::RunStepId::new("step"),
+        step_id: context::RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
@@ -117,7 +112,7 @@ fn request() -> ContextRequest {
 
 #[tokio::test]
 async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
-    use context::ports::ContextPort;
+    use context::ContextPort;
 
     let memory_calls = Arc::new(AtomicUsize::new(0));
     let service = ContextApplicationService::new(
@@ -128,8 +123,8 @@ async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
 
     assert!(matches!(
         service.build_window(&request()).await,
-        Err(context::domain::ContextPortError::PromptMaterialization(
-            context::ports::PromptMaterializationError::Baseline(msg)
+        Err(context::ContextPortError::PromptMaterialization(
+            context::PromptMaterializationError::Baseline(msg)
         )) if msg == "guidance unavailable"
     ));
     assert_eq!(memory_calls.load(Ordering::SeqCst), 0);

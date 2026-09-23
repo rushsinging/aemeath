@@ -133,16 +133,14 @@ pub(crate) fn workspace_context_to_sdk(
 }
 
 pub(crate) fn map_finalize_cause_to_sdk(
-    cause: context::domain::FinalizeCause,
+    cause: context::FinalizeCause,
 ) -> sdk::ResumedStepFinalizeCause {
     match cause {
-        context::domain::FinalizeCause::Completed => sdk::ResumedStepFinalizeCause::Completed,
-        context::domain::FinalizeCause::UserCancelledStep => {
+        context::FinalizeCause::Completed => sdk::ResumedStepFinalizeCause::Completed,
+        context::FinalizeCause::UserCancelledStep => {
             sdk::ResumedStepFinalizeCause::UserCancelledStep
         }
-        context::domain::FinalizeCause::RunTerminated => {
-            sdk::ResumedStepFinalizeCause::RunTerminated
-        }
+        context::FinalizeCause::RunTerminated => sdk::ResumedStepFinalizeCause::RunTerminated,
     }
 }
 

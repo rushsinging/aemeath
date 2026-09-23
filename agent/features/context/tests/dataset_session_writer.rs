@@ -1,9 +1,9 @@
-use context::adapters::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
-use context::domain::session::{
+use context::{
     AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, FinalizedOutcomeProjection, RunStepCursor, SessionCommitPlan,
     SessionGenerationCodec,
 };
+use context::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
 use share::message::Message;
 use storage::{DatasetKey, DatasetReadOutcome, SafePathSegment, StorageNamespace};
 

@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use context::adapters::{SkillPromptSource, WorkspaceSkillQueryFactory};
-use context::domain::ContextRequest;
-use context::ports::{ContextPromptSource, SkillQueryFactory};
+use context::ContextRequest;
+use context::{ContextPromptSource, SkillQueryFactory};
+use context::{SkillPromptSource, WorkspaceSkillQueryFactory};
 use provider::ReasoningLevel;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -46,7 +46,7 @@ fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
 }
 
 fn base_request() -> ContextRequest {
-    use context::domain::*;
+    use context::*;
     ContextRequest {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
@@ -116,14 +116,14 @@ async fn duplicate_identity_is_deduplicated_and_empty_catalog_omits_block() {
 #[tokio::test]
 async fn chinese_header_and_budget_are_deterministic() {
     let mut request = base_request();
-    request.language = context::domain::Language::new("zh");
+    request.language = context::Language::new("zh");
     request.context_size = 8_000;
     let result = source(vec![descriptor("alpha", &"x".repeat(8_000), None)])
         .materialize(&request)
         .await
         .unwrap();
     assert!(!result.cacheable.iter().any(|block| block.kind == "skills"));
-    assert_eq!(context::adapters::skill_prompt_budget(8_000), 1_024);
+    assert_eq!(context::skill_prompt_budget(8_000), 1_024);
 }
 
 struct FakeWorkspace(PathBuf);

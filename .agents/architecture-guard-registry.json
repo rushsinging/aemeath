@@ -1102,6 +1102,23 @@
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove the update branch and register update Hexagonal target layout when #989 completes COLA elimination",
       "status": "active"
+    },
+    {
+      "id": "policy.context.crate-root-facade",
+      "guard": "check-crate-api-boundary.sh",
+      "module": "context",
+      "scope": {
+        "kind": "symbol",
+        "value": "ROOT_ACCESS_ALLOW.context"
+      },
+      "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
+      "owner": "context",
+      "reason": "Context internal layers are private; cross-BC access only via registered crate-root symbols and semantic module facades (api/compact/context_port/guidance/main_session/session/skill)",
+      "tracking_issue": 1022,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Context crate-root facade policy",
+      "status": "active"
     }
   ]
 }

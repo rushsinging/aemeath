@@ -6,11 +6,11 @@ use context::compact::{
     microcompact_exploration, snip_superseded_exploration, ContextReadCandidate, ContextReadRun,
     ContextReadStep, ProtectedRunPolicy,
 };
-use context::domain::session::{
+use context::{
     AcceptedInputProjection, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeProjection, SessionHistory,
 };
-use context::domain::{
+use context::{
     CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentity, ToolCallReceipt,
     ToolOutcomeKind, ToolTerminalReceipt,
 };
@@ -145,7 +145,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: context::domain::ToolCallState::Terminal(ToolTerminalReceipt::new(
+        state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,

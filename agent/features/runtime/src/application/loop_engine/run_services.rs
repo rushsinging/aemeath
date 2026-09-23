@@ -41,7 +41,7 @@ pub(crate) struct ContextRequestData<'a> {
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
-    pub invocation_reminders: Vec<context::domain::InvocationReminder>,
+    pub invocation_reminders: Vec<context::InvocationReminder>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
@@ -113,7 +113,7 @@ where
                 let kinds = request
                     .invocation_reminders
                     .iter()
-                    .map(context::domain::InvocationReminder::kind)
+                    .map(context::InvocationReminder::kind)
                     .collect::<Vec<_>>()
                     .join(",");
                 log::debug!(

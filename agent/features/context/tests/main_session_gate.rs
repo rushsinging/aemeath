@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use context::application::main_session::SessionSwitchGate;
+use context::main_session::SessionSwitchGate;
 use tokio::sync::oneshot;
 
 #[tokio::test]

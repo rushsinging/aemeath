@@ -14,7 +14,7 @@ struct FixedMainContextFactory {
     context: Arc<dyn ContextPort>,
 }
 
-impl context::ports::MainContextFactory for FixedMainContextFactory {
+impl context::MainContextFactory for FixedMainContextFactory {
     fn build(
         &self,
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
