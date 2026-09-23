@@ -509,23 +509,6 @@
       "status": "active"
     },
     {
-      "id": "scope.config.reader-tests-only",
-      "guard": "check-config-reader-injection.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "test paths and file-tail cfg(test) inline modules"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "config",
-      "reason": "Test-only ConfigAppService construction is outside the production construction rule",
-      "tracking_issue": 949,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests require direct fixture construction",
-      "status": "active"
-    },
-    {
       "id": "scope.logging.production-test-sources",
       "guard": "check-log-target-prefix.sh",
       "module": "logging",

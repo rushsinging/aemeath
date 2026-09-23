@@ -144,9 +144,10 @@ fn resumed_shell(
 ) -> crate::application::client::SessionRuntime {
     let mut shell = test_shell_with_task_store(noop_hook_port(), task_store.clone());
     let workspace = shell.workspace.clone();
-    let config = Arc::new(config::ConfigAppService::new(Some(
-        &workspace.read().initial_cwd(),
-    )));
+    let config = Arc::new(config::ConfigAppService::with_global_path(
+        Some(&workspace.read().initial_cwd()),
+        share::config::paths::global_config_path(),
+    ));
     shell.wiring = Arc::new(context::MainSessionWiring::build(
         context::MainSessionWiringBuilder {
             workspace_read: workspace.read(),

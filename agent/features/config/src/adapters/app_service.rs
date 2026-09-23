@@ -65,10 +65,8 @@ impl ConfigAppService {
         Ok(service)
     }
 
-    pub fn new(project_dir: Option<&Path>) -> Self {
-        Self::with_global_path(project_dir, share::config::paths::global_config_path())
-    }
-
+    /// 测试可指定独立 global 路径（context 集成测试的 Facade harness 依赖）；
+    /// 生产构造一律经 crate 根 `wire_project_config*` 工厂（内部 `for_project`）。
     pub fn with_global_path(project_dir: Option<&Path>, global_path: PathBuf) -> Self {
         let project_path = project_dir.map(share::config::paths::project_config_path);
         let claude_project_settings_path =
@@ -94,11 +92,15 @@ impl ConfigAppService {
         }
     }
 
-    pub fn with_env_source(mut self, env_source: std::sync::Arc<dyn EnvSource>) -> Self {
+    /// 测试专用：注入 FakeEnv；生产路径固定使用 ProcessEnv。
+    #[cfg(test)]
+    pub(crate) fn with_env_source(mut self, env_source: std::sync::Arc<dyn EnvSource>) -> Self {
         self.env_source = env_source;
         self
     }
 
+    /// 测试 harness 注入自定义 store（context 集成测试）；生产构造经
+    /// crate 根 `wire_project_config*` 工厂（内部 `for_project`，pub(crate)）。
     pub fn with_native_store(mut self, native_store: NativeConfigStore) -> Self {
         self.native_store = Some(native_store);
         self
