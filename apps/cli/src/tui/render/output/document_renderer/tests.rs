@@ -1025,7 +1025,7 @@ fn test_markdown_link_offsets_align_after_control_char_normalization() {
     assert!(!plain.contains('\t'), "plain 不应残留 tab: {plain:?}");
     let link = &link_line.links[0];
     assert_eq!(
-        &plain[link.col_start..link.col_end],
+        &plain[link.col_start..link.col_end], // allow unsafe_text_op: find offset
         "example",
         "link 偏移应命中归一化后 plain 的锚文本"
     );
