@@ -9,6 +9,8 @@ use std::rc::Rc;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
+use crate::tui::view_model::display_text::normalize_display_control_chars;
+
 /// 渲染管线的渲染上下文。
 ///
 /// 当前主题是编译期 `render::theme` 常量，无运行时 Theme，故只持宽度。
@@ -78,9 +80,26 @@ pub struct RenderedLine {
     pub animation: Option<LineAnimation>,
 }
 
+/// 把 spans 中的控制字符归一化（issue #1670）；含控制字符的 span 被替换为归一化副本，
+/// 干净 span 保持原对象。wrap 入口与 RenderedLine 构造共用（DRY）。
+pub(crate) fn normalize_span_texts(spans: Vec<Span<'static>>) -> Vec<Span<'static>> {
+    spans
+        .into_iter()
+        .map(|span| {
+            let normalized = normalize_display_control_chars(span.content.as_ref());
+            if normalized == span.content.as_ref() {
+                span
+            } else {
+                Span::styled(normalized, span.style)
+            }
+        })
+        .collect()
+}
+
 impl RenderedLine {
     /// 从 spans 构造，`plain` 由 spans 可见文本拼接得到。
     pub fn new(spans: Vec<Span<'static>>) -> Self {
+        let spans = normalize_span_texts(spans);
         let plain = spans
             .iter()
             .map(|span| span.content.as_ref())
@@ -104,7 +123,7 @@ impl RenderedLine {
     /// 从纯文本构造渲染行。
     #[cfg(test)]
     pub fn from_plain(text: impl Into<String>) -> Self {
-        let plain = text.into();
+        let plain = normalize_display_control_chars(&text.into());
         Self {
             spans: vec![Span::raw(plain.clone())],
             plain,
@@ -118,6 +137,8 @@ impl RenderedLine {
 
     /// 显式提供 plain（用于 markdown 等显示文本 ≠ 逻辑文本的场景）。
     pub fn with_plain(spans: Vec<Span<'static>>, plain: String) -> Self {
+        let spans = normalize_span_texts(spans);
+        let plain = normalize_display_control_chars(&plain);
         Self {
             spans,
             plain,
@@ -135,6 +156,8 @@ impl RenderedLine {
         plain: String,
         links: Vec<LinkSpan>,
     ) -> Self {
+        let spans = normalize_span_texts(spans);
+        let plain = normalize_display_control_chars(&plain);
         Self {
             spans,
             plain,
@@ -528,5 +551,27 @@ mod tests {
 
         assert_eq!(selected, vec![(1, "one"), (2, "two")]);
         assert_eq!(doc.lines_in_range(9..12).count(), 0);
+    }
+
+    #[test]
+    fn test_rendered_line_new_normalizes_control_chars() {
+        let line = RenderedLine::new(vec![Span::raw("a\u{1b}b")]);
+        assert_eq!(line.plain, "a\u{fffd}b");
+        assert_eq!(line.spans[0].content.as_ref(), "a\u{fffd}b");
+    }
+
+    #[test]
+    fn test_with_plain_normalizes_spans_and_plain_symmetrically() {
+        // 不变式：plain == spans 可见文本拼接 —— 两侧必须同函数归一化。
+        let line = RenderedLine::with_plain(vec![Span::raw("a\tb")], "a\tb".to_string());
+        assert_eq!(line.plain, "a    b");
+        assert_eq!(line.spans[0].content.as_ref(), "a    b");
+        assert_eq!(
+            line.plain,
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        );
     }
 }

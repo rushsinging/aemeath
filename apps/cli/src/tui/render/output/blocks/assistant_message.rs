@@ -160,4 +160,21 @@ mod tests {
             "选中后应保留新增前景色（修 #61）"
         );
     }
+
+    #[test]
+    fn test_assistant_code_block_expands_tab() {
+        // issue #1670 复现：fenced code block 内 tab 被吞。
+        let block = render("```\nwanaka_session\t9892\n```");
+        let code_line = block
+            .lines
+            .iter()
+            .find(|line| line.plain.contains("wanaka_session"))
+            .expect("应渲染出代码行");
+        assert!(
+            !code_line.plain.contains('\t'),
+            "代码行不应残留 tab，实际: {:?}",
+            code_line.plain
+        );
+        assert!(code_line.plain.contains("wanaka_session    9892"));
+    }
 }

@@ -942,3 +942,57 @@ fn test_streaming_and_final_tool_result_have_consistent_gutter() {
     assert_eq!(s_marker_count, 1, "streaming 应仅出现一个 ⎿ marker");
     assert_eq!(f_marker_count, 1, "final 应仅出现一个 ⎿ marker");
 }
+
+#[test]
+fn test_user_message_tab_renders_as_visible_spaces_scene() {
+    // issue #1670 场景：TSV 用户消息回显列对齐可见。
+    let kind = OutputBlockKind::UserMessage(TextBlockView {
+        key: "u".into(),
+        text: "wanaka_session\t9892\t78".into(),
+        style: SemanticStyle::Normal,
+    });
+    let user = BlockNode {
+        block_id: "u".into(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    };
+    let vm = vm_with_roots(vec![user]);
+    let mut renderer = OutputDocumentRenderer::default();
+    let doc = renderer.render_tree(&vm, 80);
+    let lines = &doc.blocks[0].lines;
+
+    assert_eq!(lines[2].plain, "wanaka_session    9892    78");
+    assert!(!lines[2].plain.contains('\t'));
+}
+
+#[test]
+fn test_assistant_code_block_tab_renders_as_visible_spaces_scene() {
+    // issue #1670 场景：assistant 代码块内 tab 可见为空白。
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "a".into(),
+        text: "```\nwanaka_session\t9892\n```".into(),
+        style: SemanticStyle::Normal,
+    });
+    let assistant = BlockNode {
+        block_id: "a".into(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    };
+    let vm = vm_with_roots(vec![assistant]);
+    let mut renderer = OutputDocumentRenderer::default();
+    let doc = renderer.render_tree(&vm, 80);
+
+    let code_line = doc.blocks[0]
+        .lines
+        .iter()
+        .find(|line| line.plain.contains("wanaka_session"))
+        .expect("应渲染出代码行");
+    assert!(
+        !code_line.plain.contains('\t'),
+        "代码行不应残留 tab，实际: {:?}",
+        code_line.plain
+    );
+    assert!(code_line.plain.contains("wanaka_session    9892"));
+}

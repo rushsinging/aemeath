@@ -8,8 +8,19 @@
 
 use crate::tui::render::output::blocks;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
-use crate::tui::view_model::output::OutputBlockKind;
+use crate::tui::view_model::display_text::normalize_display_control_chars;
+use crate::tui::view_model::output::{OutputBlockKind, TextBlockView};
 use std::hash::{Hash, Hasher};
+
+/// 渲染前归一化视图文本副本（issue #1670 源头防线：先于宽度计算与
+/// markdown/links 解析，保证 links 偏移基于已归一化文本对齐）。
+fn normalized_text_block_view(view: &TextBlockView) -> TextBlockView {
+    TextBlockView {
+        key: view.key.clone(),
+        text: normalize_display_control_chars(&view.text),
+        style: view.style,
+    }
+}
 
 pub trait BlockComponent {
     fn render_self(&self, block_id: &str, ctx: &RenderCtx) -> RenderedBlock;
@@ -33,7 +44,11 @@ impl BlockComponent for OutputBlockKind {
     fn render_self(&self, block_id: &str, ctx: &RenderCtx) -> RenderedBlock {
         match self {
             OutputBlockKind::AssistantMessage(text) => {
-                blocks::assistant_message::render_assistant_message(block_id, text, ctx)
+                blocks::assistant_message::render_assistant_message(
+                    block_id,
+                    &normalized_text_block_view(text),
+                    ctx,
+                )
             }
             OutputBlockKind::ToolCall(tool) => {
                 blocks::tool_call::render_tool_call(block_id, tool, ctx)
@@ -42,11 +57,13 @@ impl BlockComponent for OutputBlockKind {
                 blocks::tool_result::render_tool_result(block_id, result, ctx)
             }
             OutputBlockKind::ThinkingMessage(text) => {
-                blocks::thinking::render_thinking(block_id, text, ctx)
+                blocks::thinking::render_thinking(block_id, &normalized_text_block_view(text), ctx)
             }
-            OutputBlockKind::UserMessage(text) => {
-                blocks::user_message::render_user_message(block_id, text, ctx)
-            }
+            OutputBlockKind::UserMessage(text) => blocks::user_message::render_user_message(
+                block_id,
+                &normalized_text_block_view(text),
+                ctx,
+            ),
             OutputBlockKind::AskUserBatch(ask) => {
                 blocks::ask_user::render_ask_user_batch(block_id, ask, ctx)
             }
@@ -54,7 +71,11 @@ impl BlockComponent for OutputBlockKind {
                 blocks::hook_notice::render_hook_notice(block_id, notice, ctx)
             }
             OutputBlockKind::SystemNotice(text) | OutputBlockKind::DiagnosticNotice(text) => {
-                blocks::diagnostic::render_diagnostic(block_id, text, ctx)
+                blocks::diagnostic::render_diagnostic(
+                    block_id,
+                    &normalized_text_block_view(text),
+                    ctx,
+                )
             }
         }
     }

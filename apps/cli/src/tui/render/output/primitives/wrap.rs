@@ -1,4 +1,4 @@
-use crate::tui::render::output::rendered::RenderedLine;
+use crate::tui::render::output::rendered::{normalize_span_texts, RenderedLine};
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthChar;
 
@@ -24,6 +24,8 @@ pub fn wrap_spans_with_prefix(
     continuation_prefix: Option<Span<'static>>,
     mode: WrapMode,
 ) -> Vec<RenderedLine> {
+    // issue #1670：宽度敏感处理前先归一化控制字符，保证 tab 不以 0 宽参与断行计算。
+    let spans = normalize_span_texts(spans);
     if max_width == 0 {
         return vec![RenderedLine::new(spans)];
     }
@@ -314,5 +316,12 @@ mod tests {
         // Char 模式：逐字符硬切，保持现状
         let lines = wrap_text_to_strings("aaa bbb", 4, WrapMode::Char);
         assert_eq!(lines, vec!["aaa ", "bbb"]);
+    }
+
+    #[test]
+    fn test_wrap_entry_normalizes_tab_before_width_calc() {
+        // issue #1670：tab 必须在宽度计算前展开，否则以 0 宽参与断行导致溢出/吞字。
+        let lines = wrap_spans_with_prefix(vec![Span::raw("a\tb")], 80, None, WrapMode::Word);
+        assert_eq!(lines[0].plain, "a    b");
     }
 }
