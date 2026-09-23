@@ -40,7 +40,7 @@
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单；禁止 Task PL/行为爬回 Shared |
 | 4a | `check-noninteractive-child-session.sh` + `check-noninteractive-child-session-tests.sh` | 安全/IO | 所有生产非交互外部进程必须经 `utils` 唯一边界创建独立 session，禁止继承父控制终端 |
 | 4b | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Task 仅允许 `domain + adapters` 并禁止 `business/core` 复活；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
+| 5 | `check-hexagonal-layer-purity.sh` | Hexagonal 正式层界 | 全部 feature crate 层目录白名单 + R8 层内依赖方向 + retired COLA 层名防复活（#1022 正式化；update 例外 tracking #989）；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task、Storage）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage/Query PL、AppendLog 入口、无指标 `UsageSender`、消费式 `UsageWorker` 及被 Composition 消费的 `usage_query_service` 查询装配入口；退役 worker metrics 与共享 shutdown outcome 不得重新进入 façade；Runtime 登记 Compact 模型解析入口 `CompactModelResolver` / `SessionModelSlot`；Storage 经 `check_storage_facade` 与 lib.rs 公开面 exact-match（#1647） |
 | 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
 | 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
@@ -217,10 +217,10 @@
 - **#914 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.policy` 传给 Runtime；Tool Catalog/Execution 只由 Runtime bootstrap 经 `tools::composition::wire_builtin_catalog_execution` 装配，禁止恢复 `ToolCatalogGateway`、`new_registry` 或 `register_all_tools*` 兼容链。规则使用结构化正向/负向断言，白名单仍为 0。
 - **#914 故意违规证据**：在 Tools 临时恢复 `LegacyNoAgent` 后，`check-tool-catalog-execution-boundary.sh` 以 exit 2 阻断；删除探针后单 Guard 与总编排 clean pass。
 
-## 5. check-cola-layer-purity.sh
+## 5. check-hexagonal-layer-purity.sh（原 check-cola-layer-purity.sh，#1022 正式化）
 
-- **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界；Config 在 #1654 后允许 `domain + ports + application + adapters`（`application/wiring` 依赖 adapters 的例外待 #1022 裁决 wiring 归位后开启 R8 方向检查）。
+- **定位**：Hexagonal 正式层界守卫（#1022）：全部 feature crate 的层目录白名单、R8 层内依赖方向（`domain ← application ← ports ← adapters`）与 retired COLA 层名防复活。迁移期 COLA 矩阵（`@FEATURE_LAYERS` fallback、business/utils/contract/gateway 方向规则）已退役；唯一残留例外是 update crate（registry `exception.update.cola-layout`，tracking #989）。
+- **功能**：R8 层内依赖方向统一覆盖全部 Hexagonal crate（含 storage 补入、config 三层收敛后零例外开启）；retired COLA 层名防复活（统一 `@RETIRED_COLA_LAYERS`）；update 显式例外分支；各 crate 层目录与顶层文件白名单维持既有锁定。
 - **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
 - **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
@@ -229,10 +229,6 @@
 
 | 当前层 | 禁止依赖 |
 |---|---|
-| `business` | `core`, `gateway`, `contract` |
-| `utils` | `business`, `core`, `gateway`, `contract` |
-| `contract` | `business`, `core`, `gateway`, `utils` |
-| `gateway` | `business`, `utils` |
 
 - **检查方式**：
   - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage 与 Audit 使用各自目标规则。
@@ -240,7 +236,8 @@
   - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。  - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
   - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
-  - Config 顶层只允许 `lib.rs/domain.rs/ports.rs/application.rs/adapters.rs` 与三个 `*_tests.rs` 分离测试文件，目录只允许 `domain/ports/application/adapters`；重新出现 `contract.rs` / `api/` 等旧 COLA 层名时直接失败（#1654 迁移，`policy.config.target-layout` 登记）。
+  - Config 已收敛为 `domain/ports/adapters` 三层（#1022：ConfigAppService 是实现 ports 的 adapter，application 层属过度预建并已移除；wiring 归位 crate 根 `lib.rs`）；顶层白名单与目录白名单锁定，R8 方向检查零例外开启。
+  - Update 目录白名单显式登记（`api/contract/gateway` + 对应 `.rs`），越界文件（如 `domain.rs`）直接失败；该分支是 registry 登记的 migration exception（tracking #989），#989 完成后删除。
   - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
   - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
   - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage Hexagonal 层。

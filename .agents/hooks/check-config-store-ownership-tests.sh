@@ -7,7 +7,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/agent/features/config/src" "$TMP/agent/composition/src"
-cat >"$TMP/agent/features/config/src/application.rs" <<'RS'
+cat >"$TMP/agent/features/config/src/adapters.rs" <<'RS'
 pub fn wire_project_config_with_cli(native_store: NativeConfigStore) {}
 pub fn wire_project_config(native_store: NativeConfigStore) {}
 pub fn for_project(native_store: NativeConfigStore) {}
@@ -38,9 +38,9 @@ expect_failure() {
 }
 
 run_guard >/dev/null
-printf '%s\n' 'fn bad() { storage::api::file_system_blob("root"); }' >>"$TMP/agent/features/config/src/application.rs"
-expect_failure config-construction 'Config application must consume injected NativeConfigStore' sed -i.bak '$d' "$TMP/agent/features/config/src/application.rs"
-rm -f "$TMP/agent/features/config/src/application.rs.bak"
+printf '%s\n' 'fn bad() { storage::api::file_system_blob("root"); }' >>"$TMP/agent/features/config/src/adapters.rs"
+expect_failure config-construction 'Config application must consume injected NativeConfigStore' sed -i.bak '$d' "$TMP/agent/features/config/src/adapters.rs"
+rm -f "$TMP/agent/features/config/src/adapters.rs.bak"
 
 printf '%s\n' 'fn wire_config_override_store() { NativeConfigStore::new(file_system_blob()); }' >>"$TMP/agent/composition/src/app.rs"
 expect_failure duplicate-composition-factory 'Composition must define exactly one `wire_config_override_store` factory in production' sed -i.bak '$d' "$TMP/agent/composition/src/app.rs"

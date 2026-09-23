@@ -15,9 +15,7 @@ violations = []
 config = "\n".join(
     (root / rel).read_text()
     for rel in (
-        "agent/features/config/src/application.rs",
-        "agent/features/config/src/application/wiring.rs",
-        "agent/features/config/src/application/app_service.rs",
+        "agent/features/config/src/adapters/app_service.rs",
     )
     if (root / rel).is_file()
 )

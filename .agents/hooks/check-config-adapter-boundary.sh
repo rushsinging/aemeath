@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-APPLICATION="$ROOT/agent/features/config/src/application.rs"
+APPLICATION="$ROOT/agent/features/config/src/adapters/app_service.rs"
 ADAPTERS="$ROOT/agent/features/config/src/adapters.rs"
 
 violations=""

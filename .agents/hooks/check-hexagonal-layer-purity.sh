@@ -3,13 +3,13 @@ set -euo pipefail
 # guard-registry:policy.hexagonal.current-layer-matrix
 # guard-registry:policy.task.target-layout
 # guard-registry:policy.config.target-layout
+# guard-registry:exception.update.cola-layout
 
-# 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
-# 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
-#       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
-#       Project/Tools/Task 使用 domain/adapters（domain 不得依赖 adapters）；Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层；
-#       Config 使用 domain/ports/application/adapters（#1654 迁移；application 依赖 adapters 的 wiring 例外待 #1022 裁决归位后开启 R8 方向检查）。
-# 例外：RUNTIME_LAYER_MIGRATION_EXCEPTIONS 为空集合（当前无迁移期层级倒置）。
+# 功能：Hexagonal 正式层界守卫（#1022）：全部 feature crate 的层目录白名单、
+#       R8 层内依赖方向（domain ← application ← ports ← adapters）与 retired
+#       COLA 层名防复活。迁移期 COLA 矩阵已退役，唯一残留例外是 update crate
+#       （仍为 COLA 形态，tracking #989，registry 登记 migration_exception）。
+# 例外：update（COLA 目录白名单显式登记）；其余 13 个 Hexagonal crate 零例外。
 #
 # 实现：perl 单进程核心（issue 1521）。原实现为 xtask 子命令 `cola-layer-purity`
 #       （tools/xtask/src/cola_layer_purity.rs），Stop Hook 每次触发产生 40~80s
@@ -28,45 +28,32 @@ use strict;
 use warnings;
 use JSON::PP;
 
-# ---------- 常量矩阵（与 xtask cola_layer_purity.rs 一致） ----------
-my @FEATURE_LAYERS = qw(contract gateway core business utils);
+# ---------- 常量矩阵（Hexagonal 正式版，#1022 起 COLA 矩阵退役） ----------
+my @RETIRED_COLA_LAYERS = qw(api business contract core gateway capabilities memory_store task_store);
 my @RUNTIME_HEX_LAYERS = qw(domain application ports adapters shared);
 my @WORKFLOW_HEX_LAYERS = qw(domain);
 my @PROVIDER_HEX_LAYERS = qw(domain adapters);
 my @MEMORY_HEX_LAYERS = qw(domain application ports adapters);
-my @PROVIDER_LEGACY_LAYERS = qw(api business contract core gateway);
 my @POLICY_HEX_LAYERS = qw(domain adapters);
 my @POLICY_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs adapters.rs);
-my @POLICY_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @STORAGE_HEX_LAYERS = qw(domain ports adapters);
-my @STORAGE_LEGACY_LAYERS = qw(api business contract gateway memory_store task_store);
 my @PROJECT_HEX_LAYERS = qw(domain adapters);
 my @PROJECT_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs adapters.rs);
-my @PROJECT_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @TOOLS_HEX_LAYERS = qw(domain adapters);
 my @TOOLS_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs adapters.rs);
-my @TOOLS_LEGACY_LAYERS = qw(api business contract core gateway);
 my @TASK_HEX_LAYERS = qw(domain adapters);
 my @TASK_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs adapters.rs);
-my @TASK_LEGACY_LAYERS = qw(api business contract core gateway ports capabilities);
 my @AUDIT_HEX_LAYERS = qw(domain application ports adapters);
 my @AUDIT_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs application.rs ports.rs adapters.rs);
-my @AUDIT_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @HOOK_HEX_LAYERS = qw(domain ports adapters);
 my @HOOK_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs adapters.rs capabilities.rs);
-my @HOOK_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
-my @CONFIG_HEX_LAYERS = qw(domain ports application adapters);
-my @CONFIG_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs application.rs adapters.rs domain_tests.rs application_tests.rs adapters_tests.rs);
-my @CONFIG_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
+my @CONFIG_HEX_LAYERS = qw(domain ports adapters);
+my @CONFIG_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs adapters.rs lib_tests.rs domain_tests.rs adapters_tests.rs);
 my @CONTEXT_HEX_LAYERS = qw(domain application ports adapters);
 my @TOOL_PROFILE_PUBLIC_API = qw(baseline derive_restricted allowed_capabilities);
 my $POLICY_FORBIDDEN_ADAPTER_TYPES = qr/\b(?:struct|enum)\s+(?:Deny|Approval|RequireApproval)\w*Policy\b/;
 
 my %FORBIDDEN_LAYER_DEPS = (
-  business    => [qw(core gateway contract)],
-  utils       => [qw(business core gateway contract)],
-  contract    => [qw(business core gateway utils)],
-  gateway     => [qw(business utils)],
   domain      => [qw(application ports adapters)],
   ports       => [qw(application adapters)],
   application => [qw(adapters)],
@@ -227,13 +214,13 @@ sub feature_layer_for {
     task     => \@TASK_HEX_LAYERS,
     audit    => \@AUDIT_HEX_LAYERS,
     hook     => \@HOOK_HEX_LAYERS,
+    storage  => \@STORAGE_HEX_LAYERS,
+    config   => \@CONFIG_HEX_LAYERS,
   );
   if (exists $hex_layers{$feature}) {
     return ($feature, $layer) if contains($layer, @{$hex_layers{$feature}});
     return ();
   }
-  return () if $feature eq "storage";
-  return ($feature, $layer) if contains($layer, @FEATURE_LAYERS);
   return ();
 }
 
@@ -254,7 +241,7 @@ sub check_src_layout {
       my $child = "$src/$name";
       my $rel = "agent/features/$crate_name/src/$name";
       if ($crate_name eq "runtime") {
-        if (-d $child && contains($name, @FEATURE_LAYERS)) {
+        if (-d $child && contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Runtime legacy COLA directory is forbidden; use " . fmt_list(@RUNTIME_HEX_LAYERS);
           next;
         }
@@ -266,14 +253,14 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "provider") {
-        if (contains($name, @PROVIDER_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Provider legacy fixed layer is forbidden; use domain/ports/adapters";
           next;
         }
         push @violations, "$rel: Provider source directories must be " . fmt_list(@PROVIDER_HEX_LAYERS) if (-d $child && !contains($name, @PROVIDER_HEX_LAYERS));
         next;
       } elsif ($crate_name eq "policy") {
-        if (contains($name, @POLICY_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Policy legacy fixed layer is forbidden; use " . fmt_list(@POLICY_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @POLICY_HEX_LAYERS)) {
           push @violations, "$rel: Policy source directories must be " . fmt_list(@POLICY_HEX_LAYERS);
@@ -282,7 +269,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "project") {
-        if (contains($name, @PROJECT_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Project legacy fixed layer is forbidden; use " . fmt_list(@PROJECT_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @PROJECT_HEX_LAYERS)) {
           push @violations, "$rel: Project source directories must be " . fmt_list(@PROJECT_HEX_LAYERS);
@@ -291,7 +278,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "audit") {
-        if (contains($name, @AUDIT_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Audit empty or legacy fixed layer is forbidden; use evidence-backed " . fmt_list(@AUDIT_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @AUDIT_HEX_LAYERS)) {
           push @violations, "$rel: Audit source directories must be evidence-backed layers " . fmt_list(@AUDIT_HEX_LAYERS);
@@ -300,7 +287,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "hook") {
-        if (contains($name, @HOOK_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Hook legacy fixed layer is forbidden; use " . fmt_list(@HOOK_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @HOOK_HEX_LAYERS)) {
           push @violations, "$rel: Hook source directories must be " . fmt_list(@HOOK_HEX_LAYERS);
@@ -309,7 +296,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "config") {
-        if (contains($name, @CONFIG_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Config legacy fixed layer is forbidden; use " . fmt_list(@CONFIG_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @CONFIG_HEX_LAYERS)) {
           push @violations, "$rel: Config source directories must be " . fmt_list(@CONFIG_HEX_LAYERS);
@@ -318,7 +305,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "tools") {
-        if (contains($name, @TOOLS_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: tools legacy fixed layer is forbidden; use " . fmt_list(@TOOLS_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @TOOLS_HEX_LAYERS)) {
           push @violations, "$rel: tools source directories must be " . fmt_list(@TOOLS_HEX_LAYERS);
@@ -327,7 +314,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "task") {
-        if (contains($name, @TASK_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Task legacy fixed layer is forbidden; use " . fmt_list(@TASK_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @TASK_HEX_LAYERS)) {
           push @violations, "$rel: Task source directories must be " . fmt_list(@TASK_HEX_LAYERS);
@@ -336,7 +323,7 @@ sub check_src_layout {
         }
         next;
       } elsif ($crate_name eq "storage") {
-        if (contains($name, @STORAGE_LEGACY_LAYERS)) {
+        if (contains($name, @RETIRED_COLA_LAYERS)) {
           push @violations, "$rel: Storage legacy fixed layer is forbidden; use " . fmt_list(@STORAGE_HEX_LAYERS);
         } elsif (-d $child && !contains($name, @STORAGE_HEX_LAYERS)) {
           push @violations, "$rel: Storage directory must be a hexagonal layer " . fmt_list(@STORAGE_HEX_LAYERS) . " or registered transitional module";
@@ -344,11 +331,12 @@ sub check_src_layout {
         next;
       } elsif ($crate_name eq "memory") {
         next if (-d $child && contains($name, @MEMORY_HEX_LAYERS));
-      }
-      if (-d $child && !contains($name, @FEATURE_LAYERS)) {
-        next if ($crate_name eq "runtime" && contains($name, @RUNTIME_HEX_LAYERS));
-        next if ($crate_name eq "context" && contains($name, @CONTEXT_HEX_LAYERS));
-        push @violations, "$rel: feature src directories must be COLA layers " . fmt_list(@FEATURE_LAYERS);
+      } elsif ($crate_name eq "update") {
+        # migration_exception（registry: exception.update.cola-layout，tracking #989）：
+        # update 仍为 COLA 形态，目录白名单显式登记，#989 归位后删除本分支。
+        next if (-d $child && contains($name, qw(api contract gateway)));
+        next if (!-d $child && $name =~ /^(?:lib|api|contract|gateway)\.rs$/);
+        push @violations, "$rel: Update retains COLA layout beyond its registered exception (tracking #989)";
       }
     }
   }
@@ -432,10 +420,7 @@ sub run_sanity {
       $fail = 1;
     }
   };
-  # line_layer_violations 断言
-  $check->(@{ [line_layer_violation_for("business", "use crate::core::port::ToolPort;")] } != 0, "business->core 应被阻断");
-  $check->(@{ [line_layer_violation_for("utils", "let _ = crate::business::Policy::default();")] } != 0, "utils->business 应被阻断");
-  $check->(@{ [line_layer_violation_for("core", "use crate::business::TaskState;")] } == 0, "core->business 应放行");
+  # line_layer_violations 断言（Hexagonal 方向；COLA 方向矩阵已随 #1022 退役）
   $check->(@{ [line_layer_violation_for("domain", "use crate::application::Agent;")] } != 0, "domain->application 应被阻断");
   $check->(@{ [line_layer_violation_for("application", "use crate::adapters::SdkProjection;")] } != 0, "application->adapters 应被阻断");
   $check->(@{ [line_layer_violation_for("application", "use crate::domain::Run;")] } == 0, "application->domain 应放行");
