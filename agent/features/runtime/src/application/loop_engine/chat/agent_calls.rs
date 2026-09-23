@@ -772,9 +772,9 @@ mod tests {
                 catalog: catalog.clone(),
                 execution,
                 context: crate::application::context::coordination::ContextCoordinator::new(
-                    context::adapters::isolated_context("test-session"),
+                    context::isolated_context("test-session"),
                 ),
-                session_id: context::domain::SessionId::new("test-session"),
+                session_id: context::SessionId::new("test-session"),
                 ctx: ctx.clone(),
                 max_tool_concurrency: 1,
                 agent_semaphore: agent_semaphore.clone(),

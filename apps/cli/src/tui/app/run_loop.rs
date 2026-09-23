@@ -114,6 +114,14 @@ impl App {
         // resume 为已加载历史）。
         self.ensure_persistent_processing(&runtime_tx);
 
+        // #740：回路建立后异步预热 /model 与 /resume 的数据源（事件流请求，
+        // 不阻塞启动；回填经 ModelList/SessionList 事件写入 SessionState 缓存）。
+        if self.chat.input_event_tx.is_some() {
+            for event in cache_warmup_events() {
+                self.chat.push_input_event(event);
+            }
+        }
+
         loop {
             let loop_now = Instant::now();
             let loop_gap_ms = loop_now.duration_since(last_loop_iteration).as_millis();
@@ -242,6 +250,17 @@ impl App {
 
         Ok(())
     }
+}
+
+/// #740：常驻 chat 回路建立后的缓存预热事件——立即请求模型列表与最近
+/// session 列表，回填 /model 对话框与 /resume 补全的数据源。
+pub(crate) fn cache_warmup_events() -> Vec<sdk::ChatInputEvent> {
+    vec![
+        sdk::ChatInputEvent::ListModels,
+        sdk::ChatInputEvent::ManageSession {
+            args: "list".to_string(),
+        },
+    ]
 }
 
 #[cfg(test)]

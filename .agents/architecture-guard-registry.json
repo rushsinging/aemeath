@@ -4,7 +4,8 @@
     "repository_migration_debt": 1,
     "modules": {
       "runtime": 0,
-      "tui": 1
+      "tui": 1,
+      "update": 1
     }
   },
   "construction_symbols": [
@@ -424,7 +425,7 @@
     },
     {
       "id": "policy.hexagonal.current-layer-matrix",
-      "guard": "check-cola-layer-purity.sh",
+      "guard": "check-hexagonal-layer-purity.sh",
       "module": "repository",
       "scope": {
         "kind": "symbol",
@@ -441,7 +442,7 @@
     },
     {
       "id": "policy.config.target-layout",
-      "guard": "check-cola-layer-purity.sh",
+      "guard": "check-hexagonal-layer-purity.sh",
       "module": "config",
       "scope": {
         "kind": "path_prefix",
@@ -450,10 +451,10 @@
       "classification": "target_hexagonal_policy",
       "mechanism_type": "structural",
       "owner": "config",
-      "reason": "Config uses domain/ports/application/adapters Target and rejects retired COLA layer names (contract.rs legacy removed)",
+      "reason": "Config converged to domain/ports/adapters (ConfigAppService is a port-implementing adapter); wiring lives at crate root lib.rs; R8 direction checks fully enabled with zero exceptions",
       "tracking_issue": 1654,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "application wiring dependency on adapters resolves when #1022 adjudicates wiring ownership; replace only with an equivalent Config Target layout policy",
+      "exit_condition": "replace only with an equivalent Config Target layout policy",
       "status": "active"
     },
     {
@@ -577,7 +578,7 @@
     },
     {
       "id": "scope.tui.render-tests-and-display-bridge",
-      "guard": "check-render-pure.sh",
+      "guard": "check-tui-render-pure.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -662,7 +663,7 @@
     },
     {
       "id": "scope.tui.safe-text-owners",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -679,7 +680,7 @@
     },
     {
       "id": "false-positive.tui.unsafe-text-inline-allow",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
@@ -815,7 +816,7 @@
     },
     {
       "id": "policy.task.target-layout",
-      "guard": "check-cola-layer-purity.sh",
+      "guard": "check-hexagonal-layer-purity.sh",
       "module": "task",
       "scope": {
         "kind": "path_prefix",
@@ -968,7 +969,7 @@
     },
     {
       "id": "policy.runtime.capability-assembly",
-      "guard": "check-runtime-capability-assembly.sh",
+      "guard": "check-runtime-capability-assembly-ownership.sh",
       "module": "runtime",
       "scope": {
         "kind": "path_prefix",
@@ -1002,7 +1003,7 @@
     },
     {
       "id": "scope.all.unsafe-text-long-statement-files",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "shared",
       "scope": {
         "kind": "pattern",
@@ -1083,6 +1084,40 @@
       "tracking_issue": 1067,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent registry-driven policy that preserves symbol discovery and allowlist semantics",
+      "status": "active"
+    },
+    {
+      "id": "exception.update.cola-layout",
+      "guard": "check-hexagonal-layer-purity.sh",
+      "module": "update",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/update/src"
+      },
+      "classification": "migration_exception",
+      "mechanism_type": "whitelist-backed",
+      "owner": "update",
+      "reason": "update crate retains COLA layout (api/contract/gateway) pending #989; directory whitelist is explicit in the guard's update branch",
+      "tracking_issue": 989,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "remove the update branch and register update Hexagonal target layout when #989 completes COLA elimination",
+      "status": "active"
+    },
+    {
+      "id": "policy.context.crate-root-facade",
+      "guard": "check-crate-api-boundary.sh",
+      "module": "context",
+      "scope": {
+        "kind": "symbol",
+        "value": "ROOT_ACCESS_ALLOW.context"
+      },
+      "classification": "target_capability_policy",
+      "mechanism_type": "whitelist-backed",
+      "owner": "context",
+      "reason": "Context internal layers are private; cross-BC access only via registered crate-root symbols and semantic module facades (api/compact/context_port/guidance/main_session/session/skill)",
+      "tracking_issue": 1022,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Context crate-root facade policy",
       "status": "active"
     }
   ]

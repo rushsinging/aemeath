@@ -16,12 +16,12 @@
 use std::sync::Arc;
 
 use context::context_port::ContextPort;
-use context::domain::{
+use context::MainSessionDependencies;
+use context::SessionManagementPort;
+use context::{
     ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
     SessionRevision,
 };
-use context::MainSessionDependencies;
-use context::SessionManagementPort;
 use sdk::{ChatBootstrapArgs, RunId};
 use share::message::Message;
 use std::path::Path;
@@ -106,7 +106,7 @@ fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
 }
 
 fn session_management(agents_dir: &Path) -> Arc<dyn SessionManagementPort> {
-    Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+    Arc::new(context::AtomicBlobSessionManagement::new(
         storage::file_system_blob(agents_dir).expect("create session blob"),
     ))
 }
@@ -204,9 +204,9 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -266,14 +266,10 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let session_blob = storage::file_system_blob(&agents_dir).expect("create session blob");
     let session_dataset =
         storage::file_system_dataset(agents_dir.clone()).expect("create session dataset adapter");
-    let session_management: Arc<dyn SessionManagementPort> =
-        Arc::new(context::adapters::DatasetSessionManagement::new(
-            session_dataset.clone(),
-            session_blob.clone(),
-        ));
-    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
-        session_dataset,
-    ));
+    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
+        context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
+    );
+    let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
         workspace,
@@ -282,7 +278,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(writer)),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(writer)),
     })
     .await
     .expect("wire main session");
@@ -391,9 +387,9 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -575,9 +571,9 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
     let wiring = context::wire_main_session(deps)
         .await

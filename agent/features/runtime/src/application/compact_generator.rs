@@ -6,9 +6,7 @@
 
 use async_trait::async_trait;
 use context::compact::CompactGenerator;
-use context::domain::{
-    CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput,
-};
+use context::{CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput};
 use futures::StreamExt;
 use provider::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, ReasoningLevel,

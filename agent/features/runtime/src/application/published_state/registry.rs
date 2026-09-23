@@ -12,7 +12,7 @@ impl PublishedStateRegistry {
     pub(crate) fn update_context_budget(
         &self,
         session_id: impl Into<String>,
-        decision: &context::domain::CompactionDecision,
+        decision: &context::CompactionDecision,
     ) -> sdk::RuntimeStatusView {
         let session_id = session_id.into();
         let mut state = self.inner.lock();
@@ -22,16 +22,16 @@ impl PublishedStateRegistry {
             .filter(|status| status.session_id == session_id)
             .map_or(1, |status| status.revision.saturating_add(1));
         let source = match decision.reason {
-            context::domain::DecisionReason::ActualProviderUsage => {
+            context::DecisionReason::ActualProviderUsage => {
                 sdk::ContextDecisionSourceView::ActualProviderUsage
             }
-            context::domain::DecisionReason::HeuristicFallback => {
+            context::DecisionReason::HeuristicFallback => {
                 sdk::ContextDecisionSourceView::HeuristicFallback
             }
-            context::domain::DecisionReason::MisconfiguredWindow => {
+            context::DecisionReason::MisconfiguredWindow => {
                 sdk::ContextDecisionSourceView::MisconfiguredWindow
             }
-            context::domain::DecisionReason::Manual => sdk::ContextDecisionSourceView::Manual,
+            context::DecisionReason::Manual => sdk::ContextDecisionSourceView::Manual,
         };
         let status = sdk::RuntimeStatusView {
             session_id,
@@ -80,15 +80,15 @@ impl PublishedStateRegistry {
 mod tests {
     use super::*;
 
-    fn decision() -> context::domain::CompactionDecision {
-        context::domain::CompactionDecision {
+    fn decision() -> context::CompactionDecision {
+        context::CompactionDecision {
             needed: true,
-            urgency: context::domain::Urgency::Should,
+            urgency: context::Urgency::Should,
             decision_token_count: 145_000,
             threshold: 144_000,
             context_size: 200_000,
             effective_window: 180_000,
-            reason: context::domain::DecisionReason::ActualProviderUsage,
+            reason: context::DecisionReason::ActualProviderUsage,
         }
     }
 

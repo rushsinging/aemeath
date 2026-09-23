@@ -44,7 +44,7 @@ struct Inner {
 }
 
 impl ConfigAppService {
-    pub(super) fn for_project(
+    pub(crate) fn for_project(
         project_dir: &Path,
         native_store: NativeConfigStore,
     ) -> Result<Self, ConfigError> {
@@ -104,7 +104,7 @@ impl ConfigAppService {
         self
     }
 
-    pub(super) fn set_project_location(&self, location: ProjectConfigLocation) {
+    pub(crate) fn set_project_location(&self, location: ProjectConfigLocation) {
         self.active.write().unwrap().location = Some(location);
     }
 

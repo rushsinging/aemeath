@@ -1,4 +1,4 @@
-use context::domain::ToolCallIdentity;
+use context::ToolCallIdentity;
 use share::message::{ContentBlock, Message};
 use std::sync::Arc;
 use tools::{
@@ -64,7 +64,7 @@ pub struct Agent {
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub workspace_persist: Arc<dyn project::WorkspacePersist>,
     pub(crate) context: ContextCoordinator,
-    pub(crate) session_id: context::domain::SessionId,
+    pub(crate) session_id: context::SessionId,
     pub(crate) tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     pub(crate) committed_side_effects:
@@ -125,8 +125,8 @@ impl Agent {
             workspace_persist: crate::application::run::workspace_test_support::workspace_persist(
                 &ctx,
             ),
-            context: ContextCoordinator::new(context::adapters::isolated_context("test-session")),
-            session_id: context::domain::SessionId::new("test-session"),
+            context: ContextCoordinator::new(context::isolated_context("test-session")),
+            session_id: context::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
             committed_side_effects: Default::default(),

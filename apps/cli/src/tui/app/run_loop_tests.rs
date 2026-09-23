@@ -73,3 +73,20 @@ fn runtime_batch_stops_at_session_reset_effect_barrier() {
         matches!(rx.try_recv(), Ok(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "after reset")
     );
 }
+
+/// #740：启动预热——常驻 chat 回路建立后必须立即请求模型列表与最近
+/// session 列表，否则 /model 对话框与 /resume 补全永远拿不到数据。
+#[test]
+fn cache_warmup_events_request_model_and_session_lists() {
+    let events = super::cache_warmup_events();
+
+    assert_eq!(events.len(), 2, "预热应包含两个请求事件，实际: {events:?}");
+    assert!(
+        matches!(events.first(), Some(sdk::ChatInputEvent::ListModels)),
+        "第一个事件应为 ListModels，实际: {events:?}"
+    );
+    assert!(
+        matches!(events.get(1), Some(sdk::ChatInputEvent::ManageSession { args }) if args == "list"),
+        "第二个事件应为 ManageSession list，实际: {events:?}"
+    );
+}

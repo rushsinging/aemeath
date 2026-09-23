@@ -16,7 +16,7 @@ hooks = root / ".agents/hooks"
 runner = hooks / "check-architecture-guards.sh"
 registry = root / ".agents/architecture-guard-registry.json"
 runtime = root / "agent/features/runtime/src/application/client/from_args.rs"
-config = root / "agent/features/config/src/application.rs"
+config = root / "agent/features/config/src/adapters/app_service.rs"
 context = root / "agent/features/context/src/adapters/atomic_blob_session_management.rs"
 
 leaf_guards = {

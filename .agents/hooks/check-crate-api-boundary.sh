@@ -19,6 +19,7 @@ import sys
 
 root = Path.cwd()
 FEATURE_CRATES = {
+    "config",
     "runtime",
     "project",
     "policy",
@@ -33,7 +34,8 @@ FEATURE_CRATES = {
     "update",
     "workflow",
 }
-INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
+INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils",
+                      "domain", "application", "ports", "adapters", "shared"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
@@ -107,6 +109,32 @@ TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_
 }
 
 ROOT_ACCESS_ALLOW = {
+    # config crate-root façade（#1022 登记；消费者：composition/context/runtime 及其契约测试）
+    "config": {
+        "ConfigAppService",
+        "ConfigChangeSet",
+        "ConfigError",
+        "ConfigPersistError",
+        "ConfigPersistOutcome",
+        "ConfigQuery",
+        "ConfigQueryError",
+        "ConfigReader",
+        "ConfigRefreshOutcome",
+        "ConfigSubscription",
+        "ConfigUpdate",
+        "ConfigUpdateError",
+        "ConfigWiring",
+        "ConfigWriter",
+        "NativeConfigStore",
+        "PreparedConfigUpdate",
+        "PreparedProjectConfig",
+        "ProjectConfigLocation",
+        "ProjectConfigLocationError",
+        "ProjectConfigParticipant",
+        "wire_project_config",
+        "wire_project_config_with_agents_dir",
+        "wire_project_config_with_cli",
+    },
     "provider": {
         "CancellationSignal",
         "InvocationDelta",
@@ -191,6 +219,7 @@ ROOT_ACCESS_ALLOW = {
       },
     "workflow": {"adaptive_reasoning"},
     # guard-registry:policy.hook.crate-root-facade
+# guard-registry:policy.context.crate-root-facade
     "hook": {
         "Dispatcher", "MAX_ATTEMPTS", "classify_directive", "ClassifyError", "HookClass",
         "HookCommand", "HookDispatchContext", "HookDirective", "CancellationSignal",
@@ -208,14 +237,119 @@ ROOT_ACCESS_ALLOW = {
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {
-        "compact", "context_port", "domain", "guidance", "session", "skill",
-        "isolated_context", "SessionManagementPort", "SessionListEntry",
-        "SessionManagementError", "SessionMetadataUpdate", "SessionResumeView",
-        "ProductionMainContextFactory", "NoOpCanonicalSessionWriter",
-        "test_support", "wire_main_session", "BoundMainRun", "MainSessionDependencies",
-        "MainSessionError", "MainSessionWiring", "MainSessionWiringBuilder",
-        "OwnedSessionExclusivePermit", "OwnedSessionSharedPermit", "SessionSwitchClosed",
-        "SessionSwitchGate", "SessionSwitchInProgress",
+        "AcceptedInputAppend",
+        "AcceptedInputError",
+        "AcceptedInputWriter",
+        "AppendReceipt",
+        "AtomicBlobAcceptedInputWriter",
+        "AtomicBlobCanonicalSessionWriter",
+        "AtomicBlobSessionManagement",
+        "AtomicBlobSessionStore",
+        "AtomicBlobToolReceiptWriter",
+        "BoundMainRun",
+        "CanonicalSessionRepository",
+        "CanonicalSessionWriter",
+        "CleanupConfirmation",
+        "CommittedMemoryRetrieveAdapter",
+        "CompactGenerationFailure",
+        "CompactGenerationFailureKind",
+        "CompactGenerationOutput",
+        "CompactOutcome",
+        "CompactRequest",
+        "CompactResult",
+        "CompactSkipReason",
+        "CompactSummaryQuality",
+        "CompactTrigger",
+        "CompactionDecision",
+        "ContentFingerprint",
+        "ContextAppend",
+        "ContextAppendError",
+        "ContextApplicationService",
+        "ContextMemorySource",
+        "ContextMessages",
+        "ContextPort",
+        "ContextPortError",
+        "ContextPromptSource",
+        "ContextRequest",
+        "ContextRequestId",
+        "ContextWindow",
+        "DatasetCanonicalSessionWriter",
+        "DatasetSessionManagement",
+        "DatasetSessionReader",
+        "DecisionReason",
+        "FinalizeCause",
+        "InMemorySessionRepository",
+        "InvocationReminder",
+        "Language",
+        "LegacySessionDecoder",
+        "MainContextFactory",
+        "MainSessionDependencies",
+        "MainSessionError",
+        "MainSessionWiring",
+        "MainSessionWiringBuilder",
+        "ManualCompactRequest",
+        "MemoryMaterialization",
+        "NoOpCanonicalSessionWriter",
+        "NoOpContextMemorySource",
+        "OwnedSessionExclusivePermit",
+        "OwnedSessionSharedPermit",
+        "ProductionMainContextFactory",
+        "PromptMaterialization",
+        "PromptMaterializationError",
+        "RunStepId",
+        "SessionGeneration",
+        "SessionId",
+        "SessionLoadError",
+        "SessionManagementPort",
+        "SessionPersistenceService",
+        "SessionRepository",
+        "SessionRevision",
+        "SessionSnapshot",
+        "SessionSnapshotStore",
+        "SessionStoreError",
+        "SessionSwitchClosed",
+        "SessionSwitchGate",
+        "SessionSwitchInProgress",
+        "SkillPromptSource",
+        "SkillQueryFactory",
+        "StepReceipt",
+        "SystemBlock",
+        "SystemPromptSpec",
+        "TaskProgressReminder",
+        "TaskProgressReminderItem",
+        "TaskProgressStatus",
+        "ToolCallIdentity",
+        "ToolCallReceipt",
+        "ToolCallState",
+        "ToolOutcomeKind",
+        "ToolReceiptMutation",
+        "ToolReceiptMutationError",
+        "ToolReceiptMutationReceipt",
+        "ToolReceiptWriter",
+        "ToolTerminalReceipt",
+        "Urgency",
+        "WorkspaceSkillQueryFactory",
+        "api",
+        "capture_session_lifecycle",
+        "compact",
+        "context_port",
+        "decode_session",
+        "guidance",
+        "isolated_context",
+        "isolated_context_with_skill",
+        "isolated_context_with_workspace_skills",
+        "main_session",
+        "session",
+        "skill",
+        "skill_prompt_budget",
+        "test_support",
+        "wire_main_session",
+        "DisplayHistoryStepIndex",
+        "SessionListEntry",
+        "SessionManagementError",
+        "SessionMetadataUpdate",
+        "SessionRestoreStep",
+        "SessionResumeView",
     },
     "task": {
         "Batch", "BatchCreateSpec", "BatchId", "BatchStatus", "InterruptedBatchInfo",
@@ -725,6 +859,21 @@ project_lib = root / "agent/features/project/src/lib.rs"
 if project_lib.exists():
     for violation in project_public_facade_violations(project_lib.read_text()):
         violations.append(f"agent/features/project/src/lib.rs: {violation}")
+# L0（#1022）：全部 Hexagonal feature crate 的 lib.rs 内部层模块 MUST 私有；
+# update 例外（tracking #989）。
+hexagonal_pub_mod_pattern = re.compile(r"^\s*pub\s+mod\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.MULTILINE)
+HEXAGONAL_INTERNAL_LAYER_MODULES = {"domain", "application", "ports", "adapters", "shared", "capabilities"}
+for feature_dir in sorted((root / "agent" / "features").iterdir()):
+    if not feature_dir.is_dir() or feature_dir.name == "update":
+        continue
+    lib_rs = feature_dir / "src" / "lib.rs"
+    if not lib_rs.exists():
+        continue
+    for module in hexagonal_pub_mod_pattern.findall(lib_rs.read_text()):
+        if module in HEXAGONAL_INTERNAL_LAYER_MODULES:
+            violations.append(
+                f"agent/features/{feature_dir.name}/src/lib.rs: internal layer module `{module}` must stay private (no `pub mod`)"
+            )
 for forbidden in sorted(POLICY_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():

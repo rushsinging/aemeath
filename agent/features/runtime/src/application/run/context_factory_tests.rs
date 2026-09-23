@@ -499,7 +499,10 @@ fn run_context_factory_does_not_construct_context_concrete_adapters() {
         "RuntimeContextFactory 必须消费 Context 窄装配入口，不得原地构造 Context concrete adapter"
     );
     assert!(
-        !source.contains("context::adapters::"),
-        "RuntimeContextFactory 不得触达 Context adapters 内部模块路径"
+        !source.contains("context::adapters::")
+            && !source.contains("context::domain::")
+            && !source.contains("context::application::")
+            && !source.contains("context::ports::"),
+        "RuntimeContextFactory 不得触达 Context 内部层模块路径"
     );
 }

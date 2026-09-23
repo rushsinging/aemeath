@@ -1,10 +1,10 @@
 #!/bin/bash
-# Regression tests for no_mod_rs.sh.
+# Regression tests for check-no-mod-rs.sh.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="$SCRIPT_DIR/no_mod_rs.sh"
+HOOK="$SCRIPT_DIR/check-no-mod-rs.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -47,7 +47,7 @@ main() {
     fail "failure output must not include pruned worktrees: $output"
   fi
 
-  echo "no_mod_rs hook regression tests passed"
+  echo "check-no-mod-rs hook regression tests passed"
 }
 
 main "$@"

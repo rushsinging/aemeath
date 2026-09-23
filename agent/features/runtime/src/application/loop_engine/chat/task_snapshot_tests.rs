@@ -133,7 +133,7 @@ fn task_reminder_intent_preserves_count_and_active_list() {
         .unwrap();
 
     let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
-    let context::domain::InvocationReminder::TaskProgress(progress) = reminder else {
+    let context::InvocationReminder::TaskProgress(progress) = reminder else {
         panic!("expected task progress reminder");
     };
 
@@ -144,13 +144,13 @@ fn task_reminder_intent_preserves_count_and_active_list() {
     assert_eq!(progress.items[0].subject, "done");
     assert_eq!(
         progress.items[0].status,
-        context::domain::TaskProgressStatus::Completed
+        context::TaskProgressStatus::Completed
     );
     assert_eq!(progress.items[1].sequence, 2);
     assert_eq!(progress.items[1].subject, "todo");
     assert_eq!(
         progress.items[1].status,
-        context::domain::TaskProgressStatus::Pending
+        context::TaskProgressStatus::Pending
     );
 }
 

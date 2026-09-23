@@ -8,8 +8,17 @@ impl super::super::App {
         let input = self.model.input.document.buffer.clone();
         let cursor_offset = self.model.input.document.cursor;
 
-        // #567：模型列表走事件流（ListModels），缓存尚未接入。暂传空列表。
-        let models: Vec<(String, String)> = Vec::new();
+        // #740：模型与 session 列表从事件流回填的缓存读取（启动预热 +
+        // ModelList/SessionList 事件消费），此处保持纯函数。
+        let models: Vec<(String, String)> = self
+            .session
+            .cached_models
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|model| (model.provider.clone(), model.id.clone()))
+            .collect();
+        let sessions = self.session.cached_sessions.clone();
 
         let mut commands = self
             .command_catalog
@@ -54,7 +63,7 @@ impl super::super::App {
             cwd: self.session.cwd.clone(),
             models,
             commands,
-            sessions: Vec::new(),
+            sessions,
         };
 
         let suggestions = generate_suggestions(&ctx);

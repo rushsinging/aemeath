@@ -75,7 +75,7 @@ async fn make_wiring_and_workspace(
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+        Arc::new(context::AtomicBlobSessionManagement::new(
             storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
         ));
     let wiring = context::test_support::wire_in_memory(
@@ -84,9 +84,9 @@ async fn make_wiring_and_workspace(
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     )
     .await;
     (wiring, workspace)
@@ -244,7 +244,7 @@ async fn config_query_and_writer_come_from_wiring() {
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+        Arc::new(context::AtomicBlobSessionManagement::new(
             storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
         ));
 
@@ -254,9 +254,9 @@ async fn config_query_and_writer_come_from_wiring() {
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     )
     .await;
 

@@ -1,8 +1,8 @@
 #!/bin/bash
-# no_mod_rs.sh — 架构 guard：检测项目中新增的 mod.rs 文件
+# check-no-mod-rs.sh — 架构 guard：检测项目中新增的 mod.rs 文件
 # 用法：
-#   ./no_mod_rs.sh          # 检查所有 .rs 源文件
-#   ./no_mod_rs.sh --diff   # 仅检查 git 暂存区新增的文件
+#   ./check-no-mod-rs.sh          # 检查所有 .rs 源文件
+#   ./check-no-mod-rs.sh --diff   # 仅检查 git 暂存区新增的文件
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

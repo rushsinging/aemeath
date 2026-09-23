@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use context::adapters::AtomicBlobSessionStore;
-use context::ports::{SessionGeneration, SessionSnapshotStore};
+use context::AtomicBlobSessionStore;
+use context::{SessionGeneration, SessionSnapshotStore};
 use storage::{
     AtomicBlobPort, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome, QuarantineOutcome,
     QuarantineReason, ReadOutcome, StorageError, StorageKey, TransactionScope, WriteOptions,

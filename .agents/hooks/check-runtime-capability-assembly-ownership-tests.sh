@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 cp -R "$ROOT/." "$TMP/repo"
-GUARD="$TMP/repo/.agents/hooks/check-runtime-capability-assembly.sh"
+GUARD="$TMP/repo/.agents/hooks/check-runtime-capability-assembly-ownership.sh"
 BASELINE="$TMP/baseline"
 mkdir -p "$BASELINE"
 cp "$TMP/repo/agent/features/runtime/src/application.rs" "$BASELINE/application.rs"

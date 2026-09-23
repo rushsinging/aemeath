@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use context::adapters::decode_session;
-use context::domain::session::{CanonicalSession, SessionCodec, SnapshotState};
-use context::domain::{SessionId, ToolCallIdentity};
-use context::ports::SessionManagementPort;
+use context::decode_session;
+use context::SessionManagementPort;
+use context::{CanonicalSession, SessionCodec, SnapshotState};
+use context::{SessionId, ToolCallIdentity};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 fn session_for_project(
@@ -32,8 +32,8 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::file_system_blob(&root).expect("create filesystem blob adapter");
-    let port = context::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
-    let writer = context::adapters::AtomicBlobCanonicalSessionWriter::new(blob);
+    let port = context::AtomicBlobSessionManagement::new(Arc::clone(&blob));
+    let writer = context::AtomicBlobCanonicalSessionWriter::new(blob);
     let project = ProjectIdentity {
         initial_cwd: "/receipt-ledger".to_string(),
         git_common_dir: None,
@@ -49,14 +49,14 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     let identity = ToolCallIdentity {
         session_id: session_id.clone(),
         run_id: sdk::RunId::new("run"),
-        step_id: context::domain::RunStepId::new("step"),
+        step_id: context::RunStepId::new("step"),
         runtime_call_id: "call-1".to_string(),
         provider_call_id: Some("provider-1".to_string()),
         tool_name: "Glob".to_string(),
         call_index: 0,
         agent: false,
     };
-    let receipt = context::domain::ToolCallReceipt::pending(identity, "safe preview");
+    let receipt = context::ToolCallReceipt::pending(identity, "safe preview");
     writer
         .save_tool_receipt(session_id.as_str(), 1, &receipt)
         .await
@@ -79,10 +79,9 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            storage::file_system_blob(&root).expect("create filesystem blob adapter"),
-        ));
+    let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
+        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+    ));
     let project_a = ProjectIdentity {
         initial_cwd: "/project-a".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
@@ -177,7 +176,7 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob = storage::file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(blob));
+        Arc::new(context::AtomicBlobSessionManagement::new(blob));
     let project = ProjectIdentity {
         initial_cwd: "/session-primary".to_string(),
         git_common_dir: None,
@@ -207,10 +206,9 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            storage::file_system_blob(&root).expect("create filesystem blob adapter"),
-        ));
+    let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
+        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+    ));
     let project = ProjectIdentity {
         initial_cwd: "/session-lifecycle".to_string(),
         git_common_dir: None,

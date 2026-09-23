@@ -10,4 +10,4 @@ pub use guidance::resolver::InstructionsLoadedHook;
 pub use guidance::{
     init_guidance_dir, resolve_guidance, resolve_guidance_async, universal_execution_discipline,
 };
-pub use security::{assess_guidance, scan_content, GuidanceAssessment};
+pub use security::{assess_guidance, GuidanceAssessment};

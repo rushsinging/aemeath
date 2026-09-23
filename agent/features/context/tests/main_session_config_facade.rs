@@ -14,8 +14,8 @@ use config::{
     ConfigAppService, ConfigPersistError, ConfigReader, ConfigUpdate, ConfigUpdateError,
     NativeConfigStore, ProjectConfigParticipant,
 };
-use context::application::main_session::{MainSessionWiring, MainSessionWiringBuilder};
-use context::domain::session::{CanonicalSession, SnapshotState};
+use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
+use context::{CanonicalSession, SnapshotState};
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -235,14 +235,14 @@ async fn build_facade_harness(
             last_key,
             fail,
         }),
-        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
             storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
 
     let wiring = MainSessionWiring::build(builder);
@@ -352,7 +352,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     // Cross-project resume must fail before Config/Memory preparation.
     assert!(matches!(
         h.wiring.resume_prepared(session).await,
-        Err(context::application::main_session::MainSessionError::ProjectMismatch)
+        Err(context::main_session::MainSessionError::ProjectMismatch)
     ));
 
     let post_model = h

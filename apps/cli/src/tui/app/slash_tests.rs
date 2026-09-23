@@ -357,3 +357,213 @@ fn local_slash_commands_render_notices_without_side_effects() {
     assert!(result.effects.is_empty());
     assert!(app.layout.should_exit, "/exit 应设置退出标志");
 }
+
+// === #740：/model 对话框与 /resume 补全的事件流数据源 ===
+
+fn model_summary(provider: &str, id: &str, name: &str) -> sdk::ModelSummary {
+    sdk::ModelSummary {
+        provider: provider.to_string(),
+        id: id.to_string(),
+        name: name.to_string(),
+        context_window: 200_000,
+        max_tokens: 8_000,
+    }
+}
+
+fn session_summary(id: &str, summary: &str) -> sdk::SessionSummary {
+    sdk::SessionSummary {
+        id: id.to_string(),
+        title: None,
+        project: None,
+        model: None,
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+        updated_at: "2026-01-02T00:00:00Z".to_string(),
+        message_count: 3,
+        preview: None,
+        summary: summary.to_string(),
+    }
+}
+
+/// 走真实 sdk → TUI 映射后再 apply，覆盖 adapter 映射与 update 消费两层。
+fn apply_sdk_event(app: &mut App, event: sdk::ChatEvent) {
+    let mapping = crate::tui::adapter::event_mapping::sdk_event_to_tui_event(event);
+    let crate::tui::adapter::event_mapping::SdkEventMapping::Runtime(runtime_event) = mapping
+    else {
+        panic!("ModelList/SessionList 必须映射为单个 runtime 事件");
+    };
+    apply_runtime_event(app, runtime_event);
+}
+
+/// #740：缓存未回填时打开 /model 必须发 `ListModels` 请求并挂起等待，
+/// NEVER 直接显示 "No models configured"。
+#[test]
+fn model_dialog_without_cached_models_requests_list_and_waits() {
+    let mut app = app_with_builtin_router();
+
+    let result = app.handle_slash_command("/model");
+
+    assert!(
+        matches!(
+            sent_chat_event(&result),
+            Some(sdk::ChatInputEvent::ListModels)
+        ),
+        "/model 缓存未回填时应发 ListModels 请求，实际: {:?}",
+        result.effects
+    );
+    assert!(
+        app.session.model_selection_pending,
+        "缓存未回填时应挂起等待事件回填"
+    );
+    assert!(
+        !app.layout.has_active_dialog(),
+        "缓存未回填时不得直接打开 dialog"
+    );
+    let rendered = system_texts(&app).join("\n");
+    assert!(
+        rendered.contains("Loading model list"),
+        "挂起时应提示加载中，实际: {rendered}"
+    );
+}
+
+/// #740：`ModelList` 事件回填缓存后，挂起的 /model 对话框必须自动打开。
+#[test]
+fn model_list_event_fills_cache_and_opens_pending_dialog() {
+    let mut app = app_with_builtin_router();
+    let _ = app.handle_slash_command("/model");
+
+    apply_sdk_event(
+        &mut app,
+        sdk::ChatEvent::ModelList {
+            models: vec![model_summary("anthropic", "claude-3-id", "Claude 3")],
+        },
+    );
+
+    let cached = app
+        .session
+        .cached_models
+        .as_ref()
+        .expect("ModelList 事件应回填模型缓存");
+    assert_eq!(cached.len(), 1);
+    assert_eq!(cached[0].provider, "anthropic");
+    assert!(
+        !app.session.model_selection_pending,
+        "事件回填后应清除挂起标志"
+    );
+    assert!(
+        app.layout.has_active_dialog(),
+        "挂起的 dialog 应在事件回填后打开"
+    );
+    assert_eq!(
+        app.layout.dialog_model_keys,
+        vec!["anthropic/Claude 3".to_string()],
+        "dialog 选择 key 应为 provider/name"
+    );
+}
+
+/// #740：runtime 确认模型列表为空时，提示必须指向真实配置路径
+/// （`~/.agents/aemeath.json` / `.agents/aemeath.json`），
+/// NEVER 再出现过期的 `~/.aemeath/config.json`。
+#[test]
+fn loaded_empty_model_list_shows_real_config_path() {
+    let mut app = app_with_builtin_router();
+    apply_sdk_event(&mut app, sdk::ChatEvent::ModelList { models: vec![] });
+
+    let result = app.handle_slash_command("/model");
+
+    assert!(
+        matches!(
+            sent_chat_event(&result),
+            Some(sdk::ChatInputEvent::ListModels)
+        ),
+        "空列表场景仍应发 ListModels 刷新，实际: {:?}",
+        result.effects
+    );
+    assert!(!app.layout.has_active_dialog());
+    assert!(!app.session.model_selection_pending);
+    let rendered = system_texts(&app).join("\n");
+    assert!(
+        rendered.contains("~/.agents/aemeath.json") && rendered.contains(".agents/aemeath.json"),
+        "空态提示必须指向真实全局/项目配置路径，实际: {rendered}"
+    );
+    assert!(
+        !rendered.contains("~/.aemeath/config.json"),
+        "不得再出现过期配置路径，实际: {rendered}"
+    );
+}
+
+/// #740：缓存已回填时 /model 立即打开 dialog（不等待），并附带一次刷新请求。
+#[test]
+fn cached_models_open_dialog_immediately_with_refresh() {
+    let mut app = app_with_builtin_router();
+    apply_sdk_event(
+        &mut app,
+        sdk::ChatEvent::ModelList {
+            models: vec![
+                model_summary("anthropic", "claude-3-id", "Claude 3"),
+                model_summary("openai", "gpt-5-id", "GPT-5"),
+            ],
+        },
+    );
+
+    let result = app.handle_slash_command("/model");
+
+    assert!(
+        app.layout.has_active_dialog(),
+        "缓存已回填时应立即打开 dialog"
+    );
+    assert_eq!(
+        app.layout.dialog_model_keys,
+        vec!["anthropic/Claude 3".to_string(), "openai/GPT-5".to_string()]
+    );
+    assert!(
+        matches!(
+            sent_chat_event(&result),
+            Some(sdk::ChatInputEvent::ListModels)
+        ),
+        "打开 dialog 应同时发 ListModels 刷新，实际: {:?}",
+        result.effects
+    );
+}
+
+/// #740：`SessionList` 事件必须回填 /resume 补全数据源，
+/// 输入 `/resume ` 时产出历史 session 候选。
+#[test]
+fn session_list_event_feeds_resume_completion() {
+    use crate::tui::model::input::intent::InputIntent;
+
+    let mut app = app_with_builtin_router();
+    apply_sdk_event(
+        &mut app,
+        sdk::ChatEvent::SessionList {
+            sessions: vec![
+                session_summary("s-100", "first session"),
+                session_summary("s-200", "second session"),
+            ],
+        },
+    );
+
+    assert_eq!(
+        app.session.cached_sessions,
+        vec![
+            ("s-100".to_string(), "first session".to_string()),
+            ("s-200".to_string(), "second session".to_string())
+        ],
+        "SessionList 事件应回填 (id, summary) 缓存"
+    );
+
+    app.model
+        .input
+        .apply(InputIntent::ReplaceText("/resume ".to_string()));
+    app.update_suggestions();
+
+    let completion = &app.model.input.completion;
+    assert!(completion.visible, "/resume 应展示 session 补全候选");
+    assert!(
+        completion
+            .items
+            .iter()
+            .any(|item| item.label.contains("s-100")),
+        "补全候选应包含回填的 session id，实际: {:?}",
+        completion.items
+    );
+}
