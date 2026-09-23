@@ -111,19 +111,14 @@ pub fn wire_builtin_catalog_execution(
         scopes.insert(scope.name().clone(), scope);
         profiles.insert(profile_name, profile);
     }
-    let main_scope = scopes
-        .get(&RegistryScopeName::new("main"))
-        .expect("the main scope is assembled above");
     for (role, policy) in role_policies {
-        let profile = crate::domain::role_policy::compile_role_profile(&policy, &|tool| {
-            main_scope
-                .get(&crate::domain::ToolName::new(tool))
-                .map(|spec| spec.required_capabilities())
-        })
-        .map_err(|source| BuiltinWiringError::RolePolicy {
-            role: role.clone(),
-            source,
-        })?;
+        let profile =
+            crate::domain::role_policy::compile_role_profile(&policy).map_err(|source| {
+                BuiltinWiringError::RolePolicy {
+                    role: role.clone(),
+                    source,
+                }
+            })?;
         profiles.insert(
             crate::domain::role_policy::role_profile_name(&role),
             profile,

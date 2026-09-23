@@ -59,7 +59,7 @@ my @CONFIG_HEX_LAYERS = qw(domain ports application adapters);
 my @CONFIG_ALLOWED_TOP_LEVEL_FILES = qw(lib.rs domain.rs ports.rs application.rs adapters.rs domain_tests.rs application_tests.rs adapters_tests.rs);
 my @CONFIG_LEGACY_LAYERS = qw(api business contract core gateway capabilities);
 my @CONTEXT_HEX_LAYERS = qw(domain application ports adapters);
-my @TOOL_PROFILE_PUBLIC_API = qw(baseline baseline_with_names derive_restricted allowed_capabilities allowed_tool_names);
+my @TOOL_PROFILE_PUBLIC_API = qw(baseline derive_restricted allowed_capabilities);
 my $POLICY_FORBIDDEN_ADAPTER_TYPES = qr/\b(?:struct|enum)\s+(?:Deny|Approval|RequireApproval)\w*Policy\b/;
 
 my %FORBIDDEN_LAYER_DEPS = (

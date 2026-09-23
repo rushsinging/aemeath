@@ -120,25 +120,27 @@ impl From<String> for ToolName {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ToolCapability {
     /// 读取工作区（文件 / 目录）。
-    ReadWorkspace,
+    Read,
     /// 写入工作区（创建 / 修改 / 删除文件）。
-    WriteWorkspace,
+    Write,
     /// 执行外部进程（bash 等）。
-    ExecuteProcess,
+    Execute,
     /// 网络访问（web fetch / search 等）。
     NetworkAccess,
     /// 用户交互（AskUserQuestion 等）。
-    UserInteraction,
+    Interact,
     /// 派发子 agent。
-    AgentDispatch,
+    Dispatch,
     /// 读取 Task 列表或 Task 详情。
     TaskRead,
     /// 修改 Task 列表。
-    TaskMutation,
+    TaskWrite,
     /// 控制 workspace（worktree 进入 / 退出）。
     WorkspaceControl,
     /// 控制 plan mode。
-    PlanControl,
+    Plan,
+    /// 全量类：main 专属杂项工具。
+    All,
 }
 
 impl ToolCapability {
@@ -146,16 +148,17 @@ impl ToolCapability {
     /// spellings. Consumed by role-policy compilation for config validation.
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "ReadWorkspace" => Some(Self::ReadWorkspace),
-            "WriteWorkspace" => Some(Self::WriteWorkspace),
-            "ExecuteProcess" => Some(Self::ExecuteProcess),
+            "Read" => Some(Self::Read),
+            "Write" => Some(Self::Write),
+            "Execute" => Some(Self::Execute),
             "NetworkAccess" => Some(Self::NetworkAccess),
-            "UserInteraction" => Some(Self::UserInteraction),
-            "AgentDispatch" => Some(Self::AgentDispatch),
+            "Interact" => Some(Self::Interact),
+            "Dispatch" => Some(Self::Dispatch),
             "TaskRead" => Some(Self::TaskRead),
-            "TaskMutation" => Some(Self::TaskMutation),
+            "TaskWrite" => Some(Self::TaskWrite),
             "WorkspaceControl" => Some(Self::WorkspaceControl),
-            "PlanControl" => Some(Self::PlanControl),
+            "Plan" => Some(Self::Plan),
+            "All" => Some(Self::All),
             _ => None,
         }
     }
@@ -165,16 +168,17 @@ impl fmt::Display for ToolCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // 与 parse 对称：canonical 变体名。
         f.write_str(match self {
-            Self::ReadWorkspace => "ReadWorkspace",
-            Self::WriteWorkspace => "WriteWorkspace",
-            Self::ExecuteProcess => "ExecuteProcess",
+            Self::Read => "Read",
+            Self::Write => "Write",
+            Self::Execute => "Execute",
             Self::NetworkAccess => "NetworkAccess",
-            Self::UserInteraction => "UserInteraction",
-            Self::AgentDispatch => "AgentDispatch",
+            Self::Interact => "Interact",
+            Self::Dispatch => "Dispatch",
             Self::TaskRead => "TaskRead",
-            Self::TaskMutation => "TaskMutation",
+            Self::TaskWrite => "TaskWrite",
             Self::WorkspaceControl => "WorkspaceControl",
-            Self::PlanControl => "PlanControl",
+            Self::Plan => "Plan",
+            Self::All => "All",
         })
     }
 }
@@ -187,16 +191,19 @@ bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(transparent)]
     pub struct ToolCapabilities: u32 {
-        const ReadWorkspace    = 1 << 0;
-        const WriteWorkspace   = 1 << 1;
-        const ExecuteProcess   = 1 << 2;
+        const Read             = 1 << 0;
+        const Write            = 1 << 1;
+        const Execute          = 1 << 2;
         const NetworkAccess    = 1 << 3;
-        const UserInteraction  = 1 << 4;
-        const AgentDispatch    = 1 << 5;
-        const TaskMutation     = 1 << 6;
+        const Interact         = 1 << 4;
+        const Dispatch         = 1 << 5;
+        const TaskWrite        = 1 << 6;
         const WorkspaceControl = 1 << 7;
-        const PlanControl      = 1 << 8;
+        const Plan             = 1 << 8;
         const TaskRead         = 1 << 9;
+        /// 全量类：main 专属。Brief / ToolSearch / Memory 等杂项工具归此位，
+        /// 受限 profile 默认组装不出；config 显式声明 "All" 才放行。
+        const All              = 1 << 10;
     }
 }
 
@@ -226,16 +233,17 @@ impl ToolCapabilities {
 impl From<ToolCapability> for ToolCapabilities {
     fn from(cap: ToolCapability) -> Self {
         match cap {
-            ToolCapability::ReadWorkspace => Self::ReadWorkspace,
-            ToolCapability::WriteWorkspace => Self::WriteWorkspace,
-            ToolCapability::ExecuteProcess => Self::ExecuteProcess,
+            ToolCapability::Read => Self::Read,
+            ToolCapability::Write => Self::Write,
+            ToolCapability::Execute => Self::Execute,
             ToolCapability::NetworkAccess => Self::NetworkAccess,
-            ToolCapability::UserInteraction => Self::UserInteraction,
-            ToolCapability::AgentDispatch => Self::AgentDispatch,
+            ToolCapability::Interact => Self::Interact,
+            ToolCapability::Dispatch => Self::Dispatch,
             ToolCapability::TaskRead => Self::TaskRead,
-            ToolCapability::TaskMutation => Self::TaskMutation,
+            ToolCapability::TaskWrite => Self::TaskWrite,
             ToolCapability::WorkspaceControl => Self::WorkspaceControl,
-            ToolCapability::PlanControl => Self::PlanControl,
+            ToolCapability::Plan => Self::Plan,
+            ToolCapability::All => Self::All,
         }
     }
 }
@@ -810,27 +818,25 @@ mod tests {
 
     #[test]
     fn test_capabilities_contains_cap() {
-        let caps = ToolCapabilities::ReadWorkspace | ToolCapabilities::WriteWorkspace;
-        assert!(caps.contains_cap(ToolCapability::ReadWorkspace));
-        assert!(caps.contains_cap(ToolCapability::WriteWorkspace));
-        assert!(!caps.contains_cap(ToolCapability::ExecuteProcess));
+        let caps = ToolCapabilities::Read | ToolCapabilities::Write;
+        assert!(caps.contains_cap(ToolCapability::Read));
+        assert!(caps.contains_cap(ToolCapability::Write));
+        assert!(!caps.contains_cap(ToolCapability::Execute));
     }
 
     #[test]
     fn test_capabilities_from_caps() {
-        let caps = ToolCapabilities::from_caps([
-            ToolCapability::ReadWorkspace,
-            ToolCapability::NetworkAccess,
-        ]);
-        assert!(caps.contains_cap(ToolCapability::ReadWorkspace));
+        let caps =
+            ToolCapabilities::from_caps([ToolCapability::Read, ToolCapability::NetworkAccess]);
+        assert!(caps.contains_cap(ToolCapability::Read));
         assert!(caps.contains_cap(ToolCapability::NetworkAccess));
-        assert!(!caps.contains_cap(ToolCapability::WriteWorkspace));
+        assert!(!caps.contains_cap(ToolCapability::Write));
     }
 
     #[test]
     fn test_capabilities_is_subset_of() {
         let full = ToolCapabilities::all();
-        let partial = ToolCapabilities::ReadWorkspace | ToolCapabilities::WriteWorkspace;
+        let partial = ToolCapabilities::Read | ToolCapabilities::Write;
         assert!(partial.is_subset_of(full));
         assert!(!full.is_subset_of(partial));
     }
@@ -838,7 +844,7 @@ mod tests {
     #[test]
     fn test_capabilities_empty_is_subset_of_anything() {
         let empty = ToolCapabilities::empty();
-        let some = ToolCapabilities::ReadWorkspace;
+        let some = ToolCapabilities::Read;
         assert!(empty.is_subset_of(some));
         assert!(empty.is_subset_of(ToolCapabilities::empty()));
     }
@@ -884,7 +890,7 @@ mod tests {
             name: ToolName::new("Glob"),
             description: "File glob tool".into(),
             input_schema: serde_json::json!({"type": "object"}),
-            required_capabilities: ToolCapabilities::ReadWorkspace,
+            required_capabilities: ToolCapabilities::Read,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
             timeout_secs: 120,
@@ -902,8 +908,7 @@ mod tests {
             name: ToolName::new("Bash"),
             description: "Shell tool".into(),
             input_schema: serde_json::json!({"type": "object"}),
-            required_capabilities: ToolCapabilities::ExecuteProcess
-                | ToolCapabilities::WriteWorkspace,
+            required_capabilities: ToolCapabilities::Execute | ToolCapabilities::Write,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
             timeout_secs: 120,
@@ -1026,7 +1031,7 @@ mod tests {
             name: ToolName::new("Read"),
             description: "Read tool".into(),
             input_schema: serde_json::json!({"type": "object"}),
-            required_capabilities: ToolCapabilities::ReadWorkspace,
+            required_capabilities: ToolCapabilities::Read,
             concurrency: ConcurrencyDeclaration::safe(),
             cancellation: CancellationDeclaration::Cooperative,
             timeout_secs: 120,
@@ -1038,7 +1043,7 @@ mod tests {
             name: ToolName::new("Bash"),
             description: "Bash tool".into(),
             input_schema: serde_json::json!({"type": "object"}),
-            required_capabilities: ToolCapabilities::ExecuteProcess,
+            required_capabilities: ToolCapabilities::Execute,
             concurrency: ConcurrencyDeclaration::serialized(),
             cancellation: CancellationDeclaration::NonCooperative,
             timeout_secs: 120,

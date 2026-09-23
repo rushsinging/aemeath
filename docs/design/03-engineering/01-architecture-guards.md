@@ -221,7 +221,7 @@
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
 - **功能**：检查未迁移 feature 与已迁移 feature 的层级方向；Task 在 #891 后只允许 `domain + adapters`，并拒绝 `business/core` 复活；Policy 在 #916 后只允许 `lib.rs`，#917 随真实实现恢复 domain/adapters；Audit 在 #929 后允许 `domain + application + ports + adapters`；Tools 锁定 #909 scope/profile 授权边界；Config 在 #1654 后允许 `domain + ports + application + adapters`（`application/wiring` 依赖 adapters 的例外待 #1022 裁决 wiring 归位后开启 R8 方向检查）。
-- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 与 allowed_tool_names（role policy 白名单，只收缩）是授权真相，公开 API 白名单为 `baseline / baseline_with_names / derive_restricted / allowed_capabilities / allowed_tool_names`，RegistryScope 内部不从 crate root 导出。
+- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相（capability-only 组装），公开 API 白名单为 `baseline / derive_restricted / allowed_capabilities`，RegistryScope 内部不从 crate root 导出。
 - **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
 - **结构定义**：Audit 使用 `domain/application/ports/adapters`，#930 只能随真实 query 实现扩展；Policy #917 随真实实现恢复层；其他过渡集合禁止无证据扩张。

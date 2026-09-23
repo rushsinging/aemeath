@@ -49,7 +49,7 @@ impl TestCatalogExecutionFactory {
     }
 
     pub fn register<T: TypedTool + 'static>(&self, tool: T) {
-        self.register_with_capabilities(tool, ToolCapabilities::ReadWorkspace);
+        self.register_with_capabilities(tool, ToolCapabilities::Read);
     }
 
     pub fn register_with_capabilities<T: TypedTool + 'static>(
@@ -89,7 +89,7 @@ impl TestCatalogExecutionFactory {
             }
             scopes.insert(candidate_scope, scope.build());
             let allowed = if candidate_profile.as_str() == "sub-agent-restricted" {
-                ToolCapabilities::ReadWorkspace
+                ToolCapabilities::Read
             } else {
                 ToolCapabilities::all()
             };

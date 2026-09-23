@@ -723,8 +723,7 @@ fn make_parent_context_with_policy_role(
         share::config::AgentRoleDefinition {
             description: String::new(),
             policy: Some(share::config::RolePolicyConfig {
-                allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
-                capabilities: Vec::new(),
+                capabilities: vec!["Read".to_string()],
             }),
         },
     );

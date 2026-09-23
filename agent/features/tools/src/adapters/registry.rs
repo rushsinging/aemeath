@@ -31,52 +31,21 @@ impl BuiltinRegistryScope {
     }
 }
 
-/// Legacy sub-agent toolset, carried explicitly by the sub-agent-restricted
-/// profile since the static `[main, sub]` registration booleans retired.
-/// Equivalence guarantee: a sub run without a role policy sees exactly these
-/// tools, byte-for-byte with the pre-role behavior.
-pub(crate) const SUB_AGENT_TOOLSET: &[&str] = &[
-    "Bash",
-    "Read",
-    "Write",
-    "Edit",
-    "Glob",
-    "Grep",
-    "WebFetch",
-    "WebSearch",
-    "Memory",
-    "Brief",
-    "ToolSearch",
-    "Skill",
-];
-
 pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
+    // sub 默认集以 capability 位为唯一载体：Read|Write|Execute|NetworkAccess。
+    // Memory/Brief/ToolSearch 归 All 位（main 专属），默认对受限 profile 隐藏
+    // （用户决策：empty-caps 不无脑放行）；skill 走 Read 位。
     let requested = match scope {
         BuiltinRegistryScope::Main => Caps::all(),
         BuiltinRegistryScope::SubAgent => {
-            Caps::ReadWorkspace
-                | Caps::WriteWorkspace
-                | Caps::ExecuteProcess
-                | Caps::NetworkAccess
-                | Caps::WorkspaceControl
+            Caps::Read | Caps::Write | Caps::Execute | Caps::NetworkAccess
         }
-    };
-    let requested_names = match scope {
-        BuiltinRegistryScope::Main => None,
-        BuiltinRegistryScope::SubAgent => Some(
-            SUB_AGENT_TOOLSET
-                .iter()
-                .map(|tool| crate::domain::published_language::ToolName::new(*tool))
-                .collect(),
-        ),
     };
 
     match scope {
-        BuiltinRegistryScope::Main => main_parent.clone(),
-        BuiltinRegistryScope::SubAgent => {
-            ToolProfile::derive_restricted(main_parent, requested, requested_names)
-                .expect("built-in child profiles must only restrict the main profile")
-        }
+        BuiltinRegistryScope::Main => *main_parent,
+        BuiltinRegistryScope::SubAgent => ToolProfile::derive_restricted(main_parent, requested)
+            .expect("built-in child profiles must only restrict the main profile"),
     }
 }
 
@@ -107,44 +76,36 @@ pub(crate) fn register_named_scope(
 
     builtin!(
         "Bash",
-        Caps::ReadWorkspace | Caps::ExecuteProcess | Caps::WorkspaceControl,
+        Caps::Read | Caps::Execute,
         bash::BashTool {
             control: workspace_control.clone()
         }
     );
-    builtin!("Read", Caps::ReadWorkspace, file_read::FileReadTool);
-    builtin!(
-        "Write",
-        Caps::ReadWorkspace | Caps::WriteWorkspace,
-        file_write::FileWriteTool
-    );
-    builtin!(
-        "Edit",
-        Caps::ReadWorkspace | Caps::WriteWorkspace,
-        file_edit::FileEditTool
-    );
-    builtin!("Glob", Caps::ReadWorkspace, glob_tool::GlobTool);
-    builtin!("Grep", Caps::ReadWorkspace, grep::GrepTool);
+    builtin!("Read", Caps::Read, file_read::FileReadTool);
+    builtin!("Write", Caps::Read | Caps::Write, file_write::FileWriteTool);
+    builtin!("Edit", Caps::Read | Caps::Write, file_edit::FileEditTool);
+    builtin!("Glob", Caps::Read, glob_tool::GlobTool);
+    builtin!("Grep", Caps::Read, grep::GrepTool);
     builtin!("WebFetch", Caps::NetworkAccess, web_fetch::WebFetchTool);
     builtin!("WebSearch", Caps::NetworkAccess, web_search::WebSearchTool);
-    builtin!("Agent", Caps::AgentDispatch, agent_tool::AgentTool);
+    builtin!("Agent", Caps::Dispatch, agent_tool::AgentTool);
     builtin!(
         "TaskCreate",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_create::TaskCreateTool {
             access: task_access.clone()
         }
     );
     builtin!(
         "TaskUpdate",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_update::TaskUpdateTool {
             access: task_access.clone()
         }
     );
     builtin!(
         "TaskBlockBy",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_block_by::TaskBlockByTool {
             access: task_access.clone()
         }
@@ -165,14 +126,14 @@ pub(crate) fn register_named_scope(
     );
     builtin!(
         "TaskListCreate",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_list_create::TaskListCreateTool {
             access: task_access.clone()
         }
     );
     builtin!(
         "TaskListComplete",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_list_complete::TaskListCompleteTool {
             access: task_access.clone()
         }
@@ -186,50 +147,42 @@ pub(crate) fn register_named_scope(
     );
     builtin!(
         "TaskStop",
-        Caps::TaskMutation,
+        Caps::TaskWrite,
         task_stop::TaskStopTool {
             access: task_access.clone()
         }
     );
     builtin!(
         "Memory",
-        Caps::empty(),
+        Caps::All,
         memory_tool::MemoryTool {
             source: memory_source.clone(),
         }
     );
     builtin!(
         "Skill",
-        Caps::ReadWorkspace,
+        Caps::Read,
         skill_tool::SkillTool::new(skill_loader)
     );
     builtin!(
         "AskUserQuestion",
-        Caps::UserInteraction,
+        Caps::Interact,
         ask_user::AskUserQuestionTool
     );
-    builtin!("Brief", Caps::empty(), brief::BriefTool);
-    builtin!("ToolSearch", Caps::empty(), tool_search::ToolSearchTool);
-    builtin!(
-        "EnterPlanMode",
-        Caps::PlanControl,
-        plan_mode::EnterPlanModeTool
-    );
-    builtin!(
-        "ExitPlanMode",
-        Caps::PlanControl,
-        plan_mode::ExitPlanModeTool
-    );
+    builtin!("Brief", Caps::All, brief::BriefTool);
+    builtin!("ToolSearch", Caps::All, tool_search::ToolSearchTool);
+    builtin!("EnterPlanMode", Caps::Plan, plan_mode::EnterPlanModeTool);
+    builtin!("ExitPlanMode", Caps::Plan, plan_mode::ExitPlanModeTool);
     builtin!(
         "EnterWorktree",
-        Caps::ReadWorkspace | Caps::WorkspaceControl,
+        Caps::Read | Caps::WorkspaceControl,
         worktree::EnterWorktreeTool {
             control: workspace_control.clone()
         }
     );
     builtin!(
         "ExitWorktree",
-        Caps::ReadWorkspace | Caps::WorkspaceControl,
+        Caps::Read | Caps::WorkspaceControl,
         worktree::ExitWorktreeTool {
             control: workspace_control.clone()
         }
@@ -245,6 +198,7 @@ pub(crate) fn register_named_scope(
 mod tests {
     use super::*;
     use crate::domain::memory_source::MemoryPortSource;
+    use crate::domain::scope_profile::is_authorized;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use task::TaskStore;
@@ -321,8 +275,6 @@ mod tests {
         "ExitWorktree",
         "Skill",
     ];
-    const SUB_AGENT: &[&str] = SUB_AGENT_TOOLSET;
-
     #[test]
     fn production_profiles_are_main_baseline_or_restricted_children() {
         let main = ToolProfile::baseline(Caps::all());
@@ -356,7 +308,7 @@ mod tests {
             let spec = main_scope
                 .get(&crate::domain::published_language::ToolName::new(name))
                 .unwrap();
-            assert_eq!(spec.required_capabilities(), Caps::TaskMutation);
+            assert_eq!(spec.required_capabilities(), Caps::TaskWrite);
         }
     }
 
@@ -386,37 +338,36 @@ mod tests {
     }
 
     #[test]
-    fn sub_agent_restricted_profile_carries_legacy_toolset_explicitly() {
+    fn sub_agent_restricted_profile_assembles_expected_toolset_from_caps() {
+        // caps 组装：Read|Write|Execute|NetworkAccess 位挑选的工具组。
+        // Memory/Brief/ToolSearch 归 All 位（main 专属），默认组装不出。
         let main = ToolProfile::baseline(Caps::all());
         let restricted = profile_for(BuiltinRegistryScope::SubAgent, &main);
-        let names = restricted
-            .allowed_tool_names()
-            .expect("restricted profile carries an explicit allowlist");
-        for tool in SUB_AGENT {
-            assert!(
-                names.contains(&crate::domain::published_language::ToolName::new(*tool)),
-                "{tool} missing from restricted profile"
-            );
-        }
-        for absent in [
-            "Agent",
-            "AskUserQuestion",
-            "TaskCreate",
-            "TaskUpdate",
-            "TaskBlockBy",
-            "TaskListCreate",
-            "TaskListComplete",
-            "TaskStop",
-            "EnterPlanMode",
-            "ExitPlanMode",
-            "EnterWorktree",
-            "ExitWorktree",
-        ] {
-            assert!(
-                !names.contains(&crate::domain::published_language::ToolName::new(absent)),
-                "{absent} must stay out of the restricted profile"
-            );
-        }
+        assert_eq!(
+            restricted.allowed_capabilities(),
+            Caps::Read | Caps::Write | Caps::Execute | Caps::NetworkAccess
+        );
+        let scope = assembled_scope(BuiltinRegistryScope::SubAgent);
+        let mut assembled: Vec<String> = scope
+            .iter()
+            .filter(|spec| is_authorized(spec, &restricted))
+            .map(|spec| spec.name().to_string())
+            .collect();
+        assembled.sort();
+        assert_eq!(
+            assembled,
+            vec![
+                "Bash",
+                "Edit",
+                "Glob",
+                "Grep",
+                "Read",
+                "Skill",
+                "WebFetch",
+                "WebSearch",
+                "Write",
+            ]
+        );
     }
 
     #[test]

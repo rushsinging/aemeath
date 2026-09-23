@@ -1,68 +1,33 @@
-use super::published_language::{ToolCapabilities, ToolCapability, ToolName, ToolProfileName};
+use super::published_language::{ToolCapabilities, ToolCapability, ToolProfileName};
 use super::role_policy::{compile_role_profile, role_profile_name, RolePolicyCompileError};
-use super::scope_profile::ToolProfile;
 use share::config::RolePolicyConfig;
 
-fn policy(allowed_tools: &[&str], capabilities: &[&str]) -> RolePolicyConfig {
+fn policy(capabilities: &[&str]) -> RolePolicyConfig {
     RolePolicyConfig {
-        allowed_tools: allowed_tools.iter().map(|tool| tool.to_string()).collect(),
         capabilities: capabilities.iter().map(|cap| cap.to_string()).collect(),
     }
 }
 
-/// Registry lookup stub: Read/Grep 需要 ReadWorkspace，Write 需要 WriteWorkspace。
-fn caps_of(tool: &str) -> Option<ToolCapabilities> {
-    match tool.to_ascii_lowercase().as_str() {
-        "read" | "grep" => Some(ToolCapabilities::ReadWorkspace),
-        "write" => Some(ToolCapabilities::WriteWorkspace),
-        _ => None,
-    }
-}
-
 #[test]
-fn compiles_allowlist_and_derives_capabilities_from_registered_tools() {
-    let profile = compile_role_profile(&policy(&["Read", "Grep"], &[]), &caps_of).unwrap();
-    let names = profile.allowed_tool_names().expect("allowlist compiled");
-    assert!(names.contains(&ToolName::new("Read")));
-    assert!(names.contains(&ToolName::new("Grep")));
-    assert!(!names.contains(&ToolName::new("Write")));
-    // capability 位 = 名单内工具 required capabilities 的并集
+fn compiles_declared_capabilities_into_allow_set() {
+    let profile = compile_role_profile(&policy(&["Read", "NetworkAccess"])).unwrap();
     assert_eq!(
         profile.allowed_capabilities(),
-        ToolCapabilities::ReadWorkspace
+        ToolCapabilities::Read | ToolCapabilities::NetworkAccess
     );
 }
 
 #[test]
-fn declared_capabilities_intersect_with_derived_bits() {
-    let profile =
-        compile_role_profile(&policy(&["Read", "Write"], &["ReadWorkspace"]), &caps_of).unwrap();
-    assert_eq!(
-        profile.allowed_capabilities(),
-        ToolCapabilities::ReadWorkspace
-    );
-    // capability 收缩不影响名单；授权由 capability 子集 + 名单共同决定
+fn all_capability_grants_full_toolset() {
+    let profile = compile_role_profile(&policy(&["All"])).unwrap();
     assert!(profile
-        .allowed_tool_names()
-        .unwrap()
-        .contains(&ToolName::new("Write")));
-}
-
-#[test]
-fn unknown_tool_name_is_rejected() {
-    let error = compile_role_profile(&policy(&["NoSuchTool"], &[]), &caps_of).unwrap_err();
-    assert_eq!(
-        error,
-        RolePolicyCompileError::UnknownToolName {
-            name: "NoSuchTool".to_string()
-        }
-    );
+        .allowed_capabilities()
+        .is_subset_of(ToolCapabilities::all()));
 }
 
 #[test]
 fn unknown_capability_is_rejected() {
-    let error =
-        compile_role_profile(&policy(&["Read"], &["NotACapability"]), &caps_of).unwrap_err();
+    let error = compile_role_profile(&policy(&["Read", "NotACapability"])).unwrap_err();
     assert_eq!(
         error,
         RolePolicyCompileError::UnknownCapability {
@@ -72,13 +37,9 @@ fn unknown_capability_is_rejected() {
 }
 
 #[test]
-fn empty_allowlist_is_rejected() {
-    let error = compile_role_policy_empty().unwrap_err();
-    assert!(matches!(error, RolePolicyCompileError::EmptyAllowlist));
-}
-
-fn compile_role_policy_empty() -> Result<ToolProfile, RolePolicyCompileError> {
-    compile_role_profile(&policy(&[], &[]), &caps_of)
+fn empty_capabilities_is_rejected() {
+    let error = compile_role_profile(&policy(&[])).unwrap_err();
+    assert!(matches!(error, RolePolicyCompileError::EmptyCapabilities));
 }
 
 #[test]
@@ -91,16 +52,17 @@ fn role_profile_name_uses_stable_prefix() {
 #[test]
 fn capability_parse_round_trips_all_variants() {
     let all = [
-        ToolCapability::ReadWorkspace,
-        ToolCapability::WriteWorkspace,
-        ToolCapability::ExecuteProcess,
+        ToolCapability::Read,
+        ToolCapability::Write,
+        ToolCapability::Execute,
         ToolCapability::NetworkAccess,
-        ToolCapability::UserInteraction,
-        ToolCapability::AgentDispatch,
-        ToolCapability::TaskMutation,
-        ToolCapability::WorkspaceControl,
-        ToolCapability::PlanControl,
+        ToolCapability::Interact,
+        ToolCapability::Dispatch,
         ToolCapability::TaskRead,
+        ToolCapability::TaskWrite,
+        ToolCapability::WorkspaceControl,
+        ToolCapability::Plan,
+        ToolCapability::All,
     ];
     for cap in all {
         let parsed = ToolCapability::parse(&cap.to_string())

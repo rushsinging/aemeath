@@ -193,81 +193,63 @@ impl Default for AgentInstanceConfig {
     }
 }
 
-/// Tool policy bound to a role: allowlist plus optional capability restriction.
+/// Tool policy bound to a role: capability-only allow-set.
 ///
-/// Both fields are optional; an absent `policy` (or an empty allowlist, which
-/// the Tools-layer compiler rejects) means the role keeps the default sub tool
-/// set. Config-layer stores plain strings only — tool-name and capability-name
+/// The role's toolset is assembled from the declared capability groups
+/// (capability → tool-group mapping is owned by the Tools layer). An absent
+/// `policy` (or empty `capabilities`) means the role keeps the default sub
+/// tool set. Config-layer stores plain strings only — capability-name
 /// validation happens at Tools-layer compilation time.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RolePolicyConfig {
-    /// Tool-name allowlist; unlisted tools are invisible to the run and any
-    /// call against them is denied via the catalog-miss path.
-    #[serde(default, rename = "allowed_tools", alias = "allowedTools")]
-    pub allowed_tools: Vec<String>,
-
-    /// Capability-bit restriction intersected with the allowlist-derived
-    /// capabilities at compile time.
+    /// Capability allow-set; tools outside the declared groups are invisible
+    /// to the run and any call against them is denied via the catalog-miss
+    /// path.
     #[serde(default)]
     pub capabilities: Vec<String>,
 }
 
 /// Builtin role definitions consumed via [`AgentsConfig::merged_roles`].
 ///
-/// Builtin roles carry a policy and a description only — model bindings live
-/// in named instances under `agents.names`.
+/// Builtin roles are declared as capability groups; model bindings live in
+/// named instances under `agents.names`. Capability → tool-group mapping is
+/// owned by the Tools layer.
 fn builtin_agent_roles() -> Vec<(&'static str, AgentRoleDefinition)> {
-    fn policy_role(allowed_tools: &[&str], description: &str) -> AgentRoleDefinition {
+    fn capability_role(capabilities: &[&str], description: &str) -> AgentRoleDefinition {
         AgentRoleDefinition {
             description: description.to_string(),
             policy: Some(RolePolicyConfig {
-                allowed_tools: allowed_tools.iter().map(|tool| tool.to_string()).collect(),
-                capabilities: Vec::new(),
+                capabilities: capabilities.iter().map(|cap| cap.to_string()).collect(),
             }),
         }
     }
     vec![
         (
             "planner",
-            policy_role(
-                &[
-                    "Read",
-                    "Grep",
-                    "Glob",
-                    "WebSearch",
-                    "WebFetch",
-                    "TaskGet",
-                    "TaskListGet",
-                    "TaskLists",
-                ],
-                "Planning and task breakdown; read-only plus web research",
+            capability_role(
+                &["Read", "NetworkAccess", "TaskRead", "TaskWrite"],
+                "Planning and task breakdown; read-only plus web research and task writes",
             ),
         ),
         (
             "coder",
-            policy_role(
-                &["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill"],
+            capability_role(
+                &["Read", "Write", "Execute"],
                 "Implementation; read/write/execute, no agent dispatch",
             ),
         ),
         (
             "explorer",
-            policy_role(
-                &["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
-                "Local and web code retrieval",
-            ),
+            capability_role(&["Read", "NetworkAccess"], "Local and web code retrieval"),
         ),
         (
             "tester",
-            policy_role(
-                &["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
+            capability_role(
+                &["Read", "Write", "Execute"],
                 "Test authoring and execution",
             ),
         ),
-        (
-            "reviewer",
-            policy_role(&["Read", "Grep", "Glob"], "Read-only review"),
-        ),
+        ("reviewer", capability_role(&["Read"], "Read-only review")),
     ]
 }
 
@@ -421,14 +403,27 @@ mod tests {
     }
 
     #[test]
-    fn role_policy_parses_allowlist_and_capabilities() {
-        let config: AgentRoleDefinition = serde_json::from_str(
-            r#"{ "policy": { "allowed_tools": ["Read", "Grep"], "capabilities": ["ReadWorkspace"] } }"#,
-        )
-        .unwrap();
-        let policy = config.policy.expect("policy parsed");
-        assert_eq!(policy.allowed_tools, vec!["Read", "Grep"]);
-        assert_eq!(policy.capabilities, vec!["ReadWorkspace"]);
+    fn role_policy_parses_capabilities_only() {
+        let config: AgentRoleDefinition =
+            serde_json::from_str(r#"{ "policy": { "capabilities": ["Read", "Write"] } }"#).unwrap();
+        assert_eq!(
+            config.policy.expect("policy parsed").capabilities,
+            vec!["Read", "Write"]
+        );
+    }
+
+    #[test]
+    fn builtin_planner_declares_task_write_capability() {
+        let merged = AgentsConfig::default().merged_roles();
+        let planner = &merged["planner"];
+        assert_eq!(
+            planner
+                .policy
+                .as_ref()
+                .expect("planner policy")
+                .capabilities,
+            vec!["Read", "NetworkAccess", "TaskRead", "TaskWrite"]
+        );
     }
 
     #[test]

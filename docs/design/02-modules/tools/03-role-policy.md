@@ -10,7 +10,7 @@
 
 目标：
 
-1. role → 工具集（名单 + capability 位）可配置、可内置、可覆盖。
+1. role → 工具集（capability 组装）可配置、可内置、可覆盖。
 2. **role policy 取代注册表 `[main, sub]` 静态布尔**，成为 sub run 工具裁剪的唯一机制。
 3. 全链路防提权：子工具集 ⊆ 父工具集，越权即 `CapabilityEscalation`。
 
@@ -22,9 +22,9 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 |---|---|---|
 | D1 | **role 是 sub run 的策略绑定**；main agent 不绑 role | main 裁剪由 EnterPlanMode（交互式软审批）承担，避免双机制重叠 |
 | D2 | **role policy 取代 `[main, sub]` 静态布尔** | 静态归属无法表达"planner-as-sub 可派发、coder-as-sub 不可"；裁剪点唯一化 |
-| D3 | **白名单语义，未配置 = 继承现状** | 向后兼容：不写 policy 的 role 与既有 Sub scope 行为逐字节等价 |
+| D3 | **capability 组装语义，未配置 = 默认 sub 集** | 唯一配置维度是 capability 组；不写 policy 的实例使用 `Read|Write|Execute|NetworkAccess` 默认 sub 集 |
 | D4 | **内置 5 role，config 同名整条覆盖**（不做字段级合并） | 开箱即用 + 用户完全控制权；避免半内置半自定义的组合不可预期 |
-| D5 | **有效工具集 = 注册池 ∩ role 名单 ∩ role capability 位 ⊆ 父 ceiling** | 名单与 capability 位正交且都只收缩，复用 `ToolProfile::derive_restricted` 防提权 |
+| D5 | **有效工具集 = 注册池 ∩ role capability 组 ⊆ 父 ceiling** | 工具按语义归入 capability 组，职能声明组即组装；`ToolProfile::derive_restricted` 防提权 |
 | D6 | **可见性裁剪即硬边界** | LLM 看不到不可用工具（省 token、防误调用）；catalog 外调用走现有 deny 路径（`prepare_tool_round` 的 catalog-miss deny），Policy 层零改动 |
 
 ## 3. 配置 schema（Config BC）
@@ -37,7 +37,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
     "roles": {
       "reviewer": {
         "description": "Reviews code quality",
-        "policy": { "allowed_tools": ["Read", "Grep", "Glob", "WebSearch", "ToolSearch"] }
+        "policy": { "capabilities": ["Read"] }
       }
     },
     "names": {
@@ -55,7 +55,7 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 | 字段 | 语义 |
 |---|---|
 | `description: String` | 职能说明（实例未带 description 时的 fallback） |
-| `policy: Option<RolePolicyConfig>` | `allowed_tools` 白名单 + `capabilities` 收缩（见下表） |
+| `policy: Option<RolePolicyConfig>` | `capabilities` 组装声明（见下表） |
 
 **具名实例（`names`，`AgentInstanceConfig`）**：
 
@@ -70,10 +70,25 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 
 | 字段 | 语义 |
 |---|---|
-| `allowed_tools: Vec<String>` | 白名单：只允许列出者，其余不可见且调用必拒 |
-| `capabilities: Vec<String>` | capability 位收缩；与名单取交集（名单有 `Bash` 但无 `ExecuteProcess` 仍拦） |
+| `capabilities: Vec<String>` | capability 组装声明；工具集 = 声明组对应工具的并集 |
 
-只保留白名单，不设黑名单：白名单是显式、可审计的能力声明，黑名单（全量 − 排除项）会随内置工具集增长而隐式扩权。未写 `allowed_tools` 时仅由 `capabilities` 收缩（两者都未写则 `None` 走现状路径）。
+capability → 工具组映射（由工具的语义归类决定，Tools 层唯一事实源）：
+
+| Capability | 工具组 |
+|---|---|
+| `Read` | Read, Grep, Glob, Skill |
+| `Write` | Write, Edit |
+| `Execute` | Bash |
+| `NetworkAccess` | WebFetch, WebSearch |
+| `TaskRead` | TaskGet, TaskListGet, TaskLists |
+| `TaskWrite` | TaskCreate, TaskUpdate, TaskBlockBy, TaskListCreate, TaskListComplete, TaskStop |
+| `Interact` | AskUserQuestion |
+| `Dispatch` | Agent |
+| `WorkspaceControl` | EnterWorktree, ExitWorktree |
+| `Plan` | EnterPlanMode, ExitPlanMode |
+| `All` | Memory, Brief, ToolSearch（main 专属杂项；config 显式声明 `All` 才对受限职能放行） |
+
+`allowed_tools` 工具名单维度已删除（与 capability 冗余、可配置性过强）。空 `capabilities` = 无 policy = 默认 sub 集。
 
 ### 3.1 派发与自定义
 
@@ -84,15 +99,15 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 
 ## 4. 内置 role（fallback，config 同名整条覆盖）
 
-| Role | allowed_tools | 定位 |
+| Role | capabilities | 定位 |
 |---|---|---|
-| **planner** | Read, Grep, Glob, WebSearch, WebFetch, TaskGet, TaskListGet, TaskLists | 规划与拆解：只读 + 联网 + Task 读；禁写、禁执行、禁派发 |
-| **coder** | Read, Write, Edit, Glob, Grep, Bash, Skill | 执行者：读写执行；禁 AgentDispatch（防递归派发） |
-| **explorer** | Read, Grep, Glob, WebSearch, WebFetch | 检索：本地 + 联网，最瘦 |
-| **tester** | Read, Write, Edit, Bash, Grep, Glob | 测试编写与运行 |
-| **reviewer** | Read, Grep, Glob | 只读审查 |
+| **planner** | Read, NetworkAccess, TaskRead, TaskWrite | 规划拆解 + 任务编排；禁文件写、禁执行、禁派发 |
+| **coder** | Read, Write, Execute | 执行者；禁 Dispatch（防递归派发） |
+| **explorer** | Read, NetworkAccess | 检索：本地 + 联网，最瘦 |
+| **tester** | Read, Write, Execute | 测试编写与运行 |
+| **reviewer** | Read | 只读审查 |
 
-内置 role 是**职能定义**（policy + description），不含 model；内置职能没有隐式实例——派发必须命中 `names` 中的具名实例（model 取实例值或回退 `default_model`）。内置 capability 位由 allowed_tools 对应工具的 required capabilities 推导。用户要给某职能加 `Agent` / `TaskCreate` / `AskUserQuestion` 等，config 覆盖职能即可——机制支持一切名单，内置默认从简。
+内置 role 是**职能定义**（capability 组 + description），不含 model；内置职能没有隐式实例——派发必须命中 `names` 中的具名实例（model 取实例值或回退 `default_model`）。用户要给某职能加 `Dispatch` / `TaskWrite` / `Interact` 等，config 覆盖职能即可。
 
 ## 5. 分层装配与执行
 
@@ -100,11 +115,10 @@ role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由�
 config.json
   └─ ConfigSnapshot（RolePolicyConfig 解析/校验：工具名拼写、capability 拼写）
        └─ runtime resolve_derived_role（现有入口扩展）
-            └─ RolePolicy 编译：名单 ∩ capability → ToolFilter
+            └─ RolePolicy 编译：capabilities → capability allow-set
                  ├─ RunSpec：携带 role 绑定与 ToolFilter，ceiling 校验子 ⊆ 父
-                 │    ToolProfile 扩展 allowed_tool_names: Option<BTreeSet<ToolName>>
-                 │    （None = 不过滤名单，兼容现状）
-                 ├─ 可见性裁剪：发给 LLM 的 tools schema 列表按 ToolFilter 过滤
+                 │    ToolProfile 纯 capability 位集
+                 ├─ 可见性裁剪：发给 LLM 的 tools schema 列表按 capability 组装过滤
                  └─ 硬边界：被裁工具的调用（幻觉/绕过）走现有 catalog-miss deny
                     （prepare_tool_round："Tool is not present in the catalog"）
 ```
@@ -112,8 +126,8 @@ config.json
 关键约束：
 
 1. **只收缩**：`ToolFilter` 只能从注册池与父 ceiling 里做减法，任何扩展在 `derive_restricted` 处报 `CapabilityEscalation`。
-2. **单一裁剪点**：注册表 `builtin!` 的 `[main, sub]` 布尔退役，改为统一注册池 + role ToolFilter。迁移期未配置 policy 且非内置 role 名的 sub run，使用现有 Sub scope 名单作为隐式 default ToolFilter（等价迁移，行为零变化）。
-3. **AskUserQuestion 不进内置名单**：内置 role 均不含 Ask。sub run 是 NonInteractive + ParentMediated，交互代理链路（问题冒泡→main 转述→答案回灌）不存在；config 显式把 Ask 放进自定义 role 名单时工具可见可调用，但挂起后无法在 sub 环境完成恢复（等待至 timeout）——交互代理是 P2 独立特性，落地前不建议任何 role 名单包含 Ask。
+2. **单一裁剪点**：注册表 `builtin!` 的 `[main, sub]` 布尔退役，改为统一注册池 + capability 组装。无 policy 的 sub run 使用 `Read|Write|Execute|NetworkAccess` 默认组；Memory/Brief/ToolSearch 归 `All` 位（main 专属）默认对 sub 隐藏（用户决策：empty-caps 不无脑放行），其余与原 sub 集一致。
+3. **AskUserQuestion（Interact 组）不进内置职能**：sub run 是 NonInteractive + ParentMediated，交互代理链路（问题冒泡→main 转述→答案回灌）不存在；config 显式给自定义职能声明 `Interact` 时工具可见可调用，但挂起后无法在 sub 环境完成恢复（等待至 timeout）——交互代理是 P2 独立特性，落地前不建议任何职能声明 `Interact`。
 4. **绑定时机固定**：role 在 sub run 创建（`Agent` 工具调用）时解析并冻结进 RunSpec，run 存续期内不变更。
 
 ## 6. 与现有机制的关系

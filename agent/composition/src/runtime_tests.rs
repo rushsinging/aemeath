@@ -224,7 +224,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         .iter()
         .map(|t| t.name.as_str())
         .collect();
-    // TaskCreate (Main-only, Caps::TaskMutation) is an agent-dispatch tool
+    // TaskCreate (Main-only, Caps::TaskWrite) is an agent-dispatch tool
     // that must appear in the main scope.
     assert!(
         main_names.contains(&"TaskCreate"),
@@ -263,14 +263,7 @@ async fn role_policies_surface_as_role_profiles() {
     let role_policies = vec![(
         "explorer".to_string(),
         share::config::RolePolicyConfig {
-            allowed_tools: vec![
-                "Read".to_string(),
-                "Grep".to_string(),
-                "Glob".to_string(),
-                "WebSearch".to_string(),
-                "WebFetch".to_string(),
-            ],
-            capabilities: Vec::new(),
+            capabilities: vec!["Read".to_string(), "NetworkAccess".to_string()],
         },
     )];
     let tools_wiring = tools::composition::wire_builtin_catalog_execution(
@@ -309,17 +302,16 @@ async fn role_policies_surface_as_role_profiles() {
     );
 }
 
-/// A role policy naming an unregistered tool must fail wiring loudly instead
+/// A role policy naming an unknown capability must fail wiring loudly instead
 /// of silently producing a broken profile.
 #[tokio::test]
-async fn role_policy_with_unknown_tool_fails_wiring() {
+async fn role_policy_with_unknown_capability_fails_wiring() {
     let (_temp, workspace) = temp_workspace();
     let task_wiring = task::wire_task();
     let role_policies = vec![(
         "ghost".to_string(),
         share::config::RolePolicyConfig {
-            allowed_tools: vec!["NoSuchTool".to_string()],
-            capabilities: Vec::new(),
+            capabilities: vec!["NotACapability".to_string()],
         },
     )];
     let result = tools::composition::wire_builtin_catalog_execution(
