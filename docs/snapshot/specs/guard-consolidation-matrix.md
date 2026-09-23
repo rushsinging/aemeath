@@ -28,9 +28,9 @@
 | A. 转发壳与编排器 | 7 | → 1 个薄壳 + `xtask guard` 入口 |
 | B. 自测脚本（真 `X-tests.sh`） | 25 | → cargo 单测 + fixture |
 | C. ④ 直接退役 | 4 | → 删除（含 registry entry 同步 retire） |
-| D. ① 类型化（含混合主判①） | 16（15 条规则，`config-adapter` sh+py 计 2 文件） | → 构造器/可见性收窄，规则随编译强制退役 |
+| D. ① 类型化（含混合主判①） | 15（14 条规则，`config-adapter` sh+py 计 2 文件；1 条已执行，`block-nesting` 判据修正移 F） | → 构造器/可见性收窄，规则随编译强制退役 |
 | E. ② 测试化 | 8 | → cargo test |
-| F. ③ 数据化 | 29 | → registry 数据 + 引擎断言器 |
+| F. ③ 数据化 | 30（F-30 为 D 组判据修正移入） | → registry 数据 + 引擎断言器 |
 | G. 保留独立 hook | 1 | 流程防护，不进 xtask |
 | 编排器内嵌规则函数 | 1 | 归组 D（见 3.1） |
 
@@ -152,17 +152,16 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 | check-provider-construction-ownership.sh | 无（补录或随退役免录） | provider 构造符号仅 composition 可引用 | composition 模块可见性收窄 |
 | check-provider-invocation-scope.sh | scope.provider.invocation-tests | invocation_stream 强制 `&InvocationScope`、禁可变状态 | 签名类型化；可变模式黑名单→`retired_symbols` |
 | check-provider-window-single-owner.sh | 无 | ContextWindow 映射唯一 owner，禁再装饰 messages_for_api | 字段私有化 + 管线入口 pub(crate) |
-| check-config-reader-injection.sh | scope.config.reader-tests-only | ConfigAppService 构造限定 config/composition | 构造器可见性收窄 |
+| check-config-reader-injection.sh ✅（已执行） | scope.config.reader-tests-only（entry 已删） | ConfigAppService 构造限定 config/composition | 已完成：`new`/`with_global_path`/`with_env_source`/`with_native_store` 收窄 `pub(crate)`，crate 外违规编译报 E0624；类型渗漏半边（TUI/CLI 禁持 reader 类型）按本表原计划归 pattern_exclusion 数据规则 |
 | check-config-store-ownership.sh | policy.config.override-store.composition-ownership | BlobAdapter/NativeConfigStore 唯一工厂构造 | 构造器 composition 私有；工厂转发语义留一条 cargo test |
 | check-composition-construction-ownership.sh | policy.composition.cross-bc-construction-ownership | BC 内禁构造他方 adapter | 私有构造器；剩余并发入 F-14 引擎 |
 | check-context-architecture.sh | 无（主体随①消失；R3/R8/R12 黑名单进 `retired_symbols`） | R1–R12：上下文类型禁字段、能力调用限定点 | 字段与可见性改型 |
 | check-unified-authorization.sh | 无 | 授权统一（混合①②④） | Allow 携带上下文→类型化；patch 顺序→cargo test；legacy 退役项→`retired_symbols` |
 | check-config-adapter-boundary.sh + .py（2 文件） | 无 | config application 禁直读 fs/JSON + stub 残留 | 注入式设计消解 fs/serde_json 依赖；stub 黑名单→`retired_symbols`；壳与 py 删除 |
 | 编排器内嵌 run_tui_single_source_structure_guard | scope.tui.arch.inline-exclusions | retired widget adapter 仅 cfg(test)、render 禁镜像存储/生产读写 API | retired adapter 文件移出生产模块树（或删除）；镜像字段可见性收窄；CompactProgress 黑名单→`retired_symbols` |
-| check-tui-block-nesting.sh | 无 | block 禁调 apply_gutter | `apply_gutter` 收窄为 document_renderer 私有 |
 | check-session-management-ownership.sh | policy.session-management.composition-ownership | Session backing 仅 composition 构造 | 构造器私有化 + 注入 port |
 
-（注：D 组 15 条规则记录、16 个文件——`check-config-adapter-boundary` 的 `.sh` 与 `.py` 为一对，合计时按 2 文件计；编排器内嵌函数归 D 但文件本体在 A 组。）
+（注：D 组 14 条规则记录、15 个文件——`check-config-adapter-boundary` 的 `.sh` 与 `.py` 为一对，合计时按 2 文件计；编排器内嵌函数归 D 但文件本体在 A 组；`check-config-reader-injection.sh` 已执行完毕。`check-tui-block-nesting.sh` 经执行核验**判据修正**：Rust 可见性无法表达「对特定子模块隐藏」（blocks 与 gutter 同属 output 祖先链，任何收窄都无法单独屏蔽 blocks），而实际调用面为 document_renderer 与 primitives/markdown 两处，强行类型化需改渲染逻辑——降级为 F 组 pattern_exclusion（F-30），scope=blocks 目录、禁模式=`apply_gutter`、无豁免。）
 
 ### 3.5 E 组：② 测试化（8 文件）
 
@@ -210,6 +209,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 | F-27 | check-logging-settings-injection.sh | scope.logging.settings-tests 等 | 导入白名单 + 唯一性计数 |
 | F-28 | check-no-inline-tests.sh | 无（基线 .agents/inline-tests-baseline.json） | 测试文件布局断言 + 存量基线（随迁移收缩至删除） |
 | F-29 | check-no-mod-rs.sh | 无 | `forbid: src/**/mod.rs` 声明式规则 |
+| F-30 | check-tui-block-nesting.sh（自 D 组判据修正移入） | 无（补录） | blocks 目录禁 `apply_gutter` 模式（gutter 由 renderer 注入；类型化不可行：Rust 可见性无法对特定子模块隐藏） |
 
 ### 3.7 G 组：保留独立（1 文件）
 
