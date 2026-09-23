@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use context::domain::{
+use context::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
@@ -244,14 +244,14 @@ where
 fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceipt {
     match outcome {
         PublishedToolOutcome::TimedOut(details) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::TimedOut,
+            context::ToolOutcomeKind::TimedOut,
             details.safe_reason.clone(),
             receipt_cleanup(details.cleanup),
         ),
         PublishedToolOutcome::CancellationUnconfirmed(details) => {
             details.possible_side_effects.iter().fold(
                 ToolTerminalReceipt::new(
-                    context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+                    context::ToolOutcomeKind::CancellationUnconfirmed,
                     details.safe_reason.clone(),
                     receipt_cleanup(details.cleanup),
                 ),
@@ -259,22 +259,22 @@ fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceipt {
             )
         }
         PublishedToolOutcome::Cancelled(cancelled) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Cancelled,
+            context::ToolOutcomeKind::Cancelled,
             cancelled.reason.clone(),
             ReceiptCleanupConfirmation::Confirmed,
         ),
         PublishedToolOutcome::Success(_) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Success,
+            context::ToolOutcomeKind::Success,
             "tool completed",
             ReceiptCleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Failure(failure) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Failure,
+            context::ToolOutcomeKind::Failure,
             failure.safe_message.clone(),
             ReceiptCleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Suspended(_) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Suspended,
+            context::ToolOutcomeKind::Suspended,
             "tool suspended",
             ReceiptCleanupConfirmation::NotApplicable,
         ),
@@ -302,7 +302,7 @@ pub(crate) enum ToolExecutionSupervisorError {
     #[error("Tool 不在当前 Catalog：{0}")]
     ToolUnavailable(String),
     #[error(transparent)]
-    Receipt(#[from] context::domain::ToolReceiptMutationError),
+    Receipt(#[from] context::ToolReceiptMutationError),
 }
 
 #[cfg(test)]

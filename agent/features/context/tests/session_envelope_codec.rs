@@ -1,10 +1,10 @@
-use context::adapters::decode_session;
-use context::domain::session::{
+use context::decode_session;
+use context::{
     AcceptedInputProjection, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
     CommittedStepMessages, FinalizedOutcomeProjection, SessionCodec, SessionCodecError,
     SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
-use context::domain::{FinalizeCause, StepReceipt, ToolOutcomeKind};
+use context::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};

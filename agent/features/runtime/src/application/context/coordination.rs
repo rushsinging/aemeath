@@ -26,7 +26,7 @@ use crate::ports::{
     ContextPort, ContextPortError, ContextRequest, ContextWindow, FinalizeCause,
     ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
 };
-use context::domain::{ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt};
+use context::{ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt};
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
@@ -89,7 +89,7 @@ impl ContextCoordinator {
     pub(crate) async fn compaction_decision(
         &self,
         request: &ContextRequest,
-    ) -> Result<context::domain::CompactionDecision, ContextPortError> {
+    ) -> Result<context::CompactionDecision, ContextPortError> {
         self.port.needs_compaction(request).await
     }
 

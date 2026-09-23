@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
-use context::domain::session::DisplayHistoryStepIndex;
-use context::domain::session::SessionRestoreStep;
-use context::domain::FinalizeCause;
+use context::DisplayHistoryStepIndex;
+use context::FinalizeCause;
+use context::SessionRestoreStep;
 use context::SessionResumeView;
 use share::message::{Message, Role};
 

@@ -11,19 +11,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
-use context::application::main_session::{
-    MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
-};
-use context::domain::session::{
-    CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeProjection, SnapshotState,
-};
-use context::domain::{
+use context::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
+use context::ContextPort;
+use context::{
     AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
     ContextRequestId, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
     SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind, ToolTerminalReceipt,
 };
-use context::ports::ContextPort;
+use context::{
+    CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
+    FinalizedOutcomeProjection, SnapshotState,
+};
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -229,14 +227,14 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
-        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
+        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
             storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
 
     let wiring = MainSessionWiring::build(builder);
@@ -348,7 +346,7 @@ fn finalized_tool_step(
                 agent: false,
             },
             input_preview: input.to_string(),
-            state: context::domain::ToolCallState::Terminal(ToolTerminalReceipt::new(
+            state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
                 ToolOutcomeKind::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,

@@ -34,7 +34,7 @@ pub struct RuntimeResumedSessionStep {
     pub run_id: String,
     pub step_id: String,
     pub message_segments: Vec<std::sync::Arc<[Message]>>,
-    pub finalize_cause: Option<context::domain::FinalizeCause>,
+    pub finalize_cause: Option<context::FinalizeCause>,
     pub duration_ms: Option<u64>,
 }
 

@@ -363,9 +363,9 @@ fn compact_operation_facts_preserve_messages_and_notice() {
 #[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries_and_terminal_facts() {
     for finalize_cause in [
-        context::domain::FinalizeCause::Completed,
-        context::domain::FinalizeCause::UserCancelledStep,
-        context::domain::FinalizeCause::RunTerminated,
+        context::FinalizeCause::Completed,
+        context::FinalizeCause::UserCancelledStep,
+        context::FinalizeCause::RunTerminated,
     ] {
         let event = RuntimeStreamEvent::SessionResumed {
             steps: vec![RuntimeResumedSessionStep {

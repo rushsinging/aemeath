@@ -130,7 +130,7 @@ pub(crate) fn make_agent(
         context: crate::application::context::coordination::ContextCoordinator::new(
             runtime_context.context(),
         ),
-        session_id: context::domain::SessionId::new(session_id),
+        session_id: context::SessionId::new(session_id),
         ctx: tools::ToolExecutionContext::new(
             tools::ExecutionScope::builder(
                 run_id.to_string(),

@@ -783,7 +783,7 @@ where
                 .collect::<Vec<_>>();
                 if turn_boundary_config.guidance_sources_changed {
                     let reminder =
-                        context::domain::InvocationReminder::guidance_sources_changed();
+                        context::InvocationReminder::guidance_sources_changed();
                     log::debug!(
                         target: crate::LOG_TARGET,
                         "invocation_reminder_created kind={} trigger=guidance_sources_changed",
@@ -792,7 +792,7 @@ where
                     invocation_reminders.push(reminder);
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
+                    let reminder = context::InvocationReminder::model_guidance_mismatch(
                         shell.prompt_model_id.clone(),
                         runtime_context.provider_ref().model.model.clone(),
                     );

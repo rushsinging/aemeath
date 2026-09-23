@@ -432,7 +432,7 @@ impl AgentRunner for CliAgentRunner {
                 context: crate::application::context::coordination::ContextCoordinator::new(
                     derived.instance.context().context(),
                 ),
-                session_id: context::domain::SessionId::new(&derived.session_id),
+                session_id: context::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),
@@ -539,7 +539,7 @@ impl AgentRunner for CliAgentRunner {
                             .into_iter()
                             .collect::<Vec<_>>();
                             if model_name != parent_frame.context.provider_ref().model.model {
-                                let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
+                                let reminder = context::InvocationReminder::model_guidance_mismatch(
                                     parent_frame.context.provider_ref().model.model.clone(),
                                     model_name.clone(),
                                 );
