@@ -834,6 +834,54 @@ fn interaction_request_user_questions_keep_option_descriptions() {
 }
 
 #[test]
+fn interaction_request_keeps_multiple_questions_in_order() {
+    let request = sdk::InteractionRequest {
+        id: sdk::InteractionRequestId::new("request-multi"),
+        run_id: sdk::RunId::new("run-1"),
+        tool_call_id: Some("call-1".to_string()),
+        body: sdk::InteractionRequestBody::UserQuestions(vec![
+            sdk::UserQuestion {
+                prompt: "first".to_string(),
+                options: vec![sdk::OptionItem::new("a", "first choice")],
+                allow_multi: false,
+            },
+            sdk::UserQuestion {
+                prompt: "second".to_string(),
+                options: vec![sdk::OptionItem::new("b", "second choice")],
+                allow_multi: true,
+            },
+        ]),
+    };
+
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::InteractionRequested { request });
+
+    match mapped {
+        SdkEventMapping::Runtime(TuiRuntimeEvent::InteractionRequested(request)) => {
+            match request.body {
+                crate::tui::adapter::tui_runtime_event::TuiInteractionBody::UserQuestions(
+                    questions,
+                ) => {
+                    assert_eq!(questions.len(), 2, "多题映射不得丢失第二题");
+                    assert_eq!(questions[0].prompt, "first");
+                    assert_eq!(questions[1].prompt, "second");
+                    assert!(!questions[0].allow_multi);
+                    assert!(
+                        questions[1].allow_multi,
+                        "per-question allow_multi 必须保真"
+                    );
+                    assert_eq!(
+                        questions[1].options[0].description.as_deref(),
+                        Some("second choice")
+                    );
+                }
+                other => panic!("expected UserQuestions body, got {other:?}"),
+            }
+        }
+        _other => panic!("expected InteractionRequested event, got a different mapping"),
+    }
+}
+
+#[test]
 fn task_state_preserves_structured_payload() {
     let expected = sdk::TaskStateView::empty("session-a", 42);
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {
