@@ -7,6 +7,9 @@ pub struct ToolResultPayload {
     pub content: Value,
     pub is_error: bool,
     pub image_count: usize,
+    /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）。
+    /// None = 非 supervisor 路径或旧数据无耗时。
+    pub duration_ms: Option<u64>,
 }
 
 impl ToolResultPayload {
@@ -16,13 +19,20 @@ impl ToolResultPayload {
             content,
             is_error,
             image_count,
+            duration_ms: None,
         }
+    }
+
+    /// 附加 supervisor 测量的执行耗时（#1666）。
+    pub fn with_duration(mut self, duration_ms: Option<u64>) -> Self {
+        self.duration_ms = duration_ms;
+        self
     }
 }
 
 // 手写 `Eq` 与 `Hash`：serde_json::Value 不 impl Eq/Hash，但我们的缓存键只需要
-// `output`/`is_error`/`image_count` 三个标识字段的指纹——`content` 走 partial_eq
-// 比较（derive PartialEq 已用），对 cache_version 的语义指纹无影响。
+// `output`/`is_error`/`image_count` 三个标识字段的指纹——`content` 与 `duration_ms`
+// 走 partial_eq 比较（derive PartialEq 已用），对 cache_version 的语义指纹无影响。
 impl Eq for ToolResultPayload {}
 
 impl Hash for ToolResultPayload {

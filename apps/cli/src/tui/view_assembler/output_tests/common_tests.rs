@@ -87,5 +87,6 @@ fn add_completed_tool(
         content: serde_json::json!({ "text": output }),
         is_error,
         image_count: 0,
+        duration_ms: None,
     });
 }

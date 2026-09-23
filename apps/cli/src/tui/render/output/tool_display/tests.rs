@@ -892,3 +892,68 @@ fn test_task_get_snake_case_task_id_shows_id() {
         "TaskGet header 应包含 task_id '7'，实际: {text}"
     );
 }
+
+// ── issue #1666：tool call 执行耗时展示（supervisor 测量值经事件流透传） ──
+
+#[test]
+fn test_format_tool_call_appends_duration_suffix() {
+    let payload = ToolResultPayload::new(
+        "ok".to_string(),
+        serde_json::json!({ "text": "ok" }),
+        false,
+        0,
+    )
+    .with_duration(Some(1_240));
+
+    let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, Some(&payload), None);
+
+    let text = line_to_string(&header);
+    assert!(
+        text.contains(" · 1.24s"),
+        "header 应追加 supervisor 耗时后缀: {text}"
+    );
+}
+
+#[test]
+fn test_format_tool_call_without_duration_omits_suffix() {
+    let payload = ToolResultPayload::new(
+        "ok".to_string(),
+        serde_json::json!({ "text": "ok" }),
+        false,
+        0,
+    );
+
+    let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, Some(&payload), None);
+
+    let text = line_to_string(&header);
+    assert!(
+        !text.contains(" · "),
+        "duration 为 None 时不得渲染耗时占位: {text}"
+    );
+}
+
+#[test]
+fn test_format_call_duration_auto_carries_across_units() {
+    // ms 档
+    assert_eq!(super::format::format_call_duration(0), "0ms");
+    assert_eq!(super::format::format_call_duration(850), "850ms");
+    assert_eq!(super::format::format_call_duration(999), "999ms");
+
+    // s 档（百分秒，风格对齐 spinner 的空格分隔）
+    assert_eq!(super::format::format_call_duration(1_000), "1.00s");
+    assert_eq!(super::format::format_call_duration(1_240), "1.24s");
+    assert_eq!(super::format::format_call_duration(12_500), "12.50s");
+    assert_eq!(super::format::format_call_duration(59_400), "59.40s");
+
+    // ms→m 自动进位：秒四舍五入后 ≥60s 升档，NEVER 显示 60.00s
+    assert_eq!(super::format::format_call_duration(59_600), "1m 0s");
+    assert_eq!(super::format::format_call_duration(65_000), "1m 5s");
+    assert_eq!(super::format::format_call_duration(90_000), "1m 30s");
+    assert_eq!(super::format::format_call_duration(3_599_000), "59m 59s");
+
+    // s→h 自动进位：分钟四舍五入后 ≥60min 升档，零分钟省略
+    assert_eq!(super::format::format_call_duration(3_599_700), "1h");
+    assert_eq!(super::format::format_call_duration(3_600_000), "1h");
+    assert_eq!(super::format::format_call_duration(3_725_000), "1h 2m");
+    assert_eq!(super::format::format_call_duration(7_925_000), "2h 12m");
+}

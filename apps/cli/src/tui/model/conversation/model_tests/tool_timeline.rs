@@ -148,6 +148,7 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     // result 不应是 orphan
@@ -211,6 +212,7 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     assert!(
@@ -253,6 +255,7 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     assert!(

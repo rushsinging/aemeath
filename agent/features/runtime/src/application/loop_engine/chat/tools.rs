@@ -105,7 +105,7 @@ where
             .execute_one_outcome_with_ctx(call, &tool_ctx, step_id)
             .await
         {
-            tools::ToolExecutionOutcome::Suspended(suspension) => {
+            (tools::ToolExecutionOutcome::Suspended(suspension), _) => {
                 let questions = match suspension {
                     ToolSuspension::UserInteraction(spec) => spec
                         .questions
@@ -128,10 +128,13 @@ where
                     questions,
                 });
             }
-            outcome => ask_user_terminal.push(ToolExecution::new(
-                call,
-                crate::application::tool::agent::legacy_outcome(outcome),
-            )),
+            (outcome, duration_ms) => ask_user_terminal.push(
+                ToolExecution::new(
+                    call,
+                    crate::application::tool::agent::legacy_outcome(outcome),
+                )
+                .with_optional_duration(duration_ms),
+            ),
         }
     }
     let non_agent_results = execute_non_agent(
@@ -394,6 +397,8 @@ pub(crate) async fn send_tool_result<S>(
             content,
             is_error: execution.outcome.is_error,
             images: execution.outcome.images.clone(),
+            // #1666：supervisor 测量值经事件流出站（非 supervisor 路径为 None）。
+            duration_ms: execution.duration_ms,
         })
         .await;
 }
@@ -859,6 +864,72 @@ mod tests {
             Some("tool-result://event-session/provider-oversized")
         );
         assert!(!content.to_string().contains(&oversized));
+    }
+
+    /// #1666：`send_tool_result` 必须把 `ToolExecution.duration_ms`
+    /// （supervisor 测量值）透传进 `RuntimeStreamEvent::ToolResult`，
+    /// NEVER 静默丢弃——这是耗时进入事件流的唯一出口。
+    #[tokio::test]
+    async fn send_tool_result_forwards_execution_duration() {
+        let execution = ToolExecution::from_parts(
+            ToolCallId::new_v7(),
+            "provider-duration".to_string(),
+            "Bash".to_string(),
+            ToolOutcome::new("ok", Value::Null, Vec::new()),
+        )
+        .with_duration(1_500);
+        let sink = RecordingSink::default();
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+
+        send_tool_result(
+            &sink,
+            &context,
+            &execution,
+            materializer.as_ref(),
+            "event-session",
+        )
+        .await;
+
+        let events = sink.events.lock().unwrap();
+        let [RuntimeStreamEvent::ToolResult { duration_ms, .. }] = events.as_slice() else {
+            panic!("expected one tool result event");
+        };
+        assert_eq!(
+            *duration_ms,
+            Some(1_500),
+            "事件必须携带 execution.duration_ms"
+        );
+    }
+
+    /// #1666：非 supervisor 路径（如 from_parts 直接构造）duration 保持 None，
+    /// 渲染层据此不显示耗时占位。
+    #[tokio::test]
+    async fn send_tool_result_without_duration_keeps_none() {
+        let execution = ToolExecution::from_parts(
+            ToolCallId::new_v7(),
+            "provider-no-duration".to_string(),
+            "Bash".to_string(),
+            ToolOutcome::new("ok", Value::Null, Vec::new()),
+        );
+        let sink = RecordingSink::default();
+        let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
+        let materializer = crate::application::tool::test_support::test_tool_result_materializer();
+
+        send_tool_result(
+            &sink,
+            &context,
+            &execution,
+            materializer.as_ref(),
+            "event-session",
+        )
+        .await;
+
+        let events = sink.events.lock().unwrap();
+        let [RuntimeStreamEvent::ToolResult { duration_ms, .. }] = events.as_slice() else {
+            panic!("expected one tool result event");
+        };
+        assert_eq!(*duration_ms, None);
     }
 
     #[tokio::test]

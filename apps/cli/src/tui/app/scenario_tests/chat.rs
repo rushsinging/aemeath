@@ -586,6 +586,7 @@ fn tool_lifecycle_binds_result_to_call_and_renders_stable_states() {
         content: serde_json::json!({"text":"[workspace]\nmembers = []"}),
         is_error: false,
         images: vec![],
+        duration_ms: None,
     });
     harness.render();
     assert!(harness.screen().contains("Read"));
@@ -623,6 +624,7 @@ fn oversized_unknown_tool_result_renders_truncation_notice() {
         }),
         is_error: false,
         images: vec![],
+        duration_ms: None,
     });
 
     harness.render();

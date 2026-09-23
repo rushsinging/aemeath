@@ -656,6 +656,7 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
         content: content.clone(),
         is_error: false,
         images: Vec::new(),
+        duration_ms: None,
     });
 
     assert!(matches!(
@@ -669,6 +670,36 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
             && projected.pointer("/blob/reason").and_then(serde_json::Value::as_str)
                 == Some("write_failed")
     ));
+}
+
+/// #1666：SDK `ChatEvent::ToolResult` 的 duration_ms 必须透传到
+/// `TuiRuntimeEvent::ToolResult`，NEVER 丢弃。
+#[test]
+fn tool_result_maps_duration_ms_to_tui() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ToolResult {
+        context: sdk::ChatEventContext::new(
+            sdk::ChatId::new("chat-duration"),
+            sdk::ChatRunId::new("turn-duration"),
+        ),
+        id: sdk::ToolCallId::new("runtime-call-duration"),
+        provider_id: "provider-call".to_string(),
+        tool_name: "Bash".to_string(),
+        output: "ok".to_string(),
+        content: serde_json::json!({ "text": "ok" }),
+        is_error: false,
+        images: Vec::new(),
+        duration_ms: Some(1_240),
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ToolResult { duration_ms, .. }) = mapped else {
+        panic!("expected TUI tool result event");
+    };
+
+    assert_eq!(
+        duration_ms,
+        Some(1_240),
+        "TUI ToolResult 必须保留 supervisor 测量的耗时"
+    );
 }
 
 #[test]

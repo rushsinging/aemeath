@@ -72,6 +72,7 @@ fn seed_edit(harness: &mut TuiScenarioHarness, index: usize, diff_lines: usize) 
         }),
         is_error: false,
         images: vec![],
+        duration_ms: None,
     });
 }
 

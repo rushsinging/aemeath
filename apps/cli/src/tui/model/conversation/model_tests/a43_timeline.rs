@@ -76,6 +76,7 @@ fn test_a43_promote_orphan_timeline_ordering() {
         content: serde_json::json!({}),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     assert!(
         changes

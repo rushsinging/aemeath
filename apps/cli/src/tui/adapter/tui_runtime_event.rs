@@ -602,6 +602,8 @@ pub(crate) enum TuiRuntimeEvent {
         content: serde_json::Value,
         is_error: bool,
         images: Vec<TuiToolResultImage>,
+        /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）。
+        duration_ms: Option<u64>,
     },
     SystemMessage(String),
     ModelInvocationRetrying {

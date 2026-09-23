@@ -84,6 +84,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let vm = assemble_output_view(&conversation, None);
@@ -152,6 +153,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     let vm = assemble_output_view(&conversation, None);
     let diagnostics = vm
@@ -191,6 +193,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let vm = assemble_output_view(&conversation, None);
@@ -367,6 +370,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
         content: expected_content.clone(),
         is_error: expected_is_error,
         image_count: expected_image_count,
+        duration_ms: None,
     });
 
     let index = ToolIndex::build(&conv);
@@ -440,6 +444,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         content: serde_json::json!({}),
         is_error: true,
         image_count: 2,
+        duration_ms: None,
     });
 
     let vm = assemble_output_view(&conv, None);

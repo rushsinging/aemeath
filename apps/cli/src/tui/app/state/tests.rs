@@ -403,6 +403,7 @@ mod tests {
                 content: serde_json::json!({ "text": "/tmp/docs/bug/active.md:18:match\n/tmp/docs/bug/active.md:19:next\n/tmp/docs/bug/active.md:20:more\n/tmp/docs/bug/active.md:21:more\n/tmp/docs/bug/active.md:22:more\n/tmp/docs/bug/active.md:23:omitted" }),
                 is_error: false,
                 images: Vec::new(),
+                duration_ms: None,
             },
         ]
     }

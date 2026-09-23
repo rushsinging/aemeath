@@ -126,6 +126,7 @@ impl ConversationUpdate for ResumeConversation {
                                             content: normalize_tool_result_content(result.content),
                                             is_error: result.is_error,
                                             image_count: tool_result_image_count(result.content),
+                                            duration_ms: None,
                                         }));
                                     } else {
                                         // #1384: ToolUse without a matching ToolResult means
@@ -267,6 +268,7 @@ impl ConversationUpdate for ToolResult {
             self.content,
             self.is_error,
             self.image_count,
+            self.duration_ms,
         )
     }
 }

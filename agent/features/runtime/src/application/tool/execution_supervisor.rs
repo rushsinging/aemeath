@@ -59,7 +59,7 @@ impl ToolExecutionSupervisor {
     pub(crate) async fn execute(
         &self,
         call: SupervisedToolCall,
-    ) -> Result<PublishedToolOutcome, ToolExecutionSupervisorError> {
+    ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
         let descriptor = self
             .catalog
             .find(&call.invocation.tool_name)
@@ -205,7 +205,9 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutation::terminal(call.identity, terminal))
             .await?;
-        Ok(outcome)
+        // #1666：与 [tool execution terminal] 日志同源的执行耗时，随 outcome
+        // 返回给调用方进入事件流（ChatEvent::ToolResult.duration_ms）。
+        Ok((outcome, started.elapsed()))
     }
 }
 

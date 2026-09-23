@@ -753,6 +753,42 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
     );
 }
 
+/// #1666：execute_tools 返回的每个 ToolExecution 必须携带 supervisor
+/// 测量的执行耗时（duration_ms = Some），这是耗时链路的测量源头。
+#[tokio::test]
+async fn execute_tools_reports_supervisor_measured_duration() {
+    let registry = TestCatalogExecutionFactory::new();
+    registry.register(TimedTool {
+        name: "timed_duration".to_string(),
+        safe: true,
+        start_times: Arc::new(Mutex::new(Vec::new())),
+        sleep_ms: 10,
+    });
+    let agent = Agent::for_test(&registry, test_ctx(), 10);
+
+    let tool_calls = vec![ToolCall {
+        provider_id: "provider-test".to_string(),
+        id: sdk::ids::ToolCallId::from_legacy_or_new("duration-1"),
+        name: "timed_duration".to_string(),
+        index: 0,
+        input: serde_json::json!({}),
+    }];
+
+    let results = agent.execute_tools(&tool_calls).await;
+
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].duration_ms.is_some(),
+        "supervisor 路径必须返回测量耗时，实际: {:?}",
+        results[0].duration_ms
+    );
+    assert!(
+        results[0].duration_ms.unwrap() >= 10,
+        "10ms sleep 工具的耗时应 ≥ 10ms，实际: {:?}",
+        results[0].duration_ms
+    );
+}
+
 /// deadline 到达时 supervisor 必须向 Cooperative 工具发送 per-call child
 /// cancellation；工具感知并返回后，终态应为确认的 TimedOut，而不是
 /// CancellationUnconfirmed。

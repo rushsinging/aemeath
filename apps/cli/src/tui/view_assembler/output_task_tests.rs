@@ -146,5 +146,65 @@ fn add_task_tool(
         content: serde_json::json!({ "text": output }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
+}
+
+/// #1666：view assembler 组装 ToolCallBlockView 时必须把 model payload 的
+/// duration_ms 拷入 view payload，供渲染层显示耗时。
+#[test]
+fn test_tool_call_view_carries_result_duration() {
+    let mut conversation = ConversationModel::default();
+    conversation.ensure_runtime_turn(
+        crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+    );
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        id: ToolCallId::new("tool-dur-view"),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: Some("provider-dur-view".to_string()),
+        id: ToolCallId::new("tool-dur-view"),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+    conversation.apply(ToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        run_id: crate::tui::model::conversation::ids::ChatRunId::new("turn-1"),
+        provider_id: "provider-dur-view".to_string(),
+        id: ToolCallId::new("tool-dur-view"),
+        tool_name: "Bash".to_string(),
+        output: "ok".to_string(),
+        content: serde_json::json!({ "text": "ok" }),
+        is_error: false,
+        image_count: 0,
+        duration_ms: Some(1_240),
+    });
+
+    let vm = assemble_output_view(&conversation, None);
+    let tool = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("应有 Bash 工具调用块");
+
+    assert_eq!(
+        tool.result_payload
+            .as_ref()
+            .and_then(|payload| payload.duration_ms),
+        Some(1_240),
+        "view payload 必须携带 model 端耗时"
+    );
 }

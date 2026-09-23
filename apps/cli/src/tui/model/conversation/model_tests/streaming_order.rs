@@ -206,6 +206,7 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
     model.apply(ToolCallStart {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -286,6 +287,7 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         content: serde_json::json!({ "text": "test output" }),
         is_error: false,
         image_count: 0,
+        duration_ms: None,
     });
 
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
