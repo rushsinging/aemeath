@@ -331,8 +331,9 @@ fn enforce_pattern_exclusion(
         Ok(source) => source,
         Err(_) => return Ok(Vec::new()),
     };
+    let production = strip_inline_cfg_test_region(&source);
     let mut violations = Vec::new();
-    for (offset, line) in source.lines().enumerate() {
+    for (offset, line) in production.lines().enumerate() {
         for pattern in forbidden_patterns {
             if line.contains(pattern.as_str()) {
                 violations.push(Violation {
@@ -344,6 +345,45 @@ fn enforce_pattern_exclusion(
         }
     }
     Ok(violations)
+}
+
+/// 剥离内联 `#[cfg(test)] mod name { ... }` 区块（保留区块前的生产行号语义：
+/// 以占位空行维持总行数，保证违规定位行号与原文件一致）。
+fn strip_inline_cfg_test_region(source: &str) -> String {
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut pending_test_attr = false;
+    let mut test_block_depth: Option<i32> = None;
+    let mut depth: i32 = 0;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let mut blanked = false;
+        if trimmed == "#[cfg(test)]" {
+            pending_test_attr = true;
+            blanked = true;
+        } else if test_block_depth.is_none() && pending_test_attr {
+            if trimmed.starts_with("mod ") && trimmed.contains('{') {
+                test_block_depth = Some(depth);
+            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                pending_test_attr = false;
+            }
+            if test_block_depth.is_some() {
+                blanked = true;
+            }
+        } else if let Some(start_depth) = test_block_depth {
+            if depth <= start_depth {
+                test_block_depth = None;
+            } else {
+                blanked = true;
+            }
+        }
+        output_lines.push(if blanked {
+            String::new()
+        } else {
+            line.to_owned()
+        });
+        depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+    }
+    output_lines.join("\n")
 }
 
 fn enforce_construction_whitelist(

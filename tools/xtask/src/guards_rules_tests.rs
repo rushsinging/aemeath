@@ -241,6 +241,31 @@ fn pattern_exclusion_skips_test_sources() {
 }
 
 #[test]
+fn pattern_exclusion_skips_inline_cfg_test_region() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/runtime/service.rs"),
+        "#[cfg(test)]\nmod tests {\n    fn helper() {\n        hook::build_dispatcher(&snapshot);\n    }\n}\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.runtime.no-hook-dispatcher-construction",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/runtime" },
+        "forbidden_patterns": ["build_dispatcher("],
+        "reason": "dispatcher 只由 composition 构造注入",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/runtime/service.rs")
+            .expect("enforce");
+
+    assert!(violations.is_empty(), "inline cfg(test) 区不得违规");
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

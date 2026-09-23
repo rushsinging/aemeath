@@ -322,23 +322,6 @@
       "status": "active"
     },
     {
-      "id": "policy.runtime.hook-assembly.composition-ownership",
-      "guard": "check-runtime-hook-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition alone builds HookRunner from the committed ConfigSnapshot; Runtime Main and Sub consume the injected HookPort",
-      "tracking_issue": 1295,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Hook assembly policy",
-      "status": "active"
-    },
-    {
       "id": "policy.runtime.tool-assembly.composition-ownership",
       "guard": "check-runtime-tool-assembly-ownership.sh",
       "module": "runtime",
@@ -1171,6 +1154,27 @@
       ],
       "exclusions": [],
       "reason": "adapter 实现已完整落地（#1654），stub/占位残留禁止回退",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-hook-dispatcher-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "hook::build_dispatcher(",
+        "hook::Dispatcher::new(",
+        "hook::Dispatcher::try_new(",
+        "build_hook_runner("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
       "profile": "full"
     }
   ],
