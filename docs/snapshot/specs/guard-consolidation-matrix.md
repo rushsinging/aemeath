@@ -157,7 +157,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 | check-composition-construction-ownership.sh | policy.composition.cross-bc-construction-ownership | BC 内禁构造他方 adapter | 私有构造器；剩余并发入 F-14 引擎 |
 | check-context-architecture.sh | 无（主体随①消失；R3/R8/R12 黑名单进 `retired_symbols`） | R1–R12：上下文类型禁字段、能力调用限定点 | 字段与可见性改型 |
 | check-unified-authorization.sh | 无 | 授权统一（混合①②④） | Allow 携带上下文→类型化；patch 顺序→cargo test；legacy 退役项→`retired_symbols` |
-| check-config-adapter-boundary.sh + .py（2 文件） | 无 | config application 禁直读 fs/JSON + stub 残留 | 注入式设计消解 fs/serde_json 依赖；stub 黑名单→`retired_symbols`；壳与 py 删除 |
+| check-config-adapter-boundary.sh + .py（2 文件）✅（已执行） | 无 | config application 禁直读 fs/JSON + stub 残留 | 已完成：注入式 #1654 已落地，防回退落两条引擎规则（app-service-no-direct-io / adapters-no-stubs），sh+py+编排器行删除；判据修正记录：同 crate 跨模块 API 禁止无法编译期表达，①不可行 |
 | 编排器内嵌 run_tui_single_source_structure_guard | scope.tui.arch.inline-exclusions | retired widget adapter 仅 cfg(test)、render 禁镜像存储/生产读写 API | retired adapter 文件移出生产模块树（或删除）；镜像字段可见性收窄；CompactProgress 黑名单→`retired_symbols` |
 | check-session-management-ownership.sh | policy.session-management.composition-ownership | Session backing 仅 composition 构造 | 构造器私有化 + 注入 port |
 

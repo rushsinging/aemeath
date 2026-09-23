@@ -1136,6 +1136,42 @@
       "exclusions": [],
       "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
       "profile": "full"
+    },
+    {
+      "id": "pattern.config.app-service-no-direct-io",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters/app_service.rs"
+      },
+      "forbidden_patterns": [
+        "tokio::fs",
+        "std::fs",
+        "read_to_string(",
+        "serde_json::from_",
+        "serde_json::to_"
+      ],
+      "exclusions": [],
+      "reason": "Config application 只编排 adapter，文件 IO 与 JSON 解析经 FileAdapter/CompatibilityAdapter 注入（#1654 注入式已落地，规则防回退）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.config.adapters-no-stubs",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters.rs"
+      },
+      "forbidden_patterns": [
+        "Placeholder",
+        "TODO: adapter",
+        "TODO: FileAdapter",
+        "TODO: CliArgsAdapter",
+        "TODO: Claude"
+      ],
+      "exclusions": [],
+      "reason": "adapter 实现已完整落地（#1654），stub/占位残留禁止回退",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
