@@ -8,8 +8,9 @@ impl App {
     /// Run the TUI event loop.
     /// `agent_client` 是唯一的 runtime 注入点；`resume_id` 由 CLI 启动参数决定。
     pub async fn run(&mut self, _agent_client: Arc<dyn sdk::AgentClient>) -> io::Result<()> {
-        // #567：list_sessions / list_models 走事件流（ManageSession / ListModels）。
-        // 不再启动时同步拉取。
+        // #567/#740：list_sessions / list_models 走事件流（ManageSession /
+        // ListModels），启动时经 run_loop::cache_warmup_events 异步预热，
+        // 不做同步拉取。
 
         // 进入 TUI：RAII guard 保证任何退出路径（正常 / ? / panic 展开）都恢复终端。
         let mut guard = TerminalGuard::enter()?;

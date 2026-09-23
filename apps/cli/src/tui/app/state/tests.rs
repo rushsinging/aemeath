@@ -8,10 +8,6 @@ mod tests {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
 
-    fn make_memory_config() -> sdk::MemoryConfigView {
-        sdk::MemoryConfigView::default()
-    }
-
     // === ChatState ===
 
     #[test]
@@ -35,9 +31,8 @@ mod tests {
         let state = SessionState {
             session_id: "sess-1".into(),
             cwd: std::path::PathBuf::from("/tmp"),
-            session_created_at: None,
             current_model_display: "gpt-4".into(),
-            memory_config: make_memory_config(),
+            ..SessionState::default()
         };
         assert_eq!(state.session_id, "sess-1");
         assert_eq!(state.current_model_display, "gpt-4");
@@ -48,9 +43,8 @@ mod tests {
         let mut state = SessionState {
             session_id: "sess-1".into(),
             cwd: std::path::PathBuf::from("/tmp"),
-            session_created_at: None,
             current_model_display: "".into(),
-            memory_config: make_memory_config(),
+            ..SessionState::default()
         };
         state.rename_session("sess-2");
         assert_eq!(state.session_id(), "sess-2");

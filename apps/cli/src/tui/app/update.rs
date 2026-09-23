@@ -562,6 +562,33 @@ impl App {
                     sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
                 ));
             }
+            // #740：ModelList / SessionList 是 /model 对话框与 /resume 补全的
+            // 唯一数据源，在此显式消费写入 SessionState 缓存（与 ReminderList
+            // 同模式），NEVER 静默丢弃。
+            TuiRuntimeEvent::ModelList { models } => {
+                let models = models
+                    .iter()
+                    .map(|model| sdk::ModelSummary {
+                        provider: model.provider.clone(),
+                        id: model.id.clone(),
+                        name: model.name.clone(),
+                        context_window: model.context_window,
+                        max_tokens: model.max_tokens,
+                    })
+                    .collect();
+                self.session.cache_models(models);
+                if std::mem::take(&mut self.session.model_selection_pending) {
+                    self.present_model_selection_dialog();
+                }
+            }
+            TuiRuntimeEvent::SessionList { sessions } => {
+                self.session.cache_sessions(
+                    sessions
+                        .iter()
+                        .map(|session| (session.id.clone(), session.summary.clone()))
+                        .collect(),
+                );
+            }
             // `/memory remind` 结果渲染：ReminderList 在 Intent 层无投影，
             // 必须在此显式消费，NEVER 静默丢弃（#1092 终审修复）。
             TuiRuntimeEvent::ReminderList { reminders } => {

@@ -370,6 +370,8 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }))
         }
         TuiRuntimeEvent::ReflectionHistory { .. } => AgentEventMapping::default(),
+        // ModelList/SessionList/ReminderList 在 Intent 层无投影：由 update.rs
+        // 显式消费写入 SessionState 缓存 / 渲染 notice（#740 / #1092）。
         TuiRuntimeEvent::ModelList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::ReminderList { .. } => AgentEventMapping::default(),
         TuiRuntimeEvent::SessionList { .. } => AgentEventMapping::default(),

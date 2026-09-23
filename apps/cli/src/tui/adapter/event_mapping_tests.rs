@@ -913,3 +913,50 @@ fn reminder_list_maps_every_field_to_tui_owned_dto() {
     assert!(reminders[1].done);
     assert_eq!(reminders[1].created_at, 1_700_000_100);
 }
+
+/// #740：`ModelList` / `SessionList` 是 /model 对话框与 /resume 补全的唯一
+/// 数据源，payload 必须逐字段映射到 TUI 侧 DTO，NEVER 丢弃或压平。
+#[test]
+fn model_and_session_list_map_every_field_to_tui_owned_dto() {
+    let model_mapping = sdk_event_to_tui_event(sdk::ChatEvent::ModelList {
+        models: vec![sdk::ModelSummary {
+            provider: "anthropic".to_owned(),
+            id: "claude-3-id".to_owned(),
+            name: "Claude 3".to_owned(),
+            context_window: 200_000,
+            max_tokens: 8_000,
+        }],
+    });
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ModelList { models }) = model_mapping else {
+        panic!("ModelList must map to one runtime event");
+    };
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].provider, "anthropic");
+    assert_eq!(models[0].id, "claude-3-id");
+    assert_eq!(models[0].name, "Claude 3");
+    assert_eq!(models[0].context_window, 200_000);
+    assert_eq!(models[0].max_tokens, 8_000);
+
+    let session_mapping = sdk_event_to_tui_event(sdk::ChatEvent::SessionList {
+        sessions: vec![sdk::SessionSummary {
+            id: "s-100".to_owned(),
+            title: Some("custom title".to_owned()),
+            project: Some("/repo".to_owned()),
+            model: Some("anthropic/claude-3".to_owned()),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-02T00:00:00Z".to_owned(),
+            message_count: 7,
+            preview: Some("first user message".to_owned()),
+            summary: "first session".to_owned(),
+        }],
+    });
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::SessionList { sessions }) = session_mapping
+    else {
+        panic!("SessionList must map to one runtime event");
+    };
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "s-100");
+    assert_eq!(sessions[0].summary, "first session");
+    assert_eq!(sessions[0].message_count, 7);
+    assert_eq!(sessions[0].title.as_deref(), Some("custom title"));
+}
