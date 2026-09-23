@@ -103,4 +103,16 @@ mod tests {
             .iter()
             .all(|span| span.style.bg == Some(theme::USER_BG))));
     }
+
+    #[test]
+    fn test_user_message_expands_tab_to_four_spaces() {
+        // issue #1670 复现：TSV 回显 tab 被吞成一整行。
+        let view = TextBlockView {
+            key: "u".into(),
+            text: "wanaka_session\t9892\t78".into(),
+            style: SemanticStyle::Normal,
+        };
+        let block = render_user_message("u", &view, &RenderCtx::for_width(80));
+        assert_eq!(block.lines[0].plain, "wanaka_session    9892    78");
+    }
 }
