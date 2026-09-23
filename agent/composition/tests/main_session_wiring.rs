@@ -99,7 +99,7 @@ async fn wire_config_with_agents_dir(
 }
 
 fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
-    config::NativeConfigStore::new(
+    config::native_override_store(
         storage::file_system_blob(agents_dir.join("config-overrides"))
             .expect("create config override blob"),
     )

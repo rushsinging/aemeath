@@ -88,7 +88,7 @@ fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
 fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigStore, SdkError> {
     let blob = storage::file_system_blob(agents_dir.join("config-overrides"))
         .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
-    Ok(config::NativeConfigStore::new(blob))
+    Ok(config::native_override_store(blob))
 }
 
 fn logging_settings_from_snapshot(

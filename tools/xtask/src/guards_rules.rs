@@ -101,13 +101,22 @@ pub fn parse_registry(bytes: &[u8]) -> Result<GuardsRegistry> {
     Ok(serde_json::from_slice(bytes)?)
 }
 
-/// 按规则数据对单文件执行断言。scope 不匹配或豁免命中的文件返回空。
+/// 按规则数据对单文件执行断言。scope 不匹配或豁免命中的文件返回空；
+/// 生产结构断言（forbidden_segments / facade_whitelist / layer_order /
+/// pattern_exclusion）默认跳过测试源（`*_tests.rs` 与 `tests/` 目录）。
 pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Result<Vec<Violation>> {
     if !scope_matches(&rule.scope, relative_file) {
         return Ok(Vec::new());
     }
     let absolute = repo_root.join(relative_file);
     if !absolute.is_file() {
+        return Ok(Vec::new());
+    }
+    let skips_test_sources = !matches!(
+        rule.spec,
+        RuleSpec::Layout { .. } | RuleSpec::ConstructionWhitelist { .. }
+    );
+    if skips_test_sources && is_test_source(relative_file) {
         return Ok(Vec::new());
     }
     match &rule.spec {
@@ -152,6 +161,13 @@ fn scope_matches(scope: &Scope, relative_file: &str) -> bool {
         Scope::PathPrefix { value } => relative_file.starts_with(value.as_str()),
         Scope::Workspace => true,
     }
+}
+
+/// 测试源判定：分离测试文件（`*_tests.rs`）与集成测试目录（`tests/` 路径段）。
+fn is_test_source(relative_file: &str) -> bool {
+    relative_file.ends_with("_tests.rs")
+        || relative_file.ends_with("_test.rs")
+        || relative_file.split('/').any(|segment| segment == "tests")
 }
 
 fn scope_prefix(scope: &Scope) -> &str {

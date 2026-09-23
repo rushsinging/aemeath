@@ -356,23 +356,6 @@
       "status": "active"
     },
     {
-      "id": "policy.config.override-store.composition-ownership",
-      "guard": "check-config-store-ownership.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/config/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "config",
-      "reason": "Composition alone selects config override AtomicBlob backing; Config wiring consumes injected NativeConfigStore",
-      "tracking_issue": 1293,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with equivalent Composition-only config override store ownership policy",
-      "status": "active"
-    },
-    {
       "id": "policy.session-management.composition-ownership",
       "guard": "check-session-management-ownership.sh",
       "module": "context",
@@ -1138,6 +1121,22 @@
       "status": "active"
     }
   ],
-  "rules": [],
+  "rules": [
+    {
+      "id": "pattern.config.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
+      "profile": "full"
+    }
+  ],
   "retired_symbols": []
 }

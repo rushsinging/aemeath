@@ -208,6 +208,39 @@ fn pattern_exclusion_flags_forbidden_pattern_with_file_exemption() {
 }
 
 #[test]
+fn pattern_exclusion_skips_test_sources() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/tui/model/update_tests.rs"),
+        "tokio::spawn(do_work);\n",
+    );
+    write_source(
+        &temp.path().join("crates/tui/tests/support.rs"),
+        "tokio::spawn(do_work);\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.tui.model-no-side-effects",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/tui" },
+        "forbidden_patterns": ["tokio::spawn"],
+        "reason": "model/update 目录禁止副作用",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let unit_test_violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/tui/model/update_tests.rs")
+            .expect("enforce");
+    assert!(unit_test_violations.is_empty(), "分离测试文件不得违规");
+
+    let integration_violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/tui/tests/support.rs")
+            .expect("enforce");
+    assert!(integration_violations.is_empty(), "tests 目录不得违规");
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

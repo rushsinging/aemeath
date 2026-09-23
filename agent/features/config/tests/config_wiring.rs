@@ -1,10 +1,10 @@
-use config::{ConfigWriter, NativeConfigStore};
+use config::{native_override_store, ConfigWriter, NativeConfigStore};
 
 #[tokio::test]
 async fn wiring_reads_runtime_override_from_injected_native_store() {
     let project = tempfile::tempdir().expect("create project directory");
     let storage = tempfile::tempdir().expect("create override storage directory");
-    let store = NativeConfigStore::new(
+    let store = native_override_store(
         storage::file_system_blob(storage.path()).expect("create override blob"),
     );
 

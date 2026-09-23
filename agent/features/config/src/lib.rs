@@ -47,6 +47,16 @@ impl ConfigWiring {
     }
 }
 
+/// Composition 的唯一 `NativeConfigStore` 构造入口：blob 由调用方
+/// （composition）经 `storage::file_system_blob` 选定，config 不拥有
+/// 文件系统实现选择权；`NativeConfigStore::new` 已收窄 `pub(crate)`，
+/// crate 外散落构造在编译期不可达。
+pub fn native_override_store(
+    blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
+) -> NativeConfigStore {
+    NativeConfigStore::new(blob)
+}
+
 pub async fn wire_project_config_with_cli(
     project_dir: &Path,
     native_store: NativeConfigStore,

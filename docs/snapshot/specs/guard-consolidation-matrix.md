@@ -153,7 +153,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 | check-provider-invocation-scope.sh | scope.provider.invocation-tests | invocation_stream 强制 `&InvocationScope`、禁可变状态 | 签名类型化；可变模式黑名单→`retired_symbols` |
 | check-provider-window-single-owner.sh | 无 | ContextWindow 映射唯一 owner，禁再装饰 messages_for_api | 字段私有化 + 管线入口 pub(crate) |
 | check-config-reader-injection.sh ✅（已执行） | scope.config.reader-tests-only（entry 已删） | ConfigAppService 构造限定 config/composition | 已完成：`new`/`with_global_path`/`with_env_source`/`with_native_store` 收窄 `pub(crate)`，crate 外违规编译报 E0624；类型渗漏半边（TUI/CLI 禁持 reader 类型）按本表原计划归 pattern_exclusion 数据规则 |
-| check-config-store-ownership.sh | policy.config.override-store.composition-ownership | BlobAdapter/NativeConfigStore 唯一工厂构造 | 构造器 composition 私有；工厂转发语义留一条 cargo test |
+| check-config-store-ownership.sh ✅（已执行） | policy.config.override-store.composition-ownership（entry 已删） | BlobAdapter/NativeConfigStore 唯一工厂构造 | 已完成：`NativeConfigStore::new` 收窄 pub(crate) + crate 根 `native_override_store` 工厂（E0624 证据）；config 禁 blob 半边落 registry 首条引擎规则 `pattern.config.no-blob-construction`（故意违规 exit 2 实证）；same-body 组织约束按④退役归 review |
 | check-composition-construction-ownership.sh | policy.composition.cross-bc-construction-ownership | BC 内禁构造他方 adapter | 私有构造器；剩余并发入 F-14 引擎 |
 | check-context-architecture.sh | 无（主体随①消失；R3/R8/R12 黑名单进 `retired_symbols`） | R1–R12：上下文类型禁字段、能力调用限定点 | 字段与可见性改型 |
 | check-unified-authorization.sh | 无 | 授权统一（混合①②④） | Allow 携带上下文→类型化；patch 顺序→cargo test；legacy 退役项→`retired_symbols` |
