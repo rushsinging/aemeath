@@ -1322,6 +1322,117 @@
       "exclusions": [],
       "reason": "render widget 禁 pub(super) 级镜像存储（SuggestionViewState 等 view_state 派生投影合法）；retired adapter 已 #[cfg(test)] 模块级锁定（④）",
       "profile": "full"
+    },
+    {
+      "id": "pattern.tui.model-update-no-direct-effects",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/model"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "HookRunner::run",
+        ".run_hook(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        "read_clipboard_image(",
+        "process_image_file(",
+        "Handle::block_on(",
+        "Runtime::block_on(",
+        "block_in_place",
+        ".await",
+        "mpsc::Sender"
+      ],
+      "exclusions": [],
+      "reason": "F-17：model/update 以 Effect 值描述副作用，禁直接执行（model 目录；update 目录并入同 scope 需另条）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.update-no-direct-effects",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/update"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "HookRunner::run",
+        ".run_hook(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        "read_clipboard_image(",
+        "process_image_file(",
+        "Handle::block_on(",
+        "Runtime::block_on(",
+        "block_in_place",
+        ".await",
+        "mpsc::Sender"
+      ],
+      "exclusions": [],
+      "reason": "F-17：update 目录同 model 目录副作用禁式",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-output-purity",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render/output"
+      },
+      "forbidden_patterns": [
+        "use crate::tui::model::",
+        "std::fs::",
+        "std::process::",
+        "tokio::",
+        "SELECTION_BG"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+        }
+      ],
+      "reason": "F-19：render/output 纯渲染——禁 Model 可变依赖/IO/旁路选区上色（selection_overlay 唯一上色路径豁免）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-no-domain-model-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render"
+      },
+      "forbidden_patterns": [
+        "model.conversation",
+        "model.runtime"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/display/render.rs"
+        }
+      ],
+      "reason": "F-20：render 只读 view model/view_state 投影（display bridge 豁免）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.blocks-no-gutter-write",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render/output/blocks"
+      },
+      "forbidden_patterns": [
+        "apply_gutter("
+      ],
+      "exclusions": [],
+      "reason": "F-30（D 组判据修正移入）：gutter 由 document_renderer 注入，block 组件禁自调",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
