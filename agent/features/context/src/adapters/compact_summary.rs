@@ -244,9 +244,9 @@ async fn llm_refresh(
 /// 调用方已经根据归一化的 Provider usage 或无 usage 时的完整估算完成决策；
 /// 本函数只执行压缩。返回 `None` 仅表示消息太少，无法形成有效压缩窗口。
 /// summary 不再注入 messages，走 system 通道。
-pub fn compact_messages(messages: &[Message]) -> Option<CompactResult> {
+pub fn compact_messages(messages: &[Message], tail: CompactTail<'_>) -> Option<CompactResult> {
     let total = messages.len();
-    let window = compact_window(total)?;
+    let window = compact_window_with_budget(messages, tail.step_boundaries, tail.token_cap)?;
     if total <= 4 {
         return None;
     }
@@ -270,7 +270,37 @@ pub fn compact_messages(messages: &[Message]) -> Option<CompactResult> {
     })
 }
 
+/// #1688：compact tail 保留的窗口预算输入。
+///
+/// `step_boundaries` 来自 canonical `visible_steps` 扁平化的各 Step 起始
+/// 索引（升序）；`token_cap` 为 token 预算封顶（调用方按注入窗口比例
+/// 推导，见 `token_budget::compact_tail_token_cap`）。
+#[derive(Debug, Clone, Copy)]
+pub struct CompactTail<'a> {
+    pub step_boundaries: &'a [usize],
+    pub token_cap: usize,
+}
+
+impl<'a> CompactTail<'a> {
+    /// 生产构造：Step 边界 + 注入窗口推导的 token 封顶。
+    pub fn from_context(step_boundaries: &'a [usize], context_size: usize) -> Self {
+        Self {
+            step_boundaries,
+            token_cap: crate::domain::token_budget::compact_tail_token_cap(context_size),
+        }
+    }
+
+    /// 测试/无边界退化：等价旧条数语义（无边界对齐、无预算收缩）。
+    pub fn unbounded() -> Self {
+        Self {
+            step_boundaries: &[],
+            token_cap: usize::MAX / 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
+
 pub struct CompactWindow {
     pub head_protect: usize,
     pub split_point: usize,
@@ -293,6 +323,79 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
         head_protect,
         split_point,
         keep_recent,
+    })
+}
+
+/// #1688：带 token 预算封顶的 compact 窗口（软阶段对齐 Step 边界）。
+///
+/// 语义（用户约束的确定性落地）：
+/// 1. **条数候选不变**：起点仍取尾部 10%（≥4 条），预算路径 NEVER 保留
+///    多于条数候选——封顶只收紧不放大。
+/// 2. **软阶段优先对齐**：起点先对齐到 `≥ 条数候选起点` 的最近 Step 边界
+///    （边界来自 canonical `visible_steps` 扁平化索引，非 role/位置推断），
+///    保留完整 Step 集合；预算内宁少勿切。
+/// 3. **token 封顶收缩**：tail 估算 token 超过 `token_cap × 1.1`（软上限，
+///    为边界/配对完整性留余量）时向内收缩——先跳下一个 Step 边界，无边界
+///    可跳则逐条收缩到 ≤ 软上限的最大起点。
+/// 4. **配对保护**：收缩后起点若落在 ToolResult 上（其 ToolUse 已被切走），
+///    起点后移过该孤儿消息——整对进 summary，NEVER 让 Provider 收到无
+///    ToolUse 的 tool_result。
+/// 5. **下限妥协**：收缩不越过 `total - 4`（至少 4 条保证工具调用连续性）；
+///    软上限允许为该下限轻微超出。
+///
+/// `step_boundaries` 为空时退化为「条数候选 + token 封顶逐条收缩」。
+pub fn compact_window_with_budget(
+    messages: &[share::message::Message],
+    step_boundaries: &[usize],
+    token_cap: usize,
+) -> Option<CompactWindow> {
+    let total = messages.len();
+    let base = compact_window(total)?;
+    let soft_cap = token_cap + token_cap / 10;
+    let tail_tokens = |start: usize| -> usize {
+        let tail = messages.get(start..).unwrap_or(&[]);
+        crate::domain::token_budget::estimate_messages_tokens(tail)
+    };
+
+    // 起点：条数候选；存在 ≥ 该起点的 Step 边界时对齐（保留只减不增）。
+    let mut split_point = base.split_point;
+    if let Some(&boundary) = step_boundaries
+        .iter()
+        .filter(|&&boundary| boundary >= split_point && boundary < total)
+        .min()
+    {
+        split_point = boundary;
+    }
+
+    // token 封顶收缩：先跳边界，再逐条，保底 total - 4。
+    let floor_start = total - 4;
+    while tail_tokens(split_point) > soft_cap && split_point < floor_start {
+        let next_boundary = step_boundaries
+            .iter()
+            .filter(|&&boundary| boundary > split_point && boundary <= floor_start)
+            .copied()
+            .min();
+        let candidate = next_boundary.unwrap_or(split_point + 1).min(floor_start);
+        split_point = candidate;
+    }
+
+    // 配对保护：起点是孤儿 ToolResult（配对 ToolUse 已在 early 侧）时后移。
+    while split_point < total
+        && messages[split_point]
+            .content
+            .iter()
+            .any(|block| block.is_tool_result())
+    {
+        split_point += 1;
+    }
+
+    if split_point <= base.head_protect || split_point >= total {
+        return None;
+    }
+    Some(CompactWindow {
+        head_protect: base.head_protect,
+        split_point,
+        keep_recent: total - split_point,
     })
 }
 
@@ -670,6 +773,7 @@ pub async fn compact_messages_with_llm(
     progress: Option<&dyn CompactProgressFn>,
     task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
     cancel: &CancellationToken,
+    tail: CompactTail<'_>,
 ) -> Option<CompactResult> {
     // summary 预算归注入窗口；Map 分块归 compact 调用模型窗口（若不同）。
     let budgets = match generator {
@@ -688,7 +792,7 @@ pub async fn compact_messages_with_llm(
 
     emit_progress(progress, CompactStage::Preparing);
 
-    let window = compact_window(total)?;
+    let window = compact_window_with_budget(messages, tail.step_boundaries, tail.token_cap)?;
 
     // 与 recent tail 互补：所有不再保留的消息都必须参与 summary。
     let early_messages = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice

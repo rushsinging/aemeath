@@ -170,6 +170,7 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
             None,
             None,
             cancel,
+            CompactTail::unbounded(),
         )
         .await
         .expect("compact must produce a result");
@@ -294,6 +295,7 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact must produce a result");
@@ -355,6 +357,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -372,6 +375,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -392,7 +396,7 @@ fn compact_execution_does_not_repeat_threshold_decision() {
         .map(|index| Message::user(format!("message-{index}")))
         .collect::<Vec<_>>();
 
-    let result = compact_messages(&messages);
+    let result = compact_messages(&messages, CompactTail::unbounded());
 
     assert!(
         result.is_some(),
@@ -723,6 +727,7 @@ async fn second_compact_fallback_preserves_previous_summary() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("second compact should run");
@@ -757,6 +762,7 @@ async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -835,6 +841,7 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("multi-chunk facts should be reduced locally");
@@ -914,6 +921,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("map-reduce compact should run");
@@ -1007,6 +1015,7 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1065,6 +1074,7 @@ async fn compact_with_generator_uses_llm_summary() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1116,6 +1126,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await;
 
@@ -1155,6 +1166,7 @@ async fn compact_falls_back_when_generator_errors() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should still run with fallback");
@@ -1270,6 +1282,7 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1329,6 +1342,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         Some(&progress),
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1419,6 +1433,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         Some(&progress),
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1495,6 +1510,7 @@ async fn empty_single_map_retries_once_with_original_history() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("empty map should retry with original history");
@@ -1565,6 +1581,7 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("one failed chunk should not discard successful facts");
@@ -1617,6 +1634,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("task companion must not invalidate previous checkpoint");
@@ -1695,6 +1713,7 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("partial fallback must preserve previous protected semantics");
@@ -1749,6 +1768,7 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("repair should preserve compact");
@@ -1808,6 +1828,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("local reduce should preserve compact");
@@ -1889,6 +1910,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("provider failure during refresh must use deterministic degradation");
@@ -1977,6 +1999,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("repair should preserve compact");
@@ -2026,6 +2049,7 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await;
 
@@ -2064,6 +2088,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("exhausted repair should use local fallback");
@@ -2223,6 +2248,7 @@ async fn compact_keeps_main_user_objective_when_facts_omit_it() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact must produce a result");
@@ -2262,6 +2288,7 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact must produce a result");
@@ -2277,4 +2304,98 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
         .summary
         .contains("Revalidate the latest user objective"));
     assert!(result.summary.contains("Continue —"));
+}
+
+// ── #1688：compact tail token 封顶（软阶段对齐 Step 边界） ─────────────
+
+/// 构造约 `tokens` 估算 token 的 user 文本消息（ASCII ~4 chars/token）。
+fn sized_user_message(label: &str, tokens: usize) -> Message {
+    let filler = "x".repeat(tokens.saturating_sub(1) * 4);
+    Message::user(format!("{label}{filler}"))
+}
+
+fn budget_boundaries(entries: &[usize]) -> Vec<usize> {
+    entries.to_vec()
+}
+
+#[test]
+fn token_cap_aligns_tail_start_to_recent_step_boundary() {
+    // 50 条各 ~100 tok；条数 10% 候选起点 45；存在 ≥45 的 Step 边界 46，
+    // 预算内 → 对齐到 46：保留更少但完整 Step，NEVER 保留多于条数候选。
+    let messages: Vec<Message> = (0..50)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let boundaries = budget_boundaries(&[0, 10, 20, 42, 46]);
+    let window = compact_window_with_budget(&messages, &boundaries, 500).expect("budget window");
+    assert_eq!(window.split_point, 46);
+    assert_eq!(window.keep_recent, 4);
+    assert!(boundaries.contains(&window.split_point));
+}
+
+#[test]
+fn token_cap_shrinks_inside_step_when_boundary_tail_exceeds_soft_cap() {
+    // 60 条各 ~100 tok，Step 边界粒度 20 条；最小完整 Step 尾也超软上限
+    // （cap 480 / soft 528），退到条数候选内逐条收缩，允许落在 Step 内部
+    // 但起点必须避开孤儿 ToolResult（此处无 tool 消息，落在 55）。
+    let messages: Vec<Message> = (0..60)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let boundaries = budget_boundaries(&[0, 20, 40]);
+    let window = compact_window_with_budget(&messages, &boundaries, 480).expect("budget window");
+    // 条数候选起点 54（600 tok）超 soft 528；55（500 tok）≤ 528 且 keep=5 ≥ 4。
+    assert_eq!(window.split_point, 55);
+    assert_eq!(window.keep_recent, 5);
+}
+
+#[test]
+fn token_cap_never_splits_tool_pair_at_tail_start() {
+    // 起点收缩落在 ToolResult 上时必须后移过该孤儿（其 ToolUse 已被切走，
+    // 整对进 summary），NEVER 让 Provider 收到无 ToolUse 的 tool_result。
+    // 70 条：0..63 普通（~100 tok）；63=长 ToolUse（150 tok）；
+    // 64=短 ToolResult（30 tok）；65..=普通。cap 500 / soft 550：
+    // 条数候选起点 63（630 tok）超 soft → 逐条收缩到 64（530 ≤ 550）；
+    // 64 是孤儿 ToolResult → 后移到 65。
+    let mut messages: Vec<Message> = (0..63)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    messages.push(Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::ToolUse {
+            id: "tool-pair-1".to_string(),
+            name: "Bash".to_string(),
+            input: serde_json::json!({"goal": "demo", "padding": "p".repeat(600)}),
+        }],
+        metadata: None,
+    });
+    messages.push(Message {
+        role: share::message::Role::User,
+        content: vec![share::message::ContentBlock::ToolResult {
+            tool_use_id: "tool-pair-1".to_string(),
+            content: serde_json::Value::String("ok".into()),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    });
+    for index in 65..70 {
+        messages.push(sized_user_message(&format!("tail{index}-"), 100));
+    }
+    let window = compact_window_with_budget(&messages, &[], 500).expect("budget window");
+    assert_eq!(window.split_point, 65);
+    assert_eq!(window.keep_recent, 5);
+    assert!(!messages[window.split_point]
+        .content
+        .iter()
+        .any(|block| block.is_tool_result()));
+}
+
+#[test]
+fn token_cap_budget_inside_candidate_count_keeps_count_semantics() {
+    // 预算充裕（不构成约束）时保持条数 10% 语义；无边界可对齐则起点不变。
+    let messages: Vec<Message> = (0..50)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let window = compact_window_with_budget(&messages, &[], 100_000).expect("budget window");
+    assert_eq!(window.split_point, 45);
+    assert_eq!(window.keep_recent, 5);
 }
