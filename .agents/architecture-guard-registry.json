@@ -1216,6 +1216,37 @@
       ],
       "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
       "profile": "full"
+    },
+    {
+      "id": "pattern.project.no-permission-state-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "ConfigReader",
+        "PermissionMode",
+        "PolicyPort",
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Project 不读权限/配置状态，授权统一经 AuthorizationContext 携带（Allow(AuthorizationContext) 变体签名由类型系统锁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-adapters.no-allow-all",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/adapters"
+      },
+      "forbidden_patterns": [
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Tool adapter 消费 AuthorizationContext，禁 allow_all 旁路",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
