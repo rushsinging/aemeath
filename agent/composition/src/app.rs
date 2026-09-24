@@ -280,6 +280,12 @@ async fn build_agent_client_with_gateways(
     Ok(agent_client_from_runtime(runtime_client.client))
 }
 
+/// 进程退出前排空异步诊断日志（File 模式经 worker 线程落盘，退出前必须
+/// flush barrier 兜底）。经 composition 转发以维持 logging 装配单一入口。
+pub fn flush_diagnostic_logs() {
+    logging::flush_diagnostic_logs();
+}
+
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
     let cwd = args
         .cwd

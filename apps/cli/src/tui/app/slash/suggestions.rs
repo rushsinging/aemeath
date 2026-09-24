@@ -8,6 +8,16 @@ impl super::super::App {
         let input = self.model.input.document.buffer.clone();
         let cursor_offset = self.model.input.document.cursor;
 
+        // /resume 按需拉取：用户首次输入 /resume 且缓存尚未回填过时，
+        // 请求一次 session 列表（list 查询有磁盘成本，不做启动预热）。
+        if input.trim_start().starts_with("/resume") && !self.session.session_list_requested {
+            self.session.session_list_requested = true;
+            self.chat
+                .push_input_event(sdk::ChatInputEvent::ManageSession {
+                    args: "list".to_string(),
+                });
+        }
+
         // #740：模型与 session 列表从事件流回填的缓存读取（启动预热 +
         // ModelList/SessionList 事件消费），此处保持纯函数。
         let models: Vec<(String, String)> = self

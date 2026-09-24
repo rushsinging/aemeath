@@ -126,14 +126,17 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         .load_for_project("project-a", &same_git_other_worktree)
         .await
         .is_ok());
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见（探测
+    // 序列只含本项目目录段与平铺遗留位置），NotFound 与旧 ProjectMismatch
+    // 在消费方同归 SessionResumeFailureKind::NotFound，语义等价且更准确。
     assert!(matches!(
         port.load_for_project("project-b", &same_git_other_worktree).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.export_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.update_metadata_for_project(
@@ -145,12 +148,12 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
             },
         )
         .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.delete_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     let exported = port
         .export_for_project("project-a", &same_git_other_worktree)

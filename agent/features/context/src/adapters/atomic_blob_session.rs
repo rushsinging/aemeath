@@ -23,6 +23,41 @@ impl AtomicBlobSessionStore {
         Ok(Self { blob, key })
     }
 
+    /// 按 project 分目录的 store：key 为 `<project-dir>/<session-id>`。
+    pub fn new_scoped(
+        blob: Arc<dyn AtomicBlobPort>,
+        project_dir: &SafePathSegment,
+        session_id: &str,
+    ) -> Result<Self, SessionStoreError> {
+        let segment = session_id
+            .parse::<SafePathSegment>()
+            .map_err(|error| SessionStoreError(error.to_string()))?;
+        let key = StorageKey::new(
+            StorageNamespace::Session,
+            vec![project_dir.clone(), segment],
+        )
+        .map_err(|error| SessionStoreError(error.to_string()))?;
+        Ok(Self { blob, key })
+    }
+
+    /// 按显式段列表构造（legacy 兼容读取与迁移器复用）。
+    pub fn from_key_segments(
+        blob: Arc<dyn AtomicBlobPort>,
+        raw_segments: Vec<String>,
+    ) -> Result<Self, SessionStoreError> {
+        let segments = raw_segments
+            .into_iter()
+            .map(|segment| {
+                segment
+                    .parse::<SafePathSegment>()
+                    .map_err(|error| SessionStoreError(error.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let key = StorageKey::new(StorageNamespace::Session, segments)
+            .map_err(|error| SessionStoreError(error.to_string()))?;
+        Ok(Self { blob, key })
+    }
+
     fn storage_generation(generation: SessionGeneration) -> Generation {
         match generation {
             SessionGeneration::Primary => Generation::Primary,

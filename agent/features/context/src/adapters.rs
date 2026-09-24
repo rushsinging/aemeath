@@ -9,6 +9,7 @@ mod dataset_session_management;
 mod dataset_session_reader;
 mod dataset_session_writer;
 mod in_memory_session;
+mod legacy_flat_session_migrator;
 pub mod memory_injection;
 pub mod prompt;
 mod prompt_source;
@@ -30,6 +31,7 @@ pub use dataset_session_management::DatasetSessionManagement;
 pub use dataset_session_reader::DatasetSessionReader;
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub use in_memory_session::InMemorySessionRepository;
+pub use legacy_flat_session_migrator::migrate_flat_sessions_to_project_dirs;
 pub use memory_injection::{
     CommittedMemoryRetrieveAdapter, MemoryRetrieveAdapter, NoOpContextMemorySource,
 };

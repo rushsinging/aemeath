@@ -23,6 +23,58 @@ pub struct PreparedDatasetResume {
     pub display_history: DisplayHistoryStepIndex,
 }
 
+/// dataset 读取候选 key：project 目录段存在时先探测 scoped 两段 key，
+/// 再退回平铺（迁移期兼容）；无目录段时仅平铺。
+fn dataset_read_candidates(
+    project_dir: Option<&SafePathSegment>,
+    session_id: &str,
+) -> Result<Vec<DatasetKey>, SessionGenerationWireError> {
+    let mut candidates = Vec::new();
+    if let Some(project_dir) = project_dir {
+        candidates.push(
+            super::dataset_session_writer::session_dataset_key_scoped(project_dir, session_id)
+                .map_err(storage_error)?,
+        );
+    }
+    candidates.push(
+        super::dataset_session_writer::session_dataset_key(session_id).map_err(storage_error)?,
+    );
+    Ok(candidates)
+}
+
+/// legacy blob 读取候选 persistence：scoped（迁移后）→ 平铺（历史 key 无
+/// 后缀）→ 平铺带 `.json` 后缀（更早版本写出的 `<id>.json` 文件）。
+/// 调用方按序探测，第一个 load 成功者胜出。
+fn legacy_blob_persistence_candidates(
+    blob: Arc<dyn storage::AtomicBlobPort>,
+    project_dir: Option<&SafePathSegment>,
+    session_id: &str,
+) -> Result<Vec<SessionPersistenceService>, SessionGenerationWireError> {
+    let build = |segments: Vec<String>| -> Result<_, String> {
+        let store = AtomicBlobSessionStore::from_key_segments(Arc::clone(&blob), segments)
+            .map_err(|error| error.to_string())?;
+        Ok(SessionPersistenceService::new(
+            Arc::new(store),
+            Arc::new(LegacySessionDecoder),
+        ))
+    };
+    let mut candidate_names: Vec<String> = Vec::new();
+    if let Some(project_dir) = project_dir {
+        candidate_names.push(format!("{}/{}", project_dir.as_str(), session_id));
+    }
+    candidate_names.push(session_id.to_string());
+    candidate_names.push(format!("{session_id}.json"));
+    candidate_names
+        .into_iter()
+        .map(|raw_key| build(parse_blob_segments(&raw_key)))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(SessionGenerationWireError::InvalidManifest)
+}
+
+fn parse_blob_segments(raw_key: &str) -> Vec<String> {
+    raw_key.split('/').map(str::to_string).collect()
+}
+
 pub struct DatasetSessionReader {
     dataset: Arc<dyn AtomicDatasetPort>,
     legacy_blob: Option<Arc<dyn storage::AtomicBlobPort>>,
@@ -41,62 +93,73 @@ impl DatasetSessionReader {
 
     pub async fn load(
         &self,
+        project_dir: Option<&SafePathSegment>,
         session_id: &str,
     ) -> Result<CanonicalSession, SessionGenerationWireError> {
-        self.load_for_resume(session_id)
+        self.load_for_resume(project_dir, session_id)
             .await
             .map(|prepared| prepared.active_session)
     }
 
+    /// 按 project 分目录布局加载：优先探测 `<project-dir>/<id>.dataset`，
+    /// 未命中再退回平铺 `<id>.dataset`，最后回退 legacy blob（兼容迁移期）。
     pub async fn load_for_resume(
         &self,
+        project_dir: Option<&SafePathSegment>,
         session_id: &str,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         let started = Instant::now();
-        let dataset_key = session_dataset_key(session_id)?;
         let manifest_name = safe_member_name(SessionGenerationManifest::manifest_member_name())?;
-        let primary_manifest = match self
-            .dataset
-            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_name))
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(error) => return Err(storage_error(error)),
-        };
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "session_resume dataset_manifest_loaded session_id={} elapsed_ms={}",
-            session_id,
-            started.elapsed().as_secs_f64() * 1000.0
-        );
-        if matches!(primary_manifest, DatasetReadOutcome::NotFound) {
-            return self.load_and_migrate_legacy(session_id).await;
-        }
-
-        match self
-            .decode_generation(&dataset_key, Generation::Primary, primary_manifest)
-            .await
-        {
-            Ok(session) => {
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "session_resume dataset_generation_decoded session_id={} elapsed_ms={}",
-                    session_id,
-                    started.elapsed().as_secs_f64() * 1000.0
-                );
-                Ok(session)
+        let candidate_keys = dataset_read_candidates(project_dir, session_id)?;
+        for dataset_key in &candidate_keys {
+            let primary_manifest = match self
+                .dataset
+                .read_consistent(dataset_key, std::slice::from_ref(&manifest_name))
+                .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => return Err(storage_error(error)),
+            };
+            if matches!(primary_manifest, DatasetReadOutcome::NotFound) {
+                continue;
             }
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "session_resume dataset_manifest_loaded session_id={} elapsed_ms={}",
+                session_id,
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            return self
+                .decode_with_previous_fallback(dataset_key, primary_manifest, &manifest_name)
+                .await;
+        }
+        // 全部候选位置都未命中：回退 legacy blob（加载并升格到新布局）。
+        self.load_and_migrate_legacy(project_dir, session_id).await
+    }
+
+    /// primary 解码失败时回退 previous generation；future version 直接上抛。
+    async fn decode_with_previous_fallback(
+        &self,
+        dataset_key: &DatasetKey,
+        primary_manifest: DatasetReadOutcome,
+        manifest_name: &SafePathSegment,
+    ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
+        match self
+            .decode_generation(dataset_key, Generation::Primary, primary_manifest)
+            .await
+        {
+            Ok(session) => Ok(session),
             Err(primary_error @ SessionGenerationWireError::UnsupportedFutureVersion { .. }) => {
                 Err(primary_error)
             }
             Err(primary_error) => {
                 let previous_manifest = self
                     .dataset
-                    .read_previous(&dataset_key, &[manifest_name])
+                    .read_previous(dataset_key, std::slice::from_ref(manifest_name))
                     .await
                     .map_err(storage_error)?;
                 match self
-                    .decode_generation(&dataset_key, Generation::Previous, previous_manifest)
+                    .decode_generation(dataset_key, Generation::Previous, previous_manifest)
                     .await
                 {
                     Ok(session) => Ok(session),
@@ -108,17 +171,47 @@ impl DatasetSessionReader {
 
     pub async fn load_display_history_steps(
         &self,
+        project_dir: Option<&SafePathSegment>,
         session_id: &str,
         generation_revision: u64,
         member_names: &[String],
     ) -> Result<DisplayHistoryStepWindow, SessionGenerationWireError> {
-        let dataset_key = session_dataset_key(session_id)?;
         let manifest_name = safe_member_name(SessionGenerationManifest::manifest_member_name())?;
-        let manifest_outcome = self
-            .dataset
-            .read_consistent(&dataset_key, std::slice::from_ref(&manifest_name))
-            .await
-            .map_err(storage_error)?;
+        let candidate_keys = dataset_read_candidates(project_dir, session_id)?;
+        for dataset_key in &candidate_keys {
+            let manifest_outcome = self
+                .dataset
+                .read_consistent(dataset_key, std::slice::from_ref(&manifest_name))
+                .await
+                .map_err(storage_error)?;
+            if matches!(manifest_outcome, DatasetReadOutcome::NotFound) {
+                continue;
+            }
+            return self
+                .decode_display_history_steps(
+                    dataset_key,
+                    session_id,
+                    generation_revision,
+                    member_names,
+                    manifest_outcome,
+                    &manifest_name,
+                )
+                .await;
+        }
+        Err(SessionGenerationWireError::InvalidManifest(
+            "Session generation 不存在".to_string(),
+        ))
+    }
+
+    async fn decode_display_history_steps(
+        &self,
+        dataset_key: &DatasetKey,
+        session_id: &str,
+        generation_revision: u64,
+        member_names: &[String],
+        manifest_outcome: DatasetReadOutcome,
+        _manifest_name: &SafePathSegment,
+    ) -> Result<DisplayHistoryStepWindow, SessionGenerationWireError> {
         let DatasetReadOutcome::Found(manifest_read) = manifest_outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session generation 不存在".to_string(),
@@ -150,7 +243,7 @@ impl DatasetSessionReader {
             .collect::<Result<Vec<_>, _>>()?;
         let outcome = self
             .dataset
-            .read_consistent(&dataset_key, &safe_names)
+            .read_consistent(dataset_key, &safe_names)
             .await
             .map_err(storage_error)?;
         let DatasetReadOutcome::Found(read) = outcome else {
@@ -189,6 +282,7 @@ impl DatasetSessionReader {
 
     async fn load_and_migrate_legacy(
         &self,
+        project_dir: Option<&SafePathSegment>,
         session_id: &str,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         let Some(blob) = &self.legacy_blob else {
@@ -196,14 +290,26 @@ impl DatasetSessionReader {
                 "Session generation 不存在".to_string(),
             ));
         };
-        let store = AtomicBlobSessionStore::new(Arc::clone(blob), session_id)
-            .map(Arc::new)
-            .map_err(|error| SessionGenerationWireError::InvalidManifest(error.to_string()))?;
-        let persistence = SessionPersistenceService::new(store, Arc::new(LegacySessionDecoder));
-        let session = persistence
-            .load()
-            .await
-            .map_err(|error| SessionGenerationWireError::InvalidManifest(error.to_string()))?;
+        let candidates =
+            legacy_blob_persistence_candidates(Arc::clone(blob), project_dir, session_id)?;
+        let mut loaded_session = None;
+        let mut last_error = None;
+        for persistence in candidates {
+            match persistence.load().await {
+                Ok(session) => {
+                    loaded_session = Some(session);
+                    break;
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        let session = loaded_session.ok_or_else(|| {
+            SessionGenerationWireError::InvalidManifest(
+                last_error
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| "legacy session 不存在".to_string()),
+            )
+        })?;
         DatasetCanonicalSessionWriter::new(Arc::clone(&self.dataset))
             .save_initial(&session)
             .await
@@ -263,10 +369,11 @@ impl DatasetSessionReader {
         };
         let manifest_bytes = only_member_bytes(manifest_read.members())?;
         let manifest = SessionGenerationCodec::decode_manifest(manifest_bytes)?;
+        // dataset key 可能带 project 目录段（两段）；identity 恒对应最后一段。
         if format!("{}.dataset", manifest.session_id())
             != dataset_key
                 .segments()
-                .first()
+                .last()
                 .map(SafePathSegment::as_str)
                 .unwrap_or_default()
         {
@@ -485,10 +592,6 @@ fn only_member_bytes(members: &[DatasetMember]) -> Result<&[u8], SessionGenerati
         ));
     }
     Ok(members[0].bytes())
-}
-
-fn session_dataset_key(session_id: &str) -> Result<DatasetKey, SessionGenerationWireError> {
-    super::dataset_session_writer::session_dataset_key(session_id).map_err(storage_error)
 }
 
 fn safe_member_name(name: &str) -> Result<SafePathSegment, SessionGenerationWireError> {

@@ -15,6 +15,8 @@ pub(crate) struct SessionState {
     pub cached_models: Option<Vec<sdk::ModelSummary>>,
     /// 事件流回填的最近 session 列表（id, summary），供 /resume 补全消费。
     pub cached_sessions: Vec<(String, String)>,
+    /// /resume 补全数据是否已请求过（按需拉取，防重复触发 list 查询）。
+    pub session_list_requested: bool,
     /// /model 对话框在等待 `ModelList` 事件回填后自动打开。
     pub model_selection_pending: bool,
 }
@@ -36,6 +38,7 @@ impl SessionState {
     /// 回填 /resume 补全用的 session 列表缓存（`SessionList` 事件消费点调用）。
     pub(crate) fn cache_sessions(&mut self, sessions: Vec<(String, String)>) {
         self.cached_sessions = sessions;
+        self.session_list_requested = true;
     }
 }
 

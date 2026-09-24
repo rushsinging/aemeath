@@ -1,5 +1,6 @@
 //! Unified diagnostic logger with independently recoverable file sinks.
 
+use super::async_sink::AsyncSinkWorker;
 use super::formatter::format_diag_json_line;
 use super::lifecycle::{EmergencyWriter, FileSinkLifecycle, StdFileOps, StdMonotonicClock};
 use super::native_stderr::route_native_stderr;
@@ -14,6 +15,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 const UNKNOWN_TARGET_REPORT_LIMIT: usize = 3;
 static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
 
+/// 异步落盘 channel 容量：按平均 512B/行计约 4MB 内存上限，
+/// 远高于日志峰值速率，饱和时丢弃计数而非反压调用线程。
+const ASYNC_SINK_CHANNEL_CAPACITY: usize = 8192;
+
 /// emergency 兜底专用的日志文件名。TUI（alternate screen）下 stderr 越过双缓冲直接糊屏，
 /// 因此 File 模式的兜底 **NEVER** 走 stderr，统一落到 `<logs_dir>/emergency.log`。
 const EMERGENCY_LOG_FILE: &str = "emergency.log";
@@ -21,7 +26,6 @@ const EMERGENCY_LOG_FILE: &str = "emergency.log";
 struct SinkEntry {
     #[cfg_attr(not(test), allow(dead_code))]
     path: PathBuf,
-    lifecycle: Mutex<Option<FileSinkLifecycle>>,
 }
 
 struct DirectStderr {
@@ -81,9 +85,12 @@ impl EmergencyWriter for FileEmergency {
     }
 }
 
-/// The process-wide logger. Each file sink owns a separate lifecycle mutex.
+/// The process-wide logger. File 模式下全部落盘 IO 由专用 worker 线程执行，
+/// 调用线程（含 TUI 主线程）只做有界入队，磁盘繁忙不再阻塞 UI。
 pub struct UnifiedLogger {
+    #[cfg_attr(not(test), allow(dead_code))]
     sinks: HashMap<DiagnosticSinkId, SinkEntry>,
+    async_sink: Option<AsyncSinkWorker>,
     emergency: Arc<dyn EmergencyWriter>,
     output_mode: LoggingOutputMode,
     filter: env_logger::Logger,
@@ -120,10 +127,14 @@ impl UnifiedLogger {
         let files = Arc::new(StdFileOps);
         let clock = Arc::new(StdMonotonicClock::default());
         let mut sinks = HashMap::new();
-        let mut add = |sink: DiagnosticSinkId, file_name: &str| -> io::Result<()> {
+        let mut lifecycles = HashMap::new();
+        let mut add = |sink: DiagnosticSinkId,
+                       file_name: &str,
+                       lifecycles: &mut HashMap<DiagnosticSinkId, FileSinkLifecycle>|
+         -> io::Result<()> {
             let path = settings.logs_dir().join(file_name);
-            let lifecycle = (settings.output_mode() == LoggingOutputMode::File).then(|| {
-                FileSinkLifecycle::start(
+            if settings.output_mode() == LoggingOutputMode::File {
+                let lifecycle = FileSinkLifecycle::start(
                     path.clone(),
                     settings.max_bytes(),
                     settings.max_backups(),
@@ -131,24 +142,24 @@ impl UnifiedLogger {
                     files.clone(),
                     clock.clone(),
                     emergency.clone(),
-                )
-            });
-            insert_sink(
-                &mut sinks,
-                sink,
-                SinkEntry {
-                    path,
-                    lifecycle: Mutex::new(lifecycle),
-                },
-            )
+                );
+                lifecycles.insert(sink, lifecycle);
+            }
+            insert_sink(&mut sinks, sink, SinkEntry { path })
         };
         let fallback = TargetCatalog::fallback();
-        add(fallback.sink, fallback.file_name)?;
+        add(fallback.sink, fallback.file_name, &mut lifecycles)?;
         for spec in TargetCatalog::specs() {
-            add(spec.sink, spec.file_name)?;
+            add(spec.sink, spec.file_name, &mut lifecycles)?;
         }
+        // File 模式：全部 lifecycle 移交专用落盘线程（enqueue/flush barrier 语义
+        // 见 `async_sink`）；Stderr 模式保持实时直写，无 worker。
+        let async_sink = (settings.output_mode() == LoggingOutputMode::File).then(|| {
+            AsyncSinkWorker::spawn(lifecycles, emergency.clone(), ASYNC_SINK_CHANNEL_CAPACITY)
+        });
         Ok(Self {
             sinks,
+            async_sink,
             emergency,
             output_mode: settings.output_mode(),
             filter: build_filter(settings.filter_directive()),
@@ -164,13 +175,20 @@ impl UnifiedLogger {
         self.output_mode
     }
 
-    fn route(&self, target: &str) -> &SinkEntry {
+    fn route_sink_id(&self, target: &str) -> DiagnosticSinkId {
         let spec = TargetCatalog::route(target).unwrap_or_else(|| {
             self.report_unknown_target(target);
             TargetCatalog::fallback()
         });
+        spec.sink
+    }
+
+    /// 测试辅助：按 target 查 sink 落盘路径（生产日志路径走 `route_sink_id`）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn route(&self, target: &str) -> &SinkEntry {
+        let sink = self.route_sink_id(target);
         self.sinks
-            .get(&spec.sink)
+            .get(&sink)
             .expect("catalog sink must be installed")
     }
 
@@ -179,35 +197,23 @@ impl UnifiedLogger {
     /// 节流后仍只报告有限次数，避免日志膨胀。
     fn report_unknown_target(&self, target: &str) {
         if should_report_unknown(&UNKNOWN_TARGET_REPORTS) {
-            // 写入 fallback sink（aemeath.log），不写 emergency stderr
-            let fallback = TargetCatalog::fallback();
-            if let Some(entry) = self.sinks.get(&fallback.sink) {
-                match entry.lifecycle.lock() {
-                    Ok(mut lifecycle) => {
-                        if let Some(lifecycle) = lifecycle.as_mut() {
-                            lifecycle.write_line(&format!(
-                                "aemeath logging fallback: unknown target {target:?}; using aemeath.log"
-                            ));
-                        }
-                    }
-                    Err(_) => { /* sink 锁失败时静默，不退回 stderr */ }
-                }
-            }
+            // 异步入队到 fallback sink（aemeath.log），不写 emergency stderr
+            self.enqueue_line(
+                TargetCatalog::fallback().sink,
+                format!("aemeath logging fallback: unknown target {target:?}; using aemeath.log"),
+            );
         }
     }
 
-    fn write_line(&self, entry: &SinkEntry, line: &str) {
+    /// File 模式经异步 worker 落盘；Stderr 模式实时直写（保持 no-tui -v 语义）。
+    fn enqueue_line(&self, sink: DiagnosticSinkId, line: String) {
         if self.output_mode == LoggingOutputMode::Stderr {
-            self.emergency.write(line);
+            self.emergency.write(&line);
             return;
         }
-        match entry.lifecycle.lock() {
-            Ok(mut lifecycle) => {
-                if let Some(lifecycle) = lifecycle.as_mut() {
-                    lifecycle.write_line(line);
-                }
-            }
-            Err(_) => self.emergency.write(line),
+        match &self.async_sink {
+            Some(worker) => worker.handle().enqueue_line(sink, line),
+            None => self.emergency.write(&line),
         }
     }
 }
@@ -220,7 +226,8 @@ impl Log for UnifiedLogger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             let line = format_diag_json_line(record);
-            self.write_line(self.route(record.target()), &line);
+            let sink = self.route_sink_id(record.target());
+            self.enqueue_line(sink, line);
         }
     }
 
@@ -228,12 +235,8 @@ impl Log for UnifiedLogger {
         if self.output_mode == LoggingOutputMode::Stderr {
             return;
         }
-        for entry in self.sinks.values() {
-            if let Ok(mut lifecycle) = entry.lifecycle.lock() {
-                if let Some(lifecycle) = lifecycle.as_mut() {
-                    lifecycle.flush();
-                }
-            }
+        if let Some(worker) = &self.async_sink {
+            worker.handle().flush_barrier();
         }
     }
 }

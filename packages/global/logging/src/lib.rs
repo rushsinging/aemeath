@@ -37,6 +37,15 @@ pub fn level_filter_from_str(level: &str) -> log::LevelFilter {
     }
 }
 
+/// 进程退出前排空异步落盘 channel：阻塞到 worker 把已入队的诊断行全部写盘。
+/// File 模式（异步 worker）必须依赖本函数保证退出前日志不丢；Stderr 模式为空操作。
+/// 未初始化 logger 时静默返回。
+pub fn flush_diagnostic_logs() {
+    if let Some(logger) = UnifiedLogger::current() {
+        log::Log::flush(logger);
+    }
+}
+
 pub const LOG_MAX_BYTES: u64 = 100 * 1024 * 1024;
 pub const LOG_MAX_BACKUPS: usize = 5;
 pub const LOG_RETENTION_DAYS: u64 = 30;

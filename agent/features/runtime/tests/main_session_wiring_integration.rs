@@ -388,9 +388,11 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     }
 
     // Cross-project resume is rejected before Config/Memory switching.
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见，
+    // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-memory-target", &wiring).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-memory-target"
+        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-memory-target"
     ));
 
     // The committed and newly bound config must remain on project A.
@@ -441,9 +443,11 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
     );
 
     // Cross-project resume must not switch to project B's model or memory.
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见，
+    // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-config-target", &wiring).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-config-target"
+        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-config-target"
     ));
 
     let after = wiring.committed_config();

@@ -34,6 +34,19 @@ fn dataset_key(session_id: &str) -> DatasetKey {
     .expect("dataset key")
 }
 
+fn scoped_dataset_key(project_dir: &SafePathSegment, session_id: &str) -> DatasetKey {
+    DatasetKey::new(
+        StorageNamespace::Session,
+        vec![
+            project_dir.clone(),
+            format!("{session_id}.dataset")
+                .parse::<SafePathSegment>()
+                .expect("safe session dataset id"),
+        ],
+    )
+    .expect("scoped dataset key")
+}
+
 #[tokio::test]
 async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     let root = tempfile::tempdir().expect("temporary root");
@@ -65,14 +78,16 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     .expect("save legacy blob");
 
     let reader = DatasetSessionReader::new(dataset.clone(), Some(blob));
+    // import 落新布局（scoped key）：load 必须带同一 project 目录段探测。
+    let project_dir = context::project_dir_segment(&project);
     let loaded = reader
-        .load("legacy")
+        .load(Some(&project_dir), "legacy")
         .await
         .expect("load and migrate legacy");
 
     assert_eq!(loaded, expected);
     assert!(!dataset
-        .read_manifest(&dataset_key("legacy"))
+        .read_manifest(&scoped_dataset_key(&project_dir, "legacy"))
         .await
         .expect("migrated dataset manifest")
         .members()
@@ -92,7 +107,7 @@ async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let loaded = reader
-        .load("primary")
+        .load(None, "primary")
         .await
         .expect("load primary generation");
 
@@ -136,7 +151,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 
     let reader = DatasetSessionReader::new(dataset, None);
     let loaded = reader
-        .load("recover")
+        .load(None, "recover")
         .await
         .expect("recover previous generation");
 
@@ -171,7 +186,7 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let error = reader
-        .load("future")
+        .load(None, "future")
         .await
         .expect_err("future schema fails closed");
 
@@ -219,7 +234,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("cleared")
+        .load_for_resume(None, "cleared")
         .await
         .expect("load cleared generation");
     let loaded = prepared.active_session;
@@ -275,7 +290,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("cleared-then-append")
+        .load_for_resume(None, "cleared-then-append")
         .await
         .expect("load cleared-then-appended generation");
     let loaded = prepared.active_session;
@@ -342,7 +357,7 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("compacted")
+        .load_for_resume(None, "compacted")
         .await
         .expect("load compacted generation");
     let loaded = prepared.active_session;
@@ -410,11 +425,12 @@ async fn dataset_reader_loads_requested_display_history_steps_from_same_generati
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("windowed")
+        .load_for_resume(None, "windowed")
         .await
         .expect("prepare resume");
     let window = reader
         .load_display_history_steps(
+            None,
             "windowed",
             prepared.display_history.generation_revision(),
             &[prepared.display_history.steps()[0]
@@ -484,7 +500,7 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     writer.save_initial(&session).await.unwrap();
 
     let prepared = DatasetSessionReader::new(dataset, None)
-        .load_for_resume("control-lines")
+        .load_for_resume(None, "control-lines")
         .await
         .unwrap();
     let restored = prepared.active_session.compact.unwrap().summary;

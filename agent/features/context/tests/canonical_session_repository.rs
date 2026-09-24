@@ -810,13 +810,19 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
             .map(|c| c.step_id.as_str()),
         Some("step-b")
     );
+    // 落盘位置随 project 分目录布局：workspace 捕获 identity 的 session
+    // 写入 `<project-dir>/<id>.dataset`。
+    let project_dir = context::project_dir_segment(&workspace().project_identity);
     let manifest = dataset
         .read_manifest(
             &storage::DatasetKey::new(
                 storage::StorageNamespace::Session,
-                vec![format!("{}.dataset", session_id.as_str())
-                    .parse::<storage::SafePathSegment>()
-                    .expect("safe dataset segment")],
+                vec![
+                    project_dir,
+                    format!("{}.dataset", session_id.as_str())
+                        .parse::<storage::SafePathSegment>()
+                        .expect("safe dataset segment"),
+                ],
             )
             .expect("valid dataset key"),
         )

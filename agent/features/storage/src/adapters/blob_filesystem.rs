@@ -159,7 +159,26 @@ impl FileSystemBlobAdapter {
             Err(error) => return Err(map_io(error)),
         };
         let mut entries = Vec::new();
-        for entry in namespace_dir.entries().map_err(map_io)? {
+        let mut prefix_segments = Vec::new();
+        Self::collect_primary_entries(
+            &namespace_dir,
+            namespace,
+            &mut prefix_segments,
+            &mut entries,
+        )?;
+        entries.sort_by(|left, right| left.key().segments().cmp(right.key().segments()));
+        Ok(entries)
+    }
+
+    /// 递归枚举 blob：子目录作为额外 key 段进入（session 按 project 分目录
+    /// 布局依赖此行为）；协议工件与符号链接的排除规则与平铺一致。
+    fn collect_primary_entries(
+        directory: &Dir,
+        namespace: StorageNamespace,
+        prefix_segments: &mut Vec<SafePathSegment>,
+        entries: &mut Vec<StorageEntry>,
+    ) -> Result<(), StorageError> {
+        for entry in directory.entries().map_err(map_io)? {
             let entry = entry.map_err(map_io)?;
             let raw_name = entry.file_name().to_string_lossy().into_owned();
             if Self::is_protocol_artifact(&raw_name) {
@@ -176,14 +195,21 @@ impl FileSystemBlobAdapter {
                     "存储枚举遇到符号链接",
                 ));
             }
-            if !metadata.file_type().is_file() {
-                continue;
+            if metadata.file_type().is_file() {
+                prefix_segments.push(segment);
+                let key = StorageKey::new(namespace, prefix_segments.clone())?;
+                prefix_segments.pop();
+                entries.push(StorageEntry::new(key, metadata.len() as usize));
+            } else {
+                let child = directory
+                    .open_dir(Path::new(segment.as_str()))
+                    .map_err(map_io)?;
+                prefix_segments.push(segment);
+                Self::collect_primary_entries(&child, namespace, prefix_segments, entries)?;
+                prefix_segments.pop();
             }
-            let key = StorageKey::new(namespace, vec![segment])?;
-            entries.push(StorageEntry::new(key, metadata.len() as usize));
         }
-        entries.sort_by(|left, right| left.key().segments().cmp(right.key().segments()));
-        Ok(entries)
+        Ok(())
     }
 
     fn recover_sync(&self, parent: &Dir, primary_name: &Path) -> Result<(), StorageError> {
