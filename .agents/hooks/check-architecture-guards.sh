@@ -243,7 +243,6 @@ run_guard fast "$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-capability-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-large-file-responsibilities.sh"
 run_guard fast "$HOOKS_DIR/check-cost-tracker-retirement.sh"
-run_guard fast "$HOOKS_DIR/check-runtime-activity-observation.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-event-naming.sh"
 run_guard full bash "$HOOKS_DIR/check-runtime-event-naming-tests.sh"
 if [ "$mode" = "--fast" ]; then

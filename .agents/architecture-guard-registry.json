@@ -827,23 +827,6 @@
       "status": "active"
     },
     {
-      "id": "policy.runtime.activity-observation",
-      "guard": "check-runtime-activity-observation.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/activity"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "ActivityCoordinator exclusively constructs Runtime Activity observations; TUI mutates its fact mirror only through the root reducer; LiveStatus consumes Activity instead of legacy Run status; diagnostics remain structured and payload-free",
-      "tracking_issue": 742,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent unified Runtime Activity observation policy",
-      "status": "active"
-    },
-    {
       "id": "policy.runtime.event-naming",
       "guard": "check-runtime-event-naming.sh",
       "module": "runtime",
@@ -1211,6 +1194,27 @@
       ],
       "exclusions": [],
       "reason": "runtime 禁恢复共享客户端突变/串行锁；调用语义经 provider Published Language",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.activity-construction-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "ActivityObservation {"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/activity/coordinator.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/activity/model.rs"
+        }
+      ],
+      "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
       "profile": "full"
     }
   ],
