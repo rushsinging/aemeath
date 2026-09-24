@@ -2869,6 +2869,71 @@
       ],
       "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
       "profile": "full"
+    },
+    {
+      "id": "pattern.sdk.run-control-pure-dto",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/sdk/src/run.rs"
+      },
+      "forbidden_patterns": [
+        "CancellationToken",
+        "Sender<",
+        "Receiver<",
+        "Mutex<",
+        "RwLock<",
+        "Arc<"
+      ],
+      "exclusions": [],
+      "reason": "F-24：sdk run.rs run control 发布语言只含纯值 DTO",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.no-openai-config-reexport",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src/lib.rs"
+      },
+      "forbidden_patterns": [
+        "OpenAIProviderConfig"
+      ],
+      "exclusions": [],
+      "reason": "F-15：Provider 实现配置不得经 crate 根 façade 外泄；DriverSpec::parse 内部化正向断言由类型/测试承接",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-cancel-input-event",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "ChatInputEvent::Cancel"
+      ],
+      "exclusions": [],
+      "reason": "F-11：旧取消入口禁复活，取消走 cancel_current_run / RunControlClient",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.sdk.client-pure-dto",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/sdk/src/client.rs"
+      },
+      "forbidden_patterns": [
+        "CancellationToken",
+        "Sender<",
+        "Receiver<",
+        "Mutex<",
+        "RwLock<",
+        "Arc<"
+      ],
+      "exclusions": [],
+      "reason": "F-24：AgentClient run control 命令只暴露纯值 SDK 类型",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
