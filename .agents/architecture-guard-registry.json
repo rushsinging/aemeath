@@ -1321,6 +1321,24 @@
       ],
       "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
       "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-no-mirror-storage",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render"
+      },
+      "forbidden_patterns": [
+        "pub(super) suggestions: Vec",
+        "pub selected_suggestion",
+        "pub show_suggestions",
+        "pub(super) struct SpinnerState",
+        "pub struct SpinnerState"
+      ],
+      "exclusions": [],
+      "reason": "render widget 禁 pub(super) 级镜像存储（SuggestionViewState 等 view_state 派生投影合法）；retired adapter 已 #[cfg(test)] 模块级锁定（④）",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
