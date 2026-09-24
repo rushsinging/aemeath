@@ -267,11 +267,13 @@ reasoning 规则：
 
 - `reasoning: true`：只表示内部启用，不额外发送字段。
 - `reasoning: false`：不发送 reasoning 字段。
-- `reasoning: { "effort": "medium" }`：发送：
+- `reasoning: { "effort": "medium" }`：发送顶层字段（OpenAI Chat Completions 正式协议）：
 
 ```json
-"reasoning": { "effort": "medium" }
+"reasoning_effort": "medium"
 ```
+
+`driver: "openai"` 的契约是 OpenAI Chat Completions 标准 schema：effort 只编码为顶层 `reasoning_effort`，NEVER 同时发送嵌套 `reasoning`（严格 schema 的服务会拒绝冲突字段）。只认嵌套 `reasoning` 的非标准兼容服务需要专用 driver 配置，不在通用 OpenAI driver 中双发。object 中 effort 之外的字段（如 Responses 风格的 `summary`）不透传。
 
 模型名支持检查只作为 warning/debug，不阻止发送。
 
