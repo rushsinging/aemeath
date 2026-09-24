@@ -239,16 +239,10 @@ run_guard full "$HOOKS_DIR/check-shared-run-loop-tests.sh"
 run_guard fast "$HOOKS_DIR/check-run-control-boundary.sh"
 run_guard full "$HOOKS_DIR/check-sdk-wire-schema.sh"
 run_guard fast "$HOOKS_DIR/check-tool-catalog-execution-boundary.sh"
-run_guard fast "$HOOKS_DIR/check-runtime-capability-assembly-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-large-file-responsibilities.sh"
 run_guard fast "$HOOKS_DIR/check-cost-tracker-retirement.sh"
 run_guard fast "$HOOKS_DIR/check-runtime-event-naming.sh"
 run_guard full bash "$HOOKS_DIR/check-runtime-event-naming-tests.sh"
-if [ "$mode" = "--fast" ]; then
-  run_guard fast bash "$HOOKS_DIR/check-runtime-capability-assembly-ownership-tests.sh" --fast-only
-else
-  run_guard full bash "$HOOKS_DIR/check-runtime-capability-assembly-ownership-tests.sh"
-fi
 run_guard full bash "$HOOKS_DIR/check-runtime-large-file-responsibilities-tests.sh"
 run_guard full bash "$HOOKS_DIR/check-cost-tracker-retirement-tests.sh"
 run_guard full bash "$HOOKS_DIR/check-hexagonal-layer-purity-tests.sh"

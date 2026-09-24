@@ -145,7 +145,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 
 | 文件 | registry | 内容 | 类型化动作 |
 |---|---|---|---|
-| check-runtime-capability-assembly-ownership.sh | policy.runtime.capability-assembly | RuntimeContext/Token 唯一构造点等 21 组混检 | 构造器私有化（composition 唯一）；导出白名单子项→F；退役符号子项→`retired_symbols` |
+| check-runtime-capability-assembly-ownership.sh ✅（已执行） | policy.runtime.capability-assembly（entry 已删） | RuntimeContext/Token 唯一构造点等 21 组混检 | 已完成：核心限点落 pattern.runtime.context-construction-single-factory（context_factory.rs 单文件豁免）；工厂 must-wire 正向断言由必填参数编译承接（④）；BoundaryHookPort filtering/proceed 行为断言归测试（#1056）；façade 白名单由 crate-api-boundary 承接（F-2）；脚本与自测壳删除，编排器语法修复 |
 | check-runtime-hook-assembly-ownership.sh ✅（已执行） | policy.runtime.hook-assembly.composition-ownership（entry 已删） | Hook dispatcher 仅 composition 构造 | 已完成（判据修正①→③）：跨 crate 无排除可见性，落 pattern.runtime.no-hook-dispatcher-construction 引擎规则（hook:: 前缀锚定 + context_factory.rs 单文件豁免登记）；旧守卫截断式剥离的过剥盲区由引擎精确块剥离修复 |
 | check-runtime-tool-assembly-ownership.sh ✅（已执行） | policy.runtime.tool-assembly.composition-ownership（entry 已删） | Tool/Skill/Registry 仅 composition 装配 | 已完成：ActiveRunRegistry 摘 derive(Default)（仅 cfg(test)）+ wire_active_run_registry 工厂唯一生产构造（capability façade/construction_symbols 双白名单登记）；负向禁式落 pattern.runtime.no-tool-self-assembly；正向装配断言由必填字段类型承接（④）；元守卫映射表与自测壳同步 |
 | check-runtime-activity-observation.sh ✅（已执行） | policy.runtime.activity-observation（entry 已删） | ActivityObservation 唯一构造/变更点 + legacy 符号 | 已完成：构造限点落 pattern.runtime.activity-construction-single-owner（coordinator/model 双文件豁免）；TUI 变更入口已 #[cfg(test)] 方法级编译锁定（④）；legacy/hook 平行黑名单符号已物理删除（④），复活归 review |

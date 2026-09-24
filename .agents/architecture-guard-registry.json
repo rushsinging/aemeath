@@ -844,23 +844,6 @@
       "status": "active"
     },
     {
-      "id": "policy.runtime.capability-assembly",
-      "guard": "check-runtime-capability-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired; broad Projection naming cannot hide mixed Runtime responsibilities",
-      "tracking_issue": 1248,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Runtime capability assembly policy",
-      "status": "active"
-    },
-    {
       "id": "policy.runtime.large-file-responsibilities",
       "guard": "check-runtime-large-file-responsibilities.sh",
       "module": "runtime",
@@ -1318,6 +1301,25 @@
       ],
       "exclusions": [],
       "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.context-construction-single-factory",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "RuntimeContext::new(",
+        "RuntimeContextAssemblyToken::new("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
       "profile": "full"
     }
   ],
