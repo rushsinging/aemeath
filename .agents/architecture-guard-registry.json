@@ -329,40 +329,6 @@
       "status": "active"
     },
     {
-      "id": "policy.config.business-env-owner",
-      "guard": "check-config-env-guard.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/config/src/adapters.rs"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "whitelist-backed",
-      "owner": "config",
-      "reason": "All business environment variables are read only by the Config EnvAdapter",
-      "tracking_issue": 935,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Config-owned environment adapter policy",
-      "status": "active"
-    },
-    {
-      "id": "scope.config.comments",
-      "guard": "check-config-env-guard.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "comment lines"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "whitelist-backed",
-      "owner": "config",
-      "reason": "Comment examples are not runtime environment reads",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while the textual scanner reads source lines",
-      "status": "active"
-    },
-    {
       "id": "scope.logging.production-test-sources",
       "guard": "check-log-target-prefix.sh",
       "module": "logging",
@@ -496,23 +462,6 @@
       "tracking_issue": 1021,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "scope.command.tests-and-owner-filter",
-      "guard": "check-command-catalog-boundary.sh",
-      "module": "tools",
-      "scope": {
-        "kind": "pattern",
-        "value": "Command boundary test exclusions and unique owner filter"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "tools",
-      "reason": "Command boundary scans production definitions and excludes tests while selecting the single Tools owner path",
-      "tracking_issue": 913,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual boundary guard excludes tests and filters the unique owner path",
       "status": "active"
     },
     {
@@ -2934,6 +2883,29 @@
       "exclusions": [],
       "reason": "F-24：AgentClient run control 命令只暴露纯值 SDK 类型",
       "profile": "full"
+    },
+    {
+      "id": "pattern.config.business-env-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "reason": "F-7：业务 env（AEMEATH_*/API_KEY）读取限 config 登记路径；细分 per-var 白名单正则特征 defer",
+      "profile": "full",
+      "forbidden_patterns": [],
+      "exclusions": []
+    },
+    {
+      "id": "pattern.all.no-builtin-command-registry",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "F-10：Delivery 禁恢复静态 builtin 注册表/独立解析器；Command PL 定义点唯一性由类型系统承接",
+      "profile": "full",
+      "forbidden_patterns": [],
+      "exclusions": []
     }
   ],
   "retired_symbols": []
