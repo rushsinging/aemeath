@@ -465,23 +465,6 @@
       "status": "active"
     },
     {
-      "id": "policy.runtime.large-file-responsibilities",
-      "guard": "check-runtime-large-file-responsibilities.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "Runtime post-migration orchestration roots stay narrow and delegate contracts, phases, interaction, control, session commands, Run preparation, assembly and launch to named responsibility owners; giant roots, mod.rs and retired compatibility paths may not return",
-      "tracking_issue": 1400,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Runtime responsibility and file-size policy",
-      "status": "active"
-    },
-    {
       "id": "scope.all.unsafe-text-long-statement-files",
       "guard": "check-tui-unsafe-text-ops.sh",
       "module": "shared",
@@ -3634,6 +3617,79 @@
       "exclusions": [],
       "reason": "F-16：legacy DTO/factory/物化路径防复活（符号已删编译期拦截为主，模式兜底）；validator 唯一实现与文件存在正向断言由类型系统/测试承接",
       "profile": "full"
+    },
+    {
+      "id": "budget.runtime.responsibility",
+      "assertion": "line_budget",
+      "scope": {
+        "kind": "workspace"
+      },
+      "budgets": [
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/engine.rs",
+          "max_lines": 400
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/session_driver.rs",
+          "max_lines": 400
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/from_args.rs",
+          "max_lines": 550
+        }
+      ],
+      "required_files": [
+        "agent/features/runtime/src/application/loop_engine/engine/contracts.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/step_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/interaction_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/control_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs",
+        "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs",
+        "agent/features/runtime/src/application/client/from_args_tests.rs"
+      ],
+      "reason": "F-14/#1400：拆分根保持编排 façade，行数预算锁职责不回缩；mod.rs 由 layout.all.no-mod-rs 承接；retired 符号④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-unsafe-text-slicing",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        ".chars().nth(",
+        ".split_at("
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/display/safe_text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/display/safe_text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/reflection.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/ollama/conversion.rs"
+        },
+        {
+          "path": "agent/features/audit/src/adapters/append.rs"
+        },
+        {
+          "path": "packages/global/logging/src/domain/routing_guard.rs"
+        }
+      ],
+      "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
+      "profile": "full",
+      "allow_marker": "allow unsafe_text_op"
     }
   ],
   "retired_symbols": []

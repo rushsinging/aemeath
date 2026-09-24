@@ -400,6 +400,74 @@ fn dependency_matrix_flags_edge_outside_allow_list() {
 }
 
 #[test]
+fn line_budget_flags_overrun_and_missing_required_files() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(&temp.path().join("crates/r/engine.rs"), &"a\n".repeat(5));
+    // required 文件 deliberate 不创建。
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "budget.r.responsibility",
+        "assertion": "line_budget",
+        "scope": { "kind": "workspace" },
+        "budgets": [{ "path": "crates/r/engine.rs", "max_lines": 4 }],
+        "required_files": ["crates/r/contracts.rs"],
+        "reason": "#1400 职责预算",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations = crate::guards_rules::collect_line_budget_violations(
+        &rule,
+        temp.path(),
+        &["crates/r/engine.rs".to_owned()],
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.message.contains("超出职责预算")),
+        "超预算必须违规：{:#?}",
+        violations
+    );
+
+    // required_files 缺失：对任意被扫描文件报告（引擎在 run 级别聚合一次）。
+    let missing = crate::guards_rules::collect_line_budget_violations(
+        &rule,
+        temp.path(),
+        &["crates/r/engine.rs".to_owned()],
+    );
+    assert!(
+        missing.iter().any(|v| v.location.contains("contracts.rs")),
+        "缺失必需文件必须违规：{:#?}",
+        missing
+    );
+}
+
+#[test]
+fn pattern_exclusion_skips_comments_and_inline_allow_marker() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/s.rs"),
+        "//! docs mention .split_at( demo\nlet s = a.split_at(8); // allow unsafe_text_op\nlet t = b.split_at(4);\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.all.no-unsafe-text-slicing",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "workspace" },
+        "forbidden_patterns": [".split_at("],
+        "allow_marker": "allow unsafe_text_op",
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/s.rs").expect("enforce");
+
+    assert_eq!(violations.len(), 1, "仅无标记的第三行违规：{violations:#?}");
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

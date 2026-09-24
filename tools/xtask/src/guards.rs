@@ -59,10 +59,21 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
         }
     }
     // F-4：依赖矩阵（DependencyMatrix 规则走 cargo metadata 全局检查）。
+    // F-14：职责预算（LineBudget 同为聚合级检查）。
     for rule in &selected {
-        if let guards_rules::RuleSpec::DependencyMatrix { business_allow } = &rule.spec {
-            let edges = guards_rules::workspace_dependency_edges(repo_root)?;
-            violations.extend(guards_rules::check_dependency_edges(business_allow, &edges));
+        match &rule.spec {
+            guards_rules::RuleSpec::DependencyMatrix { business_allow } => {
+                let edges = guards_rules::workspace_dependency_edges(repo_root)?;
+                violations.extend(guards_rules::check_dependency_edges(business_allow, &edges));
+            }
+            guards_rules::RuleSpec::LineBudget { .. } => {
+                violations.extend(guards_rules::collect_line_budget_violations(
+                    rule,
+                    repo_root,
+                    &source_files,
+                ));
+            }
+            _ => {}
         }
     }
     // F-1 样板：construction_symbols 越界检查 + 跨 BC wire 调用 fail-closed。
