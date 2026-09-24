@@ -346,40 +346,6 @@
       "status": "active"
     },
     {
-      "id": "policy.hexagonal.current-layer-matrix",
-      "guard": "check-hexagonal-layer-purity.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "symbol",
-        "value": "FORBIDDEN_LAYER_DEPS"
-      },
-      "classification": "target_hexagonal_policy",
-      "mechanism_type": "structural",
-      "owner": "architecture",
-      "reason": "Current Hexagonal dependency directions remain enforced until the capability-first guard replaces legacy COLA rules",
-      "tracking_issue": 1022,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
-      "status": "active"
-    },
-    {
-      "id": "policy.config.target-layout",
-      "guard": "check-hexagonal-layer-purity.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/config/src"
-      },
-      "classification": "target_hexagonal_policy",
-      "mechanism_type": "structural",
-      "owner": "config",
-      "reason": "Config converged to domain/ports/adapters (ConfigAppService is a port-implementing adapter); wiring lives at crate root lib.rs; R8 direction checks fully enabled with zero exceptions",
-      "tracking_issue": 1654,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Config Target layout policy",
-      "status": "active"
-    },
-    {
       "id": "policy.config.business-env-owner",
       "guard": "check-config-env-guard.sh",
       "module": "config",
@@ -669,23 +635,6 @@
       "status": "active"
     },
     {
-      "id": "policy.task.target-layout",
-      "guard": "check-hexagonal-layer-purity.sh",
-      "module": "task",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/task/src"
-      },
-      "classification": "target_hexagonal_policy",
-      "mechanism_type": "structural",
-      "owner": "task",
-      "reason": "Task uses its documented domain/adapters Target and rejects retired COLA layer names",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Task Target layout policy",
-      "status": "active"
-    },
-    {
       "id": "policy.shared.task-owner-boundary",
       "guard": "check-share-minimal-kernel.sh",
       "module": "task",
@@ -890,23 +839,6 @@
       "status": "active"
     },
     {
-      "id": "exception.update.cola-layout",
-      "guard": "check-hexagonal-layer-purity.sh",
-      "module": "update",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/update/src"
-      },
-      "classification": "migration_exception",
-      "mechanism_type": "whitelist-backed",
-      "owner": "update",
-      "reason": "update crate retains COLA layout (api/contract/gateway) pending #989; directory whitelist is explicit in the guard's update branch",
-      "tracking_issue": 989,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove the update branch and register update Hexagonal target layout when #989 completes COLA elimination",
-      "status": "active"
-    },
-    {
       "id": "policy.context.crate-root-facade",
       "guard": "check-crate-api-boundary.sh",
       "module": "context",
@@ -921,23 +853,6 @@
       "tracking_issue": 1022,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Context crate-root facade policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.repository.guard-selftest-hexagonal",
-      "guard": "check-hexagonal-layer-purity-tests.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "path_prefix",
-        "value": ".agents/hooks"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "architecture",
-      "reason": "Guard self-test: fixture mini-repo end-to-end probes for R8 direction, COLA revival, update exception boundary and config layer lockout",
-      "tracking_issue": 1074,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retire together with the guarded script it verifies",
       "status": "active"
     },
     {
@@ -1422,6 +1337,483 @@
       "allow_prefixes": [
         "agent/composition"
       ]
+    },
+    {
+      "id": "layout.runtime.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "composition.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs",
+        "shared"
+      ],
+      "reason": "F-3：runtime Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.runtime.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.workflow.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/workflow/src"
+      },
+      "allowed_entries": [
+        "domain",
+        "lib.rs"
+      ],
+      "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.workflow.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/workflow/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.provider.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports.rs",
+        "published_language.rs"
+      ],
+      "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.provider.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.memory.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/memory/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "adapters_tests.rs",
+        "application",
+        "application.rs",
+        "application_tests.rs",
+        "codec.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "noop.rs",
+        "ports",
+        "ports.rs",
+        "service.rs",
+        "service_reflection_tests.rs"
+      ],
+      "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.memory.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/memory/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.policy.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/policy/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：policy Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.policy.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/policy/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.storage.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/storage/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "lib_tests.rs",
+        "ports",
+        "ports.rs",
+        "test_log.rs"
+      ],
+      "reason": "F-3：storage Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.storage.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/storage/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.project.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.project.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.tools.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：tools Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.tools.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.task.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：task Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.task.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.audit.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/audit/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：audit Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.audit.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/audit/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.hook.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "capabilities.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：hook Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.hook.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.config.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "adapters_tests.rs",
+        "domain",
+        "domain.rs",
+        "domain_tests.rs",
+        "lib.rs",
+        "lib_tests.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：config Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.config.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.context.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：context Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.context.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
