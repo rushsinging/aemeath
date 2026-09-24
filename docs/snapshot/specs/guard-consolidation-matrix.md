@@ -230,6 +230,14 @@ F 组 29 项 + D/E 组切出的白名单子项，收敛为 4 个通用断言器�
 
 `retired_symbols` 为纯数据区（不设断言器），供 review 对照，不再机械拦截。
 
+### 3.9 执行进度（#1676 退役壳收敛批次）
+
+- C 组④4 脚本退役（cost-tracker/hook-target-facade/share-no-upstream/tui-output-legacy）+ entry 4 条。
+- 转发壳 4 个并入编排器内联（guard-registry/sdk-wire-schema/source-guard/log-target-prefix→cargo test）。
+- **引擎链路转正**：编排器默认 `xtask guard`（registry 88 规则），`AEMEATH_GUARD_ENGINE=legacy` 逃生阀；E 组 8 脚本 + unsafe-text 残段过渡保留。
+- #1696-② 顺路：no-cancel-input-event / no-builtin-command-registry 两规则退役（已删符号④归 review）；no-legacy-tool-paths 收缩至 wire_tools 单模式。
+- `.agents/hooks/` 20 → **12 文件**（编排器+agent-stop+reject-main-edit+E组8+unsafe-text）。
+
 ### 3.8 执行进度（#1677 数据化批次）
 
 - 已完成 28/30 全量 + 2 部分：F-14 已补（line_budget 断言器）；F-23 已迁子串两模式（chars().nth/split_at + 行级 allow 标记 + 注释剥离），区间切片正则留原脚本；F-18 半段留原脚本（层边界分区语义）。

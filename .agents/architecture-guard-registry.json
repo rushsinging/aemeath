@@ -329,23 +329,6 @@
       "status": "active"
     },
     {
-      "id": "scope.logging.production-test-sources",
-      "guard": "check-log-target-prefix.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "tests directories, *_test.rs, *_tests.rs, tests.rs, and cfg(test) modules"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Test fixtures and guard probes are not production log calls or production owner constants",
-      "tracking_issue": 941,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while production ownership applies only to compiled production source",
-      "status": "active"
-    },
-    {
       "id": "scope.provider.error-log-self-reference",
       "guard": "check-provider-http-attempt.sh",
       "module": "provider",
@@ -360,23 +343,6 @@
       "tracking_issue": 1033,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while the dedicated no-self-reference check exists",
-      "status": "active"
-    },
-    {
-      "id": "false-positive.tui.running-indicator-condition",
-      "guard": "check-tui-output-legacy-guards.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "LineStyle::ToolCallRunning"
-      },
-      "classification": "false_positive_suppression",
-      "mechanism_type": "whitelist-backed",
-      "owner": "tui",
-      "reason": "The single running-indicator write is the guarded intended rendering site",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove with the legacy running indicator rule",
       "status": "active"
     },
     {
@@ -411,40 +377,6 @@
       "tracking_issue": 1021,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "policy.hook.target-facade",
-      "guard": "check-hook-target-facade.sh",
-      "module": "hook",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/hook/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "hook",
-      "reason": "Hook exposes only its crate-root Published Language and HookPort; Runtime must not restore the legacy api facade",
-      "tracking_issue": 926,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Hook crate-root facade policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.audit.cost-retirement",
-      "guard": "check-cost-tracker-retirement.sh",
-      "module": "audit",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "audit",
-      "reason": "Usage-only Audit MVP keeps Runtime pricing, legacy Cost history paths, Cost DTO/events, Cost presentation state and the unused Storage Cost namespace retired",
-      "tracking_issue": 932,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only after a separately approved Audit-owned Cost/Pricing design defines new Published Language and migration semantics",
       "status": "active"
     },
     {
@@ -2720,19 +2652,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.all.no-cancel-input-event",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        "ChatInputEvent::Cancel"
-      ],
-      "exclusions": [],
-      "reason": "F-11：旧取消入口禁复活，取消走 cancel_current_run / RunControlClient",
-      "profile": "full"
-    },
-    {
       "id": "pattern.sdk.client-pure-dto",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -2759,17 +2678,6 @@
         "value": "agent/features/config/src"
       },
       "reason": "F-7：业务 env（AEMEATH_*/API_KEY）读取限 config 登记路径；细分 per-var 白名单正则特征 defer",
-      "profile": "full",
-      "forbidden_patterns": [],
-      "exclusions": []
-    },
-    {
-      "id": "pattern.all.no-builtin-command-registry",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "reason": "F-10：Delivery 禁恢复静态 builtin 注册表/独立解析器；Command PL 定义点唯一性由类型系统承接",
       "profile": "full",
       "forbidden_patterns": [],
       "exclusions": []
@@ -3599,23 +3507,10 @@
         "value": "agent/features/tools/src"
       },
       "forbidden_patterns": [
-        "LegacyNoAgent",
-        "legacy-no-agent",
-        "SkillInput",
-        "SkillResult",
-        "SkillMaterializationPort",
-        "SkillMaterializationQuery",
-        "SkillMaterializationSnapshot",
-        "PromptFragment",
-        "with_skill_supplier",
-        "register_all_tools",
-        "register_subagent_tools",
-        "ToolCatalogGateway",
-        "DefaultToolCatalogGateway",
         "wire_tools"
       ],
       "exclusions": [],
-      "reason": "F-16：legacy DTO/factory/物化路径防复活（符号已删编译期拦截为主，模式兜底）；validator 唯一实现与文件存在正向断言由类型系统/测试承接",
+      "reason": "#1696-②：legacy 符号编译期已拦（④退役归 review）；仅保留 wire_tools 装配入口禁式",
       "profile": "full"
     },
     {
