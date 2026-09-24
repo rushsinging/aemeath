@@ -329,23 +329,6 @@
       "status": "active"
     },
     {
-      "id": "policy.cargo.capability-dependency-matrix",
-      "guard": "check-cargo-dependency-graph.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "symbol",
-        "value": "business_allow"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "architecture",
-      "reason": "Cargo workspace edges are the machine-enforced capability dependency policy",
-      "tracking_issue": 1022,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent capability dependency policy",
-      "status": "active"
-    },
-    {
       "id": "policy.config.business-env-owner",
       "guard": "check-config-env-guard.sh",
       "module": "config",
@@ -2715,6 +2698,132 @@
         "adaptive_reasoning"
       ],
       "reason": "F-2：workflow crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "dependency.workspace-matrix",
+      "assertion": "dependency_matrix",
+      "scope": {
+        "kind": "workspace"
+      },
+      "business_allow": {
+        "cli": [
+          "composition",
+          "sdk",
+          "utils"
+        ],
+        "composition": [
+          "audit",
+          "config",
+          "context",
+          "hook",
+          "logging",
+          "memory",
+          "policy",
+          "project",
+          "provider",
+          "runtime",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "update",
+          "workflow"
+        ],
+        "runtime": [
+          "audit",
+          "config",
+          "context",
+          "hook",
+          "logging",
+          "memory",
+          "policy",
+          "project",
+          "provider",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "utils",
+          "workflow"
+        ],
+        "config": [
+          "share",
+          "storage"
+        ],
+        "share": [
+          "logging",
+          "utils"
+        ],
+        "project": [
+          "share",
+          "utils"
+        ],
+        "policy": [
+          "sdk",
+          "share",
+          "tools"
+        ],
+        "context": [
+          "config",
+          "memory",
+          "project",
+          "provider",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "utils"
+        ],
+        "memory": [
+          "share",
+          "storage",
+          "utils"
+        ],
+        "provider": [
+          "logging",
+          "share"
+        ],
+        "tools": [
+          "memory",
+          "project",
+          "share",
+          "task",
+          "utils"
+        ],
+        "storage": [
+          "share"
+        ],
+        "task": [],
+        "hook": [
+          "share",
+          "utils"
+        ],
+        "audit": [
+          "sdk",
+          "share",
+          "storage"
+        ],
+        "workflow": [
+          "share"
+        ],
+        "sdk": [
+          "share",
+          "tools",
+          "utils"
+        ],
+        "update": [
+          "logging",
+          "sdk",
+          "share"
+        ],
+        "logging": [],
+        "utils": []
+      },
+      "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
       "profile": "full"
     }
   ],

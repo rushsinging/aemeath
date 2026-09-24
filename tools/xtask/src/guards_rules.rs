@@ -1,5 +1,5 @@
 use crate::guards_engine;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -50,6 +50,10 @@ pub enum RuleSpec {
     },
     ForbiddenFileNames {
         forbidden_file_names: Vec<String>,
+    },
+    /// F-4：workspace 内业务依赖矩阵（crate → 允许依赖的 workspace crate 名）。
+    DependencyMatrix {
+        business_allow: std::collections::BTreeMap<String, Vec<String>>,
     },
 }
 
@@ -173,6 +177,7 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
         RuleSpec::ForbiddenFileNames {
             forbidden_file_names,
         } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
+        RuleSpec::DependencyMatrix { .. } => Ok(Vec::new()),
     }
 }
 
@@ -657,6 +662,81 @@ fn owning_crate_of(relative_file: &str) -> String {
         return segments[1].to_owned();
     }
     String::new()
+}
+
+/// F-4：cargo metadata 的 workspace path 依赖边集合（crate → 依赖 crate 名）。
+pub fn workspace_dependency_edges(
+    repo_root: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(repo_root)
+        .output()
+        .with_context(|| "执行 cargo metadata 失败")?;
+    if !output.status.success() {
+        anyhow::bail!("cargo metadata 退出码非零");
+    }
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).with_context(|| "解析 cargo metadata 失败")?;
+    let workspace_root = repo_root.to_path_buf();
+    let mut edges: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let Some(packages) = metadata["packages"].as_array() else {
+        anyhow::bail!("metadata 缺 packages");
+    };
+    for package in packages {
+        let name = package["name"].as_str().unwrap_or_default().to_owned();
+        let manifest_path = package["manifest_path"].as_str().unwrap_or_default();
+        let Ok(package_root) = std::path::Path::new(manifest_path)
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("manifest 无父目录"))
+        else {
+            continue;
+        };
+        let mut dependencies = Vec::new();
+        if let Some(deps) = package["dependencies"].as_array() {
+            for dependency in deps {
+                let Some(dep_path) = dependency["path"].as_str() else {
+                    continue;
+                };
+                let dep_root = std::path::Path::new(dep_path);
+                // 仅统计指向 workspace 内的 path 依赖。
+                if dep_root.strip_prefix(&workspace_root).is_ok() {
+                    if let Some(dep_name) = dependency["name"].as_str() {
+                        dependencies.push(dep_name.to_owned());
+                    }
+                }
+            }
+        }
+        let _ = package_root;
+        edges.insert(name, dependencies);
+    }
+    Ok(edges)
+}
+
+/// 校验依赖边集合是否落在业务矩阵内（不在矩阵的 crate 跳过，与原脚本一致）。
+pub fn check_dependency_edges(
+    business_allow: &std::collections::BTreeMap<String, Vec<String>>,
+    edges: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Vec<Violation> {
+    let workspace_names: std::collections::BTreeSet<&str> =
+        edges.keys().map(|name| name.as_str()).collect();
+    let mut violations = Vec::new();
+    for (name, deps) in edges {
+        let Some(allowed) = business_allow.get(name) else {
+            continue;
+        };
+        for dep in deps {
+            if workspace_names.contains(dep.as_str()) && !allowed.contains(dep) {
+                violations.push(Violation {
+                    rule_id: "dependency.workspace-matrix".to_owned(),
+                    location: format!("crate:{name}"),
+                    message: format!("{name} 不得依赖 {dep}；允许：{allowed:?}"),
+                });
+            }
+        }
+    }
+    violations
 }
 
 /// 词边界匹配：避免 `AdapterX` 误命中 `Adapter`。

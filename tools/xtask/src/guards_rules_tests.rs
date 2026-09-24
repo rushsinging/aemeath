@@ -380,6 +380,26 @@ fn forbidden_file_names_flags_mod_rs_anywhere() {
 }
 
 #[test]
+fn dependency_matrix_flags_edge_outside_allow_list() {
+    let matrix = std::collections::BTreeMap::from([
+        ("task".to_owned(), vec![]),
+        ("storage".to_owned(), vec!["share".to_owned()]),
+    ]);
+    let edges = std::collections::BTreeMap::from([
+        ("task".to_owned(), vec!["tools".to_owned()]),
+        ("storage".to_owned(), vec!["share".to_owned()]),
+        ("tools".to_owned(), vec![]),
+        ("share".to_owned(), vec![]),
+    ]);
+
+    let violations = crate::guards_rules::check_dependency_edges(&matrix, &edges);
+
+    assert_eq!(violations.len(), 1);
+    assert!(violations[0].message.contains("task"));
+    assert!(violations[0].message.contains("tools"));
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

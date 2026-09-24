@@ -50,9 +50,19 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
     let source_files = collect_source_files(repo_root)?;
     let mut violations = Vec::new();
     for rule in &selected {
+        if matches!(rule.spec, guards_rules::RuleSpec::DependencyMatrix { .. }) {
+            continue;
+        }
         for relative_file in &source_files {
             let file_violations = guards_rules::enforce_rule(rule, repo_root, relative_file)?;
             violations.extend(file_violations);
+        }
+    }
+    // F-4：依赖矩阵（DependencyMatrix 规则走 cargo metadata 全局检查）。
+    for rule in &selected {
+        if let guards_rules::RuleSpec::DependencyMatrix { business_allow } = &rule.spec {
+            let edges = guards_rules::workspace_dependency_edges(repo_root)?;
+            violations.extend(guards_rules::check_dependency_edges(business_allow, &edges));
         }
     }
     // F-1 样板：construction_symbols 越界检查 + 跨 BC wire 调用 fail-closed。
