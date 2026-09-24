@@ -312,23 +312,6 @@
   ],
   "entries": [
     {
-      "id": "policy.context.session-project-scope",
-      "guard": "check-session-project-scope.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "context",
-      "reason": "Session list and resume are restricted to the current ProjectIdentity; Git worktrees match by common-dir and non-git projects by canonical root",
-      "tracking_issue": 1295,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
-      "status": "active"
-    },
-    {
       "id": "scope.provider.error-log-self-reference",
       "guard": "check-provider-http-attempt.sh",
       "module": "provider",
@@ -3585,6 +3568,40 @@
       "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
       "profile": "full",
       "allow_marker": "allow unsafe_text_op"
+    },
+    {
+      "id": "pattern.provider.no-pull-stream-retry-loop",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        "backoff",
+        "retry_loop"
+      ],
+      "exclusions": [],
+      "reason": "#1679：拉流段禁 backoff/重试循环（idle-timeout select sleep 合法保留；流中断 fail-fast 可重试语义已由 stream_contract_tests 覆盖）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.session-setup-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        ".process_group(",
+        ".pre_exec(",
+        "libc::setsid("
+      ],
+      "exclusions": [
+        {
+          "path": "packages/global/utils/src/process.rs"
+        }
+      ],
+      "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
