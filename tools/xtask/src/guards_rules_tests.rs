@@ -324,6 +324,82 @@ fn pattern_exclusion_skips_scenario_tests_directory() {
 }
 
 #[test]
+fn forbidden_segments_supports_multi_segment_prefix() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/runtime/service.rs"),
+        "use share::adapter::widget;\nuse share::adapters::other;\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "use.share.adapter-single-root",
+        "assertion": "forbidden_segments",
+        "scope": { "kind": "path_prefix", "value": "crates" },
+        "forbidden_segments": ["share::adapter"],
+        "reason": "adapter 只经 composition 引用",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/runtime/service.rs")
+            .expect("enforce");
+
+    assert_eq!(
+        violations.len(),
+        1,
+        "share::adapter 前缀命中，share::adapters 不命中"
+    );
+    assert!(violations[0].message.contains("share::adapter"));
+}
+
+#[test]
+fn forbidden_file_names_flags_mod_rs_anywhere() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/task/src/domain/mod.rs"),
+        "pub struct X;\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "layout.all.no-mod-rs",
+        "assertion": "forbidden_file_names",
+        "scope": { "kind": "workspace" },
+        "forbidden_file_names": ["mod.rs"],
+        "reason": "Rust 2018+ 同名文件模块约定",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/task/src/domain/mod.rs")
+            .expect("enforce");
+
+    assert_eq!(violations.len(), 1);
+    assert!(violations[0].message.contains("mod.rs"));
+}
+
+#[test]
+fn dependency_matrix_flags_edge_outside_allow_list() {
+    let matrix = std::collections::BTreeMap::from([
+        ("task".to_owned(), vec![]),
+        ("storage".to_owned(), vec!["share".to_owned()]),
+    ]);
+    let edges = std::collections::BTreeMap::from([
+        ("task".to_owned(), vec!["tools".to_owned()]),
+        ("storage".to_owned(), vec!["share".to_owned()]),
+        ("tools".to_owned(), vec![]),
+        ("share".to_owned(), vec![]),
+    ]);
+
+    let violations = crate::guards_rules::check_dependency_edges(&matrix, &edges);
+
+    assert_eq!(violations.len(), 1);
+    assert!(violations[0].message.contains("task"));
+    assert!(violations[0].message.contains("tools"));
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

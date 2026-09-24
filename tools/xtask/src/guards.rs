@@ -50,9 +50,68 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
     let source_files = collect_source_files(repo_root)?;
     let mut violations = Vec::new();
     for rule in &selected {
+        if matches!(rule.spec, guards_rules::RuleSpec::DependencyMatrix { .. }) {
+            continue;
+        }
         for relative_file in &source_files {
             let file_violations = guards_rules::enforce_rule(rule, repo_root, relative_file)?;
             violations.extend(file_violations);
+        }
+    }
+    // F-4：依赖矩阵（DependencyMatrix 规则走 cargo metadata 全局检查）。
+    for rule in &selected {
+        if let guards_rules::RuleSpec::DependencyMatrix { business_allow } = &rule.spec {
+            let edges = guards_rules::workspace_dependency_edges(repo_root)?;
+            violations.extend(guards_rules::check_dependency_edges(business_allow, &edges));
+        }
+    }
+    // F-1 样板：construction_symbols 越界检查 + 跨 BC wire 调用 fail-closed。
+    if rule_filter.is_none() || rule_filter.is_some_and(|id| id == "construction.cross-bc") {
+        for symbol in &registry.construction_symbols {
+            // wire 类条目经限定调用检查（enforce_wire_registration）：
+            // 经 composition 转发的 `composition::tools::wire_x` 文本出现是合法装配面。
+            if symbol.kind == "wire" {
+                continue;
+            }
+            let scope = guards_rules::Scope::Workspace;
+            // 原样板语义：owner crate 内部构造不拦截（BC 内部事务）。
+            let mut allowed = symbol.allowed_paths.clone();
+            allowed.push(format!("agent/features/{}", symbol.owner_crate));
+            let spec = guards_rules::RuleSpec::ConstructionWhitelist {
+                symbol: symbol.symbol.clone(),
+                allowed_paths: allowed,
+            };
+            let rule = guards_rules::Rule {
+                id: symbol.id.clone(),
+                scope,
+                spec,
+                reason: String::new(),
+                profile: guards_rules::Profile::Full,
+            };
+            for relative_file in &source_files {
+                let file_violations = guards_rules::enforce_rule(&rule, repo_root, relative_file)?;
+                violations.extend(file_violations);
+            }
+        }
+        let wire_definitions = guards_rules::collect_wire_definitions(repo_root);
+        let registered: Vec<(String, String, Vec<String>)> = registry
+            .construction_symbols
+            .iter()
+            .map(|entry| {
+                (
+                    entry.owner_crate.clone(),
+                    entry.symbol.clone(),
+                    entry.allowed_paths.clone(),
+                )
+            })
+            .collect();
+        for relative_file in &source_files {
+            violations.extend(guards_rules::enforce_wire_registration(
+                &wire_definitions,
+                &registered,
+                repo_root,
+                relative_file,
+            ));
         }
     }
     violations.sort_by(|left, right| {
