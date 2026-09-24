@@ -385,23 +385,6 @@
       "status": "active"
     },
     {
-      "id": "scope.tui.arch.inline-exclusions",
-      "guard": "check-architecture-guards.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "inline grep exclusions in run_tui_single_source_structure_guard"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "tui",
-      "reason": "Tests, projection owners and comments are outside each narrowly stated TUI invariant",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "split into narrower registered scopes when the inline TUI guard is decomposed",
-      "status": "active"
-    },
-    {
       "id": "policy.config.business-env-owner",
       "guard": "check-config-env-guard.sh",
       "module": "config",
