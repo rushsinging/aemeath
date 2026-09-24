@@ -483,13 +483,17 @@ impl AgentRunner for CliAgentRunner {
 
             let progress: super::loop_run::ProgressReporter = Arc::new(progress);
 
-            let context_size = derived
-                .instance
-                .context()
-                .config_ref()
-                .config()
-                .resolve_context_size(None, 0);
             let config_snapshot = derived.instance.context().config_ref().config().clone();
+            // #1686：sub-agent 的窗口基数必须对齐 agent 模型的 registry 真实
+            // 窗口，与主装配（composition）同语义；查不到条目时传 0 走
+            // fail-closed fallback，NEVER 凭空放大窗口。
+            let registry_window = config_snapshot
+                .models()
+                .find_model(&model_name)
+                .map(|(_, _, model_entry)| model_entry.context_window)
+                .filter(|window| *window > 0)
+                .unwrap_or(0);
+            let context_size = config_snapshot.resolve_context_size(None, registry_window);
             let language = config_snapshot.language().to_string();
             let agent_roles = config_snapshot
                 .agents()
