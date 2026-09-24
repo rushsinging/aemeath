@@ -751,6 +751,10 @@ impl CanonicalSessionRepository {
             start_at,
             source_revision: source.revision.get(),
         });
+        // compact 以 summary 替代窗口后，skill 注入内容不再可见，去重前提
+        // （内容仍在窗口）失效：必须随窗口一起失效记录，否则同 revision 的
+        // 再次加载会命中 AlreadyLoaded 拒绝重发，模型永远拿不回内容。
+        candidate.skill_load_records.clear();
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.persist_candidate(&current, &candidate)

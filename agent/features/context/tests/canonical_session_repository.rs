@@ -541,37 +541,73 @@ async fn clear_removes_persisted_skill_load_records() {
     assert!(holder.read().unwrap().skill_load_records.is_empty());
 }
 
+/// #1697：compact 替代窗口后 skill 注入内容不再可见，`skill_load_records`
+/// 的去重前提失效——compact commit 必须清空记录，让再次调用返回 `Fresh`
+/// 重新注入内容。旧断言「compact 保留」的行为被该设计决策替代（原测试
+/// `compaction_preserves_skill_load_records`）：保留会让 `AlreadyLoaded`
+/// 在内容已丢失时拒绝重发，模型拿不回 skill 内容。
 #[tokio::test]
-async fn compaction_preserves_skill_load_records() {
+async fn compaction_clears_skill_load_records() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let session_id = holder.read().unwrap().id.clone();
+    let session_id = SessionId::new("session");
+    // 十步会话保证 compact 走到 Committed（空历史会 Skipped，清空逻辑不执行）
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     repository
         .compare_and_record_skill_load(
-            SkillLoadMutation::new(session_id.clone(), SkillLoadScope::main(), "review", "r1")
-                .unwrap(),
+            SkillLoadMutation::new(
+                session_id.to_string(),
+                SkillLoadScope::main(),
+                "review",
+                "r1",
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
-    repository
-        .commit_compaction(&CompactRequest {
-            run_id: RunId::new("run"),
-            source_revision: SessionRevision::new(1),
-            source: compact_request(SessionId::new(&session_id)),
-            trigger: CompactTrigger::Automatic,
-            progress: None,
-            task_snapshot: None,
-            cancellation: tokio_util::sync::CancellationToken::new(),
-        })
-        .await
-        .unwrap();
+    // 强断言 compact 已提交，避免 Skipped 路径让清空断言空过
+    // （context_size=1 的默认请求会让尾部保留吞掉全部消息而 Skipped）
+    let mut source = compact_request(SessionId::new(&session_id));
+    source.context_size = 100_000;
+    assert!(matches!(
+        repository
+            .commit_compaction(&CompactRequest {
+                run_id: RunId::new("run"),
+                source_revision: SessionRevision::new(1),
+                source,
+                trigger: CompactTrigger::Automatic,
+                progress: None,
+                task_snapshot: None,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
+            .await
+            .unwrap(),
+        context::CompactOutcome::Committed(_)
+    ));
 
-    assert_eq!(
+    assert!(
         holder
             .read()
             .unwrap()
-            .loaded_skill_revision(&SkillLoadScope::main(), "review"),
-        Some("r1")
+            .loaded_skill_revision(&SkillLoadScope::main(), "review")
+            .is_none(),
+        "compact 替代窗口后注入记录必须失效"
+    );
+    assert_eq!(
+        repository
+            .compare_and_record_skill_load(
+                SkillLoadMutation::new(
+                    session_id.to_string(),
+                    SkillLoadScope::main(),
+                    "review",
+                    "r1"
+                )
+                .unwrap()
+            )
+            .await
+            .unwrap(),
+        SkillLoadDecision::Fresh,
+        "compact 后同 revision 重新加载必须返回 Fresh 以重发内容"
     );
 }
 
