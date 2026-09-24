@@ -334,23 +334,6 @@
       "status": "active"
     },
     {
-      "id": "policy.composition.unique-adapter-root",
-      "guard": "check-forbidden-imports.sh",
-      "module": "composition",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/composition/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition is the unique production location allowed to assemble shared adapters",
-      "tracking_issue": 1002,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only if the deployable production root changes",
-      "status": "active"
-    },
-    {
       "id": "policy.hexagonal.current-layer-matrix",
       "guard": "check-hexagonal-layer-purity.sh",
       "module": "repository",
@@ -450,23 +433,6 @@
       "tracking_issue": 1033,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while the dedicated no-self-reference check exists",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.render-tests-and-display-bridge",
-      "guard": "check-tui-render-pure.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "render tests and display/render.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "tui",
-      "reason": "Test files and the registered display projection owner are outside the direct-model-read rule",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove display bridge exclusion when Render bypass retirement completes",
       "status": "active"
     },
     {
@@ -1433,6 +1399,34 @@
       "exclusions": [],
       "reason": "F-30（D 组判据修正移入）：gutter 由 document_renderer 注入，block 组件禁自调",
       "profile": "full"
+    },
+    {
+      "id": "layout.all.no-mod-rs",
+      "assertion": "forbidden_file_names",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "F-29：Rust 2018+ 同名文件模块约定，src 下禁 mod.rs",
+      "profile": "full",
+      "forbidden_file_names": [
+        "mod.rs"
+      ]
+    },
+    {
+      "id": "use.share.adapter-single-root",
+      "assertion": "forbidden_segments",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "F-5：生产 adapter 唯一根在 composition，其余禁穿透 share::adapter 路径段",
+      "profile": "full",
+      "forbidden_segments": [
+        "share::adapter",
+        "shared::adapter"
+      ],
+      "allow_prefixes": [
+        "agent/composition"
+      ]
     }
   ],
   "retired_symbols": []

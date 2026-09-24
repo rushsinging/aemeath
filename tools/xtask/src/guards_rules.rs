@@ -48,6 +48,9 @@ pub enum RuleSpec {
         symbol: String,
         allowed_paths: Vec<String>,
     },
+    ForbiddenFileNames {
+        forbidden_file_names: Vec<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +117,9 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
     }
     let skips_test_sources = !matches!(
         rule.spec,
-        RuleSpec::Layout { .. } | RuleSpec::ConstructionWhitelist { .. }
+        RuleSpec::Layout { .. }
+            | RuleSpec::ConstructionWhitelist { .. }
+            | RuleSpec::ForbiddenFileNames { .. }
     );
     if skips_test_sources && is_test_source(relative_file) {
         return Ok(Vec::new());
@@ -153,7 +158,29 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
             symbol,
             allowed_paths,
         } => enforce_construction_whitelist(rule, &absolute, relative_file, symbol, allowed_paths),
+        RuleSpec::ForbiddenFileNames {
+            forbidden_file_names,
+        } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
     }
+}
+
+fn enforce_forbidden_file_names(
+    rule: &Rule,
+    relative_file: &str,
+    forbidden_file_names: &[String],
+) -> Result<Vec<Violation>> {
+    let file_name = relative_file.rsplit('/').next().unwrap_or(relative_file);
+    if let Some(forbidden) = forbidden_file_names
+        .iter()
+        .find(|forbidden| *forbidden == file_name)
+    {
+        return Ok(vec![Violation {
+            rule_id: rule.id.clone(),
+            location: relative_file.to_owned(),
+            message: format!("文件名 `{forbidden}` 被禁止（目录布局约定）"),
+        }]);
+    }
+    Ok(Vec::new())
 }
 
 fn scope_matches(scope: &Scope, relative_file: &str) -> bool {
@@ -202,15 +229,25 @@ fn enforce_forbidden_segments(
     let mut violations = Vec::new();
     for use_path in index.production_use_paths() {
         let segments: Vec<&str> = use_path.text.split("::").collect();
-        if let Some(segment) = segments.iter().find(|segment| {
-            forbidden_segments
-                .iter()
-                .any(|forbidden| forbidden == *segment)
-        }) {
+        let mut matched: Option<&str> = None;
+        for forbidden in forbidden_segments {
+            if forbidden.contains("::") {
+                // 多段前缀（如 `share::adapter`）：匹配 use 路径的段序列前缀。
+                let forbidden_sequence: Vec<&str> = forbidden.split("::").collect();
+                if segments.starts_with(&forbidden_sequence[..]) {
+                    matched = Some(forbidden);
+                    break;
+                }
+            } else if segments.iter().any(|segment| *segment == forbidden) {
+                matched = Some(forbidden);
+                break;
+            }
+        }
+        if let Some(forbidden) = matched {
             violations.push(Violation {
                 rule_id: rule.id.clone(),
                 location: format!("{relative_file}:{}", use_path.line),
-                message: format!("use 路径含禁段 `{segment}`：{}", use_path.text),
+                message: format!("use 路径命中禁段 `{forbidden}`：{}", use_path.text),
             });
         }
     }
