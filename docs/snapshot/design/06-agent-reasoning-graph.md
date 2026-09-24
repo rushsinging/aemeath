@@ -229,7 +229,7 @@ trait Provider {
 | Provider | `max_level` | Off<br>(Idle/Execute) | Low | Medium<br>(Explore/Verify) | High | Xhigh | Max<br>(Plan) | 实际可区分档位 |
 |---|---|---|---|---|---|---|---|---|
 | **Anthropic** | Max | `budget=0` | `budget=1024` | `budget=4096` | `budget=16384` | `budget=32768` | `budget=65536` | 6 档（⚠️ budget_tokens 已废弃，见下方说明） |
-| **OpenAI** | High | `reasoning` 不发 | `effort=low` | `effort=medium` | `effort=high` | →**high** | →**high** | 4 档（off/low/medium/high，driver clamp） |
+| **OpenAI** | High | `reasoning_effort` 不发 | `reasoning_effort=low` | `reasoning_effort=medium` | `reasoning_effort=high` | →**high** | →**high** | 4 档（off/low/medium/high，driver clamp；#973 后为顶层字段，OpenAI Chat Completions 正式协议） |
 | **Zhipu (GLM)** | Max | `thinking=disabled` | `effort=low`→**high** | `effort=medium`→**high** | `effort=high` | `effort=xhigh`→**max** | `effort=max` | 3 档（off/high/max，服务端折叠） |
 | **DeepSeek** | Max | `thinking=disabled` | `effort=low`→**high** | `effort=medium`→**high** | `effort=high` | `effort=xhigh`→**max** | `effort=max` | 3 档（off/high/max，服务端折叠） |
 | **LiteLLM** | Max | 不发 | `reasoning_effort=low` | `=medium` | `=high` | `=xhigh` | `=max` | 6 档（透传，上游可能再折） |
