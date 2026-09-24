@@ -118,6 +118,20 @@ pub(crate) async fn from_args_with_gateways(
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
     );
+    // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
+    // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
+    {
+        let migration_blob = session_blob.clone();
+        tokio::spawn(async move {
+            let report = context::api::migrate_flat_sessions_to_project_dirs(migration_blob).await;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "session_flat_migration spawned migrated={} skipped={}",
+                report.migrated,
+                report.skipped
+            );
+        });
+    }
 
     let snapshot = config.reader().committed_snapshot();
     let runtime_model = snapshot

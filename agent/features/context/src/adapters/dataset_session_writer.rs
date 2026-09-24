@@ -8,7 +8,8 @@ use storage::{
 };
 
 use crate::domain::session::{
-    CanonicalSession, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
+    session_project_dir, CanonicalSession, SessionCommitPlan, SessionGenerationCodec,
+    SessionGenerationManifest,
 };
 
 pub struct DatasetCanonicalSessionWriter {
@@ -34,8 +35,7 @@ impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
         before: &CanonicalSession,
         mut after: CanonicalSession,
     ) -> Result<CanonicalSession, String> {
-        let dataset_key =
-            session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
+        let dataset_key = dataset_key_for_session(&after).map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
             .read_manifest(&dataset_key)
@@ -63,7 +63,7 @@ impl crate::adapters::CanonicalSessionWriter for DatasetCanonicalSessionWriter {
         session_id: &str,
         session: &CanonicalSession,
     ) -> Result<(), String> {
-        let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
+        let dataset_key = dataset_key_for_session(session).map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
             .read_manifest(&dataset_key)
@@ -125,8 +125,7 @@ impl DatasetCanonicalSessionWriter {
         before: &CanonicalSession,
         after: &CanonicalSession,
     ) -> Result<(), String> {
-        let dataset_key =
-            session_dataset_key(after.id.as_str()).map_err(|error| error.to_string())?;
+        let dataset_key = dataset_key_for_session(after).map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
             .read_manifest(&dataset_key)
@@ -158,7 +157,8 @@ impl DatasetCanonicalSessionWriter {
         expected_revision: u64,
         mut plan: SessionCommitPlan,
     ) -> Result<(), String> {
-        let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
+        let dataset_key = dataset_key_for_plan(session_id, plan.project_dir())
+            .map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
             .read_manifest(&dataset_key)
@@ -191,7 +191,8 @@ impl DatasetCanonicalSessionWriter {
     }
 
     async fn commit(&self, session_id: &str, changes: SessionCommitPlan) -> Result<(), String> {
-        let dataset_key = session_dataset_key(session_id).map_err(|error| error.to_string())?;
+        let dataset_key = dataset_key_for_plan(session_id, changes.project_dir())
+            .map_err(|error| error.to_string())?;
         let manifest = self
             .dataset
             .read_manifest(&dataset_key)
@@ -226,6 +227,40 @@ pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKey, Storag
         StorageNamespace::Session,
         vec![SafePathSegment::from_str(&format!("{session_id}.dataset"))?],
     )
+}
+
+/// 按 project 分目录的 dataset key：`<project-dir>/<session-id>.dataset`。
+pub(super) fn session_dataset_key_scoped(
+    project_dir: &SafePathSegment,
+    session_id: &str,
+) -> Result<DatasetKey, StorageError> {
+    DatasetKey::new(
+        StorageNamespace::Session,
+        vec![
+            project_dir.clone(),
+            SafePathSegment::from_str(&format!("{session_id}.dataset"))?,
+        ],
+    )
+}
+
+/// session 写入位置的 key：workspace 捕获了 project identity 时落到
+/// project 目录段下，否则退回平铺（无归属信息的 session 维持旧布局）。
+fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKey, StorageError> {
+    match session_project_dir(session) {
+        Some(project_dir) => session_dataset_key_scoped(&project_dir, &session.id),
+        None => session_dataset_key(&session.id),
+    }
+}
+
+/// 提交计划写入位置的 key：plan 构建时携带的 project 目录段决定布局。
+fn dataset_key_for_plan(
+    session_id: &str,
+    project_dir: Option<&SafePathSegment>,
+) -> Result<DatasetKey, StorageError> {
+    match project_dir {
+        Some(project_dir) => session_dataset_key_scoped(project_dir, session_id),
+        None => session_dataset_key(session_id),
+    }
 }
 
 fn promote_missing_reuse_evidence(

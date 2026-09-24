@@ -42,11 +42,11 @@ pub use adapters::{
 pub use application::{main_session, ContextApplicationService};
 pub use application::{SessionLoadError, SessionPersistenceService};
 pub use domain::session::{
-    AcceptedInputProjection, ActiveCompactMarker, CanonicalSession, ChatSegment, CommittedRunSlice,
-    CommittedRunStep, CommittedStep, CommittedStepMessages, FinalizedOutcomeProjection,
-    RunStepCursor, SessionCodec, SessionCodecError, SessionCommitPlan, SessionGenerationCodec,
-    SessionGenerationManifest, SessionGenerationWireError, SessionHistory, SnapshotState,
-    CURRENT_SESSION_SCHEMA_VERSION,
+    project_dir_segment, session_project_dir, AcceptedInputProjection, ActiveCompactMarker,
+    CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep, CommittedStep,
+    CommittedStepMessages, FinalizedOutcomeProjection, RunStepCursor, SessionCodec,
+    SessionCodecError, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
+    SessionGenerationWireError, SessionHistory, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use domain::{
     AcceptedInputAppend, AcceptedInputError, ContextAppend, ContextMessages, ContextRequestId,
@@ -69,6 +69,7 @@ pub use ports::{
 };
 
 pub mod api {
+    pub use crate::adapters::migrate_flat_sessions_to_project_dirs;
     pub use crate::adapters::MemoryRetrieveAdapter;
     pub use crate::domain::session::{
         DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,

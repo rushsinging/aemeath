@@ -567,3 +567,40 @@ fn session_list_event_feeds_resume_completion() {
         completion.items
     );
 }
+
+/// /resume 按需拉取：首次输入 /resume 触发一次 session 列表请求；
+/// 标记置位后不重复请求（避免每次按键都打磁盘扫描）。
+#[test]
+fn resume_input_fetches_session_list_once() {
+    let mut app = app_with_builtin_router();
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    app.chat.input_event_tx = Some(event_tx);
+
+    // 常驻 loop 未跑（tx 未连接 runtime）时 push 仍然入队成功，
+    // 事件在 runtime attach 后被消费。
+    app.model.input.document.buffer = "/resume".to_string();
+    app.update_suggestions();
+    assert!(
+        app.session.session_list_requested,
+        "首次输入 /resume 必须置位请求标记"
+    );
+
+    app.model.input.document.buffer = "/resume 01a0".to_string();
+    app.update_suggestions();
+    let mut received = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        received.push(event);
+    }
+    assert_eq!(
+        received.len(),
+        1,
+        "session 列表请求只应发送一次，实际 {received:?}"
+    );
+    assert!(
+        matches!(
+            received.first(),
+            Some(sdk::ChatInputEvent::ManageSession { args }) if args == "list"
+        ),
+        "请求应为 ManageSession list：{received:?}"
+    );
+}

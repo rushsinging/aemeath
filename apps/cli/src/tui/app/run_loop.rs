@@ -252,15 +252,11 @@ impl App {
     }
 }
 
-/// #740：常驻 chat 回路建立后的缓存预热事件——立即请求模型列表与最近
-/// session 列表，回填 /model 对话框与 /resume 补全的数据源。
+/// #740：常驻 chat 回路建立后的缓存预热事件——立即请求模型列表，回填
+/// /model 对话框数据源。session 列表不再预热：列表查询会触发磁盘扫描，
+/// 且其结果只服务 /resume 补全（用户显式打开时按需拉取即可）。
 pub(crate) fn cache_warmup_events() -> Vec<sdk::ChatInputEvent> {
-    vec![
-        sdk::ChatInputEvent::ListModels,
-        sdk::ChatInputEvent::ManageSession {
-            args: "list".to_string(),
-        },
-    ]
+    vec![sdk::ChatInputEvent::ListModels]
 }
 
 #[cfg(test)]
