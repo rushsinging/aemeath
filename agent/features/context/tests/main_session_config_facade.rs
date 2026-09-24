@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use config::{
     native_override_store, ConfigAppService, ConfigPersistError, ConfigReader, ConfigUpdate,
-    ConfigUpdateError, NativeConfigStore, ProjectConfigParticipant,
+    ConfigUpdateError, ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
 use context::{CanonicalSession, SnapshotState};

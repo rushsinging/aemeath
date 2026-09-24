@@ -1,4 +1,4 @@
-use config::{native_override_store, ConfigWriter, NativeConfigStore};
+use config::{native_override_store, ConfigWriter};
 
 #[tokio::test]
 async fn wiring_reads_runtime_override_from_injected_native_store() {
