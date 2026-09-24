@@ -1174,6 +1174,24 @@
       "exclusions": [],
       "reason": "Context Session 语义消费注入的 SessionManagementPort/AtomicBlobPort，禁自建文件系统 backing（承接 session-management/composition-construction 两守卫的 Context 断言，scope 由单文件扩至 crate src）",
       "profile": "full"
+    },
+    {
+      "id": "pattern.features.no-provider-composition-penetration",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        "provider::composition"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/"
+        }
+      ],
+      "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
