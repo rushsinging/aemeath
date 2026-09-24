@@ -294,6 +294,36 @@ fn pattern_exclusion_skips_plain_tests_module_file() {
 }
 
 #[test]
+fn pattern_exclusion_skips_scenario_tests_directory() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp
+            .path()
+            .join("crates/runtime/scenario_tests/derived_run.rs"),
+        "fn harness() { wire_active_run_registry(); }\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.runtime.no-tool-self-assembly",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/runtime" },
+        "forbidden_patterns": ["wire_active_run_registry("],
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations = crate::guards_rules::enforce_rule(
+        &rule,
+        temp.path(),
+        "crates/runtime/scenario_tests/derived_run.rs",
+    )
+    .expect("enforce");
+
+    assert!(violations.is_empty(), "*_tests 目录下的测试源不得违规");
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

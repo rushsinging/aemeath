@@ -154,7 +154,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 | check-provider-window-single-owner.sh | 无 | ContextWindow 映射唯一 owner，禁再装饰 messages_for_api | 字段私有化 + 管线入口 pub(crate) |
 | check-config-reader-injection.sh ✅（已执行） | scope.config.reader-tests-only（entry 已删） | ConfigAppService 构造限定 config/composition | 已完成：`new`/`with_global_path`/`with_env_source`/`with_native_store` 收窄 `pub(crate)`，crate 外违规编译报 E0624；类型渗漏半边（TUI/CLI 禁持 reader 类型）按本表原计划归 pattern_exclusion 数据规则 |
 | check-config-store-ownership.sh ✅（已执行） | policy.config.override-store.composition-ownership（entry 已删） | BlobAdapter/NativeConfigStore 唯一工厂构造 | 已完成：`NativeConfigStore::new` 收窄 pub(crate) + crate 根 `native_override_store` 工厂（E0624 证据）；config 禁 blob 半边落 registry 首条引擎规则 `pattern.config.no-blob-construction`（故意违规 exit 2 实证）；same-body 组织约束按④退役归 review |
-| check-composition-construction-ownership.sh | policy.composition.cross-bc-construction-ownership | BC 内禁构造他方 adapter | 私有构造器；剩余并发入 F-14 引擎 |
+| check-composition-construction-ownership.sh ✅（已执行，与 session-management 条合并交付） | policy.composition.cross-bc-construction-ownership（entry 已删） | BC 内禁构造他方 adapter | 已完成：三文件禁式已被 pattern.runtime/config/context 三条引擎规则覆盖（scope 扩至 crate src）；leaf 映射表随最后 leaf 退役清空；脚本与自测壳删除 |
 | check-context-architecture.sh | 无（主体随①消失；R3/R8/R12 黑名单进 `retired_symbols`） | R1–R12：上下文类型禁字段、能力调用限定点 | 字段与可见性改型 |
 | check-unified-authorization.sh | 无 | 授权统一（混合①②④） | Allow 携带上下文→类型化；patch 顺序→cargo test；legacy 退役项→`retired_symbols` |
 | check-config-adapter-boundary.sh + .py（2 文件）✅（已执行） | 无 | config application 禁直读 fs/JSON + stub 残留 | 已完成：注入式 #1654 已落地，防回退落两条引擎规则（app-service-no-direct-io / adapters-no-stubs），sh+py+编排器行删除；判据修正记录：同 crate 跨模块 API 禁止无法编译期表达，①不可行 |

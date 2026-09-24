@@ -300,23 +300,6 @@
   ],
   "entries": [
     {
-      "id": "policy.composition.cross-bc-construction-ownership",
-      "guard": "check-composition-construction-ownership.sh",
-      "module": "composition",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/composition/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition is the sole production construction root for the completed Context Session, Config override, Runtime Tool and Hook adapter boundaries",
-      "tracking_issue": 1296,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent aggregate policy that preserves all four leaf ownership boundaries",
-      "status": "active"
-    },
-    {
       "id": "policy.context.session-project-scope",
       "guard": "check-session-project-scope.sh",
       "module": "context",
@@ -331,23 +314,6 @@
       "tracking_issue": 1295,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.session-management.composition-ownership",
-      "guard": "check-session-management-ownership.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "context",
-      "reason": "Composition alone constructs Session AtomicBlob backing; Context and Runtime consume the same SessionManagementPort Arc",
-      "tracking_issue": 1292,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Session backing ownership policy",
       "status": "active"
     },
     {
@@ -1192,6 +1158,21 @@
         }
       ],
       "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.context.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "Context Session 语义消费注入的 SessionManagementPort/AtomicBlobPort，禁自建文件系统 backing（承接 session-management/composition-construction 两守卫的 Context 断言，scope 由单文件扩至 crate src）",
       "profile": "full"
     }
   ],
