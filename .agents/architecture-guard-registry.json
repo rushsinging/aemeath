@@ -499,108 +499,6 @@
       "status": "active"
     },
     {
-      "id": "scope.logging.registered-process-statics",
-      "guard": "check-logging-scope-context.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "STATIC_ALLOW"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Only task-local scope and immutable process metadata statics are explicit owners",
-      "tracking_issue": 942,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while process metadata remains immutable and execution context remains task-local",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.scope-context-tests",
-      "guard": "check-logging-scope-context.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "*test*.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Test fixtures are outside production scope context ownership",
-      "tracking_issue": 937,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.settings-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "*test*.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Logging settings env scan excludes test fixtures",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.runtime-comments-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "runtime comments and tests"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Runtime logging wiring scan excludes comments and tests",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.bootstrap-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "bootstrap tests"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Unique production bootstrap count excludes test consumers",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.init-import-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "init import tests"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "logging",
-      "reason": "Unique UnifiedLogger production import excludes tests",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
       "id": "scope.command.tests-and-owner-filter",
       "guard": "check-command-catalog-boundary.sh",
       "module": "tools",
@@ -2885,6 +2783,91 @@
         "runtime_tests.rs"
       ],
       "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.logging.no-process-global-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/global/logging/src"
+      },
+      "forbidden_patterns": [
+        "lazy_static! {",
+        "thread_local! {"
+      ],
+      "exclusions": [],
+      "reason": "F-26：logging 禁进程全局/线程局部状态，用 LogContext task-local；static 大写声明白名单正则特征 defer（与 F-23 同批）；legacy 符号已删④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.logging.no-env-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/global/logging/src"
+      },
+      "forbidden_patterns": [
+        "std::env::",
+        "env::var(",
+        "env::var_os("
+      ],
+      "exclusions": [],
+      "reason": "F-27：logging 生产禁读 env，经 Composition 注入 LoggingSettings",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-logging-assembly",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "UnifiedLogger",
+        "LoggingSettings",
+        "init_logging(",
+        "AEMEATH_LOG_STDERR"
+      ],
+      "exclusions": [],
+      "reason": "F-27：runtime 禁组装/初始化 Logging",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-unified-logger-spread",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "UnifiedLogger::init("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/app.rs"
+        }
+      ],
+      "reason": "F-27：UnifiedLogger::init 仅 Composition app.rs 唯一点",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-from-args-direct-call",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "from_args_with_workspace("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/runtime.rs"
+        },
+        {
+          "path": "agent/features/runtime/"
+        }
+      ],
+      "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
       "profile": "full"
     }
   ],
