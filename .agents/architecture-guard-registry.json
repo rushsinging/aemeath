@@ -470,23 +470,6 @@
       "status": "active"
     },
     {
-      "id": "scope.provider.invocation-tests",
-      "guard": "check-provider-invocation-scope.sh",
-      "module": "provider",
-      "scope": {
-        "kind": "pattern",
-        "value": "tests directory"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "provider",
-      "reason": "The invocation production ownership check excludes test fixtures",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests use local fixtures",
-      "status": "active"
-    },
-    {
       "id": "scope.tui.render-tests-and-display-bridge",
       "guard": "check-tui-render-pure.sh",
       "module": "tui",
@@ -1191,6 +1174,43 @@
         }
       ],
       "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.no-mutable-invocation-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        "AtomicU32",
+        "AtomicU8",
+        "AtomicBool",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level",
+        "reasoning_config.lock("
+      ],
+      "exclusions": [],
+      "reason": "invocation 状态经 &InvocationScope 不可变传递；trait 签名由类型系统锁定（改签名全实现面编译失败）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-shared-client-mutation",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "shared_client_lock",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level"
+      ],
+      "exclusions": [],
+      "reason": "runtime 禁恢复共享客户端突变/串行锁；调用语义经 provider Published Language",
       "profile": "full"
     }
   ],
