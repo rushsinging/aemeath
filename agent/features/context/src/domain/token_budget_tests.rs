@@ -79,3 +79,12 @@ fn clamp_keeps_large_window_behavior_unchanged() {
     assert_eq!(effective_context_window(200_000, 16_000), 180_000);
     assert_eq!(autocompact_threshold(200_000, 16_000), 144_000);
 }
+
+#[test]
+fn compact_tail_token_cap_is_five_percent_of_window() {
+    // #1688：compact 保留 tail 的 token 封顶按窗口比例（5%），与 L1
+    // scaled_for_context_window 同路子；大窗口允许更大 tail 预算。
+    assert_eq!(compact_tail_token_cap(200_000), 10_000);
+    assert_eq!(compact_tail_token_cap(300_000), 15_000);
+    assert_eq!(compact_tail_token_cap(1_000_000), 50_000);
+}

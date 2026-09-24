@@ -118,6 +118,13 @@ pub fn summary_budget(context_size: usize) -> usize {
     context_size / 50
 }
 
+/// Compact 保留 tail（recent messages）的 token 预算封顶：context window
+/// 的 5%（#1688）。与 L1 `scaled_for_context_window` 同路子——大窗口允许
+/// 更大 tail 预算，小窗口自动收紧；条数 10% 候选超过该预算时向内收缩。
+pub fn compact_tail_token_cap(context_size: usize) -> usize {
+    context_size / 20
+}
+
 /// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。
 ///
 /// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，
