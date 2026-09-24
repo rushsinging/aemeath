@@ -43,6 +43,9 @@ pub enum RuleSpec {
         forbidden_patterns: Vec<String>,
         #[serde(default)]
         exclusions: Vec<Exclusion>,
+        /// 行级豁免标记（如 `allow unsafe_text_op`）：含标记的命中行放行。
+        #[serde(default)]
+        allow_marker: Option<String>,
     },
     ConstructionWhitelist {
         symbol: String,
@@ -55,6 +58,18 @@ pub enum RuleSpec {
     DependencyMatrix {
         business_allow: std::collections::BTreeMap<String, Vec<String>>,
     },
+    /// F-14：职责预算（文件行数上限 + 必需拆分文件存在）。
+    LineBudget {
+        budgets: Vec<LineBudgetEntry>,
+        #[serde(default)]
+        required_files: Vec<String>,
+    },
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct LineBudgetEntry {
+    pub path: String,
+    pub max_lines: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,12 +178,14 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
         RuleSpec::PatternExclusion {
             forbidden_patterns,
             exclusions,
+            allow_marker,
         } => enforce_pattern_exclusion(
             rule,
             &absolute,
             relative_file,
             forbidden_patterns,
             exclusions,
+            allow_marker.as_deref(),
         ),
         RuleSpec::ConstructionWhitelist {
             symbol,
@@ -178,6 +195,7 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
             forbidden_file_names,
         } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
         RuleSpec::DependencyMatrix { .. } => Ok(Vec::new()),
+        RuleSpec::LineBudget { .. } => Ok(Vec::new()),
     }
 }
 
@@ -380,6 +398,7 @@ fn enforce_pattern_exclusion(
     relative_file: &str,
     forbidden_patterns: &[String],
     exclusions: &[Exclusion],
+    allow_marker: Option<&str>,
 ) -> Result<Vec<Violation>> {
     if exclusions
         .iter()
@@ -394,6 +413,13 @@ fn enforce_pattern_exclusion(
     let production = strip_inline_cfg_test_region(&source);
     let mut violations = Vec::new();
     for (offset, line) in production.lines().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with("//") {
+            continue;
+        }
+        if allow_marker.is_some_and(|marker| line.contains(marker)) {
+            continue;
+        }
         for pattern in forbidden_patterns {
             if line.contains(pattern.as_str()) {
                 violations.push(Violation {
@@ -734,6 +760,53 @@ pub fn check_dependency_edges(
                     message: format!("{name} 不得依赖 {dep}；允许：{allowed:?}"),
                 });
             }
+        }
+    }
+    violations
+}
+
+/// F-14：行数预算（超限）+ 必需拆分文件存在性。聚合级检查（每规则跑一次，
+/// 传入待扫描的源文件清单；行数检查只对 budgets 登记的路径生效）。
+pub fn collect_line_budget_violations(
+    rule: &Rule,
+    repo_root: &std::path::Path,
+    _source_files: &[String],
+) -> Vec<Violation> {
+    let RuleSpec::LineBudget {
+        budgets,
+        required_files,
+    } = &rule.spec
+    else {
+        return Vec::new();
+    };
+    let mut violations = Vec::new();
+    for budget in budgets {
+        let absolute = repo_root.join(&budget.path);
+        match fs::read_to_string(&absolute) {
+            Ok(source) => {
+                let lines = source.lines().count();
+                if lines > budget.max_lines {
+                    violations.push(Violation {
+                        rule_id: rule.id.clone(),
+                        location: budget.path.clone(),
+                        message: format!("{lines} 行超出职责预算 {}", budget.max_lines),
+                    });
+                }
+            }
+            Err(_) => violations.push(Violation {
+                rule_id: rule.id.clone(),
+                location: budget.path.clone(),
+                message: "职责拆分 owner 文件缺失".to_owned(),
+            }),
+        }
+    }
+    for required in required_files {
+        if !repo_root.join(required).is_file() {
+            violations.push(Violation {
+                rule_id: rule.id.clone(),
+                location: required.clone(),
+                message: "必需的职责拆分文件缺失".to_owned(),
+            });
         }
     }
     violations
