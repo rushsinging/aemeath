@@ -375,7 +375,36 @@ fn test_format_tool_call_task_update_with_result_subject_shows_title() {
         text.contains("修复渲染 bug"),
         "result 到达后 header 应包含 subject: {text}"
     );
-    assert!(text.contains("→ completed"), "应包含 status: {text}");
+    // 片段间单空格连接：subject 与状态箭头之间 NEVER 追加逗号
+    assert!(
+        text.contains("修复渲染 bug → completed"),
+        "subject 与 status 应以单空格连接: {text}"
+    );
+    assert!(!text.contains(", →"), "不应出现逗号连接: {text}");
+}
+
+#[test]
+fn test_format_tool_call_task_update_priority_segment_joins_with_space() {
+    use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+    // priority 片段与 subject 同样单空格连接，不追加逗号
+    let payload = ToolResultPayload::new(
+        String::new(),
+        serde_json::json!({ "task_id": "5", "status": "Pending", "priority": "high", "subject": "修复渲染 bug" }),
+        false,
+        0,
+    );
+    let (header, _) = format_tool_call(
+        "TaskUpdate",
+        r#"{"taskId":"5","key":"priority","value":"high"}"#,
+        Some(&payload),
+        None,
+    );
+    let text = line_to_string(&header);
+    assert!(
+        text.contains("修复渲染 bug p=high"),
+        "subject 与 priority 应以单空格连接: {text}"
+    );
+    assert!(!text.contains(", p="), "不应出现逗号连接: {text}");
 }
 
 #[test]

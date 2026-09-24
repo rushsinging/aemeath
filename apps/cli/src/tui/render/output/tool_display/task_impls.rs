@@ -118,6 +118,10 @@ impl TaskUpdateDisplay {
     /// 构建 header 摘要片段（subject 紧跟 id，其余按重要性排序）。
     /// `result_payload` 非空时优先从 typed result 取 subject（store 回填）。
     /// key-value 模式：从 `key` + `value` 提取变更摘要。
+    ///
+    /// 片段间以单空格连接，NEVER 逗号：`修复渲染 bug → in_progress` /
+    /// `修复渲染 bug p=high`。TaskBlockBy 的依赖列表枚举（`blocked by #4, #5`）
+    /// 属列表分隔符语义，不在此列。
     fn header_summary(
         &self,
         input: &serde_json::Value,
@@ -153,7 +157,7 @@ impl TaskUpdateDisplay {
             }
             _ => {}
         }
-        parts.join(", ")
+        parts.join(" ")
     }
 }
 inventory::submit!(ToolDisplayEntry {
