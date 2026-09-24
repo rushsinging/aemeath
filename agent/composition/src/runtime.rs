@@ -70,7 +70,7 @@ fn wire_runtime_tool_assembly(
                 policy.preview_tail_chars(),
             ),
         )),
-        active_run: Arc::new(runtime::ActiveRunRegistry::default()),
+        active_run: Arc::new(runtime::wire_active_run_registry()),
     })
 }
 

@@ -14,9 +14,27 @@ pub(crate) struct ActiveRun {
     control_delivered: bool,
 }
 
-#[derive(Debug, Default)]
+/// 生产构造仅经 [`wire_active_run_registry`] 工厂（composition 装配）；
+/// `Default` 仅测试可用，runtime 生产自建在编译期不可达。
+#[derive(Debug)]
 pub struct ActiveRunRegistry {
     active: std::sync::Mutex<ActiveRunState>,
+}
+
+#[cfg(test)]
+impl Default for ActiveRunRegistry {
+    fn default() -> Self {
+        Self {
+            active: std::sync::Mutex::new(ActiveRunState::default()),
+        }
+    }
+}
+
+/// ActiveRunRegistry 的唯一生产构造入口（composition 装配调用）。
+pub fn wire_active_run_registry() -> ActiveRunRegistry {
+    ActiveRunRegistry {
+        active: std::sync::Mutex::new(ActiveRunState::default()),
+    }
 }
 
 #[derive(Debug, Default)]

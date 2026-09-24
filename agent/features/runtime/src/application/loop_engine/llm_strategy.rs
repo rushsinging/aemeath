@@ -14,9 +14,16 @@ use crate::ports::ContextWindow;
 /// Output of [`extract_invocation_context`] — the three API invocation primitives
 /// derived from a [`ContextWindow`].
 pub(crate) struct InvocationContext {
-    pub messages_for_api: Vec<Message>,
+    messages_for_api: Vec<Message>,
     pub tool_schemas: Vec<serde_json::Value>,
     pub system_blocks: Vec<RequestSystemBlock>,
+}
+
+impl InvocationContext {
+    /// 只读访问：映射后的窗口消息不可装饰（push/extend 等变更在编译期不可达）。
+    pub(crate) fn messages_for_api(&self) -> &[Message] {
+        &self.messages_for_api
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +38,7 @@ pub(crate) fn invocation_mapping_log_summary(
     invocation_context: &InvocationContext,
 ) -> InvocationMappingLogSummary {
     InvocationMappingLogSummary {
-        messages: invocation_context.messages_for_api.len(),
+        messages: invocation_context.messages_for_api().len(),
         system_blocks: invocation_context.system_blocks.len(),
         tool_schemas: invocation_context.tool_schemas.len(),
         reminder_messages: invocation_context

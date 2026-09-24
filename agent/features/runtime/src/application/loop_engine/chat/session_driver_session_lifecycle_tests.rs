@@ -664,7 +664,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     let (input_tx, input_events) = ChannelInputEvents::new();
     // Active Run registry：模拟 RuntimeHandle.active_run 的同步 cancel_run 入口。
     let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+        Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let provider = CancellableThenNormalProvider::new();
 
     // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
@@ -842,7 +842,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     let (input_tx, input_events) = ChannelInputEvents::new();
     // Active Run registry：模拟同步 cancel_run(run_id)。
     let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+        Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let provider = CompleteThenCancellableProvider::new();
 
     // 回合 1 的用户消息在 loop 启动前投递。

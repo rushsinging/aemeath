@@ -101,13 +101,22 @@ pub fn parse_registry(bytes: &[u8]) -> Result<GuardsRegistry> {
     Ok(serde_json::from_slice(bytes)?)
 }
 
-/// 按规则数据对单文件执行断言。scope 不匹配或豁免命中的文件返回空。
+/// 按规则数据对单文件执行断言。scope 不匹配或豁免命中的文件返回空；
+/// 生产结构断言（forbidden_segments / facade_whitelist / layer_order /
+/// pattern_exclusion）默认跳过测试源（`*_tests.rs` 与 `tests/` 目录）。
 pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Result<Vec<Violation>> {
     if !scope_matches(&rule.scope, relative_file) {
         return Ok(Vec::new());
     }
     let absolute = repo_root.join(relative_file);
     if !absolute.is_file() {
+        return Ok(Vec::new());
+    }
+    let skips_test_sources = !matches!(
+        rule.spec,
+        RuleSpec::Layout { .. } | RuleSpec::ConstructionWhitelist { .. }
+    );
+    if skips_test_sources && is_test_source(relative_file) {
         return Ok(Vec::new());
     }
     match &rule.spec {
@@ -152,6 +161,18 @@ fn scope_matches(scope: &Scope, relative_file: &str) -> bool {
         Scope::PathPrefix { value } => relative_file.starts_with(value.as_str()),
         Scope::Workspace => true,
     }
+}
+
+/// 测试源判定：分离测试文件（`*_tests.rs`、纯 `tests.rs` 模块文件）与
+/// 测试目录（`tests/` 或任意 `*_tests/` 命名目录，如 `scenario_tests/`）。
+fn is_test_source(relative_file: &str) -> bool {
+    let file_name = relative_file.rsplit('/').next().unwrap_or(relative_file);
+    file_name.ends_with("_tests.rs")
+        || file_name.ends_with("_test.rs")
+        || file_name == "tests.rs"
+        || relative_file
+            .split('/')
+            .any(|segment| segment == "tests" || segment.ends_with("_tests"))
 }
 
 fn scope_prefix(scope: &Scope) -> &str {
@@ -315,8 +336,9 @@ fn enforce_pattern_exclusion(
         Ok(source) => source,
         Err(_) => return Ok(Vec::new()),
     };
+    let production = strip_inline_cfg_test_region(&source);
     let mut violations = Vec::new();
-    for (offset, line) in source.lines().enumerate() {
+    for (offset, line) in production.lines().enumerate() {
         for pattern in forbidden_patterns {
             if line.contains(pattern.as_str()) {
                 violations.push(Violation {
@@ -328,6 +350,45 @@ fn enforce_pattern_exclusion(
         }
     }
     Ok(violations)
+}
+
+/// 剥离内联 `#[cfg(test)] mod name { ... }` 区块（保留区块前的生产行号语义：
+/// 以占位空行维持总行数，保证违规定位行号与原文件一致）。
+fn strip_inline_cfg_test_region(source: &str) -> String {
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut pending_test_attr = false;
+    let mut test_block_depth: Option<i32> = None;
+    let mut depth: i32 = 0;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let mut blanked = false;
+        if trimmed == "#[cfg(test)]" {
+            pending_test_attr = true;
+            blanked = true;
+        } else if test_block_depth.is_none() && pending_test_attr {
+            if trimmed.starts_with("mod ") && trimmed.contains('{') {
+                test_block_depth = Some(depth);
+            } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                pending_test_attr = false;
+            }
+            if test_block_depth.is_some() {
+                blanked = true;
+            }
+        } else if let Some(start_depth) = test_block_depth {
+            if depth <= start_depth {
+                test_block_depth = None;
+            } else {
+                blanked = true;
+            }
+        }
+        output_lines.push(if blanked {
+            String::new()
+        } else {
+            line.to_owned()
+        });
+        depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
+    }
+    output_lines.join("\n")
 }
 
 fn enforce_construction_whitelist(

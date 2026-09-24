@@ -284,26 +284,21 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
       "tracking_issue": 1645
+    },
+    {
+      "id": "construction.runtime.wire-active-run-registry",
+      "symbol": "wire_active_run_registry",
+      "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "ActiveRunRegistry production construction converges to the factory; invoked only by the Composition Root (#1678)",
+      "tracking_issue": 1678
     }
   ],
   "entries": [
-    {
-      "id": "policy.composition.cross-bc-construction-ownership",
-      "guard": "check-composition-construction-ownership.sh",
-      "module": "composition",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/composition/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition is the sole production construction root for the completed Context Session, Config override, Runtime Tool and Hook adapter boundaries",
-      "tracking_issue": 1296,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent aggregate policy that preserves all four leaf ownership boundaries",
-      "status": "active"
-    },
     {
       "id": "policy.context.session-project-scope",
       "guard": "check-session-project-scope.sh",
@@ -319,74 +314,6 @@
       "tracking_issue": 1295,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.hook-assembly.composition-ownership",
-      "guard": "check-runtime-hook-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition alone builds HookRunner from the committed ConfigSnapshot; Runtime Main and Sub consume the injected HookPort",
-      "tracking_issue": 1295,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Hook assembly policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.tool-assembly.composition-ownership",
-      "guard": "check-runtime-tool-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/client"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition alone assembles Tool Catalog/Execution, Skill ports, Tool Result materializer and ActiveRunRegistry; Runtime bootstrap consumes injected resources",
-      "tracking_issue": 1294,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Runtime tool assembly policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.config.override-store.composition-ownership",
-      "guard": "check-config-store-ownership.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/config/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "config",
-      "reason": "Composition alone selects config override AtomicBlob backing; Config wiring consumes injected NativeConfigStore",
-      "tracking_issue": 1293,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with equivalent Composition-only config override store ownership policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.session-management.composition-ownership",
-      "guard": "check-session-management-ownership.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "context",
-      "reason": "Composition alone constructs Session AtomicBlob backing; Context and Runtime consume the same SessionManagementPort Arc",
-      "tracking_issue": 1292,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Session backing ownership policy",
       "status": "active"
     },
     {
@@ -540,23 +467,6 @@
       "tracking_issue": 1033,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "permanent while the dedicated no-self-reference check exists",
-      "status": "active"
-    },
-    {
-      "id": "scope.provider.invocation-tests",
-      "guard": "check-provider-invocation-scope.sh",
-      "module": "provider",
-      "scope": {
-        "kind": "pattern",
-        "value": "tests directory"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "provider",
-      "reason": "The invocation production ownership check excludes test fixtures",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests use local fixtures",
       "status": "active"
     },
     {
@@ -917,23 +827,6 @@
       "status": "active"
     },
     {
-      "id": "policy.runtime.activity-observation",
-      "guard": "check-runtime-activity-observation.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/activity"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "ActivityCoordinator exclusively constructs Runtime Activity observations; TUI mutates its fact mirror only through the root reducer; LiveStatus consumes Activity instead of legacy Run status; diagnostics remain structured and payload-free",
-      "tracking_issue": 742,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent unified Runtime Activity observation policy",
-      "status": "active"
-    },
-    {
       "id": "policy.runtime.event-naming",
       "guard": "check-runtime-event-naming.sh",
       "module": "runtime",
@@ -948,23 +841,6 @@
       "tracking_issue": 945,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent structured event catalog and naming policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.capability-assembly",
-      "guard": "check-runtime-capability-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired; broad Projection naming cannot hide mixed Runtime responsibilities",
-      "tracking_issue": 1248,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Runtime capability assembly policy",
       "status": "active"
     },
     {
@@ -1138,6 +1014,332 @@
       "status": "active"
     }
   ],
-  "rules": [],
+  "rules": [
+    {
+      "id": "pattern.config.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.config.app-service-no-direct-io",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters/app_service.rs"
+      },
+      "forbidden_patterns": [
+        "tokio::fs",
+        "std::fs",
+        "read_to_string(",
+        "serde_json::from_",
+        "serde_json::to_"
+      ],
+      "exclusions": [],
+      "reason": "Config application 只编排 adapter，文件 IO 与 JSON 解析经 FileAdapter/CompatibilityAdapter 注入（#1654 注入式已落地，规则防回退）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.config.adapters-no-stubs",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters.rs"
+      },
+      "forbidden_patterns": [
+        "Placeholder",
+        "TODO: adapter",
+        "TODO: FileAdapter",
+        "TODO: CliArgsAdapter",
+        "TODO: Claude"
+      ],
+      "exclusions": [],
+      "reason": "adapter 实现已完整落地（#1654），stub/占位残留禁止回退",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-hook-dispatcher-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "hook::build_dispatcher(",
+        "hook::Dispatcher::new(",
+        "hook::Dispatcher::try_new(",
+        "build_hook_runner("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-tool-self-assembly",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "tools::composition::wire_",
+        "AtomicBlobToolResultStore::new(",
+        "FileSystemBlobAdapter::new(",
+        "spawn_mcp_connect(",
+        "wire_active_run_registry("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/active_registry.rs"
+        }
+      ],
+      "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.context.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "Context Session 语义消费注入的 SessionManagementPort/AtomicBlobPort，禁自建文件系统 backing（承接 session-management/composition-construction 两守卫的 Context 断言，scope 由单文件扩至 crate src）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.features.no-provider-composition-penetration",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        "provider::composition"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/"
+        }
+      ],
+      "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.no-mutable-invocation-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        "AtomicU32",
+        "AtomicU8",
+        "AtomicBool",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level",
+        "reasoning_config.lock("
+      ],
+      "exclusions": [],
+      "reason": "invocation 状态经 &InvocationScope 不可变传递；trait 签名由类型系统锁定（改签名全实现面编译失败）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-shared-client-mutation",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "shared_client_lock",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level"
+      ],
+      "exclusions": [],
+      "reason": "runtime 禁恢复共享客户端突变/串行锁；调用语义经 provider Published Language",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.activity-construction-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "ActivityObservation {"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/activity/coordinator.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/activity/model.rs"
+        }
+      ],
+      "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.project.no-permission-state-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "ConfigReader",
+        "PermissionMode",
+        "PolicyPort",
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Project 不读权限/配置状态，授权统一经 AuthorizationContext 携带（Allow(AuthorizationContext) 变体签名由类型系统锁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-adapters.no-allow-all",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/adapters"
+      },
+      "forbidden_patterns": [
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Tool adapter 消费 AuthorizationContext，禁 allow_all 旁路",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.features.workspace-control-call-sites",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        ".workspace_control("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/tools/src/adapters/bash.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/worktree.rs"
+        }
+      ],
+      "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.project.git-command-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "Command::new(\"git\")"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/project/src/adapters/git.rs"
+        }
+      ],
+      "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools.no-workspace-persistence",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "forbidden_patterns": [
+        "PersistedWorkspaceContext",
+        "WorkspacePersist"
+      ],
+      "exclusions": [],
+      "reason": "R2/R6：持久化 DTO 是 session 边界语义，tools 禁引用（允许面 project/context/runtime）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-domain.no-live-resources",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/domain"
+      },
+      "forbidden_patterns": [
+        "WorkspaceViews",
+        "tokio::sync",
+        "std::sync::mpsc",
+        "Semaphore",
+        "CancellationToken"
+      ],
+      "exclusions": [],
+      "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.context-construction-single-factory",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "RuntimeContext::new(",
+        "RuntimeContextAssemblyToken::new("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-no-mirror-storage",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render"
+      },
+      "forbidden_patterns": [
+        "pub(super) suggestions: Vec",
+        "pub selected_suggestion",
+        "pub show_suggestions",
+        "pub(super) struct SpinnerState",
+        "pub struct SpinnerState"
+      ],
+      "exclusions": [],
+      "reason": "render widget 禁 pub(super) 级镜像存储（SuggestionViewState 等 view_state 派生投影合法）；retired adapter 已 #[cfg(test)] 模块级锁定（④）",
+      "profile": "full"
+    }
+  ],
   "retired_symbols": []
 }

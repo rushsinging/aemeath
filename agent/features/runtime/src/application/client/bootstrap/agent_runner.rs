@@ -118,7 +118,7 @@ mod tests {
         let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
         let runner = build_agent_runner(
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
-            Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default()),
+            Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
             10,
             Arc::new(tokio::sync::Semaphore::new(4)),
             crate::application::tool::test_support::test_tool_result_materializer(),

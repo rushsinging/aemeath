@@ -228,7 +228,7 @@ async fn invoke_model_impl(
         mapping_summary.reminder_messages,
     );
     crate::application::loop_engine::llm_log::log_llm_input(
-        &invocation_context.messages_for_api,
+        invocation_context.messages_for_api(),
         window.messages.len(),
         &invocation_context.system_blocks,
         &invocation_context.tool_schemas,
@@ -256,7 +256,7 @@ async fn invoke_model_impl(
         let provider = binding.provider.clone();
         let model = binding.model.clone();
         let max_tokens = binding.max_tokens;
-        let messages = invocation_context.messages_for_api.clone();
+        let messages = invocation_context.messages_for_api().to_vec();
         let system = invocation_context.system_blocks.clone();
         let tools = window.tool_schemas.clone();
         let stream_cancel = cancel.clone();

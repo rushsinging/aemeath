@@ -30,7 +30,7 @@ fn registry_does_not_duplicate_run_lifecycle_or_expose_legacy_cancel() {
 
 #[test]
 fn cancel_current_main_without_active_step_terminates_current_run() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let root = CancellationToken::new();
     let deadline = sdk::ControlDeadline::from_unix_millis(1);
@@ -53,7 +53,7 @@ fn cancel_current_main_without_active_step_terminates_current_run() {
 
 #[test]
 fn cancel_current_main_step_does_not_require_run_identity() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let root = CancellationToken::new();
@@ -77,7 +77,7 @@ fn cancel_current_main_step_does_not_require_run_identity() {
 
 #[test]
 fn sub_run_does_not_replace_current_main_run() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let main_id = sdk::RunId::new_v7();
     let sub_id = sdk::RunId::new_v7();
     let main_step_id = sdk::RunStepId::new_v7();
@@ -101,7 +101,7 @@ fn sub_run_does_not_replace_current_main_run() {
 
 #[test]
 fn clearing_old_main_does_not_clear_new_current_main() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let old_id = sdk::RunId::new_v7();
     let new_id = sdk::RunId::new_v7();
     let new_step_id = sdk::RunStepId::new_v7();
@@ -123,7 +123,7 @@ fn clearing_old_main_does_not_clear_new_current_main() {
 
 #[test]
 fn stale_main_cannot_register_step_after_foreground_replacement() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let stale_run_id = sdk::RunId::new_v7();
     let current_run_id = sdk::RunId::new_v7();
     let stale_step_id = sdk::RunStepId::new_v7();
@@ -158,7 +158,7 @@ fn stale_main_cannot_register_step_after_foreground_replacement() {
 
 #[test]
 fn cancel_current_main_without_active_run_is_explicit() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     assert_eq!(
         registry.cancel_current_main(sdk::ControlDeadline::from_unix_millis(1)),
         sdk::CancelCurrentRunOutcome::NoActiveRun
@@ -167,7 +167,7 @@ fn cancel_current_main_without_active_run_is_explicit() {
 
 #[test]
 fn clearing_completed_step_scope_makes_current_cancel_terminate_run() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let root = CancellationToken::new();
@@ -195,7 +195,7 @@ fn clearing_completed_step_scope_makes_current_cancel_terminate_run() {
 
 #[test]
 fn stale_step_cleanup_does_not_clear_replacement_step() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let old_step_id = sdk::RunStepId::new_v7();
     let current_step_id = sdk::RunStepId::new_v7();
@@ -215,7 +215,7 @@ fn stale_step_cleanup_does_not_clear_replacement_step() {
 
 #[test]
 fn cancelled_step_cleanup_clears_delivered_control_before_next_step() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let cancelled_step_id = sdk::RunStepId::new_v7();
     let next_step_id = sdk::RunStepId::new_v7();
@@ -248,7 +248,7 @@ fn cancelled_step_cleanup_clears_delivered_control_before_next_step() {
 
 #[test]
 fn cancel_step_only_cancels_current_step_scope() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let root = CancellationToken::new();
@@ -272,7 +272,7 @@ fn cancel_step_only_cancels_current_step_scope() {
 
 #[test]
 fn terminate_preempts_cancel_step_and_cancels_root_scope() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let root = CancellationToken::new();
@@ -307,7 +307,7 @@ fn terminate_preempts_cancel_step_and_cancels_root_scope() {
 
 #[test]
 fn repeated_main_control_commands_are_idempotent() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
@@ -342,7 +342,7 @@ fn repeated_main_control_commands_are_idempotent() {
 
 #[test]
 fn registry_tracks_runs_independently() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let parent = sdk::RunId::new_v7();
     let sub_a = sdk::RunId::new_v7();
     let sub_b = sdk::RunId::new_v7();
@@ -364,7 +364,7 @@ fn registry_tracks_runs_independently() {
 
 #[test]
 fn clear_only_removes_matching_run() {
-    let registry = ActiveRunRegistry::default();
+    let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let other = sdk::RunId::new_v7();
     registry.activate_child(run_id.clone(), CancellationToken::new());

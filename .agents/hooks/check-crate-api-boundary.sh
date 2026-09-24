@@ -131,6 +131,7 @@ ROOT_ACCESS_ALLOW = {
         "ProjectConfigLocation",
         "ProjectConfigLocationError",
         "ProjectConfigParticipant",
+        "native_override_store",
         "wire_project_config",
         "wire_project_config_with_agents_dir",
         "wire_project_config_with_cli",

@@ -99,7 +99,7 @@ async fn wire_config_with_agents_dir(
 }
 
 fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
-    config::NativeConfigStore::new(
+    config::native_override_store(
         storage::file_system_blob(agents_dir.join("config-overrides"))
             .expect("create config override blob"),
     )
@@ -410,7 +410,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         )),
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
-    let active_run = Arc::new(runtime::ActiveRunRegistry::default());
+    let active_run = Arc::new(runtime::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
         hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),

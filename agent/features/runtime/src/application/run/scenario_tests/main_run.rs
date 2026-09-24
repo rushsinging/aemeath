@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::ScenarioLoopHarness;
-use crate::application::run::active_registry::ActiveRunRegistry;
+use crate::application::run::active_registry::wire_active_run_registry;
 use crate::application::run::launcher::{self, RunLaunchResult};
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::{RunSpec, RunStatus};
@@ -17,7 +17,7 @@ async fn session_run_launcher_registers_identity_free_cancel_target() {
     instance.initialize(Vec::new(), 0);
     let mut harness = ScenarioLoopHarness::blocks_in_model();
     let cancel = CancellationToken::new();
-    let active_run = Arc::new(ActiveRunRegistry::default());
+    let active_run = Arc::new(wire_active_run_registry());
     let control = active_run.clone();
     harness.use_active_run_control(active_run.clone());
     let model_started = harness.model_started();
@@ -49,7 +49,7 @@ async fn main_run_uses_single_factory_launcher_and_loop() {
     instance.initialize(Vec::new(), 0);
     let mut harness = ScenarioLoopHarness::completes_with("main done");
     let cancel = CancellationToken::new();
-    let active_run = Arc::new(ActiveRunRegistry::default());
+    let active_run = Arc::new(wire_active_run_registry());
 
     let result = launcher::launch(&mut instance, cancel, active_run, &mut harness.run_loop()).await;
 

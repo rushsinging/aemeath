@@ -345,7 +345,7 @@ fn test_shell_with_catalog(
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
+            crate::application::run::active_registry::wire_active_run_registry(),
         ),
         interaction_bridge: Arc::new(
             crate::application::interaction::port::InteractionBridge::new(),
@@ -442,7 +442,7 @@ fn test_shell_with_task_store(
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
+            crate::application::run::active_registry::wire_active_run_registry(),
         ),
         interaction_bridge: Arc::new(
             crate::application::interaction::port::InteractionBridge::new(),

@@ -208,6 +208,122 @@ fn pattern_exclusion_flags_forbidden_pattern_with_file_exemption() {
 }
 
 #[test]
+fn pattern_exclusion_skips_test_sources() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/tui/model/update_tests.rs"),
+        "tokio::spawn(do_work);\n",
+    );
+    write_source(
+        &temp.path().join("crates/tui/tests/support.rs"),
+        "tokio::spawn(do_work);\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.tui.model-no-side-effects",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/tui" },
+        "forbidden_patterns": ["tokio::spawn"],
+        "reason": "model/update 目录禁止副作用",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let unit_test_violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/tui/model/update_tests.rs")
+            .expect("enforce");
+    assert!(unit_test_violations.is_empty(), "分离测试文件不得违规");
+
+    let integration_violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/tui/tests/support.rs")
+            .expect("enforce");
+    assert!(integration_violations.is_empty(), "tests 目录不得违规");
+}
+
+#[test]
+fn pattern_exclusion_skips_inline_cfg_test_region() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/runtime/service.rs"),
+        "#[cfg(test)]\nmod tests {\n    fn helper() {\n        hook::build_dispatcher(&snapshot);\n    }\n}\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.runtime.no-hook-dispatcher-construction",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/runtime" },
+        "forbidden_patterns": ["build_dispatcher("],
+        "reason": "dispatcher 只由 composition 构造注入",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/runtime/service.rs")
+            .expect("enforce");
+
+    assert!(violations.is_empty(), "inline cfg(test) 区不得违规");
+}
+
+#[test]
+fn pattern_exclusion_skips_plain_tests_module_file() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/runtime/derived/tests.rs"),
+        "use tools::composition::wire_skills;\nfn helper() { wire_skills(); }\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.runtime.no-tool-self-assembly",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/runtime" },
+        "forbidden_patterns": ["tools::composition::wire_"],
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/runtime/derived/tests.rs")
+            .expect("enforce");
+
+    assert!(
+        violations.is_empty(),
+        "名为 tests.rs 的分离测试模块文件不得违规"
+    );
+}
+
+#[test]
+fn pattern_exclusion_skips_scenario_tests_directory() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp
+            .path()
+            .join("crates/runtime/scenario_tests/derived_run.rs"),
+        "fn harness() { wire_active_run_registry(); }\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.runtime.no-tool-self-assembly",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/runtime" },
+        "forbidden_patterns": ["wire_active_run_registry("],
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations = crate::guards_rules::enforce_rule(
+        &rule,
+        temp.path(),
+        "crates/runtime/scenario_tests/derived_run.rs",
+    )
+    .expect("enforce");
+
+    assert!(violations.is_empty(), "*_tests 目录下的测试源不得违规");
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

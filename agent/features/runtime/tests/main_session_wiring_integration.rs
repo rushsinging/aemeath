@@ -66,7 +66,7 @@ async fn make_wiring_and_workspace(
         .into_views();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(
+        config::native_override_store(
             storage::file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
         ),
@@ -235,7 +235,7 @@ async fn config_query_and_writer_come_from_wiring() {
         .into_views();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(
+        config::native_override_store(
             storage::file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
         ),

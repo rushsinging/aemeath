@@ -237,7 +237,7 @@ async fn make_test_shell(
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(
+        config::native_override_store(
             storage::file_system_blob(temp.path()).expect("create config blob"),
         ),
     )
@@ -277,8 +277,7 @@ async fn make_test_shell(
     let agent_runner: Arc<dyn tools::AgentRunner> = Arc::new(NoopRunner);
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
-    let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let config_query = wiring.config_query();
     let config_writer = wiring.config_writer();
     let session_management = wiring.session_management();
@@ -546,7 +545,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     };
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(
+        config::native_override_store(
             storage::file_system_blob(&agents_dir).expect("create config blob"),
         ),
     )
@@ -569,8 +568,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
-    let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
         hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),
