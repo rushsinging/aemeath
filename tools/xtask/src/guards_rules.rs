@@ -83,6 +83,18 @@ pub struct RetiredSymbol {
     pub reason: String,
 }
 
+/// construction_symbols 数据区条目（F-1 样板：跨 BC 构造登记）。
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConstructionSymbol {
+    pub id: String,
+    pub symbol: String,
+    pub owner_crate: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+}
+
 /// guard 引擎消费的 registry 视图（忽略 entries/budgets 等其他数据区）。
 #[derive(Debug, Deserialize)]
 pub struct GuardsRegistry {
@@ -90,6 +102,8 @@ pub struct GuardsRegistry {
     pub rules: Vec<Rule>,
     #[serde(default)]
     pub retired_symbols: Vec<RetiredSymbol>,
+    #[serde(default)]
+    pub construction_symbols: Vec<ConstructionSymbol>,
 }
 
 /// 单条违规：规则 id + 相对文件:行 + 修复提示。
@@ -117,9 +131,7 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
     }
     let skips_test_sources = !matches!(
         rule.spec,
-        RuleSpec::Layout { .. }
-            | RuleSpec::ConstructionWhitelist { .. }
-            | RuleSpec::ForbiddenFileNames { .. }
+        RuleSpec::Layout { .. } | RuleSpec::ForbiddenFileNames { .. }
     );
     if skips_test_sources && is_test_source(relative_file) {
         return Ok(Vec::new());
@@ -197,6 +209,7 @@ fn is_test_source(relative_file: &str) -> bool {
     file_name.ends_with("_tests.rs")
         || file_name.ends_with("_test.rs")
         || file_name == "tests.rs"
+        || file_name.contains("test")
         || relative_file
             .split('/')
             .any(|segment| segment == "tests" || segment.ends_with("_tests"))
@@ -435,18 +448,18 @@ fn enforce_construction_whitelist(
     symbol: &str,
     allowed_paths: &[String],
 ) -> Result<Vec<Violation>> {
-    if allowed_paths
-        .iter()
-        .any(|allowed| relative_file == allowed.as_str())
-    {
+    if allowed_paths.iter().any(|allowed| {
+        relative_file == allowed.as_str() || relative_file.starts_with(&format!("{allowed}/"))
+    }) {
         return Ok(Vec::new());
     }
     let source = match fs::read_to_string(absolute) {
         Ok(source) => source,
         Err(_) => return Ok(Vec::new()),
     };
+    let production = strip_inline_cfg_test_region(&source);
     let mut violations = Vec::new();
-    for (offset, line) in source.lines().enumerate() {
+    for (offset, line) in production.lines().enumerate() {
         if contains_symbol(line, symbol) {
             violations.push(Violation {
                 rule_id: rule.id.clone(),
@@ -456,6 +469,194 @@ fn enforce_construction_whitelist(
         }
     }
     Ok(violations)
+}
+
+/// 提取行内 `owner::…::wire_xxx(` 形态的限定调用，owner 为链首段
+/// （`composition::tools::wire_x` 的 owner 是 composition，非 feature crate 时跳过）。
+fn extract_qualified_wire_calls(line: &str) -> Vec<(String, String)> {
+    let mut calls = Vec::new();
+    let mut search_from = 0;
+    while let Some(found) = line[search_from..].find("::wire_") {
+        let start = search_from + found;
+        // 先回退到 ::wire_ 紧邻的前一段 ident 起点。
+        let head = &line[..start];
+        let ident_start = head
+            .rfind(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .map(|boundary| boundary + 1)
+            .unwrap_or(0);
+        if ident_start >= head.len() || head[ident_start..].contains("::") {
+            // 紧邻段不是纯 ident（异常形态），跳过该命中。
+            search_from = start + "::wire_".len();
+            continue;
+        }
+        // 回溯整条限定链的起点（连续的 ident:: 序列）。
+        let mut chain_begin = ident_start;
+        while chain_begin > 0 {
+            let previous = line[..chain_begin].trim_end();
+            if let Some(segments) = previous.strip_suffix("::") {
+                // 前面还有一段 ident::。
+                let ident_start = segments
+                    .rfind(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                    .map(|boundary| boundary + 1)
+                    .unwrap_or(0);
+                if ident_start < segments.len()
+                    && segments[ident_start..]
+                        .chars()
+                        .all(|ch| ch.is_alphanumeric() || ch == '_')
+                {
+                    chain_begin = ident_start;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        let chain = &line[chain_begin..start];
+        if let Some(owner_crate) = chain.split("::").next() {
+            let symbol_rest = &line[start + 2..];
+            let symbol_len = symbol_rest
+                .find(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                .unwrap_or(symbol_rest.len());
+            let symbol = &symbol_rest[..symbol_len];
+            calls.push((owner_crate.to_owned(), symbol.to_owned()));
+        }
+        search_from = start + "::wire_".len();
+    }
+    calls
+}
+
+/// 各 feature crate 的 `pub fn wire_*` 公开装配函数定义集（crate → 函数名）。
+pub fn collect_wire_definitions(
+    repo_root: &std::path::Path,
+) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+    let mut definitions = std::collections::BTreeMap::new();
+    let features_dir = repo_root.join("agent/features");
+    let Ok(entries) = fs::read_dir(&features_dir) else {
+        return definitions;
+    };
+    for entry in entries.flatten() {
+        let crate_name = entry.file_name().to_string_lossy().to_string();
+        let src_dir = entry.path().join("src");
+        let mut wire_set = std::collections::BTreeSet::new();
+        let _ = collect_pub_wire_names(&src_dir, &mut wire_set);
+        definitions.insert(crate_name, wire_set);
+    }
+    definitions
+}
+
+fn collect_pub_wire_names(
+    dir: &std::path::Path,
+    wire_set: &mut std::collections::BTreeSet<String>,
+) -> std::result::Result<(), std::io::Error> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "target" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_pub_wire_names(&path, wire_set)?;
+        } else if name.ends_with(".rs") {
+            let Ok(source) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for line in source.lines() {
+                let trimmed = line.trim_start();
+                let Some(rest) = trimmed
+                    .strip_prefix("pub fn wire_")
+                    .or_else(|| trimmed.strip_prefix("pub async fn wire_"))
+                else {
+                    continue;
+                };
+                let symbol_len = rest
+                    .find(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+                    .unwrap_or(rest.len());
+                if symbol_len > 0 {
+                    wire_set.insert(format!("wire_{}", &rest[..symbol_len]));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// F-1 fail-closed：跨 BC `owner::wire_x` 调用（目标为 owner crate 真实 pub wire
+/// 定义且未登记 construction_symbols）违规；同 crate 与非 feature crate 前缀跳过。
+pub fn enforce_wire_registration(
+    wire_definitions: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    registered: &[(String, String, Vec<String>)],
+    repo_root: &std::path::Path,
+    relative_file: &str,
+) -> Vec<Violation> {
+    if is_test_source(relative_file) {
+        return Vec::new();
+    }
+    let absolute = repo_root.join(relative_file);
+    let Ok(source) = fs::read_to_string(&absolute) else {
+        return Vec::new();
+    };
+    let production = strip_inline_cfg_test_region(&source);
+    // 文件所属 crate：agent/features/<crate>/… → <crate>；composition/share 等 → 目录名。
+    let owning_crate = owning_crate_of(relative_file);
+    let mut violations = Vec::new();
+    for (offset, line) in production.lines().enumerate() {
+        let code = line.trim_start();
+        if code.starts_with("//") {
+            continue;
+        }
+        for (owner_crate, symbol) in extract_qualified_wire_calls(line) {
+            if owner_crate == owning_crate {
+                continue;
+            }
+            let defined = wire_definitions
+                .get(&owner_crate)
+                .is_some_and(|symbols| symbols.contains(&symbol));
+            if !defined {
+                continue;
+            }
+            // 已登记（owner crate + symbol 匹配且调用文件在允许路径）则放行。
+            let registered_hit = registered
+                .iter()
+                .any(|(entry_owner, entry_symbol, allowed)| {
+                    *entry_owner == owner_crate
+                        && *entry_symbol == symbol
+                        && (allowed.is_empty()
+                            || allowed.iter().any(|path| {
+                                relative_file == *path
+                                    || relative_file.starts_with(&format!("{path}/"))
+                            }))
+                });
+            if registered_hit {
+                continue;
+            }
+            violations.push(Violation {
+                rule_id: "construction.cross-bc.fail-closed".to_owned(),
+                location: format!("{relative_file}:{}", offset + 1),
+                message: format!(
+                    "未登记的跨 BC wire 调用 `{owner_crate}::{symbol}`（owner crate: {owner_crate}）；请登记 construction_symbols 或改走注入"
+                ),
+            });
+        }
+    }
+    violations
+}
+
+/// 文件所属 crate 名（agent/features/<crate>/ 与 agent/<crate>/ 两种布局）。
+fn owning_crate_of(relative_file: &str) -> String {
+    let segments: Vec<&str> = relative_file.split('/').collect();
+    if segments.len() >= 3 && segments[0] == "agent" && segments[1] == "features" {
+        return segments[2].to_owned();
+    }
+    if segments.len() >= 2 && segments[0] == "agent" {
+        return segments[1].to_owned();
+    }
+    if segments.len() >= 2 && segments[0] == "packages" {
+        return segments[1].to_owned();
+    }
+    String::new()
 }
 
 /// 词边界匹配：避免 `AdapterX` 误命中 `Adapter`。

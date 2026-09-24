@@ -94,6 +94,114 @@ fn guard_run_single_rule_filter_runs_only_that_rule() {
 }
 
 #[test]
+fn guard_run_enforces_construction_symbols_outside_allowed_paths() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join(".agents")).expect("create .agents");
+    let registry = serde_json::json!({
+        "version": 1,
+        "entries": [],
+        "rules": [],
+        "construction_symbols": [
+            {
+                "id": "construction.task.wire-task",
+                "symbol": "wire_task",
+                "owner_crate": "task",
+                "kind": "wire",
+                "allowed_paths": ["agent/features/task/src"],
+                "reason": "test",
+                "tracking_issue": 1
+            }
+        ]
+    });
+    fs::write(
+        root.join(".agents/architecture-guard-registry.json"),
+        serde_json::to_string_pretty(&registry).expect("serialize"),
+    )
+    .expect("write registry");
+    write_source(
+        &root.join("agent/features/task/src/lib.rs"),
+        "pub fn wire_task() {}\n",
+    );
+    write_source(
+        &root.join("agent/features/runtime/src/assembly.rs"),
+        "let t = task::wire_task();\n",
+    );
+
+    let report = crate::guards::run(&root, crate::guards::Profile::Full, None).expect("run");
+
+    let violations: Vec<&crate::guards_rules::Violation> = report
+        .violations
+        .iter()
+        .filter(|violation| violation.location.contains("runtime/src/assembly.rs"))
+        .collect();
+    assert!(
+        !violations.is_empty(),
+        "owner crate 外引用登记 wire 必须违规：{:#?}",
+        report.violations
+    );
+}
+
+#[test]
+fn guard_run_flags_unregistered_cross_bc_wire_calls_fail_closed() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join(".agents")).expect("create .agents");
+    let registry = serde_json::json!({
+        "version": 1,
+        "entries": [],
+        "rules": [],
+        "construction_symbols": [
+            {
+                "id": "construction.task.wire-task",
+                "symbol": "wire_task",
+                "owner_crate": "task",
+                "kind": "wire",
+                "allowed_paths": ["agent/features/task/src", "agent/composition/src"],
+                "reason": "test",
+                "tracking_issue": 1
+            }
+        ]
+    });
+    fs::write(
+        root.join(".agents/architecture-guard-registry.json"),
+        serde_json::to_string_pretty(&registry).expect("serialize"),
+    )
+    .expect("write registry");
+    // 未登记的跨 BC wire 调用：storage::wire_storage 有真实 pub 定义但未登记。
+    write_source(
+        &root.join("agent/features/storage/src/lib.rs"),
+        "pub fn wire_storage() {}\n",
+    );
+    write_source(
+        &root.join("agent/composition/src/app.rs"),
+        "let s = storage::wire_storage();\n",
+    );
+    // 同 crate 裸调用不拦截。
+    write_source(
+        &root.join("agent/features/task/src/lib.rs"),
+        "pub fn wire_task() { wire_task_inner(); }\n",
+    );
+
+    let report = crate::guards::run(&root, crate::guards::Profile::Full, None).expect("run");
+
+    assert!(
+        report.violations.iter().any(|violation| violation.rule_id
+            == "construction.cross-bc.fail-closed"
+            && violation.location.contains("composition/src/app.rs")),
+        "未登记跨 BC wire 调用必须 fail-closed：{:#?}",
+        report.violations
+    );
+    assert!(
+        !report
+            .violations
+            .iter()
+            .any(|violation| violation.location.contains("task/src/lib.rs")),
+        "owner crate 内裸调用不拦截"
+    );
+}
+
+#[test]
 fn guard_run_clean_tree_has_no_violations() {
     let temp = tempfile::tempdir().expect("create tempdir");
     let root = fixture_root(temp.path());

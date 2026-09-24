@@ -296,6 +296,18 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "ActiveRunRegistry production construction converges to the factory; invoked only by the Composition Root (#1678)",
       "tracking_issue": 1678
+    },
+    {
+      "id": "construction.config.wire-project-config-with-agents-dir",
+      "symbol": "wire_project_config_with_agents_dir",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
+      "tracking_issue": 1385,
+      "guard": "check-cross-bc-construction-registry.sh"
     }
   ],
   "entries": [
@@ -875,23 +887,6 @@
       "tracking_issue": 1577,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent cross-platform controlling-terminal isolation policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.cross-bc.construction-registry",
-      "guard": "check-cross-bc-construction-registry.sh",
-      "module": "composition",
-      "scope": {
-        "kind": "symbol",
-        "value": "construction_symbols"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Fail-closed registry over cross-BC concrete adapter constructions and feature wire functions; the Composition Root is the sole production construction site",
-      "tracking_issue": 1067,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent registry-driven policy that preserves symbol discovery and allowlist semantics",
       "status": "active"
     },
     {
