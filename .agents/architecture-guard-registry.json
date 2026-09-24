@@ -2825,6 +2825,67 @@
       },
       "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
       "profile": "full"
+    },
+    {
+      "id": "layout.tui.top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/"
+      },
+      "allowed_entries": [
+        "adapter",
+        "adapter.rs",
+        "app",
+        "app.rs",
+        "architecture_tests.rs",
+        "effect",
+        "effect.rs",
+        "frame_diagnostics.rs",
+        "frame_diagnostics_tests.rs",
+        "log_scope_tests.rs",
+        "model",
+        "model.rs",
+        "process_memory.rs",
+        "process_memory_tests.rs",
+        "render",
+        "render.rs",
+        "text.rs",
+        "update",
+        "update.rs",
+        "view_assembler",
+        "view_assembler.rs",
+        "view_model",
+        "view_model.rs",
+        "view_state",
+        "view_state.rs"
+      ],
+      "reason": "F-22：tui 顶层目录白名单；旧命名空间 import 防复活④（模块已删编译失败）",
+      "profile": "full"
+    },
+    {
+      "id": "layout.composition.top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/composition/src"
+      },
+      "allowed_entries": [
+        "lib.rs",
+        "app.rs",
+        "audit.rs",
+        "delivery_logging.rs",
+        "memory.rs",
+        "provider.rs",
+        "runtime.rs",
+        "tools.rs",
+        "update.rs",
+        "lib_tests.rs",
+        "provider_tests.rs",
+        "runtime_tests.rs"
+      ],
+      "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
