@@ -10,15 +10,17 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 HOOKS_DIR="$ROOT/.agents/hooks"
 
-# 守卫引擎切换（#1675 并存期）：AEMEATH_GUARD_ENGINE=xtask 时薄壳直接转发
-# xtask guard，跳过旧脚本编排；默认留空走旧链路，直至分批迁移完成。
-if [ "${AEMEATH_GUARD_ENGINE:-}" = "xtask" ]; then
+# 守卫引擎（#1676 起默认 xtask）：registry 90+ 规则 + 过渡期未迁移脚本。
+# AEMEATH_GUARD_ENGINE=legacy 逃生阀回退纯旧脚本链路（E 组测试化完成前保留）。
+GUARD_ENGINE="${AEMEATH_GUARD_ENGINE:-xtask}"
+if [ "$GUARD_ENGINE" != "legacy" ]; then
   mode="${1:---full}"
-  case "$mode" in
-    --fast) exec cargo run --quiet -p xtask -- guard --fast ;;
-    --full) exec cargo run --quiet -p xtask -- guard --full ;;
-    *) exec cargo run --quiet -p xtask -- guard "$@" ;;
-  esac
+  engine_status=0
+  cargo run --quiet -p xtask -- guard "$mode" || engine_status=$?
+  if [ "$engine_status" -ne 0 ]; then
+    echo "[architecture] xtask guard failed (exit=$engine_status)" >&2
+    exit "$engine_status"
+  fi
 fi
 
 
@@ -118,8 +120,7 @@ echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] ROOT=$ROOT"
 echo "[hook-env] ARCHITECTURE_GUARD_MODE=$mode"
-run_guard full "$HOOKS_DIR/check-guard-registry.sh"
-run_guard fast "$HOOKS_DIR/check-share-no-upstream-deps.sh"
+run_guard full bash -c "cargo run --quiet -p xtask -- guard-registry check"
 run_guard fast "$HOOKS_DIR/check-noninteractive-child-session.sh"
 run_guard full bash "$HOOKS_DIR/check-noninteractive-child-session-tests.sh"
 run_guard fast "$HOOKS_DIR/check-task-state-pipeline.sh"
@@ -127,17 +128,13 @@ run_guard fast "$HOOKS_DIR/check-provider-http-attempt.sh"
 run_guard fast "$HOOKS_DIR/check-provider-retry-ownership.sh"
 run_guard fast "$HOOKS_DIR/check-provider-usage-capability.sh"
 run_guard fast "$HOOKS_DIR/check-session-project-scope.sh"
-run_guard fast "$HOOKS_DIR/check-hook-target-facade.sh"
-run_guard fast "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
 run_guard fast "$HOOKS_DIR/check-tui-retained-output-view.sh"
 run_guard fast "$HOOKS_DIR/check-tui-unsafe-text-ops.sh"
-run_guard full "$HOOKS_DIR/check-log-target-prefix.sh"
-run_guard full "$HOOKS_DIR/check-sdk-wire-schema.sh"
-run_guard fast "$HOOKS_DIR/check-cost-tracker-retirement.sh"
+run_guard full bash -c "cargo test --quiet -p logging routing_guard::tests"
+run_guard full bash -c "cargo run --quiet -p xtask -- sdk-wire-schema check"
 run_guard fast "$HOOKS_DIR/check-runtime-event-naming.sh"
 run_guard full bash "$HOOKS_DIR/check-runtime-event-naming-tests.sh"
-run_guard full bash "$HOOKS_DIR/check-cost-tracker-retirement-tests.sh"
-run_guard full "$HOOKS_DIR/check-production-reachability.sh"
+run_guard full bash -c "cargo run --quiet -p xtask -- source-guard \"$ROOT\" "
 
 if [ "$mode" = "--fast" ]; then
   wait_for_fast_guards || fast_status=1
