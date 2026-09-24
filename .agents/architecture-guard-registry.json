@@ -397,40 +397,6 @@
       "status": "active"
     },
     {
-      "id": "scope.tui.tea-runtime-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "mod.rs,run_loop.rs,runtime.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "tui",
-      "reason": "TEA purity scans update/model projections, not the registered runtime and Effect executor owners",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
-      "status": "active"
-    },
-    {
-      "id": "false-positive.tui.tea-inline-allow",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "allow tea_side_effect"
-      },
-      "classification": "false_positive_suppression",
-      "mechanism_type": "whitelist-backed",
-      "owner": "tui",
-      "reason": "Line-local escape for a proven scanner false positive",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
       "id": "scope.tui.safe-text-owners",
       "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
@@ -462,23 +428,6 @@
       "tracking_issue": 1021,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "policy.shared.task-owner-boundary",
-      "guard": "check-share-minimal-kernel.sh",
-      "module": "task",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/shared/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "whitelist-backed",
-      "owner": "task",
-      "reason": "Task Published Language and behavior are owned exclusively by the Task capability, never Shared Kernel",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Task ownership policy",
       "status": "active"
     },
     {
@@ -2906,6 +2855,106 @@
       "profile": "full",
       "forbidden_patterns": [],
       "exclusions": []
+    },
+    {
+      "id": "pattern.tui.app-pure-model",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/app"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/app/run_loop.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/runtime.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/testing/"
+        }
+      ],
+      "reason": "F-21：tui app TEA 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.view-assembler-pure",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/view_assembler"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [],
+      "reason": "F-21：view_assembler 纯投影",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.view-model-pure",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/view_model"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [],
+      "reason": "F-21：view_model 纯投影",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.share.minimal-kernel",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/shared/src"
+      },
+      "forbidden_patterns": [
+        "ToolRegistry",
+        "TaskStore",
+        "TaskStoreStats",
+        "std::fs::",
+        "tokio::fs::",
+        "File::",
+        "create_dir",
+        "std::process::",
+        "tokio::process::",
+        "reqwest::",
+        "http::",
+        "parking_lot::",
+        "RwLock",
+        "async_trait",
+        "CancellationToken",
+        "SystemTime::now",
+        "Instant::now"
+      ],
+      "exclusions": [],
+      "reason": "F-9：share 最小内核——禁行为 trait/IO/网络/并发/时钟/ID 生成（依赖白名单已由 dependency.workspace-matrix share 行锁定）；forbidden_modules 防爬回符号已物理删除④",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
