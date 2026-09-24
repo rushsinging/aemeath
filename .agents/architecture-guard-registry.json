@@ -363,23 +363,6 @@
       "status": "active"
     },
     {
-      "id": "scope.runtime.shared-loop-tests",
-      "guard": "check-shared-run-loop.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "pattern",
-        "value": "*_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "The production shared-run-loop ownership rule excludes test fixtures",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while test fixtures model run-loop symbols",
-      "status": "active"
-    },
-    {
       "id": "false-positive.tui.running-indicator-condition",
       "guard": "check-tui-output-legacy-guards.sh",
       "module": "tui",
@@ -428,23 +411,6 @@
       "tracking_issue": 1021,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "policy.task.access-persistence-split",
-      "guard": "check-task-persistence-capability.sh",
-      "module": "task",
-      "scope": {
-        "kind": "symbol",
-        "value": "forbidden"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "task",
-      "reason": "Runtime and Tools receive only injected TaskAccess while Context and Composition own persistence and backing wiring",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent capability split",
       "status": "active"
     },
     {
@@ -530,40 +496,6 @@
       "tracking_issue": 1545,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retain while these files contain only offset/byte-safe slices; prefer line-level allow for new short statements",
-      "status": "active"
-    },
-    {
-      "id": "context.compact-continuation-checkpoint",
-      "guard": "check-compact-continuation-checkpoint.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "context",
-      "reason": "Context exclusively owns compact continuation checkpoint normalization and canonical submission while Runtime only consumes ContextWindow",
-      "tracking_issue": 1558,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent guard preserving semantic previous-checkpoint handling and the single Context owner",
-      "status": "active"
-    },
-    {
-      "id": "scope.runtime.compact-continuation-tests",
-      "guard": "check-compact-continuation-checkpoint.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "pattern",
-        "value": "*_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "Continuation ownership guard excludes test fixtures that contain checkpoint headings and field probes",
-      "tracking_issue": 1558,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests lock verbatim Runtime consumption",
       "status": "active"
     },
     {
@@ -2954,6 +2886,723 @@
       ],
       "exclusions": [],
       "reason": "F-9：share 最小内核——禁行为 trait/IO/网络/并发/时钟/ID 生成（依赖白名单已由 dependency.workspace-matrix share 行锁定）；forbidden_modules 防爬回符号已物理删除④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime-tools.no-task-persistence-symbols",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/"
+      },
+      "forbidden_patterns": [
+        "TaskStore",
+        "TaskPersist",
+        "PreparedTaskRestore",
+        "TaskRestoreAdapter",
+        "TaskSnapshotSource",
+        "SessionTaskAdapters",
+        "TaskWiring"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/task/"
+        },
+        {
+          "path": "agent/features/storage/"
+        },
+        {
+          "path": "agent/features/context/"
+        }
+      ],
+      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（task/storage/context 为 owner 与协调方豁免；wire_task 由 cross-bc fail-closed 承接）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-compact-continuation-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "active_summary:",
+        "continuation_checkpoint:",
+        "continuation_summary:",
+        "slice_head(previous_summary",
+        "slice_tail(previous_summary",
+        "slice_head(previous_checkpoint",
+        "slice_tail(previous_checkpoint"
+      ],
+      "exclusions": [],
+      "reason": "F-25：continuation 状态归 Context checkpoint 权威，runtime 不得持有/切片（文档标记正向断言④）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-dead-code-suppression",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "#![allow(dead_code)]"
+      ],
+      "exclusions": [],
+      "reason": "F-13：共享 run_loop 单定义（计数断言 defer 专用断言器；launcher 签名由类型系统锁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-inline-test-modules",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "mod tests {"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/app.rs"
+        },
+        {
+          "path": "agent/composition/src/delivery_logging.rs"
+        },
+        {
+          "path": "agent/composition/src/memory.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/memory_injection.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/prompt/guidance.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/prompt/security.rs"
+        },
+        {
+          "path": "agent/features/context/src/domain/session/chat_chain.rs"
+        },
+        {
+          "path": "agent/features/hook/src/adapters/dispatcher/executor.rs"
+        },
+        {
+          "path": "agent/features/memory/src/codec.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/model.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/persistence.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/reflection.rs"
+        },
+        {
+          "path": "agent/features/memory/src/ports.rs"
+        },
+        {
+          "path": "agent/features/memory/src/service.rs"
+        },
+        {
+          "path": "agent/features/project/src/adapters/git.rs"
+        },
+        {
+          "path": "agent/features/project/src/domain/service.rs"
+        },
+        {
+          "path": "agent/features/project/src/lib.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/anthropic.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/anthropic/message_conversion.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/error_log.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/ollama.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/openai_compatible/reasoning_normalizer.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/stream.rs"
+        },
+        {
+          "path": "agent/features/provider/src/domain/capability.rs"
+        },
+        {
+          "path": "agent/features/provider/src/domain/invoke.rs"
+        },
+        {
+          "path": "agent/features/provider/src/lib.rs"
+        },
+        {
+          "path": "agent/features/provider/src/ports.rs"
+        },
+        {
+          "path": "agent/features/provider/src/published_language.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/adapters/sdk_event_mapper.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/agent_runner.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/concurrency.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/model_runtime.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/mapping.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/trait_model.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/trait_reflection.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/compact_generator.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/config_reload.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/idle_commands.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/input_log.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/snapshot_registry.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/tools.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/input.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/model/invocation.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/model/token_usage.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/prompt/prompt_build_ext.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/published_state/registry.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/run/chat_launch.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/run/derived/loop_run.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/tool/coordination/identity.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/tool/coordination/loop_guard.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/lib.rs"
+        },
+        {
+          "path": "agent/features/task/src/adapters/wiring.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/bash/safety.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/mcp/tests.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/registry.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/task_list_complete.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/task_list_create.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/tool_registry.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/tool_search.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/published_language.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/shell_safety.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/tool_types.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/agent.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_create.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_stop.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_update.rs"
+        },
+        {
+          "path": "agent/features/update/src/contract.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/fs.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/git.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/mcp.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/process.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/storage.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/telemetry.rs"
+        },
+        {
+          "path": "agent/shared/src/config.rs"
+        },
+        {
+          "path": "agent/shared/src/config/adapters/paths.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/driver_env.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/logging.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/memory.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/merge.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/models/deserialize.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/models/runtime.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/snapshot.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/tools.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/update.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/commit.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/discipline.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/git_context_labels.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/sections.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/system.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/runtime/command.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/runtime/reflection.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/core.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/filesystem.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/task.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/web.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/worktree.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/dedup.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/entry.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/error.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/format.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/result.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/scoring.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/session_reminder.rs"
+        },
+        {
+          "path": "agent/shared/src/message/types.rs"
+        },
+        {
+          "path": "agent/shared/src/session_types.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/byte_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/char_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/col_idx.rs"
+        },
+        {
+          "path": "apps/cli/src/args.rs"
+        },
+        {
+          "path": "apps/cli/src/chat/no_tui.rs"
+        },
+        {
+          "path": "apps/cli/src/panic_hook.rs"
+        },
+        {
+          "path": "apps/cli/src/subcommand/model_selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/live_status_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/output_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/status_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/resize.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/runtime.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/slash/dialog.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/slash/reflection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/state/session.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/state/tests.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/update/enter.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/util.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/session/processing.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/session/resume.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/spawn_guard.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/change.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/history_parse.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/intent_impls.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/notice.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/queued_submission.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/stream.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/streaming_preview.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/system_reminder.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/tool_call.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/diagnostic/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/change.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/completion.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/completion_item.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/mode.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/output_timeline/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/root.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/runtime/session_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/render.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/suggestions.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/wrap.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_render_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/block_cache.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/block_component.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/ask_user.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/assistant_message.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/diagnostic.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/edit_diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/thinking.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_call.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/user_message.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/gutter.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/markdown/table.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/convert.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/markdown.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/table.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/unified_diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/wrap.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/rendered.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/status_line.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/common.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/agent.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/ask_user.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/helpers.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/shell.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/display.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/update/coordinator.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/update/dirty.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/dialog.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/input.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/live_status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/live_status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/nesting.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/output.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/tool_name.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/input_selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/spinner_anim.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/status.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_event.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_result.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_view.rs"
+        },
+        {
+          "path": "packages/sdk/src/config_view.rs"
+        },
+        {
+          "path": "packages/sdk/src/content.rs"
+        },
+        {
+          "path": "packages/sdk/src/ids.rs"
+        },
+        {
+          "path": "packages/sdk/src/session_lock.rs"
+        },
+        {
+          "path": "agent/features/project/src/domain/git.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/resize.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/resize.rs"
+        }
+      ],
+      "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 210 + 3 声明遗漏补录（cfg(test) 门控确认为存量），迁移完成 MUST 收缩 exclusions",
       "profile": "full"
     }
   ],
