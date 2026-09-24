@@ -192,6 +192,18 @@ pub struct ConfigSnapshot {
     inner: Arc<Config>,
 }
 
+/// snapshot `context_size` 与模型 registry 真实窗口的疑似失配方向。
+///
+/// 只提供提示信号，不改变 resolve 优先级——显式配置始终胜出。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextSizeMisalignment {
+    /// 配置明显小于 registry 窗口（< 50%）——短窗口会频繁触发 auto-compact（#1626）。
+    ConfiguredTooSmall { configured: usize, registry: usize },
+    /// 配置明显大于 registry 窗口（> 200%）——summary 预算等按窗口比例的
+    /// 派生预算会随配置膨胀，超出模型真实承载（#1686）。
+    ConfiguredTooLarge { configured: usize, registry: usize },
+}
+
 impl ConfigSnapshot {
     /// Create a bootstrap snapshot. ConfigAppService commits use
     /// `new_with_revision` to preserve monotonic committed identity.
@@ -464,15 +476,30 @@ impl ConfigSnapshot {
         }
         // snapshot value (already env > file merged)
         if self.inner.model.context_size > 0 {
-            if let Some((configured, registry)) =
-                self.context_size_mismatch_hint(model_context_window)
-            {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "[config] 配置的 context_size {} 明显小于模型 registry 窗口 {}（低于 50%）——若非有意限制，请检查 aemeath.json 的 model.context_size / max_output_tokens 是否与模型真实窗口匹配，否则短窗口会频繁触发 auto-compact",
+            match self.context_size_mismatch_hint(model_context_window) {
+                Some(ContextSizeMisalignment::ConfiguredTooSmall {
                     configured,
                     registry,
-                );
+                }) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[config] 配置的 context_size {} 明显小于模型 registry 窗口 {}（低于 50%）——若非有意限制，请检查 aemeath.json 的 model.context_size / max_output_tokens 是否与模型真实窗口匹配，否则短窗口会频繁触发 auto-compact",
+                        configured,
+                        registry,
+                    );
+                }
+                Some(ContextSizeMisalignment::ConfiguredTooLarge {
+                    configured,
+                    registry,
+                }) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "[config] 配置的 context_size {} 明显大于模型 registry 窗口 {}（超过 200%）——疑似按更大窗口模型残留的配置；compact summary 预算等按窗口比例的派生预算会随之膨胀，若非有意放大，请检查 aemeath.json 的 model.context_size 是否与模型真实窗口匹配",
+                        configured,
+                        registry,
+                    );
+                }
+                None => {}
             }
             return self.inner.model.context_size;
         }
@@ -486,16 +513,31 @@ impl ConfigSnapshot {
 
     /// 检测 snapshot `context_size` 与 model registry 窗口的疑似误配（#1626）。
     ///
-    /// 返回 `Some((configured, registry))` 当且仅当：snapshot 显式配置了
-    /// `context_size > 0`、registry 窗口已知，且配置值低于 registry 窗口的
-    /// 50%。只提供提示信号，不改变 resolve 优先级。
+    /// 返回失配方向与两窗口值当且仅当：snapshot 显式配置了
+    /// `context_size > 0`、registry 窗口已知，且配置值偏离 registry 窗口
+    /// 超过 2 倍——过小（< 50%，#1626）或过大（> 200%，#1686）都视为疑似
+    /// 误配。恰好 2 倍不提示。只提供提示信号，不改变 resolve 优先级。
     pub fn context_size_mismatch_hint(
         &self,
         model_context_window: usize,
-    ) -> Option<(usize, usize)> {
+    ) -> Option<ContextSizeMisalignment> {
         let configured = self.inner.model.context_size;
-        (configured > 0 && model_context_window > 0 && configured * 2 < model_context_window)
-            .then_some((configured, model_context_window))
+        if configured == 0 || model_context_window == 0 {
+            return None;
+        }
+        if configured * 2 < model_context_window {
+            return Some(ContextSizeMisalignment::ConfiguredTooSmall {
+                configured,
+                registry: model_context_window,
+            });
+        }
+        if configured > model_context_window * 2 {
+            return Some(ContextSizeMisalignment::ConfiguredTooLarge {
+                configured,
+                registry: model_context_window,
+            });
+        }
+        None
     }
 
     /// 返回完整 `ModelsConfig`，供消费方读取 providers / guidance / model entries 等。
@@ -639,10 +681,13 @@ mod tests {
         config.model.context_size = 8192;
         let snap = ConfigSnapshot::new(config);
 
-        // 8192 < 200_000 / 2 → 疑似误配，hint 返回 registry 窗口供提示
+        // 8192 < 200_000 / 2 → 疑似误配，hint 带方向与两窗口值
         assert_eq!(
             snap.context_size_mismatch_hint(200_000),
-            Some((8192, 200_000))
+            Some(ContextSizeMisalignment::ConfiguredTooSmall {
+                configured: 8192,
+                registry: 200_000
+            })
         );
         // 接近真实窗口（8192 ≥ 16384/2，不低于 50%）不提示
         assert_eq!(snap.context_size_mismatch_hint(16_384), None);
@@ -650,6 +695,34 @@ mod tests {
         let unset = ConfigSnapshot::new(Config::default());
         assert_eq!(unset.context_size_mismatch_hint(200_000), None);
         // registry 窗口未知（0）不提示
+        assert_eq!(snap.context_size_mismatch_hint(0), None);
+    }
+
+    /// #1686：对称方向——snapshot context_size 明显大于 registry 真实窗口
+    /// （> 200%）同样是疑似误配：summary 预算等按窗口比例的派生预算会随
+    /// 配置膨胀，超出模型真实承载。返回值仍以 snapshot 为准，仅留下提示。
+    #[test]
+    fn test_context_size_mismatch_hint_flags_suspiciously_large_window() {
+        let mut config = Config::default();
+        config.model.context_size = 1_048_576;
+        let snap = ConfigSnapshot::new(config);
+
+        // 1M > 200_000 × 2 → 疑似配置残留，hint 指出过大方向
+        assert_eq!(
+            snap.context_size_mismatch_hint(200_000),
+            Some(ContextSizeMisalignment::ConfiguredTooLarge {
+                configured: 1_048_576,
+                registry: 200_000
+            })
+        );
+        // 恰好 2 倍（400_000 = 200_000 × 2）不算明显失配，不提示
+        let mut boundary = Config::default();
+        boundary.model.context_size = 400_000;
+        let boundary_snap = ConfigSnapshot::new(boundary);
+        assert_eq!(boundary_snap.context_size_mismatch_hint(200_000), None);
+        // 未配置 / registry 未知同样不提示
+        let unset = ConfigSnapshot::new(Config::default());
+        assert_eq!(unset.context_size_mismatch_hint(200_000), None);
         assert_eq!(snap.context_size_mismatch_hint(0), None);
     }
 

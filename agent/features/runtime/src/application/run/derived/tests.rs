@@ -364,6 +364,22 @@ fn sub_run_adapter_has_no_optional_or_duplicate_run_identity() {
     assert!(!run.contains("pub run_id:"));
 }
 
+/// #1686：sub-agent 的 context_size 解析必须接入 agent 模型的 registry
+/// 真实窗口，不得再退回 `(None, 0)`——否则配置缺省时 fallback 128k，
+/// 与主 Run 同模型的窗口语义不一致，summary 预算基数随之失真。
+#[test]
+fn sub_agent_context_size_resolves_against_model_registry_window() {
+    let setup = include_str!("setup.rs");
+    assert!(
+        !setup.contains("resolve_context_size(None, 0)"),
+        "sub-agent context window resolution must pass the agent model's registry window"
+    );
+    assert!(
+        setup.contains("find_model"),
+        "sub-agent context window resolution must look up the resolved agent model entry"
+    );
+}
+
 #[test]
 fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
     let setup = include_str!("setup.rs");
