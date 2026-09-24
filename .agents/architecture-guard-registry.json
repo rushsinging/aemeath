@@ -1247,6 +1247,78 @@
       "exclusions": [],
       "reason": "Tool adapter 消费 AuthorizationContext，禁 allow_all 旁路",
       "profile": "full"
+    },
+    {
+      "id": "pattern.features.workspace-control-call-sites",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        ".workspace_control("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/tools/src/adapters/bash.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/worktree.rs"
+        }
+      ],
+      "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.project.git-command-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "Command::new(\"git\")"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/project/src/adapters/git.rs"
+        }
+      ],
+      "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools.no-workspace-persistence",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "forbidden_patterns": [
+        "PersistedWorkspaceContext",
+        "WorkspacePersist"
+      ],
+      "exclusions": [],
+      "reason": "R2/R6：持久化 DTO 是 session 边界语义，tools 禁引用（允许面 project/context/runtime）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-domain.no-live-resources",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/domain"
+      },
+      "forbidden_patterns": [
+        "WorkspaceViews",
+        "tokio::sync",
+        "std::sync::mpsc",
+        "Semaphore",
+        "CancellationToken"
+      ],
+      "exclusions": [],
+      "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
