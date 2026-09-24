@@ -3604,6 +3604,33 @@
       ],
       "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 210 + 3 声明遗漏补录（cfg(test) 门控确认为存量），迁移完成 MUST 收缩 exclusions",
       "profile": "full"
+    },
+    {
+      "id": "pattern.tools.no-legacy-tool-paths",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "forbidden_patterns": [
+        "LegacyNoAgent",
+        "legacy-no-agent",
+        "SkillInput",
+        "SkillResult",
+        "SkillMaterializationPort",
+        "SkillMaterializationQuery",
+        "SkillMaterializationSnapshot",
+        "PromptFragment",
+        "with_skill_supplier",
+        "register_all_tools",
+        "register_subagent_tools",
+        "ToolCatalogGateway",
+        "DefaultToolCatalogGateway",
+        "wire_tools"
+      ],
+      "exclusions": [],
+      "reason": "F-16：legacy DTO/factory/物化路径防复活（符号已删编译期拦截为主，模式兜底）；validator 唯一实现与文件存在正向断言由类型系统/测试承接",
+      "profile": "full"
     }
   ],
   "retired_symbols": []
