@@ -284,6 +284,18 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
       "tracking_issue": 1645
+    },
+    {
+      "id": "construction.runtime.wire-active-run-registry",
+      "symbol": "wire_active_run_registry",
+      "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "ActiveRunRegistry production construction converges to the factory; invoked only by the Composition Root (#1678)",
+      "tracking_issue": 1678
     }
   ],
   "entries": [
@@ -319,23 +331,6 @@
       "tracking_issue": 1295,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.tool-assembly.composition-ownership",
-      "guard": "check-runtime-tool-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/client"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "composition",
-      "reason": "Composition alone assembles Tool Catalog/Execution, Skill ports, Tool Result materializer and ActiveRunRegistry; Runtime bootstrap consumes injected resources",
-      "tracking_issue": 1294,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Runtime tool assembly policy",
       "status": "active"
     },
     {
@@ -1175,6 +1170,28 @@
         }
       ],
       "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-tool-self-assembly",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "tools::composition::wire_",
+        "AtomicBlobToolResultStore::new(",
+        "FileSystemBlobAdapter::new(",
+        "spawn_mcp_connect(",
+        "wire_active_run_registry("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/active_registry.rs"
+        }
+      ],
+      "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
       "profile": "full"
     }
   ],

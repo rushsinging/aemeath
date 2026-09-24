@@ -21,7 +21,6 @@ context = root / "agent/features/context/src/adapters/atomic_blob_session_manage
 
 leaf_guards = {
     "check-session-management-ownership.sh": "policy.session-management.composition-ownership",
-    "check-runtime-tool-assembly-ownership.sh": "policy.runtime.tool-assembly.composition-ownership",
 }
 violations = []
 

@@ -9,7 +9,7 @@ pub(crate) mod ports;
 
 pub use adapters::sdk_event_mapper::map_lifecycle_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
-pub use application::run::active_registry::ActiveRunRegistry;
+pub use application::run::active_registry::{wire_active_run_registry, ActiveRunRegistry};
 pub use application::tool::tool_result_materializer::{
     ToolResultMaterializationPolicy, ToolResultMaterializer,
 };

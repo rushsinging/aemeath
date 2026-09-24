@@ -163,10 +163,13 @@ fn scope_matches(scope: &Scope, relative_file: &str) -> bool {
     }
 }
 
-/// 测试源判定：分离测试文件（`*_tests.rs`）与集成测试目录（`tests/` 路径段）。
+/// 测试源判定：分离测试文件（`*_tests.rs`、纯 `tests.rs` 模块文件）与
+/// 集成测试目录（`tests/` 路径段）。
 fn is_test_source(relative_file: &str) -> bool {
-    relative_file.ends_with("_tests.rs")
-        || relative_file.ends_with("_test.rs")
+    let file_name = relative_file.rsplit('/').next().unwrap_or(relative_file);
+    file_name.ends_with("_tests.rs")
+        || file_name.ends_with("_test.rs")
+        || file_name == "tests.rs"
         || relative_file.split('/').any(|segment| segment == "tests")
 }
 

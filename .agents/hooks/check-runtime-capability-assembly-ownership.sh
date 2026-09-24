@@ -485,6 +485,7 @@ if re.search(r'(?m)^pub\s+use\s+[^;]*\*\s*;', runtime_lib_source):
     violations.append("17. Runtime crate root must not use wildcard exports")
 approved_root_exports = {
     "ActiveRunRegistry",
+    "wire_active_run_registry",
     "AgentClient",
     "AgentClientImpl",
     "AgentRunnerAssembly",

@@ -18,10 +18,7 @@ mkdir -p "$TMP/.agents/hooks" \
   "$TMP/agent/features/context/src/adapters"
 
 for guard in \
-  check-session-management-ownership.sh \
-  check-config-store-ownership.sh \
-  check-runtime-tool-assembly-ownership.sh \
-  check-runtime-hook-assembly-ownership.sh; do
+  check-session-management-ownership.sh; do
   cat >"$TMP/.agents/hooks/$guard" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -31,16 +28,10 @@ done
 
 cat >"$TMP/.agents/hooks/check-architecture-guards.sh" <<'SH'
 run_guard fast "$HOOKS_DIR/check-session-management-ownership.sh"
-run_guard fast "$HOOKS_DIR/check-config-store-ownership.sh"
-run_guard fast "$HOOKS_DIR/check-runtime-tool-assembly-ownership.sh"
-run_guard fast "$HOOKS_DIR/check-runtime-hook-assembly-ownership.sh"
 SH
 cat >"$TMP/.agents/architecture-guard-registry.json" <<'JSON'
 {"entries":[
-{"id":"policy.session-management.composition-ownership","guard":"check-session-management-ownership.sh","classification":"target_capability_policy","status":"active"},
-{"id":"policy.config.override-store.composition-ownership","guard":"check-config-store-ownership.sh","classification":"target_capability_policy","status":"active"},
-{"id":"policy.runtime.tool-assembly.composition-ownership","guard":"check-runtime-tool-assembly-ownership.sh","classification":"target_capability_policy","status":"active"},
-{"id":"policy.runtime.hook-assembly.composition-ownership","guard":"check-runtime-hook-assembly-ownership.sh","classification":"target_capability_policy","status":"active"}
+{"id":"policy.session-management.composition-ownership","guard":"check-session-management-ownership.sh","classification":"target_capability_policy","status":"active"}
 ]}
 JSON
 cat >"$TMP/agent/features/runtime/src/application/client/from_args.rs" <<'RS'
@@ -66,23 +57,23 @@ expect_failure() {
 }
 
 run_guard >/dev/null
-sed -i.bak '/check-runtime-tool-assembly-ownership/d' "$TMP/.agents/hooks/check-architecture-guards.sh"
-expect_failure missing-wiring 'missing fast registration for check-runtime-tool-assembly-ownership.sh'
+sed -i.bak '/check-session-management-ownership/d' "$TMP/.agents/hooks/check-architecture-guards.sh"
+expect_failure missing-wiring 'missing fast registration for check-session-management-ownership.sh'
 mv "$TMP/.agents/hooks/check-architecture-guards.sh.bak" "$TMP/.agents/hooks/check-architecture-guards.sh"
 
 python3 - "$TMP/.agents/architecture-guard-registry.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
-data['entries'] = [entry for entry in data['entries'] if entry['id'] != 'policy.config.override-store.composition-ownership']
+data['entries'] = [entry for entry in data['entries'] if entry['id'] != 'policy.session-management.composition-ownership']
 json.dump(data, open(path, 'w'))
 PY
-expect_failure missing-registry 'missing active target policy for check-config-store-ownership.sh'
+expect_failure missing-registry 'missing active target policy for check-session-management-ownership.sh'
 python3 - "$TMP/.agents/architecture-guard-registry.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 data = json.load(open(path))
-data['entries'].append({"id":"policy.config.override-store.composition-ownership","guard":"check-config-store-ownership.sh","classification":"target_capability_policy","status":"active"})
+data['entries'].append({"id":"policy.session-management.composition-ownership","guard":"check-session-management-ownership.sh","classification":"target_capability_policy","status":"active"})
 json.dump(data, open(path, 'w'))
 PY
 

@@ -147,7 +147,7 @@ check-command-catalog-boundary-tests、check-composition-construction-ownership-
 |---|---|---|---|
 | check-runtime-capability-assembly-ownership.sh | policy.runtime.capability-assembly | RuntimeContext/Token 唯一构造点等 21 组混检 | 构造器私有化（composition 唯一）；导出白名单子项→F；退役符号子项→`retired_symbols` |
 | check-runtime-hook-assembly-ownership.sh ✅（已执行） | policy.runtime.hook-assembly.composition-ownership（entry 已删） | Hook dispatcher 仅 composition 构造 | 已完成（判据修正①→③）：跨 crate 无排除可见性，落 pattern.runtime.no-hook-dispatcher-construction 引擎规则（hook:: 前缀锚定 + context_factory.rs 单文件豁免登记）；旧守卫截断式剥离的过剥盲区由引擎精确块剥离修复 |
-| check-runtime-tool-assembly-ownership.sh | policy.runtime.tool-assembly.composition-ownership | Tool/Skill/Registry 仅 composition 装配 | 构造器私有化 + 注入字段收窄 |
+| check-runtime-tool-assembly-ownership.sh ✅（已执行） | policy.runtime.tool-assembly.composition-ownership（entry 已删） | Tool/Skill/Registry 仅 composition 装配 | 已完成：ActiveRunRegistry 摘 derive(Default)（仅 cfg(test)）+ wire_active_run_registry 工厂唯一生产构造（capability façade/construction_symbols 双白名单登记）；负向禁式落 pattern.runtime.no-tool-self-assembly；正向装配断言由必填字段类型承接（④）；元守卫映射表与自测壳同步 |
 | check-runtime-activity-observation.sh | policy.runtime.activity-observation | ActivityObservation 唯一构造/变更点 + legacy 符号 | 构造与 `&mut` 入口私有化；legacy 符号→`retired_symbols` |
 | check-provider-construction-ownership.sh | 无（补录或随退役免录） | provider 构造符号仅 composition 可引用 | composition 模块可见性收窄 |
 | check-provider-invocation-scope.sh | scope.provider.invocation-tests | invocation_stream 强制 `&InvocationScope`、禁可变状态 | 签名类型化；可变模式黑名单→`retired_symbols` |

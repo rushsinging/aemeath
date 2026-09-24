@@ -414,9 +414,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
 
     let runner = CliAgentRunner {
         factory,
-        active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
-        ),
+        active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer:
@@ -613,9 +611,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
 
     let runner = CliAgentRunner {
         factory,
-        active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
-        ),
+        active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer:

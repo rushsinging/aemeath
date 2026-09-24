@@ -197,9 +197,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 ContextRecordingProvider { seen: seen.clone() },
             )),
         ),
-        active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
-        ),
+        active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer:
@@ -666,7 +664,7 @@ fn test_sub_run_cancellation_scope_is_one_way() {
 #[tokio::test]
 async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
     let calls = Arc::new(std::sync::Mutex::new(0usize));
-    let registry = Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let registry = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let (mut runner, _guard) = test_runner_with_blocking_provider(calls.clone());
     runner.active_run = registry.clone();
     let ctx = test_ctx();
@@ -1601,7 +1599,7 @@ fn test_runner_with_provider(
                 crate::application::model::test_support::binding_from_llm_provider(provider),
             ),
             active_run: Arc::new(
-                crate::application::run::active_registry::ActiveRunRegistry::default(),
+                crate::application::run::active_registry::wire_active_run_registry(),
             ),
             max_tool_concurrency: 10,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
