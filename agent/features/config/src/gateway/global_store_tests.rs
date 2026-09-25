@@ -11,11 +11,12 @@ fn draft() -> ConnectDraft {
     draft.driver = Some(entry.driver);
     draft.base_url = Some("https://example.test".to_string());
     draft.provider_user_agent = Some("test-agent".to_string());
-    draft.model = Some(ModelDraft {
+    draft.models = vec![ModelDraft {
         model_id: "model-x".to_string(),
         context_window: 32_000,
         max_tokens: 4_096,
-    });
+        reasoning_effort: None,
+    }];
     draft.set_global_default = true;
     draft.set_user_credential("secret".to_string());
     draft

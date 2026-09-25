@@ -182,12 +182,25 @@ pub struct ExistingProviderSnapshot {
     pub max_tokens: Option<u32>,
     /// 全局配置中该 Provider 的专属 UA（`userAgent`，已归一化空白）。
     pub user_agent: Option<String>,
+    /// 首个模型的固定推理档位（`reasoningEffort`）。
+    pub reasoning_effort: Option<String>,
     /// 已有凭证的掩码形态（首 4 + `****` + 尾 4；短凭证整体 `****`）。
     /// 仅用于向导展示；明文不离开全局配置存储。
     pub credential_mask: Option<String>,
     /// 已有凭证明文（服务端内存内持有，供 probe 携带；view **NEVER** 投影，
     /// commit 由 port 在全局文档内复制）。
     pub api_key: Option<String>,
+    /// 全部已配置模型（多选页预选用；覆盖推荐外的自定义模型）。
+    pub models: Vec<ExistingModelSnapshot>,
+}
+
+/// 快照中的单个已配置模型。
+#[derive(Debug, Clone)]
+pub struct ExistingModelSnapshot {
+    pub model_id: String,
+    pub context_window: usize,
+    pub max_tokens: u32,
+    pub reasoning_effort: Option<String>,
 }
 
 /// 由明文凭证计算展示掩码：长度 ≥ 12 时首 4 + `****` + 尾 4，否则整体 `****`。
@@ -248,6 +261,8 @@ impl ExistingProviderSnapshot {
         context_window: usize,
         max_tokens: u32,
         user_agent: Option<&str>,
+        reasoning_effort: Option<&str>,
+        models: Vec<ExistingModelSnapshot>,
     ) -> Self {
         let api_key_status = if api_key.is_some_and(|value| !value.is_empty()) {
             ExistingCredentialStatus::Present
@@ -282,11 +297,16 @@ impl ExistingProviderSnapshot {
             model_id: model_id_opt,
             context_window: (context_window > 0).then_some(context_window),
             max_tokens: (max_tokens > 0).then_some(max_tokens),
+            reasoning_effort: reasoning_effort
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
             user_agent: normalized_user_agent,
             credential_mask,
             api_key: api_key
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),
+            models,
         }
     }
 

@@ -22,6 +22,9 @@ pub struct ModelDraft {
     pub model_id: String,
     pub context_window: usize,
     pub max_tokens: u32,
+    /// 固定推理档位（off/minimal/low/medium/high/xhigh/max）；
+    /// `None` 沿用全局默认。
+    pub reasoning_effort: Option<String>,
 }
 
 impl ModelDraft {
@@ -130,7 +133,7 @@ pub struct ConnectDraft {
     /// PreservedFromExisting 路径的明文凭证（服务端内存内持有，供 probe
     /// 携带）；view **NEVER** 投影，用户输入新值时被替换。
     pub(crate) preserved_api_key: Option<String>,
-    pub model: Option<ModelDraft>,
+    pub models: Vec<ModelDraft>,
     pub set_global_default: bool,
 }
 
@@ -145,7 +148,7 @@ impl ConnectDraft {
             provider_user_agent: None,
             credential_mask: None,
             preserved_api_key: None,
-            model: None,
+            models: Vec::new(),
             set_global_default: false,
         }
     }

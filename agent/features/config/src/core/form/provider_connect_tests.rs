@@ -141,11 +141,12 @@ fn review_page_displays_every_chosen_configuration() {
     view.draft.has_api_key = true;
     view.draft.credential_mask = Some("sk-h****wxyz".to_string());
     view.draft.provider_user_agent = Some("ZCode/3.11.2".to_string());
-    view.draft.model = Some(crate::connect::ModelDraftView {
+    view.draft.models = vec![crate::connect::ModelDraftView {
         model_id: "glm-5.3".to_string(),
         context_window: Some(1_048_576),
         max_tokens: Some(16_384),
-    });
+        reasoning_effort: None,
+    }];
     view.draft.set_global_default = true;
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
@@ -481,7 +482,12 @@ fn custom_model_page_requires_three_typed_fields() {
             .iter()
             .map(|field| field.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["model_id", "context_window", "max_tokens"]
+        vec![
+            "model_id",
+            "context_window",
+            "max_tokens",
+            "reasoning_effort"
+        ]
     );
 }
 
@@ -511,21 +517,26 @@ fn model_page_publishes_every_catalog_model_before_custom_option() {
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
     let model_options = &form.page.fields[0].options;
 
-    // Anthropic 发布 4 个当前在线模型，末尾固定追加自定义模型入口。
-    assert!(model_options.len() >= 5);
-    assert_eq!(model_options[0].id.as_str(), "recommended-0");
+    // Anthropic 发布 4 个当前在线模型（多选，无 custom 混入项）。
+    assert!(model_options.len() >= 4);
+    assert_eq!(model_options[0].id.as_str(), "recommended-claude-fable-5-1");
     assert_eq!(model_options[0].label, "claude-fable-5-1");
-    assert_eq!(model_options[1].id.as_str(), "recommended-1");
     assert_eq!(model_options[1].label, "claude-opus-5");
     assert_eq!(model_options[2].label, "claude-sonnet-5");
     assert_eq!(model_options[3].label, "claude-haiku-4-5");
-    assert_eq!(model_options.last().unwrap().id.as_str(), "custom");
 }
 
 #[test]
-fn custom_model_page_prefills_first_catalog_model_defaults() {
+fn custom_model_page_prefills_first_selected_model_for_editing() {
+    // 编辑场景：预填 draft 首个已选模型（含推理档位），用户改属性后保存
+    // 即 upsert；添加场景用户直接覆盖输入。
     let mut view = connect_view(ConnectStage::EditCustomModel);
-    view.draft.source = Some(crate::catalog::ProviderSource::new("Anthropic"));
+    view.draft.models = vec![crate::connect::ModelDraftView {
+        model_id: "claude-fable-5-1".to_string(),
+        context_window: Some(1_000_000),
+        max_tokens: Some(131_072),
+        reasoning_effort: Some("high".to_string()),
+    }];
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 
@@ -538,7 +549,7 @@ fn custom_model_page_prefills_first_catalog_model_defaults() {
         Some("1000000")
     );
     assert_eq!(form.page.fields[2].display_value.as_deref(), Some("131072"));
-    assert!(form.page.fields.iter().all(|field| field.has_value));
+    assert_eq!(form.page.fields[3].display_value.as_deref(), Some("high"));
 }
 
 #[test]
@@ -609,11 +620,12 @@ fn model_select_page_marks_existing_draft_model_as_selected() {
             .source
             .clone(),
     );
-    view.draft.model = Some(crate::connect::ModelDraftView {
+    view.draft.models = vec![crate::connect::ModelDraftView {
         model_id: "glm-5.2".to_string(),
         context_window: Some(204_800),
         max_tokens: Some(16_000),
-    });
+        reasoning_effort: None,
+    }];
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 
@@ -667,22 +679,78 @@ fn minimax_model_page_publishes_128k_output_cap() {
 }
 
 #[test]
-fn minimax_custom_model_page_prefills_128k_output_cap() {
-    let mut view = connect_view(ConnectStage::EditCustomModel);
-    view.draft.source = Some(crate::catalog::ProviderSource::new("Minimax"));
+fn model_page_multi_select_prefills_configured_models_and_keeps_custom() {
+    // 模型页契约：MultiSelect；推荐 ∪ 已配置（推荐外自定义也带上）；
+    // 已配置默认勾选（display_value 预选串）；提交完整集合。
+    let mut view = connect_view(ConnectStage::SelectModel);
+    view.draft.source = Some(
+        crate::catalog::find_by_source("DeepSeek")
+            .unwrap()
+            .source
+            .clone(),
+    );
+    view.draft.models = vec![
+        crate::connect::ModelDraftView {
+            model_id: "deepseek-v4-pro".to_string(),
+            context_window: Some(1_048_576),
+            max_tokens: Some(16_384),
+            reasoning_effort: Some("high".to_string()),
+        },
+        crate::connect::ModelDraftView {
+            model_id: "my-private-model".to_string(),
+            context_window: Some(128_000),
+            max_tokens: Some(8_192),
+            reasoning_effort: None,
+        },
+    ];
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+    let field = &form.page.fields[0];
+    assert_eq!(field.field_type, ConfigFormFieldType::MultiSelect);
+    let labels: Vec<&str> = field
+        .options
+        .iter()
+        .map(|option| option.label.as_str())
+        .collect();
+    assert!(
+        labels.contains(&"deepseek-v4-pro") && labels.contains(&"deepseek-flash"),
+        "推荐模型必须在列表"
+    );
+    assert!(
+        labels.contains(&"my-private-model"),
+        "推荐外的自定义已配置模型必须带上"
+    );
+    assert_eq!(
+        field.display_value.as_deref(),
+        Some("deepseek-v4-pro, my-private-model"),
+        "已配置模型必须默认选中"
+    );
 
-    assert_eq!(
-        form.page.fields[0].display_value.as_deref(),
-        Some("MiniMax-M3")
-    );
-    assert_eq!(
-        form.page.fields[1].display_value.as_deref(),
-        Some("1000000")
-    );
-    assert_eq!(form.page.fields[2].display_value.as_deref(), Some("131072"));
+    let command = connect_command_for_form(
+        &view,
+        ConfigFormCommand::SubmitPage {
+            values: vec![ConfigFormFieldValue {
+                field_id: ConfigFormFieldId::new("recommended_models").unwrap(),
+                value: ConfigFormValue::SelectedOptions(vec![
+                    ConfigFormOptionId::new("recommended-deepseek-v4-pro").unwrap(),
+                    ConfigFormOptionId::new("configured-my-private-model").unwrap(),
+                ]),
+            }],
+        },
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    match command {
+        crate::connect::ConnectCommand::SetSelectedModels { models } => {
+            assert_eq!(models.len(), 2);
+            assert_eq!(models[0].model_id, "deepseek-v4-pro");
+            assert_eq!(models[1].model_id, "my-private-model");
+            assert_eq!(models[1].context_window, 128_000);
+        }
+        other => panic!("必须映射 SetSelectedModels，得到 {other:?}"),
+    }
 }
+
 #[test]
 fn custom_model_submission_maps_all_typed_fields() {
     let command = connect_command_for_form(
@@ -701,6 +769,12 @@ fn custom_model_submission_maps_all_typed_fields() {
                     field_id: ConfigFormFieldId::new("max_tokens").unwrap(),
                     value: ConfigFormValue::Number(8_192),
                 },
+                ConfigFormFieldValue {
+                    field_id: ConfigFormFieldId::new("reasoning_effort").unwrap(),
+                    value: ConfigFormValue::SelectedOption(
+                        ConfigFormOptionId::new("high").unwrap(),
+                    ),
+                },
             ],
         },
         crate::catalog::PROVIDER_CATALOG,
@@ -709,11 +783,11 @@ fn custom_model_submission_maps_all_typed_fields() {
 
     assert!(matches!(
         command,
-        crate::connect::ConnectCommand::SetCustomModel {
-            model_id,
-            context_window: 128_000,
-            max_tokens: 8_192,
-        } if model_id == "custom-model"
+        crate::connect::ConnectCommand::UpsertCustomModel { model }
+            if model.model_id == "custom-model"
+                && model.context_window == 128_000
+                && model.max_tokens == 8_192
+                && model.reasoning_effort.as_deref() == Some("high")
     ));
 }
 

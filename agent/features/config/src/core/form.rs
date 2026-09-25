@@ -86,6 +86,7 @@ pub enum ConfigFormFieldType {
     Secret,
     Number,
     SingleSelect,
+    MultiSelect,
     Boolean,
     Summary,
     Status,
@@ -98,6 +99,7 @@ pub enum ConfigFormValue {
     Number(u64),
     Boolean(bool),
     SelectedOption(ConfigFormOptionId),
+    SelectedOptions(Vec<ConfigFormOptionId>),
 }
 
 impl ConfigFormValue {}
@@ -112,6 +114,10 @@ impl fmt::Debug for ConfigFormValue {
             Self::SelectedOption(value) => formatter
                 .debug_tuple("SelectedOption")
                 .field(value)
+                .finish(),
+            Self::SelectedOptions(values) => formatter
+                .debug_tuple("SelectedOptions")
+                .field(values)
                 .finish(),
         }
     }

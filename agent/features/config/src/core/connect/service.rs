@@ -391,14 +391,16 @@ impl ConnectAppService {
                 command: "BeginProbe",
                 actual: session.stage,
             })?;
-        let model = session
-            .draft
-            .model
-            .clone()
-            .ok_or(ConnectError::InvalidTransition {
-                command: "BeginProbe",
-                actual: session.stage,
-            })?;
+        let model =
+            session
+                .draft
+                .models
+                .first()
+                .cloned()
+                .ok_or(ConnectError::InvalidTransition {
+                    command: "BeginProbe",
+                    actual: session.stage,
+                })?;
         Ok(ProviderProbeRequest {
             driver,
             base_url,
@@ -486,15 +488,9 @@ impl ConnectAppService {
             Cmd::SetProviderUserAgent { raw } => {
                 self.sync_set_provider_user_agent(session, raw.as_deref())
             }
-            Cmd::SelectRecommendedModel { index } => {
-                self.sync_select_recommended_model(session, *index)
-            }
+            Cmd::SetSelectedModels { models } => self.sync_set_selected_models(session, models),
             Cmd::EnterCustomModel => self.sync_enter_custom_model(session),
-            Cmd::SetCustomModel {
-                model_id,
-                context_window,
-                max_tokens,
-            } => self.sync_set_custom_model(session, model_id, *context_window, *max_tokens),
+            Cmd::UpsertCustomModel { model } => self.sync_upsert_custom_model(session, model),
             Cmd::SetGlobalDefault { set_as_default } => {
                 self.sync_set_global_default(session, *set_as_default)
             }
@@ -643,20 +639,18 @@ impl ConnectAppService {
                 session.draft.provider_user_agent = provider.user_agent.clone();
             }
             session.draft.credential_mask = provider.credential_mask.clone();
-            if let (Some(model_id), Some(context_window), Some(max_tokens)) = (
-                provider.model_id.as_deref(),
-                provider.context_window,
-                provider.max_tokens,
-            ) {
-                let draft = crate::connect::draft::ModelDraft {
-                    model_id: model_id.to_string(),
-                    context_window,
-                    max_tokens,
-                };
-                if draft.validate().is_ok() {
-                    session.draft.model = Some(draft);
-                }
-            }
+            let models: Vec<ModelDraft> = provider
+                .models
+                .iter()
+                .map(|model| ModelDraft {
+                    model_id: model.model_id.clone(),
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning_effort: model.reasoning_effort.clone(),
+                })
+                .filter(|model| model.validate().is_ok())
+                .collect();
+            session.draft.models = models;
             if matches!(
                 provider.api_key_status,
                 super::states::ExistingCredentialStatus::Present
@@ -746,65 +740,32 @@ impl ConnectAppService {
         }
     }
 
-    fn sync_select_recommended_model(
+    fn sync_set_selected_models(
         &self,
         session: &mut ConnectSession,
-        index: usize,
+        models: &[ModelDraft],
     ) -> (Option<ConnectError>, SyncOutcome) {
-        let source = match session.draft.source.clone() {
-            Some(s) => s,
-            None => {
-                return (
-                    Some(ConnectError::InvalidTransition {
-                        command: "SelectRecommendedModel",
-                        actual: session.stage,
-                    }),
-                    SyncOutcome::Proceed,
-                );
-            }
-        };
-        let entry = match self.catalog_entry(&source) {
-            Some(e) => e,
-            None => {
-                return (
-                    Some(ConnectError::CatalogUnavailable {
-                        reason: format!("source {} 已不在 Catalog 中", source.as_str()),
-                    }),
-                    SyncOutcome::Proceed,
-                );
-            }
-        };
-        if entry.recommended_models.is_empty() {
+        if models.is_empty() {
             return (
-                Some(ConnectError::CatalogUnavailable {
-                    reason: format!(
-                        "{} 当前没有核验过的推荐模型，请直接进入 EditCustomModel",
-                        source.as_str()
-                    ),
+                Some(ConnectError::Validation {
+                    field: "model",
+                    reason: "至少选择一个模型".to_string(),
                 }),
                 SyncOutcome::Proceed,
             );
         }
-        let model = match entry.recommended_models.get(index) {
-            Some(m) => m,
-            None => {
+        for model in models {
+            if let Err(err) = model.validate() {
                 return (
                     Some(ConnectError::Validation {
-                        field: "recommended_model_index",
-                        reason: format!(
-                            "索引 {index} 超出 Catalog 推荐列表（长度 {}）",
-                            entry.recommended_models.len()
-                        ),
+                        field: "model",
+                        reason: format!("模型 {}：{}", model.model_id, err.message()),
                     }),
                     SyncOutcome::Proceed,
                 );
             }
-        };
-        session.draft.model = Some(ModelDraft {
-            model_id: model.model_id.to_string(),
-            context_window: model.context_window,
-            max_tokens: model.max_tokens,
-        });
+        }
+        session.draft.models = models.to_vec();
         session.stage = ConnectStage::ChooseGlobalDefault;
         (None, SyncOutcome::Proceed)
     }
@@ -817,19 +778,12 @@ impl ConnectAppService {
         (None, SyncOutcome::Proceed)
     }
 
-    fn sync_set_custom_model(
+    fn sync_upsert_custom_model(
         &self,
         session: &mut ConnectSession,
-        model_id: &str,
-        context_window: usize,
-        max_tokens: u32,
+        model: &ModelDraft,
     ) -> (Option<ConnectError>, SyncOutcome) {
-        let draft = ModelDraft {
-            model_id: model_id.to_string(),
-            context_window,
-            max_tokens,
-        };
-        if let Err(err) = draft.validate() {
+        if let Err(err) = model.validate() {
             return (
                 Some(ConnectError::Validation {
                     field: "model",
@@ -838,8 +792,17 @@ impl ConnectAppService {
                 SyncOutcome::Proceed,
             );
         }
-        session.draft.model = Some(draft);
-        session.stage = ConnectStage::ChooseGlobalDefault;
+        match session
+            .draft
+            .models
+            .iter_mut()
+            .find(|existing| existing.model_id == model.model_id)
+        {
+            Some(existing) => *existing = model.clone(),
+            None => session.draft.models.push(model.clone()),
+        }
+        // 返回模型页：允许继续添加 / 调整勾选后再提交。
+        session.stage = ConnectStage::SelectModel;
         (None, SyncOutcome::Proceed)
     }
 
@@ -1003,11 +966,16 @@ fn project_draft(draft: &ConnectDraft) -> ConnectDraftView {
         has_api_key: draft.has_api_key(),
         provider_user_agent: draft.provider_user_agent.clone(),
         credential_mask: draft.credential_mask.clone(),
-        model: draft.model.as_ref().map(|model| ModelDraftView {
-            model_id: model.model_id.clone(),
-            context_window: Some(model.context_window),
-            max_tokens: Some(model.max_tokens),
-        }),
+        models: draft
+            .models
+            .iter()
+            .map(|model| ModelDraftView {
+                model_id: model.model_id.clone(),
+                context_window: Some(model.context_window),
+                max_tokens: Some(model.max_tokens),
+                reasoning_effort: model.reasoning_effort.clone(),
+            })
+            .collect(),
         set_global_default: draft.set_global_default,
     }
 }

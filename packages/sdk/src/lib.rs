@@ -87,8 +87,8 @@ pub use config_view::{
 };
 pub use connect::{
     ConnectAvailableAction, ConnectCommand, ConnectDraftView, ConnectErrorKind, ConnectErrorView,
-    ConnectExistingProviderView, ConnectModelDraftView, ConnectOrigin, ConnectOutcome,
-    ConnectProbeErrorKind, ConnectProbeStatus, ConnectProviderOption,
+    ConnectExistingProviderView, ConnectModelDraftView, ConnectModelSpec, ConnectOrigin,
+    ConnectOutcome, ConnectProbeErrorKind, ConnectProbeStatus, ConnectProviderOption,
     ConnectRecommendedModelOption, ConnectRevision, ConnectSessionId, ConnectStage, ConnectView,
 };
 pub use content::{ContentBlock, ImageSource};

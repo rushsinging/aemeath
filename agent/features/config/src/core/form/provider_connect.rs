@@ -235,27 +235,63 @@ fn page_for_connect(
         ConnectStage::SelectModel => (
             "select_model",
             "选择模型",
-            vec![recommended_model_field(connect, catalog)?],
+            vec![recommended_models_field(connect, catalog)?],
         ),
-        ConnectStage::EditCustomModel => (
-            "edit_custom_model",
-            "自定义模型",
-            vec![
-                text_field("model_id", "Model ID", true, model_id(connect, catalog))?,
-                number_field(
-                    "context_window",
-                    "Context Window",
-                    true,
-                    context_window(connect, catalog),
-                )?,
-                number_field(
-                    "max_tokens",
-                    "Max Tokens",
-                    true,
-                    max_tokens(connect, catalog),
-                )?,
-            ],
-        ),
+        ConnectStage::EditCustomModel => {
+            // 预填 draft 首个已选模型（编辑场景）；添加场景用户直接覆盖。
+            let editing = connect.draft.models.first();
+            let mut effort_field = select_field(
+                "reasoning_effort",
+                "Reasoning Effort",
+                vec![
+                    option("default", "默认（全局）", None)?,
+                    option("off", "off", None)?,
+                    option("minimal", "minimal", None)?,
+                    option("low", "low", None)?,
+                    option("medium", "medium", None)?,
+                    option("high", "high", None)?,
+                    option("xhigh", "xhigh", None)?,
+                    option("max", "max", None)?,
+                ],
+            )?;
+            if let Some(effort) = editing.and_then(|model| model.reasoning_effort.as_deref()) {
+                if effort_field
+                    .options
+                    .iter()
+                    .any(|option| option.id.as_str() == effort)
+                {
+                    effort_field.has_value = true;
+                    effort_field.display_value = Some(effort.to_string());
+                }
+            }
+            (
+                "edit_custom_model",
+                "添加 / 编辑模型",
+                vec![
+                    text_field(
+                        "model_id",
+                        "Model ID",
+                        true,
+                        editing.map(|model| model.model_id.clone()),
+                    )?,
+                    number_field(
+                        "context_window",
+                        "Context Window",
+                        true,
+                        editing
+                            .and_then(|model| model.context_window)
+                            .and_then(|value| u64::try_from(value).ok()),
+                    )?,
+                    number_field(
+                        "max_tokens",
+                        "Max Tokens",
+                        true,
+                        editing.and_then(|model| model.max_tokens).map(u64::from),
+                    )?,
+                    effort_field,
+                ],
+            )
+        }
         ConnectStage::ChooseGlobalDefault => {
             let mut field = select_field(
                 "set_global_default",
@@ -413,31 +449,57 @@ fn submit_for_stage(
             }
         }
         ConnectStage::SelectModel => {
-            let ConfigFormValue::SelectedOption(option_id) = &field("recommended_model")?.value
+            let ConfigFormValue::SelectedOptions(option_ids) = &field("recommended_models")?.value
             else {
-                return Err(invalid_type("recommended_model"));
+                return Err(invalid_type("recommended_models"));
             };
-            if option_id.as_str() == "custom" {
-                ConnectCommand::EnterCustomModel
-            } else {
-                let index = option_id
-                    .as_str()
-                    .strip_prefix("recommended-")
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .ok_or_else(|| invalid_value("recommended_model"))?;
-                ConnectCommand::SelectRecommendedModel { index }
+            let mut models = Vec::new();
+            for option_id in option_ids {
+                let Some((model_id, context_window, max_tokens)) =
+                    model_spec_for_option_id(connect, catalog, option_id.as_str())
+                else {
+                    return Err(invalid_value("recommended_models"));
+                };
+                let reasoning_effort = connect
+                    .draft
+                    .models
+                    .iter()
+                    .find(|model| model.model_id == model_id)
+                    .and_then(|model| model.reasoning_effort.clone());
+                models.push(crate::connect::ModelDraft {
+                    model_id,
+                    context_window,
+                    max_tokens,
+                    reasoning_effort,
+                });
+            }
+            ConnectCommand::SetSelectedModels { models }
+        }
+        ConnectStage::EditCustomModel => {
+            let reasoning_effort = {
+                let ConfigFormValue::SelectedOption(option_id) = &field("reasoning_effort")?.value
+                else {
+                    return Err(invalid_type("reasoning_effort"));
+                };
+                match option_id.as_str() {
+                    "default" => None,
+                    value => Some(value.to_string()),
+                }
+            };
+            ConnectCommand::UpsertCustomModel {
+                model: crate::connect::ModelDraft {
+                    model_id: text_value(field("model_id")?, "model_id")?,
+                    context_window: usize::try_from(number_value(
+                        field("context_window")?,
+                        "context_window",
+                    )?)
+                    .map_err(|_| invalid_value("context_window"))?,
+                    max_tokens: u32::try_from(number_value(field("max_tokens")?, "max_tokens")?)
+                        .map_err(|_| invalid_value("max_tokens"))?,
+                    reasoning_effort,
+                },
             }
         }
-        ConnectStage::EditCustomModel => ConnectCommand::SetCustomModel {
-            model_id: text_value(field("model_id")?, "model_id")?,
-            context_window: usize::try_from(number_value(
-                field("context_window")?,
-                "context_window",
-            )?)
-            .map_err(|_| invalid_value("context_window"))?,
-            max_tokens: u32::try_from(number_value(field("max_tokens")?, "max_tokens")?)
-                .map_err(|_| invalid_value("max_tokens"))?,
-        },
         ConnectStage::ChooseGlobalDefault => {
             let ConfigFormValue::SelectedOption(option_id) = &field("set_global_default")?.value
             else {
@@ -465,6 +527,7 @@ fn action_for_id(action_id: &str) -> Result<ConnectCommand, ProviderConnectFormE
     Ok(match action_id {
         "confirm_overwrite" => ConnectCommand::ConfirmOverwrite,
         "reject_overwrite" => ConnectCommand::RejectOverwrite,
+        "enter_custom_model" => ConnectCommand::EnterCustomModel,
         "skip_probe" => ConnectCommand::SkipProbe,
         "begin_probe" => ConnectCommand::BeginProbe,
         "continue_after_probe" => ConnectCommand::ContinueAfterProbe,
@@ -506,11 +569,12 @@ fn action_schema(
         | AvailableAction::SetCredential
         | AvailableAction::SetProviderUserAgent
         | AvailableAction::SelectRecommendedModel
-        | AvailableAction::EnterCustomModel
         | AvailableAction::SetCustomModel
         | AvailableAction::SetGlobalDefault
         | AvailableAction::BeginCustomProvider
         | AvailableAction::SelectCustomProvider => return None,
+        // 模型多选页的"添加 / 编辑模型"入口（可无限次进入 upsert）。
+        AvailableAction::EnterCustomModel => ("enter_custom_model", "添加 / 编辑模型", secondary),
         AvailableAction::ConfirmOverwrite => ("confirm_overwrite", "覆盖", primary),
         AvailableAction::RejectOverwrite => ("reject_overwrite", "返回", secondary),
         AvailableAction::SkipProbe => ("skip_probe", "跳过测试", secondary),
@@ -663,49 +727,101 @@ fn option(
     })
 }
 
-fn recommended_model_field(
+/// 模型多选字段：推荐模型 ∪ 已配置模型（含自定义），已配置默认勾选。
+/// 空格切换勾选，回车提交完整集合。
+fn recommended_models_field(
     connect: &ConnectView,
     catalog: &'static [ProviderCatalogEntry],
 ) -> Result<ConfigFormField, ConfigFormError> {
-    let mut options = connect
+    let mut options: Vec<ConfigFormOption> = Vec::new();
+    let mut chosen_labels: Vec<String> = Vec::new();
+    let entry = connect
         .draft
         .source
         .as_ref()
-        .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
-        .map(|entry| {
-            entry
-                .recommended_models
-                .iter()
-                .enumerate()
-                .map(|(index, model)| {
-                    option(
-                        &format!("recommended-{index}"),
-                        model.model_id,
-                        Some(&format!(
-                            "Context {} · Max {}",
-                            model.context_window, model.max_tokens
-                        )),
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()?
-        .unwrap_or_default();
-    options.push(option("custom", "自定义模型", None)?);
-    let mut field = select_field("recommended_model", "模型", options)?;
-    // draft.model（如确认覆盖时从全局配置预填的模型）命中推荐列表时标记为
-    // 已选，供 TUI 初始化 option 高亮；未命中推荐列表时交由"自定义模型"页。
-    if let Some(draft_model) = connect.draft.model.as_ref() {
-        let recommended = field
-            .options
-            .iter()
-            .any(|option| option.label == draft_model.model_id);
-        if recommended {
-            field.has_value = true;
-            field.display_value = Some(draft_model.model_id.clone());
+        .and_then(|source| catalog.iter().find(|entry| entry.source == *source));
+    if let Some(entry) = entry {
+        for model in entry.recommended_models {
+            options.push(option(
+                &format!("recommended-{}", model.model_id),
+                model.model_id,
+                Some(&format!(
+                    "Context {} · Max {}",
+                    model.context_window, model.max_tokens
+                )),
+            )?);
         }
     }
-    Ok(field)
+    // 已配置模型（含推荐外的自定义）进入列表并默认勾选。
+    for model in &connect.draft.models {
+        let label = model.model_id.as_str();
+        if !options.iter().any(|existing| existing.label == label) {
+            let detail = format!(
+                "Context {} · Max {}{}",
+                model.context_window.unwrap_or(0),
+                model.max_tokens.unwrap_or(0),
+                model
+                    .reasoning_effort
+                    .as_deref()
+                    .map(|effort| format!(" · {effort}"))
+                    .unwrap_or_default(),
+            );
+            options.push(option(
+                &format!("configured-{}", label),
+                label,
+                Some(&detail),
+            )?);
+        }
+        chosen_labels.push(label.to_string());
+    }
+    Ok(ConfigFormField {
+        id: ConfigFormFieldId::new("recommended_models")?,
+        label: "模型（空格勾选，可多选）".to_string(),
+        description: None,
+        field_type: ConfigFormFieldType::MultiSelect,
+        required: !options.is_empty(),
+        has_value: !chosen_labels.is_empty(),
+        display_value: (!chosen_labels.is_empty()).then(|| chosen_labels.join(", ")),
+        options,
+        error: None,
+    })
+}
+
+/// 按 option id 解析模型规格（推荐命中 catalog，已配置命中 draft.models）。
+fn model_spec_for_option_id(
+    connect: &ConnectView,
+    catalog: &'static [ProviderCatalogEntry],
+    option_id: &str,
+) -> Option<(String, usize, u32)> {
+    if let Some(model_id) = option_id.strip_prefix("recommended-") {
+        let entry = connect
+            .draft
+            .source
+            .as_ref()
+            .and_then(|source| catalog.iter().find(|entry| entry.source == *source))?;
+        let model = entry
+            .recommended_models
+            .iter()
+            .find(|model| model.model_id == model_id)?;
+        return Some((
+            model.model_id.to_string(),
+            model.context_window,
+            model.max_tokens,
+        ));
+    }
+    if let Some(model_id) = option_id.strip_prefix("configured-") {
+        let model = connect
+            .draft
+            .models
+            .iter()
+            .find(|model| model.model_id == model_id)?;
+        return Some((
+            model.model_id.clone(),
+            model.context_window.unwrap_or(0),
+            model.max_tokens.unwrap_or(0),
+        ));
+    }
+    None
 }
 
 fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFormError> {
@@ -750,21 +866,31 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
         },
     )?);
     fields.push(summary_field(
-        "review_model",
+        "review_models",
         "模型",
-        connect
-            .draft
-            .model
-            .as_ref()
-            .map(|model| {
-                format!(
-                    "{}（Context {} · Max {}）",
-                    model.model_id,
-                    model.context_window.unwrap_or(0),
-                    model.max_tokens.unwrap_or(0),
-                )
-            })
-            .unwrap_or_else(|| "未选择".to_string()),
+        if connect.draft.models.is_empty() {
+            "未选择".to_string()
+        } else {
+            connect
+                .draft
+                .models
+                .iter()
+                .map(|model| {
+                    format!(
+                        "{}（Context {} · Max {}{}）",
+                        model.model_id,
+                        model.context_window.unwrap_or(0),
+                        model.max_tokens.unwrap_or(0),
+                        model
+                            .reasoning_effort
+                            .as_deref()
+                            .map(|effort| format!(" · {effort}"))
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("、")
+        },
     )?);
     fields.push(summary_field(
         "review_user_agent",
@@ -800,59 +926,6 @@ fn step_for_stage(stage: ConnectStage) -> Option<ConfigFormStep> {
         ConnectStage::Completed | ConnectStage::Cancelled => return None,
     };
     Some(ConfigFormStep { current, total: 8 })
-}
-
-fn model_id(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<String> {
-    connect
-        .draft
-        .model
-        .as_ref()
-        .map(|model| model.model_id.clone())
-        .or_else(|| {
-            connect
-                .draft
-                .source
-                .as_ref()
-                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
-                .and_then(|entry| entry.recommended_models.first())
-                .map(|model| model.model_id.to_string())
-        })
-}
-
-fn context_window(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<u64> {
-    connect
-        .draft
-        .model
-        .as_ref()
-        .and_then(|model| model.context_window)
-        .and_then(|value| u64::try_from(value).ok())
-        .or_else(|| {
-            connect
-                .draft
-                .source
-                .as_ref()
-                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
-                .and_then(|entry| entry.recommended_models.first())
-                .and_then(|model| u64::try_from(model.context_window).ok())
-        })
-}
-
-fn max_tokens(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> Option<u64> {
-    connect
-        .draft
-        .model
-        .as_ref()
-        .and_then(|model| model.max_tokens)
-        .map(u64::from)
-        .or_else(|| {
-            connect
-                .draft
-                .source
-                .as_ref()
-                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
-                .and_then(|entry| entry.recommended_models.first())
-                .map(|model| u64::from(model.max_tokens))
-        })
 }
 
 fn probe_status_text(status: Option<&ProbeStatusView>) -> String {

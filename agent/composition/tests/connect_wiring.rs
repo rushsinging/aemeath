@@ -367,11 +367,12 @@ async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest(
     draft.source = Some(entry.source.clone());
     draft.driver = Some(entry.driver);
     draft.base_url = Some("https://example.test".to_string());
-    draft.model = Some(config::connect::ModelDraft {
+    draft.models = vec![config::connect::ModelDraft {
         model_id: "model-1".to_string(),
         context_window: 32_000,
         max_tokens: 4_096,
-    });
+        reasoning_effort: None,
+    }];
     let adapter = GlobalConnectCommitAdapter::new(store.clone());
     let error = config::connect::ConnectCommitPort::commit(
         adapter.as_ref(),

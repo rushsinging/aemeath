@@ -78,18 +78,16 @@ pub enum ConnectCommand {
     },
 
     // --- SelectModel / EditCustomModel ---
-    /// 通过 Catalog 推荐列表的 index 选择（仅在 Catalog 推荐非空时合法）。
-    SelectRecommendedModel {
-        index: usize,
+    /// 模型页提交完整所选集合（推荐与自定义的任意组合，整体替换）。
+    SetSelectedModels {
+        models: Vec<super::draft::ModelDraft>,
     },
-    /// 切换至 EditCustomModel 阶段。Catalog 推荐为空时必须使用本命令直接
-    /// 进入自定义模型编辑。
+    /// 切换至 EditCustomModel 阶段（添加 / 编辑模型，可无限次进入）。
     EnterCustomModel,
-    /// 在 EditCustomModel 阶段提交自定义模型字段。
-    SetCustomModel {
-        model_id: String,
-        context_window: usize,
-        max_tokens: u32,
+    /// 在 EditCustomModel 阶段提交模型字段；model_id 命中已有条目即编辑
+    /// （替换属性），否则追加，随后返回模型页。
+    UpsertCustomModel {
+        model: super::draft::ModelDraft,
     },
 
     // --- ChooseGlobalDefault ---
@@ -144,10 +142,10 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
         ConnectCommand::SetEndpoint { .. } => &[EditEndpoint],
         ConnectCommand::SetCredential { .. } => &[EditCredential],
         ConnectCommand::SetProviderUserAgent { .. } => &[EditUserAgent],
-        ConnectCommand::SelectRecommendedModel { .. } | ConnectCommand::EnterCustomModel => {
+        ConnectCommand::SetSelectedModels { .. } | ConnectCommand::EnterCustomModel => {
             &[SelectModel]
         }
-        ConnectCommand::SetCustomModel { .. } => &[EditCustomModel],
+        ConnectCommand::UpsertCustomModel { .. } => &[EditCustomModel],
         ConnectCommand::SetGlobalDefault { .. } => &[ChooseGlobalDefault],
         ConnectCommand::SkipProbe | ConnectCommand::BeginProbe => &[ChooseProbe],
         ConnectCommand::ContinueAfterProbe | ConnectCommand::EditAfterProbeFailure => &[Probing],

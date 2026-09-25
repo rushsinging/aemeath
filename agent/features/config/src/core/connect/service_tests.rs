@@ -220,10 +220,26 @@ async fn ready_to_probe_for_source(
     view = advance(
         service,
         view,
-        ConnectCommand::SetCustomModel {
-            model_id: "model-1".into(),
-            context_window: 32_000,
-            max_tokens: 4_096,
+        ConnectCommand::UpsertCustomModel {
+            model: ModelDraft {
+                model_id: "model-1".to_string(),
+                context_window: 32_000,
+                max_tokens: 4_096,
+                reasoning_effort: None,
+            },
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SetSelectedModels {
+            models: vec![ModelDraft {
+                model_id: "model-1".to_string(),
+                context_window: 32_000,
+                max_tokens: 4_096,
+                reasoning_effort: None,
+            }],
         },
     )
     .await;
@@ -296,7 +312,7 @@ async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
     let entry = find_by_source("Anthropic").unwrap();
     assert!(entry.recommended_models.len() >= 2);
 
-    for (index, expected_model) in entry.recommended_models.iter().enumerate() {
+    for expected_model in entry.recommended_models.iter() {
         let initial = service
             .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
             .await;
@@ -334,10 +350,22 @@ async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
         let selected = advance(
             &service,
             models,
-            ConnectCommand::SelectRecommendedModel { index },
+            ConnectCommand::SetSelectedModels {
+                models: vec![ModelDraft {
+                    model_id: expected_model.model_id.to_string(),
+                    context_window: expected_model.context_window,
+                    max_tokens: expected_model.max_tokens,
+                    reasoning_effort: None,
+                }],
+            },
         )
         .await;
-        let selected_model = selected.draft.model.expect("推荐模型必须写入服务端 draft");
+        let selected_model = selected
+            .draft
+            .models
+            .first()
+            .expect("推荐模型必须写入服务端 draft")
+            .clone();
         assert_eq!(selected_model.model_id, expected_model.model_id);
         assert_eq!(
             selected_model.context_window,
@@ -394,15 +422,22 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
     let selected = advance(
         &service,
         models,
-        ConnectCommand::SelectRecommendedModel { index: 0 },
+        ConnectCommand::SetSelectedModels {
+            models: vec![ModelDraft {
+                model_id: "claude-fable-5-1".to_string(),
+                context_window: 1_000_000,
+                max_tokens: 65_536,
+                reasoning_effort: None,
+            }],
+        },
     )
     .await;
     assert_eq!(selected.stage, ConnectStage::ChooseGlobalDefault);
     assert_eq!(
         selected
             .draft
-            .model
-            .as_ref()
+            .models
+            .first()
             .map(|model| model.model_id.as_str()),
         Some("claude-fable-5-1")
     );
@@ -711,6 +746,21 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
         256_000,
         16_000,
         Some("ZCode/3.10.0"),
+        None,
+        vec![
+            ExistingModelSnapshot {
+                model_id: "glm-5.3".to_string(),
+                context_window: 256_000,
+                max_tokens: 16_000,
+                reasoning_effort: Some("high".to_string()),
+            },
+            ExistingModelSnapshot {
+                model_id: "my-private-model".to_string(),
+                context_window: 128_000,
+                max_tokens: 8_192,
+                reasoning_effort: None,
+            },
+        ],
     );
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -749,8 +799,9 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
     );
     let model = confirmed
         .draft
-        .model
-        .as_ref()
+        .models
+        .first()
+        .cloned()
         .expect("模型必须预填全局配置已有值");
     assert_eq!(model.model_id, "glm-5.3");
     assert_eq!(model.context_window, Some(256_000));
@@ -787,6 +838,13 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
         1_048_576,
         16_384,
         None,
+        None,
+        vec![ExistingModelSnapshot {
+            model_id: "glm-5.3".to_string(),
+            context_window: 1_048_576,
+            max_tokens: 16_384,
+            reasoning_effort: None,
+        }],
     );
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)

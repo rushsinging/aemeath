@@ -541,6 +541,39 @@ fn provider_snapshot_from_config(
         provider
             .get("userAgent")
             .and_then(serde_json::Value::as_str),
+        model
+            .and_then(|model| model.get("reasoningEffort"))
+            .and_then(serde_json::Value::as_str),
+        provider
+            .get("models")
+            .and_then(serde_json::Value::as_array)
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|model| {
+                        let id = model.get("id").and_then(serde_json::Value::as_str)?;
+                        Some(config::connect::ExistingModelSnapshot {
+                            model_id: id.to_string(),
+                            context_window: model
+                                .get("contextWindow")
+                                .and_then(serde_json::Value::as_u64)
+                                .and_then(|value| usize::try_from(value).ok())
+                                .unwrap_or_default(),
+                            max_tokens: model
+                                .get("max_tokens")
+                                .or_else(|| model.get("maxTokens"))
+                                .and_then(serde_json::Value::as_u64)
+                                .and_then(|value| u32::try_from(value).ok())
+                                .unwrap_or_default(),
+                            reasoning_effort: model
+                                .get("reasoningEffort")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     ))
 }
 
@@ -617,16 +650,25 @@ fn config_command(
         },
         Source::SetCredential { api_key } => Target::SetCredential { api_key },
         Source::SetProviderUserAgent { raw } => Target::SetProviderUserAgent { raw },
-        Source::SelectRecommendedModel { index } => Target::SelectRecommendedModel { index },
+        Source::SetSelectedModels { models } => Target::SetSelectedModels {
+            models: models
+                .into_iter()
+                .map(|model| config::connect::ModelDraft {
+                    model_id: model.model_id,
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning_effort: model.reasoning_effort,
+                })
+                .collect(),
+        },
         Source::EnterCustomModel => Target::EnterCustomModel,
-        Source::SetCustomModel {
-            model_id,
-            context_window,
-            max_tokens,
-        } => Target::SetCustomModel {
-            model_id,
-            context_window,
-            max_tokens,
+        Source::UpsertCustomModel { model } => Target::UpsertCustomModel {
+            model: config::connect::ModelDraft {
+                model_id: model.model_id,
+                context_window: model.context_window,
+                max_tokens: model.max_tokens,
+                reasoning_effort: model.reasoning_effort,
+            },
         },
         Source::SetGlobalDefault { set_as_default } => Target::SetGlobalDefault { set_as_default },
         Source::SkipProbe => Target::SkipProbe,
@@ -672,11 +714,17 @@ fn sdk_view(view: ConnectView) -> sdk::ConnectView {
             base_url: view.draft.base_url,
             has_api_key: view.draft.has_api_key,
             provider_user_agent: view.draft.provider_user_agent,
-            model: view.draft.model.map(|model| sdk::ConnectModelDraftView {
-                model_id: model.model_id,
-                context_window: model.context_window,
-                max_tokens: model.max_tokens,
-            }),
+            models: view
+                .draft
+                .models
+                .into_iter()
+                .map(|model| sdk::ConnectModelDraftView {
+                    model_id: model.model_id,
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning_effort: model.reasoning_effort,
+                })
+                .collect(),
             set_global_default: view.draft.set_global_default,
         },
         existing_provider: view.existing_provider.map(|provider| {
@@ -835,6 +883,16 @@ fn sdk_form_command(
                                 .map_err(|error| SdkError::Internal(error.display_message()))?,
                         )
                     }
+                    sdk::ConfigFormValue::SelectedOptions(values) => {
+                        let ids = values
+                            .into_iter()
+                            .map(|value| {
+                                config::form::ConfigFormOptionId::new(value.0)
+                                    .map_err(|error| SdkError::Internal(error.display_message()))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        config::form::ConfigFormValue::SelectedOptions(ids)
+                    }
                 },
             })
         })
@@ -930,6 +988,7 @@ fn sdk_form_field(field: config::form::ConfigFormField) -> sdk::ConfigFormField 
             config::form::ConfigFormFieldType::SingleSelect => {
                 sdk::ConfigFormFieldType::SingleSelect
             }
+            config::form::ConfigFormFieldType::MultiSelect => sdk::ConfigFormFieldType::MultiSelect,
             config::form::ConfigFormFieldType::Boolean => sdk::ConfigFormFieldType::Boolean,
             config::form::ConfigFormFieldType::Summary => sdk::ConfigFormFieldType::Summary,
             config::form::ConfigFormFieldType::Status => sdk::ConfigFormFieldType::Status,

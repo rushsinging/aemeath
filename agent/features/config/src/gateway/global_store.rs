@@ -252,10 +252,9 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
         .base_url
         .as_ref()
         .ok_or(GlobalConfigStoreError::InvalidDraft("base_url"))?;
-    let model = draft
-        .model
-        .as_ref()
-        .ok_or(GlobalConfigStoreError::InvalidDraft("model"))?;
+    if draft.models.is_empty() {
+        return Err(GlobalConfigStoreError::InvalidDraft("model"));
+    }
     let root = root
         .as_object_mut()
         .ok_or_else(|| GlobalConfigStoreError::InvalidDocument("根节点必须是对象".to_string()))?;
@@ -284,7 +283,28 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
             .or(existing_api_key)
             .unwrap_or_else(|| Value::String(String::new())),
     );
-    provider.insert("models".to_string(), Value::Array(vec![serde_json::json!({"id": model.model_id, "name": model.model_id, "input": ["text"], "contextWindow": model.context_window, "max_tokens": model.max_tokens})]));
+    let model_values: Vec<Value> = draft
+        .models
+        .iter()
+        .map(|model| {
+            let mut entry = serde_json::json!({
+                "id": model.model_id,
+                "name": model.model_id,
+                "input": ["text"],
+                "contextWindow": model.context_window,
+                "max_tokens": model.max_tokens,
+            });
+            if let Some(effort) = model
+                .reasoning_effort
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                entry["reasoningEffort"] = Value::String(effort.trim().to_string());
+            }
+            entry
+        })
+        .collect();
+    provider.insert("models".to_string(), Value::Array(model_values));
     if let Some(user_agent) = draft
         .provider_user_agent
         .as_ref()
@@ -312,7 +332,15 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
     if draft.set_global_default {
         models.insert(
             "default".to_string(),
-            Value::String(format!("{}/{}", source.as_str(), model.model_id)),
+            Value::String(format!(
+                "{}/{}",
+                source.as_str(),
+                draft
+                    .models
+                    .first()
+                    .map(|model| model.model_id.as_str())
+                    .unwrap_or_default()
+            )),
         );
     }
     Ok(root.clone().into())

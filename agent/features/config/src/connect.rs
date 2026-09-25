@@ -48,7 +48,7 @@ pub use outcome::ConnectOutcome;
 pub use service::{ConnectAppService, ConnectAppServiceBuilder};
 pub use states::{
     ConnectOrigin, ConnectRevision, ConnectSessionId, ConnectStage, DriverIdOrString,
-    ExistingCredentialStatus, ExistingProviderSnapshot,
+    ExistingCredentialStatus, ExistingModelSnapshot, ExistingProviderSnapshot,
 };
 pub use view::{
     AvailableAction, ConnectDraftView, ConnectView, ExistingProviderSummary, ModelDraftView,

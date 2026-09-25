@@ -7,12 +7,14 @@ use crate::tui::render::theme;
 
 const WIDE_LAYOUT_MIN_WIDTH: u16 = 72;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigFormInteraction {
     pub(crate) focused_field: usize,
     pub(crate) selected_option: usize,
     pub(crate) focused_action: usize,
     pub(crate) input_cursor_column: Option<usize>,
+    /// MultiSelect 字段的勾选集合（字段索引 → 勾选 option 索引集合）。
+    pub(crate) multi_selection: std::collections::HashMap<usize, std::collections::HashSet<usize>>,
 }
 
 pub(crate) fn render_config_form(
@@ -49,11 +51,11 @@ pub(crate) fn render_config_form(
         .split(inner);
     render_header(frame, view, rows[0]);
     if area.width >= WIDE_LAYOUT_MIN_WIDTH {
-        render_wide_body(frame, view, rows[1], scroll, interaction);
+        render_wide_body(frame, view, rows[1], scroll, &interaction);
     } else {
-        render_narrow_body(frame, view, rows[1], scroll, interaction);
+        render_narrow_body(frame, view, rows[1], scroll, &interaction);
     }
-    render_footer(frame, view, visible_input, rows[2], interaction);
+    render_footer(frame, view, visible_input, rows[2], &interaction);
 }
 
 fn render_header(frame: &mut ratatui::Frame<'_>, view: &sdk::ConfigFormView, area: Rect) {
@@ -79,7 +81,7 @@ fn render_wide_body(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
-    interaction: ConfigFormInteraction,
+    interaction: &ConfigFormInteraction,
 ) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
@@ -94,7 +96,7 @@ fn render_narrow_body(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
-    interaction: ConfigFormInteraction,
+    interaction: &ConfigFormInteraction,
 ) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -109,7 +111,7 @@ fn render_fields(
     view: &sdk::ConfigFormView,
     area: Rect,
     scroll: u16,
-    interaction: ConfigFormInteraction,
+    interaction: &ConfigFormInteraction,
 ) {
     let items = view
         .page
@@ -139,6 +141,33 @@ fn render_fields(
                                 is_focused && option_index == interaction.selected_option;
                             let option_marker = if selected { "    ● " } else { "    ○ " };
                             let option_style = if selected {
+                                Style::default().fg(theme::ACCENT_BRIGHT)
+                            } else {
+                                Style::default().fg(theme::TEXT)
+                            };
+                            ListItem::new(Line::from(vec![
+                                Span::styled(option_marker, Style::default().fg(theme::ACCENT)),
+                                Span::styled(&option.label, option_style),
+                            ]))
+                        }),
+                );
+            } else if field.field_type == sdk::ConfigFormFieldType::MultiSelect {
+                let empty = std::collections::HashSet::new();
+                let chosen = interaction
+                    .multi_selection
+                    .get(&field_index)
+                    .unwrap_or(&empty);
+                lines.extend(
+                    field
+                        .options
+                        .iter()
+                        .enumerate()
+                        .map(|(option_index, option)| {
+                            let highlighted =
+                                is_focused && option_index == interaction.selected_option;
+                            let checked = chosen.contains(&option_index);
+                            let option_marker = if checked { "    ☑ " } else { "    ☐ " };
+                            let option_style = if highlighted {
                                 Style::default().fg(theme::ACCENT_BRIGHT)
                             } else {
                                 Style::default().fg(theme::TEXT)
@@ -223,7 +252,7 @@ fn render_footer(
     view: &sdk::ConfigFormView,
     visible_input: &str,
     area: Rect,
-    interaction: ConfigFormInteraction,
+    interaction: &ConfigFormInteraction,
 ) {
     let mut action_spans = Vec::new();
     for (action_index, action) in view.page.actions.iter().enumerate() {

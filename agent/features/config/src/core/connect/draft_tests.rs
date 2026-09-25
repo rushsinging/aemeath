@@ -8,6 +8,7 @@ fn model_draft_rejects_zero_window_or_max_tokens() {
         model_id: "x".into(),
         context_window: 0,
         max_tokens: 1,
+        reasoning_effort: None,
     };
     assert!(matches!(
         zero_window.validate(),
@@ -17,6 +18,7 @@ fn model_draft_rejects_zero_window_or_max_tokens() {
         model_id: "x".into(),
         context_window: 100,
         max_tokens: 0,
+        reasoning_effort: None,
     };
     assert!(matches!(
         zero_tokens.validate(),
@@ -30,6 +32,7 @@ fn model_draft_rejects_max_tokens_above_window() {
         model_id: "x".into(),
         context_window: 100,
         max_tokens: 200,
+        reasoning_effort: None,
     };
     assert!(matches!(
         bad.validate(),

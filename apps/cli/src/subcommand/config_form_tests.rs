@@ -136,6 +136,48 @@ fn summary_only_page_enter_invokes_focused_action() {
 }
 
 #[test]
+fn actions_page_enter_triggers_primary_action_by_default() {
+    // ChooseProbe 页 actions [跳过测试(secondary), 测试连接(primary), 取消]：
+    // 回车必须默认触发 primary（测试连接），而不是第一个（跳过测试）——
+    // 否则用户以为在测试，实际跳过导致"没有显示结果"。
+    let mut view = secret_view();
+    view.page.id = sdk::ConfigFormPageId("choose_probe".to_string());
+    view.page.fields = Vec::new();
+    view.page.actions = vec![
+        sdk::ConfigFormAction {
+            id: sdk::ConfigFormActionId("skip_probe".to_string()),
+            label: "跳过测试".to_string(),
+            style: sdk::ConfigFormActionStyle::Secondary,
+            shortcut: None,
+        },
+        sdk::ConfigFormAction {
+            id: sdk::ConfigFormActionId("begin_probe".to_string()),
+            label: "测试连接".to_string(),
+            style: sdk::ConfigFormActionStyle::Primary,
+            shortcut: None,
+        },
+        sdk::ConfigFormAction {
+            id: sdk::ConfigFormActionId("cancel".to_string()),
+            label: "取消".to_string(),
+            style: sdk::ConfigFormActionStyle::Destructive,
+            shortcut: None,
+        },
+    ];
+
+    let mut model = ConfigFormModel::new(view);
+
+    let effect = model.update(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(
+            effect,
+            Some(ConfigFormEffect::InvokeAction { command })
+                if command.action_id.as_str() == "begin_probe"
+        ),
+        "回车必须默认触发 primary action（测试连接）"
+    );
+}
+
+#[test]
 fn select_page_preselects_option_matching_display_value() {
     // 已有配置预填的模型（has_value + display_value）在进入 select 页时
     // 必须直接高亮对应 option，而不是从第一项开始。

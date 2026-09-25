@@ -34,6 +34,17 @@ pub enum ConnectStage {
     Cancelled,
 }
 
+/// Connect 向导的模型规格（多选提交 / 自定义模型 upsert 载荷）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ConnectModelSpec {
+    pub model_id: String,
+    pub context_window: usize,
+    pub max_tokens: u32,
+    /// 固定推理档位（off/minimal/low/medium/high/xhigh/max）；None 用全局默认。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectCommand {
@@ -58,14 +69,12 @@ pub enum ConnectCommand {
     SetProviderUserAgent {
         raw: Option<String>,
     },
-    SelectRecommendedModel {
-        index: usize,
+    SetSelectedModels {
+        models: Vec<ConnectModelSpec>,
     },
     EnterCustomModel,
-    SetCustomModel {
-        model_id: String,
-        context_window: usize,
-        max_tokens: u32,
+    UpsertCustomModel {
+        model: ConnectModelSpec,
     },
     SetGlobalDefault {
         set_as_default: bool,
@@ -82,6 +91,8 @@ pub struct ConnectModelDraftView {
     pub model_id: String,
     pub context_window: Option<usize>,
     pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -91,7 +102,7 @@ pub struct ConnectDraftView {
     pub base_url: Option<String>,
     pub has_api_key: bool,
     pub provider_user_agent: Option<String>,
-    pub model: Option<ConnectModelDraftView>,
+    pub models: Vec<ConnectModelDraftView>,
     pub set_global_default: bool,
 }
 

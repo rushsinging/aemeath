@@ -40,6 +40,8 @@ pub struct ModelDraftView {
     pub model_id: String,
     pub context_window: Option<usize>,
     pub max_tokens: Option<u32>,
+    /// 固定推理档位；None 用全局默认。
+    pub reasoning_effort: Option<String>,
 }
 
 /// Connect draft 的无密钥投影。
@@ -55,7 +57,7 @@ pub struct ConnectDraftView {
     pub provider_user_agent: Option<String>,
     /// 已保留凭证的展示掩码（首 4 + `****` + 尾 4）。
     pub credential_mask: Option<String>,
-    pub model: Option<ModelDraftView>,
+    pub models: Vec<ModelDraftView>,
     pub set_global_default: bool,
 }
 

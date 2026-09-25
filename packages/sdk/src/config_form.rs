@@ -40,6 +40,7 @@ pub enum ConfigFormFieldType {
     Secret,
     Number,
     SingleSelect,
+    MultiSelect,
     Boolean,
     Summary,
     Status,
@@ -53,6 +54,7 @@ pub enum ConfigFormValue {
     Number(u64),
     Boolean(bool),
     SelectedOption(ConfigFormOptionId),
+    SelectedOptions(Vec<ConfigFormOptionId>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

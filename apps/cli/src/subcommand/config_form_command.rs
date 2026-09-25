@@ -26,6 +26,8 @@ pub(crate) struct ConfigFormModel {
     field_inputs: Vec<String>,
     input_cursor: usize,
     selected_option: usize,
+    /// MultiSelect 字段的勾选集合（字段索引 → 勾选的 option 索引集合）。
+    multi_selection: std::collections::HashMap<usize, std::collections::HashSet<usize>>,
     focused_action: usize,
     scroll: u16,
 }
@@ -38,6 +40,8 @@ impl ConfigFormModel {
             .unwrap_or_default();
         let input_cursor = input.chars().count();
         let field_inputs = initial_field_inputs(&view);
+        let focused_action = initial_focused_action(&view);
+        let multi_selection = multi_selection_from_view(&view);
         Self {
             view,
             focused_field: 0,
@@ -45,7 +49,8 @@ impl ConfigFormModel {
             field_inputs,
             input_cursor,
             selected_option: 0,
-            focused_action: 0,
+            multi_selection,
+            focused_action,
             scroll: 0,
         }
     }
@@ -59,7 +64,8 @@ impl ConfigFormModel {
         self.view = view;
         self.focused_field = 0;
         self.selected_option = self.initial_selected_option();
-        self.focused_action = 0;
+        self.multi_selection = multi_selection_from_view(&self.view);
+        self.focused_action = initial_focused_action(&self.view);
         self.scroll = 0;
         self.field_inputs = initial_field_inputs(&self.view);
         self.input = self.field_inputs.first().cloned().unwrap_or_default();
@@ -94,6 +100,7 @@ impl ConfigFormModel {
             selected_option: self.selected_option,
             focused_action: self.focused_action,
             input_cursor_column: self.input_cursor_column(),
+            multi_selection: self.multi_selection.clone(),
         }
     }
 
@@ -178,6 +185,13 @@ impl ConfigFormModel {
                 }
                 None
             }
+            // MultiSelect：空格切换当前高亮 option 的勾选。
+            KeyCode::Char(' ')
+                if self.focused_field_type() == Some(sdk::ConfigFormFieldType::MultiSelect) =>
+            {
+                self.toggle_multi_selection();
+                None
+            }
             KeyCode::Char(character) => {
                 if self.accepts_text_input() {
                     insert_character(&mut self.input, self.input_cursor, character);
@@ -200,6 +214,15 @@ impl ConfigFormModel {
                 session_id: self.view.session_id.clone(),
             })
         })
+    }
+
+    fn toggle_multi_selection(&mut self) {
+        let field_index = self.focused_field;
+        let selected = self.selected_option;
+        let chosen = self.multi_selection.entry(field_index).or_default();
+        if !chosen.insert(selected) {
+            chosen.remove(&selected);
+        }
     }
 
     fn save_focused_field_input(&mut self) {
@@ -277,6 +300,21 @@ impl ConfigFormModel {
                     sdk::ConfigFormFieldType::SingleSelect => {
                         let option = field.options.get(self.selected_option)?;
                         sdk::ConfigFormValue::SelectedOption(option.id.clone())
+                    }
+                    sdk::ConfigFormFieldType::MultiSelect => {
+                        let chosen = self
+                            .multi_selection
+                            .get(&index)
+                            .cloned()
+                            .unwrap_or_default();
+                        let ids: Vec<sdk::ConfigFormOptionId> = field
+                            .options
+                            .iter()
+                            .enumerate()
+                            .filter(|(option_index, _)| chosen.contains(option_index))
+                            .map(|(_, option)| option.id.clone())
+                            .collect();
+                        sdk::ConfigFormValue::SelectedOptions(ids)
                     }
                     sdk::ConfigFormFieldType::Summary | sdk::ConfigFormFieldType::Status => {
                         return None;
@@ -497,6 +535,49 @@ fn remove_character(value: &mut String, character_index: usize) {
     if start < end {
         value.replace_range(start..end, "");
     }
+}
+
+/// action 驱动页（无字段）的初始焦点：指向 Primary 样式按钮（如
+/// "测试连接" / "保存"），无 Primary 时回落第一个。否则回车默认触发
+/// 第一个 action（如"跳过测试"），用户以为在测试实际被跳过。
+/// MultiSelect 字段的初始勾选：display_value 存放已选 option label 的
+/// 逗号分隔串（表单层生成）；据此恢复勾选索引。
+fn multi_selection_from_view(
+    view: &sdk::ConfigFormView,
+) -> std::collections::HashMap<usize, std::collections::HashSet<usize>> {
+    let mut selection = std::collections::HashMap::new();
+    for (field_index, field) in view.page.fields.iter().enumerate() {
+        if field.field_type != sdk::ConfigFormFieldType::MultiSelect {
+            continue;
+        }
+        let Some(display) = field.display_value.as_deref() else {
+            continue;
+        };
+        let chosen: std::collections::HashSet<&str> = display
+            .split(',')
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .collect();
+        let indexes: std::collections::HashSet<usize> = field
+            .options
+            .iter()
+            .enumerate()
+            .filter(|(_, option)| chosen.contains(option.label.as_str()))
+            .map(|(index, _)| index)
+            .collect();
+        if !indexes.is_empty() {
+            selection.insert(field_index, indexes);
+        }
+    }
+    selection
+}
+
+fn initial_focused_action(view: &sdk::ConfigFormView) -> usize {
+    view.page
+        .actions
+        .iter()
+        .position(|action| action.style == sdk::ConfigFormActionStyle::Primary)
+        .unwrap_or(0)
 }
 
 fn initial_field_inputs(view: &sdk::ConfigFormView) -> Vec<String> {
