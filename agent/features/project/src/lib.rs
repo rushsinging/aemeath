@@ -1,3 +1,19 @@
+//! Project：workspace/worktree 的探测、装配与生命周期。
+//!
+//! # Published Language（#1711 收敛后，14 实体）
+//!
+//! | 类别 | 实体 | 消费者 |
+//! |---|---|---|
+//! | 装配 | `wire_production_workspace` | composition、runtime、tools |
+//! | Port | `WorkspaceRead`、`WorkspaceControl`、`WorkspacePersist`、`WorkspaceViews`、`WorkspaceWiring` | context、runtime、tools、composition |
+//! | 核心类型 | `ProjectIdentity`、`WorkspaceId`、`WorktreeKind`、`WorkspaceFrame` | 广泛（cli TUI 10 处、share、context） |
+//! | 恢复 | `PreparedWorkspaceRestore`、`WorkspaceRestoreError` | context |
+//! | 错误 | `WorkspaceError` | tools |
+//!
+//! 边界判定：全部符号有跨 crate 生产消费实锤；错误家族
+//! `WorkspaceError`/`WorkspaceRestoreError` 消费面为窄域单点（tools/context），
+//! 保留双错误形态（折叠为 ProjectError 的收益不足，记录于本判定）。
+
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
 mod adapters;
 mod domain;

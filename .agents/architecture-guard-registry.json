@@ -1006,6 +1006,8 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "contract",
+        "contract.rs",
         "domain",
         "domain.rs",
         "lib.rs"
@@ -1510,7 +1512,6 @@
         "value": "agent/features/config/src"
       },
       "allowed_symbols": [
-        "CliArgsAdapter",
         "CliConfigInput",
         "ConfigAppService",
         "ConfigChangeCause",
@@ -1518,7 +1519,6 @@
         "ConfigCommitWarning",
         "ConfigError",
         "ConfigField",
-        "ConfigPersistError",
         "ConfigPersistOutcome",
         "ConfigQuery",
         "ConfigQueryError",
@@ -1528,8 +1528,6 @@
         "ConfigUpdate",
         "ConfigUpdateError",
         "ConfigWriter",
-        "EnvAdapter",
-        "FileAdapter",
         "NativeConfigStore",
         "PreparedConfigUpdate",
         "PreparedProjectConfig",
@@ -1800,15 +1798,13 @@
       "allowed_symbols": [
         "AllowAllPolicy",
         "ApprovalSubject",
-        "AuthorizationContext",
         "ConfiguredPolicy",
         "PolicyDecision",
         "PolicyMode",
         "PolicyModeSource",
         "PolicyPort",
         "PolicyReason",
-        "PolicyRequest",
-        "StandardPolicy"
+        "PolicyRequest"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"

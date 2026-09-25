@@ -18,6 +18,7 @@ impl<S: PolicyModeSource> PolicyPort for ConfiguredPolicy<S> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct StandardPolicy;
 
 impl PolicyPort for StandardPolicy {

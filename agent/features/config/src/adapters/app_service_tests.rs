@@ -24,7 +24,7 @@ async fn cli_layer_overrides_env() {
         )]))),
     );
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(
+        .set_cli_patch(crate::adapters::CliArgsAdapter::read(
             &crate::adapters::CliConfigInput {
                 api_key: Some("cli-key".into()),
                 model: Some("cli-model".into()),
@@ -221,7 +221,7 @@ async fn cli_permission_override_remains_highest_after_dynamic_update() {
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(
+        .set_cli_patch(crate::adapters::CliArgsAdapter::read(
             &crate::adapters::CliConfigInput {
                 allow_all: true,
                 ..Default::default()
@@ -274,7 +274,7 @@ async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
             std::collections::HashMap::from([("AEMEATH_MODEL".into(), "env".into())]),
         )));
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(
+        .set_cli_patch(crate::adapters::CliArgsAdapter::read(
             &crate::adapters::CliConfigInput {
                 model: Some("cli".into()),
                 ..Default::default()

@@ -1,17 +1,31 @@
+//! Config：分层配置的读取、合并与提交（含 wire 工厂）。
+//!
+//! # Published Language（#1706 本批小步收敛后）
+//!
+//! | 类别 | 实体 | 消费者 |
+//! |---|---|---|
+//! | 装配工厂 | `wire_project_config*`、`native_override_store`、`ConfigWiring` | composition |
+//! | Port | `ConfigReader`、`ConfigWriter`、`ConfigQuery`、`ConfigSubscription`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
+//! | 服务 | `ConfigAppService`、`NativeConfigStore` | composition、share snapshot |
+//! | DTO | `ConfigUpdate`、`ConfigChangeSet`、`ConfigField`、`ConfigChangeCause`、`ConfigRefreshOutcome`、`ConfigPersistOutcome`、`PreparedConfigUpdate`、`PreparedProjectConfig`、`ProjectConfigLocation`、`CliConfigInput` | context、runtime、sdk、cli |
+//! | 错误 | `ConfigError`、`ConfigQueryError`、`ConfigUpdateError`、`ProjectConfigLocationError` | context、runtime（match 消费面活跃） |
+//! //!
+//! 边界判定：`CliArgsAdapter`/`EnvAdapter`/`FileAdapter` 为 wire 工厂内部实现收窄 crate 内（此前消费分析误报：share/config 存在另一套同名独立实现，词命中假阳性）；`ConfigPersistError` 本批收窄 crate 内（context 测试断言改行为级）；
+//! 错误家族 4 个有活跃 match 消费，折叠为统一 `ConfigError` 属后续设计决策
+//! （需随消费方错误处理重构一并评审），本批记录判定不硬做。
+
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
 mod adapters;
 mod domain;
 mod ports;
 
-pub use adapters::{
-    CliArgsAdapter, CliConfigInput, ConfigAppService, EnvAdapter, FileAdapter, NativeConfigStore,
-};
+pub use adapters::{CliConfigInput, ConfigAppService, NativeConfigStore};
 pub use domain::{
     ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome,
-    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError,
+    ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate,
+    ConfigUpdateError, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
+    ProjectConfigLocationError,
 };
 pub use ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
 
@@ -66,7 +80,9 @@ pub async fn wire_project_config_with_cli(
     let result = async {
         let service =
             std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
-        service.set_cli_patch(CliArgsAdapter::read(&cli)).await;
+        service
+            .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
+            .await;
         service.load().await.map_err(ConfigError::Load)?;
         Ok(ConfigWiring { service })
     }
@@ -125,7 +141,9 @@ pub async fn wire_project_config_with_agents_dir(
                 .with_native_store(native_store),
         );
         service.set_project_location(location);
-        service.set_cli_patch(CliArgsAdapter::read(&cli)).await;
+        service
+            .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
+            .await;
         service.load().await.map_err(ConfigError::Load)?;
         Ok(ConfigWiring { service })
     }
