@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    native_override_store, ConfigAppService, ConfigReader, ConfigUpdateData,
+    wire_config_override_store, ConfigAppService, ConfigReader, ConfigUpdateData,
     ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
@@ -273,7 +273,7 @@ async fn build_with_store_harness() -> FacadeHarness {
     let storage = storage::file_system_blob(tmp.path()).unwrap();
     let config_service = Arc::new(
         ConfigAppService::with_global_path(None, tmp.path().join("global.json"))
-            .with_native_store(native_override_store(storage)),
+            .with_native_store(wire_config_override_store(storage)),
     );
     let memory_opener = Arc::new(TrackingMemoryOpener::new());
     build_facade_harness(tmp, config_service, memory_opener).await

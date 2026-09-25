@@ -214,7 +214,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let temp = tempfile::tempdir().unwrap();
     let config = config::wire_project_config(
         temp.path(),
-        config::native_override_store(storage::file_system_blob(temp.path()).unwrap()),
+        config::wire_config_override_store(storage::file_system_blob(temp.path()).unwrap()),
     )
     .await
     .unwrap();

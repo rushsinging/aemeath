@@ -522,7 +522,7 @@ pub struct NativeConfigStore {
 
 impl NativeConfigStore {
     /// 构造仅限 config crate 内部与测试；crate 外一律经 crate 根
-    /// `native_override_store` 工厂装配，散落构造在编译期不可达。
+    /// `wire_config_override_store` 工厂装配，散落构造在编译期不可达。
     pub(crate) fn new(storage: Arc<dyn AtomicBlobPort>) -> Self {
         Self { storage }
     }

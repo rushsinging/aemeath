@@ -4,7 +4,7 @@
 //!
 //! | 类别 | 实体 | 消费者 |
 //! |---|---|---|
-//! | 装配工厂 | `wire_project_config*`、`native_override_store`、`ConfigWiring` | composition |
+//! | 装配工厂 | `wire_project_config*`、`wire_config_override_store`、`ConfigWiring` | composition |
 //! | Port | `ConfigReader`（读轨合一：committed + async snapshot/subscribe，ConfigQuery 消亡）、`ConfigWriter`、`ConfigSubscriptionData`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
 //! | 服务 | `ConfigAppService`、`NativeConfigStore` | composition、share snapshot |
 //! | DTO | `ConfigUpdateData`、`ConfigChangeData`、`ConfigFieldData`、`ConfigChangeCauseData`、`ConfigRefreshOutcomeData`、`ConfigPersistOutcomeData`、`PreparedConfigUpdateData`、`PreparedProjectConfigData`、`ProjectConfigLocationData`、`CliConfigInputData` | context、runtime、sdk、cli |
@@ -59,7 +59,7 @@ impl ConfigWiring {
 /// （composition）经 `storage::file_system_blob` 选定，config 不拥有
 /// 文件系统实现选择权；`NativeConfigStore::new` 已收窄 `pub(crate)`，
 /// crate 外散落构造在编译期不可达。
-pub fn native_override_store(
+pub fn wire_config_override_store(
     blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
 ) -> NativeConfigStore {
     NativeConfigStore::new(blob)
