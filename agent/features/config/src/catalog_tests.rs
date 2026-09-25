@@ -27,6 +27,7 @@ const EXPECTED_SOURCES: &[(&str, &str)] = &[
     ("Z.ai Coding Plan", "zhipu"),
     ("LiteLLM", "litellm"),
     ("Minimax", "minimax"),
+    ("Minimax.io", "minimax"),
     ("Mimo", "mimo"),
     ("DeepSeek", "deepseek"),
     ("Agnes", "agnes"),

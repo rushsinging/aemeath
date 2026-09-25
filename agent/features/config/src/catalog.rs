@@ -477,6 +477,21 @@ const MINIMAX_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
+/// Minimax.io 是 MiniMax 面向海外用户的国际平台（美元计价），与国内平台
+/// 同模型体系但账号、余额与 API Key 互不通用。
+const MINIMAX_INTERNATIONAL_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
+    source: ProviderSource::new("Minimax.io"),
+    driver: DriverId::new("minimax"),
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://api.minimax.io/v1",
+        evidence_url: "https://platform.minimax.io/docs/api-reference/text-openai-api",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+    recommended_models: MINIMAX_MODELS,
+    api_key_hint: Some("MiniMax Platform (International) → API Keys"),
+    official_sdk_user_agent: None,
+};
+
 /// Xiaomi MiMo Catalog 条目。
 ///
 /// `mimo-v2-pro` / `mimo-v2-flash` 等旧模型已于 2026-06-30 下线，
@@ -585,6 +600,7 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
     ZAI_CODING_PLAN_ENTRY,
     LITELLM_ENTRY,
     MINIMAX_ENTRY,
+    MINIMAX_INTERNATIONAL_ENTRY,
     MIMO_ENTRY,
     DEEPSEEK_ENTRY,
     AGNES_ENTRY,
