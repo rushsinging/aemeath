@@ -95,7 +95,7 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
         similarity_threshold: config.similarity_threshold as f32,
         reflection: ReflectionConfigView {
             enabled: config.reflection.enabled,
-            interval_run_steps: config.reflection.interval_run_steps,
+            interval_runs: config.reflection.interval_runs,
             auto_apply_suggestions: config.reflection.auto_apply_suggestions,
         },
     }

@@ -329,7 +329,7 @@ pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
-    pub interval_run_steps: Option<usize>,
+    pub interval_runs: Option<usize>,
     #[serde(default)]
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
@@ -804,8 +804,8 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.enabled {
         base.enabled = v;
     }
-    if let Some(v) = patch.interval_run_steps {
-        base.interval_run_steps = v;
+    if let Some(v) = patch.interval_runs {
+        base.interval_runs = v;
     }
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;

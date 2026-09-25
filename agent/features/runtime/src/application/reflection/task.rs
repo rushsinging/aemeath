@@ -178,10 +178,7 @@ impl ReflectionTaskAdapter {
         memory: std::sync::Arc<dyn MemoryPort>,
         history: std::sync::Arc<dyn ReflectionHistoryStore>,
     ) -> ReflectionTaskSubmitOutcome {
-        if !config.enabled
-            || !config.reflection.enabled
-            || config.reflection.interval_run_steps == 0
-        {
+        if !config.enabled || !config.reflection.enabled || config.reflection.interval_runs == 0 {
             return ReflectionTaskSubmitOutcome::DisabledSkipped;
         }
         let trigger = request.trigger;

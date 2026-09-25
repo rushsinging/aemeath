@@ -90,9 +90,32 @@ Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息�
 
 | 时机 | Trigger | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
-| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_turns`（默认 10）轮结束时提交；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
+| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Run 触发一次；计数 per-session，`/clear` 与 resume 切换后从 0 重数；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
 | **Pre-compact** | `PreCompact` | Runtime 单槽异步 submit | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才 submit，不等待 Reflection |
-| **手动请求** | `Manual` | Runtime 单槽异步 submit | Runtime 显式请求入口（#1289） | 与另两种 trigger 共用 slot；busy 时同样 skip；`/reflect [limit]` **NEVER** 进入此入口 |
+| **手动请求** | `Manual` | Runtime 单槽异步 submit | `/reflect-now` 命令（#1289） | 与另两种 trigger 共用 slot；busy 时同样 skip；`/reflect [limit]` **NEVER** 进入此入口 |
+
+### Manual 显式入口链路（#1289）
+
+用户唯一可见入口是 slash 命令 `/reflect-now`（无参数）。链路与 `/compact` 同构，但 busy 语义相反：
+
+```text
+TUI "/reflect-now"
+  → Tools Command Catalog: ApplicationControl / Memory target（补全与路由描述）
+  → SDK ChatInputEvent::ReflectNow
+  → Runtime input gate:
+      idle → PendingCommand::ReflectNow（不启动新 Run）
+      busy → CommandResultText("Reflection 正在运行…") 后丢弃，NEVER 排队
+  → run_launch handler:
+      memory/reflection 未启用 → CommandResultText(DisabledSkipped 文案)
+      bind_main_run → session.structured_messages() 冻结 owned 快照
+      submit_manual_reflection(ReflectionTaskTrigger::Manual, snapshot)
+        ├─ BusySkipped → 受理提示（不重试）
+        └─ Accepted   → CommandResultText("已开始，结果仅写入历史，/reflect 查询")
+```
+
+- **消息快照来源**：idle 时经 `MainSessionWiring::bind_main_run` 读取 committed CanonicalSession 的 `structured_messages()`（与 `/sessions` 列表同一投影），即当前可见 active 历史；不包含 system 注入。
+- **受理即返回**：submit 非阻塞；成功、失败与取消只写入 Memory-owned history record，不向 chat 投影正文（同另两种 trigger）。
+- **busy 双层语义**：gate 层（Run 进行中）直接提示跳过；slot 层（单槽被 Interval/PreCompact/前一次 Manual 占用）由 `BusySkipped` 表达，同样只提示不排队。
 
 ### 异步执行模型
 
@@ -302,6 +325,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-25 | #1289 接通 Manual 显式入口：Tools catalog `/reflect-now` → SDK `ChatInputEvent::ReflectNow` → input gate（idle 受理 / busy 提示丢弃，NEVER 排队）→ run_launch handler 冻结 `structured_messages()` 快照 submit 单槽 | #1289 |
 | 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照提交；Manual 显式入口拆分至 #1289 | #1284/#1289 |
 | 2026-07-20 | #1283 将 parse 错误收窄为不含模型原文的稳定类别，且 `ReflectionHistoryQuery` 仅发布安全摘要；完整 record 保持在 Memory adapter 内部 | #1283 |

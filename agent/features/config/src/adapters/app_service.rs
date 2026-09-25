@@ -236,7 +236,7 @@ fn patch_for_update(
                     inject_token_budget: Some(config.inject_token_budget),
                     reflection: Some(share::config::domain::merge::ReflectionConfigPatch {
                         enabled: Some(config.reflection.enabled),
-                        interval_run_steps: Some(config.reflection.interval_run_steps),
+                        interval_runs: Some(config.reflection.interval_runs),
                         auto_apply_suggestions: Some(config.reflection.auto_apply_suggestions),
                         clear_model: config.reflection.model.is_none(),
                         model: config.reflection.model,

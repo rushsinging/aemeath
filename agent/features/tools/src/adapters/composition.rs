@@ -314,6 +314,14 @@ fn builtin_command_descriptors(
             A::OptionalPositiveUsize { default: 10 },
         ),
         (
+            "reflect-now",
+            &[],
+            "Run reflection now",
+            M::ApplicationControl,
+            T::Memory,
+            A::None,
+        ),
+        (
             "update",
             &[],
             "Update aemeath",
