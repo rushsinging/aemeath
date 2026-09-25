@@ -187,13 +187,11 @@ pub struct ExistingProviderSnapshot {
 
 /// 由明文凭证计算展示掩码：长度 ≥ 12 时首 4 + `****` + 尾 4，否则整体 `****`。
 fn mask_credential(api_key: &str) -> String {
-    let chars: Vec<char> = api_key.chars().collect();
-    if chars.len() >= 12 {
-        format!(
-            "{}****{}",
-            chars[..4].iter().collect::<String>(),
-            chars[chars.len() - 4..].iter().collect::<String>()
-        )
+    let char_count = api_key.chars().count();
+    if char_count >= 12 {
+        let head: String = api_key.chars().take(4).collect();
+        let tail: String = api_key.chars().skip(char_count - 4).collect();
+        format!("{head}****{tail}")
     } else {
         "****".to_string()
     }
