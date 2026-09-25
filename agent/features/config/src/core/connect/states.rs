@@ -178,6 +178,8 @@ pub struct ExistingProviderSnapshot {
     pub model_id: Option<String>,
     pub context_window: Option<usize>,
     pub max_tokens: Option<u32>,
+    /// 全局配置中该 Provider 的专属 UA（`userAgent`，已归一化空白）。
+    pub user_agent: Option<String>,
 }
 
 /// 现有 Provider 的 driver 投影。Catalog 必须先存在才能构造 connector；
@@ -225,6 +227,7 @@ impl ExistingProviderSnapshot {
         model_id: &str,
         context_window: usize,
         max_tokens: u32,
+        user_agent: Option<&str>,
     ) -> Self {
         let api_key_status = if api_key.is_some_and(|value| !value.is_empty()) {
             ExistingCredentialStatus::Present
@@ -244,6 +247,10 @@ impl ExistingProviderSnapshot {
         } else {
             Some(model_id.to_string())
         };
+        let normalized_user_agent = user_agent.and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        });
         Self {
             source_key: source.to_string(),
             driver,
@@ -252,6 +259,7 @@ impl ExistingProviderSnapshot {
             model_id: model_id_opt,
             context_window: (context_window > 0).then_some(context_window),
             max_tokens: (max_tokens > 0).then_some(max_tokens),
+            user_agent: normalized_user_agent,
         }
     }
 

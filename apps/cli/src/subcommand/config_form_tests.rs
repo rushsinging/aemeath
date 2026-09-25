@@ -61,6 +61,63 @@ fn view_replacement_clears_secret_and_uses_server_revision() {
     assert_eq!(model.view().revision, sdk::ConfigFormRevision(2));
 }
 
+fn select_page_view_with_selected_model() -> sdk::ConfigFormView {
+    let mut view = secret_view();
+    view.page.id = sdk::ConfigFormPageId("select_model".to_string());
+    view.page.fields = vec![sdk::ConfigFormField {
+        id: sdk::ConfigFormFieldId("recommended_model".to_string()),
+        label: "模型".to_string(),
+        description: None,
+        field_type: sdk::ConfigFormFieldType::SingleSelect,
+        required: true,
+        has_value: true,
+        display_value: Some("glm-5.2".to_string()),
+        options: vec![
+            sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId("recommended-0".to_string()),
+                label: "glm-5.3".to_string(),
+                description: None,
+            },
+            sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId("recommended-1".to_string()),
+                label: "glm-5.2".to_string(),
+                description: None,
+            },
+            sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId("custom".to_string()),
+                label: "自定义模型".to_string(),
+                description: None,
+            },
+        ],
+        error: None,
+    }];
+    view
+}
+
+#[test]
+fn select_page_preselects_option_matching_display_value() {
+    // 已有配置预填的模型（has_value + display_value）在进入 select 页时
+    // 必须直接高亮对应 option，而不是从第一项开始。
+    let mut model = ConfigFormModel::new(secret_view());
+
+    model.replace_view(select_page_view_with_selected_model());
+
+    assert_eq!(model.interaction().selected_option, 1);
+}
+
+#[test]
+fn select_page_without_selected_value_starts_from_first_option() {
+    let mut view = select_page_view_with_selected_model();
+    view.page.fields[0].has_value = false;
+    view.page.fields[0].display_value = None;
+
+    let mut model = ConfigFormModel::new(secret_view());
+
+    model.replace_view(view);
+
+    assert_eq!(model.interaction().selected_option, 0);
+}
+
 fn custom_model_view() -> sdk::ConfigFormView {
     let mut view = secret_view();
     view.page.id = sdk::ConfigFormPageId("edit_custom_model".to_string());

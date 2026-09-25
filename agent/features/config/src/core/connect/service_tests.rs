@@ -675,6 +675,56 @@ async fn probe_failure_requires_explicit_continue_or_edit() {
 }
 
 #[tokio::test]
+async fn confirming_overwrite_prefills_draft_from_existing_provider() {
+    // 确认覆盖已有 Provider 后，表单默认值必须来自全局配置中的已有配置
+    //（endpoint / UA / 模型），而不是仅回落 Catalog 默认值。
+    let existing = ExistingProviderSnapshot::from_provider_config(
+        "Zhipu",
+        "https://existing.example.test/api/paas/v4",
+        Some("hidden-key"),
+        Some("zhipu"),
+        "glm-5.3",
+        256_000,
+        16_000,
+        Some("ZCode/3.10.0"),
+    );
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(
+            ConnectOrigin::ExplicitCommand,
+            test_global_revision(),
+            Some(existing),
+        )
+        .await;
+    assert_eq!(view.stage, ConnectStage::ConfirmOverwrite);
+
+    let confirmed = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
+
+    assert_eq!(confirmed.stage, ConnectStage::EditEndpoint);
+    assert_eq!(
+        confirmed.draft.base_url.as_deref(),
+        Some("https://existing.example.test/api/paas/v4"),
+        "endpoint 必须预填全局配置已有值"
+    );
+    assert_eq!(
+        confirmed.draft.provider_user_agent.as_deref(),
+        Some("ZCode/3.10.0"),
+        "Provider UA 必须预填全局配置已有值"
+    );
+    let model = confirmed
+        .draft
+        .model
+        .as_ref()
+        .expect("模型必须预填全局配置已有值");
+    assert_eq!(model.model_id, "glm-5.3");
+    assert_eq!(model.context_window, Some(256_000));
+    assert_eq!(model.max_tokens, Some(16_000));
+}
+
+#[tokio::test]
 async fn rejecting_existing_provider_returns_to_selection() {
     let existing = ExistingProviderSnapshot::from_provider_config(
         "Anthropic",
@@ -684,6 +734,7 @@ async fn rejecting_existing_provider_returns_to_selection() {
         "existing-model",
         16_000,
         2_000,
+        None,
     );
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)

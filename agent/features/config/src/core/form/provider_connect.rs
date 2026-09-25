@@ -554,7 +554,20 @@ fn recommended_model_field(
         .transpose()?
         .unwrap_or_default();
     options.push(option("custom", "自定义模型", None)?);
-    select_field("recommended_model", "模型", options)
+    let mut field = select_field("recommended_model", "模型", options)?;
+    // draft.model（如确认覆盖时从全局配置预填的模型）命中推荐列表时标记为
+    // 已选，供 TUI 初始化 option 高亮；未命中推荐列表时交由"自定义模型"页。
+    if let Some(draft_model) = connect.draft.model.as_ref() {
+        let recommended = field
+            .options
+            .iter()
+            .any(|option| option.label == draft_model.model_id);
+        if recommended {
+            field.has_value = true;
+            field.display_value = Some(draft_model.model_id.clone());
+        }
+    }
+    Ok(field)
 }
 
 fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFormError> {

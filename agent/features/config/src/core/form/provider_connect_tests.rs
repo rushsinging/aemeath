@@ -218,6 +218,25 @@ fn zhipu_user_agent_page_prefills_official_sdk_client_ua() {
 }
 
 #[test]
+fn model_select_page_marks_existing_draft_model_as_selected() {
+    // 确认覆盖已有 Provider 后 draft.model 来自全局配置；SelectModel 页必须
+    // 把该模型标记为已选（has_value + display_value），供 TUI 预选 option。
+    let mut view = connect_view(ConnectStage::SelectModel);
+    view.draft.source = Some(crate::catalog::find_by_source("Zhipu").unwrap().source);
+    view.draft.model = Some(crate::connect::ModelDraftView {
+        model_id: "glm-5.2".to_string(),
+        context_window: Some(204_800),
+        max_tokens: Some(16_000),
+    });
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    let field = &form.page.fields[0];
+    assert!(field.has_value, "draft 已有模型时必须标记 has_value");
+    assert_eq!(field.display_value.as_deref(), Some("glm-5.2"));
+}
+
+#[test]
 fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
     let mut view = connect_view(ConnectStage::EditCustomModel);
     view.draft.source = Some(crate::catalog::ProviderSource::new("LiteLLM"));

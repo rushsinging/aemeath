@@ -578,9 +578,30 @@ impl ConnectAppService {
         session: &mut ConnectSession,
     ) -> (Option<ConnectError>, SyncOutcome) {
         session.stage = ConnectStage::EditEndpoint;
-        // ConfirmOverwrite 之后，credential 标为 PreservedFromExisting；
+        // ConfirmOverwrite 之后，draft 默认值来自全局配置的已有 Provider 配置
+        //（endpoint / UA / 模型），credential 标为 PreservedFromExisting；
         // 若用户再调 SetCredential，状态会切到 UserSet/NotSet。
         if let Some(provider) = session.existing_provider.as_ref() {
+            if !provider.base_url.trim().is_empty() {
+                session.draft.base_url = Some(provider.base_url.clone());
+            }
+            if provider.user_agent.is_some() {
+                session.draft.provider_user_agent = provider.user_agent.clone();
+            }
+            if let (Some(model_id), Some(context_window), Some(max_tokens)) = (
+                provider.model_id.as_deref(),
+                provider.context_window,
+                provider.max_tokens,
+            ) {
+                let draft = crate::connect::draft::ModelDraft {
+                    model_id: model_id.to_string(),
+                    context_window,
+                    max_tokens,
+                };
+                if draft.validate().is_ok() {
+                    session.draft.model = Some(draft);
+                }
+            }
             if matches!(
                 provider.api_key_status,
                 super::states::ExistingCredentialStatus::Present

@@ -526,6 +526,9 @@ fn existing_provider_snapshot(
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or_default(),
+        provider
+            .get("userAgent")
+            .and_then(serde_json::Value::as_str),
     ))
 }
 

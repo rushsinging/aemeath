@@ -58,12 +58,34 @@ impl ConfigFormModel {
         self.clear_sensitive_input();
         self.view = view;
         self.focused_field = 0;
-        self.selected_option = 0;
+        self.selected_option = self.initial_selected_option();
         self.focused_action = 0;
         self.scroll = 0;
         self.field_inputs = initial_field_inputs(&self.view);
         self.input = self.field_inputs.first().cloned().unwrap_or_default();
         self.input_cursor = self.input.chars().count();
+    }
+
+    /// focused 字段为 SingleSelect 且携带已选值（has_value + display_value）
+    /// 时，返回匹配 option 的索引；否则从 0 开始。用于进入/切换字段时把
+    /// 全局配置预填的默认值直接高亮。
+    fn initial_selected_option(&self) -> usize {
+        let Some(field) = self.view.page.fields.get(self.focused_field) else {
+            return 0;
+        };
+        if field.field_type != sdk::ConfigFormFieldType::SingleSelect || !field.has_value {
+            return 0;
+        }
+        field
+            .display_value
+            .as_deref()
+            .and_then(|selected| {
+                field
+                    .options
+                    .iter()
+                    .position(|option| option.label == selected)
+            })
+            .unwrap_or(0)
     }
 
     pub(crate) fn interaction(&self) -> super::config_form_render::ConfigFormInteraction {
@@ -365,7 +387,7 @@ impl ConfigFormModel {
         self.save_focused_field_input();
         self.clear_sensitive_input();
         self.focused_field = (self.focused_field + 1) % self.view.page.fields.len();
-        self.selected_option = 0;
+        self.selected_option = self.initial_selected_option();
         self.input = self
             .field_inputs
             .get(self.focused_field)
@@ -390,7 +412,7 @@ impl ConfigFormModel {
             .focused_field
             .checked_sub(1)
             .unwrap_or(self.view.page.fields.len() - 1);
-        self.selected_option = 0;
+        self.selected_option = self.initial_selected_option();
         self.input = self
             .field_inputs
             .get(self.focused_field)
