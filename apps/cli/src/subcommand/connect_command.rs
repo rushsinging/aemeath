@@ -17,11 +17,3 @@ pub(crate) async fn run_connect_command_with_origin(
     )
     .await
 }
-
-pub(crate) async fn run_connect_command(
-    forms: Arc<dyn sdk::ConfigFormClient>,
-) -> Result<(), sdk::SdkError> {
-    run_connect_command_with_origin(forms, sdk::ConfigFormOrigin::ExplicitCommand)
-        .await
-        .map(|_| ())
-}

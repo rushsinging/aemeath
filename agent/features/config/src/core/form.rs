@@ -1,17 +1,12 @@
 #[path = "form/provider_connect.rs"]
 mod provider_connect;
-#[path = "form/service.rs"]
-mod service;
 
 pub use provider_connect::{
     connect_command_for_form, provider_connect_form_view, ProviderConnectFormError,
     PROVIDER_CONNECT_WORKFLOW_ID,
 };
-pub use service::{ConfigFormService, SubmittedConfigFormPage};
 
 use std::fmt;
-
-use uuid::Uuid;
 
 macro_rules! form_id {
     ($name:ident) => {
@@ -53,8 +48,8 @@ form_id!(ConfigFormActionId);
 pub struct ConfigFormSessionId(String);
 
 impl ConfigFormSessionId {
-    pub(crate) fn next() -> Self {
-        Self(Uuid::now_v7().to_string())
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
     }
 
     pub fn as_str(&self) -> &str {
@@ -76,10 +71,6 @@ impl ConfigFormRevision {
 
     pub const fn value(self) -> u64 {
         self.0
-    }
-
-    pub(crate) const fn next(self) -> Self {
-        Self(self.0 + 1)
     }
 }
 
@@ -109,17 +100,7 @@ pub enum ConfigFormValue {
     SelectedOption(ConfigFormOptionId),
 }
 
-impl ConfigFormValue {
-    pub(crate) fn field_type(&self) -> ConfigFormFieldType {
-        match self {
-            Self::Text(_) => ConfigFormFieldType::Text,
-            Self::Secret(_) => ConfigFormFieldType::Secret,
-            Self::Number(_) => ConfigFormFieldType::Number,
-            Self::Boolean(_) => ConfigFormFieldType::Boolean,
-            Self::SelectedOption(_) => ConfigFormFieldType::SingleSelect,
-        }
-    }
-}
+impl ConfigFormValue {}
 
 impl fmt::Debug for ConfigFormValue {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -320,7 +301,3 @@ impl ConfigFormError {
 #[cfg(test)]
 #[path = "form/provider_connect_tests.rs"]
 mod provider_connect_tests;
-
-#[cfg(test)]
-#[path = "form/service_tests.rs"]
-mod service_tests;

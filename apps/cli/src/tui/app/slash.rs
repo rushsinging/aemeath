@@ -205,6 +205,7 @@ Build info:
                 ));
                 UpdateResult::none()
             }
+            "connect" => UpdateResult::one(Effect::OpenConnectWizard),
             "init" => {
                 let force = arguments.first().is_some_and(|param| param == "force");
                 UpdateResult::one(Effect::SendChatInputEvent {

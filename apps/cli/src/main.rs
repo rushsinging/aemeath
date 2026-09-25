@@ -51,18 +51,11 @@ async fn main() {
             chat::run_chat(run_args.into()).await;
         }
         Some(Commands::Connect) => {
-            let bootstrap = composition::app::build_connect_bootstrap()
-                .await
-                .unwrap_or_else(|error| {
-                    eprintln!("Error: {error}");
-                    std::process::exit(1);
-                });
-            subcommand::connect_command::run_connect_command(bootstrap.forms)
-                .await
-                .unwrap_or_else(|error| {
-                    eprintln!("Error: {error}");
-                    std::process::exit(1);
-                });
+            // 向导在主 TUI 进程内打开（同 /connect slash 命令），保存后
+            // 下一轮对话边界自动刷新配置，无需独立子命令链路。
+            let mut args = Args::from(cli.run_args);
+            args.startup_connect = true;
+            chat::run_chat(args).await;
         }
         Some(Commands::Update { check }) => {
             let args = Args::from(cli.run_args);

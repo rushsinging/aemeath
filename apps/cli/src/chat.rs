@@ -43,6 +43,7 @@ where
 
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
+    let startup_connect = args.startup_connect;
     let quiet = args.quiet;
     let interactive = !quiet && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     match composition::app::prepare_first_chat(interactive).await {
@@ -139,6 +140,8 @@ pub(crate) async fn run_chat(args: Args) {
         app.run_control_client = Some(bootstrap.run_control_client.clone());
         app.display_history_query = Some(bootstrap.display_history_query.clone());
         app.user_agent = bootstrap.user_agent;        app.config_view = bootstrap.config_view.clone();
+        app.connect_forms = Some(bootstrap.forms.clone());
+        app.startup_connect = startup_connect;
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::UiPreferences(
                 crate::tui::model::ui_preferences::UiPreferencesIntent::MarkdownSpacingChanged(

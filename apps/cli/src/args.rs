@@ -138,6 +138,8 @@ pub struct Args {
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
     pub max_reasoning: Option<String>,
+    /// 启动即打开 Connect 向导（`aemeath connect`）。
+    pub startup_connect: bool,
 }
 impl From<RunArgs> for Args {
     fn from(r: RunArgs) -> Self {
@@ -157,6 +159,7 @@ impl From<RunArgs> for Args {
             max_agent_concurrency: r.max_agent_concurrency,
             no_think: r.no_think,
             max_reasoning: r.max_reasoning,
+            startup_connect: false,
         }
     }
 }
