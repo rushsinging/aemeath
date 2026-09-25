@@ -1630,3 +1630,45 @@ async fn display_messages_empty_when_no_context_or_system_message() {
         outcome.messages
     );
 }
+
+/// stdin payload 顶层双写：扁平解析器（cmux / Claude Code 生态工具按顶层
+/// `session_id` / `hook_event_name` 提取）与既有 tagged 解析脚本同时可读。
+/// `session_id` 仅在 dispatch context 携带时双写（与 env 注入语义一致）。
+#[tokio::test]
+async fn dispatch_stdin_dual_writes_flat_event_name_and_session_id() {
+    let subscriptions = vec![
+        sub(HookPoint::PreToolUse, "tool"),
+        sub(HookPoint::Stop, "stop"),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+    let workspace = std::path::PathBuf::from("/tmp/aemeath-dual-write-workspace");
+
+    dispatcher
+        .dispatch_at(
+            pre_tool_use("Bash"),
+            HookDispatchContext::new(&workspace).with_session_id("sess-dual-1"),
+            &CancellationToken::new(),
+        )
+        .await;
+    dispatcher
+        .dispatch_at(
+            stop(2),
+            HookDispatchContext::new(&workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    let calls = scripted.calls();
+
+    // 双写：顶层扁平字段命中
+    assert_eq!(calls[0].stdin["hook_event_name"], "PreToolUse");
+    assert_eq!(calls[0].stdin["session_id"], "sess-dual-1");
+    // 兼容：tagged 结构原样保留
+    assert_eq!(calls[0].stdin["PreToolUse"]["tool_name"], "Bash");
+
+    // 无 session context：hook_event_name 仍双写，session_id 不出现
+    assert_eq!(calls[1].stdin["hook_event_name"], "Stop");
+    assert!(calls[1].stdin.get("session_id").is_none());
+    assert!(calls[1].stdin["Stop"].is_object());
+}
