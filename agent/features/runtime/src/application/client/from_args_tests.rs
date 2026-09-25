@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::application::client::accessors::SessionRuntime;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::PolicyPort;
+use crate::ports::Policy;
 use hook::{HookInvocation, HookOutcome, HookPort};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
@@ -256,7 +256,7 @@ async fn make_test_shell(
     .await;
     let snapshot = wiring.committed_config();
     let binding = crate::application::model::test_support::test_binding(Vec::new());
-    let policy: Arc<dyn PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn Policy> = Arc::new(policy::AllowAllPolicy);
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
     let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
@@ -570,7 +570,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         ))),
     )
     .await;
-    let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn policy::Policy> = Arc::new(policy::AllowAllPolicy);
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer =

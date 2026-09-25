@@ -26,7 +26,7 @@ use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, PolicyPort, ProviderBinding};
+use crate::ports::{ContextPort, Policy, ProviderBinding};
 use hook::HookPort;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
@@ -343,7 +343,7 @@ pub struct RuntimeServices {
     /// Tool BC 执行端口。
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     /// Policy BC 出站端口。
-    pub policy: Arc<dyn PolicyPort>,
+    pub policy: Arc<dyn Policy>,
     /// Reflection 历史存储（会话级）。
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
     /// Task BC 低权限访问端口（会话级）。
@@ -415,7 +415,7 @@ pub struct RuntimeContext {
     provider: Arc<ProviderBinding>,
     tool_catalog: Arc<dyn ToolCatalogPort>,
     tool_execution: Arc<dyn ToolExecutionPort>,
-    policy: Arc<dyn PolicyPort>,
+    policy: Arc<dyn Policy>,
     interaction: Arc<dyn InteractionPort>,
     memory: Arc<dyn MemoryPort>,
     reflection_history: Arc<dyn ReflectionHistoryStore>,
@@ -514,7 +514,7 @@ impl RuntimeContext {
         self.tool_execution.clone()
     }
     /// Policy 端口，`Arc` clone。
-    pub fn policy(&self) -> Arc<dyn PolicyPort> {
+    pub fn policy(&self) -> Arc<dyn Policy> {
         self.policy.clone()
     }
     /// 交互桥，`Arc` clone。
@@ -595,7 +595,7 @@ impl RuntimeContext {
         &self.tool_execution
     }
     /// Policy port reference.
-    pub fn policy_ref(&self) -> &Arc<dyn PolicyPort> {
+    pub fn policy_ref(&self) -> &Arc<dyn Policy> {
         &self.policy
     }
     /// Interaction port reference.

@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use tools::{AuthorizationContext, ToolCapabilities, ToolCapability, ToolName};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PolicyMode {
+pub enum PolicyModeData {
     #[default]
     Standard,
     AllowAll,
 }
 
-impl From<share::config::PermissionModeConfig> for PolicyMode {
+impl From<share::config::PermissionModeConfig> for PolicyModeData {
     fn from(value: share::config::PermissionModeConfig) -> Self {
         match value {
             share::config::PermissionModeConfig::AllowAll => Self::AllowAll,
@@ -20,7 +20,7 @@ impl From<share::config::PermissionModeConfig> for PolicyMode {
 }
 
 #[derive(Debug, Clone)]
-pub struct PolicyRequest {
+pub struct PolicyRequestData {
     run_id: RunId,
     run_step_id: RunStepId,
     tool_name: ToolName,
@@ -28,7 +28,7 @@ pub struct PolicyRequest {
     workspace_root: PathBuf,
 }
 
-impl PolicyRequest {
+impl PolicyRequestData {
     pub fn new(
         run_id: RunId,
         run_step_id: RunStepId,
@@ -81,7 +81,7 @@ impl std::fmt::Display for PolicyRequestError {
 impl std::error::Error for PolicyRequestError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PolicyReason {
+pub enum PolicyReasonData {
     CapabilityExceeded { required: ToolCapability },
     RestrictedTool,
     RestrictedWorkspace,
@@ -89,27 +89,29 @@ pub enum PolicyReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalSubject {
+pub enum ApprovalSubjectData {
     UserInteraction,
     Delegated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PolicyDecision {
+pub enum PolicyDecisionData {
     Allow(AuthorizationContext),
     Deny {
-        reason: PolicyReason,
+        reason: PolicyReasonData,
     },
     RequireApproval {
-        reason: PolicyReason,
-        subject: ApprovalSubject,
+        reason: PolicyReasonData,
+        subject: ApprovalSubjectData,
     },
 }
 
-pub trait PolicyModeSource: Send + Sync {
-    fn current_mode(&self) -> PolicyMode;
+pub trait PolicyModeReader: Send + Sync {
+    fn current_mode(&self) -> PolicyModeData;
 }
 
-pub trait PolicyPort: Send + Sync {
-    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision;
+/// 唯一策略角色：决策 + 当前模式（两个读行为，同源——mode 是 evaluate 的决策输入）。
+pub trait Policy: Send + Sync {
+    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData;
+    fn current_mode(&self) -> PolicyModeData;
 }

@@ -414,7 +414,7 @@ pub async fn from_args_with_workspace(
 
     // Concurrency settings and shared semaphore are frozen by Composition.
 
-    // 16. PolicyPort 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
+    // 16. Policy 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
 
     // 17. #1385 Task 7: Memory port is obtained per-run via BoundMainRun
     // (assemble_main_runtime_context), not at bootstrap time.

@@ -4,7 +4,7 @@ use crate::application::run::context::{RunInputBufferHandle, RunUsageTracker, Ru
 use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest};
+use crate::ports::{Policy, PolicyDecisionData, PolicyRequestData};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -31,10 +31,14 @@ struct SpyPolicy {
     called: Arc<AtomicBool>,
 }
 
-impl PolicyPort for SpyPolicy {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
+impl Policy for SpyPolicy {
+    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
         self.called.store(true, Ordering::SeqCst);
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 
@@ -42,7 +46,7 @@ impl PolicyPort for SpyPolicy {
 fn assemble_test_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    policy: Arc<dyn PolicyPort>,
+    policy: Arc<dyn Policy>,
     config: RunConfigSnapshot,
 ) -> (RuntimeContext, Arc<RuntimeContextFactory>) {
     let factory = Arc::new(RuntimeContextFactory::new(
@@ -85,7 +89,7 @@ fn make_spy_parent_context(
         called: cat_called,
     });
 
-    let policy: Arc<dyn PolicyPort> = Arc::new(SpyPolicy {
+    let policy: Arc<dyn Policy> = Arc::new(SpyPolicy {
         called: policy_called,
     });
 

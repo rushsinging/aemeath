@@ -33,7 +33,7 @@ pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeRunContext,
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn policy::PolicyPort,
+    policy: &dyn policy::Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     agent: &Agent,

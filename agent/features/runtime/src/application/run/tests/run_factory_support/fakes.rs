@@ -4,7 +4,7 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
 use crate::ports::{
-    ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderBuildSpec,
+    ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBinding, ProviderBuildSpec,
     ProviderError, ProviderFactory, ProviderPort,
 };
 use hook::{HookInvocation, HookOutcome, HookPort};
@@ -146,9 +146,13 @@ impl ToolExecutionPort for FakeToolExecution {
 
 pub(crate) struct FakePolicyPort;
 
-impl PolicyPort for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+impl Policy for FakePolicyPort {
+    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 

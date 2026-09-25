@@ -41,15 +41,15 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 
 pub struct FeatureGateways {
     pub provider: Arc<dyn ProviderFactory>,
-    pub policy: Arc<dyn policy::PolicyPort>,
+    pub policy: Arc<dyn policy::Policy>,
 }
 
 impl FeatureGateways {
-    pub fn new(provider: Arc<dyn ProviderFactory>, policy: Arc<dyn policy::PolicyPort>) -> Self {
+    pub fn new(provider: Arc<dyn ProviderFactory>, policy: Arc<dyn policy::Policy>) -> Self {
         Self { provider, policy }
     }
 
-    pub fn wire_default(policy: Arc<dyn policy::PolicyPort>) -> Self {
+    pub fn wire_default(policy: Arc<dyn policy::Policy>) -> Self {
         Self::new(crate::provider::provider_factory(), policy)
     }
 }
@@ -58,13 +58,13 @@ struct ConfigPolicyModeSource {
     reader: Arc<dyn config::ConfigReader>,
 }
 
-impl policy::PolicyModeSource for ConfigPolicyModeSource {
-    fn current_mode(&self) -> policy::PolicyMode {
+impl policy::PolicyModeReader for ConfigPolicyModeSource {
+    fn current_mode(&self) -> policy::PolicyModeData {
         self.reader.committed_snapshot().permission_mode().into()
     }
 }
 
-fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::PolicyPort> {
+fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::Policy> {
     Arc::new(policy::ConfiguredPolicy::new(ConfigPolicyModeSource {
         reader: config.reader(),
     }))

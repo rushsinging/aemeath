@@ -6,7 +6,7 @@
 //! |---|---|---|
 //! | `wire_*` 工厂 | `wire_audit_client`、`wire_audit_store` | composition |
 //! | `*<Role>` 角色 | `AuditWriter`（try_record/shutdown，拥有 worker 管道）、`AuditReader`（query_page 纯读）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配）、TUI（Reader 接线待评审） |
-//! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageSummaryData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
+//! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
 //! | `*Error` 错误 | `AuditError`（crate 根定义，粗分类） | query_page 签名 |
 //!
 //! Role 词表（v3，拟人/明确名词）：Reader/Writer/Control/Registry/Pool/Catalog/Store；
@@ -89,5 +89,5 @@ pub fn append_store_for(
 }
 pub use domain::{
     UsageDropReasonData, UsageEmitOutcomeData, UsagePageData, UsagePaginationData, UsageQueryData,
-    UsageRecordData, UsageSummaryData, UsageTimeRangeData,
+    UsageRecordData, UsageTimeRangeData,
 };

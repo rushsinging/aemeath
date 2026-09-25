@@ -4,7 +4,7 @@
 //! logs record only `mode`, `capability_count`, and `decision` — never the
 //! tool name, workspace path, or run identifiers.
 
-use crate::{AllowAllPolicy, PolicyDecision, PolicyPort, PolicyRequest};
+use crate::{AllowAllPolicy, Policy, PolicyDecisionData, PolicyRequestData};
 use sdk::ids::{RunId, RunStepId};
 use std::sync::Mutex;
 use tools::{ToolCapabilities, ToolCapability, ToolName};
@@ -49,8 +49,8 @@ fn install_capturing_logger() {
     log::set_max_level(log::LevelFilter::Trace);
 }
 
-fn make_request(tool: &str, caps: ToolCapabilities, workspace: &str) -> PolicyRequest {
-    PolicyRequest::new(
+fn make_request(tool: &str, caps: ToolCapabilities, workspace: &str) -> PolicyRequestData {
+    PolicyRequestData::new(
         RunId::new_v7(),
         RunStepId::new_v7(),
         ToolName::new(tool),
@@ -80,7 +80,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
 
     assert_eq!(
         AllowAllPolicy.evaluate(&request),
-        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
     );
 
     let lines = CAPTURED.lock().expect("read capture").clone();
@@ -155,7 +155,7 @@ fn capability_count_reflects_request_requirements() {
 
     assert_eq!(
         AllowAllPolicy.evaluate(&request),
-        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
     );
 
     let joined = CAPTURED

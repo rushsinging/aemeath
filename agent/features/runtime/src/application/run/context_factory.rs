@@ -22,7 +22,7 @@ use crate::application::run::creation::{
 };
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{HookBindingMode, InteractionBindingMode, RunSpec};
-use crate::ports::PolicyPort;
+use crate::ports::Policy;
 use hook::HookPort;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
@@ -147,7 +147,7 @@ impl RuntimeContextFactory {
     pub fn new(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        policy: Arc<dyn PolicyPort>,
+        policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,
@@ -167,7 +167,7 @@ impl RuntimeContextFactory {
     fn from_services(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        policy: Arc<dyn PolicyPort>,
+        policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookPort>,

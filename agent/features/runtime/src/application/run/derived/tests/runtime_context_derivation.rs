@@ -4,7 +4,7 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest};
+use crate::ports::{Policy, PolicyDecisionData, PolicyRequestData};
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{ToolCatalogPort, ToolProfileName};
@@ -37,9 +37,13 @@ impl tools::ToolExecutionPort for FakeToolExec {
 }
 
 pub(super) struct FakePolicyPort;
-impl PolicyPort for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+impl Policy for FakePolicyPort {
+    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 

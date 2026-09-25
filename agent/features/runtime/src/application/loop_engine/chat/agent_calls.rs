@@ -11,7 +11,7 @@ use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
 use hook::{HookInvocation, HookPort, PreToolUseInput};
-use policy::PolicyPort;
+use policy::Policy;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolExecutionContext;
@@ -33,7 +33,7 @@ pub(crate) async fn execute_agent_calls<S>(
     cancel: &CancellationToken,
     workspace_read: &Arc<dyn project::WorkspaceRead>,
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
@@ -116,7 +116,7 @@ async fn execute_one_agent<S>(
     cancel: &CancellationToken,
     authorization: tools::AuthorizationContext,
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>

@@ -44,7 +44,7 @@ pub(crate) struct SessionRunFixture {
     event_sink: RecordingEventSink,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    policy: Arc<dyn crate::ports::PolicyPort>,
+    policy: Arc<dyn crate::ports::Policy>,
     hooks: Arc<dyn hook::HookPort>,
     workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
 }
@@ -103,7 +103,7 @@ impl SessionRunFixture {
         &self.tool_execution
     }
 
-    pub(crate) fn policy(&self) -> &Arc<dyn crate::ports::PolicyPort> {
+    pub(crate) fn policy(&self) -> &Arc<dyn crate::ports::Policy> {
         &self.policy
     }
 
@@ -138,7 +138,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     hooks: Arc<dyn hook::HookPort>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    policy: Arc<dyn crate::ports::PolicyPort>,
+    policy: Arc<dyn crate::ports::Policy>,
     context_factory: Option<Arc<RuntimeContextFactory>>,
     config: share::config::domain::snapshot::ConfigSnapshot,
     session_id: String,
@@ -229,7 +229,7 @@ impl SessionRunFixtureBuilder {
         self
     }
 
-    pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::PolicyPort>) -> Self {
+    pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::Policy>) -> Self {
         self.policy = policy;
         self
     }

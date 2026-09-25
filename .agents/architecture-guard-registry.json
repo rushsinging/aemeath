@@ -1497,7 +1497,6 @@
         "UsagePaginationData",
         "UsageQueryData",
         "UsageRecordData",
-        "UsageSummaryData",
         "UsageTimeRangeData",
         "wire_audit_client",
         "wire_audit_store"
@@ -1798,14 +1797,14 @@
       },
       "allowed_symbols": [
         "AllowAllPolicy",
-        "ApprovalSubject",
+        "ApprovalSubjectData",
         "ConfiguredPolicy",
-        "PolicyDecision",
-        "PolicyMode",
-        "PolicyModeSource",
-        "PolicyPort",
-        "PolicyReason",
-        "PolicyRequest"
+        "Policy",
+        "PolicyDecisionData",
+        "PolicyModeData",
+        "PolicyModeReader",
+        "PolicyReasonData",
+        "PolicyRequestData"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"

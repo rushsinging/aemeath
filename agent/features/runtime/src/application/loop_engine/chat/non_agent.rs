@@ -8,7 +8,7 @@ use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
 use hook::{HookInvocation, HookPort, PreToolUseInput};
-use policy::PolicyPort;
+use policy::Policy;
 use std::sync::Arc;
 use tools::ToolOutcome;
 
@@ -24,7 +24,7 @@ pub(super) async fn execute_non_agent<S>(
     non_agent_calls: &[PreparedToolCall],
     language: &str,
     workspace_read: &Arc<dyn project::WorkspaceRead>,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     tool_context: &tools::ToolExecutionContext,
@@ -92,7 +92,7 @@ async fn execute_multiple_non_agent<S>(
     other_calls: &[&PreparedToolCall],
     language: &str,
     workspace_read: &Arc<dyn project::WorkspaceRead>,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     tool_context: &tools::ToolExecutionContext,
@@ -226,7 +226,7 @@ async fn execute_one_non_agent<S>(
     prepared: &PreparedToolCall,
     language: &str,
     workspace_read: &Arc<dyn project::WorkspaceRead>,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     tool_context: &tools::ToolExecutionContext,
