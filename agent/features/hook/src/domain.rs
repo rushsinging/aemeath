@@ -14,7 +14,6 @@ pub mod subscription;
 pub use invocation::*;
 pub use metadata::*;
 pub use outcome::*;
-pub use protocol::classify_directive;
 pub use subscription::*;
 
 #[cfg(test)]

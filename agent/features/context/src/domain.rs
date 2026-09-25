@@ -13,8 +13,8 @@ mod tool_receipt_tests;
 
 pub use compact::{CompactProgressFn, CompactStage, CompactWork};
 pub use token_budget::{
-    autocompact_threshold, effective_context_window, estimate_message_tokens,
-    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
+    autocompact_threshold, clamped_max_output, effective_context_window, estimate_message_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
 pub use tool_receipt::{
     CleanupConfirmation, ToolCallIdentity, ToolCallReceipt, ToolCallState, ToolReceiptMutation,
@@ -30,7 +30,7 @@ use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
-use share::config::AgentRoleConfig;
+use share::config::AgentRoleDefinition;
 pub use share::message::Message as ContextMessage;
 
 macro_rules! string_value_object {
@@ -153,13 +153,18 @@ pub struct ContextRequest {
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
     pub language: Language,
-    pub agent_roles: HashMap<String, AgentRoleConfig>,
+    pub agent_roles: HashMap<String, AgentRoleDefinition>,
     pub config_snapshot: ConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,
     /// The most recent API-reported total tokens: normalized input plus output.
     /// `None` while no run has completed yet (first run or after baseline reset).
     pub last_api_total_tokens: Option<u64>,
+    /// Heuristic 估算滑动校准系数（#1626）：provider 上报 usage 与当轮
+    /// heuristic 估算的 EMA 比值，由 runtime 维护并注入。仅作用于
+    /// [`DecisionReason::HeuristicFallback`] 路径；`None` 或超出
+    /// `[0.5, 2.0]` 的值按 1.0（不校准）处理。
+    pub heuristic_calibration: Option<f64>,
     pub tool_schemas: Vec<ModelToolSchema>,
     pub tool_schema_tokens: usize,
 }
@@ -321,6 +326,10 @@ pub enum DecisionReason {
     ActualProviderUsage,
     /// No provider usage available; full candidate heuristic estimate used.
     HeuristicFallback,
+    /// Effective window below [`MIN_EFFECTIVE_WINDOW`] even after the output
+    /// reservation clamp — the context window itself is misconfigured and
+    /// autocompact is disabled to prevent a compaction storm (#1626).
+    MisconfiguredWindow,
     Manual,
 }
 

@@ -1,17 +1,37 @@
+use crate::tui::effect::effect::Effect;
 use crate::tui::render::dialog::Dialog;
 
 impl super::super::App {
-    pub(super) fn open_model_selection_dialog(&mut self) -> Option<String> {
-        // #567：模型列表走事件流（ListModels），缓存尚未接入。暂传空列表。
+    /// 打开 /model 选择对话框：先用已回填的缓存呈现（立即打开 / 挂起等待 /
+    /// 空态提示），并附带一次 `ListModels` 刷新请求（#740）。
+    pub(super) fn open_model_selection_dialog(&mut self) -> Effect {
+        self.present_model_selection_dialog();
+        Effect::SendChatInputEvent {
+            event: sdk::ChatInputEvent::ListModels,
+        }
+    }
+
+    /// 用当前缓存呈现 /model 对话框（纯呈现，不发请求）：
+    /// - 缓存未回填（`None`）→ 挂起等待 `ModelList` 事件回填后自动打开；
+    /// - 已回填且为空 → 提示真实配置路径；
+    /// - 已回填非空 → 打开选择对话框。
+    pub(crate) fn present_model_selection_dialog(&mut self) {
         let current = self.session.current_model_display.clone();
-        let (options, keys) = build_model_dialog_options(&[], &current);
+        let cached = self.session.cached_models.clone().unwrap_or_default();
+        let (options, keys) = build_model_dialog_options(&cached, &current);
         if options.is_empty() {
-            self.append_system_notice("No models configured. Add models to ~/.aemeath/config.json");
-            return None;
+            if self.session.cached_models.is_none() {
+                self.session.model_selection_pending = true;
+                self.append_system_notice("Loading model list…");
+            } else {
+                self.append_system_notice(
+                    "No models configured. Add models to ~/.agents/aemeath.json or .agents/aemeath.json",
+                );
+            }
+            return;
         }
         self.layout
             .open_model_dialog(Dialog::select("Select Model", options), keys);
-        None
     }
 }
 

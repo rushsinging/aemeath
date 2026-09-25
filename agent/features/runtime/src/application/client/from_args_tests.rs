@@ -231,15 +231,15 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path()).expect("create config blob"),
-        )),
+        config::native_override_store(
+            storage::file_system_blob(temp.path()).expect("create config blob"),
+        ),
     )
     .await
     .expect("wire config");
@@ -277,8 +277,7 @@ async fn make_test_shell(
     let agent_runner: Arc<dyn tools::AgentRunner> = Arc::new(NoopRunner);
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
-    let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let config_query = wiring.config_query();
     let config_writer = wiring.config_writer();
     let session_management = wiring.session_management();
@@ -299,6 +298,12 @@ async fn make_test_shell(
 
     let skill_wiring = tools::composition::wire_skills();
     let initial_skill_snapshot = tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_wiring.catalog(),
+        workspace.clone(),
+        tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     SessionRuntime::new(
         Arc::new(std::sync::RwLock::new(
@@ -343,6 +348,7 @@ async fn make_test_shell(
         "test-model".to_string(),
         skill_wiring.catalog(),
         initial_skill_snapshot,
+        skill_refresh,
         share::config::MemoryConfig::default(),
         200_000,
         "en".to_string(),
@@ -527,7 +533,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let original = workspace.clone();
@@ -546,9 +552,9 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     };
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(&agents_dir).expect("create config blob"),
-        )),
+        config::native_override_store(
+            storage::file_system_blob(&agents_dir).expect("create config blob"),
+        ),
     )
     .await
     .expect("wire config");
@@ -569,8 +575,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
-    let active_run =
-        Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
         hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),
@@ -635,7 +640,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     );
     let dependencies = RuntimeBootstrapDependencies::new(
         RuntimeCoreDependencies::new(
-            workspace,
+            workspace.clone(),
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             Arc::new(context::test_support::UnavailableSessionManagement),
@@ -650,7 +655,11 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         initial_provider,
         SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
         PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
-        SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new())),
+        SkillBootstrapAssembly::new(
+            skill_wiring.catalog(),
+            workspace.clone(),
+            tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
+        ),
         crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: Arc::new(NoopRunner),
             parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
@@ -794,19 +803,35 @@ fn startup_resume_precedes_current_project_config_read() {
         .find("startup resume")
         .expect("source should contain 'startup resume'");
     let resume_call_pos = source
-        .find("resume_session_to_backing")
-        .expect("source should contain resume_session_to_backing");
+        .find("resolve_startup_session")
+        .expect("source should contain resolve_startup_session");
     let snapshot_pos = source
         .rfind("let snapshot = wiring.committed_config()")
         .expect("source should contain committed_config read");
 
     assert!(
         resume_pos < resume_call_pos,
-        "startup resume comment should precede resume_session_to_backing call"
+        "startup resume comment should precede resolve_startup_session call"
     );
     assert!(
         resume_call_pos < snapshot_pos,
-        "resume_session_to_backing must precede the committed_config snapshot read — \
-           Context rejects cross-project sessions before this snapshot can change"
+        "resolve_startup_session must precede the committed_config snapshot read — \
+            Context rejects cross-project sessions before this snapshot can change"
+    );
+}
+
+#[test]
+fn startup_emits_session_start_after_session_resolution() {
+    let source = include_str!("from_args.rs");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+    let session_resolution = production
+        .find("resolve_startup_session")
+        .expect("startup 必须解析 session");
+    let session_start_emit = production
+        .find("emit_session_start")
+        .unwrap_or_else(|| panic!("startup 必须在 session id 确定后 emit SessionStart"));
+    assert!(
+        session_resolution < session_start_emit,
+        "SessionStart emit 必须位于 resolve_startup_session 之后（session id 已确定）"
     );
 }

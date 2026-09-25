@@ -118,12 +118,17 @@ async fn sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen() {
     assert!(!dispatch_stop_hook(parent.context()).await);
 
     let mut sub_config = blocking_hook_snapshot(2).to_config();
-    sub_config.agents.roles.insert(
+    sub_config.agents.names.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    sub_config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     sub_config.models.default = "test-provider/test-model".to_string();
     sub_config.models.providers.insert(
@@ -240,12 +245,17 @@ fn session_and_sub_runs_share_the_factory_usage_sink() {
 
     let usage_sink: Arc<dyn UsageSink> = Arc::new(RecordingUsageSink);
     let mut config = share::config::Config::default();
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "coder".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config.models.default = "test-provider/test-model".to_string();
     config.models.providers.insert(
@@ -477,4 +487,22 @@ fn parent_value_facts_without_parent_bindings_fail_closed_at_request_boundary() 
         .and_then(|tail| tail.split("impl RunCreationRequest").next())
         .expect("RunCreationRequest definition")
         .contains("ParentRunBindings"));
+}
+
+#[test]
+fn run_context_factory_does_not_construct_context_concrete_adapters() {
+    // context_factory.rs 无内嵌测试模块（#[cfg(test)] 仅修饰单个测试辅助方法），
+    // 因此直接对全文件断言，避免 split 截断漏检后段生产代码。
+    let source = include_str!("context_factory.rs");
+    assert!(
+        !source.contains("WorkspaceSkillQueryFactory"),
+        "RuntimeContextFactory 必须消费 Context 窄装配入口，不得原地构造 Context concrete adapter"
+    );
+    assert!(
+        !source.contains("context::adapters::")
+            && !source.contains("context::domain::")
+            && !source.contains("context::application::")
+            && !source.contains("context::ports::"),
+        "RuntimeContextFactory 不得触达 Context 内部层模块路径"
+    );
 }

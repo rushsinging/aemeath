@@ -61,34 +61,32 @@ async fn make_wiring_and_workspace(
 ) -> (Arc<MainSessionWiring>, project::WorkspaceViews) {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path().join("config-overrides"))
+        config::native_override_store(
+            storage::file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
-        )),
+        ),
     )
     .await
     .expect("wire config");
     let task_wiring = task::wire_task();
-    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path().join("agents"))
-                .expect("create session blob"),
-        )),
-    );
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        Arc::new(context::AtomicBlobSessionManagement::new(
+            storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
+        ));
     let wiring = context::test_support::wire_in_memory(
         &workspace,
         task_wiring.persist(),
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     )
     .await;
     (wiring, workspace)
@@ -232,25 +230,23 @@ async fn config_query_and_writer_come_from_wiring() {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
 
-    let workspace = project::wire_production_workspace(root.clone())
+    let workspace = project::wire_production_workspace(root.clone(), None)
         .expect("wire workspace")
         .into_views();
     let config = config::wire_project_config(
         &root,
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path().join("config-overrides"))
+        config::native_override_store(
+            storage::file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
-        )),
+        ),
     )
     .await
     .expect("wire config");
     let task_wiring = task::wire_task();
-    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path().join("agents"))
-                .expect("create session blob"),
-        )),
-    );
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        Arc::new(context::AtomicBlobSessionManagement::new(
+            storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
+        ));
 
     let wiring = context::test_support::wire_in_memory(
         &workspace,
@@ -258,9 +254,9 @@ async fn config_query_and_writer_come_from_wiring() {
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     )
     .await;
 
@@ -325,7 +321,7 @@ fn make_target_project(temp: &tempfile::TempDir) -> std::path::PathBuf {
         serde_json::json!({
             "memory": {
                 "enabled": false,
-                "reflection": { "enabled": true, "interval_run_steps": 7 }
+                "reflection": { "enabled": true, "interval_runs": 7 }
             },
             "models": {
                 "default": "local/target-model",
@@ -376,7 +372,7 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
 
     // Project B — resume target with disabled memory and inject_count=3.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone())
+    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
         .expect("wire workspace B")
         .into_views();
     seed_session(&wiring, &workspace_b, "cross-project-memory-target").await;
@@ -392,9 +388,11 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     }
 
     // Cross-project resume is rejected before Config/Memory switching.
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见，
+    // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-memory-target", &wiring).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-memory-target"
+        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-memory-target"
     ));
 
     // The committed and newly bound config must remain on project A.
@@ -432,7 +430,7 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
 
     // Project B — target with a distinct model and disabled memory.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone())
+    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
         .expect("wire workspace B")
         .into_views();
     seed_session(&wiring, &workspace_b, "cross-project-config-target").await;
@@ -445,9 +443,11 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
     );
 
     // Cross-project resume must not switch to project B's model or memory.
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见，
+    // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-config-target", &wiring).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "cross-project-config-target"
+        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-config-target"
     ));
 
     let after = wiring.committed_config();
@@ -467,8 +467,8 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
         "memory inject_count must remain on project A"
     );
     assert_eq!(
-        after.memory().reflection.interval_run_steps,
-        before.memory().reflection.interval_run_steps,
+        after.memory().reflection.interval_runs,
+        before.memory().reflection.interval_runs,
         "memory reflection interval must remain on project A"
     );
 }

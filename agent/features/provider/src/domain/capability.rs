@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub use share::reasoning::ReasoningLevel;
 
 /// Provider driver kind. Every model source in config.json maps to one of these via its `driver` field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ProviderDriverKind {
     #[default]
     Anthropic,

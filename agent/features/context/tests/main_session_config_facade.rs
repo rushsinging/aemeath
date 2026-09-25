@@ -11,11 +11,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    ConfigAppService, ConfigPersistError, ConfigReader, ConfigUpdate, ConfigUpdateError,
-    NativeConfigStore, ProjectConfigParticipant,
+    native_override_store, ConfigAppService, ConfigPersistError, ConfigReader, ConfigUpdate,
+    ConfigUpdateError, ProjectConfigParticipant,
 };
-use context::application::main_session::{MainSessionWiring, MainSessionWiringBuilder};
-use context::domain::session::{CanonicalSession, SnapshotState};
+use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
+use context::{CanonicalSession, SnapshotState};
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -174,7 +174,7 @@ async fn build_facade_harness(
     config_service: Arc<ConfigAppService>,
     memory_opener: Arc<TrackingMemoryOpener>,
 ) -> FacadeHarness {
-    let workspace = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+    let workspace = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
     let workspace_read = workspace.read();
     let workspace_persist = workspace.persist();
 
@@ -235,14 +235,14 @@ async fn build_facade_harness(
             last_key,
             fail,
         }),
-        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
+            storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
 
     let wiring = MainSessionWiring::build(builder);
@@ -270,10 +270,10 @@ async fn build_no_store_harness() -> FacadeHarness {
 /// Convenience: harness *with* `native_store` (persist_update → Committed).
 async fn build_with_store_harness() -> FacadeHarness {
     let tmp = TempDir::new("facade-store");
-    let storage = Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap());
+    let storage = storage::file_system_blob(tmp.path()).unwrap();
     let config_service = Arc::new(
         ConfigAppService::with_global_path(None, tmp.path().join("global.json"))
-            .with_native_store(NativeConfigStore::new(storage)),
+            .with_native_store(native_override_store(storage)),
     );
     let memory_opener = Arc::new(TrackingMemoryOpener::new());
     build_facade_harness(tmp, config_service, memory_opener).await
@@ -320,7 +320,8 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
 
     // Target project (project A) — different temp dir.
     let tmp_target = TempDir::new("target");
-    let target_workspace = wire_production_workspace(tmp_target.path().to_path_buf()).unwrap();
+    let target_workspace =
+        wire_production_workspace(tmp_target.path().to_path_buf(), None).unwrap();
 
     // Place a project config file in project A so we can detect which
     // search_root was used during prepare_for_project.
@@ -351,7 +352,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     // Cross-project resume must fail before Config/Memory preparation.
     assert!(matches!(
         h.wiring.resume_prepared(session).await,
-        Err(context::application::main_session::MainSessionError::ProjectMismatch)
+        Err(context::main_session::MainSessionError::ProjectMismatch)
     ));
 
     let post_model = h

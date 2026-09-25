@@ -38,6 +38,7 @@ fn bench_refresh_cost_by_conversation_size() {
                 content: serde_json::json!({ "text": format!("文件内容片段 {i}") }),
                 is_error: false,
                 image_count: 0,
+                duration_ms: None,
             });
         }
         conv

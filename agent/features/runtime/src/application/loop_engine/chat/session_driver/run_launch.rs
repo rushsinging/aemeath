@@ -429,6 +429,17 @@ where
                     {
                         Ok(resume_view) => {
                             session_id = resume_view.session_id.clone();
+                            // 会话身份已切换：emit SessionStart 让外部集成重新捕获
+                            // 恢复后的会话 id（生命周期点，失败不阻断恢复流程）。
+                            crate::application::hook::session_start::emit_session_start(
+                                &shell.runtime_context_factory.services().hooks,
+                                &workspace.read().current_workspace_root(),
+                                &session_id,
+                            )
+                            .await;
+                            // Run 计数器（Reflection interval 频控）per-session：
+                            // resume 切换 session 后从 0 重数，NEVER 延续旧 session 计数。
+                            step_count = 0;
                             shell
                                 .session_state
                                 .write()
@@ -511,6 +522,43 @@ where
                                 .await;
                         }
                     }
+                    continue;
+                }
+                // #1289：/reflect-now 冻结 committed 可见历史快照提交共享单槽；
+                // 受理结果只映射安全提示，执行结果仅写入 history（/reflect 查询）。
+                PendingCommand::ReflectNow => {
+                    let bound = match wiring.bind_main_run().await {
+                        Ok(bound) => bound,
+                        Err(error) => {
+                            sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("无法绑定当前 Session：{error}"),
+                                is_error: true,
+                            })
+                            .await;
+                            continue;
+                        }
+                    };
+                    let visible_messages = bound.session().structured_messages();
+                    let memory = wiring.committed_memory();
+                    let reflection_history = shell
+                        .runtime_context_factory
+                        .services()
+                        .reflection_history
+                        .clone();
+                    let outcome = crate::application::loop_engine::chat::reflection::submit_manual_reflection(
+                        &reflection_tasks,
+                        &memory_config,
+                        &visible_messages,
+                        &binding,
+                        &system_prompt_text,
+                        &language,
+                        &memory,
+                        &reflection_history,
+                    );
+                    let (text, is_error) =
+                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(outcome);
+                    sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                        .await;
                     continue;
                 }
                 PendingCommand::ListModels => match session_queries.list_models().await {
@@ -605,6 +653,9 @@ where
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
                                 messages.clear();
+                                // Run 计数器（Reflection interval 频控）绑定
+                                // session epoch：/clear 即新 epoch，从 0 重数。
+                                step_count = 0;
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {
@@ -621,6 +672,9 @@ where
                         segment_id: next_segment,
                         accepted_inputs,
                     } => {
+                        // 轮次边界重扫 skill 目录：上一轮结束后磁盘上的
+                        // skill 变更经 SkillsUpdated 事件刷新 TUI slash 目录。
+                        shell.skill_refresh.refresh(&sink).await;
                         // 新 Run 只取得本轮 accepted 输入；已提交历史由 Context backing 提供。
                         messages = initial_git_context
                             .take()
@@ -783,7 +837,7 @@ where
                 .collect::<Vec<_>>();
                 if turn_boundary_config.guidance_sources_changed {
                     let reminder =
-                        context::domain::InvocationReminder::guidance_sources_changed();
+                        context::InvocationReminder::guidance_sources_changed();
                     log::debug!(
                         target: crate::LOG_TARGET,
                         "invocation_reminder_created kind={} trigger=guidance_sources_changed",
@@ -792,7 +846,7 @@ where
                     invocation_reminders.push(reminder);
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    let reminder = context::domain::InvocationReminder::model_guidance_mismatch(
+                    let reminder = context::InvocationReminder::model_guidance_mismatch(
                         shell.prompt_model_id.clone(),
                         runtime_context.provider_ref().model.model.clone(),
                     );

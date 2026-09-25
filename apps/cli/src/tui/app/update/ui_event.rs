@@ -29,15 +29,15 @@ impl App {
                     crate::tui::model::input::intent::InputIntent::InsertImage(img),
                 );
             }
+            UiEvent::PasteFallbackToText { text } => {
+                self.apply_pasted_text(text);
+            }
             UiEvent::SystemMessage(msg) => {
                 self.append_system_notice(msg.clone());
                 return UpdateResult::one(Effect::RunHook {
                     message: msg,
                     name: "system_message".to_string(),
                 });
-            }
-            UiEvent::SessionSaved { id } => {
-                self.append_system_notice(format!("[session saved: {id}]"));
             }
             UiEvent::WorkspaceMetadataResolved(metadata) => {
                 self.apply_agent_intent(AgentIntent::Workspace(
@@ -82,7 +82,6 @@ impl App {
         UpdateResult {
             effects,
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 }

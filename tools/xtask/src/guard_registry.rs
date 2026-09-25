@@ -13,12 +13,43 @@ const CLASSIFICATIONS: [&str; 5] = [
     "migration_exception",
 ];
 
+/// 例外条目所属守卫的机械实现方式：
+/// - `structural`：编译器 / AST / 语法事实级约束，改名不可绕过；
+/// - `whitelist-backed`：黑名单叠加结构性白名单兜底；
+/// - `blacklist-transitional`：纯字面量黑名单，改名即绕过，必须有退役条件；
+/// - `blacklist-permanent`：经评审保留的永久黑名单，必须有 tracking issue。
+const MECHANISM_TYPES: [&str; 4] = [
+    "structural",
+    "whitelist-backed",
+    "blacklist-transitional",
+    "blacklist-permanent",
+];
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Registry {
     version: u32,
     budgets: Budgets,
+    #[serde(default)]
+    construction_symbols: Vec<ConstructionSymbol>,
     entries: Vec<Entry>,
+    #[serde(default)]
+    rules: Vec<crate::guards_rules::Rule>,
+    #[serde(default)]
+    retired_symbols: Vec<crate::guards_rules::RetiredSymbol>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConstructionSymbol {
+    id: String,
+    symbol: String,
+    owner_crate: String,
+    kind: String,
+    allowed_paths: Vec<String>,
+    guard: String,
+    reason: String,
+    tracking_issue: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +68,7 @@ struct Entry {
     module: String,
     scope: Scope,
     classification: String,
+    mechanism_type: String,
     owner: String,
     reason: String,
     tracking_issue: Option<u64>,
@@ -55,11 +87,15 @@ struct Scope {
 #[derive(Debug)]
 pub struct RegistryReport {
     pub migration_debt: usize,
+    pub construction_symbols: usize,
+    pub rules: usize,
+    pub retired_symbols: usize,
     pub by_classification: BTreeMap<String, usize>,
     by_module: BTreeMap<String, usize>,
     by_guard: BTreeMap<String, usize>,
     by_kind: BTreeMap<String, usize>,
     by_status: BTreeMap<String, usize>,
+    by_mechanism: BTreeMap<String, usize>,
     entries: Vec<ReportEntry>,
 }
 
@@ -73,6 +109,12 @@ struct ReportEntry {
 impl RegistryReport {
     pub fn render(&self) -> String {
         let mut output = format!("migration_debt: {}\n", self.migration_debt);
+        output.push_str(&format!(
+            "construction_symbols: {}\n",
+            self.construction_symbols
+        ));
+        output.push_str(&format!("rules: {}\n", self.rules));
+        output.push_str(&format!("retired_symbols: {}\n", self.retired_symbols));
         for (classification, count) in &self.by_classification {
             output.push_str(&format!("classification.{classification}: {count}\n"));
         }
@@ -87,6 +129,9 @@ impl RegistryReport {
         }
         for (status, count) in &self.by_status {
             output.push_str(&format!("lifecycle.{status}: {count}\n"));
+        }
+        for (mechanism, count) in &self.by_mechanism {
+            output.push_str(&format!("mechanism.{mechanism}: {count}\n"));
         }
         for entry in &self.entries {
             output.push_str(&format!(
@@ -131,6 +176,7 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
     let mut by_guard = BTreeMap::new();
     let mut by_kind = BTreeMap::new();
     let mut by_status = BTreeMap::new();
+    let mut by_mechanism = BTreeMap::new();
     let mut module_debt: BTreeMap<&str, usize> = BTreeMap::new();
     let mut report_entries = Vec::new();
 
@@ -151,6 +197,18 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
             violations.push(format!(
                 "{}: classification 非法: {}",
                 entry.id, entry.classification
+            ));
+        }
+        if !MECHANISM_TYPES.contains(&entry.mechanism_type.as_str()) {
+            violations.push(format!(
+                "{}: mechanism_type 非法: {}",
+                entry.id, entry.mechanism_type
+            ));
+        }
+        if entry.mechanism_type.starts_with("blacklist-") && entry.tracking_issue.is_none() {
+            violations.push(format!(
+                "{}: blacklist 机制 ({}) 的 tracking_issue 不能为空",
+                entry.id, entry.mechanism_type
             ));
         }
         if !matches!(
@@ -174,6 +232,7 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
         for (field, value) in [
             ("guard", entry.guard.as_str()),
             ("module", entry.module.as_str()),
+            ("mechanism_type", entry.mechanism_type.as_str()),
             ("owner", entry.owner.as_str()),
             ("reason", entry.reason.as_str()),
             ("introduced_baseline", entry.introduced_baseline.as_str()),
@@ -199,11 +258,57 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
         *by_guard.entry(entry.guard.clone()).or_insert(0) += 1;
         *by_kind.entry(entry.scope.kind.clone()).or_insert(0) += 1;
         *by_status.entry(entry.status.clone()).or_insert(0) += 1;
+        *by_mechanism
+            .entry(entry.mechanism_type.clone())
+            .or_insert(0) += 1;
         report_entries.push(ReportEntry {
             id: entry.id.clone(),
             classification: entry.classification.clone(),
             module: entry.module.clone(),
         });
+    }
+
+    let mut construction_ids = ids;
+    for symbol in &registry.construction_symbols {
+        if symbol.id.trim().is_empty() {
+            violations.push("construction_symbols: stable id 不能为空".to_owned());
+        } else if !construction_ids.insert(symbol.id.as_str()) {
+            violations.push(format!(
+                "construction_symbols: stable id 重复: {}",
+                symbol.id
+            ));
+        }
+        if !symbol.id.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '-')
+        }) {
+            violations.push(format!("{}: stable id 格式非法", symbol.id));
+        }
+        if !matches!(symbol.kind.as_str(), "adapter" | "wire") {
+            violations.push(format!("{}: kind 非法: {}", symbol.id, symbol.kind));
+        }
+        if symbol.allowed_paths.is_empty() {
+            violations.push(format!("{}: allowed_paths 不能为空", symbol.id));
+        }
+        if symbol.tracking_issue == 0 {
+            violations.push(format!("{}: tracking_issue 必须为正整数", symbol.id));
+        }
+        for (field, value) in [
+            ("symbol", symbol.symbol.as_str()),
+            ("owner_crate", symbol.owner_crate.as_str()),
+            ("guard", symbol.guard.as_str()),
+            ("reason", symbol.reason.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                violations.push(format!("{}: {field} 不能为空", symbol.id));
+            }
+        }
+        for allowed in &symbol.allowed_paths {
+            if allowed.trim().is_empty() {
+                violations.push(format!("{}: allowed_paths 含空路径", symbol.id));
+            }
+        }
     }
 
     let migration_debt = module_debt.values().sum();
@@ -224,14 +329,27 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
     if !violations.is_empty() {
         anyhow::bail!(violations.join("\n"));
     }
+    let mut rule_ids = BTreeSet::new();
+    for rule in &registry.rules {
+        if !rule_ids.insert(rule.id.as_str()) {
+            violations.push(format!("规则 id 重复：{}", rule.id));
+        }
+    }
+    if !violations.is_empty() {
+        anyhow::bail!(violations.join("\n"));
+    }
     report_entries.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(RegistryReport {
         migration_debt,
+        construction_symbols: registry.construction_symbols.len(),
+        rules: registry.rules.len(),
+        retired_symbols: registry.retired_symbols.len(),
         by_classification,
         by_module,
         by_guard,
         by_kind,
         by_status,
+        by_mechanism,
         entries: report_entries,
     })
 }

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use context::adapters::CommittedMemoryRetrieveAdapter;
-use context::application::ContextApplicationService;
-use context::domain::session::{
-    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
-    SessionHistory,
-};
-use context::domain::{
+use context::CommittedMemoryRetrieveAdapter;
+use context::ContextApplicationService;
+use context::{
     CleanupConfirmation, ContextAppend, ContextMessages, ContextRequest, ContextRequestId,
     FinalizeCause, InvocationReminder, Language, RunStepId, SessionId, SessionRevision,
     SystemBlock, SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind,
     ToolTerminalReceipt,
 };
-use context::ports::{
+use context::{
+    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
+    SessionHistory,
+};
+use context::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
     PromptMaterialization, SessionRepository, SessionSnapshot,
 };
@@ -108,7 +108,7 @@ fn structured_fake_session() -> FakeSession {
                         agent: false,
                     },
                     input_preview: input.to_string(),
-                    state: context::domain::ToolCallState::Terminal(ToolTerminalReceipt::new(
+                    state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
                         ToolOutcomeKind::Success,
                         "terminal",
                         CleanupConfirmation::NotApplicable,
@@ -201,8 +201,8 @@ impl SessionRepository for FakeSession {
     async fn append_finalized(
         &self,
         append: &ContextAppend,
-    ) -> Result<context::domain::AppendReceipt, context::domain::ContextAppendError> {
-        Ok(context::domain::AppendReceipt {
+    ) -> Result<context::AppendReceipt, context::ContextAppendError> {
+        Ok(context::AppendReceipt {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(3),
@@ -212,31 +212,26 @@ impl SessionRepository for FakeSession {
 
     async fn commit_compaction(
         &self,
-        _request: &context::domain::CompactRequest,
-    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
-        Ok(context::domain::CompactOutcome::Skipped(
-            context::domain::CompactSkipReason::ResumeProtection,
+        _request: &context::CompactRequest,
+    ) -> Result<context::CompactOutcome, context::ContextPortError> {
+        Ok(context::CompactOutcome::Skipped(
+            context::CompactSkipReason::ResumeProtection,
         ))
     }
 
     async fn commit_manual_compaction(
         &self,
-        _request: &context::domain::ManualCompactRequest,
-    ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
-        Ok(context::domain::CompactOutcome::Committed(
-            context::domain::CompactResult {
-                summary: "manual".into(),
-                recent_messages: vec![],
-                source_revision: SessionRevision::new(4),
-                quality: context::domain::CompactSummaryQuality::LocalOnly,
-            },
-        ))
+        _request: &context::ManualCompactRequest,
+    ) -> Result<context::CompactOutcome, context::ContextPortError> {
+        Ok(context::CompactOutcome::Committed(context::CompactResult {
+            summary: "manual".into(),
+            recent_messages: vec![],
+            source_revision: SessionRevision::new(4),
+            quality: context::CompactSummaryQuality::LocalOnly,
+        }))
     }
 
-    async fn clear(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<(), context::domain::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), context::ContextPortError> {
         Ok(())
     }
 }
@@ -247,7 +242,7 @@ impl ContextPromptSource for FakePrompt {
     async fn materialize(
         &self,
         _request: &ContextRequest,
-    ) -> Result<PromptMaterialization, context::ports::PromptMaterializationError> {
+    ) -> Result<PromptMaterialization, context::PromptMaterializationError> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
             uncached: Vec::new(),
@@ -296,6 +291,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -325,7 +321,7 @@ fn request_with_context_reduction(
     request
 }
 
-fn result_text(window: &context::domain::ContextWindow, call_id: &str) -> String {
+fn result_text(window: &context::ContextWindow, call_id: &str) -> String {
     window
         .messages
         .iter()
@@ -565,20 +561,20 @@ async fn build_window_renders_invocation_reminders_once_in_stable_order() {
     request.invocation_reminders = vec![
         InvocationReminder::model_guidance_mismatch("session/model", "run/model"),
         InvocationReminder::guidance_sources_changed(),
-        InvocationReminder::task_progress(context::domain::TaskProgressReminder {
+        InvocationReminder::task_progress(context::TaskProgressReminder {
             total: 2,
             completed: 0,
             items: vec![
-                context::domain::TaskProgressReminderItem {
+                context::TaskProgressReminderItem {
                     sequence: 1,
                     subject: "task one".into(),
-                    status: context::domain::TaskProgressStatus::InProgress,
+                    status: context::TaskProgressStatus::InProgress,
                     blocked_by_sequences: vec![],
                 },
-                context::domain::TaskProgressReminderItem {
+                context::TaskProgressReminderItem {
                     sequence: 2,
                     subject: "task two".into(),
-                    status: context::domain::TaskProgressStatus::Pending,
+                    status: context::TaskProgressStatus::Pending,
                     blocked_by_sequences: vec![1],
                 },
             ],
@@ -633,7 +629,7 @@ async fn append_delegates_finalized_step_to_session_backing() {
         messages: vec![Message::user("partial")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: context::domain::ContentFingerprint::new("fp"),
+        fingerprint: context::ContentFingerprint::new("fp"),
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));
@@ -643,10 +639,10 @@ async fn append_delegates_finalized_step_to_session_backing() {
 async fn manual_compact_and_clear_session_delegate_to_session_repository() {
     let service = service();
     let outcome = service
-        .manual_compact(&context::domain::ManualCompactRequest {
+        .manual_compact(&context::ManualCompactRequest {
             session_id: SessionId::new("session"),
             run_id: RunId::new("run"),
-            system_prompt: context::domain::SystemPromptSpec::new("system"),
+            system_prompt: context::SystemPromptSpec::new("system"),
             context_size: 128_000,
             progress: None,
             task_snapshot: None,
@@ -655,7 +651,7 @@ async fn manual_compact_and_clear_session_delegate_to_session_repository() {
         .unwrap();
     assert!(matches!(
         outcome,
-        context::domain::CompactOutcome::Committed(ref result)
+        context::CompactOutcome::Committed(ref result)
             if result.source_revision == SessionRevision::new(4)
     ));
 

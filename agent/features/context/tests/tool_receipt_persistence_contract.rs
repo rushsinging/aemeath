@@ -1,4 +1,4 @@
-use context::domain::{
+use context::{
     CleanupConfirmation, SessionId, ToolCallIdentity, ToolCallReceipt, ToolCallState,
     ToolOutcomeKind, ToolReceiptMutation, ToolTerminalReceipt,
 };

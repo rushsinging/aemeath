@@ -6,6 +6,8 @@ pub(crate) mod events;
 mod events_tests;
 pub(crate) mod finalize;
 pub(crate) mod hook_ui;
+#[cfg(test)]
+mod hook_ui_tests;
 mod idle_commands;
 mod idle_lifecycle;
 mod input_gate;
@@ -28,6 +30,8 @@ mod post_batch;
 #[cfg(test)]
 mod pre_compact_trigger_tests;
 pub(crate) mod reflection;
+#[cfg(test)]
+mod reflection_manual_tests;
 #[cfg(test)]
 mod reflection_trigger_tests;
 pub(crate) mod run_input_buffer;

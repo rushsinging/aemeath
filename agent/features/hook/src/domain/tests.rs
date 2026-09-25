@@ -693,11 +693,15 @@ fn test_invocation_point_roundtrip() {
             HookPoint::ElicitationResult,
         ),
         (
-            HookInvocation::SessionStart(SessionInput {}),
+            HookInvocation::SessionStart(SessionInput {
+                session_id: "sess-start".into(),
+            }),
             HookPoint::SessionStart,
         ),
         (
-            HookInvocation::SessionEnd(SessionInput {}),
+            HookInvocation::SessionEnd(SessionInput {
+                session_id: "sess-end".into(),
+            }),
             HookPoint::SessionEnd,
         ),
         (
@@ -940,4 +944,33 @@ fn all_points() -> Vec<HookPoint> {
         HookPoint::FileChanged,
         HookPoint::TeammateIdle,
     ]
+}
+
+// ════════════════════════════════════════════════════════════
+// SessionStart / SessionEnd payload 序列化
+// ════════════════════════════════════════════════════════════
+
+/// SessionStart / SessionEnd 的 stdin payload 携带 session_id，
+/// 外部集成脚本（如终端会话恢复工具）可从 stdin JSON 捕获当前会话 ID。
+#[test]
+fn session_lifecycle_payload_serializes_session_id() {
+    use crate::domain::invocation::*;
+
+    let start = serde_json::to_value(HookInvocation::SessionStart(SessionInput {
+        session_id: "sess-serialize-1".into(),
+    }))
+    .expect("SessionStart 序列化必须成功");
+    assert_eq!(
+        start,
+        serde_json::json!({"SessionStart": {"session_id": "sess-serialize-1"}})
+    );
+
+    let end = serde_json::to_value(HookInvocation::SessionEnd(SessionInput {
+        session_id: "sess-serialize-2".into(),
+    }))
+    .expect("SessionEnd 序列化必须成功");
+    assert_eq!(
+        end,
+        serde_json::json!({"SessionEnd": {"session_id": "sess-serialize-2"}})
+    );
 }

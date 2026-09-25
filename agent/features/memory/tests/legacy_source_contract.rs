@@ -20,7 +20,7 @@ use memory::{
 };
 use share::config::MemoryConfig;
 use std::sync::Arc;
-use storage::api as storage_api;
+use storage as storage_api;
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ fn legacy_stem(cwd: &str) -> String {
 }
 
 fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    Arc::new(storage::FileSystemDatasetAdapter::new(root).unwrap())
+    storage::file_system_dataset(root).unwrap()
 }
 
 /// Serialize a single legacy entry as the plain JSON array written by the

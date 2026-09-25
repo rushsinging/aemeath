@@ -125,8 +125,11 @@ impl ChatApiDriver for OpenAiDriver {
         reasoning_config: Option<&ReasoningConfig>,
         _reasoning_enabled: bool,
     ) {
-        if let Some(ReasoningConfig::Object(reasoning)) = reasoning_config {
-            request_body["reasoning"] = reasoning.clone();
+        // OpenAI Chat Completions 正式协议只接受顶层 `reasoning_effort`（#973）；
+        // 嵌套 `reasoning` 是 Responses 风格，部分网关（如 OmniRoute）不会为它
+        // 注入 reasoning summary。只提取 effort 编码为顶层字段，NEVER 双发。
+        if let Some(effort) = reasoning_config.and_then(|config| config.as_effort()) {
+            request_body["reasoning_effort"] = serde_json::Value::String(effort);
         }
     }
 }

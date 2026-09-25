@@ -1,10 +1,10 @@
-use context::adapters::InMemorySessionRepository;
-use context::domain::{
+use context::InMemorySessionRepository;
+use context::SessionRepository;
+use context::{
     AcceptedInputAppend, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequestId, FinalizeCause, RunStepId, SessionId,
     SessionRevision, ToolCallIdentity, ToolOutcomeKind, ToolReceiptMutation, ToolTerminalReceipt,
 };
-use context::ports::SessionRepository;
 use sdk::RunId;
 use share::message::{ContentBlock, Message};
 
@@ -119,9 +119,9 @@ async fn commit_tool_step(
 
 #[tokio::test]
 async fn build_window_applies_l3_to_isolated_subagent_history() {
-    use context::application::ContextApplicationService;
-    use context::domain::{ContextRequest, Language, SystemPromptSpec};
-    use context::ports::{ContextPort, ContextPromptSource, PromptMaterialization};
+    use context::ContextApplicationService;
+    use context::{ContextPort, ContextPromptSource, PromptMaterialization};
+    use context::{ContextRequest, Language, SystemPromptSpec};
     use provider::ReasoningLevel;
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
@@ -133,7 +133,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         async fn materialize(
             &self,
             _request: &ContextRequest,
-        ) -> Result<PromptMaterialization, context::ports::PromptMaterializationError> {
+        ) -> Result<PromptMaterialization, context::PromptMaterializationError> {
             Ok(PromptMaterialization {
                 cacheable: vec![],
                 uncached: vec![],
@@ -160,7 +160,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
     let service = ContextApplicationService::new(
         backing,
         Arc::new(Prompt),
-        Arc::new(context::adapters::NoOpContextMemorySource),
+        Arc::new(context::NoOpContextMemorySource),
     );
     let request = ContextRequest {
         session_id,
@@ -178,6 +178,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     };
@@ -290,10 +291,10 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
     let mut outcome = append("outcome-v1");
     outcome.finalize_cause = FinalizeCause::RunTerminated;
     outcome.api_input_tokens = Some(21);
-    outcome.receipts = vec![context::domain::StepReceipt::agent(
+    outcome.receipts = vec![context::StepReceipt::agent(
         "agent-call",
         0,
-        context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+        context::ToolOutcomeKind::CancellationUnconfirmed,
     )];
 
     let first = backing.append_finalized(&outcome).await.unwrap();

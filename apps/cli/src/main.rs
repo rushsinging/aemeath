@@ -26,6 +26,7 @@ async fn main() {
             .await
             .unwrap_or_else(|e| {
                 eprintln!("Error: {e}");
+                composition::app::flush_diagnostic_logs();
                 std::process::exit(1);
             });
             subcommand::model_selection::run_models_command(client, json).await;
@@ -41,6 +42,7 @@ async fn main() {
             .await
             .unwrap_or_else(|e| {
                 eprintln!("Error: {e}");
+                composition::app::flush_diagnostic_logs();
                 std::process::exit(1);
             });
             subcommand::sessions_command::run_sessions_command(client, delete, json, limit).await;
@@ -68,6 +70,7 @@ async fn main() {
                 .await
                 .unwrap_or_else(|error| {
                     eprintln!("Error: {error}");
+                    composition::app::flush_diagnostic_logs();
                     std::process::exit(1);
                 });
             subcommand::update_command::run_update_command(check, user_agent).await;
@@ -80,4 +83,7 @@ async fn main() {
             chat::run_chat(cli.run_args.into()).await;
         }
     }
+
+    // 异步落盘：进程退出前排空 worker channel，保证尾部诊断日志不丢。
+    composition::app::flush_diagnostic_logs();
 }

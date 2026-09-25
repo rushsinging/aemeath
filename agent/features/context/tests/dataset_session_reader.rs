@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
-use context::adapters::{DatasetCanonicalSessionWriter, DatasetSessionReader};
-use context::domain::session::{
+use context::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
     SessionGenerationCodec, SessionGenerationManifest,
 };
+use context::{DatasetCanonicalSessionWriter, DatasetSessionReader};
 use share::message::Message;
-use storage::api::{
-    AtomicDatasetPort, DatasetKey, DatasetMember, Durability, SafePathSegment, StorageNamespace,
-    WriteOptions,
+use storage::{
+    DatasetKey, DatasetMember, Durability, SafePathSegment, StorageNamespace, WriteOptions,
 };
-use storage::FileSystemDatasetAdapter;
 
 fn session_with_step(id: &str, revision: u64, text: &str) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -36,46 +34,60 @@ fn dataset_key(session_id: &str) -> DatasetKey {
     .expect("dataset key")
 }
 
+fn scoped_dataset_key(project_dir: &SafePathSegment, session_id: &str) -> DatasetKey {
+    DatasetKey::new(
+        StorageNamespace::Session,
+        vec![
+            project_dir.clone(),
+            format!("{session_id}.dataset")
+                .parse::<SafePathSegment>()
+                .expect("safe session dataset id"),
+        ],
+    )
+    .expect("scoped dataset key")
+}
+
 #[tokio::test]
 async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
-    let blob: Arc<dyn storage::api::AtomicBlobPort> =
-        Arc::new(storage::FileSystemBlobAdapter::new(root.path()).expect("blob adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::file_system_blob(root.path()).expect("blob adapter");
     let expected = session_with_step("legacy", 4, "legacy history");
-    let legacy_management = context::adapters::AtomicBlobSessionManagement::new(blob.clone());
+    let legacy_management = context::AtomicBlobSessionManagement::new(blob.clone());
     let project = share::session_types::ProjectIdentity {
         initial_cwd: "/legacy".to_string(),
         git_common_dir: None,
     };
     let mut expected = expected;
-    expected.workspace = context::domain::session::SnapshotState::Captured(
-        share::session_types::PersistedWorkspaceContext {
+    expected.workspace =
+        context::SnapshotState::Captured(share::session_types::PersistedWorkspaceContext {
             workspace_id: share::session_types::WorkspaceId::derive(&project, "/legacy"),
             project_identity: project.clone(),
             path_base: "/legacy".to_string(),
             workspace_root: "/legacy".to_string(),
             worktree_kind: share::session_types::WorktreeKind::Primary,
             context_stack: Vec::new(),
-        },
-    );
+        });
     context::SessionManagementPort::import_for_project(
         &legacy_management,
-        &context::domain::session::SessionCodec::encode(&expected).expect("encode legacy"),
+        &context::SessionCodec::encode(&expected).expect("encode legacy"),
         &project,
     )
     .await
     .expect("save legacy blob");
 
     let reader = DatasetSessionReader::new(dataset.clone(), Some(blob));
+    // import 落新布局（scoped key）：load 必须带同一 project 目录段探测。
+    let project_dir = context::project_dir_segment(&project);
     let loaded = reader
-        .load("legacy")
+        .load(Some(&project_dir), "legacy")
         .await
         .expect("load and migrate legacy");
 
     assert_eq!(loaded, expected);
     assert!(!dataset
-        .read_manifest(&dataset_key("legacy"))
+        .read_manifest(&scoped_dataset_key(&project_dir, "legacy"))
         .await
         .expect("migrated dataset manifest")
         .members()
@@ -85,7 +97,7 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
 #[tokio::test]
 async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let expected = session_with_step("primary", 3, "primary history");
     writer
@@ -95,7 +107,7 @@ async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let loaded = reader
-        .load("primary")
+        .load(None, "primary")
         .await
         .expect("load primary generation");
 
@@ -105,7 +117,7 @@ async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
 #[tokio::test]
 async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_invalid() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let previous = session_with_step("recover", 1, "previous history");
     writer
@@ -139,7 +151,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 
     let reader = DatasetSessionReader::new(dataset, None);
     let loaded = reader
-        .load("recover")
+        .load(None, "recover")
         .await
         .expect("recover previous generation");
 
@@ -153,7 +165,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 #[tokio::test]
 async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let future_bytes = br#"{"generation_schema_version":999,"opaque":"keep-me"}"#.to_vec();
     let manifest_name = SessionGenerationManifest::manifest_member_name()
         .parse::<SafePathSegment>()
@@ -174,13 +186,13 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let error = reader
-        .load("future")
+        .load(None, "future")
         .await
         .expect_err("future schema fails closed");
 
     assert!(matches!(
         error,
-        context::domain::session::SessionGenerationWireError::UnsupportedFutureVersion {
+        context::SessionGenerationWireError::UnsupportedFutureVersion {
             version: 999,
             original_bytes,
         } if original_bytes == future_bytes
@@ -190,7 +202,7 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
 #[tokio::test]
 async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("cleared", 7, "history before clear");
     session.run_slices = vec![
@@ -211,7 +223,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
     ]
     .into();
     // /clear 写入逻辑断点：最后被清除的 step 是 step-2。
-    session.cleared_after = Some(context::domain::session::RunStepCursor {
+    session.cleared_after = Some(context::RunStepCursor {
         run_id: "run-2".to_string(),
         step_id: "step-2".to_string(),
     });
@@ -222,7 +234,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("cleared")
+        .load_for_resume(None, "cleared")
         .await
         .expect("load cleared generation");
     let loaded = prepared.active_session;
@@ -243,7 +255,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
 #[tokio::test]
 async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("cleared-then-append", 7, "history before clear");
     session.run_slices = vec![CommittedRunSlice::new(
@@ -254,7 +266,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
         )],
     )]
     .into();
-    session.cleared_after = Some(context::domain::session::RunStepCursor {
+    session.cleared_after = Some(context::RunStepCursor {
         run_id: "run-1".to_string(),
         step_id: "step-1".to_string(),
     });
@@ -278,7 +290,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("cleared-then-append")
+        .load_for_resume(None, "cleared-then-append")
         .await
         .expect("load cleared-then-appended generation");
     let loaded = prepared.active_session;
@@ -301,7 +313,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
 #[tokio::test]
 async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("compacted", 7, "hidden before compact");
     session.run_slices = vec![
@@ -322,9 +334,9 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
     ]
     .into();
     let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue\n\n## Current Task State\n■ current task";
-    session.compact = Some(context::domain::session::ActiveCompactMarker {
+    session.compact = Some(context::ActiveCompactMarker {
         summary: checkpoint.to_string(),
-        start_at: Some(context::domain::session::RunStepCursor {
+        start_at: Some(context::RunStepCursor {
             run_id: "run-2".to_string(),
             step_id: "step-2".to_string(),
         }),
@@ -337,7 +349,7 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("compacted")
+        .load_for_resume(None, "compacted")
         .await
         .expect("load compacted generation");
     let loaded = prepared.active_session;
@@ -378,7 +390,7 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
 #[tokio::test]
 async fn dataset_reader_loads_requested_display_history_steps_from_same_generation() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("windowed", 9, "first");
     session.run_slices = vec![
@@ -405,11 +417,12 @@ async fn dataset_reader_loads_requested_display_history_steps_from_same_generati
 
     let reader = DatasetSessionReader::new(dataset, None);
     let prepared = reader
-        .load_for_resume("windowed")
+        .load_for_resume(None, "windowed")
         .await
         .expect("prepare resume");
     let window = reader
         .load_display_history_steps(
+            None,
             "windowed",
             prepared.display_history.generation_revision(),
             &[prepared.display_history.steps()[0]
@@ -451,11 +464,11 @@ fn manifest_codec_fixture_remains_current_for_reader_contract() {
 #[tokio::test]
 async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = Arc::new(FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
+    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("control-lines", 3, "visible");
-    let checkpoint = context::domain::compact::ContinuationCheckpoint::from_sections(
-        context::domain::compact::CheckpointSections {
+    let checkpoint = context::compact::ContinuationCheckpoint::from_sections(
+        context::compact::CheckpointSections {
             immutable_constraints: vec!["- review only".to_string()],
             current_objective: vec!["- inspect\n## 来源与身份".to_string()],
             committed_facts: vec!["- persisted".to_string()],
@@ -465,13 +478,13 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
             next_action: "revalidate once".to_string(),
             required_revalidation: vec!["- revalidate git".to_string()],
             archived_milestones: vec!["- baseline `abc`".to_string()],
-            status: context::domain::compact::ContinuationStatus::Continue,
+            status: context::compact::ContinuationStatus::Continue,
             status_reason: Some("work remains".to_string()),
         },
     )
     .unwrap()
     .render();
-    session.compact = Some(context::domain::session::ActiveCompactMarker {
+    session.compact = Some(context::ActiveCompactMarker {
         summary: checkpoint.clone(),
         start_at: None,
         source_revision: 2,
@@ -479,11 +492,11 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     writer.save_initial(&session).await.unwrap();
 
     let prepared = DatasetSessionReader::new(dataset, None)
-        .load_for_resume("control-lines")
+        .load_for_resume(None, "control-lines")
         .await
         .unwrap();
     let restored = prepared.active_session.compact.unwrap().summary;
 
     assert_eq!(restored, checkpoint);
-    assert!(context::domain::compact::ContinuationCheckpoint::parse(&restored).is_ok());
+    assert!(context::compact::ContinuationCheckpoint::parse(&restored).is_ok());
 }

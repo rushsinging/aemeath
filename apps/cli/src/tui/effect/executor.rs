@@ -117,15 +117,17 @@ impl App {
             Effect::ResolveWorkspaceMetadata { root, revision } => {
                 self.resolve_workspace_metadata_effect(root, revision, ui_tx)
             }
-            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
-            Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
+            Effect::ProcessImageFile {
+                path,
+                fallback_text,
+            } => self.process_image_file_effect(path, fallback_text, ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
-            Effect::ResetRuntimeState => self.reset_runtime_state().await,
+            Effect::ResetRuntimeState => self.reset_runtime_state(),
             Effect::OpenUrl { url } => self.open_url_effect(&url),
         }
     }
@@ -370,18 +372,6 @@ impl App {
         self.chat.push_input_event(event);
     }
 
-    /// `/save` 命令——仅 UX 反馈。Runtime 已有 run_step-level auto-save + loop-exit auto-save，
-    /// TUI 不再发 ChatInputEvent::SaveSession。
-    fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
-        if notify {
-            let id = self.session.session_id().to_string();
-            let tx = ui_tx.clone();
-            crate::tui::effect::spawn_guard::spawn_guarded("save_notify", async move {
-                let _ = tx.send(UiEvent::SessionSaved { id }).await;
-            });
-        }
-    }
-
     fn fetch_memory_list_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
         // #567：list_reminders 走事件流（ChatInputEvent::ListReminders）。
         // runtime idle 分支查询，结果通过 ReminderList 事件回传。
@@ -417,10 +407,23 @@ impl App {
         });
     }
 
-    fn process_image_file_effect(&mut self, path: String, ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567 S10：process_image_file 迁移到 TUI 本地
+    fn process_image_file_effect(
+        &mut self,
+        path: String,
+        fallback_text: String,
+        ui_tx: &mpsc::Sender<UiEvent>,
+    ) {
         let tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
+            if !std::path::Path::new(&path).is_file() {
+                // 终端粘贴的转义路径、已被清理的临时文件：回填原始文本，不丢用户输入。
+                let _ = tx
+                    .send(UiEvent::PasteFallbackToText {
+                        text: fallback_text,
+                    })
+                    .await;
+                return;
+            }
             match crate::tui::render::input::clipboard::process_image_file(&path) {
                 Ok(img) => {
                     use base64::Engine;
@@ -434,7 +437,11 @@ impl App {
                     };
                     let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                 }
-                Err(e) => crate::tui::log_warn!("image process failed: {e}"),
+                Err(error) => {
+                    let _ = tx
+                        .send(UiEvent::Error(format!("图片加载失败：{error}")))
+                        .await;
+                }
             }
         });
     }
@@ -586,49 +593,9 @@ mod workspace_tests;
 mod interaction_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "executor_image_tests.rs"]
+mod image_tests;
 
-    #[test]
-    fn test_effect_runtime_ignores_noop_effect() {
-        let app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        assert!(!app.layout.should_exit);
-    }
-
-    #[test]
-    fn test_effect_runtime_quit_effect_sets_exit_flag() {
-        let mut app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        app.layout.request_exit();
-        assert!(app.layout.should_exit);
-    }
-
-    #[test]
-    fn test_effect_runtime_accepts_pending_image() {
-        let mut app = App::new(
-            "s".to_string(),
-            std::path::PathBuf::from("/tmp"),
-            "m".to_string(),
-        );
-        // accept_pending_clipboard_image 已移除（#497 spawn_guarded 化），
-        // 图片经 UiEvent::ClipboardImage → InsertImage intent 注入。
-        app.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertImage(
-            sdk::ClipboardImageView {
-                base64: "abc".to_string(),
-                media_type: "image/png".to_string(),
-                final_size: 3,
-                display_path: None,
-                width: None,
-                height: None,
-            },
-        ));
-        assert_eq!(app.model.input.document.image_spans.len(), 1);
-    }
-}
+#[cfg(test)]
+#[path = "executor_effect_tests.rs"]
+mod effect_tests;

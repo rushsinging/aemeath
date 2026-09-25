@@ -7,6 +7,7 @@ mod envelope;
 mod generation;
 mod management;
 mod message_integrity;
+mod project_layout;
 mod restore;
 mod types;
 
@@ -27,6 +28,7 @@ pub use management::{
     same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
     SessionMetadataUpdate, SessionResumeLoad, SessionResumeView,
 };
+pub use project_layout::{project_dir_segment, session_project_dir};
 pub use restore::{SessionRestore, SessionRestoreStep};
 pub use types::{
     extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,

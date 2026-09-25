@@ -4,6 +4,7 @@ mod key;
 mod key_nav;
 mod key_scroll;
 mod notice;
+mod paste;
 mod reminder;
 mod spawn_context;
 mod ui_event;
@@ -93,11 +94,10 @@ pub(crate) fn output_visible_height(area_height: u16, live_status: &LiveStatusVi
     (area_height as usize).saturating_sub(reserved)
 }
 
-/// Return type for update: effects plus optional slash command continuation.
+/// Return type for update: effects plus optional spawn continuation.
 pub struct UpdateResult {
     pub effects: Vec<Effect>,
     pub spawn_effect: Option<SpawnAgentChatEffect>,
-    pub pending_slash: Option<String>,
 }
 
 impl UpdateResult {
@@ -105,7 +105,6 @@ impl UpdateResult {
         Self {
             effects: Vec::new(),
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 
@@ -113,7 +112,6 @@ impl UpdateResult {
         Self {
             effects: vec![effect],
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 
@@ -122,10 +120,6 @@ impl UpdateResult {
         debug_assert!(
             other.spawn_effect.is_none(),
             "runtime events must not emit spawn effects"
-        );
-        debug_assert!(
-            other.pending_slash.is_none(),
-            "runtime events must not emit slash continuations"
         );
     }
 
@@ -189,37 +183,9 @@ impl App {
                 UpdateResult {
                     effects,
                     spawn_effect: None,
-                    pending_slash: None,
                 }
             }
-            TuiMsg::Paste(text) if !self.chat.is_processing => {
-                self.handle_paste_event(text, ui_tx);
-                UpdateResult::none()
-            }
-            TuiMsg::Paste(text) => {
-                // Paste while processing: insert into input area so it can be queued
-                match sdk::classify_paste(&text) {
-                    sdk::PasteKind::Empty => {
-                        self.input.just_pasted = true;
-                        // 删：[reading clipboard image...] —— 同 paste_handler.rs 路径（#fix-tui-image-input-output）
-                        return UpdateResult::one(Effect::ReadClipboardImage);
-                    }
-                    sdk::PasteKind::ImageFile => {
-                        // 删：[loading image: ...] —— 同上（#fix-tui-image-input-output）
-                        self.input.just_pasted = true;
-                        return UpdateResult::one(Effect::ProcessImageFile {
-                            path: text.trim().to_string(),
-                        });
-                    }
-                    sdk::PasteKind::Text => {
-                        self.input.just_pasted = true;
-                        self.handle_input_intent(
-                            crate::tui::model::input::intent::InputIntent::InsertText(text),
-                        );
-                    }
-                }
-                UpdateResult::none()
-            }
+            TuiMsg::Paste(text) => self.route_paste(text),
             TuiMsg::Resize { width, height } => {
                 self.handle_resize(width, height);
                 UpdateResult::none()
@@ -524,7 +490,6 @@ impl App {
                 return UpdateResult {
                     effects: Vec::new(),
                     spawn_effect: None,
-                    pending_slash: None,
                 };
             }
             TuiRuntimeEvent::SessionResumeFailed { kind, id, message } => {
@@ -597,6 +562,52 @@ impl App {
                     sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
                 ));
             }
+            // #740：ModelList / SessionList 是 /model 对话框与 /resume 补全的
+            // 唯一数据源，在此显式消费写入 SessionState 缓存（与 ReminderList
+            // 同模式），NEVER 静默丢弃。
+            TuiRuntimeEvent::ModelList { models } => {
+                let models = models
+                    .iter()
+                    .map(|model| sdk::ModelSummary {
+                        provider: model.provider.clone(),
+                        id: model.id.clone(),
+                        name: model.name.clone(),
+                        context_window: model.context_window,
+                        max_tokens: model.max_tokens,
+                    })
+                    .collect();
+                self.session.cache_models(models);
+                if std::mem::take(&mut self.session.model_selection_pending) {
+                    self.present_model_selection_dialog();
+                }
+            }
+            TuiRuntimeEvent::SessionList { sessions } => {
+                self.session.cache_sessions(
+                    sessions
+                        .iter()
+                        .map(|session| (session.id.clone(), session.summary.clone()))
+                        .collect(),
+                );
+            }
+            // `/memory remind` 结果渲染：ReminderList 在 Intent 层无投影，
+            // 必须在此显式消费，NEVER 静默丢弃（#1092 终审修复）。
+            TuiRuntimeEvent::ReminderList { reminders } => {
+                if reminders.is_empty() {
+                    self.append_system_notice("No reminders.");
+                } else {
+                    let active_count = reminders.iter().filter(|r| !r.done).count();
+                    let mut lines = vec![format!(
+                        "Reminders ({}/{} active):",
+                        active_count,
+                        reminders.len()
+                    )];
+                    for reminder in reminders {
+                        let marker = if reminder.done { "[x]" } else { "[ ]" };
+                        lines.push(format!("  {marker} {}", reminder.content));
+                    }
+                    self.append_system_notice(lines.join("\n"));
+                }
+            }
             TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
                 // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
                 self.chat.active_run_step = None;
@@ -632,7 +643,6 @@ impl App {
         UpdateResult {
             effects: model_result.effects,
             spawn_effect: None,
-            pending_slash: None,
         }
     }
 

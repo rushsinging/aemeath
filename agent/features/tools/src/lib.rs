@@ -25,38 +25,36 @@ pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext,
     AgentRunRequest, AgentRunTerminal, AgentRunner, AgentToolCallProgress,
     ApplicationControlCommand, ApplicationControlTarget, AuthorizationContext,
-    CancellationDeclaration, CancellationSignal, CatalogQuery, CleanupConfirmation,
-    CommandArgumentSchema, CommandCatalogPort, CommandCompletion, CommandDescriptor,
-    CommandMechanism, CommandName, CommandParseError, CommandRoute, CommandRouterPort,
-    CommandTarget, CommittedTaskChange, ConcurrencyDeclaration, ExecutionScope,
-    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData,
-    InputSafetyDeclaration, InvocationSource, LoadedSkill, MemoryPortSource, MutexReadSet,
-    ParsedArguments, PlanModeState, ProfileExpansionError, ProgressSink, ReadSet,
-    RegistryScopeName, SessionReminder, SessionReminders, SkillCatalogPort, SkillCatalogSnapshot,
-    SkillDescriptor, SkillError, SkillLoadDecision, SkillLoadMutation, SkillLoadPort,
-    SkillLoadQuery, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort, SkillQuery,
-    SkillQuerySnapshot, SkillRequestCommand, SkillSlashRoute, SkillSource, SkillSourceKind,
-    SlashInput, SnapshotQueryCommand, SnapshotQueryTarget, SubRunActivityEvent, SubRunActivityKind,
-    SubRunIdentity, SubRunStartedEvent, SubRunTerminalOutcome, TaskChangeFact, Tool,
-    ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolDescriptor, ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile,
-    ToolProfileName, ToolProgressEvent, ToolResult, ToolSuspension, ToolTerminalDetails, TypedTool,
-    TypedToolAdapter, TypedToolResult, UserInteractionSpec, UserOption, UserQuestion,
-    WorkspaceReadAccess,
+    CancellationDeclaration, CancellationSignal, CleanupConfirmation, CommandArgumentSchema,
+    CommandCatalogPort, CommandCompletion, CommandDescriptor, CommandMechanism, CommandName,
+    CommandParseError, CommandRoute, CommandRouterPort, CommandTarget, CommittedTaskChange,
+    ExecutionScope, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
+    MemoryPortSource, MutexReadSet, ParsedArguments, ProgressSink, RegistryScopeName,
+    SessionReminder, SessionReminders, SkillCatalogPort, SkillCatalogSnapshot, SkillDescriptor,
+    SkillError, SkillLoadDecision, SkillLoadMutation, SkillLoadPort, SkillLoadScope,
+    SkillLoadStateError, SkillLoadStatePort, SkillQuery, SkillRequestCommand, SkillSource,
+    SkillSourceKind, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget, SubRunActivityEvent,
+    SubRunActivityKind, SubRunIdentity, SubRunStartedEvent, SubRunTerminalOutcome, TaskChangeFact,
+    Tool, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
+    ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
+    ToolExecutionPorts, ToolInvocation, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
+    ToolProgressEvent, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter, TypedToolResult,
+    UserQuestion, WorkspaceReadAccess,
 };
 
 // Schema validator (moved from runtime).
 pub use domain::schema_validator::{
-    format_tool_input_error, strip_runtime_meta, validate_tool_input, ToolInputMismatch,
-    RUNTIME_META_KEYS,
+    format_tool_input_error, strip_runtime_meta, validate_tool_input,
 };
+
+// Role-policy compilation: config strings → narrowed ToolProfile.
+pub use domain::role_policy::{role_profile_name, RolePolicyCompileError};
 
 // Runtime's phase-peel seam delegates to this Tools-owned typed parser.
 pub use adapters::ask_user::ask_user_suspension;
 
 // Adapter façade: only MCP protocol values and the read-only command classifier.
 pub use adapters::bash::is_readonly_command;
-pub use adapters::mcp::{McpServerConfig, McpToolDef, McpTransportKind};
+pub use adapters::mcp::McpTransportKind;
 pub use adapters::mcp_manager::McpConnectionManager;
 pub use adapters::mcp_tool::McpTool;

@@ -4,9 +4,312 @@
     "repository_migration_debt": 1,
     "modules": {
       "runtime": 0,
-      "tui": 1
+      "tui": 1,
+      "update": 1
     }
   },
+  "construction_symbols": [
+    {
+      "id": "construction.storage.filesystemblobadapter",
+      "symbol": "FileSystemBlobAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/features/storage/src/lib.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Blob filesystem adapter is crate-private; the sole construction site is the file_system_blob composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
+    },
+    {
+      "id": "construction.storage.filesystemdatasetadapter",
+      "symbol": "FileSystemDatasetAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/features/storage/src/lib.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset filesystem adapter is crate-private; the sole construction site is the file_system_dataset composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
+    },
+    {
+      "id": "construction.memory.datasetmemoryopener",
+      "symbol": "DatasetMemoryOpener",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Memory opener is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.memory.filelegacymemorysourcefactory",
+      "symbol": "FileLegacyMemorySourceFactory",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Legacy memory source factory is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.memory.atomicdatasetreflectionhistorystore",
+      "symbol": "AtomicDatasetReflectionHistoryStore",
+      "owner_crate": "memory",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Reflection history store is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.atomicblobacceptedinputwriter",
+      "symbol": "AtomicBlobAcceptedInputWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Accepted input writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.atomicblobtoolreceiptwriter",
+      "symbol": "AtomicBlobToolReceiptWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Tool receipt writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.datasetsessionmanagement",
+      "symbol": "DatasetSessionManagement",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset session management is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.datasetcanonicalsessionwriter",
+      "symbol": "DatasetCanonicalSessionWriter",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Canonical session writer is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.productionmaincontextfactory",
+      "symbol": "ProductionMainContextFactory",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Main context factory is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.workspaceskillqueryfactory",
+      "symbol": "WorkspaceSkillQueryFactory",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Skill query factory is assembled only by the Composition Root or inside the Context adapters (#1067)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.nativeconfigstore",
+      "symbol": "NativeConfigStore",
+      "owner_crate": "config",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Config native store is assembled only by the Composition Root (#861/#949)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.policy.configuredpolicy",
+      "symbol": "ConfiguredPolicy",
+      "owner_crate": "policy",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Policy adapter is assembled only by the Composition Root (#861)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.wire-main-session",
+      "symbol": "wire_main_session",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Main session wiring is invoked only by the Composition Root (#861/#1292)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.project.wire-production-workspace",
+      "symbol": "wire_production_workspace",
+      "owner_crate": "project",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Production workspace wiring is invoked only by the Composition Root (#893)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-commands",
+      "symbol": "wire_commands",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Command catalog wiring is invoked only by the Composition Root (#861)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.runtime.atomicblobtoolresultstore",
+      "symbol": "AtomicBlobToolResultStore",
+      "owner_crate": "runtime",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Tool Result store is assembled only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.wire-project-config-with-cli",
+      "symbol": "wire_project_config_with_cli",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Project config wiring is invoked only by the Composition Root (#949)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.task.wire-task",
+      "symbol": "wire_task",
+      "owner_crate": "task",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Task wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-builtin-catalog-execution",
+      "symbol": "wire_builtin_catalog_execution",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Builtin catalog/execution wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.tools.wire-skills",
+      "symbol": "wire_skills",
+      "owner_crate": "tools",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Skill wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.runtime.wire-sdk-chat-ingress",
+      "symbol": "wire_sdk_chat_ingress",
+      "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "SDK chat ingress wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.provider.transportpool",
+      "symbol": "TransportPool",
+      "owner_crate": "provider",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
+      "tracking_issue": 1645
+    },
+    {
+      "id": "construction.runtime.wire-active-run-registry",
+      "symbol": "wire_active_run_registry",
+      "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "ActiveRunRegistry production construction converges to the factory; invoked only by the Composition Root (#1678)",
+      "tracking_issue": 1678
+    },
+    {
+      "id": "construction.config.wire-project-config-with-agents-dir",
+      "symbol": "wire_project_config_with_agents_dir",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
+      "tracking_issue": 1385,
+      "guard": "check-cross-bc-construction-registry.sh"
+    }
+  ],
   "entries": [
     {
       "id": "policy.repository.projection-naming",
@@ -25,397 +328,15 @@
       "status": "active"
     },
     {
-      "id": "policy.composition.cross-bc-construction-ownership",
-      "guard": "check-composition-construction-ownership.sh",      "module": "composition",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/composition/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "composition",
-      "reason": "Composition is the sole production construction root for the completed Context Session, Config override, Runtime Tool and Hook adapter boundaries",
-      "tracking_issue": 1296,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent aggregate policy that preserves all four leaf ownership boundaries",
-      "status": "active"
-    },
-    {
-      "id": "policy.context.session-project-scope",
-      "guard": "check-session-project-scope.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "context",
-      "reason": "Session list and resume are restricted to the current ProjectIdentity; Git worktrees match by common-dir and non-git projects by canonical root",
-      "tracking_issue": 1295,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Context-owned session project scope policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.hook-assembly.composition-ownership",
-      "guard": "check-runtime-hook-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "composition",
-      "reason": "Composition alone builds HookRunner from the committed ConfigSnapshot; Runtime Main and Sub consume the injected HookPort",
-      "tracking_issue": 1295,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Hook assembly policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.tool-assembly.composition-ownership",
-      "guard": "check-runtime-tool-assembly-ownership.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/client"
-      },
-      "classification": "target_capability_policy",
-      "owner": "composition",
-      "reason": "Composition alone assembles Tool Catalog/Execution, Skill ports, Tool Result materializer and ActiveRunRegistry; Runtime bootstrap consumes injected resources",
-      "tracking_issue": 1294,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Runtime tool assembly policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.config.override-store.composition-ownership",
-      "guard": "check-config-store-ownership.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/config/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "config",
-      "reason": "Composition alone selects config override AtomicBlob backing; Config wiring consumes injected NativeConfigStore",
-      "tracking_issue": 1293,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with equivalent Composition-only config override store ownership policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.session-management.composition-ownership",
-      "guard": "check-session-management-ownership.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "context",
-      "reason": "Composition alone constructs Session AtomicBlob backing; Context and Runtime consume the same SessionManagementPort Arc",
-      "tracking_issue": 1292,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Composition-only Session backing ownership policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.cargo.capability-dependency-matrix",
-      "guard": "check-cargo-dependency-graph.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "symbol",
-        "value": "business_allow"
-      },
-      "classification": "target_capability_policy",
-      "owner": "architecture",
-      "reason": "Cargo workspace edges are the machine-enforced capability dependency policy",
-      "tracking_issue": 1022,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent capability dependency policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.composition.unique-adapter-root",
-      "guard": "check-forbidden-imports.sh",
-      "module": "composition",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/composition/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "composition",
-      "reason": "Composition is the unique production location allowed to assemble shared adapters",
-      "tracking_issue": 1002,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only if the deployable production root changes",
-      "status": "active"
-    },
-    {
-      "id": "policy.hexagonal.current-layer-matrix",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "symbol",
-        "value": "FORBIDDEN_LAYER_DEPS"
-      },
-      "classification": "target_hexagonal_policy",
-      "owner": "architecture",
-      "reason": "Current Hexagonal dependency directions remain enforced until the capability-first guard replaces legacy COLA rules",
-      "tracking_issue": 1022,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retire together with check-cola-layer-purity.sh after #1022 replacement evidence",
-      "status": "active"
-    },
-    {
-      "id": "migration.tui.tea-slash-dispatch",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "path",
-        "value": "apps/cli/src/tui/app/slash.rs"
-      },
-      "classification": "migration_exception",
-      "owner": "tui",
-      "reason": "Slash dispatch still performs asynchronous request-response work instead of Effect round-trips",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when slash I/O is driven through Effect and authoritative events",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.arch.inline-exclusions",
-      "guard": "check-architecture-guards.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "inline grep exclusions in run_tui_single_source_structure_guard"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Tests, projection owners and comments are outside each narrowly stated TUI invariant",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "split into narrower registered scopes when the inline TUI guard is decomposed",
-      "status": "active"
-    },
-    {
-      "id": "policy.config.business-env-owner",
-      "guard": "check-config-env-guard.sh",
-      "module": "config",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/config/src/adapters.rs"
-      },
-      "classification": "target_capability_policy",
-      "owner": "config",
-      "reason": "All business environment variables are read only by the Config EnvAdapter",
-      "tracking_issue": 935,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Config-owned environment adapter policy",
-      "status": "active"
-    },
-    {
-      "id": "scope.config.comments",
-      "guard": "check-config-env-guard.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "comment lines"
-      },
-      "classification": "scope_exclusion",
-      "owner": "config",
-      "reason": "Comment examples are not runtime environment reads",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while the textual scanner reads source lines",
-      "status": "active"
-    },
-    {
-      "id": "scope.config.reader-tests-only",
-      "guard": "check-config-reader-injection.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "test paths and file-tail cfg(test) inline modules"
-      },
-      "classification": "scope_exclusion",
-      "owner": "config",
-      "reason": "Test-only ConfigAppService construction is outside the production construction rule",
-      "tracking_issue": 949,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests require direct fixture construction",
-      "status": "active"
-    },
-    {
-      "id": "scope.config.workflow-comments-and-compat-test",
-      "guard": "check-config-workflow-boundary.sh",
-      "module": "config",
-      "scope": {
-        "kind": "pattern",
-        "value": "comments and retired compatibility test"
-      },
-      "classification": "scope_exclusion",
-      "owner": "config",
-      "reason": "Comments and the explicit retired-field compatibility test are not active Config ownership",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove compatibility suppression with the retired compatibility fixture",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.production-test-sources",
-      "guard": "check-log-target-prefix.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "tests directories, *_test.rs, *_tests.rs, tests.rs, and cfg(test) modules"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Test fixtures and guard probes are not production log calls or production owner constants",
-      "tracking_issue": 941,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while production ownership applies only to compiled production source",
-      "status": "active"
-    },
-    {
-      "id": "scope.provider.error-log-self-reference",
-      "guard": "check-provider-http-attempt.sh",
-      "module": "provider",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/provider/src/adapters/error_log.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "provider",
-      "reason": "The error logging owner is removed only for the no-self-reference sub-check",
-      "tracking_issue": 1033,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while the dedicated no-self-reference check exists",
-      "status": "active"
-    },
-    {
-      "id": "scope.provider.invocation-tests",
-      "guard": "check-provider-invocation-scope.sh",
-      "module": "provider",
-      "scope": {
-        "kind": "pattern",
-        "value": "tests directory"
-      },
-      "classification": "scope_exclusion",
-      "owner": "provider",
-      "reason": "The invocation production ownership check excludes test fixtures",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests use local fixtures",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.render-tests-and-display-bridge",
-      "guard": "check-render-pure.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "render tests and display/render.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Test files and the registered display projection owner are outside the direct-model-read rule",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove display bridge exclusion when Render bypass retirement completes",
-      "status": "active"
-    },
-    {
-      "id": "scope.runtime.shared-loop-tests",
-      "guard": "check-shared-run-loop.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "pattern",
-        "value": "*_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "runtime",
-      "reason": "The production shared-run-loop ownership rule excludes test fixtures",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while test fixtures model run-loop symbols",
-      "status": "active"
-    },
-    {
-      "id": "false-positive.tui.running-indicator-condition",
-      "guard": "check-tui-output-legacy-guards.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "LineStyle::ToolCallRunning"
-      },
-      "classification": "false_positive_suppression",
-      "owner": "tui",
-      "reason": "The single running-indicator write is the guarded intended rendering site",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove with the legacy running indicator rule",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-runtime-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "mod.rs,run_loop.rs,runtime.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "TEA purity scans update/model projections, not the registered runtime and Effect executor owners",
-      "tracking_issue": 947,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove entries when the runtime owners move or the guard scope changes",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.tea-test-files",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "slash_tests.rs,slash_effect_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tui",
-      "reason": "Test mocks are outside production TEA purity",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while these files are test-only",
-      "status": "active"
-    },
-    {
-      "id": "false-positive.tui.tea-inline-allow",
-      "guard": "check-tui-tea-purity.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "allow tea_side_effect"
-      },
-      "classification": "false_positive_suppression",
-      "owner": "tui",
-      "reason": "Line-local escape for a proven scanner false positive",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
       "id": "scope.tui.safe-text-owners",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
         "value": "safe_text.rs,text.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "tui",
       "reason": "Safe text helper implementations are the owner of the operations prohibited to consumers",
       "tracking_issue": 1021,
@@ -425,13 +346,14 @@
     },
     {
       "id": "false-positive.tui.unsafe-text-inline-allow",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
       "scope": {
         "kind": "pattern",
         "value": "allow unsafe_text_op"
       },
       "classification": "false_positive_suppression",
+      "mechanism_type": "whitelist-backed",
       "owner": "tui",
       "reason": "Line-local escape only for a proven non-string slice false positive",
       "tracking_issue": 1021,
@@ -440,339 +362,20 @@
       "status": "active"
     },
     {
-      "id": "scope.logging.registered-process-statics",
-      "guard": "check-logging-scope-context.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "STATIC_ALLOW"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Only task-local scope and immutable process metadata statics are explicit owners",
-      "tracking_issue": 942,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while process metadata remains immutable and execution context remains task-local",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.scope-context-tests",
-      "guard": "check-logging-scope-context.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "*test*.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Test fixtures are outside production scope context ownership",
-      "tracking_issue": 937,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.settings-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "*test*.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Logging settings env scan excludes test fixtures",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.runtime-comments-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "runtime comments and tests"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Runtime logging wiring scan excludes comments and tests",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.bootstrap-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "bootstrap tests"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Unique production bootstrap count excludes test consumers",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.logging.init-import-tests",
-      "guard": "check-logging-settings-injection.sh",
-      "module": "logging",
-      "scope": {
-        "kind": "pattern",
-        "value": "init import tests"
-      },
-      "classification": "scope_exclusion",
-      "owner": "logging",
-      "reason": "Unique UnifiedLogger production import excludes tests",
-      "tracking_issue": 938,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual guard excludes test-only or registered owner locations",
-      "status": "active"
-    },
-    {
-      "id": "scope.command.tests-and-owner-filter",
-      "guard": "check-command-catalog-boundary.sh",
-      "module": "tools",
-      "scope": {
-        "kind": "pattern",
-        "value": "Command boundary test exclusions and unique owner filter"
-      },
-      "classification": "scope_exclusion",
-      "owner": "tools",
-      "reason": "Command boundary scans production definitions and excludes tests while selecting the single Tools owner path",
-      "tracking_issue": 913,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while the textual boundary guard excludes tests and filters the unique owner path",
-      "status": "active"
-    },
-    {
-      "id": "policy.task.target-layout",
-      "guard": "check-cola-layer-purity.sh",
-      "module": "task",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/task/src"
-      },
-      "classification": "target_hexagonal_policy",
-      "owner": "task",
-      "reason": "Task uses its documented domain/adapters Target and rejects retired COLA layer names",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Task Target layout policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.shared.task-owner-boundary",
-      "guard": "check-share-minimal-kernel.sh",
-      "module": "task",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/shared/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "task",
-      "reason": "Task Published Language and behavior are owned exclusively by the Task capability, never Shared Kernel",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Task ownership policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.task.access-persistence-split",
-      "guard": "check-task-persistence-capability.sh",
-      "module": "task",
-      "scope": {
-        "kind": "symbol",
-        "value": "forbidden"
-      },
-      "classification": "target_capability_policy",
-      "owner": "task",
-      "reason": "Runtime and Tools receive only injected TaskAccess while Context and Composition own persistence and backing wiring",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent capability split",
-      "status": "active"
-    },
-    {
-      "id": "policy.task.crate-root-facade",
-      "guard": "check-crate-api-boundary.sh",
-      "module": "task",
-      "scope": {
-        "kind": "symbol",
-        "value": "ROOT_ACCESS_ALLOW.task"
-      },
-      "classification": "target_capability_policy",
-      "owner": "task",
-      "reason": "Task consumers use the registered crate-root Published Language and ports without traversing internal modules",
-      "tracking_issue": 891,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent narrow Task facade policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.hook.target-facade",
-      "guard": "check-hook-target-facade.sh",
-      "module": "hook",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/hook/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "hook",
-      "reason": "Hook exposes only its crate-root Published Language and HookPort; Runtime must not restore the legacy api facade",
-      "tracking_issue": 926,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Hook crate-root facade policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.hook.crate-root-facade",
-      "guard": "check-crate-api-boundary.sh",
-      "module": "hook",
-      "scope": {
-        "kind": "symbol",
-        "value": "ROOT_ACCESS_ALLOW.hook"
-      },
-      "classification": "target_capability_policy",
-      "owner": "hook",
-      "reason": "Cross-feature consumers use only the registered Hook crate-root Published Language",
-      "tracking_issue": 926,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent narrow Hook facade policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.audit.cost-retirement",
-      "guard": "check-cost-tracker-retirement.sh",
-      "module": "audit",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent"
-      },
-      "classification": "target_capability_policy",
-      "owner": "audit",
-      "reason": "Usage-only Audit MVP keeps Runtime pricing, legacy Cost history paths, Cost DTO/events, Cost presentation state and the unused Storage Cost namespace retired",
-      "tracking_issue": 932,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only after a separately approved Audit-owned Cost/Pricing design defines new Published Language and migration semantics",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.activity-observation",
-      "guard": "check-runtime-activity-observation.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application/activity"
-      },
-      "classification": "target_capability_policy",
-      "owner": "runtime",
-      "reason": "ActivityCoordinator exclusively constructs Runtime Activity observations; TUI mutates its fact mirror only through the root reducer; LiveStatus consumes Activity instead of legacy Run status; diagnostics remain structured and payload-free",
-      "tracking_issue": 742,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent unified Runtime Activity observation policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.event-naming",
-      "guard": "check-runtime-event-naming.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": ".agents/runtime-event-naming-baseline.json"
-      },
-      "classification": "target_capability_policy",
-      "owner": "runtime",
-      "reason": "Runtime, SDK and TUI event variants are explicitly cataloged, indexed and checked for cross-layer fact-name stability without breaking compatibility wire names",
-      "tracking_issue": 945,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent structured event catalog and naming policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.capability-assembly",
-      "guard": "check-runtime-capability-assembly.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "runtime",
-      "reason": "RuntimeContextFactory is the sole production constructor; RunKind does not drive control flow; retired symbols are absent; stop hook block count lives on Run; Interaction/Reasoning/Hook binding modes are exhaustively wired; broad Projection naming cannot hide mixed Runtime responsibilities",
-      "tracking_issue": 1248,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Runtime capability assembly policy",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.large-file-responsibilities",
-      "guard": "check-runtime-large-file-responsibilities.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src/application"
-      },
-      "classification": "target_capability_policy",
-      "owner": "runtime",
-      "reason": "Runtime post-migration orchestration roots stay narrow and delegate contracts, phases, interaction, control, session commands, Run preparation, assembly and launch to named responsibility owners; giant roots, mod.rs and retired compatibility paths may not return",
-      "tracking_issue": 1400,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent Runtime responsibility and file-size policy",
-      "status": "active"
-    },
-    {
       "id": "scope.all.unsafe-text-long-statement-files",
-      "guard": "check-unsafe-text-ops.sh",
+      "guard": "check-tui-unsafe-text-ops.sh",
       "module": "shared",
       "scope": {
         "kind": "pattern",
         "value": "tool_result.rs,reflection.rs,conversion.rs,append.rs,routing_guard.rs"
       },
       "classification": "scope_exclusion",
+      "mechanism_type": "structural",
       "owner": "shared",
       "reason": "Long-statement files where rustfmt reflow moves trailing comments, making line-level allow comments unstable; all slices confirmed find/char_indices offsets or Vec/byte slices",
       "tracking_issue": 1545,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "retain while these files contain only offset/byte-safe slices; prefer line-level allow for new short statements",
-      "status": "active"
-    },
-    {
-      "id": "context.compact-continuation-checkpoint",
-      "guard": "check-compact-continuation-checkpoint.sh",
-      "module": "context",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/context/src"
-      },
-      "classification": "target_capability_policy",
-      "owner": "context",
-      "reason": "Context exclusively owns compact continuation checkpoint normalization and canonical submission while Runtime only consumes ContextWindow",
-      "tracking_issue": 1558,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent guard preserving semantic previous-checkpoint handling and the single Context owner",
-      "status": "active"
-    },
-    {
-      "id": "scope.runtime.compact-continuation-tests",
-      "guard": "check-compact-continuation-checkpoint.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "pattern",
-        "value": "*_tests.rs"
-      },
-      "classification": "scope_exclusion",
-      "owner": "runtime",
-      "reason": "Continuation ownership guard excludes test fixtures that contain checkpoint headings and field probes",
-      "tracking_issue": 1558,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while tests lock verbatim Runtime consumption",
       "status": "active"
     },
     {
@@ -784,6 +387,7 @@
         "value": "packages/global/utils/src/process.rs"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "architecture",
       "reason": "All production noninteractive external processes must enter a detached Unix session through the single utils boundary",
       "tracking_issue": 1577,
@@ -791,5 +395,3126 @@
       "exit_condition": "replace only with an equivalent cross-platform controlling-terminal isolation policy",
       "status": "active"
     }
-  ]
+  ],
+  "rules": [
+    {
+      "id": "pattern.config.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.config.app-service-no-direct-io",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters/app_service.rs"
+      },
+      "forbidden_patterns": [
+        "tokio::fs",
+        "std::fs",
+        "read_to_string(",
+        "serde_json::from_",
+        "serde_json::to_"
+      ],
+      "exclusions": [],
+      "reason": "Config application 只编排 adapter，文件 IO 与 JSON 解析经 FileAdapter/CompatibilityAdapter 注入（#1654 注入式已落地，规则防回退）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.config.adapters-no-stubs",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src/adapters.rs"
+      },
+      "forbidden_patterns": [
+        "Placeholder",
+        "TODO: adapter",
+        "TODO: FileAdapter",
+        "TODO: CliArgsAdapter",
+        "TODO: Claude"
+      ],
+      "exclusions": [],
+      "reason": "adapter 实现已完整落地（#1654），stub/占位残留禁止回退",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-hook-dispatcher-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "hook::build_dispatcher(",
+        "hook::Dispatcher::new(",
+        "hook::Dispatcher::try_new(",
+        "build_hook_runner("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-tool-self-assembly",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "tools::composition::wire_",
+        "AtomicBlobToolResultStore::new(",
+        "FileSystemBlobAdapter::new(",
+        "spawn_mcp_connect(",
+        "wire_active_run_registry("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/active_registry.rs"
+        }
+      ],
+      "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.context.no-blob-construction",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "forbidden_patterns": [
+        "file_system_blob(",
+        "FileSystemBlobAdapter::new("
+      ],
+      "exclusions": [],
+      "reason": "Context Session 语义消费注入的 SessionManagementPort/AtomicBlobPort，禁自建文件系统 backing（承接 session-management/composition-construction 两守卫的 Context 断言，scope 由单文件扩至 crate src）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.features.no-provider-composition-penetration",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        "provider::composition"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/"
+        }
+      ],
+      "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.no-mutable-invocation-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        "AtomicU32",
+        "AtomicU8",
+        "AtomicBool",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level",
+        "reasoning_config.lock("
+      ],
+      "exclusions": [],
+      "reason": "invocation 状态经 &InvocationScope 不可变传递；trait 签名由类型系统锁定（改签名全实现面编译失败）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-shared-client-mutation",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "shared_client_lock",
+        "set_max_tokens(",
+        "set_reasoning_level(",
+        "current_reasoning_level"
+      ],
+      "exclusions": [],
+      "reason": "runtime 禁恢复共享客户端突变/串行锁；调用语义经 provider Published Language",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.activity-construction-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "ActivityObservation {"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/activity/coordinator.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/activity/model.rs"
+        }
+      ],
+      "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.project.no-permission-state-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "ConfigReader",
+        "PermissionMode",
+        "PolicyPort",
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Project 不读权限/配置状态，授权统一经 AuthorizationContext 携带（Allow(AuthorizationContext) 变体签名由类型系统锁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-adapters.no-allow-all",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/adapters"
+      },
+      "forbidden_patterns": [
+        "allow_all"
+      ],
+      "exclusions": [],
+      "reason": "Tool adapter 消费 AuthorizationContext，禁 allow_all 旁路",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.features.workspace-control-call-sites",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features"
+      },
+      "forbidden_patterns": [
+        ".workspace_control("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/tools/src/adapters/bash.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/worktree.rs"
+        }
+      ],
+      "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.project.git-command-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "forbidden_patterns": [
+        "Command::new(\"git\")"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/project/src/adapters/git.rs"
+        }
+      ],
+      "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools.no-workspace-persistence",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "forbidden_patterns": [
+        "PersistedWorkspaceContext",
+        "WorkspacePersist"
+      ],
+      "exclusions": [],
+      "reason": "R2/R6：持久化 DTO 是 session 边界语义，tools 禁引用（允许面 project/context/runtime）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools-domain.no-live-resources",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src/domain"
+      },
+      "forbidden_patterns": [
+        "WorkspaceViews",
+        "tokio::sync",
+        "std::sync::mpsc",
+        "Semaphore",
+        "CancellationToken"
+      ],
+      "exclusions": [],
+      "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.context-construction-single-factory",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "RuntimeContext::new(",
+        "RuntimeContextAssemblyToken::new("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+        }
+      ],
+      "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-no-mirror-storage",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render"
+      },
+      "forbidden_patterns": [
+        "pub(super) suggestions: Vec",
+        "pub selected_suggestion",
+        "pub show_suggestions",
+        "pub(super) struct SpinnerState",
+        "pub struct SpinnerState"
+      ],
+      "exclusions": [],
+      "reason": "render widget 禁 pub(super) 级镜像存储（SuggestionViewState 等 view_state 派生投影合法）；retired adapter 已 #[cfg(test)] 模块级锁定（④）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.model-update-no-direct-effects",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/model"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "HookRunner::run",
+        ".run_hook(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        "read_clipboard_image(",
+        "process_image_file(",
+        "Handle::block_on(",
+        "Runtime::block_on(",
+        "block_in_place",
+        ".await",
+        "mpsc::Sender"
+      ],
+      "exclusions": [],
+      "reason": "F-17：model/update 以 Effect 值描述副作用，禁直接执行（model 目录；update 目录并入同 scope 需另条）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.update-no-direct-effects",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/update"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "HookRunner::run",
+        ".run_hook(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        "read_clipboard_image(",
+        "process_image_file(",
+        "Handle::block_on(",
+        "Runtime::block_on(",
+        "block_in_place",
+        ".await",
+        "mpsc::Sender"
+      ],
+      "exclusions": [],
+      "reason": "F-17：update 目录同 model 目录副作用禁式",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-output-purity",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render/output"
+      },
+      "forbidden_patterns": [
+        "use crate::tui::model::",
+        "std::fs::",
+        "std::process::",
+        "tokio::",
+        "SELECTION_BG"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+        }
+      ],
+      "reason": "F-19：render/output 纯渲染——禁 Model 可变依赖/IO/旁路选区上色（selection_overlay 唯一上色路径豁免）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.render-no-domain-model-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render"
+      },
+      "forbidden_patterns": [
+        "model.conversation",
+        "model.runtime"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/display/render.rs"
+        }
+      ],
+      "reason": "F-20：render 只读 view model/view_state 投影（display bridge 豁免）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.blocks-no-gutter-write",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/render/output/blocks"
+      },
+      "forbidden_patterns": [
+        "apply_gutter("
+      ],
+      "exclusions": [],
+      "reason": "F-30（D 组判据修正移入）：gutter 由 document_renderer 注入，block 组件禁自调",
+      "profile": "full"
+    },
+    {
+      "id": "layout.all.no-mod-rs",
+      "assertion": "forbidden_file_names",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "F-29：Rust 2018+ 同名文件模块约定，src 下禁 mod.rs",
+      "profile": "full",
+      "forbidden_file_names": [
+        "mod.rs"
+      ]
+    },
+    {
+      "id": "use.share.adapter-single-root",
+      "assertion": "forbidden_segments",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "F-5：生产 adapter 唯一根在 composition，其余禁穿透 share::adapter 路径段",
+      "profile": "full",
+      "forbidden_segments": [
+        "share::adapter",
+        "shared::adapter"
+      ],
+      "allow_prefixes": [
+        "agent/composition"
+      ]
+    },
+    {
+      "id": "layout.runtime.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "composition.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs",
+        "shared"
+      ],
+      "reason": "F-3：runtime Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.runtime.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.workflow.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/workflow/src"
+      },
+      "allowed_entries": [
+        "domain",
+        "lib.rs"
+      ],
+      "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.workflow.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/workflow/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.provider.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports.rs",
+        "published_language.rs"
+      ],
+      "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.provider.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.memory.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/memory/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "adapters_tests.rs",
+        "application",
+        "application.rs",
+        "application_tests.rs",
+        "codec.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "noop.rs",
+        "ports",
+        "ports.rs",
+        "service.rs",
+        "service_reflection_tests.rs"
+      ],
+      "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.memory.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/memory/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.policy.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/policy/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：policy Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.policy.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/policy/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.storage.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/storage/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "lib_tests.rs",
+        "ports",
+        "ports.rs",
+        "test_log.rs"
+      ],
+      "reason": "F-3：storage Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.storage.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/storage/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.project.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.project.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.tools.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：tools Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.tools.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.task.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs"
+      ],
+      "reason": "F-3：task Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.task.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.audit.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/audit/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "contract",
+        "contract.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：audit Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.audit.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/audit/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.hook.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "capabilities.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs",
+        "ports_tests.rs"
+      ],
+      "reason": "F-3：hook Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.hook.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.config.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "adapters_tests.rs",
+        "catalog.rs",
+        "catalog_tests.rs",
+        "connect.rs",
+        "core",
+        "domain",
+        "domain.rs",
+        "domain_tests.rs",
+        "gateway",
+        "lib.rs",
+        "lib_tests.rs",
+        "ports",
+        "ports.rs",
+        "ports_tests.rs",
+        "runtime_resolution.rs",
+        "runtime_resolution_tests.rs",
+        "user_agent.rs",
+        "user_agent_tests.rs"
+      ],
+      "reason": "F-3：config Hexagonal 层目录与顶层文件白名单（#1022 矩阵）；catalog/connect/core/gateway/runtime_resolution/user_agent 为 Connect 向导与 UA resolver 模块（#1457）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.config.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "layout.context.hexagonal-top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "allowed_entries": [
+        "adapters",
+        "adapters.rs",
+        "application",
+        "application.rs",
+        "domain",
+        "domain.rs",
+        "lib.rs",
+        "ports",
+        "ports.rs"
+      ],
+      "reason": "F-3：context Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "profile": "full"
+    },
+    {
+      "id": "layer.context.hexagonal-order",
+      "assertion": "layer_order",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "layer_order": [
+        "shared",
+        "domain",
+        "ports",
+        "application",
+        "adapters"
+      ],
+      "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
+      "profile": "full"
+    },
+    {
+      "id": "use.features.no-internal-segment-penetration",
+      "assertion": "forbidden_segments",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_segments": [
+        "audit::adapters",
+        "audit::application",
+        "audit::business",
+        "audit::contract",
+        "audit::core",
+        "audit::domain",
+        "audit::gateway",
+        "audit::ports",
+        "audit::shared",
+        "audit::utils",
+        "config::adapters",
+        "config::application",
+        "config::business",
+        "config::contract",
+        "config::core",
+        "config::domain",
+        "config::gateway",
+        "config::ports",
+        "config::shared",
+        "config::utils",
+        "context::adapters",
+        "context::application",
+        "context::business",
+        "context::contract",
+        "context::core",
+        "context::domain",
+        "context::gateway",
+        "context::ports",
+        "context::shared",
+        "context::utils",
+        "hook::adapters",
+        "hook::application",
+        "hook::business",
+        "hook::contract",
+        "hook::core",
+        "hook::domain",
+        "hook::gateway",
+        "hook::ports",
+        "hook::shared",
+        "hook::utils",
+        "memory::adapters",
+        "memory::application",
+        "memory::business",
+        "memory::contract",
+        "memory::core",
+        "memory::domain",
+        "memory::gateway",
+        "memory::ports",
+        "memory::shared",
+        "memory::utils",
+        "policy::adapters",
+        "policy::application",
+        "policy::business",
+        "policy::contract",
+        "policy::core",
+        "policy::domain",
+        "policy::gateway",
+        "policy::ports",
+        "policy::shared",
+        "policy::utils",
+        "project::adapters",
+        "project::application",
+        "project::business",
+        "project::contract",
+        "project::core",
+        "project::domain",
+        "project::gateway",
+        "project::ports",
+        "project::shared",
+        "project::utils",
+        "provider::adapters",
+        "provider::application",
+        "provider::business",
+        "provider::contract",
+        "provider::core",
+        "provider::domain",
+        "provider::gateway",
+        "provider::ports",
+        "provider::shared",
+        "provider::utils",
+        "runtime::adapters",
+        "runtime::application",
+        "runtime::business",
+        "runtime::contract",
+        "runtime::core",
+        "runtime::domain",
+        "runtime::gateway",
+        "runtime::ports",
+        "runtime::shared",
+        "runtime::utils",
+        "storage::adapters",
+        "storage::application",
+        "storage::business",
+        "storage::contract",
+        "storage::core",
+        "storage::domain",
+        "storage::gateway",
+        "storage::ports",
+        "storage::shared",
+        "storage::utils",
+        "task::adapters",
+        "task::application",
+        "task::business",
+        "task::contract",
+        "task::core",
+        "task::domain",
+        "task::gateway",
+        "task::ports",
+        "task::shared",
+        "task::utils",
+        "tools::adapters",
+        "tools::application",
+        "tools::business",
+        "tools::contract",
+        "tools::core",
+        "tools::domain",
+        "tools::gateway",
+        "tools::ports",
+        "tools::shared",
+        "tools::utils",
+        "update::adapters",
+        "update::application",
+        "update::business",
+        "update::contract",
+        "update::core",
+        "update::domain",
+        "update::gateway",
+        "update::ports",
+        "update::shared",
+        "update::utils",
+        "workflow::adapters",
+        "workflow::application",
+        "workflow::business",
+        "workflow::contract",
+        "workflow::core",
+        "workflow::domain",
+        "workflow::gateway",
+        "workflow::ports",
+        "workflow::shared",
+        "workflow::utils"
+      ],
+      "reason": "F-2：feature 内部层路径段禁穿透（L1）；update 对外仅 ::api（api 段不在禁集）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.audit.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/audit/src"
+      },
+      "allowed_symbols": [
+        "Pagination",
+        "TimeRange",
+        "UsageDropReason",
+        "UsageEmitOutcome",
+        "UsagePage",
+        "UsageQuery",
+        "UsageRecord",
+        "UsageSender",
+        "UsageSummary",
+        "UsageWorker",
+        "UsageWorkerConfig",
+        "file_usage_append_store",
+        "start_usage_worker",
+        "usage_query_service"
+      ],
+      "reason": "F-2：audit crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.config.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/config/src"
+      },
+      "allowed_symbols": [
+        "BootstrapConfigReceipt",
+        "CliArgsAdapter",
+        "CliConfigInput",
+        "CompatibilityAdapter",
+        "ConfigAdapterError",
+        "ConfigAppService",
+        "ConfigChangeCause",
+        "ConfigChangeSet",
+        "ConfigCommitWarning",
+        "ConfigError",
+        "ConfigField",
+        "ConfigFormat",
+        "ConfigPersistError",
+        "ConfigPersistOutcome",
+        "ConfigQuery",
+        "ConfigQueryError",
+        "ConfigReader",
+        "ConfigRefreshOutcome",
+        "ConfigSubscription",
+        "ConfigUpdate",
+        "ConfigUpdateError",
+        "ConfigValidator",
+        "ConfigWiring",
+        "ConfigWriter",
+        "EnvAdapter",
+        "EnvSource",
+        "FileAdapter",
+        "FilesystemGlobalConfigConnectStore",
+        "GlobalConfigCommitReceipt",
+        "GlobalConfigConnectStore",
+        "GlobalConfigDocument",
+        "GlobalConfigRevision",
+        "GlobalConfigStoreError",
+        "NativeConfigStore",
+        "PreparedConfigUpdate",
+        "PreparedProjectConfig",
+        "ProcessEnv",
+        "ProjectConfigLocation",
+        "ProjectConfigLocationError",
+        "ProjectConfigParticipant",
+        "ProviderRuntimeResolver",
+        "ProviderUserAgentInputs",
+        "ResolvedProviderRuntimeConfig",
+        "build_global_default_user_agent",
+        "catalog",
+        "connect",
+        "encode_native_patch",
+        "form",
+        "merge_native_patches",
+        "native_override_store",
+        "ports",
+        "resolve_provider_runtime",
+        "resolve_provider_runtime_for_selection",
+        "resolve_provider_user_agent",
+        "runtime_resolution",
+        "user_agent",
+        "wire_project_config",
+        "wire_project_config_with_agents_dir",
+        "wire_project_config_with_cli"
+      ],
+      "reason": "F-2：config crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.context.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/context/src"
+      },
+      "allowed_symbols": [
+        "*",
+        "AcceptedInputAppend",
+        "AcceptedInputError",
+        "AcceptedInputRecord",
+        "AcceptedInputWriter",
+        "ActiveCompactMarker",
+        "AppendReceipt",
+        "AtomicBlobAcceptedInputWriter",
+        "AtomicBlobCanonicalSessionWriter",
+        "AtomicBlobSessionManagement",
+        "AtomicBlobSessionStore",
+        "AtomicBlobToolReceiptWriter",
+        "BoundMainRun",
+        "CURRENT_SESSION_SCHEMA_VERSION",
+        "CanonicalSession",
+        "CanonicalSessionRepository",
+        "CanonicalSessionWriter",
+        "ChatSegment",
+        "CleanupConfirmation",
+        "CommittedMemoryRetrieveAdapter",
+        "CommittedRunSlice",
+        "CommittedRunStep",
+        "CommittedStep",
+        "CommittedStepMessages",
+        "CompactGenerationFailure",
+        "CompactGenerationFailureKind",
+        "CompactGenerationOutput",
+        "CompactOutcome",
+        "CompactRequest",
+        "CompactResult",
+        "CompactSkipReason",
+        "CompactSummaryQuality",
+        "CompactTrigger",
+        "CompactionDecision",
+        "ContentFingerprint",
+        "ContextAppend",
+        "ContextAppendError",
+        "ContextApplicationService",
+        "ContextMemorySource",
+        "ContextMessages",
+        "ContextPort",
+        "ContextPortError",
+        "ContextPromptSource",
+        "ContextRequest",
+        "ContextRequestId",
+        "ContextWindow",
+        "DatasetCanonicalSessionWriter",
+        "DatasetSessionManagement",
+        "DatasetSessionReader",
+        "DecisionReason",
+        "DisplayHistoryStepIndex",
+        "DisplayHistoryStepReference",
+        "DisplayHistoryStepWindow",
+        "FinalizeCause",
+        "FinalizedOutcomeRecord",
+        "GuidanceAssessment",
+        "InMemorySessionRepository",
+        "InstructionsLoadedHook",
+        "InvocationReminder",
+        "Language",
+        "LegacySessionDecoder",
+        "MainContextFactory",
+        "MainSessionDependencies",
+        "MainSessionError",
+        "MainSessionWiring",
+        "MainSessionWiringBuilder",
+        "ManualCompactRequest",
+        "MemoryMaterialization",
+        "MemoryRetrieveAdapter",
+        "NoOpCanonicalSessionWriter",
+        "NoOpContextMemorySource",
+        "OwnedSessionSharedPermit",
+        "PersistedWorkspaceContext",
+        "PersistedWorkspaceFrame",
+        "ProductionMainContextFactory",
+        "PromptMaterialization",
+        "PromptMaterializationError",
+        "RunStepCursor",
+        "RunStepId",
+        "SessionCodec",
+        "SessionCodecError",
+        "SessionCommitPlan",
+        "SessionGeneration",
+        "SessionGenerationCodec",
+        "SessionGenerationManifest",
+        "SessionGenerationWireError",
+        "SessionHistory",
+        "SessionId",
+        "SessionListEntry",
+        "SessionLoadError",
+        "SessionManagementError",
+        "SessionManagementPort",
+        "SessionMetadata",
+        "SessionMetadataUpdate",
+        "SessionPersistenceService",
+        "SessionRepository",
+        "SessionRestoreStep",
+        "SessionResumeView",
+        "SessionRevision",
+        "SessionSnapshot",
+        "SessionSnapshotStore",
+        "SessionStoreError",
+        "SessionSwitchGate",
+        "SkillPromptSource",
+        "SkillQueryFactory",
+        "SnapshotState",
+        "StepReceipt",
+        "SystemBlock",
+        "SystemPromptSpec",
+        "TaskProgressReminder",
+        "TaskProgressReminderItem",
+        "TaskProgressStatus",
+        "ToolCallIdentity",
+        "ToolCallReceipt",
+        "ToolCallState",
+        "ToolOutcomeKind",
+        "ToolReceiptMutation",
+        "ToolReceiptMutationError",
+        "ToolReceiptMutationReceipt",
+        "ToolReceiptWriter",
+        "ToolTerminalReceipt",
+        "Urgency",
+        "WorkspaceSkillQueryFactory",
+        "assess_guidance",
+        "autocompact_threshold",
+        "capture_session_lifecycle",
+        "decode_session",
+        "effective_context_window",
+        "estimate_message_tokens",
+        "estimate_messages_tokens",
+        "estimate_tokens",
+        "estimate_tool_schemas_tokens",
+        "init_guidance_dir",
+        "isolated_context",
+        "isolated_context_with_skill",
+        "isolated_context_with_workspace_skills",
+        "main_session",
+        "migrate_flat_sessions_to_project_dirs",
+        "project_dir_segment",
+        "resolve_guidance",
+        "resolve_guidance_async",
+        "skill_prompt_budget",
+        "test_support",
+        "universal_execution_discipline",
+        "wire_main_session"
+      ],
+      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.hook.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/hook/src"
+      },
+      "allowed_symbols": [
+        "*",
+        "CancellationSignal",
+        "Dispatcher",
+        "HookClass",
+        "HookDirective",
+        "HookDispatchContext",
+        "HookDisplayMessage",
+        "HookDisplayMessageKind",
+        "HookExecution",
+        "HookExecutionStatus",
+        "HookInvocation",
+        "HookMatcher",
+        "HookOutcome",
+        "HookPoint",
+        "HookPort",
+        "HookReason",
+        "HookSubscriptionExecutionEvent",
+        "HookSubscriptionExecutionObserver",
+        "HookSubscriptionExecutionTerminal",
+        "build_dispatcher"
+      ],
+      "reason": "F-2：hook crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.memory.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/memory/src"
+      },
+      "allowed_symbols": [
+        "*",
+        "AtomicDatasetReflectionHistoryStore",
+        "CompactResult",
+        "DatasetMemoryOpener",
+        "EvictionCandidate",
+        "FileLegacyMemorySourceFactory",
+        "InMemoryMemory",
+        "MemoryCategory",
+        "MemoryEntry",
+        "MemoryError",
+        "MemoryId",
+        "MemoryLayer",
+        "MemoryLocation",
+        "MemoryOpenError",
+        "MemoryOpener",
+        "MemoryOpenerError",
+        "MemoryPolicy",
+        "MemoryPort",
+        "MemoryQuery",
+        "MemoryRetrievalMode",
+        "MemorySearchHit",
+        "MemorySearchQuery",
+        "MemorySearchResult",
+        "MemorySource",
+        "MemoryStats",
+        "MemorySuggestion",
+        "NoOpMemory",
+        "ProjectMemoryKey",
+        "ReflectionApplyResult",
+        "ReflectionApplyStatus",
+        "ReflectionEngine",
+        "ReflectionError",
+        "ReflectionErrorCategory",
+        "ReflectionExecutionIdentity",
+        "ReflectionExecutionResult",
+        "ReflectionHistoryQuery",
+        "ReflectionHistoryStore",
+        "ReflectionMessage",
+        "ReflectionOutput",
+        "ReflectionRecord",
+        "ReflectionResult",
+        "ReflectionSafeSummary",
+        "ReflectionStatus",
+        "ReflectionTokenUsage",
+        "ReflectionTrigger",
+        "ReflectionWorkflow",
+        "ReflectionWorkflowError",
+        "RestoreResult",
+        "WriteResult"
+      ],
+      "reason": "F-2：memory crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.policy.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/policy/src"
+      },
+      "allowed_symbols": [
+        "AllowAllPolicy",
+        "ApprovalSubject",
+        "AuthorizationContext",
+        "ConfiguredPolicy",
+        "PolicyDecision",
+        "PolicyMode",
+        "PolicyModeSource",
+        "PolicyPort",
+        "PolicyReason",
+        "PolicyRequest",
+        "StandardPolicy"
+      ],
+      "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.project.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/project/src"
+      },
+      "allowed_symbols": [
+        "PreparedWorkspaceRestore",
+        "ProjectIdentity",
+        "WorkspaceControl",
+        "WorkspaceError",
+        "WorkspaceFrame",
+        "WorkspaceId",
+        "WorkspacePersist",
+        "WorkspaceRead",
+        "WorkspaceRestoreError",
+        "WorkspaceViews",
+        "WorkspaceWiring",
+        "WorktreeKind",
+        "wire_production_workspace"
+      ],
+      "reason": "F-2：project crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.provider.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "allowed_symbols": [
+        "CancellationSignal",
+        "CapabilityFingerprint",
+        "InvocationDelta",
+        "InvocationEvent",
+        "InvocationOptions",
+        "InvocationRequest",
+        "InvocationScope",
+        "InvocationStream",
+        "LlmClient",
+        "LlmConfigOptions",
+        "LlmError",
+        "LlmProvider",
+        "ModelCapability",
+        "ModelId",
+        "ModelToolSchema",
+        "ProviderCompletion",
+        "ProviderContentBlock",
+        "ProviderDriverKind",
+        "ProviderError",
+        "ProviderErrorKind",
+        "ProviderStopReason",
+        "ProviderToolCall",
+        "ProviderToolCallId",
+        "RawUsageSnapshot",
+        "ReasoningCapability",
+        "ReasoningLevel",
+        "ReasoningMappingKind",
+        "RequestSystemBlock",
+        "RequestedInvocationOptions",
+        "ResolvedInvocationOptions",
+        "SystemBlock",
+        "TransportPool"
+      ],
+      "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.runtime.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "allowed_symbols": [
+        "ActiveRunRegistry",
+        "AgentClient",
+        "AgentClientImpl",
+        "AgentRunnerAssembly",
+        "AtomicBlobToolResultStore",
+        "ChangeSet",
+        "ChatEvent",
+        "ChatRequest",
+        "ChatStream",
+        "CompactModelResolver",
+        "CompleteReflectionResult",
+        "InitialProviderAssembly",
+        "ModelRuntimeSettings",
+        "ParentRunContextSource",
+        "ProjectContext",
+        "PromptAssembly",
+        "PromptContext",
+        "ProviderBinding",
+        "ProviderBuildSpec",
+        "ProviderCompactGenerator",
+        "ProviderFactory",
+        "ProviderPort",
+        "ReflectionError",
+        "ReflectionTaskAdapter",
+        "ReflectionTaskCompletionStatus",
+        "ReflectionTaskRequest",
+        "ReflectionTaskSubmitOutcome",
+        "ReflectionTaskTrigger",
+        "RuntimeBootstrapDependencies",
+        "RuntimeContextFactory",
+        "RuntimeCoreDependencies",
+        "RuntimeLifecycleEvent",
+        "RuntimeToolAssemblyDependencies",
+        "SessionBootstrapAssembly",
+        "SessionModelSlot",
+        "SkillBootstrapAssembly",
+        "TaskSummary",
+        "ToolResultBlobPort",
+        "ToolResultMaterializationPolicy",
+        "ToolResultMaterializer",
+        "UnavailableUsageSink",
+        "UsageSink",
+        "build_agent_runner",
+        "build_static_prompt",
+        "build_system_prompt_parts",
+        "config_snapshot_to_sdk",
+        "from_args_with_workspace",
+        "map_lifecycle_event",
+        "resolve_concurrency_limits",
+        "resolve_model_runtime_settings",
+        "resume_session_to_backing",
+        "wire_active_run_registry"
+      ],
+      "reason": "F-2：runtime crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.storage.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/storage/src"
+      },
+      "allowed_symbols": [
+        "AtomicBlobPort",
+        "AtomicDatasetPort",
+        "BlobRead",
+        "CommitWarning",
+        "CorruptTransactionError",
+        "CorruptionReason",
+        "DatasetChangeSet",
+        "DatasetCommitReceipt",
+        "DatasetCommitVisibility",
+        "DatasetKey",
+        "DatasetManifest",
+        "DatasetMember",
+        "DatasetMemberChange",
+        "DatasetMemberReference",
+        "DatasetRead",
+        "DatasetReadOutcome",
+        "DatasetRevision",
+        "DeleteOptions",
+        "DeleteOutcome",
+        "Durability",
+        "Generation",
+        "PreviousPolicy",
+        "PromoteOutcome",
+        "QuarantineDisposition",
+        "QuarantineOutcome",
+        "QuarantineReason",
+        "QuarantineReceipt",
+        "ReadOutcome",
+        "SafeOpenOptions",
+        "SafePathSegment",
+        "SafeStorageDir",
+        "SafeStorageFileType",
+        "SafeStorageRoot",
+        "StorageEntry",
+        "StorageError",
+        "StorageErrorKind",
+        "StorageKey",
+        "StorageNamespace",
+        "TransactionScope",
+        "WriteOptions",
+        "WriteReceipt"
+      ],
+      "reason": "F-2：storage crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.task.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/task/src"
+      },
+      "allowed_symbols": [
+        "Batch",
+        "BatchCreateSpec",
+        "BatchId",
+        "BatchStatus",
+        "PreparedTaskRestore",
+        "Task",
+        "TaskAccess",
+        "TaskCommandError",
+        "TaskCommandResult",
+        "TaskCreateSpec",
+        "TaskEvent",
+        "TaskId",
+        "TaskPersist",
+        "TaskPriority",
+        "TaskProgressItem",
+        "TaskProgressSnapshot",
+        "TaskRevision",
+        "TaskSnapshot",
+        "TaskSnapshotValidationError",
+        "TaskStatus",
+        "TaskStore",
+        "TaskView",
+        "TaskWiring",
+        "wire_task"
+      ],
+      "reason": "F-2：task crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "facade.tools.root-exports",
+      "assertion": "facade_whitelist",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "allowed_symbols": [
+        "AgentDispatch",
+        "AgentProgressEvent",
+        "AgentProgressKind",
+        "AgentProgressSourceContext",
+        "AgentRunRequest",
+        "AgentRunTerminal",
+        "AgentRunner",
+        "AgentToolCallProgress",
+        "ApplicationControlCommand",
+        "ApplicationControlTarget",
+        "AuthorizationContext",
+        "CancellationDeclaration",
+        "CancellationSignal",
+        "CatalogExecutionWiring",
+        "CleanupConfirmation",
+        "CommandArgumentSchema",
+        "CommandCatalogPort",
+        "CommandCompletion",
+        "CommandDescriptor",
+        "CommandMechanism",
+        "CommandName",
+        "CommandParseError",
+        "CommandRoute",
+        "CommandRouterPort",
+        "CommandTarget",
+        "CommandWiring",
+        "CommittedTaskChange",
+        "ExecutionScope",
+        "FixedGuidance",
+        "FixedPlanMode",
+        "Guidance",
+        "ImageData",
+        "InvocationSource",
+        "McpConnectionManager",
+        "McpTool",
+        "McpTransportKind",
+        "MemoryPortSource",
+        "MutexReadSet",
+        "ParsedArguments",
+        "ProgressSink",
+        "RegistryScopeName",
+        "RolePolicyCompileError",
+        "SessionReminder",
+        "SessionReminders",
+        "SkillCatalogPort",
+        "SkillCatalogSnapshot",
+        "SkillDescriptor",
+        "SkillError",
+        "SkillLoadDecision",
+        "SkillLoadMutation",
+        "SkillLoadPort",
+        "SkillLoadScope",
+        "SkillLoadStateError",
+        "SkillLoadStatePort",
+        "SkillQuery",
+        "SkillRequestCommand",
+        "SkillSource",
+        "SkillSourceKind",
+        "SkillWiring",
+        "SlashInput",
+        "SnapshotQueryCommand",
+        "SnapshotQueryTarget",
+        "SubRunActivityEvent",
+        "SubRunActivityKind",
+        "SubRunIdentity",
+        "SubRunStartedEvent",
+        "SubRunTerminalOutcome",
+        "TaskChangeFact",
+        "TestCatalogExecution",
+        "TestCatalogExecutionFactory",
+        "Tool",
+        "ToolCapabilities",
+        "ToolCapability",
+        "ToolCatalogError",
+        "ToolCatalogPort",
+        "ToolCatalogSnapshot",
+        "ToolErrorKind",
+        "ToolExecutionContext",
+        "ToolExecutionOutcome",
+        "ToolExecutionPort",
+        "ToolExecutionPorts",
+        "ToolInvocation",
+        "ToolName",
+        "ToolOutcome",
+        "ToolProfile",
+        "ToolProfileName",
+        "ToolProgressEvent",
+        "ToolResult",
+        "ToolSuspension",
+        "TypedTool",
+        "TypedToolAdapter",
+        "TypedToolResult",
+        "UserQuestion",
+        "WorkspaceReadAccess",
+        "ask_user_suspension",
+        "format_tool_input_error",
+        "is_readonly_command",
+        "role_profile_name",
+        "strip_runtime_meta",
+        "types",
+        "validate_tool_input",
+        "wire_builtin_catalog_execution",
+        "wire_commands",
+        "wire_skills"
+      ],
+      "reason": "F-2：tools crate 根窄 façade（#1022 登记，消费者证明制）",
+      "profile": "full"
+    },
+    {
+      "id": "dependency.workspace-matrix",
+      "assertion": "dependency_matrix",
+      "scope": {
+        "kind": "workspace"
+      },
+      "business_allow": {
+        "cli": [
+          "composition",
+          "sdk",
+          "utils"
+        ],
+        "composition": [
+          "audit",
+          "config",
+          "context",
+          "hook",
+          "logging",
+          "memory",
+          "policy",
+          "project",
+          "provider",
+          "runtime",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "update",
+          "workflow"
+        ],
+        "runtime": [
+          "audit",
+          "config",
+          "context",
+          "hook",
+          "logging",
+          "memory",
+          "policy",
+          "project",
+          "provider",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "utils",
+          "workflow"
+        ],
+        "config": [
+          "share",
+          "storage"
+        ],
+        "share": [
+          "logging",
+          "utils"
+        ],
+        "project": [
+          "share",
+          "utils"
+        ],
+        "policy": [
+          "sdk",
+          "share",
+          "tools"
+        ],
+        "context": [
+          "config",
+          "memory",
+          "project",
+          "provider",
+          "sdk",
+          "share",
+          "storage",
+          "task",
+          "tools",
+          "utils"
+        ],
+        "memory": [
+          "share",
+          "storage",
+          "utils"
+        ],
+        "provider": [
+          "logging",
+          "share"
+        ],
+        "tools": [
+          "memory",
+          "project",
+          "share",
+          "task",
+          "utils"
+        ],
+        "storage": [
+          "share"
+        ],
+        "task": [],
+        "hook": [
+          "share",
+          "utils"
+        ],
+        "audit": [
+          "sdk",
+          "share",
+          "storage"
+        ],
+        "workflow": [
+          "share"
+        ],
+        "sdk": [
+          "share",
+          "tools",
+          "utils"
+        ],
+        "update": [
+          "logging",
+          "sdk",
+          "share"
+        ],
+        "logging": [],
+        "utils": []
+      },
+      "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
+      "profile": "full"
+    },
+    {
+      "id": "layout.tui.top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/"
+      },
+      "allowed_entries": [
+        "adapter",
+        "adapter.rs",
+        "app",
+        "app.rs",
+        "architecture_tests.rs",
+        "effect",
+        "effect.rs",
+        "frame_diagnostics.rs",
+        "frame_diagnostics_tests.rs",
+        "log_scope_tests.rs",
+        "model",
+        "model.rs",
+        "process_memory.rs",
+        "process_memory_tests.rs",
+        "render",
+        "render.rs",
+        "text.rs",
+        "update",
+        "update.rs",
+        "view_assembler",
+        "view_assembler.rs",
+        "view_model",
+        "view_model.rs",
+        "view_state",
+        "view_state.rs"
+      ],
+      "reason": "F-22：tui 顶层目录白名单；旧命名空间 import 防复活④（模块已删编译失败）",
+      "profile": "full"
+    },
+    {
+      "id": "layout.composition.top-level",
+      "assertion": "layout",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/composition/src"
+      },
+      "allowed_entries": [
+        "lib.rs",
+        "app.rs",
+        "audit.rs",
+        "delivery_logging.rs",
+        "memory.rs",
+        "provider.rs",
+        "runtime.rs",
+        "tools.rs",
+        "update.rs",
+        "lib_tests.rs",
+        "provider_tests.rs",
+        "runtime_tests.rs",
+        "provider_probe_tests.rs"
+      ],
+      "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.logging.no-process-global-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/global/logging/src"
+      },
+      "forbidden_patterns": [
+        "lazy_static! {",
+        "thread_local! {"
+      ],
+      "exclusions": [],
+      "reason": "F-26：logging 禁进程全局/线程局部状态，用 LogContext task-local；static 大写声明白名单正则特征 defer（与 F-23 同批）；legacy 符号已删④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.logging.no-env-read",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/global/logging/src"
+      },
+      "forbidden_patterns": [
+        "std::env::",
+        "env::var(",
+        "env::var_os("
+      ],
+      "exclusions": [],
+      "reason": "F-27：logging 生产禁读 env，经 Composition 注入 LoggingSettings",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-logging-assembly",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "UnifiedLogger",
+        "LoggingSettings",
+        "init_logging(",
+        "AEMEATH_LOG_STDERR"
+      ],
+      "exclusions": [],
+      "reason": "F-27：runtime 禁组装/初始化 Logging",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-unified-logger-spread",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "UnifiedLogger::init("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/app.rs"
+        }
+      ],
+      "reason": "F-27：UnifiedLogger::init 仅 Composition app.rs 唯一点",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-from-args-direct-call",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "from_args_with_workspace("
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/runtime.rs"
+        },
+        {
+          "path": "agent/features/runtime/"
+        }
+      ],
+      "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.sdk.run-control-pure-dto",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/sdk/src/run.rs"
+      },
+      "forbidden_patterns": [
+        "CancellationToken",
+        "Sender<",
+        "Receiver<",
+        "Mutex<",
+        "RwLock<",
+        "Arc<"
+      ],
+      "exclusions": [],
+      "reason": "F-24：sdk run.rs run control 发布语言只含纯值 DTO",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.no-openai-config-reexport",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src/lib.rs"
+      },
+      "forbidden_patterns": [
+        "OpenAIProviderConfig"
+      ],
+      "exclusions": [],
+      "reason": "F-15：Provider 实现配置不得经 crate 根 façade 外泄；DriverSpec::parse 内部化正向断言由类型/测试承接",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.sdk.client-pure-dto",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "packages/sdk/src/client.rs"
+      },
+      "forbidden_patterns": [
+        "CancellationToken",
+        "Sender<",
+        "Receiver<",
+        "Mutex<",
+        "RwLock<",
+        "Arc<"
+      ],
+      "exclusions": [],
+      "reason": "F-24：AgentClient run control 命令只暴露纯值 SDK 类型",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.app-pure-model",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/app"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/app/run_loop.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/runtime.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/testing/"
+        }
+      ],
+      "reason": "F-21：tui app TEA 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.view-assembler-pure",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/view_assembler"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [],
+      "reason": "F-21：view_assembler 纯投影",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.view-model-pure",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "apps/cli/src/tui/view_model"
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [],
+      "reason": "F-21：view_model 纯投影",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.share.minimal-kernel",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/shared/src"
+      },
+      "forbidden_patterns": [
+        "ToolRegistry",
+        "TaskStore",
+        "TaskStoreStats",
+        "std::fs::",
+        "tokio::fs::",
+        "File::",
+        "create_dir",
+        "std::process::",
+        "tokio::process::",
+        "reqwest::",
+        "http::",
+        "parking_lot::",
+        "RwLock",
+        "async_trait",
+        "CancellationToken",
+        "SystemTime::now",
+        "Instant::now"
+      ],
+      "exclusions": [],
+      "reason": "F-9：share 最小内核——禁行为 trait/IO/网络/并发/时钟/ID 生成（依赖白名单已由 dependency.workspace-matrix share 行锁定）；forbidden_modules 防爬回符号已物理删除④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime-tools.no-task-persistence-symbols",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/"
+      },
+      "forbidden_patterns": [
+        "TaskStore",
+        "TaskPersist",
+        "PreparedTaskRestore",
+        "TaskRestoreAdapter",
+        "TaskSnapshotSource",
+        "SessionTaskAdapters",
+        "TaskWiring"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/task/"
+        },
+        {
+          "path": "agent/features/storage/"
+        },
+        {
+          "path": "agent/features/context/"
+        }
+      ],
+      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（task/storage/context 为 owner 与协调方豁免；wire_task 由 cross-bc fail-closed 承接）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-compact-continuation-state",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "active_summary:",
+        "continuation_checkpoint:",
+        "continuation_summary:",
+        "slice_head(previous_summary",
+        "slice_tail(previous_summary",
+        "slice_head(previous_checkpoint",
+        "slice_tail(previous_checkpoint"
+      ],
+      "exclusions": [],
+      "reason": "F-25：continuation 状态归 Context checkpoint 权威，runtime 不得持有/切片（文档标记正向断言④）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.runtime.no-dead-code-suppression",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/runtime/src"
+      },
+      "forbidden_patterns": [
+        "#![allow(dead_code)]"
+      ],
+      "exclusions": [],
+      "reason": "F-13：共享 run_loop 单定义（计数断言 defer 专用断言器；launcher 签名由类型系统锁定）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-inline-test-modules",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        "mod tests {"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/composition/src/app.rs"
+        },
+        {
+          "path": "agent/composition/src/delivery_logging.rs"
+        },
+        {
+          "path": "agent/composition/src/memory.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/memory_injection.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/prompt/guidance.rs"
+        },
+        {
+          "path": "agent/features/context/src/adapters/prompt/security.rs"
+        },
+        {
+          "path": "agent/features/context/src/domain/session/chat_chain.rs"
+        },
+        {
+          "path": "agent/features/hook/src/adapters/dispatcher/executor.rs"
+        },
+        {
+          "path": "agent/features/memory/src/codec.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/model.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/persistence.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/reflection.rs"
+        },
+        {
+          "path": "agent/features/memory/src/ports.rs"
+        },
+        {
+          "path": "agent/features/memory/src/service.rs"
+        },
+        {
+          "path": "agent/features/project/src/adapters/git.rs"
+        },
+        {
+          "path": "agent/features/project/src/domain/service.rs"
+        },
+        {
+          "path": "agent/features/project/src/lib.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/anthropic.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/anthropic/message_conversion.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/error_log.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/ollama.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/openai_compatible/reasoning_normalizer.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/stream.rs"
+        },
+        {
+          "path": "agent/features/provider/src/domain/capability.rs"
+        },
+        {
+          "path": "agent/features/provider/src/domain/invoke.rs"
+        },
+        {
+          "path": "agent/features/provider/src/lib.rs"
+        },
+        {
+          "path": "agent/features/provider/src/ports.rs"
+        },
+        {
+          "path": "agent/features/provider/src/published_language.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/adapters/sdk_event_mapper.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/agent_runner.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/concurrency.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/bootstrap/model_runtime.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/mapping.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/trait_model.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/trait_reflection.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/compact_generator.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/config_reload.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/idle_commands.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/input_log.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/snapshot_registry.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/tools.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/input.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/model/invocation.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/model/token_usage.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/prompt/prompt_build_ext.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/published_state/registry.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/run/chat_launch.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/run/derived/loop_run.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/tool/coordination/identity.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/application/tool/coordination/loop_guard.rs"
+        },
+        {
+          "path": "agent/features/runtime/src/lib.rs"
+        },
+        {
+          "path": "agent/features/task/src/adapters/wiring.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/bash/safety.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/mcp/tests.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/registry.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/task_list_complete.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/task_list_create.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/tool_registry.rs"
+        },
+        {
+          "path": "agent/features/tools/src/adapters/tool_search.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/published_language.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/shell_safety.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/tool_types.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/agent.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_create.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_stop.rs"
+        },
+        {
+          "path": "agent/features/tools/src/domain/types/task_update.rs"
+        },
+        {
+          "path": "agent/features/update/src/contract.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/fs.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/git.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/mcp.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/process.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/storage.rs"
+        },
+        {
+          "path": "agent/shared/src/adapter/telemetry.rs"
+        },
+        {
+          "path": "agent/shared/src/config.rs"
+        },
+        {
+          "path": "agent/shared/src/config/adapters/paths.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/driver_env.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/logging.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/memory.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/merge.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/models/deserialize.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/models/runtime.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/snapshot.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/tools.rs"
+        },
+        {
+          "path": "agent/shared/src/config/domain/update.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/commit.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/discipline.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/git_context_labels.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/sections.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/prompt/system.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/runtime/command.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/runtime/reflection.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/core.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/filesystem.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/task.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/web.rs"
+        },
+        {
+          "path": "agent/shared/src/i18n/tools/worktree.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/dedup.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/entry.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/error.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/format.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/result.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/scoring.rs"
+        },
+        {
+          "path": "agent/shared/src/memory/session_reminder.rs"
+        },
+        {
+          "path": "agent/shared/src/message/types.rs"
+        },
+        {
+          "path": "agent/shared/src/session_types.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/byte_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/char_idx.rs"
+        },
+        {
+          "path": "agent/shared/src/string_idx/col_idx.rs"
+        },
+        {
+          "path": "apps/cli/src/args.rs"
+        },
+        {
+          "path": "apps/cli/src/chat/no_tui.rs"
+        },
+        {
+          "path": "apps/cli/src/panic_hook.rs"
+        },
+        {
+          "path": "apps/cli/src/subcommand/model_selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/live_status_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/output_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/adapter/status_widget.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/resize.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/runtime.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/slash/dialog.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/slash/reflection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/state/session.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/state/tests.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/update/enter.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/util.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/session/processing.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/session/resume.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/effect/spawn_guard.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/change.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/history_parse.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/intent_impls.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/notice.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/queued_submission.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/stream.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/streaming_preview.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/system_reminder.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/conversation/tool_call.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/diagnostic/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/change.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/completion.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/completion_item.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/input/mode.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/output_timeline/model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/root.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/model/runtime/session_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/render.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/suggestions.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/wrap.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_render_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/block_cache.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/block_component.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/ask_user.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/assistant_message.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/diagnostic.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/edit_diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/thinking.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_call.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/user_message.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/gutter.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/markdown/table.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/convert.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/markdown.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/table.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/unified_diff.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/primitives/wrap.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/rendered.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/status_line.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/common.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/agent.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/ask_user.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/helpers.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/shell.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/display.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/update/coordinator.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/update/dirty.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/dialog.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/input.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/live_status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_assembler/status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/live_status.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/nesting.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/output.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_model/tool_name.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/input_selection.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/spinner_anim.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/view_state/status.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_event.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_result.rs"
+        },
+        {
+          "path": "packages/sdk/src/chat_view.rs"
+        },
+        {
+          "path": "packages/sdk/src/config_view.rs"
+        },
+        {
+          "path": "packages/sdk/src/content.rs"
+        },
+        {
+          "path": "packages/sdk/src/ids.rs"
+        },
+        {
+          "path": "packages/sdk/src/session_lock.rs"
+        },
+        {
+          "path": "agent/features/project/src/domain/git.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/input/input_area/resize.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output_area/resize.rs"
+        }
+      ],
+      "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 210 + 3 声明遗漏补录（cfg(test) 门控确认为存量），迁移完成 MUST 收缩 exclusions",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tools.no-legacy-tool-paths",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/tools/src"
+      },
+      "forbidden_patterns": [
+        "wire_tools"
+      ],
+      "exclusions": [],
+      "reason": "#1696-②：legacy 符号编译期已拦（④退役归 review）；仅保留 wire_tools 装配入口禁式",
+      "profile": "full"
+    },
+    {
+      "id": "budget.runtime.responsibility",
+      "assertion": "line_budget",
+      "scope": {
+        "kind": "workspace"
+      },
+      "budgets": [
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/engine.rs",
+          "max_lines": 400
+        },
+        {
+          "path": "agent/features/runtime/src/application/loop_engine/chat/session_driver.rs",
+          "max_lines": 400
+        },
+        {
+          "path": "agent/features/runtime/src/application/client/from_args.rs",
+          "max_lines": 550
+        }
+      ],
+      "required_files": [
+        "agent/features/runtime/src/application/loop_engine/engine/contracts.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/step_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/interaction_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/engine/control_driver.rs",
+        "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_preparation.rs",
+        "agent/features/runtime/src/application/loop_engine/chat/session_driver/run_launch.rs",
+        "agent/features/runtime/src/application/client/from_args_tests.rs"
+      ],
+      "reason": "F-14/#1400：拆分根保持编排 façade，行数预算锁职责不回缩；mod.rs 由 layout.all.no-mod-rs 承接；retired 符号④",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-unsafe-text-slicing",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        ".chars().nth(",
+        ".split_at("
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/display/safe_text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/display/safe_text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/text.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+        },
+        {
+          "path": "agent/features/memory/src/domain/reflection.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/ollama/conversion.rs"
+        },
+        {
+          "path": "agent/features/audit/src/adapters/append.rs"
+        },
+        {
+          "path": "packages/global/logging/src/domain/routing_guard.rs"
+        }
+      ],
+      "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
+      "profile": "full",
+      "allow_marker": "allow unsafe_text_op"
+    },
+    {
+      "id": "pattern.provider.no-pull-stream-retry-loop",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        "backoff",
+        "retry_loop"
+      ],
+      "exclusions": [],
+      "reason": "#1679：拉流段禁 backoff/重试循环（idle-timeout select sleep 合法保留；流中断 fail-fast 可重试语义已由 stream_contract_tests 覆盖）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.all.session-setup-single-owner",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [
+        ".process_group(",
+        ".pre_exec(",
+        "libc::setsid("
+      ],
+      "exclusions": [
+        {
+          "path": "packages/global/utils/src/process.rs"
+        }
+      ],
+      "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.http-send-single-executor",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        ".send().await",
+        "request.send()"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        }
+      ],
+      "reason": "#1679（判据修正②→③）：HTTP 发送唯一经 http_attempt executor；诊断 API（log_network_error/log_http_error 等）限点同理由编译可见性收窄承接；transport_tests 已覆盖发送/超时行为",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.error-log-diag-single-caller",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src/adapters"
+      },
+      "forbidden_patterns": [
+        "log_network_error(",
+        "log_http_error(",
+        "LlmApiErrorRecord"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/src/adapters/error_log.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        }
+      ],
+      "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
+      "profile": "full"
+    }
+  ],
+  "retired_symbols": []
 }

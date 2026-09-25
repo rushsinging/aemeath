@@ -1048,9 +1048,9 @@ fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
 }
 
 fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigStore, SdkError> {
-    let blob = storage::api::file_system_blob(agents_dir.join("config-overrides"))
+    let blob = storage::file_system_blob(agents_dir.join("config-overrides"))
         .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
-    Ok(config::NativeConfigStore::new(blob))
+    Ok(config::native_override_store(blob))
 }
 
 fn logging_settings_from_snapshot(
@@ -1151,15 +1151,31 @@ fn init_logging(
     Ok(())
 }
 
+/// 以已提交 config 快照中的 `storage.worktrees_dir` 注入 production workspace；
+/// 项目自身不读 config，配置值在 composition 装配边界解析（相对路径由 project
+/// 相对 workspace root 解析，未配置时 project 落到全局 `~/.agents/worktrees`）。
+fn wire_workspace_with_config(
+    cwd: &std::path::Path,
+    config: &config::ConfigWiring,
+) -> Result<project::WorkspaceViews, SdkError> {
+    project::wire_production_workspace(
+        cwd.to_path_buf(),
+        config
+            .reader()
+            .committed_snapshot()
+            .worktrees_dir()
+            .map(Path::to_path_buf),
+    )
+    .map_err(|error| SdkError::Init(error.to_string()))
+    .map(project::WorkspaceWiring::into_views)
+}
+
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
     let cwd = args
         .cwd
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd.clone())
-        .map_err(|error| SdkError::Init(error.to_string()))?
-        .into_views();
     let logging_output = args.logging_output;
     let native_stderr = args.native_stderr;
     let agents_dir = share::config::paths::global_agents_dir();
@@ -1169,7 +1185,8 @@ pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, Sd
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    let workspace = wire_workspace_with_config(&cwd, &config)?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(
         &config.reader().committed_snapshot(),
@@ -1195,9 +1212,6 @@ async fn build_agent_client_with_gateways(
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd.clone())
-        .map_err(|error| SdkError::Init(error.to_string()))?
-        .into_views();
     let logging_output = args.logging_output;
     let native_stderr = args.native_stderr;
     // Tests construct the config wiring directly via `ConfigAppService` so the
@@ -1213,7 +1227,8 @@ async fn build_agent_client_with_gateways(
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    let workspace = wire_workspace_with_config(&cwd, &config)?;
     init_logging(
         &config.reader().committed_snapshot(),
         logging_output,
@@ -1225,6 +1240,12 @@ async fn build_agent_client_with_gateways(
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, agents_dir)
             .await?;
     Ok(agent_client_from_runtime(runtime_client.client))
+}
+
+/// 进程退出前排空异步诊断日志（File 模式经 worker 线程落盘，退出前必须
+/// flush barrier 兜底）。经 composition 转发以维持 logging 装配单一入口。
+pub fn flush_diagnostic_logs() {
+    logging::flush_diagnostic_logs();
 }
 
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
@@ -1240,7 +1261,7 @@ pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> 
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
     Ok(config
         .reader()
         .committed_snapshot()
@@ -1254,9 +1275,6 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd.clone())
-        .map_err(|error| SdkError::Init(error.to_string()))?
-        .into_views();
     let logging_output = args.logging_output;
     let native_stderr = args.native_stderr;
     let agents_dir = share::config::paths::global_agents_dir();
@@ -1266,7 +1284,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         cli_config_input(&args),
     )
     .await
-    .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    let workspace = wire_workspace_with_config(&cwd, &config)?;
     let gateways = FeatureGateways::wire_default(configured_policy(&config));
     init_logging(
         &config.reader().committed_snapshot(),
@@ -1447,7 +1466,7 @@ mod tests {
                             arguments: serde_json::json!({
                                 "description": "record child usage",
                                 "prompt": "finish successfully",
-                                "role": "coder"
+                                "agent": "coder"
                             }),
                         },
                     )],
@@ -1551,8 +1570,9 @@ mod tests {
                     }
                 },
                 "agents": {
-                    "roles": {
+                    "names": {
                         "coder": {
+                            "role": "coder",
                             "model": "local/test-model",
                             "description": "test child usage"
                         }
@@ -1580,9 +1600,8 @@ mod tests {
         )
         .await
         .expect("config wiring");
-        let workspace = project::wire_production_workspace(args.cwd.clone().expect("cwd"))
-            .expect("workspace")
-            .into_views();
+        let workspace = wire_workspace_with_config(args.cwd.as_deref().expect("cwd"), &config)
+            .expect("workspace");
         let gateways = FeatureGateways::new(
             Arc::new(ReportedUsageProviderFactory::new()),
             configured_policy(&config),

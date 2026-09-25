@@ -1,21 +1,67 @@
-//! Config-owned 出站端口契约。
+//! 出站 / 入站 port：config 对外发布的稳定接口契约。
 //!
-//! ## 设计目标
+//! R8 方向：ports 只依赖 domain（`crate::domain`）；trait 签名引用的
+//! 领域类型均定义在 domain.rs，NEVER 在本文件引入技术实现细节。
+//!
+//! ## Connect 出站端口
 //!
 //! - Config domain 定义满足用例所需的窄出站端口，**不**在 domain 内调用平台 API、
 //!   fs 或网络；
 //! - Config platform adapter 实现 [`SystemInformationPort`]；Provider Probe 端口
 //!   由 Composition 注入 Provider adapter 实现；
-//! - Connect bootstrap 由后续 Task 单独定义 `GlobalConfigConnectStore` 与首次聊天
-//!   初始化；本 Task **不**引入新的 Commit seamble；
+//! - Connect bootstrap 的 `GlobalConfigConnectStore` 定义在 `gateway/global_store.rs`；
 //! - 各 trait 的输入是已校验、已解析的值对象，**NEVER** 接收未验证字符串或
 //!   内部类型（`ConfigSnapshot`、`&Path` 等）。
-//!
-//! ## 与 Connect 状态机的关系
 //!
 //! Provider 探测（[`ProviderProbePort`]）由 Config application 拥有的 Connect
 //! 服务调用。Probe 输入为已校验的 driver / endpoint / credential / 模型 /
 //! `max_tokens` / 最终 UA / timeout，不接收 TUI 类型、不暴露内部状态。
+use crate::domain::{
+    ConfigChangeSet, ConfigError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome,
+    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
+    PreparedProjectConfig, ProjectConfigLocation, ReadyConfigCommit,
+};
+use async_trait::async_trait;
+use share::config::domain::snapshot::ConfigSnapshot;
+use tokio::sync::watch;
+
+#[async_trait]
+pub trait ConfigReader: Send + Sync {
+    fn committed_snapshot(&self) -> ConfigSnapshot;
+    fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
+    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome;
+}
+
+#[async_trait]
+pub trait ConfigQuery: Send + Sync {
+    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError>;
+    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError>;
+}
+
+#[async_trait]
+pub trait ConfigWriter: Send + Sync {
+    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError>;
+}
+
+#[async_trait]
+pub trait ProjectConfigParticipant: Send + Sync {
+    async fn prepare_for_project(
+        &self,
+        location: &ProjectConfigLocation,
+    ) -> Result<PreparedProjectConfig, ConfigError>;
+    fn snapshot(&self) -> ConfigSnapshot;
+    async fn commit_project(&self, prepared: PreparedProjectConfig);
+    async fn prepare_update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
+    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome;
+    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet;
+}
+
+// ---------------------------------------------------------------------------
+// Connect 出站端口（平台信息与 Provider 探测）
+// ---------------------------------------------------------------------------
 
 use std::time::Duration;
 
@@ -41,14 +87,10 @@ pub struct SystemInformation {
 ///   等敏感信息塞入 [`SystemInformation`]；
 /// - 实现方负责内部缓存与降级逻辑；调用方信任 `os_name` / `os_version` / `arch`
 ///   是干净字符串，但 UA resolver 仍会做一次 HeaderValue 校验。
-#[async_trait::async_trait]
+#[async_trait]
 pub trait SystemInformationPort: Send + Sync {
     async fn current(&self) -> SystemInformation;
 }
-
-// ---------------------------------------------------------------------------
-// Provider 探测
-// ---------------------------------------------------------------------------
 
 /// Provider 探测的归一化请求。
 ///
@@ -133,7 +175,7 @@ impl std::error::Error for ProviderProbeError {}
 ///   错误必须映射为 [`ProviderProbeErrorKind`] 中的稳定类别；
 /// - **NEVER** 写入 committed config；**NEVER** 读取 env；
 /// - 错误与日志必须清洗 API Key、Authorization Header 与敏感响应正文。
-#[async_trait::async_trait]
+#[async_trait]
 pub trait ProviderProbePort: Send + Sync {
     async fn probe(
         &self,

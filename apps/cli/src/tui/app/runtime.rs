@@ -6,7 +6,7 @@ use crate::tui::update::intent::AgentIntent;
 
 impl App {
     /// Reset per-conversation runtime state while preserving model/provider/session environment.
-    pub(crate) async fn reset_runtime_state(&mut self) {
+    pub(crate) fn reset_runtime_state(&mut self) {
         self.chat.reset_runtime_state();
         // 单一真相源：清空 ConversationModel，使输出文档随之回到空状态。
         self.model.conversation.reset();
@@ -72,8 +72,8 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn reset_runtime_state_clears_view_state_selection_truth() {
+    #[test]
+    fn reset_runtime_state_clears_view_state_selection_truth() {
         use crate::tui::render::status::StatusBarRow;
         let mut app = test_app();
         // 在 view_state（三区选区真相）中建立选区。
@@ -89,7 +89,7 @@ mod tests {
         app.view_state.input_sel.update_selection((0, 6));
         assert!(app.view_state.input_sel.normalized_selection().is_some());
 
-        app.reset_runtime_state().await;
+        app.reset_runtime_state();
 
         // 三区真相被清空。
         assert_eq!(app.view_state.output.selection_range(), None);

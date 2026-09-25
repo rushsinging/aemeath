@@ -600,6 +600,7 @@ pub struct SessionCommitPlan {
     removed_members: Vec<String>,
     reuse_fallbacks: Vec<SessionMemberBytes>,
     preserves_unloaded_steps: bool,
+    project_dir: Option<storage::SafePathSegment>,
 }
 
 impl SessionCommitPlan {
@@ -921,7 +922,14 @@ impl SessionCommitPlan {
             removed_members,
             reuse_fallbacks: Vec::new(),
             preserves_unloaded_steps: false,
+            project_dir: super::project_layout::session_project_dir(after),
         })
+    }
+
+    /// 本提交的 project 目录段（按 project 分目录布局落盘）。
+    /// session workspace 缺失（无 Captured 快照）时为 `None`，写路径退回平铺 key。
+    pub fn project_dir(&self) -> Option<&storage::SafePathSegment> {
+        self.project_dir.as_ref()
     }
 
     pub fn changed_members(&self) -> &[SessionMemberBytes] {

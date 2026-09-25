@@ -14,10 +14,6 @@ impl WorkspaceControl for RecordingWorkspaceControl {
         Err(project::WorkspaceError::UnsupportedForNonGit)
     }
 
-    fn switch_to(&self, _path: PathBuf) -> Result<(), project::WorkspaceError> {
-        Err(project::WorkspaceError::UnsupportedForNonGit)
-    }
-
     fn enter(
         &self,
         path: Option<PathBuf>,
@@ -204,8 +200,15 @@ fn test_exit_worktree_schema() {
     let schema = tool.input_schema();
 
     assert_eq!(schema["type"], "object");
-    assert_eq!(schema["properties"]["path"]["type"], "string");
-    // 全 Option 字段：生成的 schema 不含 required 键（或为空数组）。
+    // ExitWorktree 无输入字段：path 参数已移除，输入 schema 必须为空。
+    assert!(
+        schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .is_none_or(|props| props.is_empty()),
+        "ExitWorktree 不应声明任何输入字段，got: {schema}"
+    );
+    // 无字段：不含 required 键（或为空数组）。
     assert!(schema
         .get("required")
         .and_then(|v| v.as_array())
@@ -385,29 +388,27 @@ async fn exit_worktree_git_empty_stack_returns_error_and_snapshot_unchanged() {
     );
 }
 
-/// Git workspace 中 Switch（ExitWorktree{path}）到另一 repo 必须返回 error，
-/// 且 snapshot 不变。
+/// 带 `path` 输入的 ExitWorktree 必须被拒绝（path 参数已移除，
+/// 防止误用直接切换旁路），且 snapshot 不变。
 #[tokio::test]
-async fn exit_worktree_switch_cross_repo_returns_error_and_snapshot_unchanged() {
-    let repo_a = tempfile::tempdir().unwrap();
-    let repo_b = tempfile::tempdir().unwrap();
-    init_git(repo_a.path());
-    init_git(repo_b.path());
+async fn exit_worktree_with_path_input_is_rejected_and_state_unchanged() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git(repo.path());
 
-    let ctx = build_ctx(repo_a.path().to_path_buf());
+    let ctx = build_ctx(repo.path().to_path_buf());
 
     let before = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
 
     let result = exit_tool(&ctx)
         .call(
             serde_json::json!({
-                "path": repo_b.path().display().to_string(),
+                "path": repo.path().display().to_string(),
             }),
             &ctx,
         )
         .await;
 
-    assert!(result.is_error, "跨仓库 switch 必须返回 error");
+    assert!(result.is_error, "带 path 的 ExitWorktree 必须返回 error");
     assert!(
         result.data.is_none(),
         "失败时不应返回 data，got: {:?}",
@@ -415,10 +416,10 @@ async fn exit_worktree_switch_cross_repo_returns_error_and_snapshot_unchanged() 
     );
 
     let after = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
-    assert_eq!(before, after, "Switch 失败后 snapshot 必须完全不变");
+    assert_eq!(before, after, "拒绝后 snapshot 必须完全不变");
 }
 
-// ── Enter / Exit / Switch call() 成功场景集成测试（真实 git） ────────────
+// ── Enter / Exit call() 成功场景集成测试（真实 git） ────────────
 //
 // 通过 `TypedTool::call()` 端到端验证真实 git 成功路径：
 //   1) EnterWorktree{branch}：用真实 `git worktree add` 创建 linked worktree，
@@ -426,8 +427,6 @@ async fn exit_worktree_switch_cross_repo_returns_error_and_snapshot_unchanged() 
 //      `WorkspacePersist::snapshot()` 的 `context_stack.len() == 1` 且 `worktree_kind == Linked`。
 //   2) ExitWorktree{}：弹出栈帧回到 primary，断言 data/read/snapshot 回到原根、
 //      stack 空、kind == Primary。
-//   3) EnterWorktree{branch} + ExitWorktree{path=primary 子目录}：验证
-//      switch 不压栈、data/read/root/kind 切到新路径。
 //
 // 全部使用 `git init --initial-branch=main` + 本地 user + seed commit，保证
 // production `worktree_add` (`-b <new> <base=main>`) 能成功派生新分支。
@@ -448,7 +447,16 @@ async fn enter_worktree_with_branch_creates_linked_and_consistent_state() {
 
     let ctx = build_ctx(tmp.path().to_path_buf());
     let main_canonical = tmp.path().canonicalize().unwrap();
-    let expected_wt = main_canonical.join(".worktrees").join("default-from-main");
+    let expected_wt = main_canonical
+        .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
+        .join("default-from-main");
 
     // Pre-state：primary、空栈
     let before = crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
@@ -526,11 +534,16 @@ async fn enter_worktree_with_blank_path_and_base_derives_path_from_branch() {
     let tmp = tempfile::tempdir().unwrap();
     init_main_repo(tmp.path());
     let ctx = build_ctx(tmp.path().to_path_buf());
-    let expected_wt = tmp
-        .path()
-        .canonicalize()
-        .unwrap()
+    let main_canonical = tmp.path().canonicalize().unwrap();
+    let expected_wt = main_canonical
         .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
         .join("fix-example");
 
     let result = enter_tool(&ctx)
@@ -568,11 +581,16 @@ async fn enter_worktree_with_explicit_base_starts_at_base_commit() {
     );
 
     let ctx = build_ctx(tmp.path().to_path_buf());
-    let expected_wt = tmp
-        .path()
-        .canonicalize()
-        .unwrap()
+    let main_canonical = tmp.path().canonicalize().unwrap();
+    let expected_wt = main_canonical
         .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
         .join("from-explicit-base");
     let result = enter_tool(&ctx)
         .call(
@@ -619,7 +637,16 @@ async fn exit_worktree_empty_input_restores_primary_and_pops_stack() {
         crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
     assert_eq!(pre_exit.worktree_kind, WorktreeKind::Linked);
     assert_eq!(pre_exit.context_stack.len(), 1);
-    let linked_root = main_canonical.join(".worktrees").join("to-exit");
+    let linked_root = main_canonical
+        .join(".worktrees")
+        .join(
+            main_canonical
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .trim_matches(|c| matches!(c, '.' | '_' | '-')),
+        )
+        .join("to-exit");
     assert_eq!(pre_exit.path_base, linked_root.display().to_string());
     assert_eq!(pre_exit.workspace_root, linked_root.display().to_string());
 
@@ -658,191 +685,4 @@ async fn exit_worktree_empty_input_restores_primary_and_pops_stack() {
 
     // 中间状态确实被改写过（防止 pop 是 no-op 回归）
     assert_ne!(pre_exit.workspace_root, snapshot.workspace_root);
-}
-
-/// 单独创建 linked worktree 后 ExitWorktreeTool path 输入 switch：
-/// 验证不压栈、data/read/root/kind 切到新路径。
-#[tokio::test]
-async fn exit_worktree_with_path_switches_without_pushing_stack() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_main_repo(tmp.path());
-    // 在主仓库内建另一个目录（primary 子目录），作为 switch 目标。
-    // switch_to 不创建新 worktree，只换 path_base/workspace_root。
-    let other = tmp.path().join("other-subdir");
-    std::fs::create_dir_all(&other).unwrap();
-
-    let ctx = build_ctx(tmp.path().to_path_buf());
-    let main_canonical = tmp.path().canonicalize().unwrap();
-    let other_canonical = other.canonicalize().unwrap();
-
-    // 先 Enter 推 linked worktree（栈长=1）
-    let enter = enter_tool(&ctx)
-        .call(serde_json::json!({ "branch": "switch-test" }), &ctx)
-        .await;
-    assert!(
-        !enter.is_error,
-        "Enter 必须成功以建立 switch 场景: {}",
-        enter.text
-    );
-    let stack_after_enter = crate::adapters::test_support_tests::production_workspace_persist(&ctx)
-        .snapshot()
-        .context_stack
-        .len();
-    assert_eq!(
-        stack_after_enter, 1,
-        "Enter 后栈长应=1（作为 switch 不压栈断言的基准）"
-    );
-
-    // ExitWorktree{path=other_subdir} 直接 switch 到 primary 子目录
-    let result = exit_tool(&ctx)
-        .call(
-            serde_json::json!({ "path": other.display().to_string() }),
-            &ctx,
-        )
-        .await;
-
-    assert!(
-        !result.is_error,
-        "ExitWorktree path switch 必须成功: {}",
-        result.text
-    );
-    let data = result.data.expect("成功必须返回 data");
-
-    // data.path_base / workspace_root / branch 与 read 一致
-    let read = ctx.workspace_read();
-    assert_eq!(data.path_base, read.current_path_base());
-    assert_eq!(data.workspace_root, read.current_workspace_root());
-    assert_eq!(data.path_base, other_canonical);
-    assert_eq!(data.workspace_root, main_canonical);
-    let read_branch = read
-        .current_branch()
-        .expect("current_branch ok")
-        .expect("switch 到 primary 子目录后分支仍为 main");
-    assert_eq!(data.branch, read_branch);
-    assert_eq!(data.branch, "main");
-
-    // switch 清空残留栈帧：栈长=0。switch_to 不参与 enter/exit 栈管理，
-    // 切换后 MUST 清空 stack 以维护「stack 非空 ⟺ Linked」不变量。
-    let snapshot =
-        crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
-    assert_eq!(
-        snapshot.context_stack.len(),
-        0,
-        "switch_to MUST 清空残留栈帧，不应保留 Enter 推入的旧帧"
-    );
-    // 切回 primary，path_base 落到 other-subdir，workspace_root 仍是主仓库根
-    assert_eq!(snapshot.worktree_kind, WorktreeKind::Primary);
-    assert_eq!(snapshot.path_base, other_canonical.display().to_string());
-    assert_eq!(
-        snapshot.workspace_root,
-        main_canonical.display().to_string()
-    );
-}
-
-/// 真实 Git 多 linked worktree 场景：
-/// 1) EnterWorktreeTool 创建 linked A（栈1）。
-/// 2) 通过测试 git command 直接从 main 创建 linked B（独立分支，真实 git worktree）。
-/// 3) ExitWorktreeTool { path: linked B } switch 到 B。
-/// 断言：成功、data/read/snapshot 指向 B、kind=Linked、
-/// context_stack 仍为1（switch 不压栈）。
-#[tokio::test]
-async fn exit_worktree_switch_to_another_linked_worktree_does_not_push_stack() {
-    let tmp = tempfile::tempdir().unwrap();
-    init_main_repo(tmp.path());
-    let main_canonical = tmp.path().canonicalize().unwrap();
-
-    let ctx = build_ctx(tmp.path().to_path_buf());
-
-    // 1) EnterWorktreeTool 创建 linked A（栈1）
-    let enter = enter_tool(&ctx)
-        .call(serde_json::json!({ "branch": "linked-a" }), &ctx)
-        .await;
-    assert!(!enter.is_error, "Enter linked-a 必须成功: {}", enter.text);
-    let linked_a = main_canonical.join(".worktrees").join("linked-a");
-    let snapshot_after_enter =
-        crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
-    assert_eq!(
-        snapshot_after_enter.worktree_kind,
-        WorktreeKind::Linked,
-        "Enter 后顶层 kind 应为 Linked"
-    );
-    assert_eq!(
-        snapshot_after_enter.context_stack.len(),
-        1,
-        "Enter 后 context_stack 应含 1 帧"
-    );
-    assert_eq!(
-        snapshot_after_enter.path_base,
-        linked_a.display().to_string()
-    );
-
-    // 2) 通过测试 git command 直接从 main 创建 linked B（独立分支）
-    let linked_b_raw = tmp.path().join(".worktrees").join("linked-b");
-    let status = test_git_command(tmp.path())
-        .args([
-            "worktree",
-            "add",
-            "-b",
-            "linked-b",
-            linked_b_raw.to_str().unwrap(),
-        ])
-        .current_dir(tmp.path())
-        .status()
-        .expect("git worktree add linked-b spawn 失败");
-    assert!(status.success(), "git worktree add linked-b 退出码非 0");
-    let linked_b = main_canonical.join(".worktrees").join("linked-b");
-
-    // 3) ExitWorktreeTool { path: linked B } switch
-    let result = exit_tool(&ctx)
-        .call(
-            serde_json::json!({ "path": linked_b_raw.display().to_string() }),
-            &ctx,
-        )
-        .await;
-
-    assert!(
-        !result.is_error,
-        "ExitWorktree path switch 到 linked B 必须成功: {}",
-        result.text
-    );
-    let data = result.data.expect("成功必须返回 data");
-
-    // data.path_base / workspace_root / branch 与 read 一致且指向 B
-    let read = ctx.workspace_read();
-    assert_eq!(data.path_base, read.current_path_base());
-    assert_eq!(data.workspace_root, read.current_workspace_root());
-    assert_eq!(data.path_base, linked_b);
-    assert_eq!(data.workspace_root, linked_b);
-    let read_branch = read
-        .current_branch()
-        .expect("current_branch ok")
-        .expect("linked worktree 必须报告新分支名");
-    assert_eq!(data.branch, read_branch);
-    assert_eq!(data.branch, "linked-b");
-
-    // snapshot 指向 B、kind=Linked
-    let snapshot =
-        crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
-    assert_eq!(
-        snapshot.path_base,
-        linked_b.display().to_string(),
-        "snapshot path_base 应指向 linked B"
-    );
-    assert_eq!(
-        snapshot.workspace_root,
-        linked_b.display().to_string(),
-        "snapshot workspace_root 应指向 linked B"
-    );
-    assert_eq!(
-        snapshot.worktree_kind,
-        WorktreeKind::Linked,
-        "switch 到 linked worktree 后顶层 kind 应为 Linked"
-    );
-
-    // switch 清空残留栈帧：context_stack 为 0。switch_to 不压新帧也不保留旧帧。
-    assert_eq!(
-        snapshot.context_stack.len(),
-        0,
-        "switch_to MUST 清空残留栈帧，不应保留 Enter 推入的旧帧"
-    );
 }

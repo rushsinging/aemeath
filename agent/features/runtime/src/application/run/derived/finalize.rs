@@ -13,6 +13,9 @@ pub(crate) struct SubRunFinalizationObserver<'a> {
     pub run_step_id: sdk::RunStepId,
     pub workspace_root: &'a std::path::Path,
     pub session_id: &'a str,
+    /// Main Session identity（继承父 Main）；hook 注入 AEMEATH_SESSION_ID 用，
+    /// 与 isolated 的 `session_id` 区分。
+    pub main_session_id: &'a str,
     pub prompt: &'a str,
     pub system: &'a str,
     pub model_spec: Option<&'a str>,
@@ -68,6 +71,7 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
                 is_error,
             }),
             self.workspace_root,
+            self.main_session_id,
             &tokio_util::sync::CancellationToken::new(),
         )
         .await;

@@ -1,8 +1,12 @@
 # 测试架构与覆盖率治理
 
 > 层级：03-engineering（工程守则）
-> 状态：Target（测试组织规范已落地，覆盖率/生产可达性/场景实现待后续 Issue）｜Milestone：v0.1.0｜对应 Issue：[#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006)、[#1013](https://github.com/rushsinging/aemeath/issues/1013)
+> 状态：Target（测试组织规范已落地；#1092 已完成 TUI 域 L0–L5 行为—证据矩阵终审并补齐缺口）｜Milestone：v0.1.0｜对应 Issue：[#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006)、[#1013](https://github.com/rushsinging/aemeath/issues/1013)、[#1092](https://github.com/rushsinging/aemeath/issues/1092)
 > 本文定义 workspace 统一测试分层、目录组织、fixture/替身、覆盖率、生产可达性与 CI 门禁。Rust 代码变更的可执行约束以 [`specs/3.2-rust-coding.md`](../../../specs/3.2-rust-coding.md) 为准。
+
+## 0. TUI 域终审结论（#1092）
+
+#860 全部执行叶子（#943/#944/#742/#612/#946/#945/#947/#1534 及历史 #1001）的 L0–L5 证据矩阵见 #1092 追踪评论。终审结论：各层证据可追溯、无未解释空白；L5 仅保留单一 PTY smoke。终审修复两项：`ReminderList` 事件的显式渲染消费（此前 reducer 空映射导致 `/memory remind` 结果静默丢弃）、A 类 slash 命令表驱动回归。Run 控制的权威表述为**单一 `CancelRunStep` Effect + runtime `CancelRunStepOutcome::RunTerminating` 升级语义**（SDK PL 层保留 `TerminateRun` outcome 契约）；TUI Effect 枚举不设独立 `TerminateRun` 变体。
 
 ## 1. 目标与非目标
 
@@ -496,7 +500,7 @@ Runtime 的创建链必须保持：`RunCreationRequest + SessionRunBindings / Pa
 
 | 层级 | 稳定证据 | 证明范围 |
 |---|---|---|
-| L0 | `check-runtime-capability-assembly.sh` 与 deliberate probes | Context 构造、assembly token、Factory/RunInstance 调用点唯一；纯值 request/facts 无 live capability；Main/Derived 不绕过 Factory 与 Launcher |
+| L0 | `check-runtime-capability-assembly-ownership.sh` 与 deliberate probes | Context 构造、assembly token、Factory/RunInstance 调用点唯一；纯值 request/facts 无 live capability；Main/Derived 不绕过 Factory 与 Launcher |
 | L1 | RunSpec ceiling、RunCreationRequest、SessionSnapshot 测试 | parent capability ceiling、纯值创建请求、committed session/config revision 冻结 |
 | L2 | Session/Derived production-chain fixture | 两种 Run 都由 production `RunFactory::create` 返回完整 `RunInstance`，字段无丢失、覆写或第二装配算法 |
 | L3 | Composition same-factory 契约 | 同一 `RuntimeContextFactory` 实例注入 Main Session 与 Derived runner，供应 BC concrete adapter 只在 Composition 构造 |
@@ -728,7 +732,7 @@ Policy v0.1.0 生产 `Standard` 与 `AllowAll` 两种授权上下文，`Deny` / 
 
 | 行为 / 风险 | 必要层 | 可追溯证据 | 结论 |
 |---|---|---|---|
-| Runtime 单一 `agent_execution` 六边形、RuntimeContext 私有构造、RunFactory/RunLauncher 唯一路径、Main/Derived 只由 RunSpec/capability binding 区分 | L0-L4 | `application/run/{context_factory,creation,launcher}_tests.rs`、`application/loop_engine/engine_architecture_tests.rs`、`application/run/scenario_tests/{main_run,derived_run}.rs`、`check-runtime-capability-assembly.sh` | 已覆盖构造 owner、父 capability ceiling、Context assembly failure、Main/Derived 同 launcher 与禁用生产角色类型；Design 与实现一致。 |
+| Runtime 单一 `agent_execution` 六边形、RuntimeContext 私有构造、RunFactory/RunLauncher 唯一路径、Main/Derived 只由 RunSpec/capability binding 区分 | L0-L4 | `application/run/{context_factory,creation,launcher}_tests.rs`、`application/loop_engine/engine_architecture_tests.rs`、`application/run/scenario_tests/{main_run,derived_run}.rs`、`check-runtime-capability-assembly-ownership.sh` | 已覆盖构造 owner、父 capability ceiling、Context assembly failure、Main/Derived 同 launcher 与禁用生产角色类型；Design 与实现一致。 |
 | Run/RunStep 状态机、非法转换、CancelRunStep、TerminateRun、deadline、terminal 抢占与 cleanup receipt | L1-L4 | `domain/agent_run/tests.rs`、`application/loop_engine/{engine_control,engine_scenarios}_tests.rs`、`application/run/scenario_tests/*`、`application/loop_engine/chat/session_driver_session_lifecycle_tests.rs` | 已覆盖状态不变量、阶段取消、terminate 抢占、timeout、exactly-one terminal 与真实 Session driver 路径；Activity 不驱动 lifecycle。 |
 | accepted input durable、finalized outcome/receipts、normal/control drain-or-seal 与 Resume | L1-L4 | `application/context/coordination_tests.rs`、`application/loop_engine/{engine_control,engine_input,engine_scenarios,llm_strategy}_tests.rs`、Context `session_recovery_scenarios.rs`、TUI resume/scenario tests | #1277/#1278/#1272/#1247/#1502 链已覆盖 save-before-next-phase、失败停止、结构化 outcome、幂等/conflict、live/resume typed terminal 等价。 |
 | model/context/tool coordinators 只经窄 Port 协作，Port failure、policy、schema、并发、取消、timeout、materialization 不绕过 | L1-L4 | `application/{model,context,tool}/**/*tests.rs`、`tests/{sdk_event_mapper_contract,tool_result_blob_contract,bootstrap_dependencies}.rs`、Main/Derived scenario tests | 已覆盖成功与失败 seam；Tools 保留 descriptor producer contract，Runtime 不取得 ToolRegistry/Tool concrete。 |
@@ -861,3 +865,4 @@ Hook 类型化协议、受管进程、Dispatcher、Runtime adapter、legacy 退�
 | 2026-07-20 | 完成 #1058 Task Management 测试审查：补 Task Tool ACL、TaskPersist contract、Context restore、Runtime snapshot/reminder 与稳定 snapshot；后续结构化 Task-state 投影已合入，当前 #849 收口证据见 §11.10 | [#1058](https://github.com/rushsinging/aemeath/issues/1058)、[#849](https://github.com/rushsinging/aemeath/issues/849) |
 | 2026-08-05 | 补齐 #849 结构化 Task-state 的相邻边界与组合证据：typed committed-change Hook 门禁、round-level 最终权威发布、Runtime→SDK 完整映射、Live/Resume 同契约、TUI session/revision 幂等；明确 per-commit 连续可见性不在本次范围 | [#849](https://github.com/rushsinging/aemeath/issues/849) |
 | 2026-07-20 | 冻结 #1057 Storage 根因级测试审查计划：按八个稳定行为单元建立 L0～L5 矩阵，优先修复 owning-layer、日志测试设施、墙钟锁断言与 SafeStorageRoot 契约根因，再复核 Blob/Dataset、消费方边界、公开面和 Guard | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#848](https://github.com/rushsinging/aemeath/issues/848) |
+| 2026-09-21 | 完成 #1067 Composition Root 测试审查：fail-closed 跨 BC 构造注册表 Guard（22 条 construction_symbols + 探针自测 7 用例）替代代表性覆盖；修复 Runtime 生产段构造 WorkspaceSkillQueryFactory 回流（#1413 引入）；from_args 职责 1 拆出 startup_resume 并补 L1 字段完整性 6 例；wire_update 装配冒烟补齐；四职责分层证据见 runtime ownership §7.3 | [#1067](https://github.com/rushsinging/aemeath/issues/1067)、[#861](https://github.com/rushsinging/aemeath/issues/861) |

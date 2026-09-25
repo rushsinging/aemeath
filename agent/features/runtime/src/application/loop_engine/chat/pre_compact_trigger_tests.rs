@@ -66,6 +66,7 @@ fn frozen_request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -166,7 +167,7 @@ impl ContextPort for StubContextPort {
     }
 }
 
-fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
+pub(super) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
     struct NoopHistory;
     #[async_trait]
     impl memory::api::ReflectionHistoryQuery for NoopHistory {
@@ -282,7 +283,7 @@ impl CompactHarness {
 
 /// A test-only `ProviderPort` whose `invoke` always returns a valid reflection
 /// JSON so `submit_complete` can complete end-to-end and reach the slot.
-struct StaticReflectionProvider;
+pub(super) struct StaticReflectionProvider;
 
 #[async_trait]
 impl crate::ports::ProviderPort for StaticReflectionProvider {
@@ -369,7 +370,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
-        quality: context::domain::CompactSummaryQuality::LocalOnly,
+        quality: context::CompactSummaryQuality::LocalOnly,
     });
     let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
 
@@ -522,7 +523,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
-        quality: context::domain::CompactSummaryQuality::LocalOnly,
+        quality: context::CompactSummaryQuality::LocalOnly,
     })));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();

@@ -32,21 +32,31 @@ fn wire_runtime_tool_assembly(
     skill_loader: Arc<dyn tools::SkillLoadPort>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
+    context_size: usize,
 ) -> Result<RuntimeToolAssembly, sdk::SdkError> {
+    // 合并内置与 config 定义的角色（config 同名整条覆盖），编译为
+    // role:<name> 工具 profile；无 policy 的角色沿用 sub-agent-restricted。
+    let role_policies = snapshot
+        .agents()
+        .merged_roles()
+        .into_iter()
+        .filter_map(|(role, config)| config.policy.map(|policy| (role, policy)))
+        .collect::<Vec<_>>();
     let tools = tools::composition::wire_builtin_catalog_execution(
         task_access,
         memory_source,
         workspace_control,
         skill_loader,
+        role_policies,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let policy = snapshot.tool_result_policy();
+    // 截断阈值按窗口比例收紧：短窗口下单条大结果会直接顶到
+    // auto-compact 阈值，配置值语义是"大窗口下的上限"。
+    let policy = snapshot.tool_result_policy(context_size);
     let agents_dir_buf = agents_dir.to_path_buf();
     let blobs = Arc::new(runtime::AtomicBlobToolResultStore::new(
-        Arc::new(
-            storage::FileSystemBlobAdapter::new(agents_dir_buf.clone())
-                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-        ),
+        storage::file_system_blob(agents_dir_buf.clone())
+            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         agents_dir_buf,
     ));
     Ok(RuntimeToolAssembly {
@@ -60,7 +70,7 @@ fn wire_runtime_tool_assembly(
                 policy.preview_tail_chars(),
             ),
         )),
-        active_run: Arc::new(runtime::ActiveRunRegistry::default()),
+        active_run: Arc::new(runtime::wire_active_run_registry()),
     })
 }
 
@@ -88,10 +98,8 @@ pub(crate) async fn from_args_with_gateways(
     // explicit agents_dir.join("memory") path via FileLegacyMemorySourceFactory.
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
         Arc::new(memory_api::AtomicDatasetReflectionHistoryStore::new(
-            Arc::new(
-                storage::FileSystemDatasetAdapter::new(agents_dir)
-                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-            ),
+            storage::file_system_dataset(agents_dir)
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             project_key,
         ));
 
@@ -103,17 +111,27 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
-    let session_dataset = Arc::new(
-        storage::FileSystemDatasetAdapter::new(agents_dir)
-            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-    );
-    let session_blob = storage::api::file_system_blob(agents_dir)
+    let session_dataset = storage::file_system_dataset(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::adapters::DatasetSessionManagement::new(
-            session_dataset.clone(),
-            session_blob.clone(),
-        ));
+    let session_blob = storage::file_system_blob(agents_dir)
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
+        context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
+    );
+    // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
+    // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
+    {
+        let migration_blob = session_blob.clone();
+        tokio::spawn(async move {
+            let report = context::api::migrate_flat_sessions_to_project_dirs(migration_blob).await;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "session_flat_migration spawned migrated={} skipped={}",
+                report.migrated,
+                report.skipped
+            );
+        });
+    }
 
     let snapshot = config.reader().committed_snapshot();
     let runtime_model = snapshot
@@ -188,30 +206,26 @@ pub(crate) async fn from_args_with_gateways(
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: Box::new(memory::DatasetMemoryOpener::new(
-            Arc::new(
-                storage::FileSystemDatasetAdapter::new(agents_dir_buf)
-                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-            ),
+            storage::file_system_dataset(agents_dir_buf)
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             Arc::new(memory::FileLegacyMemorySourceFactory::new(
                 agents_dir.join("memory"),
             )),
         )),
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::adapters::ProductionMainContextFactory::new(Arc::new(
-                context::adapters::DatasetCanonicalSessionWriter::new(session_dataset),
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::DatasetCanonicalSessionWriter::new(session_dataset),
             ))
-            .with_accepted_input_writer(Arc::new(
-                context::adapters::AtomicBlobAcceptedInputWriter::new(session_blob.clone()),
-            ))
-            .with_tool_receipt_writer(Arc::new(
-                context::adapters::AtomicBlobToolReceiptWriter::new(session_blob),
-            ))
+            .with_accepted_input_writer(Arc::new(context::AtomicBlobAcceptedInputWriter::new(
+                session_blob.clone(),
+            )))
+            .with_tool_receipt_writer(Arc::new(context::AtomicBlobToolReceiptWriter::new(
+                session_blob,
+            )))
             .with_skill_catalog(
                 skill_catalog.clone(),
-                Arc::new(context::adapters::WorkspaceSkillQueryFactory::new(
-                    workspace.read(),
-                )),
+                Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
             )
             .with_generator(Arc::new(compact_generator)),
         ),
@@ -220,6 +234,12 @@ pub(crate) async fn from_args_with_gateways(
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
 
+    // context window 需先于 tool assembly 解析：tool_result 截断阈值
+    // 按窗口比例收紧，依赖此处解析出的最终 context_size。
+    let context_size = snapshot.resolve_context_size(
+        Some(args.context_size),
+        initial_provider.resolved_model().model.context_window,
+    );
     let tool_assembly = wire_runtime_tool_assembly(
         task_wiring.access(),
         Arc::new(WiringMemoryPortSource {
@@ -229,6 +249,7 @@ pub(crate) async fn from_args_with_gateways(
         skill_loader.clone(),
         &config.reader().committed_snapshot(),
         agents_dir,
+        context_size,
     )?;
 
     let (usage_sink, session_audit): (
@@ -262,10 +283,6 @@ pub(crate) async fn from_args_with_gateways(
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let context_size = snapshot.resolve_context_size(
-        Some(args.context_size),
-        initial_provider.resolved_model().model.context_window,
-    );
     let session_bootstrap = runtime::SessionBootstrapAssembly::new(
         cwd,
         context_size,
@@ -316,10 +333,8 @@ pub(crate) async fn from_args_with_gateways(
         snapshot.skills().dirs.clone(),
         available_tools,
     );
-    let descriptors = skill_catalog.list(skill_query);
-    let skills = runtime::SkillBootstrapAssembly::new(
-        tools::SkillCatalogSnapshot::from_descriptors(descriptors),
-    );
+    let skills =
+        runtime::SkillBootstrapAssembly::new(skill_catalog.clone(), workspace.clone(), skill_query);
 
     let (max_tool_concurrency, max_agent_concurrency) = runtime::resolve_concurrency_limits(
         args.max_tool_concurrency,

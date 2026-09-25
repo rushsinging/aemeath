@@ -17,7 +17,9 @@ use crate::config::{
     permissions::{PermissionConfig, PermissionModeConfig},
     skills::SkillsConfig,
     storage::StorageConfig,
-    tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig},
+    tools::{
+        AgentInstanceConfig, AgentRoleDefinition, AgentsConfig, ToolResultConfig, ToolsConfig,
+    },
     ui::{
         ElementSpacingOverride, MarkdownSpacingMode, MarkdownSpacingOverrides, TaskLifecycleConfig,
         TaskListConfig, UiConfig,
@@ -186,7 +188,9 @@ pub struct AgentsConfigPatch {
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
     #[serde(default)]
-    pub roles: Option<HashMap<String, AgentRoleConfig>>,
+    pub roles: Option<HashMap<String, AgentRoleDefinition>>,
+    #[serde(default)]
+    pub names: Option<HashMap<String, AgentInstanceConfig>>,
     #[serde(default, alias = "defaultModel")]
     pub default_model: Option<String>,
 }
@@ -293,6 +297,8 @@ pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
     #[serde(default)]
+    pub worktrees_dir: Option<PathBuf>,
+    #[serde(default)]
     pub persist_sessions: Option<bool>,
     #[serde(default)]
     pub max_sessions: Option<usize>,
@@ -323,7 +329,7 @@ pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
-    pub interval_run_steps: Option<usize>,
+    pub interval_runs: Option<usize>,
     #[serde(default)]
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
@@ -575,6 +581,11 @@ pub(crate) fn apply_agents_patch(mut base: AgentsConfig, patch: AgentsConfigPatc
             base.roles.insert(k, v);
         }
     }
+    if let Some(names) = patch.names {
+        for (k, v) in names {
+            base.names.insert(k, v);
+        }
+    }
     if let Some(v) = patch.default_model {
         base.default_model = v;
     }
@@ -728,6 +739,9 @@ pub(crate) fn apply_storage_patch(
     if let Some(v) = patch.sessions_dir {
         base.sessions_dir = Some(v);
     }
+    if let Some(v) = patch.worktrees_dir {
+        base.worktrees_dir = Some(v);
+    }
     if let Some(v) = patch.persist_sessions {
         base.persist_sessions = v;
     }
@@ -751,6 +765,12 @@ pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfi
     HooksConfig {
         max_attempts: overlay.max_attempts.or(base.max_attempts),
         max_stop_hook_blocks: overlay.max_stop_hook_blocks.or(base.max_stop_hook_blocks),
+        // Vec 空 = 未设置：overlay 设置了透传模式则覆盖，否则继承 base（全局层）。
+        env_passthrough: if overlay.env_passthrough.is_empty() {
+            base.env_passthrough
+        } else {
+            overlay.env_passthrough
+        },
         events,
     }
 }
@@ -784,8 +804,8 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.enabled {
         base.enabled = v;
     }
-    if let Some(v) = patch.interval_run_steps {
-        base.interval_run_steps = v;
+    if let Some(v) = patch.interval_runs {
+        base.interval_runs = v;
     }
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;
@@ -903,6 +923,67 @@ mod tests {
     use crate::config::ui::MarkdownSpacingMode;
 
     #[test]
+    fn storage_worktrees_dir_patch_overrides_lower_layer_value() {
+        let global: ConfigPatch =
+            serde_json::from_str(r#"{"storage":{"worktrees_dir":"/global/wt"}}"#).unwrap();
+        let env_layer = ConfigPatch {
+            storage: Some(StorageConfigPatch {
+                worktrees_dir: Some(PathBuf::from("/env/wt")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(
+            snapshot.worktrees_dir(),
+            Some(PathBuf::from("/env/wt").as_path())
+        );
+    }
+
+    #[test]
+    fn storage_worktrees_dir_defaults_to_none_without_patch() {
+        let snapshot = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snapshot.worktrees_dir(), None);
+    }
+
+    #[test]
+    fn hook_env_passthrough_patch_overrides_and_inherits_when_unset() {
+        let global: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"env_passthrough": ["CMUX_*"]}}"#).unwrap();
+        let project_override: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"env_passthrough": ["SSH_AUTH_SOCK"]}}"#).unwrap();
+        let project_unset: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"max_attempts": 3}}"#).unwrap();
+
+        let merged_global_only = apply_patch(Config::default(), global.clone());
+        assert_eq!(
+            merged_global_only.hooks.env_passthrough,
+            vec!["CMUX_*".to_string()]
+        );
+
+        // overlay 设置了透传模式：整体覆盖（不做列表拼接合并）
+        let merged_override = apply_patch(
+            apply_patch(Config::default(), global.clone()),
+            project_override,
+        );
+        assert_eq!(
+            merged_override.hooks.env_passthrough,
+            vec!["SSH_AUTH_SOCK".to_string()]
+        );
+
+        // overlay 未设置（空）：继承全局层
+        let merged_inherit = apply_patch(apply_patch(Config::default(), global), project_unset);
+        assert_eq!(
+            merged_inherit.hooks.env_passthrough,
+            vec!["CMUX_*".to_string()]
+        );
+    }
+
+    #[test]
     fn hook_runtime_limit_patch_preserves_unspecified_lower_layer_values() {
         let global: ConfigPatch = serde_json::from_str(
             r#"{
@@ -942,7 +1023,14 @@ mod tests {
                 "agents": {
                     "max_concurrency": 6,
                     "default_model": "snake/model",
-                    "roles": { "coder": { "enabled": false, "system_suffix": "snake" } }
+                    "names": {
+                        "coder-fast": {
+                            "role": "coder",
+                            "model": "snake/model",
+                            "enabled": false,
+                            "system_suffix": "snake"
+                        }
+                    }
                 }
             }"#,
         )
@@ -950,12 +1038,14 @@ mod tests {
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
 
-        assert!(!snapshot.agents().roles["coder"].enabled);
+        assert!(!snapshot.agents().names["coder-fast"].enabled);
         assert_eq!(snapshot.max_tool_concurrency(), 9);
         assert_eq!(snapshot.max_agent_concurrency(), 6);
         assert_eq!(snapshot.agents().default_model, "snake/model");
         assert_eq!(
-            snapshot.agents().roles["coder"].system_suffix.as_deref(),
+            snapshot.agents().names["coder-fast"]
+                .system_suffix
+                .as_deref(),
             Some("snake")
         );
     }
@@ -989,7 +1079,8 @@ mod tests {
         .unwrap();
 
         let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
-        let policy = snapshot.tool_result_policy();
+        // 大窗口（1M）下比例收紧不生效，验证的就是 patch 后的原始策略值
+        let policy = snapshot.tool_result_policy(1_000_000);
 
         assert_eq!(policy.threshold_chars(), 9_000);
         assert_eq!(policy.preview_head_chars(), 2_000);

@@ -19,6 +19,7 @@ pub use atomic_dataset::{
     DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome,
     DatasetRevision,
 };
+#[cfg_attr(not(test), allow(unused_imports))]
 pub use blob_recovery::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
     DigestObservation, JournalPhase, QuarantineDisposition, RecoveryDecision, TransactionDigest,

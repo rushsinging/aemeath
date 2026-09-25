@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use context::adapters::decode_session;
-use context::domain::session::{CanonicalSession, SessionCodec, SnapshotState};
-use context::domain::{SessionId, ToolCallIdentity};
-use context::ports::SessionManagementPort;
+use context::decode_session;
+use context::SessionManagementPort;
+use context::{CanonicalSession, SessionCodec, SnapshotState};
+use context::{SessionId, ToolCallIdentity};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 fn session_for_project(
@@ -30,11 +30,10 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let blob: Arc<dyn storage::api::AtomicBlobPort> = Arc::new(
-        storage::FileSystemBlobAdapter::new(&root).expect("create filesystem blob adapter"),
-    );
-    let port = context::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
-    let writer = context::adapters::AtomicBlobCanonicalSessionWriter::new(blob);
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::file_system_blob(&root).expect("create filesystem blob adapter");
+    let port = context::AtomicBlobSessionManagement::new(Arc::clone(&blob));
+    let writer = context::AtomicBlobCanonicalSessionWriter::new(blob);
     let project = ProjectIdentity {
         initial_cwd: "/receipt-ledger".to_string(),
         git_common_dir: None,
@@ -50,14 +49,14 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     let identity = ToolCallIdentity {
         session_id: session_id.clone(),
         run_id: sdk::RunId::new("run"),
-        step_id: context::domain::RunStepId::new("step"),
+        step_id: context::RunStepId::new("step"),
         runtime_call_id: "call-1".to_string(),
         provider_call_id: Some("provider-1".to_string()),
         tool_name: "Glob".to_string(),
         call_index: 0,
         agent: false,
     };
-    let receipt = context::domain::ToolCallReceipt::pending(identity, "safe preview");
+    let receipt = context::ToolCallReceipt::pending(identity, "safe preview");
     writer
         .save_tool_receipt(session_id.as_str(), 1, &receipt)
         .await
@@ -80,11 +79,9 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(&root).expect("create filesystem blob adapter"),
-        )),
-    );
+    let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
+        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+    ));
     let project_a = ProjectIdentity {
         initial_cwd: "/project-a".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
@@ -129,14 +126,17 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         .load_for_project("project-a", &same_git_other_worktree)
         .await
         .is_ok());
+    // 按 project 分目录布局：跨项目 session 在本项目视图下不可见（探测
+    // 序列只含本项目目录段与平铺遗留位置），NotFound 与旧 ProjectMismatch
+    // 在消费方同归 SessionResumeFailureKind::NotFound，语义等价且更准确。
     assert!(matches!(
         port.load_for_project("project-b", &same_git_other_worktree).await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.export_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.update_metadata_for_project(
@@ -148,12 +148,12 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
             },
         )
         .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     assert!(matches!(
         port.delete_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(context::SessionManagementError::ProjectMismatch(id)) if id == "project-b"
+        Err(context::SessionManagementError::NotFound(id)) if id == "project-b"
     ));
     let exported = port
         .export_for_project("project-a", &same_git_other_worktree)
@@ -177,11 +177,9 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let blob = Arc::new(
-        storage::FileSystemBlobAdapter::new(&root).expect("create filesystem blob adapter"),
-    );
+    let blob = storage::file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
-        Arc::new(context::adapters::AtomicBlobSessionManagement::new(blob));
+        Arc::new(context::AtomicBlobSessionManagement::new(blob));
     let project = ProjectIdentity {
         initial_cwd: "/session-primary".to_string(),
         git_common_dir: None,
@@ -211,11 +209,9 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(
-        context::adapters::AtomicBlobSessionManagement::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(&root).expect("create filesystem blob adapter"),
-        )),
-    );
+    let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
+        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+    ));
     let project = ProjectIdentity {
         initial_cwd: "/session-lifecycle".to_string(),
         git_common_dir: None,

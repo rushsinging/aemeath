@@ -36,12 +36,12 @@ pub(crate) struct ContextRequestData<'a> {
     pub system_prompt: &'a str,
     pub model_id: &'a str,
     pub language: &'a str,
-    pub agent_roles: std::collections::HashMap<String, share::config::AgentRoleConfig>,
+    pub agent_roles: std::collections::HashMap<String, share::config::AgentRoleDefinition>,
     pub config: &'a crate::application::run::config::RunConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
-    pub invocation_reminders: Vec<context::domain::InvocationReminder>,
+    pub invocation_reminders: Vec<context::InvocationReminder>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
@@ -113,7 +113,7 @@ where
                 let kinds = request
                     .invocation_reminders
                     .iter()
-                    .map(context::domain::InvocationReminder::kind)
+                    .map(context::InvocationReminder::kind)
                     .collect::<Vec<_>>()
                     .join(",");
                 log::debug!(

@@ -25,9 +25,10 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
         language: Language::new("zh"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
-        context_size: 1_000,
+        context_size: 2_000,
         max_output_tokens: 100,
         last_api_total_tokens,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -48,7 +49,7 @@ fn provider_total_is_used_without_projected_delta() {
 
 #[test]
 fn provider_total_above_threshold_triggers_compaction() {
-    let decision = context_decision::calculate(&request(Some(900)), &Vec::new().into(), &[]);
+    let decision = context_decision::calculate(&request(Some(1_500)), &Vec::new().into(), &[]);
 
     assert!(decision.needed);
     assert_eq!(decision.reason, DecisionReason::ActualProviderUsage);
@@ -56,27 +57,29 @@ fn provider_total_above_threshold_triggers_compaction() {
 
 #[test]
 fn custom_output_limit_changes_actual_usage_threshold() {
-    let mut smaller_output_budget = request(Some(730));
+    let mut smaller_output_budget = request(Some(1_400));
     smaller_output_budget.max_output_tokens = 10;
     let smaller_output_decision =
         context_decision::calculate(&smaller_output_budget, &Vec::new().into(), &[]);
 
-    let mut larger_output_budget = request(Some(730));
-    larger_output_budget.max_output_tokens = 200;
+    let mut larger_output_budget = request(Some(1_400));
+    larger_output_budget.max_output_tokens = 1_500;
     let larger_output_decision =
         context_decision::calculate(&larger_output_budget, &Vec::new().into(), &[]);
 
     assert!(!smaller_output_decision.needed);
     assert!(larger_output_decision.needed);
-    assert_eq!(smaller_output_decision.threshold, 776);
-    assert_eq!(larger_output_decision.threshold, 624);
+    // 2_000 窗口：smaller(10) effective=1_950 → threshold 1_560；
+    // larger(1_500) clamp 到窗口 25%（500）→ effective=1_460 → threshold 1_168。
+    assert_eq!(smaller_output_decision.threshold, 1_560);
+    assert_eq!(larger_output_decision.threshold, 1_168);
 }
 
 #[test]
 fn missing_provider_total_falls_back_to_complete_candidate_estimate() {
     let decision = context_decision::calculate(
         &request(None),
-        &vec![Message::user("x".repeat(4_000))].into(),
+        &vec![Message::user("x".repeat(8_000))].into(),
         &[],
     );
 
@@ -150,4 +153,68 @@ fn heuristic_estimate_with_realistic_mix_no_longer_triggers_at_43_percent() {
     // urgency 不应达到 Should/Must（80%+ 才需要压缩）
     assert_ne!(decision.urgency, Urgency::Should);
     assert_ne!(decision.urgency, Urgency::Must);
+}
+
+/// #1626 复现：窗口本身过小（clamp 后 effective 仍低于死区下限）时，
+/// auto-compact 恒触发形成 compact 风暴直至熔断。死区护栏生效后：
+/// needed=false、reason=MisconfiguredWindow，不再每步触发压缩。
+#[test]
+fn misconfigured_tiny_window_disables_autocompact() {
+    let mut tiny_window = request(None);
+    tiny_window.context_size = 512;
+    tiny_window.max_output_tokens = 8_192;
+
+    let decision = context_decision::calculate(&tiny_window, &Vec::new().into(), &[]);
+
+    assert!(!decision.needed, "死区窗口不应触发 auto-compact");
+    assert_eq!(decision.reason, DecisionReason::MisconfiguredWindow);
+}
+
+/// #1626：clamp 后仍有意义的短窗口正常判定，不落入死区。
+/// 2_000 窗口：effective = 2_000 - 40 - 500 = 1_460 ≥ 死区下限。
+#[test]
+fn small_but_viable_window_still_evaluates_normally() {
+    let mut small_window = request(Some(1_500));
+    small_window.context_size = 2_000;
+    small_window.max_output_tokens = 2_000;
+
+    let decision = context_decision::calculate(&small_window, &Vec::new().into(), &[]);
+
+    assert_eq!(decision.reason, DecisionReason::ActualProviderUsage);
+    assert!(decision.needed, "1_500 tokens 应超过 threshold 1_168");
+}
+
+/// #1626：heuristic 估算引入滑动校准系数（provider usage 比值纠偏）。
+/// 校准系数只作用于 HeuristicFallback 路径，provider 上报值不被缩放。
+#[test]
+fn heuristic_calibration_scales_fallback_estimate_only() {
+    let mut calibrated = request(None);
+    calibrated.context_size = 32_768;
+    calibrated.max_output_tokens = 8_192;
+    calibrated.heuristic_calibration = Some(0.5);
+    let messages = vec![Message::user("x".repeat(4_000))].into();
+
+    let uncalibrated = {
+        let mut uncalibrated = calibrated.clone();
+        uncalibrated.heuristic_calibration = None;
+        context_decision::calculate(&uncalibrated, &messages, &[])
+    };
+    let calibrated_decision = context_decision::calculate(&calibrated, &messages, &[]);
+
+    assert_eq!(
+        calibrated_decision.reason,
+        DecisionReason::HeuristicFallback
+    );
+    assert_eq!(
+        calibrated_decision.decision_token_count,
+        (uncalibrated.decision_token_count as f64 * 0.5) as usize
+    );
+
+    // provider usage 路径不受校准系数影响
+    let mut with_usage = calibrated;
+    with_usage.last_api_total_tokens = Some(700);
+    with_usage.heuristic_calibration = Some(0.5);
+    let usage_decision = context_decision::calculate(&with_usage, &messages, &[]);
+    assert_eq!(usage_decision.decision_token_count, 700);
+    assert_eq!(usage_decision.reason, DecisionReason::ActualProviderUsage);
 }

@@ -125,7 +125,7 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
 pub(crate) fn build_task_reminder_intent(
     access: &dyn TaskAccess,
     max_items: usize,
-) -> Option<context::domain::InvocationReminder> {
+) -> Option<context::InvocationReminder> {
     let tasks = current_batch_tasks(access)?;
     if max_items == 0 {
         return None;
@@ -159,13 +159,13 @@ pub(crate) fn build_task_reminder_intent(
         tasks.iter().map(|task| (task.id(), task.seq())).collect();
     let items = visible
         .into_iter()
-        .map(|task| context::domain::TaskProgressReminderItem {
+        .map(|task| context::TaskProgressReminderItem {
             sequence: task.seq(),
             subject: task.subject().to_owned(),
             status: match task.status() {
-                TaskStatus::Completed => context::domain::TaskProgressStatus::Completed,
-                TaskStatus::InProgress => context::domain::TaskProgressStatus::InProgress,
-                TaskStatus::Pending => context::domain::TaskProgressStatus::Pending,
+                TaskStatus::Completed => context::TaskProgressStatus::Completed,
+                TaskStatus::InProgress => context::TaskProgressStatus::InProgress,
+                TaskStatus::Pending => context::TaskProgressStatus::Pending,
                 TaskStatus::Deleted => unreachable!("current batch excludes deleted tasks"),
             },
             blocked_by_sequences: task
@@ -175,13 +175,12 @@ pub(crate) fn build_task_reminder_intent(
                 .collect(),
         })
         .collect();
-    let reminder =
-        context::domain::InvocationReminder::task_progress(context::domain::TaskProgressReminder {
-            total,
-            completed,
-            items,
-            hidden_count: total.saturating_sub(max_items),
-        });
+    let reminder = context::InvocationReminder::task_progress(context::TaskProgressReminder {
+        total,
+        completed,
+        items,
+        hidden_count: total.saturating_sub(max_items),
+    });
     log::debug!(
         target: crate::LOG_TARGET,
         "invocation_reminder_created kind={} total={} completed={} visible={} hidden={}",

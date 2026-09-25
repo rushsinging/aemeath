@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use context::adapters::LegacySessionDecoder;
-use context::application::{SessionLoadError, SessionPersistenceService};
-use context::domain::session::{CanonicalSession, CommittedRunSlice, CommittedRunStep};
-use context::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+use context::LegacySessionDecoder;
+use context::{CanonicalSession, CommittedRunSlice, CommittedRunStep};
+use context::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+use context::{SessionLoadError, SessionPersistenceService};
 use share::message::{ContentBlock, Message, Role};
 
 #[derive(Default)]

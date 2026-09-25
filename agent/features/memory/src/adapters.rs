@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
     sync::{Arc, RwLock},
 };
-use storage::api as storage_api;
+use storage as storage_api;
 
 #[cfg(test)]
 #[path = "adapters_tests.rs"]

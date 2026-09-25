@@ -162,6 +162,8 @@ pub struct SessionRuntime {
     // ── Skills ──
     pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     pub initial_skill_snapshot: tools::SkillCatalogSnapshot,
+    /// 轮次边界重扫；新 Run 启动前调用以刷新 TUI slash 目录。
+    pub skill_refresh: crate::application::client::SkillCatalogRefresh,
 
     // ── Config values ──
     pub memory_config: MemoryConfig,
@@ -226,6 +228,7 @@ impl SessionRuntime {
         prompt_model_id: String,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         initial_skill_snapshot: tools::SkillCatalogSnapshot,
+        skill_refresh: crate::application::client::SkillCatalogRefresh,
         memory_config: MemoryConfig,
         context_size: usize,
         language: String,
@@ -267,6 +270,7 @@ impl SessionRuntime {
             prompt_model_id,
             skill_catalog,
             initial_skill_snapshot,
+            skill_refresh,
             memory_config,
             context_size,
             language,
@@ -303,9 +307,12 @@ impl SessionRuntime {
 
 /// 子 Run 派生 façade 的错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[allow(clippy::enum_variant_names)] // Sub* 前缀统一表达子 Run 派生域
 pub enum RuntimeContextAssemblyError {
-    #[error("sub-agent role `{role}` not found in config")]
-    SubRoleNotFound { role: String },
+    #[error("sub-agent instance `{agent}` not found in config")]
+    SubAgentNotFound { agent: String },
+    #[error("sub-agent instance `{agent}` is disabled")]
+    SubAgentDisabled { agent: String },
     #[error("sub derivation failed: {reason}")]
     SubDerivationFailed { reason: String },
 }

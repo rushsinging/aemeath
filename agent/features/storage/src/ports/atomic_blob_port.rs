@@ -38,6 +38,6 @@ pub trait AtomicBlobPort: Send + Sync {
 
     async fn list_primary(
         &self,
-        namespace: crate::StorageNamespace,
-    ) -> Result<Vec<crate::StorageEntry>, StorageError>;
+        namespace: crate::domain::StorageNamespace,
+    ) -> Result<Vec<crate::domain::StorageEntry>, StorageError>;
 }

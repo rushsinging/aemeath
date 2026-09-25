@@ -20,12 +20,11 @@ pub use lifecycle::{
 pub(crate) use model::TaskSnapshotFields;
 pub use model::{
     Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskEvent, TaskId, TaskIdParseError, TaskPriority, TaskRevision, TaskStatus,
-    TaskView,
+    TaskCreateSpec, TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus, TaskView,
 };
 pub use query::{
-    TaskBatchSnapshot, TaskBatchStats, TaskLifecycleSnapshot, TaskPriorityStats, TaskProgressItem,
-    TaskProgressSnapshot, TaskStoreStats,
+    TaskBatchSnapshot, TaskLifecycleSnapshot, TaskProgressItem, TaskProgressSnapshot,
+    TaskStoreStats,
 };
 pub use snapshot::{PreparedTaskRestore, TaskSnapshot, TaskSnapshotValidationError};
 /// 聚合内部事务状态：仅 crate 内 `TaskStore` backing 可见，**NEVER** 进入

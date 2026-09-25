@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::api::{AtomicBlobPort, AtomicDatasetPort, StorageNamespace};
+use storage::{AtomicBlobPort, AtomicDatasetPort, SafePathSegment, StorageNamespace};
 
 use crate::adapters::{
     AtomicBlobSessionManagement, DatasetCanonicalSessionWriter, DatasetSessionReader,
 };
 use crate::domain::session::{
-    now_iso, session_matches_project, CanonicalSession, SessionCodec, SessionListEntry,
-    SessionManagementError, SessionMetadataUpdate,
+    now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
+    SessionListEntry, SessionManagementError, SessionMetadataUpdate,
 };
 use crate::ports::SessionManagementPort;
 
@@ -37,8 +37,15 @@ impl DatasetSessionManagement {
     pub fn tool_receipt_writer(&self) -> crate::adapters::AtomicBlobToolReceiptWriter {
         crate::adapters::AtomicBlobToolReceiptWriter::new(Arc::clone(&self.receipt_blob))
     }
-    async fn load_canonical(&self, id: &str) -> Result<CanonicalSession, SessionManagementError> {
-        self.reader.load(id).await.map_err(map_reader_error)
+    async fn load_canonical(
+        &self,
+        project_dir: Option<&SafePathSegment>,
+        id: &str,
+    ) -> Result<CanonicalSession, SessionManagementError> {
+        self.reader
+            .load(project_dir, id)
+            .await
+            .map_err(map_reader_error)
     }
 }
 
@@ -61,7 +68,8 @@ impl SessionManagementPort for DatasetSessionManagement {
         id: &str,
         project: &share::session_types::ProjectIdentity,
     ) -> Result<CanonicalSession, SessionManagementError> {
-        let session = self.load_canonical(id).await?;
+        let project_dir = project_dir_segment(project);
+        let session = self.load_canonical(Some(&project_dir), id).await?;
         if session_matches_project(&session, project) {
             Ok(session)
         } else {
@@ -74,9 +82,10 @@ impl SessionManagementPort for DatasetSessionManagement {
         id: &str,
         project: &share::session_types::ProjectIdentity,
     ) -> Result<crate::domain::session::SessionResumeLoad, SessionManagementError> {
+        let project_dir = project_dir_segment(project);
         let prepared = self
             .reader
-            .load_for_resume(id)
+            .load_for_resume(Some(&project_dir), id)
             .await
             .map_err(map_reader_error)?;
         if !session_matches_project(&prepared.active_session, project) {
@@ -96,16 +105,21 @@ impl SessionManagementPort for DatasetSessionManagement {
         member_names: &[String],
     ) -> Result<crate::domain::session::DisplayHistoryStepWindow, SessionManagementError> {
         self.load_for_project(id, project).await?;
+        let project_dir = project_dir_segment(project);
         self.reader
-            .load_display_history_steps(id, generation_revision, member_names)
+            .load_display_history_steps(Some(&project_dir), id, generation_revision, member_names)
             .await
             .map_err(map_reader_error)
     }
 
+    /// 按 project 分目录布局：dataset key 首段为本项目目录段的直接采纳；
+    /// 平铺单段 key（迁移前遗留）加载后按 identity 过滤。跨项目 session
+    /// 永不出现在结果中，且不做全目录扫描加载。
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentity,
     ) -> Result<Vec<SessionListEntry>, SessionManagementError> {
+        let project_dir = project_dir_segment(project);
         let dataset_keys = self
             .dataset
             .list_datasets(StorageNamespace::Session)
@@ -113,14 +127,24 @@ impl SessionManagementPort for DatasetSessionManagement {
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let mut sessions = Vec::new();
         for dataset_key in dataset_keys {
-            let Some(session_id) = dataset_key
-                .segments()
-                .first()
-                .and_then(|segment| segment.as_str().strip_suffix(".dataset"))
-            else {
+            let segments = dataset_key.segments();
+            let session_id = if segments.len() == 2 && segments[0] == project_dir {
+                match segments[1].as_str().strip_suffix(".dataset") {
+                    Some(session_id) => session_id.to_string(),
+                    None => continue,
+                }
+            } else if segments.len() == 1 {
+                match segments[0].as_str().strip_suffix(".dataset") {
+                    Some(session_id) => session_id.to_string(),
+                    None => continue,
+                }
+            } else {
                 continue;
             };
-            if let Ok(session) = self.load_for_project(session_id, project).await {
+            if let Ok(session) = self.load_canonical(Some(&project_dir), &session_id).await {
+                if segments.len() == 1 && !session_matches_project(&session, project) {
+                    continue;
+                }
                 sessions.push(SessionListEntry::from_canonical(&session));
             }
         }
@@ -193,7 +217,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let outcome = self
             .dataset
-            .delete_all_generations(&dataset_key, storage::api::DeleteOptions::default())
+            .delete_all_generations(&dataset_key, storage::DeleteOptions::default())
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();

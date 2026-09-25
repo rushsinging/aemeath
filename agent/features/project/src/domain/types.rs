@@ -223,8 +223,6 @@ pub trait WorkspaceRead: Send + Sync {
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
 pub trait WorkspaceControl: Send + Sync {
     fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError>;
-    /// 切换到 `path`（存在性 + 同源校验），不压栈帧。供 ExitWorktree{path} 使用。
-    fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError>;
     fn enter(
         &self,
         path: Option<PathBuf>,
@@ -240,6 +238,6 @@ pub trait WorkspacePersist: Send + Sync {
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<crate::PreparedWorkspaceRestore, WorkspaceRestoreError>;
-    fn commit_restore(&self, prepared: crate::PreparedWorkspaceRestore);
+    ) -> Result<crate::domain::state::PreparedWorkspaceRestore, WorkspaceRestoreError>;
+    fn commit_restore(&self, prepared: crate::domain::state::PreparedWorkspaceRestore);
 }

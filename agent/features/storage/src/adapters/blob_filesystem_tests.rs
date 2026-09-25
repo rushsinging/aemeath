@@ -4,8 +4,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::FileSystemBlobAdapter;
 use crate::domain::{Durability, SafePathSegment, StorageKey, StorageNamespace, WriteOptions};
+use crate::ports::AtomicBlobPort;
 use crate::test_log;
-use crate::AtomicBlobPort;
 
 fn fault_env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -110,6 +110,62 @@ async fn cleanup_fault_emits_recovery_pending_warn() {
     let _ = adapter
         .delete_all_generations(&key(), Default::default())
         .await;
+    drop(adapter);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 按 project 分目录的 session 布局使用多段 StorageKey；`list_primary` 必须
+/// 递归列出子目录内的 blob，同时不破坏平铺（单段）key 的枚举。
+#[tokio::test(flavor = "current_thread")]
+async fn list_primary_enumerates_nested_segment_keys_and_flat_keys() {
+    let root = root();
+    let adapter = FileSystemBlobAdapter::new(&root).expect("adapter init");
+
+    let nested_key = StorageKey::new(
+        StorageNamespace::Session,
+        vec![
+            SafePathSegment::from_str("project-dir-a").unwrap(),
+            SafePathSegment::from_str("session-1").unwrap(),
+        ],
+    )
+    .unwrap();
+    let flat_key = StorageKey::new(
+        StorageNamespace::Session,
+        vec![SafePathSegment::from_str("flat-session").unwrap()],
+    )
+    .unwrap();
+
+    adapter
+        .write_atomic(
+            &nested_key,
+            b"nested",
+            WriteOptions::new(Durability::ProcessCrashSafe),
+        )
+        .await
+        .expect("nested write must succeed");
+    adapter
+        .write_atomic(
+            &flat_key,
+            b"flat",
+            WriteOptions::new(Durability::ProcessCrashSafe),
+        )
+        .await
+        .expect("flat write must succeed");
+
+    let listed = adapter
+        .list_primary(StorageNamespace::Session)
+        .await
+        .expect("list must succeed");
+    let listed_keys: Vec<&StorageKey> = listed.iter().map(|entry| entry.key()).collect();
+    assert!(
+        listed_keys.contains(&&nested_key),
+        "嵌套 project 段 key 必须被列出：{listed_keys:?}"
+    );
+    assert!(
+        listed_keys.contains(&&flat_key),
+        "平铺 key 必须继续被列出：{listed_keys:?}"
+    );
+
     drop(adapter);
     let _ = std::fs::remove_dir_all(&root);
 }

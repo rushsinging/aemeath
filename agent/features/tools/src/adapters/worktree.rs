@@ -162,61 +162,35 @@ impl TypedTool for ExitWorktreeTool {
         input: Value,
         ctx: &ToolExecutionContext,
     ) -> TypedToolResult<ExitWorktreeResult> {
-        let args: ExitWorktreeInput = match serde_json::from_value(input) {
+        let _args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => {
                 return TypedToolResult::error(t::invalid_input_error(ctx.guidance().language(), e))
             }
         };
 
-        if let Some(path) = args.path {
-            // 直接切到指定路径：校验存在性 + 同源，不污染上下文栈（不留多余栈帧）。
-            match self.control.switch_to(PathBuf::from(&path)) {
-                Ok(()) => {
-                    let path_base = ctx.workspace_read().current_path_base();
-                    let workspace_root = ctx.workspace_read().current_workspace_root();
-                    let branch = current_branch(ctx);
-                    let headline = if ctx.guidance().language() == "zh" {
-                        format!("已切换到：{}", path)
-                    } else {
-                        format!("Switched to: {}", path)
-                    };
-                    TypedToolResult::success(
-                        headline.clone(),
-                        ExitWorktreeResult {
-                            branch: branch.clone(),
-                            path_base: path_base.clone(),
-                            workspace_root: workspace_root.clone(),
-                            guidance: t::switch_guidance(ctx.guidance().language(), &path),
-                        },
-                    )
-                }
-                Err(e) => TypedToolResult::error(t::switch_error(ctx.guidance().language(), e)),
+        // 恢复上一上下文（弹栈）
+        match self.control.exit() {
+            Ok(prev) => {
+                let path_base = ctx.workspace_read().current_path_base();
+                let workspace_root = ctx.workspace_read().current_workspace_root();
+                let branch = current_branch(ctx);
+                let headline = if ctx.guidance().language() == "zh" {
+                    format!("已退出 worktree，恢复到：{}", prev.path_base.display())
+                } else {
+                    format!("Exited worktree, restored to: {}", prev.path_base.display())
+                };
+                TypedToolResult::success(
+                    headline.clone(),
+                    ExitWorktreeResult {
+                        branch: branch.clone(),
+                        path_base: path_base.clone(),
+                        workspace_root: workspace_root.clone(),
+                        guidance: t::exit_guidance(ctx.guidance().language(), &prev.path_base),
+                    },
+                )
             }
-        } else {
-            // 恢复上一上下文
-            match self.control.exit() {
-                Ok(prev) => {
-                    let path_base = ctx.workspace_read().current_path_base();
-                    let workspace_root = ctx.workspace_read().current_workspace_root();
-                    let branch = current_branch(ctx);
-                    let headline = if ctx.guidance().language() == "zh" {
-                        format!("已退出 worktree，恢复到：{}", prev.path_base.display())
-                    } else {
-                        format!("Exited worktree, restored to: {}", prev.path_base.display())
-                    };
-                    TypedToolResult::success(
-                        headline.clone(),
-                        ExitWorktreeResult {
-                            branch: branch.clone(),
-                            path_base: path_base.clone(),
-                            workspace_root: workspace_root.clone(),
-                            guidance: t::exit_guidance(ctx.guidance().language(), &prev.path_base),
-                        },
-                    )
-                }
-                Err(e) => TypedToolResult::error(t::exit_error(ctx.guidance().language(), e)),
-            }
+            Err(e) => TypedToolResult::error(t::exit_error(ctx.guidance().language(), e)),
         }
     }
 

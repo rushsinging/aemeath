@@ -40,18 +40,37 @@ fn scope_with_effective_reasoning(effective: ReasoningLevel) -> InvocationScope 
 }
 
 #[test]
-fn openai_object_reasoning_sends_reasoning_only() {
+fn openai_object_reasoning_sends_top_level_reasoning_effort() {
     let config = ReasoningConfig::Object(serde_json::json!({"effort":"medium"}));
     let mut body = base_body();
 
     OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
     assert_eq!(
-        body.get("reasoning"),
-        Some(&serde_json::json!({"effort":"medium"}))
+        body.get("reasoning_effort"),
+        Some(&serde_json::json!("medium"))
     );
+    assert!(body.get("reasoning").is_none());
     assert!(body.get("thinking").is_none());
     assert!(body.get("enable_thinking").is_none());
+}
+
+/// OpenAI Chat Completions 正式协议只有顶层 `reasoning_effort`（#973）：
+/// Object 携带 effort 之外的 Responses 风格字段（如 summary）时，
+/// 只提取 effort 编码为顶层字段，NEVER 双发嵌套 `reasoning`。
+#[test]
+fn openai_object_reasoning_with_extra_fields_sends_effort_only() {
+    let config = ReasoningConfig::Object(serde_json::json!({"effort":"high","summary":"auto"}));
+    let mut body = base_body();
+
+    OpenAiDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(
+        body.get("reasoning_effort"),
+        Some(&serde_json::json!("high"))
+    );
+    assert!(body.get("reasoning").is_none());
+    assert!(body.get("summary").is_none());
 }
 
 #[test]

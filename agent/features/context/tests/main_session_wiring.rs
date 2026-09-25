@@ -11,19 +11,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
-use context::application::main_session::{
-    MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
-};
-use context::domain::session::{
-    CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeRecord, SnapshotState,
-};
-use context::domain::{
+use context::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
+use context::ContextPort;
+use context::{
     AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
     ContextRequestId, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
     SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind, ToolTerminalReceipt,
 };
-use context::ports::ContextPort;
+use context::{
+    CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
+    FinalizedOutcomeRecord, SnapshotState,
+};
 use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -177,7 +175,7 @@ fn build_harness() -> Harness {
     let tmp = TempDir::new("harness");
 
     // Real workspace (non-git).
-    let workspace = wire_production_workspace(tmp.path().to_path_buf()).unwrap();
+    let workspace = wire_production_workspace(tmp.path().to_path_buf(), None).unwrap();
     let workspace_read = workspace.read();
     let workspace_persist = workspace.persist();
 
@@ -229,14 +227,14 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
-        session_management: Arc::new(context::adapters::AtomicBlobSessionManagement::new(
-            Arc::new(storage::FileSystemBlobAdapter::new(tmp.path()).unwrap()),
+        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
+            storage::file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     };
 
     let wiring = MainSessionWiring::build(builder);
@@ -291,6 +289,7 @@ fn request(session_id: &str, run_id: &str) -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -347,7 +346,7 @@ fn finalized_tool_step(
                 agent: false,
             },
             input_preview: input.to_string(),
-            state: context::domain::ToolCallState::Terminal(ToolTerminalReceipt::new(
+            state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
                 ToolOutcomeKind::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,
@@ -738,7 +737,7 @@ async fn cross_project_resume_is_rejected() {
 
     // Build a session from a *different* project's workspace.
     let tmp2 = TempDir::new("cross-project");
-    let ws2 = project::wire_production_workspace(tmp2.path().to_path_buf())
+    let ws2 = project::wire_production_workspace(tmp2.path().to_path_buf(), None)
         .unwrap()
         .persist()
         .snapshot();
@@ -950,7 +949,7 @@ async fn missing_cross_project_workspace_remains_rejected() {
     let h = build_harness();
     let pre_session_id = h.wiring.committed_session().id.clone();
     let tmp2 = TempDir::new("missing-cross-project");
-    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf())
+    let mut stale_workspace = project::wire_production_workspace(tmp2.path().to_path_buf(), None)
         .unwrap()
         .persist()
         .snapshot();

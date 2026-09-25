@@ -363,9 +363,9 @@ fn compact_operation_facts_preserve_messages_and_notice() {
 #[test]
 fn session_resume_mapping_preserves_context_run_step_boundaries_and_terminal_facts() {
     for finalize_cause in [
-        context::domain::FinalizeCause::Completed,
-        context::domain::FinalizeCause::UserCancelledStep,
-        context::domain::FinalizeCause::RunTerminated,
+        context::FinalizeCause::Completed,
+        context::FinalizeCause::UserCancelledStep,
+        context::FinalizeCause::RunTerminated,
     ] {
         let event = RuntimeStreamEvent::SessionResumed {
             steps: vec![RuntimeResumedSessionStep {
@@ -420,6 +420,7 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
         content: content.clone(),
         is_error: false,
         images: Vec::new(),
+        duration_ms: None,
     };
 
     let sdk::ChatEvent::ToolResult {
@@ -438,6 +439,36 @@ fn tool_result_projection_preserves_bounded_content_without_reconstruction() {
             .pointer("/blob/reason")
             .and_then(serde_json::Value::as_str),
         Some("write_failed")
+    );
+}
+
+/// #1666：supervisor 测量的 duration_ms 必须从 runtime 事件逐字段透传到
+/// SDK `ChatEvent::ToolResult`，NEVER 丢弃或改写。
+#[test]
+fn tool_result_maps_duration_ms_from_runtime_to_sdk() {
+    let event = RuntimeStreamEvent::ToolResult {
+        context: RuntimeRunContext::new(
+            sdk::ids::ChatId::new("chat-duration"),
+            sdk::ids::ChatRunId::new("turn-duration"),
+        ),
+        id: sdk::ids::ToolCallId::new("runtime-call-duration"),
+        provider_id: "provider-call".to_string(),
+        tool_name: "Bash".to_string(),
+        output: "ok".to_string(),
+        content: serde_json::json!({ "text": "ok" }),
+        is_error: false,
+        images: Vec::new(),
+        duration_ms: Some(1_240),
+    };
+
+    let sdk::ChatEvent::ToolResult { duration_ms, .. } = map_stream_event(event) else {
+        panic!("expected SDK tool result");
+    };
+
+    assert_eq!(
+        duration_ms,
+        Some(1_240),
+        "SDK ToolResult 必须保留 supervisor 测量的耗时"
     );
 }
 

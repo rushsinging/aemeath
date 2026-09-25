@@ -73,7 +73,7 @@ async fn post_tool_batch_reads_workspace_root_when_dispatch_begins() {
         repository.path()
     ));
     let main_root = repository.path().canonicalize().unwrap();
-    let workspace = project::wire_production_workspace(main_root.clone())
+    let workspace = project::wire_production_workspace(main_root.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     workspace
@@ -91,6 +91,7 @@ async fn post_tool_batch_reads_workspace_root_when_dispatch_begins() {
         &hook_port,
         &ActivityCoordinator::production_without_publisher(sdk::RunId::new_v7()),
         &sdk::RunStepId::new_v7(),
+        "test-post-batch-session",
         &tokio_util::sync::CancellationToken::new(),
         1,
         1,

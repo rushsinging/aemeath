@@ -172,3 +172,40 @@ fn router_validates_required_and_positive_arguments_and_maps_targets() {
             if command.command.as_str() == "model" && command.arguments.as_slice().is_empty()
     ));
 }
+
+/// #1289：生产 builtin catalog 提供 `/reflect-now`（ApplicationControl / Memory），
+/// 与 `/reflect`（SnapshotQuery）并存且互不混淆。
+#[test]
+fn builtin_catalog_routes_reflect_now_as_memory_application_control() {
+    let wiring =
+        crate::adapters::composition::wire_commands(Vec::new()).expect("wire builtin commands");
+
+    let router = wiring.router();
+    let route = router
+        .resolve(SlashInput::new("/reflect-now"))
+        .expect("resolve /reflect-now");
+
+    assert!(matches!(
+        route,
+        CommandRoute::ApplicationControl {
+            ref target,
+            ref command,
+            ..
+        } if *target == ApplicationControlTarget::Memory
+            && command.command.as_str() == "reflect-now"
+            && command.arguments.as_slice().is_empty()
+    ));
+
+    let query = router
+        .resolve(SlashInput::new("/reflect"))
+        .expect("resolve /reflect");
+    assert!(matches!(
+        query,
+        CommandRoute::SnapshotQuery {
+            ref target,
+            ref command,
+            ..
+        } if *target == SnapshotQueryTarget::Memory
+            && command.command.as_str() == "reflect"
+    ));
+}

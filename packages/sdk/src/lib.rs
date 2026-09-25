@@ -126,7 +126,7 @@ pub use task::{
     TaskStateView,
 };
 pub use tui::{
-    classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
+    classify_paste, resolve_local_image_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
     ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
     TuiLaunchContext,

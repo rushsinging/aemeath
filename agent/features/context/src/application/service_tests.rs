@@ -26,6 +26,9 @@ struct BaselineSession {
     revision: SessionRevision,
     messages: ContextMessages,
     active_summary: Option<String>,
+    /// `true` 时 commit_compaction 返回 Committed（真实提交语义），
+    /// `false`（默认）返回 Skipped(ResumeProtection)。
+    committed_compaction: bool,
 }
 
 #[async_trait]
@@ -55,9 +58,20 @@ impl SessionRepository for BaselineSession {
         &self,
         _request: &crate::domain::CompactRequest,
     ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
-        Ok(crate::domain::CompactOutcome::Skipped(
-            crate::domain::CompactSkipReason::ResumeProtection,
-        ))
+        if self.committed_compaction {
+            Ok(crate::domain::CompactOutcome::Committed(
+                crate::domain::CompactResult {
+                    summary: "summary".into(),
+                    recent_messages: vec![],
+                    source_revision: self.revision,
+                    quality: crate::domain::CompactSummaryQuality::LocalOnly,
+                },
+            ))
+        } else {
+            Ok(crate::domain::CompactOutcome::Skipped(
+                crate::domain::CompactSkipReason::ResumeProtection,
+            ))
+        }
     }
 
     async fn commit_manual_compaction(
@@ -131,12 +145,28 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
 }
 
 fn service(messages: Vec<Message>, revision: u64) -> ContextApplicationService {
+    service_with_session(messages, revision, false)
+}
+
+fn service_with_committed_compaction(
+    messages: Vec<Message>,
+    revision: u64,
+) -> ContextApplicationService {
+    service_with_session(messages, revision, true)
+}
+
+fn service_with_session(
+    messages: Vec<Message>,
+    revision: u64,
+    committed_compaction: bool,
+) -> ContextApplicationService {
     ContextApplicationService::new(
         Arc::new(BaselineSession {
             revision: SessionRevision::new(revision),
@@ -148,6 +178,7 @@ fn service(messages: Vec<Message>, revision: u64) -> ContextApplicationService {
                 Vec::new(),
             ),
             active_summary: Some("summary".into()),
+            committed_compaction,
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
@@ -170,6 +201,7 @@ fn service_with_summary(
                 Vec::new(),
             ),
             active_summary: Some(active_summary),
+            committed_compaction: false,
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
@@ -220,6 +252,48 @@ async fn build_window_structurally_degrades_oversized_summary_without_losing_obj
     assert!(!summary.contains("historical evidence"));
 }
 
+/// #1626 L2：request 携带的 heuristic 校准系数贯穿 application service，
+/// 体现在 window.compaction_decision（HeuristicFallback 路径按系数缩放）。
+#[tokio::test]
+async fn build_window_applies_request_heuristic_calibration_to_decision() {
+    let context = service(vec![Message::user("x".repeat(8_000))], 7);
+
+    let uncalibrated_request = request(None);
+    let mut calibrated_request = request(None);
+    calibrated_request.heuristic_calibration = Some(0.5);
+
+    let uncalibrated = context.build_window(&uncalibrated_request).await.unwrap();
+    let calibrated = context.build_window(&calibrated_request).await.unwrap();
+
+    assert_eq!(
+        calibrated.compaction_decision.decision_token_count,
+        (uncalibrated.compaction_decision.decision_token_count as f64 * 0.5) as usize
+    );
+    assert_eq!(
+        calibrated.compaction_decision.reason,
+        crate::domain::DecisionReason::HeuristicFallback
+    );
+}
+
+/// #1626 L2：短窗口 + 默认 max_output 的 request（旧公式 threshold=0 恒触发）
+/// 经 service 链路后不再恒触发：clamp 后 threshold > 0，判定按真实占比进行。
+#[tokio::test]
+async fn build_window_short_window_no_longer_always_triggers() {
+    let context = service(Vec::new(), 7);
+
+    let mut short_window = request(None);
+    short_window.context_size = 8_192;
+    short_window.max_output_tokens = 8_192;
+
+    let window = context.build_window(&short_window).await.unwrap();
+    let decision = &window.compaction_decision;
+
+    assert!(decision.threshold > 0, "clamp 后 threshold 永不为 0");
+    assert_eq!(decision.effective_window, 8_192 - 163 - 2_048);
+    // 空会话 + 短 system prompt：估算远低于 threshold，不触发
+    assert!(!decision.needed);
+}
+
 fn tool_result_message(bytes: usize) -> (Message, usize) {
     let content = serde_json::Value::String("x".repeat(bytes));
     let serialized_bytes = content.to_string().len();
@@ -236,6 +310,75 @@ fn tool_result_message(bytes: usize) -> (Message, usize) {
         },
         serialized_bytes,
     )
+}
+
+fn compact_request(source: ContextRequest) -> crate::domain::CompactRequest {
+    crate::domain::CompactRequest {
+        run_id: RunId::new("baseline-run"),
+        source_revision: SessionRevision::new(42),
+        source,
+        trigger: crate::domain::CompactTrigger::Automatic,
+        progress: None,
+        task_snapshot: None,
+        cancellation: tokio_util::sync::CancellationToken::new(),
+    }
+}
+
+/// compact 真实提交（Committed）后必须重建窗口做占用体检：
+/// heuristic 估算高于 threshold 一半时报告贴线，为"compact 后几轮
+/// 又触发"的震荡提供观测信号；体检不改变 compact 结果本身。
+#[tokio::test]
+async fn compact_committed_reports_usage_still_above_half_threshold() {
+    // 200k ASCII JSON ≈ 50k tokens > threshold/2（≈46.9k @ 128k 窗口）
+    let (tool_result, _) = tool_result_message(200_000);
+    let context =
+        service_with_committed_compaction(vec![Message::user("history"), tool_result], 42);
+
+    let (outcome, metrics) = capture(context.compact(&compact_request(request(None)))).await;
+    assert!(matches!(
+        outcome,
+        Ok(crate::domain::CompactOutcome::Committed(_))
+    ));
+    // 体检触发了一次窗口重建，且 compact 后 baseline 重置走 heuristic
+    assert_eq!(metrics.build_calls, 1);
+    assert_eq!(
+        metrics.decision_reason,
+        Some(crate::domain::DecisionReason::HeuristicFallback)
+    );
+
+    let report = context
+        .post_compaction_usage_check(&request(None))
+        .await
+        .expect("compact 后占用体检不应失败");
+    assert!(report.exceeds_half_threshold());
+    assert!(report.decision_token_count() > report.threshold() / 2);
+}
+
+/// 未提交（Skipped）时不做体检：会话状态未变，重建无意义。
+#[tokio::test]
+async fn compact_skipped_skips_post_compaction_usage_check() {
+    let (tool_result, _) = tool_result_message(200_000);
+    let context = service(vec![Message::user("history"), tool_result], 42);
+
+    let (outcome, metrics) = capture(context.compact(&compact_request(request(None)))).await;
+    assert!(matches!(
+        outcome,
+        Ok(crate::domain::CompactOutcome::Skipped(_))
+    ));
+    assert_eq!(metrics.build_calls, 0);
+}
+
+/// 小历史：体检报告不贴线（估算远低于 threshold 一半）。
+#[tokio::test]
+async fn post_compaction_usage_check_below_half_threshold_for_small_history() {
+    let context = service(vec![Message::user("history")], 42);
+
+    let report = context
+        .post_compaction_usage_check(&request(None))
+        .await
+        .expect("compact 后占用体检不应失败");
+
+    assert!(!report.exceeds_half_threshold());
 }
 
 #[test]

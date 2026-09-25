@@ -84,7 +84,7 @@ impl ContextPort for RecordingPort {
             summary: "summary".to_string(),
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
-            quality: context::domain::CompactSummaryQuality::LocalOnly,
+            quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -97,7 +97,7 @@ impl ContextPort for RecordingPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(2),
-            quality: context::domain::CompactSummaryQuality::LocalOnly,
+            quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -153,6 +153,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -568,7 +569,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             summary: "summary".to_string(),
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
-            quality: context::domain::CompactSummaryQuality::LocalOnly,
+            quality: context::CompactSummaryQuality::LocalOnly,
         }),
         &usage,
         &mut window,

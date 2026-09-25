@@ -7,8 +7,8 @@ use std::sync::Arc;
 #[tokio::test]
 async fn overlay_does_not_advance_canonical_session_revision() {
     let root = tempfile::tempdir().expect("temporary storage root");
-    let blob: Arc<dyn storage::api::AtomicBlobPort> =
-        Arc::new(storage::FileSystemBlobAdapter::new(root.path()).expect("blob adapter"));
+    let blob: Arc<dyn storage::AtomicBlobPort> =
+        storage::file_system_blob(root.path()).expect("blob adapter");
     let ledger = AtomicBlobToolReceiptLedger::new(blob, "session").expect("tool receipt ledger");
     let identity = ToolCallIdentity {
         session_id: SessionId::new("session"),

@@ -231,23 +231,6 @@ impl InputDocument {
             .collect()
     }
 
-    /// 移除所有图片占位符，保留其余文本。
-    pub fn remove_all_images(&mut self) {
-        // 按 start 倒序移除，避免偏移重算
-        let mut spans: Vec<ImageSpan> = std::mem::take(&mut self.image_spans);
-        spans.sort_by_key(|span| std::cmp::Reverse(span.start));
-        for span in &spans {
-            let placeholder = span.placeholder();
-            if self.buffer.get(span.start..span.end) == Some(placeholder.as_str()) {
-                self.buffer.replace_range(span.start..span.end, "");
-            }
-        }
-        // 重新计算光标位置（clamp 到合法范围）
-        self.cursor = clamp_to_char_boundary(&self.buffer, self.cursor.min(self.buffer.len()));
-        // 清理已删除的 spans 中可能与 copied_text_spans 重叠的情况不需要处理，
-        // 因为 image_spans 已经被 take 掉了
-    }
-
     /// 光标所在行号（从 0 开始）
     #[cfg(test)]
     pub fn cursor_row(&self) -> usize {

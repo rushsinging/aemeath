@@ -12,6 +12,8 @@ use async_trait::async_trait;
 use bash_result::{exit_status_description, preview};
 use cwd::{split_stdout_and_cwd, CWD_MARKER};
 
+use super::process_cleanup::terminate_process_tree;
+
 pub use crate::domain::shell_safety::is_readonly_command;
 use serde_json::Value;
 #[cfg(unix)]
@@ -406,54 +408,4 @@ impl TypedTool for BashTool {
             }
         }
     }
-}
-
-async fn terminate_process_tree(child: &mut tokio::process::Child) {
-    let child_pid = child.id();
-    log::debug!(
-        target: crate::LOG_TARGET,
-        "bash process cleanup started: pid={child_pid:?}"
-    );
-    #[cfg(unix)]
-    if let Some(pid) = child.id() {
-        let mut term_command = Command::new("kill");
-        term_command.arg("-TERM").arg(format!("-{pid}"));
-        let term_status = match utils::configure_tokio_noninteractive(&mut term_command) {
-            Ok(()) => term_command.status().await,
-            Err(error) => Err(error),
-        };
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "bash process group SIGTERM sent: pid={} status={term_status:?}",
-            pid
-        );
-        if tokio::time::timeout(Duration::from_millis(200), child.wait())
-            .await
-            .is_ok()
-        {
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "bash process cleanup confirmed after SIGTERM: pid={}",
-                pid
-            );
-            return;
-        }
-        let mut kill_command = Command::new("kill");
-        kill_command.arg("-KILL").arg(format!("-{pid}"));
-        let kill_status = match utils::configure_tokio_noninteractive(&mut kill_command) {
-            Ok(()) => kill_command.status().await,
-            Err(error) => Err(error),
-        };
-        log::debug!(
-            target: crate::LOG_TARGET,
-            "bash process group SIGKILL sent: pid={} status={kill_status:?}",
-            pid
-        );
-    }
-    let child_kill = child.kill().await;
-    let child_wait = child.wait().await;
-    log::debug!(
-        target: crate::LOG_TARGET,
-        "bash process cleanup terminal: pid={child_pid:?} child_kill={child_kill:?} child_wait={child_wait:?}"
-    );
 }

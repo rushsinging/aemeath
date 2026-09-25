@@ -14,7 +14,7 @@ struct FixedMainContextFactory {
     context: Arc<dyn ContextPort>,
 }
 
-impl context::ports::MainContextFactory for FixedMainContextFactory {
+impl context::MainContextFactory for FixedMainContextFactory {
     fn build(
         &self,
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
@@ -272,13 +272,16 @@ impl SessionRunFixtureBuilder {
             self.config.clone(),
         );
         let session_snapshot = session_state.snapshot_for_run();
-        let workspace = project::wire_production_workspace(self.workspace_root.clone())
+        let workspace = project::wire_production_workspace(self.workspace_root.clone(), None)
             .expect("wire fixture workspace")
             .into_views();
         let workspace_access =
             crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone());
         let task_store = Arc::new(task::TaskStore::new());
-        let config_service = Arc::new(config::ConfigAppService::new(Some(&self.workspace_root)));
+        let config_service = Arc::new(config::ConfigAppService::with_global_path(
+            Some(&self.workspace_root),
+            share::config::paths::global_config_path(),
+        ));
         let now = chrono::Utc::now().to_rfc3339();
         let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::NoOpMemory);
         let wiring = Arc::new(context::MainSessionWiring::build(

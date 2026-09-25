@@ -74,7 +74,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
     // Sentinel values that MUST NOT appear in any captured log line.
     let request = make_request(
         "SuperSecretTool",
-        ToolCapabilities::single(ToolCapability::ReadWorkspace),
+        ToolCapabilities::single(ToolCapability::Read),
         "/top/secret/workspace",
     );
 
@@ -149,10 +149,7 @@ fn capability_count_reflects_request_requirements() {
 
     let request = make_request(
         "MultiCap",
-        ToolCapabilities::from_caps([
-            ToolCapability::ReadWorkspace,
-            ToolCapability::WriteWorkspace,
-        ]),
+        ToolCapabilities::from_caps([ToolCapability::Read, ToolCapability::Write]),
         "/workspace",
     );
 

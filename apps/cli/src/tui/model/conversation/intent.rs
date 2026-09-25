@@ -92,6 +92,8 @@ pub struct ToolResult {
     pub content: serde_json::Value,
     pub is_error: bool,
     pub image_count: usize,
+    /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）。
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +212,12 @@ pub struct SetAskUserChatInput {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendAskUserChatChar {
     pub ch: char,
+}
+
+/// 在 Type something 输入框光标处插入整段粘贴文本。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsertAskUserChatText {
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -379,6 +387,7 @@ pub enum ConversationIntent {
     ToggleAskUserSelected(ToggleAskUserSelected),
     SetAskUserChatInput(SetAskUserChatInput),
     AppendAskUserChatChar(AppendAskUserChatChar),
+    InsertAskUserChatText(InsertAskUserChatText),
     DeleteAskUserChatChar(DeleteAskUserChatChar),
     MoveAskUserChatCursor(MoveAskUserChatCursor),
     MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd),

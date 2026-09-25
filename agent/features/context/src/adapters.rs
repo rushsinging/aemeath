@@ -9,6 +9,7 @@ mod dataset_session_management;
 mod dataset_session_reader;
 mod dataset_session_writer;
 mod in_memory_session;
+mod legacy_flat_session_migrator;
 pub mod memory_injection;
 pub mod prompt;
 mod prompt_source;
@@ -24,23 +25,20 @@ pub use atomic_blob_session_management::AtomicBlobSessionManagement;
 pub use canonical_session::{
     AcceptedInputWriter, AtomicBlobAcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
     AtomicBlobToolReceiptWriter, CanonicalSessionRepository, CanonicalSessionWriter,
-    NoOpAcceptedInputWriter, NoOpCanonicalSessionWriter, NoOpToolReceiptWriter,
-    ProductionMainContextFactory, ToolReceiptWriter,
+    NoOpCanonicalSessionWriter, ProductionMainContextFactory, ToolReceiptWriter,
 };
 pub use dataset_session_management::DatasetSessionManagement;
-pub use dataset_session_reader::{DatasetSessionReader, PreparedDatasetResume};
+pub use dataset_session_reader::DatasetSessionReader;
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub use in_memory_session::InMemorySessionRepository;
+pub use legacy_flat_session_migrator::migrate_flat_sessions_to_project_dirs;
 pub use memory_injection::{
     CommittedMemoryRetrieveAdapter, MemoryRetrieveAdapter, NoOpContextMemorySource,
 };
 pub use prompt_source::BaselinePromptSource;
 pub use session_legacy_workspace::{decode as decode_session, LegacySessionDecoder};
 #[cfg(any(test, feature = "dev"))]
-pub use session_lifecycle::{
-    capture as capture_session_lifecycle, SessionGenerationTransition, SessionLifecycleSnapshot,
-    SessionStructureSnapshot,
-};
+pub use session_lifecycle::capture as capture_session_lifecycle;
 pub use skill_prompt_source::{skill_prompt_budget, SkillPromptSource, WorkspaceSkillQueryFactory};
 
 pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
@@ -80,4 +78,22 @@ pub fn isolated_context_with_skill(
         Arc::new(SkillPromptSource::new(catalog, query_factory)),
         Arc::new(NoOpContextMemorySource),
     ))
+}
+
+/// Build an isolated (in-memory) context whose skill queries resolve against
+/// the given workspace read view.
+///
+/// Unlike [`isolated_context_with_skill`], callers pass only the workspace
+/// port; the concrete [`WorkspaceSkillQueryFactory`] construction stays inside
+/// the Context adapters so consumers never assemble cross-BC concrete types.
+pub fn isolated_context_with_workspace_skills(
+    session_id: &str,
+    catalog: Arc<dyn tools::SkillCatalogPort>,
+    workspace: Arc<dyn project::WorkspaceRead>,
+) -> Arc<dyn crate::ports::ContextPort> {
+    isolated_context_with_skill(
+        session_id,
+        catalog,
+        Arc::new(WorkspaceSkillQueryFactory::new(workspace)),
+    )
 }

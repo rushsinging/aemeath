@@ -2,8 +2,9 @@
 //!
 //! #1393 契约：
 //! - Minimal / Low / Medium / High / Xhigh / Max 档位在 Chat 和 Responses 两种 API 上
-//!   发送完全一致的 `reasoning.effort` 值。
-//! - Off 档位两种 API 都省略 `reasoning` 字段。
+//!   发送完全一致的 effort 值（#973 后 Chat 为顶层 `reasoning_effort`，
+//!   Responses 保持嵌套 `reasoning.effort`）。
+//! - Off 档位两种 API 都省略 reasoning 字段。
 //! - Responses 使用 driver 的共享 effort 映射（`wire_effort`），不复制特例。
 
 use super::super::driver::{ChatApiDriver, OpenAiDriver};
@@ -38,9 +39,8 @@ fn chat_reasoning_effort(
     let scope = scope_with_level(level);
     let mut body = super::common::base_body();
     provider.apply_reasoning_fields(&mut body, &scope);
-    body.get("reasoning")
-        .and_then(|r| r.get("effort"))
-        .and_then(|e| e.as_str())
+    body.get("reasoning_effort")
+        .and_then(|effort| effort.as_str())
         .map(ToOwned::to_owned)
 }
 

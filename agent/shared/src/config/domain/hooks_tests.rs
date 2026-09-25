@@ -189,3 +189,23 @@ fn test_hook_event_deserialize_post_tool_use_failure() {
     let config: HooksConfig = serde_json::from_str(json).unwrap();
     assert!(config.events.contains_key(&HookEvent::PostToolUseFailure));
 }
+
+#[test]
+fn test_hooks_env_passthrough_defaults_empty_and_accepts_snake_and_camel() {
+    // 默认空：未配置时行为与既有白名单模型完全一致
+    let default_config: HooksConfig = serde_json::from_str("{}").unwrap();
+    assert!(default_config.env_passthrough.is_empty());
+
+    // snake_case（aemeath 配置惯例）
+    let snake_config: HooksConfig =
+        serde_json::from_str(r#"{ "env_passthrough": ["CMUX_*", "SSH_AUTH_SOCK"] }"#).unwrap();
+    assert_eq!(
+        snake_config.env_passthrough,
+        vec!["CMUX_*".to_string(), "SSH_AUTH_SOCK".to_string()]
+    );
+
+    // camelCase alias（Claude 兼容配置惯例）
+    let camel_config: HooksConfig =
+        serde_json::from_str(r#"{ "envPassthrough": ["CMUX_*"] }"#).unwrap();
+    assert_eq!(camel_config.env_passthrough, vec!["CMUX_*".to_string()]);
+}

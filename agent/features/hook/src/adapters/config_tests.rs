@@ -14,7 +14,7 @@ use crate::{HookMatcher, HookPoint};
 fn build_dispatcher_owns_process_environment_policy() {
     let dispatcher = build_dispatcher(&ConfigSnapshot::new(Config::default()))
         .expect("默认 Hook 配置应构造生产 Dispatcher");
-    let _hook_port: &dyn crate::HookPort = &dispatcher;
+    let _hook_port: &dyn crate::ports::HookPort = &dispatcher;
 }
 
 #[test]

@@ -265,6 +265,7 @@ where
             tool_input: owned_call.input.clone(),
         }),
         &workspace_root,
+        agent.session_id.as_ref(),
         cancel,
     )
     .await;
@@ -496,6 +497,7 @@ where
             step_id,
             &effective_call,
             &ex,
+            agent.session_id.as_ref(),
             cancel,
             workspace_read,
         )

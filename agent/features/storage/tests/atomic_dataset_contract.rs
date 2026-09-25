@@ -11,9 +11,9 @@ use std::str::FromStr;
 
 use storage::{
     AtomicDatasetPort, DatasetChangeSet, DatasetCommitVisibility, DatasetKey, DatasetMember,
-    DatasetMemberChange, DatasetReadOutcome, DeleteOptions, Durability, FileSystemDatasetAdapter,
-    Generation, QuarantineOutcome, QuarantineReason, SafePathSegment, StorageErrorKind,
-    StorageNamespace, TransactionScope, WriteOptions,
+    DatasetMemberChange, DatasetReadOutcome, DeleteOptions, Durability, Generation,
+    QuarantineOutcome, QuarantineReason, SafePathSegment, StorageErrorKind, StorageNamespace,
+    TransactionScope, WriteOptions,
 };
 use uuid::Uuid;
 
@@ -21,10 +21,10 @@ fn unique_root(case: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("aemeath-dataset-{case}-{}", Uuid::new_v4()))
 }
 
-fn adapter(case: &str) -> (FileSystemDatasetAdapter, std::path::PathBuf) {
+fn adapter(case: &str) -> (std::sync::Arc<dyn AtomicDatasetPort>, std::path::PathBuf) {
     let root = unique_root(case);
     let adapter =
-        FileSystemDatasetAdapter::new(&root).expect("dataset adapter root should initialize");
+        storage::file_system_dataset(&root).expect("dataset adapter root should initialize");
     (adapter, root)
 }
 
@@ -82,7 +82,7 @@ async fn read_manifest_exposes_verified_member_reuse_evidence() {
     let (adapter, root) = adapter("manifest-member-evidence");
     let key = key();
     seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[member("active", b"a1"), member("archive", b"z1")],
     )
@@ -200,7 +200,7 @@ async fn commit_revision_is_independent_of_member_input_order() {
         DatasetKey::new(StorageNamespace::Memory, vec![name("conversation-2")]).unwrap();
 
     let ordered = seed_generation(
-        &adapter,
+        &*adapter,
         &ordered_key,
         &[
             member("active", b"a"),
@@ -210,7 +210,7 @@ async fn commit_revision_is_independent_of_member_input_order() {
     )
     .await;
     let scrambled = seed_generation(
-        &adapter,
+        &*adapter,
         &scrambled_key,
         &[
             member("index", b"i"),
@@ -245,7 +245,7 @@ async fn complete_replacement_deletes_omitted_members() {
     let key = key();
 
     let previous_revision = seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[
             member("active", b"a1"),
@@ -289,7 +289,7 @@ async fn read_consistent_returns_requested_complete_members() {
     let (adapter, root) = adapter("read-consistent");
     let key = key();
     seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[
             member("active", b"a1"),
@@ -337,7 +337,7 @@ async fn stale_revision_commit_is_rejected_without_changing_current() {
         .revision()
         .clone();
     let live_revision = seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[member("active", b"a1"), member("index", b"i1")],
     )
@@ -370,7 +370,7 @@ async fn read_previous_is_explicit_and_never_auto_fallback() {
     let key = key();
 
     seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[
             member("active", b"a1"),
@@ -437,7 +437,7 @@ async fn promote_previous_restores_prior_generation() {
     let key = key();
 
     let original = seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[member("active", b"a1"), member("archive", b"z1")],
     )
@@ -480,8 +480,8 @@ async fn list_datasets_returns_only_live_dataset_keys() {
         vec![name("conversation-2.dataset")],
     )
     .unwrap();
-    seed_generation(&adapter, &first, &[member("active", b"a1")]).await;
-    seed_generation(&adapter, &second, &[member("active", b"a2")]).await;
+    seed_generation(&*adapter, &first, &[member("active", b"a1")]).await;
+    seed_generation(&*adapter, &second, &[member("active", b"a2")]).await;
 
     let keys = adapter
         .list_datasets(StorageNamespace::Memory)
@@ -500,7 +500,7 @@ async fn list_datasets_returns_only_live_dataset_keys() {
 async fn delete_all_generations_removes_dataset_and_is_idempotent() {
     let (adapter, root) = adapter("delete-dataset");
     let key = key();
-    seed_generation(&adapter, &key, &[member("active", b"a1")]).await;
+    seed_generation(&*adapter, &key, &[member("active", b"a1")]).await;
 
     let deleted = adapter
         .delete_all_generations(&key, DeleteOptions::default())
@@ -533,7 +533,7 @@ async fn quarantine_moves_requested_dataset_generation() {
     let (adapter, root) = adapter("quarantine-dataset");
     let key = key();
     seed_generation(
-        &adapter,
+        &*adapter,
         &key,
         &[member("active", b"a1"), member("index", b"i1")],
     )

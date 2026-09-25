@@ -556,6 +556,10 @@ pub enum ChatEvent {
         content: serde_json::Value,
         is_error: bool,
         images: Vec<ToolResultImage>,
+        /// runtime supervisor 测量的工具执行耗时（毫秒，#1666）。
+        /// 非 supervisor 路径（policy denied 等）为 None。
+        /// ChatEvent 是进程内事件（不经 wire 序列化），无兼容负担。
+        duration_ms: Option<u64>,
     },
     /// 系统消息。
     SystemMessage(String),
@@ -851,3 +855,7 @@ pub enum SessionResumeFailureKind {
     /// 底层 IO 错误。
     Io,
 }
+
+#[cfg(test)]
+#[path = "chat_event_naming_tests.rs"]
+mod chat_event_naming_tests;

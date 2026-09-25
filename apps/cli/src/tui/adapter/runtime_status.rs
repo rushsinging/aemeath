@@ -13,6 +13,8 @@ pub(crate) struct TuiContextBudget {
 pub(crate) enum TuiContextDecisionSource {
     ActualProviderUsage,
     HeuristicFallback,
+    /// 窗口配置错误（effective 低于护栏下限），auto-compact 已禁用（#1626）。
+    MisconfiguredWindow,
     Manual,
 }
 

@@ -152,12 +152,23 @@ impl ConversationModel {
         request: InteractionRequest,
     ) -> Vec<ConversationChange> {
         if let Some(active) = self.active_interaction.as_ref() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[interaction] show rejected: active_request_id={} received_request_id={}",
+                active.request_id().as_str(),
+                request.request_id.as_str(),
+            );
             return vec![ConversationChange::InteractionConflict {
                 active_request_id: active.request_id().clone(),
                 received_request_id: request.request_id,
             }];
         }
         let request_id = request.request_id.clone();
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[interaction] show accepted request_id={}",
+            request_id.as_str(),
+        );
         self.active_interaction = Some(InteractionState::new(request));
         vec![ConversationChange::InteractionShown { request_id }]
     }

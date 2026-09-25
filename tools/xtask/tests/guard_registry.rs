@@ -26,6 +26,7 @@ fn migration_entry(id: &str, path: &str) -> String {
   "module": "runtime",
   "scope": {{"kind": "path", "value": "{path}"}},
   "classification": "migration_exception",
+  "mechanism_type": "structural",
   "owner": "runtime",
   "reason": "temporary migration seam",
   "tracking_issue": 1021,
@@ -45,6 +46,7 @@ fn registry_rejects_missing_migration_metadata() {
   "module": "runtime",
   "scope": {"kind": "path", "value": "agent/runtime.rs"},
   "classification": "migration_exception",
+  "mechanism_type": "structural",
   "owner": "",
   "reason": "",
   "tracking_issue": null,
@@ -81,7 +83,8 @@ fn target_policy_is_not_counted_as_migration_debt() {
   "module": "composition",
   "scope": {"kind": "path_prefix", "value": "agent/composition/src/"},
   "classification": "target_capability_policy",
-  "owner": "composition",
+
+  "mechanism_type": "structural",  "owner": "composition",
   "reason": "unique production composition root",
   "tracking_issue": 1002,
   "introduced_baseline": "v0.1.0",
@@ -135,7 +138,8 @@ fn workspace_scan_accepts_registered_reference() {
   "module": "runtime",
   "scope": {"kind": "pattern", "value": "allowed.rs"},
   "classification": "scope_exclusion",
-  "owner": "runtime",
+
+  "mechanism_type": "structural",  "owner": "runtime",
   "reason": "test fixture scope",
   "tracking_issue": 1021,
   "introduced_baseline": "v0.1.0",
@@ -181,4 +185,170 @@ fn report_is_deterministic_and_sorted_by_stable_id() {
         rendered.find("migration.runtime.alpha").unwrap()
             < rendered.find("migration.runtime.zeta").unwrap()
     );
+}
+
+fn construction_registry(entries: &str, construction_symbols: &str) -> String {
+    format!(
+        r#"{{
+  "version": 1,
+  "budgets": {{"repository_migration_debt": 1}},
+  "construction_symbols": [{construction_symbols}],
+  "entries": [{entries}]
+}}"#
+    )
+}
+
+fn construction_symbol(id: &str, symbol: &str, kind: &str, allowed: &str) -> String {
+    format!(
+        r#"{{
+  "id": "{id}",
+  "symbol": "{symbol}",
+  "owner_crate": "storage",
+  "kind": "{kind}",
+  "allowed_paths": [{allowed}],
+  "guard": "check-cross-bc-construction-registry.sh",
+  "reason": "Composition 唯一生产构造点",
+  "tracking_issue": 1067
+}}"#
+    )
+}
+
+#[test]
+fn construction_symbols_section_is_accepted_when_well_formed() {
+    let symbol = construction_symbol(
+        "construction.storage.filesystemdatasetadapter",
+        "FileSystemDatasetAdapter",
+        "adapter",
+        r#""agent/composition/src""#,
+    );
+    let input = construction_registry("", &symbol);
+    let report = xtask::guard_registry::validate_str(&input).unwrap();
+    assert_eq!(report.construction_symbols, 1);
+}
+
+#[test]
+fn construction_symbols_reject_unknown_kind_and_empty_allowed_paths() {
+    let bad_kind = construction_symbol(
+        "construction.storage.bad-kind",
+        "BadKindAdapter",
+        "service",
+        r#""agent/composition/src""#,
+    );
+    let error =
+        xtask::guard_registry::validate_str(&construction_registry("", &bad_kind)).unwrap_err();
+    assert!(error.to_string().contains("kind 非法"));
+
+    let empty_allowed = construction_symbol(
+        "construction.storage.empty-allowed",
+        "EmptyAllowedAdapter",
+        "adapter",
+        "",
+    );
+    let error = xtask::guard_registry::validate_str(&construction_registry("", &empty_allowed))
+        .unwrap_err();
+    assert!(error.to_string().contains("allowed_paths 不能为空"));
+}
+
+#[test]
+fn construction_symbols_reject_duplicate_ids_and_clash_with_entries() {
+    let duplicate = format!(
+        "{},{}",
+        construction_symbol(
+            "construction.storage.duplicate",
+            "FirstAdapter",
+            "adapter",
+            r#""agent/composition/src""#
+        ),
+        construction_symbol(
+            "construction.storage.duplicate",
+            "SecondAdapter",
+            "wire",
+            r#""agent/composition/src""#
+        ),
+    );
+    let error =
+        xtask::guard_registry::validate_str(&construction_registry("", &duplicate)).unwrap_err();
+    assert!(error.to_string().contains("重复"));
+}
+
+#[test]
+fn registry_rejects_invalid_mechanism_type() {
+    let input = registry(
+        r#"{
+  "id": "policy.runtime.mech-invalid",
+  "guard": "check-example.sh",
+  "module": "runtime",
+  "scope": {"kind": "symbol", "value": "ExamplePort"},
+  "classification": "target_capability_policy",
+  "mechanism_type": "grep-anything",
+  "owner": "runtime",
+  "reason": "example policy",
+  "tracking_issue": 1021,
+  "introduced_baseline": "v0.1.0",
+  "exit_condition": "retire with guard",
+  "status": "active"
+}"#,
+        1,
+    );
+
+    let error = xtask::guard_registry::validate_str(&input).unwrap_err();
+    assert!(error.to_string().contains("mechanism_type 非法"));
+}
+
+#[test]
+fn registry_rejects_missing_mechanism_type() {
+    let input = registry(
+        r#"{
+  "id": "policy.runtime.mech-missing",
+  "guard": "check-example.sh",
+  "module": "runtime",
+  "scope": {"kind": "symbol", "value": "ExamplePort"},
+  "classification": "target_capability_policy",
+  "owner": "runtime",
+  "reason": "example policy",
+  "tracking_issue": 1021,
+  "introduced_baseline": "v0.1.0",
+  "exit_condition": "retire with guard",
+  "status": "active"
+}"#,
+        1,
+    );
+
+    let error = xtask::guard_registry::validate_str(&input).unwrap_err();
+    let message = format!("{:?}", error);
+    assert!(message.contains("mechanism_type"));
+}
+
+#[test]
+fn blacklist_mechanism_requires_tracking_issue() {
+    let make_entry = |mechanism: &str, issue: &str| {
+        format!(
+            r#"{{
+  "id": "policy.runtime.mech-blacklist",
+  "guard": "check-example.sh",
+  "module": "runtime",
+  "scope": {{"kind": "symbol", "value": "RetiredThing"}},
+  "classification": "target_capability_policy",
+  "mechanism_type": "{mechanism}",
+  "owner": "runtime",
+  "reason": "example policy",
+  "tracking_issue": {issue},
+  "introduced_baseline": "v0.1.0",
+  "exit_condition": "retire with guard",
+  "status": "active"
+}}"#
+        )
+    };
+
+    for mechanism in ["blacklist-transitional", "blacklist-permanent"] {
+        let input = registry(&make_entry(mechanism, "null"), 1);
+        let error = xtask::guard_registry::validate_str(&input).unwrap_err();
+        assert!(
+            error.to_string().contains("tracking_issue 不能为空"),
+            "mechanism {mechanism} should require tracking issue"
+        );
+
+        let valid = registry(&make_entry(mechanism, "1021"), 1);
+        xtask::guard_registry::validate_str(&valid).unwrap();
+    }
 }

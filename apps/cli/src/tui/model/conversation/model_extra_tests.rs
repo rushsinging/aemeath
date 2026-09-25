@@ -192,6 +192,7 @@ fn test_tool_result_payload_stored_in_turn() {
         content: expected_content.clone(),
         is_error: expected_is_error,
         image_count: expected_image_count,
+        duration_ms: None,
     });
 
     // 断言：ToolCall.result 应为 Some(ToolResultPayload) 且字段正确

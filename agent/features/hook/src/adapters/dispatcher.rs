@@ -65,21 +65,54 @@ pub struct Dispatcher {
     subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
+/// Hook 子进程的 stdin payload：tagged enum 序列化后顶层双写扁平字段。
+///
+/// - `hook_event_name`：事件名（恒双写）；
+/// - `session_id`：dispatch context 携带时双写（与 `AEMEATH_SESSION_ID` env 同源）。
+///
+/// 扁平解析器（cmux / Claude Code 生态工具按顶层字段提取会话标识）与
+/// 既有按 tagged 结构解析的脚本同时可读；Runtime **NEVER** 参与拼装。
+fn stdin_payload(invocation: &HookInvocation, session_id: Option<&str>) -> serde_json::Value {
+    let mut payload = serde_json::to_value(invocation).unwrap_or(serde_json::json!({}));
+    let event_name = serde_json::to_value(invocation.point())
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string));
+    let Some(object) = payload.as_object_mut() else {
+        return payload;
+    };
+    if let Some(event_name) = event_name {
+        object.insert(
+            "hook_event_name".to_string(),
+            serde_json::Value::String(event_name),
+        );
+    }
+    if let Some(session_id) = session_id {
+        object.insert(
+            "session_id".to_string(),
+            serde_json::Value::String(session_id.to_string()),
+        );
+    }
+    payload
+}
+
 impl Dispatcher {
     /// 生产严格构造：Hook adapter 装配受管子进程执行器。
     ///
     /// cwd 是每次 dispatch 的 invocation context，不得在 Dispatcher 构造时冻结。
+    /// `env_passthrough` 是额外透传给 hook 子进程的父环境变量 glob 模式
+    /// （默认空 = 仅基础白名单；`AEMEATH_*` 按次变量恒为权威注入）。
     /// 任一 subscription 配置非法（如 Stop 配 failure_policy、非前置闸门配 Block）
     /// 即返回全部错误——与设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时
     /// 静默忽略」一致。**NEVER** 静默丢弃非法 subscription。
     pub fn try_new(
         subscriptions: Vec<HookSubscription>,
         execution_policy: HookExecutionPolicy,
+        env_passthrough: Vec<String>,
     ) -> Result<Self, Vec<SubscriptionError>> {
         Self::build(
             subscriptions,
             Box::new(ProcessDriverExecutor::new(
-                crate::adapters::environment::capture_basic_environment(),
+                crate::adapters::environment::managed_environment(&env_passthrough),
             )),
             execution_policy,
         )
@@ -198,9 +231,9 @@ impl HookPort for Dispatcher {
         let mut messages: Vec<HookDisplayMessage> = Vec::new();
 
         for sub in matching {
-            let current_input =
-                serde_json::to_value(&current_invocation).unwrap_or(serde_json::json!({}));
-            let invocation_env = invocation_environment(&current_invocation, context.cwd());
+            let current_input = stdin_payload(&current_invocation, context.session_id());
+            let invocation_env =
+                invocation_environment(&current_invocation, context.cwd(), context.session_id());
             let outcome = self
                 .execute_subscription(
                     sub,
@@ -311,6 +344,7 @@ impl HookPort for Dispatcher {
                                     &current_invocation,
                                     error,
                                     context.cwd(),
+                                    context.session_id(),
                                     cancellation,
                                 )
                                 .await;
@@ -415,6 +449,7 @@ fn first_shell_command_word(command: &str) -> String {
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
+    session_id: Option<&str>,
 ) -> HashMap<String, String> {
     let mut env = HashMap::new();
     env.insert(
@@ -423,6 +458,10 @@ fn invocation_environment(
     );
     env.insert("AEMEATH_PROJECT_DIR".to_string(), cwd.display().to_string());
     env.insert("CLAUDE_PROJECT_DIR".to_string(), cwd.display().to_string());
+    // 当前 Main Session id：所有 point 统一注入，外部集成据此捕获会话。
+    if let Some(session_id) = session_id {
+        env.insert("AEMEATH_SESSION_ID".to_string(), session_id.to_string());
+    }
     match invocation {
         HookInvocation::PreToolUse(input) => {
             env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
@@ -717,6 +756,7 @@ impl Dispatcher {
         stop_invocation: &HookInvocation,
         error: String,
         cwd: &std::path::Path,
+        session_id: Option<&str>,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let run_steps = match stop_invocation {
@@ -737,8 +777,8 @@ impl Dispatcher {
             .collect();
         matching.sort_by_key(|s| s.order);
 
-        let current_input = serde_json::to_value(&invocation).unwrap_or(serde_json::json!({}));
-        let invocation_env = invocation_environment(&invocation, cwd);
+        let current_input = stdin_payload(&invocation, session_id);
+        let invocation_env = invocation_environment(&invocation, cwd, session_id);
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self

@@ -69,8 +69,8 @@ pub enum TaskSnapshotValidationError {
 /// A validated restore candidate produced by the Task BC persistence port.
 ///
 /// The type name is public so consumers can name the token that
-/// [`crate::TaskPersist::prepare_restore`] returns and
-/// [`crate::TaskPersist::commit_restore`] consumes, but it is deliberately
+/// [`crate::domain::TaskPersist::prepare_restore`] returns and
+/// [`crate::domain::TaskPersist::commit_restore`] consumes, but it is deliberately
 /// opaque: its single field is private, it exposes no accessors, and it
 /// implements neither `Clone` nor serde. That keeps the wrapped aggregate state
 /// inside the Task BC and makes a prepared token single-use — moving it into

@@ -34,7 +34,7 @@ pub struct RuntimeResumedSessionStep {
     pub run_id: String,
     pub step_id: String,
     pub message_segments: Vec<std::sync::Arc<[Message]>>,
-    pub finalize_cause: Option<context::domain::FinalizeCause>,
+    pub finalize_cause: Option<context::FinalizeCause>,
     pub duration_ms: Option<u64>,
 }
 
@@ -90,6 +90,9 @@ pub enum RuntimeStreamEvent {
         content: serde_json::Value,
         is_error: bool,
         images: Vec<ImageData>,
+        /// supervisor 测量的工具执行耗时（毫秒）；非 supervisor 路径
+        /// （policy denied / guard blocked / cancelled）为 None（#1666）。
+        duration_ms: Option<u64>,
     },
     SystemMessage(String),
     ModelInvocationRetrying {
@@ -353,3 +356,7 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.send_lifecycle_event(event)
     }
 }
+
+#[cfg(test)]
+#[path = "events_naming_tests.rs"]
+mod events_naming_tests;

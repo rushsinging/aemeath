@@ -154,13 +154,13 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 }
 
 fn test_wiring() -> Arc<context::MainSessionWiring> {
-    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let persist = workspace.persist();
-    let config = Arc::new(config::ConfigAppService::new(Some(
+    let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
-    )));
+    ), share::config::paths::global_config_path()));
     let now = chrono::Utc::now().to_rfc3339();
     Arc::new(context::MainSessionWiring::build(
         context::MainSessionWiringBuilder {
@@ -291,9 +291,17 @@ fn test_shell_with_catalog(
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
-    let workspace = project::wire_production_workspace(cwd.clone())
+    let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
+    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_catalog = ::tools::composition::wire_skills().catalog();
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_catalog.clone(),
+        workspace.clone(),
+        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     crate::application::client::SessionRuntime {
         session_state: Arc::new(std::sync::RwLock::new(
@@ -308,8 +316,8 @@ fn test_shell_with_catalog(
         )),
         workspace,
         wiring,
-        config_query: Arc::new(config::ConfigAppService::new(None)),
-        config_writer: Arc::new(config::ConfigAppService::new(None)),
+        config_query: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
+        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
         provider_factory: crate::application::model::test_support::constant_factory(
             binding.clone(),
@@ -331,8 +339,9 @@ fn test_shell_with_catalog(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
-        skill_catalog: ::tools::composition::wire_skills().catalog(),
-        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
+        skill_catalog,
+        initial_skill_snapshot,
+        skill_refresh,
         memory_config: share::config::MemoryConfig::default(),
         context_size: 200_000,
         language: "en".to_string(),
@@ -345,7 +354,7 @@ fn test_shell_with_catalog(
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
+            crate::application::run::active_registry::wire_active_run_registry(),
         ),
         interaction_bridge: Arc::new(
             crate::application::interaction::port::InteractionBridge::new(),
@@ -387,10 +396,18 @@ fn test_shell_with_task_store(
     let wiring = test_wiring();
     let binding = crate::application::model::test_support::test_binding(vec!["dummy"]);
     let cwd = std::env::current_dir().unwrap();
-    let workspace = project::wire_production_workspace(cwd.clone())
+    let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
+    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_catalog = ::tools::composition::wire_skills().catalog();
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_catalog.clone(),
+        workspace.clone(),
+        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     crate::application::client::SessionRuntime {
         session_state: Arc::new(std::sync::RwLock::new(
@@ -405,8 +422,8 @@ fn test_shell_with_task_store(
         )),
         workspace,
         wiring,
-        config_query: Arc::new(config::ConfigAppService::new(None)),
-        config_writer: Arc::new(config::ConfigAppService::new(None)),
+        config_query: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
+        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
         provider_factory: crate::application::model::test_support::constant_factory(
             binding.clone(),
@@ -428,8 +445,9 @@ fn test_shell_with_task_store(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
-        skill_catalog: ::tools::composition::wire_skills().catalog(),
-        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
+        skill_catalog,
+        initial_skill_snapshot,
+        skill_refresh,
         memory_config: share::config::MemoryConfig::default(),
         context_size: 200_000,
         language: "en".to_string(),
@@ -442,7 +460,7 @@ fn test_shell_with_task_store(
         tool_result_materializer:
             crate::application::tool::test_support::test_tool_result_materializer(),
         active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
+            crate::application::run::active_registry::wire_active_run_registry(),
         ),
         interaction_bridge: Arc::new(
             crate::application::interaction::port::InteractionBridge::new(),

@@ -3,7 +3,8 @@ use share::message::{Message, Role};
 use share::session_types::ProjectIdentity;
 
 use super::{
-    CanonicalSession, DisplayHistoryStepIndex, SessionMetadata, SessionRestoreStep, SnapshotState,
+    extract_project_name, CanonicalSession, DisplayHistoryStepIndex, SessionMetadata,
+    SessionRestoreStep, SnapshotState,
 };
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
@@ -32,12 +33,17 @@ impl SessionListEntry {
             .title
             .clone()
             .or_else(|| preview.clone())
-            .or_else(|| session.metadata.project.clone())
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or_else(|| {
+                if messages.is_empty() {
+                    "(empty)".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            });
         Self {
             id: session.id.clone(),
             title: session.metadata.title.clone(),
-            project: session.metadata.project.clone(),
+            project: session_display_project(session),
             model: session.metadata.model.clone(),
             created_at: session.created_at.clone(),
             updated_at: session.updated_at.clone(),
@@ -46,6 +52,20 @@ impl SessionListEntry {
             summary,
         }
     }
+}
+
+/// project 显示名：显式 `metadata.project` 优先（用户可编辑 override），
+/// 否则从 workspace 快照的 project identity 推导目录名。
+/// project 的单一事实源是 workspace `ProjectIdentity`，不在 session
+/// 创建时冗余写入 metadata（避免双事实源）。
+fn session_display_project(session: &CanonicalSession) -> Option<String> {
+    if let Some(explicit) = session.metadata.project.as_deref() {
+        return Some(explicit.to_string());
+    }
+    let SnapshotState::Captured(workspace) = &session.workspace else {
+        return None;
+    };
+    extract_project_name(&workspace.project_identity.initial_cwd)
 }
 
 /// Compares stable project identity without treating individual worktree roots

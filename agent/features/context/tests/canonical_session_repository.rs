@@ -1,18 +1,18 @@
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
-use context::adapters::{CanonicalSessionRepository, CanonicalSessionWriter};
-use context::domain::session::{
-    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
-    SessionCommitPlan, SnapshotState,
-};
-use context::domain::{
+use context::SessionRepository;
+use context::{
     AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
     ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
     ToolCallIdentity, ToolCallState, ToolReceiptMutation,
 };
-use context::ports::SessionRepository;
+use context::{
+    AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
+    SessionCommitPlan, SnapshotState,
+};
+use context::{CanonicalSessionRepository, CanonicalSessionWriter};
 use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
 use provider::ReasoningLevel;
 use sdk::RunId;
@@ -85,17 +85,17 @@ impl CanonicalSessionWriter for RecordingWriter {
 
 #[derive(Default)]
 struct RecordingToolReceiptWriter {
-    saved: Mutex<Vec<context::domain::ToolCallReceipt>>,
+    saved: Mutex<Vec<context::ToolCallReceipt>>,
     fail: bool,
 }
 
 #[async_trait]
-impl context::adapters::ToolReceiptWriter for RecordingToolReceiptWriter {
+impl context::ToolReceiptWriter for RecordingToolReceiptWriter {
     async fn save(
         &self,
         _session_id: &str,
         _revision: u64,
-        receipt: &context::domain::ToolCallReceipt,
+        receipt: &context::ToolCallReceipt,
     ) -> Result<(), String> {
         if self.fail {
             return Err("receipt disk full".to_string());
@@ -115,7 +115,7 @@ struct RecordingAcceptedInputWriter {
 }
 
 #[async_trait]
-impl context::adapters::AcceptedInputWriter for RecordingAcceptedInputWriter {
+impl context::AcceptedInputWriter for RecordingAcceptedInputWriter {
     async fn save(
         &self,
         session_id: &str,
@@ -293,6 +293,7 @@ fn compact_request(session_id: SessionId) -> ContextRequest {
         context_size: 1,
         max_output_tokens: 1,
         last_api_total_tokens: Some(100),
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -421,10 +422,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
         })
         .await
         .unwrap();
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(_)
-    ));
+    assert!(matches!(outcome, context::CompactOutcome::Committed(_)));
 }
 
 #[tokio::test]
@@ -543,37 +541,73 @@ async fn clear_removes_persisted_skill_load_records() {
     assert!(holder.read().unwrap().skill_load_records.is_empty());
 }
 
+/// #1697：compact 替代窗口后 skill 注入内容不再可见，`skill_load_records`
+/// 的去重前提失效——compact commit 必须清空记录，让再次调用返回 `Fresh`
+/// 重新注入内容。旧断言「compact 保留」的行为被该设计决策替代（原测试
+/// `compaction_preserves_skill_load_records`）：保留会让 `AlreadyLoaded`
+/// 在内容已丢失时拒绝重发，模型拿不回 skill 内容。
 #[tokio::test]
-async fn compaction_preserves_skill_load_records() {
+async fn compaction_clears_skill_load_records() {
     let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer);
-    let session_id = holder.read().unwrap().id.clone();
+    let session_id = SessionId::new("session");
+    // 十步会话保证 compact 走到 Committed（空历史会 Skipped，清空逻辑不执行）
+    let (repository, holder) =
+        repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     repository
         .compare_and_record_skill_load(
-            SkillLoadMutation::new(session_id.clone(), SkillLoadScope::main(), "review", "r1")
-                .unwrap(),
+            SkillLoadMutation::new(
+                session_id.to_string(),
+                SkillLoadScope::main(),
+                "review",
+                "r1",
+            )
+            .unwrap(),
         )
         .await
         .unwrap();
-    repository
-        .commit_compaction(&CompactRequest {
-            run_id: RunId::new("run"),
-            source_revision: SessionRevision::new(1),
-            source: compact_request(SessionId::new(&session_id)),
-            trigger: CompactTrigger::Automatic,
-            progress: None,
-            task_snapshot: None,
-            cancellation: tokio_util::sync::CancellationToken::new(),
-        })
-        .await
-        .unwrap();
+    // 强断言 compact 已提交，避免 Skipped 路径让清空断言空过
+    // （context_size=1 的默认请求会让尾部保留吞掉全部消息而 Skipped）
+    let mut source = compact_request(SessionId::new(&session_id));
+    source.context_size = 100_000;
+    assert!(matches!(
+        repository
+            .commit_compaction(&CompactRequest {
+                run_id: RunId::new("run"),
+                source_revision: SessionRevision::new(1),
+                source,
+                trigger: CompactTrigger::Automatic,
+                progress: None,
+                task_snapshot: None,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
+            .await
+            .unwrap(),
+        context::CompactOutcome::Committed(_)
+    ));
 
-    assert_eq!(
+    assert!(
         holder
             .read()
             .unwrap()
-            .loaded_skill_revision(&SkillLoadScope::main(), "review"),
-        Some("r1")
+            .loaded_skill_revision(&SkillLoadScope::main(), "review")
+            .is_none(),
+        "compact 替代窗口后注入记录必须失效"
+    );
+    assert_eq!(
+        repository
+            .compare_and_record_skill_load(
+                SkillLoadMutation::new(
+                    session_id.to_string(),
+                    SkillLoadScope::main(),
+                    "review",
+                    "r1"
+                )
+                .unwrap()
+            )
+            .await
+            .unwrap(),
+        SkillLoadDecision::Fresh,
+        "compact 后同 revision 重新加载必须返回 Fresh 以重发内容"
     );
 }
 
@@ -650,16 +684,14 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
                     "input",
                     revision,
                 )),
-                outcome: Some(
-                    context::domain::session::FinalizedOutcomeRecord::compatibility(vec![
-                        tool_result,
-                    ]),
-                ),
+                outcome: Some(context::FinalizedOutcomeRecord::compatibility(vec![
+                    tool_result,
+                ])),
                 tool_receipts: Vec::new(),
             }],
         )]
         .into(),
-        committed_steps: vec![context::domain::session::CommittedStep {
+        committed_steps: vec![context::CommittedStep {
             run_id: "run".to_string(),
             step_id: "step".to_string(),
             fingerprint: "outcome".to_string(),
@@ -685,7 +717,7 @@ async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() 
     appended.step_id = RunStepId::new("step-2");
 
     let (result, lifecycle) =
-        context::adapters::capture_session_lifecycle(repository.append_finalized(&appended)).await;
+        context::capture_session_lifecycle(repository.append_finalized(&appended)).await;
     result.unwrap();
 
     assert_eq!(lifecycle.transitions.len(), 1);
@@ -715,8 +747,7 @@ async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
     let external = holder.read().unwrap().clone();
 
     let (result, lifecycle) =
-        context::adapters::capture_session_lifecycle(repository.append_finalized(&append("same")))
-            .await;
+        context::capture_session_lifecycle(repository.append_finalized(&append("same"))).await;
     result.unwrap();
 
     let replaced = lifecycle.transitions[0].replaced_generation.clone();
@@ -732,10 +763,8 @@ async fn snapshot_does_not_publish_a_new_session_generation() {
     let (repository, holder) = repository(writer);
     let committed = holder.read().unwrap().clone();
 
-    let (snapshot, lifecycle) = context::adapters::capture_session_lifecycle(
-        repository.snapshot(&SessionId::new("session")),
-    )
-    .await;
+    let (snapshot, lifecycle) =
+        context::capture_session_lifecycle(repository.snapshot(&SessionId::new("session"))).await;
     snapshot.unwrap();
 
     assert!(lifecycle.transitions.is_empty());
@@ -745,11 +774,9 @@ async fn snapshot_does_not_publish_a_new_session_generation() {
 #[tokio::test]
 async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset: Arc<dyn storage::api::AtomicDatasetPort> =
-        Arc::new(storage::FileSystemDatasetAdapter::new(root.path()).expect("dataset adapter"));
-    let writer = Arc::new(context::adapters::DatasetCanonicalSessionWriter::new(
-        dataset.clone(),
-    ));
+    let dataset: Arc<dyn storage::AtomicDatasetPort> =
+        storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(dataset.clone()));
     let session_id = SessionId::new("resume-clear-session");
     // 磁盘持久化完整历史：compact 边界前的 run-a 与边界后的 run-b。
     let persisted = CanonicalSession {
@@ -815,13 +842,19 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
             .map(|c| c.step_id.as_str()),
         Some("step-b")
     );
+    // 落盘位置随 project 分目录布局：workspace 捕获 identity 的 session
+    // 写入 `<project-dir>/<id>.dataset`。
+    let project_dir = context::project_dir_segment(&workspace().project_identity);
     let manifest = dataset
         .read_manifest(
-            &storage::api::DatasetKey::new(
-                storage::api::StorageNamespace::Session,
-                vec![format!("{}.dataset", session_id.as_str())
-                    .parse::<storage::api::SafePathSegment>()
-                    .expect("safe dataset segment")],
+            &storage::DatasetKey::new(
+                storage::StorageNamespace::Session,
+                vec![
+                    project_dir,
+                    format!("{}.dataset", session_id.as_str())
+                        .parse::<storage::SafePathSegment>()
+                        .expect("safe dataset segment"),
+                ],
             )
             .expect("valid dataset key"),
         )
@@ -830,7 +863,7 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     let names = manifest
         .members()
         .iter()
-        .map(storage::api::SafePathSegment::as_str)
+        .map(storage::SafePathSegment::as_str)
         .collect::<Vec<_>>();
     // 逻辑断点：磁盘保留全部 step 成员（含内存未装载的 step-a）。
     assert_eq!(
@@ -850,7 +883,7 @@ async fn clear_reports_zero_persisted_structure_and_releases_old_generation() {
     let (repository, _) = repository_with_session(writer, session_with_tool_result(&session_id, 3));
 
     let (result, lifecycle) =
-        context::adapters::capture_session_lifecycle(repository.clear(&session_id)).await;
+        context::capture_session_lifecycle(repository.clear(&session_id)).await;
     result.unwrap();
 
     let transition = &lifecycle.transitions[0];
@@ -874,8 +907,8 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
 
     let mut request = compact_request(session_id);
     request.context_size = 100_000;
-    let (result, lifecycle) = context::adapters::capture_session_lifecycle(
-        repository.commit_compaction(&CompactRequest {
+    let (result, lifecycle) =
+        context::capture_session_lifecycle(repository.commit_compaction(&CompactRequest {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -883,9 +916,8 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
             progress: None,
             task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
-        }),
-    )
-    .await;
+        }))
+        .await;
     result.unwrap();
 
     let transition = &lifecycle.transitions[0];
@@ -938,8 +970,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
         appended.step_id = RunStepId::new("tail-step");
 
         let (result, lifecycle) =
-            context::adapters::capture_session_lifecycle(repository.append_finalized(&appended))
-                .await;
+            context::capture_session_lifecycle(repository.append_finalized(&appended)).await;
         result.unwrap();
 
         let transition = &lifecycle.transitions[0];
@@ -1102,10 +1133,10 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
-    finalized.receipts = vec![context::domain::StepReceipt::agent(
+    finalized.receipts = vec![context::StepReceipt::agent(
         "agent-call",
         0,
-        context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+        context::ToolOutcomeKind::CancellationUnconfirmed,
     )];
     let receipt = repository.append_finalized(&finalized).await.unwrap();
 
@@ -1125,7 +1156,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     assert_eq!(outcome.api_input_tokens, Some(42));
     assert_eq!(
         outcome.receipts[0].outcome(),
-        context::domain::ToolOutcomeKind::CancellationUnconfirmed
+        context::ToolOutcomeKind::CancellationUnconfirmed
     );
     assert_eq!(outcome.fingerprint, "outcome-v1");
     assert_eq!(outcome.committed_revision, receipt.committed_revision.get());
@@ -1275,7 +1306,7 @@ async fn finalized_append_reuses_existing_committed_step_entry_backing() {
     let session_id = SessionId::new("shared-ledger");
     let mut session = CanonicalSession::fixture(session_id.as_str());
     session.revision = 1;
-    session.committed_steps = vec![context::domain::session::CommittedStep::fixture(
+    session.committed_steps = vec![context::CommittedStep::fixture(
         "run-existing",
         "step-existing",
         "existing",
@@ -1444,7 +1475,7 @@ async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
         repository
             .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
             .await,
-        Err(context::domain::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
+        Err(context::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
@@ -1517,17 +1548,14 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<
-            context::domain::CompactGenerationOutput,
-            context::domain::CompactGenerationFailure,
-        > {
+        ) -> Result<context::CompactGenerationOutput, context::CompactGenerationFailure> {
             if let Some(started) = self.started.lock().unwrap().take() {
                 let _ = started.send(());
             }
             self.release.lock().await.recv().await;
-            Ok(context::domain::CompactGenerationOutput::from(
-                valid_fact_batch("generated"),
-            ))
+            Ok(context::CompactGenerationOutput::from(valid_fact_batch(
+                "generated",
+            )))
         }
     }
 
@@ -1580,7 +1608,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
     let compact_result = compact_task.await.unwrap();
     assert!(matches!(
         compact_result,
-        Err(context::domain::ContextPortError::Compact(ref message))
+        Err(context::ContextPortError::Compact(ref message))
             if message.contains("Session revision 冲突")
     ));
     let session = holder.read().unwrap();
@@ -1595,7 +1623,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
 #[tokio::test]
 async fn cancelled_compaction_does_not_commit_local_fallback() {
     use context::compact::CompactGenerator;
-    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use context::{CompactGenerationFailure, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
 
     struct CancelledGenerator;
@@ -1606,7 +1634,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             &self,
             _request: Vec<Message>,
             cancel: &CancellationToken,
-        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<context::CompactGenerationOutput, CompactGenerationFailure> {
             assert!(cancel.is_cancelled());
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Cancelled,
@@ -1639,7 +1667,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 
     assert!(matches!(
         outcome,
-        context::domain::CompactOutcome::Skipped(context::domain::CompactSkipReason::Cancelled)
+        context::CompactOutcome::Skipped(context::CompactSkipReason::Cancelled)
     ));
     let session = holder.read().unwrap();
     assert_eq!(session.revision, 0);
@@ -1649,7 +1677,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 #[tokio::test]
 async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
     use context::compact::CompactGenerator;
-    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use context::{CompactGenerationFailure, CompactGenerationFailureKind};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio_util::sync::CancellationToken;
 
@@ -1663,7 +1691,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<context::CompactGenerationOutput, CompactGenerationFailure> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Err(CompactGenerationFailure::new(
                 CompactGenerationFailureKind::Provider,
@@ -1734,9 +1762,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
 
     assert!(matches!(
         outcome,
-        context::domain::CompactOutcome::Skipped(
-            context::domain::CompactSkipReason::CircuitBreakerOpen
-        )
+        context::CompactOutcome::Skipped(context::CompactSkipReason::CircuitBreakerOpen)
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
@@ -1744,7 +1770,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
 #[tokio::test]
 async fn manual_compact_bypasses_automatic_circuit_breaker() {
     use context::compact::CompactGenerator;
-    use context::domain::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use context::{CompactGenerationFailure, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
 
     struct SwitchableGenerator {
@@ -1757,16 +1783,16 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<context::domain::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<context::CompactGenerationOutput, CompactGenerationFailure> {
             if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
                 Err(CompactGenerationFailure::new(
                     CompactGenerationFailureKind::Provider,
                     "provider failed",
                 ))
             } else {
-                Ok(context::domain::CompactGenerationOutput::from(
-                    valid_fact_batch("manual"),
-                ))
+                Ok(context::CompactGenerationOutput::from(valid_fact_batch(
+                    "manual",
+                )))
             }
         }
     }
@@ -1827,7 +1853,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
         .unwrap();
 
     assert!(
-        matches!(outcome, context::domain::CompactOutcome::Committed(_)),
+        matches!(outcome, context::CompactOutcome::Committed(_)),
         "unexpected manual compact outcome: {outcome:?}"
     );
     assert!(holder.read().unwrap().compact.is_some());
@@ -1856,10 +1882,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
         .await
         .unwrap();
 
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(_)
-    ));
+    assert!(matches!(outcome, context::CompactOutcome::Committed(_)));
 }
 
 #[tokio::test]
@@ -1880,10 +1903,7 @@ async fn manual_compaction_bypasses_automatic_threshold() {
         .await
         .unwrap();
 
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(_)
-    ));
+    assert!(matches!(outcome, context::CompactOutcome::Committed(_)));
 }
 
 #[tokio::test]
@@ -1946,7 +1966,7 @@ async fn second_compact_advances_single_marker() {
     let marker = session.compact.as_ref().unwrap();
     assert_ne!(marker.start_at.as_ref(), Some(&first));
     assert!(
-        context::domain::compact::ContinuationCheckpoint::parse(&marker.summary).is_ok(),
+        context::compact::ContinuationCheckpoint::parse(&marker.summary).is_ok(),
         "second compact marker must contain a valid continuation checkpoint: {}",
         marker.summary
     );
@@ -1981,10 +2001,7 @@ async fn compaction_rejects_stale_source_revision() {
         })
         .await;
 
-    assert!(matches!(
-        result,
-        Err(context::domain::ContextPortError::Compact(_))
-    ));
+    assert!(matches!(result, Err(context::ContextPortError::Compact(_))));
     assert_eq!(holder.read().unwrap().revision, 2);
 }
 
@@ -2043,13 +2060,10 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<
-            context::domain::CompactGenerationOutput,
-            context::domain::CompactGenerationFailure,
-        > {
-            Ok(context::domain::CompactGenerationOutput::from(
-                valid_fact_batch(self.0),
-            ))
+        ) -> Result<context::CompactGenerationOutput, context::CompactGenerationFailure> {
+            Ok(context::CompactGenerationOutput::from(valid_fact_batch(
+                self.0,
+            )))
         }
     }
 
@@ -2074,10 +2088,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
         })
         .await
         .unwrap();
-    assert!(matches!(
-        outcome,
-        context::domain::CompactOutcome::Committed(_)
-    ));
+    assert!(matches!(outcome, context::CompactOutcome::Committed(_)));
 
     let commits = writer.saved.lock().unwrap();
     let saved = &commits.last().expect("compact commit must exist").plan;
@@ -2086,9 +2097,8 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
         .iter()
         .find(|member| member.name() == "session-state.json")
         .expect("compact must replace state member");
-    let state =
-        context::domain::session::SessionGenerationCodec::decode_state(state_member.bytes())
-            .expect("decode committed state");
+    let state = context::SessionGenerationCodec::decode_state(state_member.bytes())
+        .expect("decode committed state");
     assert!(
         state
             .compact_summary()
@@ -2115,11 +2125,11 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
     let outcome = base_repository
-        .commit_compaction(&context::domain::CompactRequest {
+        .commit_compaction(&context::CompactRequest {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
-            trigger: context::domain::CompactTrigger::Automatic,
+            trigger: context::CompactTrigger::Automatic,
             progress: None,
             task_snapshot: Some(context::compact::CompactTaskSnapshot::active(
                 1,
@@ -2134,7 +2144,7 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
         })
         .await
         .unwrap();
-    let context::domain::CompactOutcome::Committed(result) = &outcome else {
+    let context::CompactOutcome::Committed(result) = &outcome else {
         panic!("expected committed compact: {outcome:?}");
     };
     assert_eq!(result.summary.matches("## Current Task State").count(), 1);
@@ -2170,11 +2180,11 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
     .collect();
 
     let outcome = base_repository
-        .commit_compaction(&context::domain::CompactRequest {
+        .commit_compaction(&context::CompactRequest {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
-            trigger: context::domain::CompactTrigger::Automatic,
+            trigger: context::CompactTrigger::Automatic,
             progress: None,
             task_snapshot: Some(context::compact::CompactTaskSnapshot::active(
                 1,
@@ -2186,7 +2196,7 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
         })
         .await
         .unwrap();
-    let context::domain::CompactOutcome::Committed(result) = outcome else {
+    let context::CompactOutcome::Committed(result) = outcome else {
         panic!("expected committed compact: {outcome:?}")
     };
 

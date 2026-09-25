@@ -1,3 +1,4 @@
+mod async_sink;
 mod context;
 mod file_sink;
 mod formatter;

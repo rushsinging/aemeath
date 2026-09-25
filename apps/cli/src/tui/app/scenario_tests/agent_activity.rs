@@ -328,6 +328,7 @@ fn cancelled_step_closes_running_tool_and_agent_with_single_terminal_notice() {
         content: serde_json::json!({"display": "Command cancelled by user"}),
         is_error: true,
         images: Vec::new(),
+        duration_ms: None,
     });
     harness.runtime_event(TuiRuntimeEvent::RunStep {
         run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-1"),

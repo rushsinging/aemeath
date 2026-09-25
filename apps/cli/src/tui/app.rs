@@ -220,9 +220,8 @@ impl App {
             session: SessionState {
                 session_id,
                 cwd,
-                session_created_at: None,
                 current_model_display: model,
-                memory_config: sdk::MemoryConfigView::default(),
+                ..SessionState::default()
             },
             layout: UiLayout::default(),
             model: model_state,
@@ -492,8 +491,6 @@ mod tests {
 #[cfg(test)]
 mod scenario_tests;
 pub mod slash;
-#[cfg(test)]
-mod slash_effect_tests;
 #[cfg(test)]
 mod slash_tests;
 #[cfg(test)]

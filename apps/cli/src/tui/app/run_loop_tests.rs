@@ -73,3 +73,20 @@ fn runtime_batch_stops_at_session_reset_effect_barrier() {
         matches!(rx.try_recv(), Ok(TuiRuntimeEvent::AssistantTextDelta { delta, .. }) if delta == "after reset")
     );
 }
+
+/// #740：启动预热只请求模型列表（/model 对话框数据源）。session 列表不
+/// 预热：其查询触发磁盘扫描，且只服务 /resume 补全，用户打开时按需拉取。
+#[test]
+fn cache_warmup_events_request_only_model_list() {
+    let events = super::cache_warmup_events();
+
+    assert_eq!(
+        events.len(),
+        1,
+        "预热只应包含模型列表请求，实际: {events:?}"
+    );
+    assert!(
+        matches!(events.first(), Some(sdk::ChatInputEvent::ListModels)),
+        "唯一事件应为 ListModels，实际: {events:?}"
+    );
+}

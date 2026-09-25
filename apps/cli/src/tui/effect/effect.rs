@@ -32,19 +32,17 @@ pub enum Effect {
         root: String,
         revision: u64,
     },
-    /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
-    /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
-    SaveSession {
-        notify: bool,
-    },
     /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
     FetchMemoryList,
     CopyToClipboard {
         text: String,
     },
     ReadClipboardImage,
+    /// 加载粘贴进来的本地图片；`path` 已由 SDK 解码，`fallback_text` 保留原始粘贴文本，
+    /// 供文件不可用时回填输入区。
     ProcessImageFile {
         path: String,
+        fallback_text: String,
     },
     /// 查询最近的 reflection 历史；只向 runtime 推送查询事件，不触发 LLM。
     QueryReflectionHistory {

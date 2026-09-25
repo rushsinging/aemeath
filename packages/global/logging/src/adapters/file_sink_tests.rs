@@ -70,9 +70,11 @@ fn real_files_rotate_and_reopen() {
     let logger =
         UnifiedLogger::build(settings(&dir.0, 1, 2, 0), Arc::new(DirectStderr::new())).unwrap();
     let entry = logger.sinks.get(&TargetCatalog::fallback().sink).unwrap();
-    logger.write_line(entry, "fresh");
+    logger.enqueue_line(TargetCatalog::fallback().sink, "fresh".to_string());
+    logger.flush();
     assert!(dir.0.join("aemeath.log.1").exists());
-    assert!(fs::read_to_string(active).unwrap().contains("fresh"));
+    assert!(fs::read_to_string(&active).unwrap().contains("fresh"));
+    let _ = entry;
 }
 
 #[test]
@@ -82,8 +84,8 @@ fn max_backups_zero_discards_active_and_recreates_it() {
     fs::write(&active, b"old").unwrap();
     let logger =
         UnifiedLogger::build(settings(&dir.0, 1, 0, 0), Arc::new(DirectStderr::new())).unwrap();
-    let entry = logger.sinks.get(&TargetCatalog::fallback().sink).unwrap();
-    logger.write_line(entry, "new");
+    logger.enqueue_line(TargetCatalog::fallback().sink, "new".to_string());
+    logger.flush();
     assert_eq!(fs::read_to_string(active).unwrap(), "new\n");
     assert!(!dir.0.join("aemeath.log.1").exists());
 }

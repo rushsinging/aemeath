@@ -4,7 +4,8 @@ mod help_display;
 mod reflection;
 mod suggestions;
 
-use crate::tui::app::UiEvent;
+use super::update::UpdateResult;
+use crate::tui::app::App;
 use crate::tui::effect::effect::Effect;
 
 pub(crate) fn resolve_slash_for_delivery(
@@ -14,14 +15,10 @@ pub(crate) fn resolve_slash_for_delivery(
     router.resolve(sdk::SlashInput::new(input))
 }
 
-impl super::App {
-    /// Handle slash commands with an optional UI event sender for background commands.
-    /// Returns Some(prompt) if a message should be sent to the LLM (e.g. /review).
-    pub(crate) async fn handle_slash_command_with_events(
-        &mut self,
-        input: &str,
-        ui_tx: Option<tokio::sync::mpsc::Sender<UiEvent>>,
-    ) -> Option<String> {
+impl App {
+    /// 纯同步 slash 分发：只做状态写入并返回 `UpdateResult`，所有 I/O
+    /// 经 `Effect` 由 run_loop 的统一 effect 循环执行。
+    pub(crate) fn handle_slash_command(&mut self, input: &str) -> UpdateResult {
         let route = if let Some(request) = self.skill_completion_catalog.resolve(input) {
             sdk::CommandRoute::SkillRequest(request)
         } else {
@@ -30,12 +27,12 @@ impl super::App {
                     Ok(route) => route,
                     Err(error) => {
                         self.append_error_notice(error.to_string());
-                        return None;
+                        return UpdateResult::none();
                     }
                 },
                 None => {
                     self.append_error_notice("Command router unavailable.");
-                    return None;
+                    return UpdateResult::none();
                 }
             }
         };
@@ -53,7 +50,8 @@ impl super::App {
         let args = arguments.join(" ");
 
         if command == "model" && !has_args {
-            return self.open_model_selection_dialog();
+            // #740：用已回填缓存呈现对话框（或挂起等待），并附带 ListModels 刷新。
+            return UpdateResult::one(self.open_model_selection_dialog());
         }
 
         match command {
@@ -61,40 +59,52 @@ impl super::App {
                 let sdk::CommandRoute::SkillRequest(request) = route else {
                     unreachable!("matched SkillRequest route")
                 };
-                crate::tui::log_debug!(                    "skill_request boundary=tui_slash_to_runtime skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
+                crate::tui::log_debug!(
+                    "skill_request boundary=tui_slash_to_runtime skill={} arguments_len={} raw_input_len={} raw_input_preview={:?}",
                     request.skill,
                     args.len(),
                     input.len(),
                     input.chars().take(120).collect::<String>()
                 );
-                self.chat
-                    .push_input_event(sdk::ChatInputEvent::SkillRequest(sdk::SkillRequest {
-                        input_id: sdk::InputId::new_v7(),
-                        skill: request.skill,
-                        arguments: args,
-                        raw_input: input.to_string(),
-                    }));
-                return None;
+                let event = sdk::ChatInputEvent::SkillRequest(sdk::SkillRequest {
+                    input_id: sdk::InputId::new_v7(),
+                    skill: request.skill,
+                    arguments: args,
+                    raw_input: input.to_string(),
+                });
+                UpdateResult::one(Effect::SendChatInputEvent { event })
             }
-            "exit" => self.layout.request_exit(),
+            "exit" => {
+                self.layout.request_exit();
+                UpdateResult::none()
+            }
             "clear" => {
-                self.clear_conversation().await;
+                let effects = self.clear_conversation().into_iter().collect();
                 self.append_system_notice("[conversation cleared]");
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
+                }
             }
             "compact" => {
                 // 走 Runtime typed 事件流（ChatInputEvent::Compact → manual_compact），
                 // 不在 TUI 直接压缩；进度与结果仅由 Runtime Activity/结果事件驱动。
-                if self.chat.input_event_tx.is_some() {
-                    let queued = self.chat.push_input_event(sdk::ChatInputEvent::Compact);
-                    crate::tui::log_debug!("slash compact queued={} tx_available=true", queued);
-                    if queued == 0 {
-                        self.append_error_notice("/compact 未能送达 Runtime 输入通道");
-                    }
-                } else {
-                    self.append_system_notice("[compact skipped: chat loop not running]");
-                }
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::Compact,
+                })
             }
-            "help" => self.show_slash_help(),
+            "reflect-now" => {
+                // #1289：走 Runtime typed 事件流（ChatInputEvent::ReflectNow →
+                // Manual reflection 单槽提交）；受理提示由 Runtime 回传，
+                // 结果只写入 reflection history（/reflect 查询）。
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::ReflectNow,
+                })
+            }
+            "help" => {
+                self.show_slash_help();
+                UpdateResult::none()
+            }
             "usage" | "cost" => {
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
@@ -105,12 +115,7 @@ impl super::App {
                     sdk::format_tokens(usage.output_tokens),
                     sdk::format_tokens(total)
                 ));
-            }
-            "save" => {
-                if let Some(tx) = ui_tx.clone() {
-                    self.execute_effect(Effect::SaveSession { notify: true }, &tx)
-                        .await;
-                }
+                UpdateResult::none()
             }
             "context" => {
                 // #567: EstimateContext 变体已删除，改为本地渲染消息计数。
@@ -118,13 +123,13 @@ impl super::App {
                     "Messages: {}",
                     self.model.conversation.timeline.items().len()
                 ));
+                UpdateResult::none()
             }
             "reflect" => {
                 let effects = self.handle_reflect_command(&args);
-                if let Some(tx) = ui_tx.clone() {
-                    for effect in effects {
-                        self.execute_effect(effect, &tx).await;
-                    }
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
                 }
             }
             "memory"
@@ -133,39 +138,9 @@ impl super::App {
                     Some("remind" | "reminder" | "reminders")
                 ) =>
             {
-                if let Some(tx) = ui_tx.clone() {
-                    self.execute_effect(Effect::FetchMemoryList, &tx).await;
-                }
+                UpdateResult::one(Effect::FetchMemoryList)
             }
-            "update" => {
-                if let Some(tx) = ui_tx.clone() {
-                    self.execute_effect(Effect::RunSelfUpdate, &tx).await;
-                }
-            }
-            "paste" => {
-                if let Some(tx) = ui_tx.clone() {
-                    self.execute_effect(Effect::ReadClipboardImage, &tx).await;
-                }
-            }
-            "images" => {
-                let spans = &self.model.input.document.image_spans;
-                if spans.is_empty() {
-                    self.append_system_notice("No pending images.");
-                } else {
-                    let mut text = format!("Pending images: {}", spans.len());
-                    for span in spans.iter() {
-                        text.push_str(&format!(
-                            "\n  {}. [Image #{}] ({} bytes)",
-                            span.index, span.index, span.image.final_size
-                        ));
-                    }
-                    self.append_system_notice(text);
-                }
-            }
-            "clear-images" => {
-                self.model.input.document.remove_all_images();
-                self.append_system_notice("[pending images cleared]");
-            }
+            "update" => UpdateResult::one(Effect::RunSelfUpdate),
             "version" => {
                 let info = format!(
                     "aemeath v{}
@@ -177,6 +152,7 @@ Build info:
                     std::env::consts::ARCH
                 );
                 self.append_system_notice(&info);
+                UpdateResult::none()
             }
             "doctor" => {
                 let view = &self.config_view;
@@ -195,25 +171,12 @@ Build info:
                         "❌ not set"
                     },
                     view.permission_mode,
-                    home.map(|p| p.display().to_string())
+                    home.map(|path| path.display().to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
                     std::env::consts::ARCH,
                 );
                 self.append_system_notice(&info);
-            }
-            "rewind" => {
-                // /rewind <N> → 触发 compact（保留 N 条消息的语义通过 compact 实现）
-                if self.chat.input_event_tx.is_some() {
-                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
-                }
-            }
-            "status" => {
-                // #567: QueryStatus 变体已删除，改为本地渲染状态信息。
-                let view = &self.config_view;
-                self.append_system_notice(format!(
-                    "Model: {} | Permission: {} | Processing: {}",
-                    view.model_name, view.permission_mode, self.chat.is_processing,
-                ));
+                UpdateResult::none()
             }
             "config" => {
                 // #567: QueryConfig 变体已删除，改为本地从 config_view 渲染。
@@ -229,6 +192,7 @@ Build info:
                     view.verbose,
                     view.logging_level,
                 ));
+                UpdateResult::none()
             }
             "stats" => {
                 // #567: QueryStats 变体已删除，改为本地从 model 状态渲染。
@@ -239,36 +203,35 @@ Build info:
                     usage.api_calls,
                     sdk::format_tokens(usage.input_tokens + usage.output_tokens)
                 ));
+                UpdateResult::none()
             }
             "init" => {
-                let force = arguments.first().is_some_and(|p| p == "force");
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::InitProject { force });
-                }
+                let force = arguments.first().is_some_and(|param| param == "force");
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::InitProject { force },
+                })
             }
             "session" => {
                 let args = args.clone();
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::ManageSession { args });
-                }
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::ManageSession { args },
+                })
             }
             "resume" => {
                 if let Some(id) = arguments.first() {
-                    if self.chat.input_event_tx.is_some() {
-                        self.chat
-                            .push_input_event(sdk::ChatInputEvent::ResumeSession {
-                                id: id.to_string(),
-                            });
-                    }
+                    let id = id.to_string();
+                    return UpdateResult::one(Effect::SendChatInputEvent {
+                        event: sdk::ChatInputEvent::ResumeSession { id },
+                    });
                 }
+                UpdateResult::none()
             }
             "model" if has_args => {
                 // /model <name> — 解析参数并走 SwitchModel 事件流
-                let args = args.clone();
-                if let Some(prompt) = self.handle_model_with_args(&args).await {
-                    return Some(prompt);
+                let effects = self.handle_model_with_args(&args).into_iter().collect();
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
                 }
             }
             // /memory 的 remind 子命令已被上面截胡
@@ -277,54 +240,56 @@ Build info:
                 let args = args.clone();
                 // 排除 remind 子命令（已被上面截胡）
                 let first_arg = arguments.first().map(String::as_str).unwrap_or("");
-                if first_arg != "remind"
-                    && first_arg != "reminder"
-                    && first_arg != "reminders"
-                    && self.chat.input_event_tx.is_some()
-                {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::ManageMemory { args });
+                if first_arg != "remind" && first_arg != "reminder" && first_arg != "reminders" {
+                    return UpdateResult::one(Effect::SendChatInputEvent {
+                        event: sdk::ChatInputEvent::ManageMemory { args },
+                    });
                 }
+                UpdateResult::none()
             }
-            _ => self.append_error_notice(format!("Unsupported command route: /{command}")),
+            _ => {
+                self.append_error_notice(format!("Unsupported command route: /{command}"));
+                UpdateResult::none()
+            }
         }
-        None
     }
+
     /// #391 方案 B：清空会话。
     ///
-    /// 即时清 TUI 状态（messages/output/输入框），同时经 `ChatInputEvent::Reset`
-    /// 让 runtime idle gate 统一清空 runtime messages。busy 时先 `cancel()` 使 loop
-    /// 回 idle 处理 Reset；loop 未运行时 fallback 到 `reset_runtime_state`。
+    /// 即时清 TUI 状态（messages/output/输入框），loop 运行时经
+    /// `ChatInputEvent::Reset`（SendChatInputEvent Effect）让 runtime idle gate
+    /// 统一清空 runtime messages；loop 未运行时 fallback 到 `reset_runtime_state`
+    /// 本地清理。
     ///
     /// `SessionReset` 事件回来后经 `Effect::ResetRuntimeState` 再做完整清理
     ///（sync agent_client + clear_tasks）；loop 不再被 drop，保持存活。
-    async fn clear_conversation(&mut self) {
+    fn clear_conversation(&mut self) -> Option<Effect> {
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         self.output_area.clear();
         if self.chat.input_event_tx.is_some() {
             // loop 运行中：发 Reset，由 runtime gate 统一清空。
             // cancel 通过 ProcessingHandle 管理（#567 S4），不再调 ac.cancel()。
-            self.chat.push_input_event(sdk::ChatInputEvent::Reset);
+            Some(Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::Reset,
+            })
         } else {
             // loop 未运行（如启动前）→ 直接本地清理。
-            self.reset_runtime_state().await;
+            self.reset_runtime_state();
+            None
         }
     }
 
-    /// 解析 /model <name> 参数，返回 Some(prompt) 如果需要发起 LLM 调用。
-    async fn handle_model_with_args(&mut self, args: &str) -> Option<String> {
+    /// 解析 /model <name> 参数，经 `SwitchModel` 事件流由 runtime 通过
+    /// `resolve_model_selection` 解析（#567）。
+    fn handle_model_with_args(&mut self, args: &str) -> Option<Effect> {
         let arg = args.trim();
         if arg.is_empty() {
             return None;
         }
-        // 直接将 selection 字符串转发给 runtime，由 runtime 通过
-        // `resolve_model_selection` 解析（#567）。
-        if self.chat.input_event_tx.is_some() {
-            self.chat
-                .push_input_event(sdk::ChatInputEvent::SwitchModel {
-                    selection: arg.to_string(),
-                });
-        }
-        None
+        Some(Effect::SendChatInputEvent {
+            event: sdk::ChatInputEvent::SwitchModel {
+                selection: arg.to_string(),
+            },
+        })
     }
 }

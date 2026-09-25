@@ -104,11 +104,11 @@ pub trait ToolReceiptWriter: Send + Sync {
 }
 
 pub struct AtomicBlobAcceptedInputWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobAcceptedInputWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 }
@@ -156,11 +156,11 @@ impl AcceptedInputWriter for AtomicBlobAcceptedInputWriter {
 }
 
 pub struct AtomicBlobToolReceiptWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobToolReceiptWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 }
@@ -197,11 +197,11 @@ impl ToolReceiptWriter for NoOpToolReceiptWriter {
 }
 
 pub struct AtomicBlobCanonicalSessionWriter {
-    blob: Arc<dyn storage::api::AtomicBlobPort>,
+    blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
 impl AtomicBlobCanonicalSessionWriter {
-    pub fn new(blob: Arc<dyn storage::api::AtomicBlobPort>) -> Self {
+    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
     }
 
@@ -344,6 +344,9 @@ struct CompactSource {
         crate::domain::session::RunStepCursor,
         Vec<share::message::Message>,
     )>,
+    /// 各 Step 在 `messages` 扁平序列中的起始索引（升序），供 #1688
+    /// tail token 封顶软对齐使用；来源为 canonical visible_steps。
+    step_boundaries: Vec<usize>,
     previous_summary: Option<String>,
 }
 
@@ -475,10 +478,15 @@ impl CanonicalSessionRepository {
         messages: &[share::message::Message],
         previous_summary: Option<&str>,
         context_size: usize,
+        step_boundaries: &[usize],
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
         task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
+        let tail = crate::adapters::compact_summary::CompactTail::from_context(
+            step_boundaries,
+            context_size,
+        );
         match &self.generator {
             Some(generator) => {
                 let result = compact_messages_with_llm(
@@ -489,6 +497,7 @@ impl CanonicalSessionRepository {
                     progress.as_deref(),
                     task_snapshot,
                     cancellation,
+                    tail,
                 )
                 .await;
                 result.inspect(|compacted| {
@@ -502,8 +511,13 @@ impl CanonicalSessionRepository {
                 })
             }
             None => {
-                let mut compacted = crate::adapters::compact_summary::compact_messages(messages)?;
-                let window = crate::adapters::compact_summary::compact_window(messages.len())?;
+                let mut compacted =
+                    crate::adapters::compact_summary::compact_messages(messages, tail)?;
+                let window = crate::adapters::compact_summary::compact_window_with_budget(
+                    messages,
+                    tail.step_boundaries,
+                    tail.token_cap,
+                )?;
                 let early = &messages[..window.split_point]; // allow unsafe_text_op: Vec slice
                 compacted.summary =
                     crate::adapters::compact_summary::build_summary_text(early, previous_summary);
@@ -629,8 +643,17 @@ impl CanonicalSessionRepository {
             .iter()
             .flat_map(|(_, messages)| messages.iter().cloned())
             .collect();
+        let step_boundaries = visible_steps
+            .iter()
+            .scan(0usize, |offset, (_, step_messages)| {
+                let boundary = *offset;
+                *offset += step_messages.len();
+                Some(boundary)
+            })
+            .collect();
         Ok(CompactSource {
             revision,
+            step_boundaries,
             messages,
             visible_steps,
             previous_summary: current
@@ -653,6 +676,7 @@ impl CanonicalSessionRepository {
                 &source.messages,
                 source.previous_summary.as_deref(),
                 context_size,
+                &source.step_boundaries,
                 progress,
                 task_snapshot,
                 cancellation,
@@ -727,6 +751,10 @@ impl CanonicalSessionRepository {
             start_at,
             source_revision: source.revision.get(),
         });
+        // compact 以 summary 替代窗口后，skill 注入内容不再可见，去重前提
+        // （内容仍在窗口）失效：必须随窗口一起失效记录，否则同 revision 的
+        // 再次加载会命中 AlreadyLoaded 拒绝重发，模型永远拿不回内容。
+        candidate.skill_load_records.clear();
         candidate.revision += 1;
         candidate.updated_at = crate::domain::session::now_iso();
         self.persist_candidate(&current, &candidate)

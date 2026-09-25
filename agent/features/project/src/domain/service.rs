@@ -4,12 +4,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 use crate::domain::git::GitWorktreeOps;
+use crate::domain::state::PreparedWorkspaceRestore;
 use crate::domain::state::{self as rules, WorkspaceState};
 use crate::domain::types::{
     WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
     WorkspaceRestoreError,
 };
-use crate::PreparedWorkspaceRestore;
 
 const MAX_PATH_DEPTH: usize = 64;
 
@@ -113,6 +113,7 @@ impl WorkspaceService {
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
+        worktrees_root: PathBuf,
         git: Arc<dyn GitWorktreeOps>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -121,6 +122,7 @@ impl WorkspaceService {
                 workspace_root,
                 path_base,
                 worktree_kind,
+                worktrees_root,
             )),
             control_operation: Mutex::new(()),
             git,
@@ -134,8 +136,9 @@ impl WorkspaceService {
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
             cwd.clone(),
-            cwd,
+            cwd.clone(),
             WorktreeKind::Primary,
+            cwd.join(".worktrees"),
             git,
         )
     }
@@ -149,6 +152,7 @@ impl WorkspaceService {
                 workspace_root: s.workspace_root.clone(),
                 path_base: s.path_base.clone(),
                 worktree_kind: s.worktree_kind,
+                worktrees_root: s.worktrees_root.clone(),
                 stack: Vec::new(),
             }),
             control_operation: Mutex::new(()),
@@ -255,13 +259,6 @@ impl WorkspaceControl for WorkspaceService {
         self.commit(candidate);
         Ok(())
     }
-    fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
-        let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        rules::switch_to(&mut candidate, self.git.as_ref(), path)?;
-        self.commit(candidate);
-        Ok(())
-    }
     fn enter(
         &self,
         path: Option<PathBuf>,
@@ -322,22 +319,30 @@ mod tests {
         fn probe_repository(
             &self,
             path: &Path,
-        ) -> Result<crate::domain::git::RepositoryProbe, crate::GitProbeError> {
+        ) -> Result<crate::domain::git::RepositoryProbe, crate::domain::types::GitProbeError>
+        {
+            // enter() 要求目标是 linked worktree，替身固定报告 Linked。
             Ok(crate::domain::git::RepositoryProbe::Git {
                 canonical_top_level: path.to_path_buf(),
                 canonical_common_dir: self.common_dir.clone(),
-                worktree_kind: WorktreeKind::Primary,
+                worktree_kind: WorktreeKind::Linked,
             })
         }
 
-        fn show_toplevel(&self, path: &Path) -> Result<PathBuf, crate::GitOperationError> {
+        fn show_toplevel(
+            &self,
+            path: &Path,
+        ) -> Result<PathBuf, crate::domain::types::GitOperationError> {
             assert_eq!(path, self.target);
             self.io_started.send(()).unwrap();
             self.io_release.lock().unwrap().recv().unwrap();
             Ok(self.worktree_root.clone())
         }
 
-        fn is_linked_worktree(&self, _path: &Path) -> Result<bool, crate::GitOperationError> {
+        fn is_linked_worktree(
+            &self,
+            _path: &Path,
+        ) -> Result<bool, crate::domain::types::GitOperationError> {
             Ok(false)
         }
 
@@ -347,11 +352,14 @@ mod tests {
             _path: &Path,
             _branch: &str,
             _base: &str,
-        ) -> Result<(), crate::GitOperationError> {
+        ) -> Result<(), crate::domain::types::GitOperationError> {
             Ok(())
         }
 
-        fn current_branch(&self, _path: &Path) -> Result<Option<String>, crate::GitOperationError> {
+        fn current_branch(
+            &self,
+            _path: &Path,
+        ) -> Result<Option<String>, crate::domain::types::GitOperationError> {
             Ok(None)
         }
     }
@@ -435,9 +443,10 @@ mod tests {
     }
 
     #[test]
-    fn switch_during_git_io_keeps_committed_state_readable() {
+    fn enter_during_git_io_keeps_committed_state_readable() {
         let root = unique_temp_dir("read_during_io_root");
         let target = unique_temp_dir("read_during_io_target");
+        std::fs::create_dir_all(&target).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let git = Arc::new(BlockingGit {
@@ -451,7 +460,7 @@ mod tests {
         let switching = {
             let workspace = workspace.clone();
             let target = target.clone();
-            thread::spawn(move || workspace.switch_to(target))
+            thread::spawn(move || workspace.enter(Some(target), Some("branch".to_string()), None))
         };
 
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -466,7 +475,7 @@ mod tests {
             .expect("Git I/O 期间 state lock 不应阻塞只读访问");
         assert_eq!(observed, root);
         release_tx.send(()).unwrap();
-        assert_eq!(switching.join().unwrap(), Ok(()));
+        assert!(switching.join().unwrap().is_ok());
         reader.join().unwrap();
         assert_eq!(workspace.current_path_base(), target);
     }
@@ -475,6 +484,7 @@ mod tests {
     fn concurrent_writes_share_one_control_operation_lock() {
         let root = unique_temp_dir("serialized_root");
         let target = unique_temp_dir("serialized_target");
+        std::fs::create_dir_all(&target).unwrap();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let git = Arc::new(BlockingGit {
@@ -488,7 +498,7 @@ mod tests {
         let first = {
             let workspace = workspace.clone();
             let target = target.clone();
-            thread::spawn(move || workspace.switch_to(target))
+            thread::spawn(move || workspace.enter(Some(target), Some("branch".to_string()), None))
         };
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
@@ -510,7 +520,7 @@ mod tests {
         );
 
         release_tx.send(()).unwrap();
-        assert_eq!(first.join().unwrap(), Ok(()));
+        assert!(first.join().unwrap().is_ok());
         second_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(second.join().unwrap(), Ok(()));
         assert_eq!(workspace.current_path_base(), target);
@@ -559,6 +569,7 @@ mod tests {
             root.to_path_buf(),
             root.to_path_buf(),
             WorktreeKind::Primary,
+            root.join(".worktrees"),
             Arc::new(git),
         )
     }

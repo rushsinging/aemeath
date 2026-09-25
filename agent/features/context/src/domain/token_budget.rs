@@ -88,13 +88,41 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 }
 
 // ---- Autocompact threshold constants ----
-// effective = context_size - reserved_context(2%) - max_output
+// effective = context_size - reserved_context(2%) - clamped_max_output(≤25% 窗口)
 // threshold = effective * 0.8
+
+/// max_output 预留占窗口的比例上限（#1626）。
+///
+/// 未设护栏时 `max_output >= 窗口×98%`（如 8k 窗口 + 默认 8192 output）
+/// 会让 effective 归零、threshold 归零，任意一轮对话即恒触发
+/// auto-compact，形成 compact 风暴直至熔断。预留 clamp 到窗口 25% 后
+/// threshold 永不为 0；大窗口常规配置（如 200k 窗口 + 16k output）不受影响。
+pub const MAX_OUTPUT_WINDOW_RATIO_CAP: usize = 4;
+
+/// clamp 后 effective window 仍低于此值时判定窗口配置错误（#1626）。
+///
+/// 低于该值的可用窗口连 system prompt 都无法稳定容纳，auto-compact
+/// 只会风暴；此时应禁用 auto-compact 并告警（见 `MisconfiguredWindow`）。
+pub const MIN_EFFECTIVE_WINDOW: usize = 1_024;
+
+/// max_output 预留 clamp 到窗口比例上限（#1626 短窗口护栏）。
+pub fn clamped_max_output(context_size: usize, max_output_tokens: usize) -> usize {
+    max_output_tokens
+        .min(context_size / MAX_OUTPUT_WINDOW_RATIO_CAP)
+        .max(1)
+}
 
 /// Reserved context for guidance and compaction summary.
 /// 预留上下文预算：context window 的 2%。
 pub fn summary_budget(context_size: usize) -> usize {
     context_size / 50
+}
+
+/// Compact 保留 tail（recent messages）的 token 预算封顶：context window
+/// 的 5%（#1688）。与 L1 `scaled_for_context_window` 同路子——大窗口允许
+/// 更大 tail 预算，小窗口自动收紧；条数 10% 候选超过该预算时向内收缩。
+pub fn compact_tail_token_cap(context_size: usize) -> usize {
+    context_size / 20
 }
 
 /// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。
@@ -118,9 +146,11 @@ pub fn compact_chunk_target_tokens(context_size: usize) -> usize {
 }
 
 /// Calculate the effective context window size (after reserving output tokens
-/// and summary budget).
+/// and summary budget). Output reservation is clamped to at most 25% of the
+/// window (#1626) so the effective window never collapses to zero.
 pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
-    let reserved = summary_budget(context_size) + max_output_tokens;
+    let reserved =
+        summary_budget(context_size) + clamped_max_output(context_size, max_output_tokens);
     context_size.saturating_sub(reserved)
 }
 

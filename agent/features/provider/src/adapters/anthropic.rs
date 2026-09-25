@@ -60,15 +60,33 @@ impl AnthropicProvider {
     ) -> Self {
         let base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
         let model = model.expect("Provider construction 必须传入已解析模型");
+        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(&base_url));
+        Self::from_shared_http(
+            api_key,
+            Some(base_url),
+            Some(model),
+            timeout_secs,
+            user_agent,
+            http,
+        )
+    }
+
+    /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
+    /// `ProviderTransport` 持有，本结构只保存引用与展示字段。
+    pub(crate) fn from_shared_http(
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        timeout_secs: u64,
+        user_agent: String,
+        http: reqwest::Client,
+    ) -> Self {
         Self {
             api_key,
-            base_url,
-            model,
+            base_url: base_url.expect("Provider construction 必须传入已解析 base URL"),
+            model: model.expect("Provider construction 必须传入已解析模型"),
             user_agent,
-            http: reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
-                .build()
-                .expect("failed to create HTTP client"),
+            http,
             timeout_secs,
         }
     }
@@ -77,10 +95,8 @@ impl AnthropicProvider {
     #[allow(dead_code)]
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
-        self.http = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
-            .build()
-            .expect("failed to create HTTP client with custom timeout");
+        self.http =
+            crate::adapters::transport::build_http_client_for_endpoint(Some(&self.base_url));
         self
     }
 

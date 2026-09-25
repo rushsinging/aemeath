@@ -170,6 +170,7 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
             None,
             None,
             cancel,
+            CompactTail::unbounded(),
         )
         .await
         .expect("compact must produce a result");
@@ -294,6 +295,7 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact must produce a result");
@@ -355,6 +357,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -372,6 +375,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -392,7 +396,7 @@ fn compact_execution_does_not_repeat_threshold_decision() {
         .map(|index| Message::user(format!("message-{index}")))
         .collect::<Vec<_>>();
 
-    let result = compact_messages(&messages);
+    let result = compact_messages(&messages, CompactTail::unbounded());
 
     assert!(
         result.is_some(),
@@ -467,6 +471,22 @@ fn compact_prompts_require_typed_json_contracts() {
     assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
     assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
     assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
+    // #1623：目标表达与 kind 位置必须显式约束，且修复不得降级 kind 语义。
+    assert!(COMPACT_PROMPT.contains("kind=objective"));
+    assert!(COMPACT_PROMPT.contains("never downgrade an objective"));
+    let repair_request = build_typed_output_repair_request(
+        "map",
+        "{\"facts\":[]}",
+        &crate::domain::CompactGenerationFailure::new(
+            crate::domain::CompactGenerationFailureKind::InvalidSummary,
+            "unknown field `resume_candidate`",
+        ),
+    );
+    let repair_text = repair_request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+    assert!(repair_text.contains("MUST NOT change a fact's kind semantics"));
     for prompt in [COMPACT_PROMPT, COMPACT_REFRESH_PROMPT] {
         assert!(!prompt.contains("<summary>"));
         assert!(!prompt.contains("## Immutable Constraints"));
@@ -707,6 +727,7 @@ async fn second_compact_fallback_preserves_previous_summary() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("second compact should run");
@@ -741,6 +762,7 @@ async fn fallback_never_embeds_oversized_previous_summary_verbatim() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -819,6 +841,7 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("multi-chunk facts should be reduced locally");
@@ -898,6 +921,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("map-reduce compact should run");
@@ -991,6 +1015,7 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1049,6 +1074,7 @@ async fn compact_with_generator_uses_llm_summary() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1100,6 +1126,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await;
 
@@ -1139,6 +1166,7 @@ async fn compact_falls_back_when_generator_errors() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should still run with fallback");
@@ -1254,6 +1282,7 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1313,6 +1342,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         Some(&progress),
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1403,6 +1433,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         Some(&progress),
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await
     .expect("compact should run");
@@ -1479,6 +1510,7 @@ async fn empty_single_map_retries_once_with_original_history() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("empty map should retry with original history");
@@ -1549,6 +1581,7 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("one failed chunk should not discard successful facts");
@@ -1601,6 +1634,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("task companion must not invalidate previous checkpoint");
@@ -1679,6 +1713,7 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("partial fallback must preserve previous protected semantics");
@@ -1733,6 +1768,7 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("repair should preserve compact");
@@ -1792,6 +1828,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("local reduce should preserve compact");
@@ -1873,6 +1910,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("provider failure during refresh must use deterministic degradation");
@@ -1961,6 +1999,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("repair should preserve compact");
@@ -2010,6 +2049,7 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         None,
         None,
         &cancel,
+        CompactTail::unbounded(),
     )
     .await;
 
@@ -2048,6 +2088,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         None,
         None,
         &CancellationToken::new(),
+        CompactTail::unbounded(),
     )
     .await
     .expect("exhausted repair should use local fallback");
@@ -2115,4 +2156,246 @@ fn fallback_preserves_markdown_control_lines_without_panicking() {
     assert!(summary.contains("来源与身份"));
     assert!(summary.contains("用户正文中的示例"));
     assert_eq!(summary.matches("\n## Current Task State\n").count(), 0);
+}
+
+// ── #1623：Map 阶段遗漏 objective 时的主用户目标兜底 ──
+
+#[test]
+fn latest_main_user_request_prefers_last_real_user_message() {
+    let messages = vec![
+        Message::user("先看仓库状态"),
+        Message::system_generated_user("system reminder must be ignored"),
+        Message::user("Investigate the staging steer chat-ordering bug"),
+    ];
+
+    assert_eq!(
+        latest_main_user_request(&messages).as_deref(),
+        Some("Investigate the staging steer chat-ordering bug")
+    );
+}
+
+#[test]
+fn latest_main_user_request_ignores_non_user_messages_and_sources() {
+    let messages = vec![
+        Message::system_generated_user("system reminder"),
+        assistant_text("assistant report"),
+    ];
+
+    assert_eq!(latest_main_user_request(&messages), None);
+}
+
+fn assistant_text(text: impl Into<String>) -> Message {
+    Message {
+        role: Role::Assistant,
+        content: vec![ContentBlock::Text { text: text.into() }],
+        metadata: None,
+    }
+}
+
+#[test]
+fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
+    let long_request = "x".repeat(500);
+    let messages = vec![Message::user("   "), Message::user(long_request)];
+
+    let extracted = latest_main_user_request(&messages).expect("must extract the long request");
+
+    assert_eq!(extracted.chars().count(), 200);
+}
+
+/// 构造只包含 working_set 的 facts，复现真实缺陷中 map 阶段遗漏 objective 的输出。
+struct FactsWithoutObjective;
+
+#[async_trait::async_trait]
+impl CompactGenerator for FactsWithoutObjective {
+    async fn generate(
+        &self,
+        request: Vec<Message>,
+        _cancel: &CancellationToken,
+    ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        let text = request
+            .first()
+            .map(Message::text_content)
+            .unwrap_or_default();
+        if text.contains("<unprotected_checkpoint_details>") {
+            return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+        }
+        if text.contains("<compact_facts>") {
+            return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+        }
+        Ok(CompactGenerationOutput::from(
+            r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
+        ))
+    }
+}
+
+fn messages_with_leading_objective(objective: &str) -> Vec<Message> {
+    let mut messages = vec![Message::user(objective)];
+    for index in 0..24 {
+        messages.push(assistant_text(format!("history turn {index}")));
+    }
+    messages
+}
+
+/// #1623：facts 遗漏 objective 时，最终 checkpoint 仍保留主用户目标。
+#[tokio::test]
+async fn compact_keeps_main_user_objective_when_facts_omit_it() {
+    let objective = "Investigate the staging steer chat-ordering bug for the Studio project";
+    let result = compact_messages_with_llm(
+        &messages_with_leading_objective(objective),
+        None,
+        200_000,
+        Some(&FactsWithoutObjective),
+        None,
+        None,
+        &CancellationToken::new(),
+        CompactTail::unbounded(),
+    )
+    .await
+    .expect("compact must produce a result");
+
+    assert!(
+        result
+            .summary
+            .contains(&format!("## Current Objective\n- {objective}")),
+        "目标必须被兜底保留，实际 summary 摘要：{}",
+        result.summary.chars().take(320).collect::<String>()
+    );
+    assert!(!result
+        .summary
+        .contains("Revalidate the latest user objective"));
+    assert!(result.summary.contains("Continue —"));
+}
+
+/// #1623：上一版 checkpoint 的占位符目标不得向下传播。
+#[tokio::test]
+async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user_request() {
+    let placeholder_previous = VALID_CHECKPOINT
+        .replace(
+            "- Continue the compact checkpoint work.",
+            "- Revalidate the latest user objective before continuing.",
+        )
+        .replace(
+            "Continue — checkpoint normalization remains.",
+            "Waiting for User — no active main-user objective could be established.",
+        );
+    let objective = "Investigate the staging steer chat-ordering bug for the Studio project";
+
+    let result = compact_messages_with_llm(
+        &messages_with_leading_objective(objective),
+        Some(&placeholder_previous),
+        200_000,
+        Some(&FactsWithoutObjective),
+        None,
+        None,
+        &CancellationToken::new(),
+        CompactTail::unbounded(),
+    )
+    .await
+    .expect("compact must produce a result");
+
+    assert!(
+        result
+            .summary
+            .contains(&format!("## Current Objective\n- {objective}")),
+        "占位符不得传播，实际 summary 摘要：{}",
+        result.summary.chars().take(320).collect::<String>()
+    );
+    assert!(!result
+        .summary
+        .contains("Revalidate the latest user objective"));
+    assert!(result.summary.contains("Continue —"));
+}
+
+// ── #1688：compact tail token 封顶（软阶段对齐 Step 边界） ─────────────
+
+/// 构造约 `tokens` 估算 token 的 user 文本消息（ASCII ~4 chars/token）。
+fn sized_user_message(label: &str, tokens: usize) -> Message {
+    let filler = "x".repeat(tokens.saturating_sub(1) * 4);
+    Message::user(format!("{label}{filler}"))
+}
+
+fn budget_boundaries(entries: &[usize]) -> Vec<usize> {
+    entries.to_vec()
+}
+
+#[test]
+fn token_cap_aligns_tail_start_to_recent_step_boundary() {
+    // 50 条各 ~100 tok；条数 10% 候选起点 45；存在 ≥45 的 Step 边界 46，
+    // 预算内 → 对齐到 46：保留更少但完整 Step，NEVER 保留多于条数候选。
+    let messages: Vec<Message> = (0..50)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let boundaries = budget_boundaries(&[0, 10, 20, 42, 46]);
+    let window = compact_window_with_budget(&messages, &boundaries, 500).expect("budget window");
+    assert_eq!(window.split_point, 46);
+    assert_eq!(window.keep_recent, 4);
+    assert!(boundaries.contains(&window.split_point));
+}
+
+#[test]
+fn token_cap_shrinks_inside_step_when_boundary_tail_exceeds_soft_cap() {
+    // 60 条各 ~100 tok，Step 边界粒度 20 条；最小完整 Step 尾也超软上限
+    // （cap 480 / soft 528），退到条数候选内逐条收缩，允许落在 Step 内部
+    // 但起点必须避开孤儿 ToolResult（此处无 tool 消息，落在 55）。
+    let messages: Vec<Message> = (0..60)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let boundaries = budget_boundaries(&[0, 20, 40]);
+    let window = compact_window_with_budget(&messages, &boundaries, 480).expect("budget window");
+    // 条数候选起点 54（600 tok）超 soft 528；55（500 tok）≤ 528 且 keep=5 ≥ 4。
+    assert_eq!(window.split_point, 55);
+    assert_eq!(window.keep_recent, 5);
+}
+
+#[test]
+fn token_cap_never_splits_tool_pair_at_tail_start() {
+    // 起点收缩落在 ToolResult 上时必须后移过该孤儿（其 ToolUse 已被切走，
+    // 整对进 summary），NEVER 让 Provider 收到无 ToolUse 的 tool_result。
+    // 70 条：0..63 普通（~100 tok）；63=长 ToolUse（150 tok）；
+    // 64=短 ToolResult（30 tok）；65..=普通。cap 500 / soft 550：
+    // 条数候选起点 63（630 tok）超 soft → 逐条收缩到 64（530 ≤ 550）；
+    // 64 是孤儿 ToolResult → 后移到 65。
+    let mut messages: Vec<Message> = (0..63)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    messages.push(Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::ToolUse {
+            id: "tool-pair-1".to_string(),
+            name: "Bash".to_string(),
+            input: serde_json::json!({"goal": "demo", "padding": "p".repeat(600)}),
+        }],
+        metadata: None,
+    });
+    messages.push(Message {
+        role: share::message::Role::User,
+        content: vec![share::message::ContentBlock::ToolResult {
+            tool_use_id: "tool-pair-1".to_string(),
+            content: serde_json::Value::String("ok".into()),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    });
+    for index in 65..70 {
+        messages.push(sized_user_message(&format!("tail{index}-"), 100));
+    }
+    let window = compact_window_with_budget(&messages, &[], 500).expect("budget window");
+    assert_eq!(window.split_point, 65);
+    assert_eq!(window.keep_recent, 5);
+    assert!(!messages[window.split_point]
+        .content
+        .iter()
+        .any(|block| block.is_tool_result()));
+}
+
+#[test]
+fn token_cap_budget_inside_candidate_count_keeps_count_semantics() {
+    // 预算充裕（不构成约束）时保持条数 10% 语义；无边界可对齐则起点不变。
+    let messages: Vec<Message> = (0..50)
+        .map(|index| sized_user_message(&format!("m{index}-"), 100))
+        .collect();
+    let window = compact_window_with_budget(&messages, &[], 100_000).expect("budget window");
+    assert_eq!(window.split_point, 45);
+    assert_eq!(window.keep_recent, 5);
 }

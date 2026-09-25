@@ -139,7 +139,7 @@ pub(crate) fn make_agent(
         context: crate::application::context::coordination::ContextCoordinator::new(
             runtime_context.context(),
         ),
-        session_id: context::domain::SessionId::new(session_id),
+        session_id: context::SessionId::new(session_id),
         ctx: tools::ToolExecutionContext::new(
             tools::ExecutionScope::builder(
                 run_id.to_string(),
@@ -347,6 +347,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
             self.runtime_context.hooks_ref(),
             self.runtime_context.activities().as_ref(),
             step_id,
+            self.runtime_context.main_session_id(),
             cancel,
             call_count,
             run_step,

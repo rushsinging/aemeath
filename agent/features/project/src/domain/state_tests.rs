@@ -5,6 +5,19 @@ fn st(cwd: &str) -> WorkspaceState {
     WorkspaceState::new(PathBuf::from(cwd))
 }
 
+fn st_with_worktrees_root(cwd: &str, worktrees_root: &str) -> WorkspaceState {
+    WorkspaceState::from_verified(
+        ProjectIdentity {
+            initial_cwd: cwd.to_string(),
+            git_common_dir: Some(format!("{cwd}/.git")),
+        },
+        PathBuf::from(cwd),
+        PathBuf::from(cwd),
+        WorktreeKind::Primary,
+        PathBuf::from(worktrees_root),
+    )
+}
+
 fn unique_temp_dir(name: &str) -> PathBuf {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -56,6 +69,7 @@ fn exit_pops_and_restores() {
         root.clone(),
         root.clone(),
         WorktreeKind::Linked,
+        root.join(".worktrees"),
     );
     s.stack.push(WorkspaceFrame {
         path_base: root.clone(),
@@ -85,6 +99,7 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
         root.clone(),
         root.clone(),
         WorktreeKind::Linked,
+        root.join(".worktrees"),
     );
     state.stack.push(WorkspaceFrame {
         path_base: noncanonical,
@@ -101,7 +116,7 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -121,6 +136,7 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
         root.clone(),
         root.clone(),
         WorktreeKind::Linked,
+        root.join(".worktrees"),
     );
     state.stack.push(WorkspaceFrame {
         path_base: root.clone(),
@@ -137,7 +153,7 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -156,6 +172,7 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
         root.clone(),
         root.clone(),
         WorktreeKind::Linked,
+        root.join(".worktrees"),
     );
     state.stack.push(WorkspaceFrame {
         path_base: root.clone(),
@@ -172,7 +189,7 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -189,6 +206,7 @@ fn change_directory_canonicalizes_and_keeps_root() {
         root.clone(),
         root.clone(),
         WorktreeKind::NonGit,
+        root.join(".worktrees"),
     );
     change_directory(&mut s, sub.clone()).unwrap();
     assert_eq!(s.path_base, sub.canonicalize().unwrap());
@@ -264,7 +282,7 @@ fn prepare_restore_success_does_not_mutate_live_state() {
     let before_root = live.workspace_root.clone();
     let before_identity = live.project_identity.clone();
 
-    let prepared: crate::PreparedWorkspaceRestore =
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
         prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
 
     // live state（不可变借用）必须原样保留。
@@ -512,7 +530,7 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
     assert_eq!(
         result,
         Err(WorkspaceError::GitOperationFailed(
-            crate::GitOperationError::CommandFailed { exit_code: None }
+            crate::domain::types::GitOperationError::CommandFailed { exit_code: None }
         ))
     );
     assert_eq!(state.path_base, PathBuf::from("/repo"));
@@ -558,223 +576,6 @@ fn enter_rejects_nested_when_in_worktree() {
 }
 
 #[test]
-fn switch_to_rejects_nonexistent_path() {
-    let git = FakeGit::default();
-    let mut s = st("/repo");
-    let result = switch_to(&mut s, &git, PathBuf::from("/does/not/exist/xyz"));
-    assert!(
-        matches!(result, Err(WorkspaceError::PathNotFound(_))),
-        "expected PathNotFound, got {:?}",
-        result
-    );
-    // State must remain unchanged.
-    assert_eq!(s.path_base, PathBuf::from("/repo"));
-    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
-    assert!(s.stack.is_empty());
-}
-
-#[test]
-fn switch_to_rejects_cross_repo() {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let tmp = std::env::temp_dir().join(format!("aemeath_switch_cross_{}", nanos));
-    std::fs::create_dir_all(&tmp).unwrap();
-    let canonical_tmp = tmp.canonicalize().unwrap();
-
-    let mut git = FakeGit::default();
-    // Target: toplevel = /other-repo; common_dir for current root vs other root differ.
-    git.toplevel
-        .insert(canonical_tmp.clone(), PathBuf::from("/other-repo"));
-    git.common_dir
-        .insert(PathBuf::from("/repo"), PathBuf::from("/repo/.git"));
-    git.common_dir.insert(
-        PathBuf::from("/other-repo"),
-        PathBuf::from("/other-repo/.git"),
-    );
-
-    let mut s = st("/repo");
-    let result = switch_to(&mut s, &git, canonical_tmp.clone());
-    assert!(
-        matches!(result, Err(WorkspaceError::RepoMismatch { .. })),
-        "expected RepoMismatch, got {:?}",
-        result
-    );
-    // State must remain unchanged.
-    assert_eq!(s.path_base, PathBuf::from("/repo"));
-    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
-    assert!(s.stack.is_empty());
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
-#[test]
-fn switch_to_succeeds_same_repo() {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    let tmp = std::env::temp_dir().join(format!("aemeath_switch_same_{}", nanos));
-    std::fs::create_dir_all(&tmp).unwrap();
-    let canonical_tmp = tmp.canonicalize().unwrap();
-
-    let worktree_root = PathBuf::from("/repo/wt");
-    let common = PathBuf::from("/repo/.git");
-
-    let mut git = FakeGit::default();
-    git.toplevel
-        .insert(canonical_tmp.clone(), worktree_root.clone());
-    git.common_dir
-        .insert(PathBuf::from("/repo"), common.clone());
-    git.common_dir.insert(worktree_root.clone(), common.clone());
-    git.worktrees.insert(canonical_tmp.clone());
-
-    let mut s = st("/repo");
-    switch_to(&mut s, &git, canonical_tmp.clone()).unwrap();
-
-    assert_eq!(s.path_base, canonical_tmp, "path_base should be canonical");
-    assert_eq!(
-        s.workspace_root, worktree_root,
-        "workspace_root should be worktree root"
-    );
-    assert!(s.stack.is_empty(), "stack must not be pushed");
-
-    let _ = std::fs::remove_dir_all(&tmp);
-}
-
-#[test]
-fn switch_to_from_linked_back_to_primary_clears_stale_stack() {
-    // 复现：ExitWorktree{path} 经 switch_to 从 linked worktree 切回 primary 时，
-    // 残留的 linked 时期栈帧违反「stack 非空 ⟺ Linked」不变量，导致 resume 时
-    // prepare_restore 返回 InvalidStackShape。switch_to MUST 清空 stack。
-    let root = unique_temp_dir("switch_linked_to_primary_root");
-    let common = root.join(".git");
-    let worktree_path = root.join(".worktrees").join("feat");
-    std::fs::create_dir_all(&worktree_path).unwrap();
-    let worktree_canonical = worktree_path.canonicalize().unwrap();
-
-    let mut git = FakeGit::default();
-    git.common_dir.insert(root.clone(), common.clone());
-    git.common_dir
-        .insert(worktree_canonical.clone(), common.clone());
-    git.toplevel.insert(root.clone(), root.clone());
-    git.toplevel
-        .insert(worktree_canonical.clone(), worktree_canonical.clone());
-    git.worktrees.insert(worktree_canonical.clone());
-
-    // 初始：primary，在 main worktree。
-    let mut state = WorkspaceState {
-        project_identity: ProjectIdentity {
-            initial_cwd: root.display().to_string(),
-            git_common_dir: Some(common.display().to_string()),
-        },
-        workspace_root: root.clone(),
-        path_base: root.clone(),
-        worktree_kind: WorktreeKind::Primary,
-        stack: Vec::new(),
-    };
-
-    // enter linked worktree → stack 含一个 Primary 栈帧，kind=Linked。
-    enter(
-        &mut state,
-        &git,
-        Some(worktree_canonical.clone()),
-        Some("feat".to_string()),
-        None,
-    )
-    .expect("enter linked worktree");
-    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
-    assert_eq!(state.stack.len(), 1);
-
-    // switch_to 切回 primary worktree 根。
-    switch_to(&mut state, &git, root.clone()).expect("switch to primary");
-
-    // 不变量：切回 Primary 后 stack MUST 为空。
-    assert_eq!(
-        state.worktree_kind,
-        WorktreeKind::Primary,
-        "kind should be Primary after switch back"
-    );
-    assert_eq!(state.workspace_root, root);
-    assert_eq!(state.path_base, root);
-    assert!(
-        state.stack.is_empty(),
-        "stack MUST be cleared when switching back to Primary"
-    );
-
-    // snapshot 后 prepare_restore MUST 成功（不变量满足）。
-    let snapshot_dto = snapshot(&state);
-    let live = st("/repo");
-    let _prepared = prepare_restore(&live, &snapshot_dto, &git)
-        .expect("snapshot with cleared stack must restore successfully");
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
-fn switch_to_from_linked_to_another_linked_clears_stale_stack() {
-    // switch_to 在 linked 之间切换也 MUST 清空残留栈帧（不留多余栈帧）。
-    let root = unique_temp_dir("switch_linked_to_linked_root");
-    let common = root.join(".git");
-    let wt_a = root.join(".worktrees").join("a");
-    let wt_b = root.join(".worktrees").join("b");
-    std::fs::create_dir_all(&wt_a).unwrap();
-    std::fs::create_dir_all(&wt_b).unwrap();
-    let canonical_a = wt_a.canonicalize().unwrap();
-    let canonical_b = wt_b.canonicalize().unwrap();
-
-    let mut git = FakeGit::default();
-    git.common_dir.insert(root.clone(), common.clone());
-    git.common_dir.insert(canonical_a.clone(), common.clone());
-    git.common_dir.insert(canonical_b.clone(), common.clone());
-    git.toplevel.insert(root.clone(), root.clone());
-    git.toplevel
-        .insert(canonical_a.clone(), canonical_a.clone());
-    git.toplevel
-        .insert(canonical_b.clone(), canonical_b.clone());
-    git.worktrees.insert(canonical_a.clone());
-    git.worktrees.insert(canonical_b.clone());
-
-    let mut state = WorkspaceState {
-        project_identity: ProjectIdentity {
-            initial_cwd: root.display().to_string(),
-            git_common_dir: Some(common.display().to_string()),
-        },
-        workspace_root: root.clone(),
-        path_base: root.clone(),
-        worktree_kind: WorktreeKind::Primary,
-        stack: Vec::new(),
-    };
-
-    enter(
-        &mut state,
-        &git,
-        Some(canonical_a.clone()),
-        Some("a".to_string()),
-        None,
-    )
-    .expect("enter linked worktree a");
-    assert_eq!(state.stack.len(), 1);
-
-    // switch_to 从 a 切到 b（仍为 linked）。
-    switch_to(&mut state, &git, canonical_b.clone()).expect("switch to linked b");
-
-    assert_eq!(state.worktree_kind, WorktreeKind::Linked);
-    assert_eq!(state.path_base, canonical_b);
-    assert!(
-        state.stack.is_empty(),
-        "switch_to MUST not leave stale stack frames"
-    );
-
-    let _ = std::fs::remove_dir_all(&root);
-}
-
-#[test]
 fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_target() {
     let target = unique_temp_dir("non_git_target");
     let mut git = FakeGit::default();
@@ -787,7 +588,7 @@ fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_t
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     let _ = std::fs::remove_dir_all(target);
@@ -812,8 +613,47 @@ fn resolve_worktree_path_treats_empty_path_as_missing() {
 
     assert_eq!(
         resolved,
-        PathBuf::from("/repo/.worktrees/feature-path-contract")
+        PathBuf::from("/repo/.worktrees/repo/feature-path-contract")
     );
+}
+
+#[test]
+fn resolve_worktree_path_derives_from_injected_worktrees_root_with_repo_segment() {
+    let state = st_with_worktrees_root("/work/aemeath", "/wt/root");
+
+    let resolved = resolve_worktree_path(&state, None, Some("feature/parser fix")).unwrap();
+
+    assert_eq!(
+        resolved,
+        PathBuf::from("/wt/root/aemeath/feature-parser-fix")
+    );
+}
+
+#[test]
+fn resolve_worktree_path_sanitizes_repo_segment_of_workspace_root() {
+    let state = st_with_worktrees_root("/work/my repo!", "/wt/root");
+
+    let resolved = resolve_worktree_path(&state, None, Some("feature/x")).unwrap();
+
+    assert_eq!(resolved, PathBuf::from("/wt/root/my-repo/feature-x"));
+}
+
+#[test]
+fn resolve_worktree_path_falls_back_to_workspace_segment_when_root_has_no_name() {
+    let state = st_with_worktrees_root("/", "/wt/root");
+
+    let resolved = resolve_worktree_path(&state, None, Some("feature/x")).unwrap();
+
+    assert_eq!(resolved, PathBuf::from("/wt/root/workspace/feature-x"));
+}
+
+#[test]
+fn resolve_worktree_path_keeps_explicit_relative_path_semantics() {
+    let state = st_with_worktrees_root("/repo", "/wt/root");
+
+    let resolved = resolve_worktree_path(&state, Some(PathBuf::from("wt/feat")), None).unwrap();
+
+    assert_eq!(resolved, PathBuf::from("/repo/wt/feat"));
 }
 
 #[test]
@@ -831,7 +671,11 @@ fn resolve_worktree_base_preserves_explicit_value() {
 #[test]
 fn enter_with_empty_path_derives_target_and_forwards_default_base() {
     let root = unique_temp_dir("enter_empty_path");
-    let expected_target = root.join(".worktrees/feature-empty-path");
+    let repo_dir = root.file_name().unwrap().to_string_lossy().to_string();
+    let expected_target = root
+        .join(".worktrees")
+        .join(&repo_dir)
+        .join("feature-empty-path");
     let mut state = WorkspaceState::new(root.clone());
     let git = FakeGit::default();
 
@@ -861,7 +705,11 @@ fn enter_with_empty_path_derives_target_and_forwards_default_base() {
 fn enter_with_blank_base_forwards_default_base() {
     for (case, base) in [("empty", ""), ("whitespace", " \t\n ")] {
         let root = unique_temp_dir(&format!("enter_blank_base_{case}"));
-        let expected_target = root.join(format!(".worktrees/feature-{case}"));
+        let repo_dir = root.file_name().unwrap().to_string_lossy().to_string();
+        let expected_target = root
+            .join(".worktrees")
+            .join(&repo_dir)
+            .join(format!("feature-{case}"));
         let mut state = WorkspaceState::new(root.clone());
         let git = FakeGit::default();
 
@@ -890,7 +738,11 @@ fn enter_with_blank_base_forwards_default_base() {
 #[test]
 fn enter_with_explicit_base_forwards_value_unchanged() {
     let root = unique_temp_dir("enter_explicit_base");
-    let expected_target = root.join(".worktrees/feature-explicit");
+    let repo_dir = root.file_name().unwrap().to_string_lossy().to_string();
+    let expected_target = root
+        .join(".worktrees")
+        .join(&repo_dir)
+        .join("feature-explicit");
     let mut state = WorkspaceState::new(root.clone());
     let git = FakeGit::default();
 
@@ -1127,8 +979,9 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_turns_foreign_rep
         .insert(sub.clone(), PathBuf::from("/foreign/.git"));
 
     let mut live = st("/repo");
-    let prepared: crate::PreparedWorkspaceRestore = prepare_restore(&live, &dto, &git)
-        .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
+        prepare_restore(&live, &dto, &git)
+            .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
     commit_restore(&mut live, prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());
     assert_eq!(live.workspace_root, root.canonicalize().unwrap());
@@ -1146,7 +999,7 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_probe_fails() {
         .insert(missing.canonicalize().unwrap_or(missing.clone()));
 
     let mut live = st("/repo");
-    let prepared: crate::PreparedWorkspaceRestore =
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
         prepare_restore(&live, &dto, &git).expect("path_base 探测失败时必须回退 workspace_root");
     commit_restore(&mut live, prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());

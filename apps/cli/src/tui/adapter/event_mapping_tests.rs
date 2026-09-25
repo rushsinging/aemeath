@@ -256,6 +256,36 @@ fn session_message_state_maps_count_and_revision_without_messages() {
     ));
 }
 
+/// #1626：sdk 新增的 misconfigured_window 决策来源必须在 TUI 边界无损映射，
+/// 不能被覆写或回落成其他来源（跨层链路中间层覆盖）。
+#[test]
+fn runtime_status_maps_misconfigured_window_source_without_loss() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::RuntimeStatusChanged {
+        status: Box::new(sdk::RuntimeStatusView {
+            session_id: "session".to_string(),
+            revision: 2,
+            heartbeat_sequence: 0,
+            context_budget: sdk::ContextBudgetView {
+                context_size: 512,
+                effective_window: 374,
+                decision_token_count: 120,
+                threshold: 299,
+                usage_permille: 320,
+                compaction_needed: false,
+                source: sdk::ContextDecisionSourceView::MisconfiguredWindow,
+            },
+        }),
+    });
+
+    assert!(matches!(
+        mapped,
+        SdkEventMapping::Runtime(TuiRuntimeEvent::RuntimeStatusChanged { status })
+            if status.context_budget.source
+                == crate::tui::adapter::runtime_status::TuiContextDecisionSource::MisconfiguredWindow
+                && !status.context_budget.compaction_needed
+    ));
+}
+
 #[test]
 fn hook_notice_maps_point_kind_and_complete_payload() {
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::HookNotice {
@@ -626,6 +656,7 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
         content: content.clone(),
         is_error: false,
         images: Vec::new(),
+        duration_ms: None,
     });
 
     assert!(matches!(
@@ -639,6 +670,36 @@ fn tool_result_projection_keeps_bounded_payload_and_blob_reason() {
             && projected.pointer("/blob/reason").and_then(serde_json::Value::as_str)
                 == Some("write_failed")
     ));
+}
+
+/// #1666：SDK `ChatEvent::ToolResult` 的 duration_ms 必须透传到
+/// `TuiRuntimeEvent::ToolResult`，NEVER 丢弃。
+#[test]
+fn tool_result_maps_duration_ms_to_tui() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ToolResult {
+        context: sdk::ChatEventContext::new(
+            sdk::ChatId::new("chat-duration"),
+            sdk::ChatRunId::new("turn-duration"),
+        ),
+        id: sdk::ToolCallId::new("runtime-call-duration"),
+        provider_id: "provider-call".to_string(),
+        tool_name: "Bash".to_string(),
+        output: "ok".to_string(),
+        content: serde_json::json!({ "text": "ok" }),
+        is_error: false,
+        images: Vec::new(),
+        duration_ms: Some(1_240),
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ToolResult { duration_ms, .. }) = mapped else {
+        panic!("expected TUI tool result event");
+    };
+
+    assert_eq!(
+        duration_ms,
+        Some(1_240),
+        "TUI ToolResult 必须保留 supervisor 测量的耗时"
+    );
 }
 
 #[test]
@@ -773,6 +834,54 @@ fn interaction_request_user_questions_keep_option_descriptions() {
 }
 
 #[test]
+fn interaction_request_keeps_multiple_questions_in_order() {
+    let request = sdk::InteractionRequest {
+        id: sdk::InteractionRequestId::new("request-multi"),
+        run_id: sdk::RunId::new("run-1"),
+        tool_call_id: Some("call-1".to_string()),
+        body: sdk::InteractionRequestBody::UserQuestions(vec![
+            sdk::UserQuestion {
+                prompt: "first".to_string(),
+                options: vec![sdk::OptionItem::new("a", "first choice")],
+                allow_multi: false,
+            },
+            sdk::UserQuestion {
+                prompt: "second".to_string(),
+                options: vec![sdk::OptionItem::new("b", "second choice")],
+                allow_multi: true,
+            },
+        ]),
+    };
+
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::InteractionRequested { request });
+
+    match mapped {
+        SdkEventMapping::Runtime(TuiRuntimeEvent::InteractionRequested(request)) => {
+            match request.body {
+                crate::tui::adapter::tui_runtime_event::TuiInteractionBody::UserQuestions(
+                    questions,
+                ) => {
+                    assert_eq!(questions.len(), 2, "多题映射不得丢失第二题");
+                    assert_eq!(questions[0].prompt, "first");
+                    assert_eq!(questions[1].prompt, "second");
+                    assert!(!questions[0].allow_multi);
+                    assert!(
+                        questions[1].allow_multi,
+                        "per-question allow_multi 必须保真"
+                    );
+                    assert_eq!(
+                        questions[1].options[0].description.as_deref(),
+                        Some("second choice")
+                    );
+                }
+                other => panic!("expected UserQuestions body, got {other:?}"),
+            }
+        }
+        _other => panic!("expected InteractionRequested event, got a different mapping"),
+    }
+}
+
+#[test]
 fn task_state_preserves_structured_payload() {
     let expected = sdk::TaskStateView::empty("session-a", 42);
     let mapped = sdk_event_to_tui_event(sdk::ChatEvent::TaskStateChanged {
@@ -848,4 +957,85 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
         }) if context.chat_id == expected_chat_id.as_str()
             && context.run_id == expected_run_id.as_str()
     ));
+}
+
+/// #1092 缺口回归：`ChatEvent::ReminderList` 必须映射为 TUI-owned
+/// `TuiReminder`（`/memory remind` 的结果回传），字段逐项完整。
+#[test]
+fn reminder_list_maps_every_field_to_tui_owned_dto() {
+    let mapping = sdk_event_to_tui_event(sdk::ChatEvent::ReminderList {
+        reminders: vec![
+            sdk::ReminderView {
+                id: "reminder-1".to_owned(),
+                content: "drink water".to_owned(),
+                done: false,
+                created_at: 1_700_000_000,
+            },
+            sdk::ReminderView {
+                id: "reminder-2".to_owned(),
+                content: "ship release".to_owned(),
+                done: true,
+                created_at: 1_700_000_100,
+            },
+        ],
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ReminderList { reminders }) = mapping else {
+        panic!("ReminderList must map to one runtime event");
+    };
+    assert_eq!(reminders.len(), 2);
+    assert_eq!(reminders[0].id, "reminder-1");
+    assert_eq!(reminders[0].content, "drink water");
+    assert!(!reminders[0].done);
+    assert_eq!(reminders[0].created_at, 1_700_000_000);
+    assert_eq!(reminders[1].id, "reminder-2");
+    assert!(reminders[1].done);
+    assert_eq!(reminders[1].created_at, 1_700_000_100);
+}
+
+/// #740：`ModelList` / `SessionList` 是 /model 对话框与 /resume 补全的唯一
+/// 数据源，payload 必须逐字段映射到 TUI 侧 DTO，NEVER 丢弃或压平。
+#[test]
+fn model_and_session_list_map_every_field_to_tui_owned_dto() {
+    let model_mapping = sdk_event_to_tui_event(sdk::ChatEvent::ModelList {
+        models: vec![sdk::ModelSummary {
+            provider: "anthropic".to_owned(),
+            id: "claude-3-id".to_owned(),
+            name: "Claude 3".to_owned(),
+            context_window: 200_000,
+            max_tokens: 8_000,
+        }],
+    });
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ModelList { models }) = model_mapping else {
+        panic!("ModelList must map to one runtime event");
+    };
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].provider, "anthropic");
+    assert_eq!(models[0].id, "claude-3-id");
+    assert_eq!(models[0].name, "Claude 3");
+    assert_eq!(models[0].context_window, 200_000);
+    assert_eq!(models[0].max_tokens, 8_000);
+
+    let session_mapping = sdk_event_to_tui_event(sdk::ChatEvent::SessionList {
+        sessions: vec![sdk::SessionSummary {
+            id: "s-100".to_owned(),
+            title: Some("custom title".to_owned()),
+            project: Some("/repo".to_owned()),
+            model: Some("anthropic/claude-3".to_owned()),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-02T00:00:00Z".to_owned(),
+            message_count: 7,
+            preview: Some("first user message".to_owned()),
+            summary: "first session".to_owned(),
+        }],
+    });
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::SessionList { sessions }) = session_mapping
+    else {
+        panic!("SessionList must map to one runtime event");
+    };
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "s-100");
+    assert_eq!(sessions[0].summary, "first session");
+    assert_eq!(sessions[0].message_count, 7);
+    assert_eq!(sessions[0].title.as_deref(), Some("custom title"));
 }

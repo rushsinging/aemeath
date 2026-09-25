@@ -53,8 +53,8 @@ fn adapter_factory() -> FactoryFuture {
 
         let mut scope_builder = RegistryScopeBuilder::new("main");
         for (name, caps) in [
-            ("Counting", ToolCapabilities::ReadWorkspace),
-            ("Suspend", ToolCapabilities::UserInteraction),
+            ("Counting", ToolCapabilities::Read),
+            ("Suspend", ToolCapabilities::Interact),
             ("Ghost", ToolCapabilities::empty()),
         ] {
             scope_builder
@@ -72,7 +72,7 @@ fn adapter_factory() -> FactoryFuture {
             ToolProfileName::new("read-only"),
             ToolProfile::derive_restricted(
                 profiles.get(&ToolProfileName::new("full")).unwrap(),
-                ToolCapabilities::ReadWorkspace,
+                ToolCapabilities::Read,
             )
             .unwrap(),
         );
@@ -106,12 +106,12 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
             name: "mcp__demo__read",
             calls: calls.clone(),
         },
-        ToolCapabilities::ReadWorkspace,
+        ToolCapabilities::Read,
     );
     ports.backing.sync_dynamic_membership(
         &[ToolRegistrationSpec::new(
             "mcp__demo__read",
-            ToolCapabilities::ReadWorkspace,
+            ToolCapabilities::Read,
         )],
         &[],
     );

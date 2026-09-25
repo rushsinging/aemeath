@@ -186,6 +186,55 @@ async fn compact_input_becomes_idle_command_and_is_buffered_while_busy() {
     assert!(!busy_buffer.is_empty());
 }
 
+/// #1289：`/reflect-now` idle 受理为 PendingCommand；busy 直接提示丢弃，NEVER 排队。
+#[tokio::test]
+async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {
+    let idle_buffer = PendingInputBuffer::default();
+    idle_buffer.push(ChatInputEvent::ReflectNow);
+    let idle_sink = TestSink::default();
+    let idle_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &idle_buffer,
+        &idle_sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        idle_outcome.pending_command,
+        Some(PendingCommand::ReflectNow)
+    ));
+    assert!(idle_buffer.is_empty(), "idle 受理后事件消费完毕");
+    assert!(
+        idle_sink.events.lock().unwrap().is_empty(),
+        "受理提示由 run_launch handler 发出，gate 不重复提示"
+    );
+
+    let busy_buffer = PendingInputBuffer::default();
+    busy_buffer.push(ChatInputEvent::ReflectNow);
+    let busy_sink = TestSink::default();
+    let busy_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &busy_buffer,
+        &busy_sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert!(busy_outcome.pending_command.is_none());
+    assert!(busy_buffer.is_empty(), "busy 不排队：事件被丢弃");
+    let busy_events = busy_sink.events.lock().unwrap();
+    match busy_events.as_slice() {
+        [RuntimeStreamEvent::CommandResultText { text, is_error }] => {
+            assert!(!is_error, "busy 跳过是提示而非错误");
+            assert!(text.contains("Reflection"), "提示应说明跳过原因：{text}");
+        }
+        other => panic!("busy 应只发一条 CommandResultText，实际 {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let buffer = PendingInputBuffer::default();

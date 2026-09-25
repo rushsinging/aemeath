@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::loop_engine::ScenarioLoopHarness;
-use crate::application::run::active_registry::ActiveRunRegistry;
+use crate::application::run::active_registry::wire_active_run_registry;
 use crate::application::run::launcher::{self, RunLaunchResult};
 use crate::application::run::run_factory_support::derived_run::ParentRunFixture;
 use crate::application::run::run_factory_support::SessionRunFixture;
@@ -13,12 +13,17 @@ use crate::domain::agent_run::{RunSpec, RunStatus};
 
 fn derived_run_config() -> share::config::domain::snapshot::ConfigSnapshot {
     let mut config = share::config::Config::default();
-    config.agents.roles.insert(
+    config.agents.names.insert(
         "derived".to_string(),
-        share::config::AgentRoleConfig {
+        share::config::AgentInstanceConfig {
+            role: "generic".to_string(),
             model: "test-provider/test-model".to_string(),
             ..Default::default()
         },
+    );
+    config.agents.roles.insert(
+        "generic".to_string(),
+        share::config::AgentRoleDefinition::default(),
     );
     config.models.default = "test-provider/test-model".to_string();
     config.models.providers.insert(
@@ -68,7 +73,7 @@ async fn derived_run_uses_parent_factory_launcher_and_same_loop() {
     derived.initialize(Vec::new(), 0);
     let mut harness = ScenarioLoopHarness::completes_with("derived done");
     let cancel = CancellationToken::new();
-    let active_run = Arc::new(ActiveRunRegistry::default());
+    let active_run = Arc::new(wire_active_run_registry());
 
     let result = launcher::launch(&mut derived, cancel, active_run, &mut harness.run_loop()).await;
 

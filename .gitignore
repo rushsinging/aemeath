@@ -38,6 +38,7 @@ Thumbs.db
 !.agents/aemeath.json
 !.agents/dead-code-baseline.json
 !.agents/flaky-debt.json
+!.agents/inline-tests-baseline.json
 !.agents/hooks/
 !.agents/skills/
 !.agents/skills/**

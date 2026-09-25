@@ -220,7 +220,8 @@ pub async fn orchestrate_stop_hook(
     let invocation = HookInvocation::Stop(StopInput {
         run_steps: context.run_steps,
     });
-    let mut hook_dispatch_context = HookDispatchContext::new(&context.workspace_root);
+    let mut hook_dispatch_context =
+        HookDispatchContext::new(&context.workspace_root).with_session_id(&context.session_id);
     if let Some(observer) = context.subscription_execution_observer {
         hook_dispatch_context =
             hook_dispatch_context.with_subscription_execution_observer(observer);

@@ -19,6 +19,7 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::Reset => "Reset",
         ChatInputEvent::WithdrawAll => "WithdrawAll",
         ChatInputEvent::Compact => "Compact",
+        ChatInputEvent::ReflectNow => "ReflectNow",
         ChatInputEvent::SwitchModel { .. } => "SwitchModel",
         ChatInputEvent::SetThinking { .. } => "SetThinking",
         ChatInputEvent::InitProject { .. } => "InitProject",
@@ -73,6 +74,8 @@ pub struct ControlCommand {
 #[derive(Debug, Clone)]
 pub enum PendingCommand {
     Compact,
+    /// 立即执行一次 Reflection（/reflect-now，#1289）。
+    ReflectNow,
     SwitchModel {
         selection: String,
     },
@@ -360,6 +363,22 @@ where
                     // busy：放回 buffer，等run 结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Compact);
                 }
+            }
+            ChatInputEvent::ReflectNow => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ReflectNow);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                }
+                // #1289 busy：Manual 触发 NEVER 排队；提示后丢弃本事件，
+                // 不放回 buffer（与 Compact 的 busy 排队语义相反）。
+                sink.send_event(RuntimeStreamEvent::CommandResultText {
+                    text: "Reflection 已在运行或等待运行结束，已跳过本次手动触发；稍后再试。"
+                        .to_string(),
+                    is_error: false,
+                })
+                .await;
             }
             ChatInputEvent::SwitchModel { selection } => {
                 if is_idle {

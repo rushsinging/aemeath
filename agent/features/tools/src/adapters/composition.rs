@@ -71,12 +71,25 @@ pub(crate) fn wire_catalog_execution(
     })
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum BuiltinWiringError {
+    #[error(transparent)]
+    Backing(#[from] ToolBackingError),
+    #[error("role policy for '{role}' failed to compile: {source}")]
+    RolePolicy {
+        role: String,
+        #[source]
+        source: crate::domain::role_policy::RolePolicyCompileError,
+    },
+}
+
 pub fn wire_builtin_catalog_execution(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
-) -> Result<CatalogExecutionWiring, ToolBackingError> {
+    role_policies: Vec<(String, share::config::RolePolicyConfig)>,
+) -> Result<CatalogExecutionWiring, BuiltinWiringError> {
     let registry = Arc::new(ToolRegistry::new());
     let main_profile = ToolProfile::baseline(ToolCapabilities::all());
     let mut scopes = HashMap::new();
@@ -98,7 +111,20 @@ pub fn wire_builtin_catalog_execution(
         scopes.insert(scope.name().clone(), scope);
         profiles.insert(profile_name, profile);
     }
-    wire_catalog_execution(registry, scopes, profiles)
+    for (role, policy) in role_policies {
+        let profile =
+            crate::domain::role_policy::compile_role_profile(&policy).map_err(|source| {
+                BuiltinWiringError::RolePolicy {
+                    role: role.clone(),
+                    source,
+                }
+            })?;
+        profiles.insert(
+            crate::domain::role_policy::role_profile_name(&role),
+            profile,
+        );
+    }
+    wire_catalog_execution(registry, scopes, profiles).map_err(BuiltinWiringError::Backing)
 }
 
 /// Production Skill Catalog / Load wiring over one stateless adapter.
@@ -216,14 +242,6 @@ fn builtin_command_descriptors(
             A::None,
         ),
         (
-            "status",
-            &[],
-            "Show current session status",
-            M::SnapshotQuery,
-            T::Runtime,
-            A::None,
-        ),
-        (
             "config",
             &[],
             "Show configuration settings",
@@ -288,22 +306,6 @@ fn builtin_command_descriptors(
             A::None,
         ),
         (
-            "rewind",
-            &[],
-            "Rewind conversation",
-            M::ApplicationControl,
-            T::ContextManagement,
-            A::OptionalText,
-        ),
-        (
-            "save",
-            &[],
-            "Save current session",
-            M::ApplicationControl,
-            T::ContextManagement,
-            A::None,
-        ),
-        (
             "reflect",
             &[],
             "Show reflection history",
@@ -312,27 +314,11 @@ fn builtin_command_descriptors(
             A::OptionalPositiveUsize { default: 10 },
         ),
         (
-            "paste",
+            "reflect-now",
             &[],
-            "Paste image from clipboard",
+            "Run reflection now",
             M::ApplicationControl,
-            T::ApplicationShell,
-            A::None,
-        ),
-        (
-            "images",
-            &[],
-            "List pending images",
-            M::SnapshotQuery,
-            T::ApplicationShell,
-            A::None,
-        ),
-        (
-            "clear-images",
-            &[],
-            "Clear pending images",
-            M::ApplicationControl,
-            T::ApplicationShell,
+            T::Memory,
             A::None,
         ),
         (

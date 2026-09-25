@@ -6,10 +6,8 @@ use crate::application::query::{
     add_summary, decode_cursor, decode_record, encode_cursor, matches, query_fingerprint,
     validate_query, CursorPosition,
 };
-use crate::{
-    AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageCursor, UsagePage, UsageQuery,
-    UsageQueryError, UsageQueryPort, UsageSummary,
-};
+use crate::domain::{UsageCursor, UsagePage, UsageQuery, UsageQueryError, UsageSummary};
+use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageQueryPort};
 
 pub fn usage_query_service(store: Arc<dyn UsageAppendStorePort>) -> UsageQueryService {
     UsageQueryService { store }
@@ -112,6 +110,12 @@ impl UsageQueryPort for UsageQueryService {
 }
 
 impl UsageQueryService {
+    /// PL 固有读出入口（消费者无需导入 Port trait；边界错误为粗分类 AuditError）。
+    pub async fn query_page(&self, query: UsageQuery) -> Result<UsagePage, crate::AuditError> {
+        let port = self as &dyn crate::ports::UsageQueryPort;
+        port.query(query).await.map_err(crate::AuditError::from)
+    }
+
     async fn streams(
         &self,
         query: &UsageQuery,
@@ -143,6 +147,6 @@ impl UsageQueryService {
     }
 }
 
-fn storage_error(_: crate::AppendLogError) -> UsageQueryError {
+fn storage_error(_: crate::ports::AppendLogError) -> UsageQueryError {
     UsageQueryError::Storage("审计用量存储读取失败".to_string())
 }

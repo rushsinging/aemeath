@@ -16,7 +16,7 @@ pub(crate) struct ContextRequestSource<'a> {
     pub system_prompt: &'a str,
     pub model_id: &'a str,
     pub language: &'a str,
-    pub agent_roles: HashMap<String, share::config::AgentRoleConfig>,
+    pub agent_roles: HashMap<String, share::config::AgentRoleDefinition>,
     pub config: &'a RunConfigSnapshot,
     pub context_size: usize,
     pub max_output_tokens: usize,
@@ -72,6 +72,7 @@ impl<'a> ContextRequestCoordinator<'a> {
             context_size: self.source.context_size,
             max_output_tokens: self.source.max_output_tokens,
             last_api_total_tokens: self.source.runtime_context.usage().get(),
+            heuristic_calibration: Some(self.source.runtime_context.usage().calibration_factor()),
             tool_schemas,
             tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(
                 &self.source.raw_tool_schemas,

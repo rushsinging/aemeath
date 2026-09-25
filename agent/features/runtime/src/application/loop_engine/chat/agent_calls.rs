@@ -144,6 +144,7 @@ where
             tool_input: call.input.clone(),
         }),
         &workspace_root,
+        agent.session_id.as_ref(),
         cancel,
     )
     .await;
@@ -349,6 +350,7 @@ where
         step_id,
         &effective_call,
         &execution,
+        agent.session_id.as_ref(),
         cancel,
         workspace_read,
     )
@@ -772,9 +774,9 @@ mod tests {
                 catalog: catalog.clone(),
                 execution,
                 context: crate::application::context::coordination::ContextCoordinator::new(
-                    context::adapters::isolated_context("test-session"),
+                    context::isolated_context("test-session"),
                 ),
-                session_id: context::domain::SessionId::new("test-session"),
+                session_id: context::SessionId::new("test-session"),
                 ctx: ctx.clone(),
                 max_tool_concurrency: 1,
                 agent_semaphore: agent_semaphore.clone(),

@@ -39,7 +39,7 @@ pub mod write;
 
 // Re-exports for ergonomic `use crate::domain::types::XxxResult;`.
 pub use agent::{AgentInput, AgentResult};
-pub use ask_user::{AskUserQuestionInput, AskUserQuestionResult};
+pub use ask_user::{AskUserQuestionInput, AskUserQuestionResult, QuestionItem};
 pub use bash::{BashInput, BashResult};
 pub use edit::{EditInput, EditResult};
 pub use enter_worktree::{EnterWorktreeInput, EnterWorktreeResult};

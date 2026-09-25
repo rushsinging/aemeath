@@ -4,7 +4,9 @@ mod compact_model;
 mod from_args;
 mod mapping;
 pub mod resume_helper;
-pub(super) mod session_query;
+pub(crate) mod session_query;
+mod skill_catalog_refresh;
+mod startup_resume;
 mod trait_chat;
 mod trait_impl;
 mod trait_memory;
@@ -15,12 +17,12 @@ mod trait_session;
 pub(crate) use accessors::SessionModelState;
 pub(crate) use accessors::{RuntimeContextAssemblyError, SessionInputHandle, SessionRuntime};
 pub use compact_model::{
-    CompactModelOrigin, CompactModelResolveError, CompactModelResolver, CompactModelTarget,
-    SessionModelSlot,
+    CompactModelOrigin, CompactModelResolveError, CompactModelResolver, SessionModelSlot,
 };
 pub(crate) use mapping::{
     map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk, workspace_context_to_sdk,
 };
+pub use skill_catalog_refresh::SkillCatalogRefresh;
 // Compact 模型解析复用 model switch 的 binding 构造路径，避免重复实现。
 pub(crate) use trait_model::build_provider_binding_from_runtime_model;
 
@@ -36,4 +38,4 @@ pub use from_args::{
     RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SkillBootstrapAssembly,
 };
 pub use mapping::config_snapshot_to_sdk;
-pub use resume_helper::{resume_session_to_backing, ResumeError};
+pub use resume_helper::resume_session_to_backing;

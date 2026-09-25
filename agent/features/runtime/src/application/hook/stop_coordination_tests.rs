@@ -141,7 +141,7 @@ async fn stop_hook_reads_workspace_root_when_dispatch_begins() {
         repository.path()
     ));
     let main_root = repository.path().canonicalize().unwrap();
-    let workspace = project::wire_production_workspace(main_root.clone())
+    let workspace = project::wire_production_workspace(main_root.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
     workspace

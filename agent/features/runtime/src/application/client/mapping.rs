@@ -95,7 +95,7 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
         similarity_threshold: config.similarity_threshold as f32,
         reflection: ReflectionConfigView {
             enabled: config.reflection.enabled,
-            interval_run_steps: config.reflection.interval_run_steps,
+            interval_runs: config.reflection.interval_runs,
             auto_apply_suggestions: config.reflection.auto_apply_suggestions,
         },
     }
@@ -133,16 +133,14 @@ pub(crate) fn workspace_context_to_sdk(
 }
 
 pub(crate) fn map_finalize_cause_to_sdk(
-    cause: context::domain::FinalizeCause,
+    cause: context::FinalizeCause,
 ) -> sdk::ResumedStepFinalizeCause {
     match cause {
-        context::domain::FinalizeCause::Completed => sdk::ResumedStepFinalizeCause::Completed,
-        context::domain::FinalizeCause::UserCancelledStep => {
+        context::FinalizeCause::Completed => sdk::ResumedStepFinalizeCause::Completed,
+        context::FinalizeCause::UserCancelledStep => {
             sdk::ResumedStepFinalizeCause::UserCancelledStep
         }
-        context::domain::FinalizeCause::RunTerminated => {
-            sdk::ResumedStepFinalizeCause::RunTerminated
-        }
+        context::FinalizeCause::RunTerminated => sdk::ResumedStepFinalizeCause::RunTerminated,
     }
 }
 
@@ -247,6 +245,27 @@ pub(crate) fn model_display(source_key: &str, model_name: &str, model_id: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_summary_mapping_carries_project_and_empty_marker_summary() {
+        let entry = context::SessionListEntry {
+            id: "session-1".to_string(),
+            title: None,
+            project: Some("aemeath".to_string()),
+            model: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            message_count: 0,
+            preview: None,
+            summary: "(empty)".to_string(),
+        };
+
+        let mapped = session_summary_from_context(entry);
+
+        assert_eq!(mapped.project.as_deref(), Some("aemeath"));
+        assert_eq!(mapped.summary, "(empty)");
+        assert_eq!(mapped.message_count, 0);
+    }
 
     #[test]
     fn message_mapping_preserves_hook_notice() {

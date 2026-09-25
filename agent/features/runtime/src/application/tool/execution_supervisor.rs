@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use context::domain::{
+use context::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
@@ -30,6 +30,9 @@ pub(crate) struct SupervisedToolCall {
     pub input_preview: String,
     pub run_deadline: Option<SystemTime>,
     pub cancellation: Arc<dyn CancellationSignal>,
+    /// per-call child cancellation：deadline 到期或用户取消时由 supervisor
+    /// 触发，经 `context.cancellation()` 传播给 Cooperative 工具。
+    pub child_cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl ToolExecutionSupervisor {
@@ -56,7 +59,7 @@ impl ToolExecutionSupervisor {
     pub(crate) async fn execute(
         &self,
         call: SupervisedToolCall,
-    ) -> Result<PublishedToolOutcome, ToolExecutionSupervisorError> {
+    ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
         let descriptor = self
             .catalog
             .find(&call.invocation.tool_name)
@@ -138,6 +141,7 @@ impl ToolExecutionSupervisor {
                             call.identity.tool_name,
                             started.elapsed().as_millis()
                         );
+                        call.child_cancellation.cancel();
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                     }
                     _ = tokio::time::sleep(wait) => {
@@ -150,6 +154,7 @@ impl ToolExecutionSupervisor {
                             call.identity.tool_name,
                             started.elapsed().as_millis()
                         );
+                        call.child_cancellation.cancel();
                         cancellation_outcome(descriptor.cancellation, &mut future, self.grace, true).await
                     }
                 }
@@ -166,6 +171,7 @@ impl ToolExecutionSupervisor {
                         call.identity.tool_name,
                         started.elapsed().as_millis()
                     );
+                    call.child_cancellation.cancel();
                     cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
                 }
             },
@@ -199,7 +205,9 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutation::terminal(call.identity, terminal))
             .await?;
-        Ok(outcome)
+        // #1666：与 [tool execution terminal] 日志同源的执行耗时，随 outcome
+        // 返回给调用方进入事件流（ChatEvent::ToolResult.duration_ms）。
+        Ok((outcome, started.elapsed()))
     }
 }
 
@@ -238,14 +246,14 @@ where
 fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceipt {
     match outcome {
         PublishedToolOutcome::TimedOut(details) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::TimedOut,
+            context::ToolOutcomeKind::TimedOut,
             details.safe_reason.clone(),
             receipt_cleanup(details.cleanup),
         ),
         PublishedToolOutcome::CancellationUnconfirmed(details) => {
             details.possible_side_effects.iter().fold(
                 ToolTerminalReceipt::new(
-                    context::domain::ToolOutcomeKind::CancellationUnconfirmed,
+                    context::ToolOutcomeKind::CancellationUnconfirmed,
                     details.safe_reason.clone(),
                     receipt_cleanup(details.cleanup),
                 ),
@@ -253,22 +261,22 @@ fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceipt {
             )
         }
         PublishedToolOutcome::Cancelled(cancelled) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Cancelled,
+            context::ToolOutcomeKind::Cancelled,
             cancelled.reason.clone(),
             ReceiptCleanupConfirmation::Confirmed,
         ),
         PublishedToolOutcome::Success(_) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Success,
+            context::ToolOutcomeKind::Success,
             "tool completed",
             ReceiptCleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Failure(failure) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Failure,
+            context::ToolOutcomeKind::Failure,
             failure.safe_message.clone(),
             ReceiptCleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Suspended(_) => ToolTerminalReceipt::new(
-            context::domain::ToolOutcomeKind::Suspended,
+            context::ToolOutcomeKind::Suspended,
             "tool suspended",
             ReceiptCleanupConfirmation::NotApplicable,
         ),
@@ -296,7 +304,7 @@ pub(crate) enum ToolExecutionSupervisorError {
     #[error("Tool 不在当前 Catalog：{0}")]
     ToolUnavailable(String),
     #[error(transparent)]
-    Receipt(#[from] context::domain::ToolReceiptMutationError),
+    Receipt(#[from] context::ToolReceiptMutationError),
 }
 
 #[cfg(test)]

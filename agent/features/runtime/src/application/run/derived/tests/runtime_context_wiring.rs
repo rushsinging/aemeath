@@ -128,7 +128,7 @@ async fn derived_tool_catalog_is_spied_during_sub_agent_run() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -241,7 +241,7 @@ async fn derived_context_integration_verifies_policy_catalog() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -414,9 +414,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
 
     let runner = CliAgentRunner {
         factory,
-        active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
-        ),
+        active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer:
@@ -443,7 +441,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
             plan_mode: ctx.plan_mode_state(),
             guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
-            role: "coder",
+            agent_name: "coder",
         })
         .await;
 
@@ -613,9 +611,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
 
     let runner = CliAgentRunner {
         factory,
-        active_run: Arc::new(
-            crate::application::run::active_registry::ActiveRunRegistry::default(),
-        ),
+        active_run: Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
         max_tool_concurrency: 10,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer:
@@ -643,7 +639,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
                 plan_mode: ctx.plan_mode_state(),
                 guidance: ctx.guidance(),
                 timeout: std::time::Duration::from_secs(30),
-                role: "coder",
+                agent_name: "coder",
             })
             .await
     });

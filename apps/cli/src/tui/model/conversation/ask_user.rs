@@ -156,8 +156,14 @@ impl ConversationModel {
         let first_total = slots.first().map(|s| s.options.len()).unwrap_or(0);
         let chat_input_active = slot_starts_in_chat_input(slots.first());
         self.clear_active_text_blocks();
-        self.remove_active_ask_user_block();
+        let removed_active_block = self.remove_active_ask_user_block();
         let n = slots.len();
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[ask_user] show batch request_id={} slots={} removed_active_block={removed_active_block}",
+            request_id.as_str(),
+            n,
+        );
         self.timeline.push(OutputTimelineItem::AskUserBatch {
             id: id.clone(),
             request_id: Some(request_id),
@@ -188,6 +194,7 @@ impl ConversationModel {
             selected,
             chat_input_active,
             chat_input_text,
+            chat_input_cursor,
             confirm_cursor,
             completion,
             ..
@@ -208,6 +215,7 @@ impl ConversationModel {
                 *selected = vec![false; new_total];
                 *chat_input_active = slot_starts_in_chat_input(slots.get(*active_index));
                 chat_input_text.clear();
+                *chat_input_cursor = 0;
             } else if slots.len() == 1 {
                 // 单问题：直接确认，跳过确认页
                 *completion = AskUserCompletion::ReplyPending;
@@ -230,6 +238,7 @@ impl ConversationModel {
             selected,
             chat_input_active,
             chat_input_text,
+            chat_input_cursor,
             ..
         }) = self.ask_user_timeline_item_mut()
         {
@@ -243,6 +252,7 @@ impl ConversationModel {
             *selected = vec![false; total];
             *chat_input_active = slot_starts_in_chat_input(slots.get(index));
             chat_input_text.clear();
+            *chat_input_cursor = 0;
             return self.ask_user_updated();
         }
         Vec::new()
@@ -299,12 +309,14 @@ impl ConversationModel {
         if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
+            chat_input_cursor,
             ..
         }) = self.ask_user_timeline_item_mut()
         {
             *chat_input_active = active;
             if !active {
                 chat_input_text.clear();
+                *chat_input_cursor = 0;
             }
             return self.ask_user_updated();
         }
@@ -328,6 +340,37 @@ impl ConversationModel {
                     return self.ask_user_updated();
                 }
             }
+        }
+        Vec::new()
+    }
+
+    /// 在 Type something 输入框当前光标位置插入整段粘贴文本。
+    ///
+    /// 自由输入框按单行渲染，任何换行都会破坏显示，因此与主输入区的
+    /// ">3 行才折叠" 规则不同：含换行即折叠为单空格。
+    pub(super) fn insert_ask_user_chat_text(&mut self, text: String) -> Vec<ConversationChange> {
+        if let Some(OutputTimelineItem::AskUserBatch {
+            chat_input_active,
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        }) = self.ask_user_timeline_item_mut()
+        {
+            if !*chat_input_active {
+                return Vec::new();
+            }
+            let normalized = if text.contains(['\n', '\r']) {
+                text.split_whitespace().collect::<Vec<_>>().join(" ")
+            } else {
+                text
+            };
+            if normalized.is_empty() {
+                return Vec::new();
+            }
+            let position = (*chat_input_cursor).min(chat_input_text.len());
+            chat_input_text.insert_str(position, &normalized);
+            *chat_input_cursor = position + normalized.len();
+            return self.ask_user_updated();
         }
         Vec::new()
     }

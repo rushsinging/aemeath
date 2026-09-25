@@ -235,6 +235,56 @@ impl ContextApplicationService {
         crate::application::performance::record_build(build_started.elapsed());
         Ok(window)
     }
+
+    /// compact 提交后的占用体检报告（防震荡观测信号）。
+    pub(crate) async fn post_compaction_usage_check(
+        &self,
+        source: &ContextRequest,
+    ) -> Option<PostCompactionUsageReport> {
+        // compact 刚重置 usage baseline，source 里携带的 provider 旧值
+        // 不代表提交后的状态，强制走 heuristic 估算路径。
+        let mut source = source.clone();
+        source.last_api_total_tokens = None;
+        match self.build_candidate(&source).await {
+            Ok(candidate) => Some(PostCompactionUsageReport {
+                decision_token_count: candidate.compaction_decision.decision_token_count,
+                threshold: candidate.compaction_decision.threshold,
+            }),
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "compact 后占用体检失败（不阻断）：{error}"
+                );
+                None
+            }
+        }
+    }
+}
+
+/// compact 提交后的占用体检结果。
+///
+/// 估算仍高于 threshold 的 50% 视为贴线：保留消息 + system/tool schema
+/// 固定底盘几轮后将再次触发 auto-compact（震荡循环）。体检只产出
+/// 报告与告警，不阻断 compact、不自动二次压缩。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PostCompactionUsageReport {
+    decision_token_count: usize,
+    threshold: usize,
+}
+
+impl PostCompactionUsageReport {
+    pub fn decision_token_count(&self) -> usize {
+        self.decision_token_count
+    }
+
+    pub fn threshold(&self) -> usize {
+        self.threshold
+    }
+
+    /// 估算是否仍高于 threshold 的一半（贴线，震荡风险）。
+    pub fn exceeds_half_threshold(&self) -> bool {
+        self.decision_token_count > self.threshold / 2
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -423,7 +473,21 @@ impl ContextPort for ContextApplicationService {
     }
 
     async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
-        self.session.commit_compaction(request).await
+        let outcome = self.session.commit_compaction(request).await?;
+        // 仅在真实提交后体检：Skipped 时会话状态未变，重建无意义。
+        if matches!(outcome, CompactOutcome::Committed(_)) {
+            if let Some(report) = self.post_compaction_usage_check(&request.source).await {
+                if report.exceeds_half_threshold() {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "compact 提交后估算仍贴线（{} > threshold/2 = {}）：保留消息与固定底盘几轮后将再次触发 auto-compact；若频繁出现，考虑增大 context window 或调小保留窗口",
+                        report.decision_token_count(),
+                        report.threshold() / 2
+                    );
+                }
+            }
+        }
+        Ok(outcome)
     }
 
     async fn manual_compact(

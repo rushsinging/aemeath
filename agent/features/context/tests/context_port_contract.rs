@@ -46,6 +46,7 @@ fn request() -> ContextRequest {
         context_size: 128_000,
         max_output_tokens: 8_192,
         last_api_total_tokens: None,
+        heuristic_calibration: None,
         tool_schemas: vec![],
         tool_schema_tokens: 0,
     }
@@ -80,7 +81,7 @@ impl ContextPort for FakeContextPort {
             summary: "summary".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
-            quality: context::domain::CompactSummaryQuality::LocalOnly,
+            quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -92,7 +93,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(5),
-            quality: context::domain::CompactSummaryQuality::LocalOnly,
+            quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
 

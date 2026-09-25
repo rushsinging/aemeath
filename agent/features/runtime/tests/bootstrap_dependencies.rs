@@ -102,8 +102,14 @@ fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBo
     runtime::SessionBootstrapAssembly::new(root.to_path_buf(), 8192, true, false, None)
 }
 
-fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
-    runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new()))
+fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootstrapAssembly {
+    runtime::SkillBootstrapAssembly::new(
+        tools::composition::wire_skills().catalog(),
+        project::wire_production_workspace(root.to_path_buf(), None)
+            .expect("wire test workspace")
+            .into_views(),
+        tools::SkillQuery::new(root.to_path_buf(), Vec::new(), Default::default()),
+    )
 }
 
 fn test_agent_runner_assembly(
@@ -210,19 +216,17 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let temp = tempfile::tempdir().unwrap();
     let config = config::wire_project_config(
         temp.path(),
-        config::NativeConfigStore::new(Arc::new(
-            storage::FileSystemBlobAdapter::new(temp.path()).unwrap(),
-        )),
+        config::native_override_store(storage::file_system_blob(temp.path()).unwrap()),
     )
     .await
     .unwrap();
-    let workspace = project::wire_production_workspace(temp.path().to_path_buf())
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
         .unwrap()
         .into_views();
     let task = task::wire_task();
     let access = task.access();
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
-        Arc::new(storage::FileSystemDatasetAdapter::new(temp.path()).unwrap()),
+        storage::file_system_dataset(temp.path()).unwrap(),
         Arc::new(memory::FileLegacyMemorySourceFactory::new(temp.path())),
     ));
     let session_management: Arc<dyn context::SessionManagementPort> =
@@ -234,9 +238,9 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::adapters::ProductionMainContextFactory::new(
-            Arc::new(context::adapters::NoOpCanonicalSessionWriter),
-        )),
+        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))),
     })
     .await
     .unwrap();
@@ -247,12 +251,12 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let skill_catalog = skill_wiring.catalog();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
-            Arc::new(storage::FileSystemBlobAdapter::new(temp.path()).unwrap()),
+            storage::file_system_blob(temp.path()).unwrap(),
             temp.path().to_path_buf(),
         )),
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
-    let active_run = Arc::new(runtime::ActiveRunRegistry::default());
+    let active_run = Arc::new(runtime::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
         hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),
@@ -287,7 +291,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         initial_provider_assembly(),
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),
-        test_skill_bootstrap_assembly(),
+        test_skill_bootstrap_assembly(temp.path()),
         test_agent_runner_assembly(runtime_context_factory.clone(), active_run.clone()),
     );
 
