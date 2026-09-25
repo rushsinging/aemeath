@@ -609,20 +609,6 @@ fn number_field(
     })
 }
 
-fn boolean_field(id: &str, label: &str, value: bool) -> Result<ConfigFormField, ConfigFormError> {
-    Ok(ConfigFormField {
-        id: ConfigFormFieldId::new(id)?,
-        label: label.to_string(),
-        description: None,
-        field_type: ConfigFormFieldType::Boolean,
-        required: true,
-        has_value: true,
-        display_value: Some(if value { "是" } else { "否" }.to_string()),
-        options: Vec::new(),
-        error: None,
-    })
-}
-
 fn summary_field(id: &str, label: &str, value: String) -> Result<ConfigFormField, ConfigFormError> {
     read_only_field(id, label, value, ConfigFormFieldType::Summary)
 }

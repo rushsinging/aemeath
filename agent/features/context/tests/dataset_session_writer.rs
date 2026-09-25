@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use context::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, FinalizedOutcomeRecord, RunStepCursor, SessionCommitPlan,

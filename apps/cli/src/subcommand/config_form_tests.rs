@@ -127,7 +127,7 @@ fn secret_field_prefills_mask_and_renders_as_dots() {
     view.page.fields[0].field_type = sdk::ConfigFormFieldType::Secret;
     view.page.fields[0].display_value = Some("sk-h****wxyz".to_string());
 
-    let mut model = ConfigFormModel::new(view);
+    let model = ConfigFormModel::new(view);
 
     assert_eq!(model.visible_input(), "•".repeat("sk-h****wxyz".len()));
 }
