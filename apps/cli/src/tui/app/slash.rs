@@ -93,6 +93,14 @@ impl App {
                     event: sdk::ChatInputEvent::Compact,
                 })
             }
+            "reflect-now" => {
+                // #1289：走 Runtime typed 事件流（ChatInputEvent::ReflectNow →
+                // Manual reflection 单槽提交）；受理提示由 Runtime 回传，
+                // 结果只写入 reflection history（/reflect 查询）。
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::ReflectNow,
+                })
+            }
             "help" => {
                 self.show_slash_help();
                 UpdateResult::none()

@@ -67,6 +67,56 @@ pub(crate) fn submit_pre_compact_reflection(
     )
 }
 
+/// Submit manual reflection with an owned message snapshot. Only the
+/// `/reflect-now` idle command path (#1289) calls this after freezing the
+/// committed session's visible messages. The function does not await
+/// execution and never exposes generated reflection text to chat UI; the
+/// slot is shared with `Interval` and `PreCompact`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn submit_manual_reflection(
+    adapter: &ReflectionTaskAdapter,
+    config: &share::config::MemoryConfig,
+    messages: &[share::message::Message],
+    binding: &Arc<ProviderBinding>,
+    system_prompt_text: &str,
+    lang: &str,
+    memory: &Arc<dyn MemoryPort>,
+    history: &Arc<dyn ReflectionHistoryStore>,
+) -> ReflectionTaskSubmitOutcome {
+    submit(
+        adapter,
+        ReflectionTaskTrigger::Manual,
+        config,
+        messages.to_vec(),
+        binding,
+        system_prompt_text,
+        lang,
+        memory,
+        history,
+    )
+}
+
+/// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`：
+/// 所有分支都不是执行失败——busy/disabled 是显式跳过语义。
+pub(crate) fn manual_reflection_outcome_text(
+    outcome: ReflectionTaskSubmitOutcome,
+) -> (String, bool) {
+    match outcome {
+        ReflectionTaskSubmitOutcome::Accepted => (
+            "Reflection 已开始：结果只写入历史，稍后可用 /reflect 查询安全摘要。".to_string(),
+            false,
+        ),
+        ReflectionTaskSubmitOutcome::BusySkipped => (
+            "Reflection 正在运行，已跳过本次手动触发；稍后再试。".to_string(),
+            false,
+        ),
+        ReflectionTaskSubmitOutcome::DisabledSkipped => (
+            "Memory 或 Reflection 未启用；请在配置中开启后重试。".to_string(),
+            false,
+        ),
+    }
+}
+
 /// Decide whether to enqueue a PreCompact reflection job based on the compact
 /// outcome. Only `CompactOutcome::Committed` calls
 /// `submit_pre_compact_reflection`; `Skipped` returns `None` and never claims

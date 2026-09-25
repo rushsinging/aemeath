@@ -70,6 +70,12 @@ pub enum ChatInputEvent {
     ///
     /// 由 `/compact` 触发，走 runtime 事件流（#497），不再调 `compact_messages()` trait。
     Compact,
+    /// 用户请求立即执行一次 Reflection（Manual trigger）。
+    ///
+    /// 由 `/reflect-now` 触发（#1289）：idle 时受理为 PendingCommand 并冻结当前
+    /// 可见历史快照提交共享单槽；busy 时直接提示跳过，**NEVER** 排队。
+    /// 结果只写入 Memory-owned reflection history（`/reflect` 查询），不投影正文。
+    ReflectNow,
     /// 用户请求切换模型：idle 时立即执行，busy 时排队等run结束后执行。
     ///
     /// 由 `/model` 触发，走 runtime 事件流（#567）。`selection` 是用户输入的

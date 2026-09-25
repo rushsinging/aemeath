@@ -521,6 +521,43 @@ where
                     }
                     continue;
                 }
+                // #1289：/reflect-now 冻结 committed 可见历史快照提交共享单槽；
+                // 受理结果只映射安全提示，执行结果仅写入 history（/reflect 查询）。
+                PendingCommand::ReflectNow => {
+                    let bound = match wiring.bind_main_run().await {
+                        Ok(bound) => bound,
+                        Err(error) => {
+                            sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("无法绑定当前 Session：{error}"),
+                                is_error: true,
+                            })
+                            .await;
+                            continue;
+                        }
+                    };
+                    let visible_messages = bound.session().structured_messages();
+                    let memory = wiring.committed_memory();
+                    let reflection_history = shell
+                        .runtime_context_factory
+                        .services()
+                        .reflection_history
+                        .clone();
+                    let outcome = crate::application::loop_engine::chat::reflection::submit_manual_reflection(
+                        &reflection_tasks,
+                        &memory_config,
+                        &visible_messages,
+                        &binding,
+                        &system_prompt_text,
+                        &language,
+                        &memory,
+                        &reflection_history,
+                    );
+                    let (text, is_error) =
+                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(outcome);
+                    sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                        .await;
+                    continue;
+                }
                 PendingCommand::ListModels => match session_queries.list_models().await {
                     Ok(models) => {
                         let _ = sink

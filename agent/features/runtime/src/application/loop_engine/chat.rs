@@ -31,6 +31,8 @@ mod post_batch;
 mod pre_compact_trigger_tests;
 pub(crate) mod reflection;
 #[cfg(test)]
+mod reflection_manual_tests;
+#[cfg(test)]
 mod reflection_trigger_tests;
 pub(crate) mod run_input_buffer;
 mod session_driver;

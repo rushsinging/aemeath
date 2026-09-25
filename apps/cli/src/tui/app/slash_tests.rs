@@ -75,6 +75,23 @@ fn compact_slash_command_returns_send_event_effect() {
     );
 }
 
+/// #1289：/reflect-now 产出 ReflectNow typed 事件；busy 丢弃语义归 Runtime gate。
+#[test]
+fn reflect_now_slash_command_returns_send_event_effect() {
+    let mut app = app_with_builtin_router();
+
+    let result = app.handle_slash_command("/reflect-now");
+
+    assert!(
+        matches!(
+            sent_chat_event(&result),
+            Some(sdk::ChatInputEvent::ReflectNow)
+        ),
+        "/reflect-now 应产出 SendChatInputEvent{{ReflectNow}} effect，实际: {:?}",
+        result.effects
+    );
+}
+
 #[test]
 fn skill_request_routes_to_send_event_effect() {
     let mut app = App::new(

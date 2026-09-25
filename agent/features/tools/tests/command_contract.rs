@@ -102,8 +102,24 @@ fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
     assert_eq!(
         names,
         vec![
-            "clear", "compact", "config", "context", "cost", "doctor", "exit", "help", "init",
-            "memory", "model", "reflect", "resume", "session", "stats", "update", "usage",
+            "clear",
+            "compact",
+            "config",
+            "context",
+            "cost",
+            "doctor",
+            "exit",
+            "help",
+            "init",
+            "memory",
+            "model",
+            "reflect",
+            "reflect-now",
+            "resume",
+            "session",
+            "stats",
+            "update",
+            "usage",
             "version",
         ]
     );
