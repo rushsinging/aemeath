@@ -65,7 +65,8 @@ fn record(id: &str) -> UsageRecordData {
 #[tokio::test]
 async fn public_worker_partitions_records_drains_once_and_rejects_late_records() {
     let store = Arc::new(RecordingStore::default());
-    let client = wire_audit_client(&wire_audit_store(store.clone()), 4, Duration::from_secs(1));
+    let (client, _reader) =
+        wire_audit_client(&wire_audit_store(store.clone()), 4, Duration::from_secs(1));
     let sender = client.clone();
     let first = record("a");
     let second = record("b");

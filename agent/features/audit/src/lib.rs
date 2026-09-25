@@ -5,12 +5,13 @@
 //! | 类 | 实体 | 消费者 |
 //! |---|---|---|
 //! | `wire_*` 工厂 | `wire_audit_client`、`wire_audit_store` | composition |
-//! | `*<Role>` 角色 | `AuditClient`（读写合一：try_record/query_page/shutdown）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配） |
+//! | `*<Role>` 角色 | `AuditWriter`（try_record/shutdown，拥有 worker 管道）、`AuditReader`（query_page 纯读）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配）、TUI（Reader 接线待评审） |
 //! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageSummaryData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
 //! | `*Error` 错误 | `AuditError`（crate 根定义，粗分类） | query_page 签名 |
 //!
-//! Role 词表：Client/Port/Sink/Source/Control/Registry/Pool/Catalog/Store；
-//! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀。
+//! Role 词表（v3，拟人/明确名词）：Reader/Writer/Control/Registry/Pool/Catalog/Store；
+//! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀；
+//! 读写配套由同一 wire 工厂产出（Writer+Reader），不造全能 Client。
 
 /// Audit 模块自身的运行诊断 target；Audit Usage Fact 使用独立 append store。
 pub(crate) const LOG_TARGET: &str = "aemeath:diagnostic:audit";
@@ -79,7 +80,7 @@ impl From<crate::ports::AppendLogError> for AuditError {
 /// 查询/Append 内部面未接线（无生产消费者），按消费者证明制收窄 crate 内；
 /// 契约测试已迁 crate 内单元测试（#1705）。
 use crate::adapters::append::file_usage_append_store;
-pub use client::{wire_audit_client, wire_audit_store, AuditClient, AuditStore};
+pub use client::{wire_audit_client, wire_audit_store, AuditReader, AuditStore, AuditWriter};
 /// 文件系统审计存储工厂（SPI 经 AuditStore 包装，此处返回 port 以便装配）。
 pub fn append_store_for(
     root: storage::SafeStorageRoot,

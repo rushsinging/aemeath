@@ -11,6 +11,7 @@ use crate::domain::{
 };
 use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageQueryPort};
 
+#[derive(Clone)]
 pub struct UsageQueryService {
     store: Arc<dyn UsageAppendStorePort>,
 }
@@ -18,12 +19,6 @@ pub struct UsageQueryService {
 impl UsageQueryService {
     pub(crate) fn from_store(store: Arc<dyn UsageAppendStorePort>) -> Self {
         Self { store }
-    }
-
-    pub(crate) fn clone_store(&self) -> Self {
-        Self {
-            store: Arc::clone(&self.store),
-        }
     }
 }
 

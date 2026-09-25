@@ -1488,8 +1488,9 @@
         "value": "agent/features/audit/src"
       },
       "allowed_symbols": [
-        "AuditClient",
+        "AuditReader",
         "AuditStore",
+        "AuditWriter",
         "UsageDropReasonData",
         "UsageEmitOutcomeData",
         "UsagePageData",

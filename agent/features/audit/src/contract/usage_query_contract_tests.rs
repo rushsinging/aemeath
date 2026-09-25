@@ -112,7 +112,7 @@ async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
     ));
     let service = UsageQueryService::from_store(store.clone());
     let expected = record("session-l4", "match", 15);
-    let client = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
     let sender = client.clone();
 
     assert_eq!(
@@ -151,7 +151,7 @@ async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
     let service = UsageQueryService::from_store(store.clone());
     let first = record("session-global-a", "match", 15);
     let second = record("session-global-b", "match", 16);
-    let client = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
     let sender = client.clone();
 
     assert_eq!(

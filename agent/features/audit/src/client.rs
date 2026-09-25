@@ -34,38 +34,34 @@ pub fn wire_audit_store(port: Arc<dyn UsageAppendStorePort>) -> AuditStore {
 
 type SenderSlot = Arc<Mutex<Option<mpsc::Sender<UsageRecordData>>>>;
 
-/// 读写合一角色：写（try_record）+ 读（query_page）+ worker 生命周期（shutdown）。
+/// 写角色：记录用量事实 + worker 管道生命周期。
 ///
-/// Clone 语义：克隆写端与读端（多持有者发送/查询）；worker join 归首个实例
-/// 所有，克隆体 drop 不影响运行，`shutdown` 由持有完整实例的一侧调用。
-pub struct AuditClient {
+/// Clone 语义：克隆共享发送端（多持有者并发记录）；worker join 归首个
+/// 实例所有，`shutdown` 由持有完整实例的一侧调用。
+pub struct AuditWriter {
     sender: SenderSlot,
-    query: UsageQueryService,
     worker: Mutex<Option<crate::application::UsageWorkerHandle>>,
     timeout: Duration,
 }
 
-impl Clone for AuditClient {
+impl Clone for AuditWriter {
     fn clone(&self) -> Self {
         Self {
             sender: Arc::clone(&self.sender),
-            query: self.query.clone_store(),
             worker: Mutex::new(None),
             timeout: self.timeout,
         }
     }
 }
 
-impl AuditClient {
+impl AuditWriter {
     pub(crate) fn from_parts(
         sender: SenderSlot,
-        query: UsageQueryService,
         worker: crate::application::UsageWorkerHandle,
         timeout: Duration,
     ) -> Self {
         Self {
             sender,
-            query,
             worker: Mutex::new(Some(worker)),
             timeout,
         }
@@ -94,11 +90,6 @@ impl AuditClient {
         }
     }
 
-    /// 读：分页查询用量（粗分类边界错误）。
-    pub async fn query_page(&self, query: UsageQueryData) -> Result<UsagePageData, AuditError> {
-        self.query.query_page(query).await
-    }
-
     /// worker 生命周期：关闭发送端并等待落盘完成（超时中止）。
     pub async fn shutdown(&self) {
         // 先取出 worker（guard 不跨 await），再等待。
@@ -112,22 +103,35 @@ impl AuditClient {
     }
 }
 
-/// 装配工厂：审计客户端（启动内部 worker 管道）。
-///
-/// `params` 承载容量与停机超时（装配参数，非 PL）。
+/// 读角色：纯查询（无管道生命周期职责）。
+#[derive(Clone)]
+pub struct AuditReader {
+    query: UsageQueryService,
+}
+
+impl AuditReader {
+    /// 读：分页查询用量（粗分类边界错误）。
+    pub async fn query_page(&self, query: UsageQueryData) -> Result<UsagePageData, AuditError> {
+        self.query.query_page(query).await
+    }
+}
+
+/// 装配工厂：审计读写角色（一次装配产出配套 Writer+Reader，writer 拥有 worker 管道）。
 pub fn wire_audit_client(
     store: &AuditStore,
     capacity: usize,
     shutdown_timeout: Duration,
-) -> AuditClient {
+) -> (AuditWriter, AuditReader) {
     let (sender, receiver) = mpsc::channel(capacity.max(1));
     let sender: SenderSlot = Arc::new(Mutex::new(Some(sender)));
     let join = tokio::spawn(crate::application::run_usage_worker(receiver, store.port()));
-    let query = UsageQueryService::from_store(store.port());
-    AuditClient::from_parts(
+    let writer = AuditWriter::from_parts(
         Arc::clone(&sender),
-        query,
         crate::application::UsageWorkerHandle::new(join),
         shutdown_timeout,
-    )
+    );
+    let reader = AuditReader {
+        query: UsageQueryService::from_store(store.port()),
+    };
+    (writer, reader)
 }
