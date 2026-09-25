@@ -2563,18 +2563,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.config.business-env-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/config/src"
-      },
-      "reason": "F-7：业务 env（AEMEATH_*/API_KEY）读取限 config 登记路径；细分 per-var 白名单正则特征 defer",
-      "profile": "full",
-      "forbidden_patterns": [],
-      "exclusions": []
-    },
-    {
       "id": "pattern.tui.app-pure-model",
       "assertion": "pattern_exclusion",
       "scope": {
