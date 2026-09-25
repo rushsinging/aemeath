@@ -22,7 +22,9 @@ const EXPECTED_SOURCES: &[(&str, &str)] = &[
     ("Anthropic", "anthropic"),
     ("OpenAI", "openai"),
     ("Zhipu", "zhipu"),
-    ("ZhipuCodingPlan", "zhipu"),
+    ("Zhipu Coding Plan", "zhipu"),
+    ("Z.ai", "zhipu"),
+    ("Z.ai Coding Plan", "zhipu"),
     ("LiteLLM", "litellm"),
     ("Minimax", "minimax"),
     ("Mimo", "mimo"),
@@ -80,9 +82,11 @@ fn catalog_sources_are_unique_and_use_title_case_names() {
             source.chars().next().is_some_and(char::is_uppercase),
             "source 必须以大写字母开头（固定 stable key），得到 {source}"
         );
+        // source 是精确匹配的 stable key，允许内部空格（如 "Z.ai Coding Plan"），
+        // 但禁止首尾空白与连续空白，避免匹配歧义。
         assert!(
-            !source.contains(char::is_whitespace),
-            "source 不得包含空白，得到 {source:?}"
+            source == source.trim() && !source.contains("  "),
+            "source 不得有首尾或连续空白，得到 {source:?}"
         );
         assert!(
             seen_sources.insert(source),
@@ -108,8 +112,8 @@ fn catalog_drivers_cover_connect_exposed_runtime_drivers_without_requiring_uniqu
             .iter()
             .filter(|entry| entry.driver.as_str() == "zhipu")
             .count(),
-        2,
-        "同一 runtime driver 必须允许承载普通版与 Coding Plan 等不同内置配置"
+        4,
+        "同一 runtime driver 必须允许承载普通版与 Coding Plan、国内与海外等不同内置配置"
     );
 }
 
@@ -294,7 +298,7 @@ fn configured_catalog_defaults_match_product_requirements() {
             zhipu_models,
         ),
         (
-            "ZhipuCodingPlan",
+            "Zhipu Coding Plan",
             "https://open.bigmodel.cn/api/coding/paas/v4",
             zhipu_models,
         ),
@@ -395,7 +399,12 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
             "0.154.0",
             "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)",
         ),
-        ("ZhipuCodingPlan", "zcode", "3.11.2", "ZCode/3.11.2"),
+        // ZCode 是 BigModel（国内）与 Z.ai（海外）双平台的官方桌面客户端，
+        // 覆盖通用余额与 Coding Plan 全部端点（ZCode 官方配置文档端点矩阵）。
+        ("Zhipu", "zcode", "3.11.2", "ZCode/3.11.2"),
+        ("Zhipu Coding Plan", "zcode", "3.11.2", "ZCode/3.11.2"),
+        ("Z.ai", "zcode", "3.11.2", "ZCode/3.11.2"),
+        ("Z.ai Coding Plan", "zcode", "3.11.2", "ZCode/3.11.2"),
     ];
 
     for (source, sdk_name, sdk_version, expected_ua) in cases {
@@ -427,11 +436,10 @@ fn catalog_official_sdk_user_agents_record_verified_sdk_metadata() {
 
 #[test]
 fn catalog_entries_without_official_sdk_user_agent_evidence_stay_absent() {
-    // 官方 SDK 不发送 UA（zhipu 普通开放平台），或根本没有官方 SDK 的 Provider
-    // 必须保持 None，由全局配置与全局默认继续回退。
-    for source in [
-        "Zhipu", "Minimax", "Mimo", "DeepSeek", "LiteLLM", "Agnes", "Ollama",
-    ] {
+    // 根本没有官方 SDK 的 Provider 必须保持 None，由全局配置与全局默认继续回退。
+    // zhipu 系（Zhipu / Zhipu Coding Plan / Z.ai / Z.ai Coding Plan）均以 ZCode 为
+    // 官方客户端，不在此名单。
+    for source in ["Minimax", "Mimo", "DeepSeek", "LiteLLM", "Agnes", "Ollama"] {
         let entry = find_by_source(source).expect("内置 Provider 必须存在");
         assert!(
             entry.official_sdk_user_agent.is_none(),

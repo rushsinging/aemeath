@@ -332,12 +332,24 @@ const ZHIPU_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     }),
     recommended_models: ZHIPU_MODELS,
     api_key_hint: Some("智谱开放平台 → API Keys"),
-    official_sdk_user_agent: None,
+    // ZCode 是 BigModel（国内）与 Z.ai（海外）双平台的官方桌面客户端；其配置文档
+    // 的端点矩阵覆盖通用余额端点（资源包 / 充值余额场景），因此普通开放平台
+    // 请求同样携带 ZCode 客户端标识。GLM 请求头构造为
+    // `User-Agent: ZCode/${appVersion}`（伴随 `X-ZCode-Agent` 与
+    // `X-ZCode-App-Version`）；appVersion 取自应用 Info.plist 的
+    // CFBundleShortVersionString = 3.11.2，因此 UA 逐字符为 `ZCode/3.11.2`。
+    official_sdk_user_agent: Some(OfficialSdkUserAgent {
+        sdk_name: "zcode",
+        sdk_version: "3.11.2",
+        value: "ZCode/3.11.2",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
 };
 
 /// Zhipu Coding Plan 使用相同 runtime driver，但拥有独立稳定 source 与 endpoint。
 const ZHIPU_CODING_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
-    source: ProviderSource::new("ZhipuCodingPlan"),
+    source: ProviderSource::new("Zhipu Coding Plan"),
     driver: DriverId::new("zhipu"),
     default_endpoint: Some(DefaultEndpoint {
         url: "https://open.bigmodel.cn/api/coding/paas/v4",
@@ -350,12 +362,55 @@ const ZHIPU_CODING_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     // GLM 请求头构造为 `User-Agent: ZCode/${appVersion}`（伴随
     // `X-ZCode-Agent: glm` 与 `X-ZCode-App-Version`）；appVersion 取自应用
     // Info.plist 的 CFBundleShortVersionString = 3.11.2，因此 UA 逐字符为
-    // `ZCode/3.11.2`。普通 Zhipu 开放平台不是 ZCode 的目标服务，保持 None。
+    // `ZCode/3.11.2`。
     official_sdk_user_agent: Some(OfficialSdkUserAgent {
         sdk_name: "zcode",
         sdk_version: "3.11.2",
         value: "ZCode/3.11.2",
-        evidence_url: "https://open.bigmodel.cn",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+};
+
+/// Z.ai 是智谱面向海外用户的国际平台（美元计价），与 BigModel 同模型体系但
+/// 账号、余额与 API Key 互不通用。通用端点服务资源包 / 充值余额场景。
+const ZAI_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
+    source: ProviderSource::new("Z.ai"),
+    driver: DriverId::new("zhipu"),
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://api.z.ai/api/paas/v4",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+    recommended_models: ZHIPU_MODELS,
+    api_key_hint: Some("Z.ai Platform → API Keys"),
+    // ZCode 同为 BigModel 与 Z.ai 的官方桌面客户端（ZCode 配置文档端点矩阵
+    // 列明 `https://api.z.ai/api/paas/v4` 通用端点），UA 与国内系列一致。
+    official_sdk_user_agent: Some(OfficialSdkUserAgent {
+        sdk_name: "zcode",
+        sdk_version: "3.11.2",
+        value: "ZCode/3.11.2",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+};
+
+/// Z.ai Coding Plan 使用 Coding 专用端点（不可与通用端点互相替代、额度独立）。
+const ZAI_CODING_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
+    source: ProviderSource::new("Z.ai Coding Plan"),
+    driver: DriverId::new("zhipu"),
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://api.z.ai/api/coding/paas/v4",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+    recommended_models: ZHIPU_MODELS,
+    api_key_hint: Some("Z.ai Coding Plan → API Keys"),
+    official_sdk_user_agent: Some(OfficialSdkUserAgent {
+        sdk_name: "zcode",
+        sdk_version: "3.11.2",
+        value: "ZCode/3.11.2",
+        evidence_url: "https://zcode.z.ai/cn/docs/configuration",
         verified_at: VERIFIED_AT_2026_09_10,
     }),
 };
@@ -526,6 +581,8 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
     OPENAI_ENTRY,
     ZHIPU_ENTRY,
     ZHIPU_CODING_PLAN_ENTRY,
+    ZAI_ENTRY,
+    ZAI_CODING_PLAN_ENTRY,
     LITELLM_ENTRY,
     MINIMAX_ENTRY,
     MIMO_ENTRY,

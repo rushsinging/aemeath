@@ -78,7 +78,7 @@ fn runtime_resolution_uses_source_specific_endpoint_for_shared_driver() {
     for (source, expected_endpoint) in [
         ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
         (
-            "ZhipuCodingPlan",
+            "Zhipu Coding Plan",
             "https://open.bigmodel.cn/api/coding/paas/v4",
         ),
     ] {
@@ -121,10 +121,10 @@ fn runtime_resolution_prefers_catalog_official_sdk_user_agent_over_global() {
 
 #[test]
 fn runtime_resolution_skips_catalog_level_without_sdk_evidence() {
-    // zhipu 官方 SDK 不发送 User-Agent；Catalog 级保持 None 并回退到全局配置。
-    let snapshot = snapshot("Zhipu", "zhipu", "", None);
+    // DeepSeek 无官方 SDK UA；Catalog 级保持 None 并回退到全局配置。
+    let snapshot = snapshot("DeepSeek", "deepseek", "", None);
 
-    let resolved = resolve(&snapshot, "Zhipu", "zhipu", None);
+    let resolved = resolve(&snapshot, "DeepSeek", "deepseek", None);
 
     assert_eq!(resolved.user_agent, "global/1.0");
 }
@@ -140,21 +140,31 @@ fn runtime_resolution_applies_provider_user_agent_before_global_user_agent() {
 
 #[test]
 fn runtime_resolution_falls_back_to_global_user_agent() {
-    let snapshot = snapshot("Zhipu", "zhipu", "https://zhipu.example.test", None);
+    let snapshot = snapshot(
+        "DeepSeek",
+        "deepseek",
+        "https://deepseek.example.test",
+        None,
+    );
 
-    let resolved = resolve(&snapshot, "Zhipu", "zhipu", None);
+    let resolved = resolve(&snapshot, "DeepSeek", "deepseek", None);
 
     assert_eq!(resolved.user_agent, "global/1.0");
 }
 
 #[test]
 fn runtime_resolution_falls_back_to_global_default_user_agent() {
-    let mut snapshot = snapshot("Zhipu", "zhipu", "https://zhipu.example.test", None);
+    let mut snapshot = snapshot(
+        "DeepSeek",
+        "deepseek",
+        "https://deepseek.example.test",
+        None,
+    );
     let mut config = snapshot.to_config();
     config.api.user_agent.clear();
     snapshot = ConfigSnapshot::new(config);
 
-    let resolved = resolve(&snapshot, "Zhipu", "zhipu", None);
+    let resolved = resolve(&snapshot, "DeepSeek", "deepseek", None);
 
     assert_eq!(resolved.user_agent, "Aemeath/0.1.0 cli linux/6.1.0/x86_64");
 }

@@ -175,7 +175,7 @@ fn zhipu_endpoint_pages_publish_distinct_default_urls() {
     for (source, expected_url) in [
         ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
         (
-            "ZhipuCodingPlan",
+            "Zhipu Coding Plan",
             "https://open.bigmodel.cn/api/coding/paas/v4",
         ),
     ] {

@@ -71,8 +71,8 @@ fn assembled_inputs_normalize_blank_provider_and_global_values() {
     let inputs = assemble_provider_user_agent_inputs(
         ProviderUserAgentRequest {
             provider_user_agent: Some("   "),
-            source_key: Some("Zhipu"),
-            driver: Some("zhipu"),
+            source_key: Some("DeepSeek"),
+            driver: Some("deepseek"),
             global_user_agent: Some("\t"),
         },
         system("macos", "aarch64", Some("15.5")),
@@ -98,8 +98,8 @@ fn assembled_inputs_carry_global_config_user_agent() {
     let inputs = assemble_provider_user_agent_inputs(
         ProviderUserAgentRequest {
             provider_user_agent: None,
-            source_key: Some("Zhipu"),
-            driver: Some("zhipu"),
+            source_key: Some("DeepSeek"),
+            driver: Some("deepseek"),
             global_user_agent: Some("global/2.0"),
         },
         system("macos", "aarch64", Some("15.5")),
@@ -135,7 +135,7 @@ fn assembled_inputs_take_catalog_user_agent_and_keep_absence_for_unverified() {
         "claude-cli/2.1.267 (external, sdk-cli)"
     );
 
-    for (source_key, driver) in [("Zhipu", "zhipu"), ("Minimax", "minimax")] {
+    for (source_key, driver) in [("DeepSeek", "deepseek"), ("Minimax", "minimax")] {
         let inputs = assemble_provider_user_agent_inputs(
             ProviderUserAgentRequest {
                 provider_user_agent: None,
@@ -573,7 +573,7 @@ fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
     );
 
     let zhipu_coding_plan =
-        crate::catalog::find_by_source("ZhipuCodingPlan").expect("ZhipuCodingPlan 必须存在");
+        crate::catalog::find_by_source("Zhipu Coding Plan").expect("Zhipu Coding Plan 必须存在");
     assert_eq!(
         zhipu_coding_plan
             .official_sdk_user_agent
@@ -583,13 +583,9 @@ fn catalog_official_sdk_user_agent_is_present_only_for_verified_sdks() {
         "ZCode 3.11.2 是智谱 Coding Plan 官方客户端，UA 为 ZCode/<appVersion>"
     );
 
-    // 其余 driver 都没有逐字符可核验的官方客户端 UA：zhipu 普通开放平台的官方
-    // SDK 不发送 UA，minimax / mimo / deepseek 等没有官方 SDK。
-    // 注意 `find_by_driver("zhipu")` 的 canonical 条目是普通版 Zhipu（无 UA），
-    // Coding Plan 的 ZCode UA 只按 source 命中。
-    for driver in [
-        "zhipu", "litellm", "minimax", "mimo", "deepseek", "agnes", "ollama",
-    ] {
+    // 其余 driver 都没有逐字符可核验的官方客户端 UA：deepseek / minimax /
+    // mimo 等没有官方 SDK，zhipu 系（含 Z.ai）全部以 ZCode 为官方客户端。
+    for driver in ["litellm", "minimax", "mimo", "deepseek", "agnes", "ollama"] {
         let entry = find_by_driver(driver).unwrap_or_else(|| panic!("Catalog 必含 {driver}"));
         assert!(
             entry.official_sdk_user_agent.is_none(),

@@ -247,7 +247,7 @@ async fn selecting_provider_prefills_catalog_endpoint_in_server_draft() {
         ("OpenAI", "https://api.openai.com"),
         ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
         (
-            "ZhipuCodingPlan",
+            "Zhipu Coding Plan",
             "https://open.bigmodel.cn/api/coding/paas/v4",
         ),
     ] {
@@ -596,7 +596,7 @@ async fn probe_success_moves_directly_to_review() {
 
 #[tokio::test]
 async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
-    // Zhipu 官方 SDK 不发送 User-Agent，Catalog 级为空 → probe 必须与正式请求
+    // DeepSeek 无官方 SDK UA，Catalog 级为空 → probe 必须与正式请求
     // 使用同一份全局 UA。
     let probe = CapturingProbe::success();
     let service = ConnectAppService::builder()
@@ -605,7 +605,7 @@ async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
         .with_global_user_agent(Some("global-agent/9.9".to_string()))
         .build();
 
-    let view = ready_to_probe_for_source(&service, "Zhipu", None).await;
+    let view = ready_to_probe_for_source(&service, "DeepSeek", None).await;
     advance(&service, view, ConnectCommand::BeginProbe).await;
 
     assert_eq!(
