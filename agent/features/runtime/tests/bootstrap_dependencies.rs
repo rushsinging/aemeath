@@ -268,7 +268,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tools.catalog_port(),
         tools.execution(),
-        Arc::new(policy::AllowAllPolicy),
+        policy::allow_all(),
         history.clone(),
         access.clone(),
         hook_runner.clone(),

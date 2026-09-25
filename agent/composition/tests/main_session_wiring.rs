@@ -470,7 +470,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tools.catalog_port(),
         tools.execution(),
-        Arc::new(policy::AllowAllPolicy),
+        policy::allow_all(),
         reflection_history,
         task_access,
         hook_runner,

@@ -93,16 +93,6 @@ pub struct UsagePageData {
     pub warnings: Vec<UsageQueryWarning>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct UsageSummaryData {
-    pub record_count: u64,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_write_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub reasoning_tokens: u64,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UsageQueryError {
     Storage(String),

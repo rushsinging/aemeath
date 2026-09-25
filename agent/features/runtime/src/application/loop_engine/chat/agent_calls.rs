@@ -803,7 +803,7 @@ mod tests {
                 &cancel,
                 &ctx.workspace_read(),
                 &catalog,
-                &policy::AllowAllPolicy,
+                &*policy::allow_all(),
                 &sdk::RunId::new_v7(),
                 &sdk::RunStepId::new_v7(),
             )

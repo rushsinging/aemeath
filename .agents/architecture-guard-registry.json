@@ -1796,15 +1796,14 @@
         "value": "agent/features/policy/src"
       },
       "allowed_symbols": [
-        "AllowAllPolicy",
         "ApprovalSubjectData",
-        "ConfiguredPolicy",
         "Policy",
         "PolicyDecisionData",
         "PolicyModeData",
-        "PolicyModeReader",
         "PolicyReasonData",
-        "PolicyRequestData"
+        "PolicyRequestData",
+        "allow_all",
+        "configured"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"

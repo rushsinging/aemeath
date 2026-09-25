@@ -1,10 +1,10 @@
-//! Logging-contract tests for [`AllowAllPolicy::evaluate`].
+//! Logging-contract tests for [`allow_all()::evaluate`].
 //!
 //! Proves the entry / Allow-exit logging contract and verifies that production
 //! logs record only `mode`, `capability_count`, and `decision` — never the
 //! tool name, workspace path, or run identifiers.
 
-use crate::{AllowAllPolicy, Policy, PolicyDecisionData, PolicyRequestData};
+use crate::{allow_all, PolicyDecisionData, PolicyRequestData};
 use sdk::ids::{RunId, RunStepId};
 use std::sync::Mutex;
 use tools::{ToolCapabilities, ToolCapability, ToolName};
@@ -79,7 +79,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
     );
 
     assert_eq!(
-        AllowAllPolicy.evaluate(&request),
+        allow_all().evaluate(&request),
         PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
     );
 
@@ -154,7 +154,7 @@ fn capability_count_reflects_request_requirements() {
     );
 
     assert_eq!(
-        AllowAllPolicy.evaluate(&request),
+        allow_all().evaluate(&request),
         PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
     );
 

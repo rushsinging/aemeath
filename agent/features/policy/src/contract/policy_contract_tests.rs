@@ -1,8 +1,9 @@
-use crate::adapters::{AllowAllPolicy, ConfiguredPolicy, StandardPolicy};
+use crate::adapters::StandardPolicy;
 use crate::domain::{
-    ApprovalSubjectData, Policy, PolicyDecisionData, PolicyModeData, PolicyModeReader,
-    PolicyReasonData, PolicyRequestData,
+    ApprovalSubjectData, Policy, PolicyDecisionData, PolicyModeData, PolicyReasonData,
+    PolicyRequestData,
 };
+use crate::{allow_all, configured};
 use sdk::ids::{RunId, RunStepId};
 use share::config::PermissionModeConfig;
 use tools::{ToolCapabilities, ToolCapability, ToolName};
@@ -69,19 +70,11 @@ fn standard_policy_returns_allow_with_standard_authorization() {
     );
 }
 
-#[derive(Clone)]
-struct MutableModeSource(std::sync::Arc<std::sync::RwLock<PermissionModeConfig>>);
-
-impl PolicyModeReader for MutableModeSource {
-    fn current_mode(&self) -> PolicyModeData {
-        (*self.0.read().expect("mode source lock")).into()
-    }
-}
-
 #[test]
 fn configured_policy_reads_current_mode_for_every_evaluation() {
     let mode = std::sync::Arc::new(std::sync::RwLock::new(PermissionModeConfig::Ask));
-    let policy = ConfiguredPolicy::new(MutableModeSource(mode.clone()));
+    let mode_for_closure = std::sync::Arc::clone(&mode);
+    let policy = configured(move || (*mode_for_closure.read().expect("mode lock")).into());
     let request = request("Read", ToolCapability::Read);
 
     assert_eq!(
@@ -115,7 +108,7 @@ fn policy_decision_future_variants_keep_typed_reason_and_subject() {
 
 #[test]
 fn allow_all_policy_contract_allows_every_valid_request() {
-    let policy: &dyn Policy = &AllowAllPolicy;
+    let policy = allow_all();
     for request in [
         request("Read", ToolCapability::Read),
         request("Edit", ToolCapability::Write),

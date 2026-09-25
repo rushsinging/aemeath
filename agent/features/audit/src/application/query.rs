@@ -1,6 +1,6 @@
 use crate::domain::{
     UsageEnvelopeV1, UsageQueryData, UsageQueryError, UsageQueryWarning, UsageRecordData,
-    UsageSummaryData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 
 pub(crate) const MAX_USAGE_QUERY_LIMIT: usize = 1_000;
@@ -121,16 +121,6 @@ pub(crate) fn matches(query: &UsageQueryData, record: &UsageRecordData) -> bool 
                     .to_exclusive_unix_ms
                     .is_none_or(|to| record.recorded_at_unix_ms < to)
         })
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn add_summary(summary: &mut UsageSummaryData, record: &UsageRecordData) {
-    summary.record_count += 1;
-    summary.input_tokens += record.input_tokens;
-    summary.output_tokens += record.output_tokens;
-    summary.cache_write_tokens += record.cache_write_tokens.unwrap_or(0);
-    summary.cache_read_tokens += record.cache_read_tokens.unwrap_or(0);
-    summary.reasoning_tokens += record.reasoning_tokens.unwrap_or(0);
 }
 
 fn corrupt(stream: &str, line_number: u64) -> UsageQueryWarning {

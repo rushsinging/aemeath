@@ -172,7 +172,7 @@ mod tests {
                 crate::application::run::context_factory::RuntimeContextFactory::new(
                     tool_ports.catalog_port(),
                     tool_ports.execution(),
-                    Arc::new(policy::AllowAllPolicy),
+                    policy::allow_all(),
                     refl,
                     crate::application::run::test_task_access(),
                     hooks,

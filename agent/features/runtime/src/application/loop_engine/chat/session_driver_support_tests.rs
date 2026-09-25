@@ -379,7 +379,7 @@ fn test_shell_with_catalog(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
                 factory.execution(),
-                Arc::new(policy::AllowAllPolicy),
+                policy::allow_all(),
                 test_reflection_history_store(),
                 Arc::new(task::TaskStore::new()),
                 hooks,
@@ -485,7 +485,7 @@ fn test_shell_with_task_store(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
                 factory.execution(),
-                Arc::new(policy::AllowAllPolicy),
+                policy::allow_all(),
                 test_reflection_history_store(),
                 task_store,
                 hooks,

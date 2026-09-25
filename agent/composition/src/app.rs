@@ -54,20 +54,9 @@ impl FeatureGateways {
     }
 }
 
-struct ConfigPolicyModeSource {
-    reader: Arc<dyn config::ConfigReader>,
-}
-
-impl policy::PolicyModeReader for ConfigPolicyModeSource {
-    fn current_mode(&self) -> policy::PolicyModeData {
-        self.reader.committed_snapshot().permission_mode().into()
-    }
-}
-
 fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::Policy> {
-    Arc::new(policy::ConfiguredPolicy::new(ConfigPolicyModeSource {
-        reader: config.reader(),
-    }))
+    let reader = config.reader();
+    policy::configured(move || reader.committed_snapshot().permission_mode().into())
 }
 
 fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
@@ -736,7 +725,7 @@ mod tests {
             .expect("write MCP config");
 
         let provider = Arc::new(CountingProviderFactory::default());
-        let gateways = FeatureGateways::new(provider.clone(), Arc::new(policy::AllowAllPolicy));
+        let gateways = FeatureGateways::new(provider.clone(), policy::allow_all());
         let args = AgentArgs {
             cwd: Some(root),
             api_key: Some("test-api-key".to_string()),

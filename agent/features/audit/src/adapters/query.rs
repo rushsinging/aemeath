@@ -3,12 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::query::{
-    add_summary, decode_cursor, decode_record, encode_cursor, matches, query_fingerprint,
-    validate_query, CursorPosition,
+    decode_cursor, decode_record, encode_cursor, matches, query_fingerprint, validate_query,
+    CursorPosition,
 };
-use crate::domain::{
-    UsageCursor, UsagePageData, UsageQueryData, UsageQueryError, UsageSummaryData,
-};
+use crate::domain::{UsageCursor, UsagePageData, UsageQueryData, UsageQueryError};
 use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageQueryPort};
 
 #[derive(Clone)]
@@ -83,34 +81,6 @@ impl UsageQueryPort for UsageQueryService {
             next_cursor: None,
             warnings,
         })
-    }
-
-    async fn summarize(&self, query: UsageQueryData) -> Result<UsageSummaryData, UsageQueryError> {
-        validate_query(&query)?;
-        if query.pagination.cursor.is_some() {
-            return Err(UsageQueryError::InvalidCursor);
-        }
-        let streams = self.streams(&query, None).await?;
-        let mut summary = UsageSummaryData::default();
-
-        for stream in streams {
-            let reader = self.store.read(&stream).await.map_err(storage_error)?;
-            for (offset, line) in reader.lines().iter().enumerate() {
-                let line_number = u64::try_from(offset + 1).unwrap_or(u64::MAX);
-                if let Ok(record) = decode_record(
-                    line.bytes(),
-                    line.is_terminated(),
-                    stream.as_str(),
-                    line_number,
-                ) {
-                    if matches(&query, &record) {
-                        add_summary(&mut summary, &record);
-                    }
-                }
-            }
-        }
-
-        Ok(summary)
     }
 }
 

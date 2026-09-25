@@ -106,10 +106,6 @@ pub enum PolicyDecisionData {
     },
 }
 
-pub trait PolicyModeReader: Send + Sync {
-    fn current_mode(&self) -> PolicyModeData;
-}
-
 /// 唯一策略角色：决策 + 当前模式（两个读行为，同源——mode 是 evaluate 的决策输入）。
 pub trait Policy: Send + Sync {
     fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData;
