@@ -247,6 +247,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_summary_mapping_carries_project_and_empty_marker_summary() {
+        let entry = context::SessionListEntry {
+            id: "session-1".to_string(),
+            title: None,
+            project: Some("aemeath".to_string()),
+            model: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            message_count: 0,
+            preview: None,
+            summary: "(empty)".to_string(),
+        };
+
+        let mapped = session_summary_from_context(entry);
+
+        assert_eq!(mapped.project.as_deref(), Some("aemeath"));
+        assert_eq!(mapped.summary, "(empty)");
+        assert_eq!(mapped.message_count, 0);
+    }
+
+    #[test]
     fn message_mapping_preserves_hook_notice() {
         let message = share::message::Message::hook_notice(
             "<system-reminder>blocked</system-reminder>",
