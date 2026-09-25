@@ -2,11 +2,13 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use audit::{
-    file_usage_append_store, start_usage_worker, usage_query_service, Pagination, TimeRange,
-    UsageCursor, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryPort, UsageQueryWarning,
-    UsageRecord, UsageWorkerConfig, CURRENT_USAGE_SCHEMA_VERSION,
+use crate::adapters::{file_usage_append_store, usage_query_service};
+use crate::application::{start_usage_worker, UsageWorkerConfig};
+use crate::domain::{
+    Pagination, TimeRange, UsageCursor, UsageEnvelopeV1, UsageQuery, UsageQueryError,
+    UsageQueryWarning, UsageRecord, CURRENT_USAGE_SCHEMA_VERSION,
 };
+use crate::ports::UsageQueryPort;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use storage::SafeStorageRoot;
 
@@ -50,7 +52,10 @@ fn query(limit: usize) -> UsageQuery {
 
 async fn service(
     temp: &tempfile::TempDir,
-) -> (Arc<audit::FileUsageAppendStore>, audit::UsageQueryService) {
+) -> (
+    Arc<crate::adapters::FileUsageAppendStore>,
+    crate::adapters::UsageQueryService,
+) {
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
     ));
@@ -58,8 +63,8 @@ async fn service(
     (store, query)
 }
 
-async fn append_envelope(store: &audit::FileUsageAppendStore, envelope: UsageEnvelopeV1) {
-    use audit::UsageAppendStorePort;
+async fn append_envelope(store: &crate::adapters::FileUsageAppendStore, envelope: UsageEnvelopeV1) {
+    use crate::ports::UsageAppendStorePort;
     let stream = store.stream_for_session(&envelope.record.session_id);
     let mut bytes = serde_json::to_vec(&envelope).unwrap();
     bytes.push(b'\n');
@@ -67,7 +72,7 @@ async fn append_envelope(store: &audit::FileUsageAppendStore, envelope: UsageEnv
     store.flush(&stream).await.unwrap();
 }
 
-async fn append(store: &audit::FileUsageAppendStore, record: UsageRecord) {
+async fn append(store: &crate::adapters::FileUsageAppendStore, record: UsageRecord) {
     append_envelope(store, UsageEnvelopeV1::new(record)).await;
 }
 
@@ -111,7 +116,7 @@ async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
 
     assert_eq!(
         sender.try_record(expected.clone()),
-        audit::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcome::Accepted
     );
     worker.shutdown().await;
 
@@ -150,11 +155,11 @@ async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
 
     assert_eq!(
         sender.try_record(first.clone()),
-        audit::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcome::Accepted
     );
     assert_eq!(
         sender.try_record(second.clone()),
-        audit::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcome::Accepted
     );
     worker.shutdown().await;
 

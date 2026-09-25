@@ -5,5 +5,8 @@ mod query;
 #[path = "adapters/query_tests.rs"]
 mod query_tests;
 
-pub use append::{file_usage_append_store, FileUsageAppendStore};
+pub use append::file_usage_append_store;
+#[allow(unused_imports)]
+pub use append::FileUsageAppendStore;
+#[allow(unused_imports)]
 pub use query::{usage_query_service, UsageQueryService};

@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use audit::{UsageDropReason, UsageEmitOutcome, UsageQuery, UsageQueryPort, UsageRecord};
+use audit::{
+    file_usage_append_store, usage_query_service, UsageDropReason, UsageEmitOutcome, UsageQuery,
+    UsageRecord,
+};
 use composition::audit::{usage_worker_config_from_snapshot, wire_session_audit, AuditUsageSink};
 use runtime::UsageSink;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
@@ -11,7 +14,7 @@ use share::config::Config;
 async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = storage::SafeStorageRoot::open(temp.path()).expect("storage root");
-    let store = std::sync::Arc::new(audit::file_usage_append_store(root));
+    let store = std::sync::Arc::new(file_usage_append_store(root));
     let (sender, worker) = audit::start_usage_worker(
         store,
         audit::UsageWorkerConfig::new(1, Duration::from_secs(1)),
@@ -70,11 +73,10 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
     );
     let audit_root = storage::SafeStorageRoot::open(agents_dir.join("audit"))
         .expect("reopen production audit root");
-    let query_service = audit::usage_query_service(std::sync::Arc::new(
-        audit::file_usage_append_store(audit_root),
-    ));
+    let query_service =
+        usage_query_service(std::sync::Arc::new(file_usage_append_store(audit_root)));
     let page = query_service
-        .query(UsageQuery {
+        .query_page(UsageQuery {
             session_id: Some(record.session_id.clone()),
             run_id: Some(record.run_id.clone()),
             run_step_id: Some(record.run_step_id.clone()),

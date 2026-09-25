@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use audit::{
-    start_usage_worker, AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream,
-    UsageAppendStorePort, UsageDropReason, UsageEmitOutcome, UsageRecord, UsageWorkerConfig,
+use crate::application::{start_usage_worker, UsageWorkerConfig};
+use crate::domain::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use crate::ports::{
+    AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
 };
+use async_trait::async_trait;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 #[derive(Default)]

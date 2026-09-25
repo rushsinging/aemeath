@@ -3,9 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::query::usage_query_service;
-use crate::{
-    AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, Pagination,
-    UsageAppendStorePort, UsageQuery, UsageQueryError, UsageQueryPort,
+use crate::domain::{Pagination, UsageQuery, UsageQueryError};
+use crate::ports::{
+    AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
+    UsageQueryPort,
 };
 
 #[derive(Clone, Copy)]

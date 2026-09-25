@@ -6,7 +6,7 @@ use super::query::{
     add_summary, decode_cursor, decode_record, encode_cursor, matches, query_fingerprint,
     validate_query, CursorPosition, MAX_USAGE_QUERY_LIMIT,
 };
-use crate::{
+use crate::domain::{
     Pagination, TimeRange, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryWarning,
     UsageRecord, UsageSummary, CURRENT_USAGE_SCHEMA_VERSION,
 };
@@ -107,7 +107,7 @@ fn query_fingerprint_changes_for_each_filter_but_not_pagination() {
 
     let mut pagination_only = baseline.clone();
     pagination_only.pagination.limit = NonZeroUsize::new(99).expect("non-zero query limit");
-    pagination_only.pagination.cursor = Some(crate::UsageCursor::new("ignored"));
+    pagination_only.pagination.cursor = Some(crate::domain::UsageCursor::new("ignored"));
     assert_eq!(query_fingerprint(&pagination_only), baseline_fingerprint);
 
     let variants = [

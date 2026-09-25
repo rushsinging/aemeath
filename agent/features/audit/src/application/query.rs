@@ -1,4 +1,4 @@
-use crate::{
+use crate::domain::{
     TimeRange, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryWarning, UsageRecord,
     UsageSummary, CURRENT_USAGE_SCHEMA_VERSION,
 };
@@ -123,6 +123,7 @@ pub(crate) fn matches(query: &UsageQuery, record: &UsageRecord) -> bool {
         })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn add_summary(summary: &mut UsageSummary, record: &UsageRecord) {
     summary.record_count += 1;
     summary.input_tokens += record.input_tokens;
