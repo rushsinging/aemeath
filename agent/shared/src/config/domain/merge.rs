@@ -765,6 +765,12 @@ pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfi
     HooksConfig {
         max_attempts: overlay.max_attempts.or(base.max_attempts),
         max_stop_hook_blocks: overlay.max_stop_hook_blocks.or(base.max_stop_hook_blocks),
+        // Vec 空 = 未设置：overlay 设置了透传模式则覆盖，否则继承 base（全局层）。
+        env_passthrough: if overlay.env_passthrough.is_empty() {
+            base.env_passthrough
+        } else {
+            overlay.env_passthrough
+        },
         events,
     }
 }
@@ -942,6 +948,39 @@ mod tests {
         let snapshot = ConfigSnapshot::new(Config::default());
 
         assert_eq!(snapshot.worktrees_dir(), None);
+    }
+
+    #[test]
+    fn hook_env_passthrough_patch_overrides_and_inherits_when_unset() {
+        let global: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"env_passthrough": ["CMUX_*"]}}"#).unwrap();
+        let project_override: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"env_passthrough": ["SSH_AUTH_SOCK"]}}"#).unwrap();
+        let project_unset: ConfigPatch =
+            serde_json::from_str(r#"{"hooks": {"max_attempts": 3}}"#).unwrap();
+
+        let merged_global_only = apply_patch(Config::default(), global.clone());
+        assert_eq!(
+            merged_global_only.hooks.env_passthrough,
+            vec!["CMUX_*".to_string()]
+        );
+
+        // overlay 设置了透传模式：整体覆盖（不做列表拼接合并）
+        let merged_override = apply_patch(
+            apply_patch(Config::default(), global.clone()),
+            project_override,
+        );
+        assert_eq!(
+            merged_override.hooks.env_passthrough,
+            vec!["SSH_AUTH_SOCK".to_string()]
+        );
+
+        // overlay 未设置（空）：继承全局层
+        let merged_inherit = apply_patch(apply_patch(Config::default(), global), project_unset);
+        assert_eq!(
+            merged_inherit.hooks.env_passthrough,
+            vec!["CMUX_*".to_string()]
+        );
     }
 
     #[test]

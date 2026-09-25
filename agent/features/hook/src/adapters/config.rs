@@ -39,12 +39,17 @@ pub fn build_dispatcher(config: &ConfigSnapshot) -> Result<Dispatcher, Vec<Subsc
     let policy = config.hook_execution_policy();
     log::debug!(
         target: crate::LOG_TARGET,
-        "hook dispatcher built: configured_events={} subscriptions={} max_attempts={}",
+        "hook dispatcher built: configured_events={} subscriptions={} max_attempts={} env_passthrough={:?}",
         config.hooks().events.len(),
         subscriptions.len(),
         policy.max_attempts(),
+        config.hooks().env_passthrough,
     );
-    Dispatcher::try_new(subscriptions, policy)
+    Dispatcher::try_new(
+        subscriptions,
+        policy,
+        config.hooks().env_passthrough.clone(),
+    )
 }
 
 fn hook_point_from_event(event: HookEvent) -> HookPoint {
