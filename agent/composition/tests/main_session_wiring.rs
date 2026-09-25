@@ -488,7 +488,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         runtime::RuntimeCoreDependencies::new(
-            workspace,
+            workspace.clone(),
             wiring,
             provider_factory,
             session_management,
@@ -503,9 +503,11 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         initial_provider,
         runtime::SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
         runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
-        runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(
-            Vec::new(),
-        )),
+        runtime::SkillBootstrapAssembly::new(
+            tools::composition::wire_skills().catalog(),
+            workspace.clone(),
+            tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
+        ),
         agent_runner,
     );
     assert!(Arc::ptr_eq(

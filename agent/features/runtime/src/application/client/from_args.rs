@@ -87,11 +87,22 @@ impl SessionBootstrapAssembly {
 
 pub struct SkillBootstrapAssembly {
     pub snapshot: tools::SkillCatalogSnapshot,
+    /// 轮次边界重扫组件：会话中 skill 文件变更后经 `SkillsUpdated`
+    /// 事件刷新 TUI slash 目录（初始 revision 即 snapshot）。
+    pub refresh: crate::application::client::SkillCatalogRefresh,
 }
 
 impl SkillBootstrapAssembly {
-    pub fn new(snapshot: tools::SkillCatalogSnapshot) -> Self {
-        Self { snapshot }
+    pub fn new(
+        catalog: std::sync::Arc<dyn tools::SkillCatalogPort>,
+        workspace: project::WorkspaceViews,
+        query: tools::SkillQuery,
+    ) -> Self {
+        let snapshot = tools::SkillCatalogSnapshot::from_descriptors(catalog.list(query.clone()));
+        let refresh = crate::application::client::SkillCatalogRefresh::new(
+            catalog, workspace, query, &snapshot,
+        );
+        Self { snapshot, refresh }
     }
 }
 
@@ -382,6 +393,7 @@ pub async fn from_args_with_workspace(
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
     let SkillBootstrapAssembly {
         snapshot: initial_skill_snapshot,
+        refresh: skill_refresh,
     } = skills;
     // #1327 承接 MCP Ready lifecycle / Catalog 同步；#1294 不保留 MCP manager 或
     // Tools 私有 CatalogExecutionWiring 接线。
@@ -445,6 +457,7 @@ pub async fn from_args_with_workspace(
         model_id,
         skill_catalog,
         initial_skill_snapshot,
+        skill_refresh,
         memory_config,
         context_size,
         snapshot.language().to_string(),

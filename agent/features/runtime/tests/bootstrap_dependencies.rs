@@ -102,8 +102,14 @@ fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBo
     runtime::SessionBootstrapAssembly::new(root.to_path_buf(), 8192, true, false, None)
 }
 
-fn test_skill_bootstrap_assembly() -> runtime::SkillBootstrapAssembly {
-    runtime::SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new()))
+fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootstrapAssembly {
+    runtime::SkillBootstrapAssembly::new(
+        tools::composition::wire_skills().catalog(),
+        project::wire_production_workspace(root.to_path_buf(), None)
+            .expect("wire test workspace")
+            .into_views(),
+        tools::SkillQuery::new(root.to_path_buf(), Vec::new(), Default::default()),
+    )
 }
 
 fn test_agent_runner_assembly(
@@ -285,7 +291,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         initial_provider_assembly(),
         test_session_bootstrap_assembly(temp.path()),
         test_prompt_assembly(),
-        test_skill_bootstrap_assembly(),
+        test_skill_bootstrap_assembly(temp.path()),
         test_agent_runner_assembly(runtime_context_factory.clone(), active_run.clone()),
     );
 

@@ -298,6 +298,12 @@ async fn make_test_shell(
 
     let skill_wiring = tools::composition::wire_skills();
     let initial_skill_snapshot = tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_wiring.catalog(),
+        workspace.clone(),
+        tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     SessionRuntime::new(
         Arc::new(std::sync::RwLock::new(
@@ -342,6 +348,7 @@ async fn make_test_shell(
         "test-model".to_string(),
         skill_wiring.catalog(),
         initial_skill_snapshot,
+        skill_refresh,
         share::config::MemoryConfig::default(),
         200_000,
         "en".to_string(),
@@ -633,7 +640,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     );
     let dependencies = RuntimeBootstrapDependencies::new(
         RuntimeCoreDependencies::new(
-            workspace,
+            workspace.clone(),
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             Arc::new(context::test_support::UnavailableSessionManagement),
@@ -648,7 +655,11 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         initial_provider,
         SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
         PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
-        SkillBootstrapAssembly::new(tools::SkillCatalogSnapshot::from_descriptors(Vec::new())),
+        SkillBootstrapAssembly::new(
+            skill_wiring.catalog(),
+            workspace.clone(),
+            tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
+        ),
         crate::application::client::bootstrap::AgentRunnerAssembly {
             runner: Arc::new(NoopRunner),
             parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
