@@ -8,9 +8,9 @@ use config::{
     ProjectConfigParticipant,
 };
 use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
-use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError};
+use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceRestoreError, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
-use share::session_types::ProjectIdentity;
+use share::session_types::ProjectIdentityData;
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
@@ -97,7 +97,7 @@ pub enum MainSessionError {
     #[error("session belongs to a different project")]
     ProjectMismatch,
 
-    /// `WorkspacePersist::prepare_restore` rejected the candidate.
+    /// `WorkspaceWriter::prepare_restore` rejected the candidate.
     #[error("workspace restore prepare failed: {0}")]
     WorkspaceRestore(#[from] WorkspaceRestoreError),
 
@@ -178,10 +178,10 @@ impl BoundMainRun {
 ///
 /// The composition root supplies all ports plus the production
 /// [`MemoryOpener`]. Context takes ownership and eager-opens the initial
-/// [`MemoryPort`] from the workspace [`ProjectIdentity`] and the committed
+/// [`MemoryPort`] from the workspace [`ProjectIdentityData`] and the committed
 /// config `MemoryConfig`.
 pub struct MainSessionDependencies {
-    pub workspace: project::WorkspaceViews,
+    pub workspace: project::Workspace,
     pub task_persist: Arc<dyn task::TaskPersist>,
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
@@ -200,7 +200,7 @@ pub struct MainSessionDependencies {
 /// 1. Creates the initial [`CanonicalSession`] from the live workspace
 ///    snapshot so that a fresh (non-resume) start has a valid workspace slot.
 /// 2. Eager-opens the initial [`MemoryPort`] from the workspace
-///    [`ProjectIdentity`] and the committed config `MemoryConfig` — the
+///    [`ProjectIdentityData`] and the committed config `MemoryConfig` — the
 ///    workspace identity is the single source of truth for the memory key.
 /// 3. Assembles the wiring via [`MainSessionWiringBuilder`].
 ///
@@ -249,7 +249,7 @@ pub async fn wire_main_session(
         .commit_project(prepared_config)
         .await;
 
-    // Eager-open initial memory from the workspace ProjectIdentity +
+    // Eager-open initial memory from the workspace ProjectIdentityData +
     // the project-scoped config MemoryConfig (which now includes any durable
     // override).
     let memory_key =
@@ -291,7 +291,7 @@ pub async fn wire_main_session(
 /// [`Self::resume_prepared`] runs entirely inside the exclusive permit and
 /// follows a strict prepare-then-commit order:
 ///
-/// 1. **Project prepare** — `WorkspacePersist::prepare_restore` validates the
+/// 1. **Project prepare** — `WorkspaceWriter::prepare_restore` validates the
 ///    envelope's workspace context and returns the **canonical** project
 ///    identity. `Missing` / `CapturedEmpty` is rejected as
 ///    [`MainSessionError::WorkspaceMissing`].
@@ -332,8 +332,8 @@ pub struct MainSessionWiring {
     gate: SessionSwitchGate,
 
     // ── Project BC ──
-    workspace_read: Arc<dyn WorkspaceRead>,
-    workspace_persist: Arc<dyn WorkspacePersist>,
+    workspace_read: Arc<dyn WorkspaceReader>,
+    workspace_persist: Arc<dyn WorkspaceWriter>,
 
     // ── Task BC ──
     task_persist: Arc<dyn TaskPersist>,
@@ -371,8 +371,8 @@ impl std::fmt::Debug for MainSessionWiring {
 /// and memory. The wiring takes ownership and never exposes mutable access to
 /// the committed holders.
 pub struct MainSessionWiringBuilder {
-    pub workspace_read: Arc<dyn WorkspaceRead>,
-    pub workspace_persist: Arc<dyn WorkspacePersist>,
+    pub workspace_read: Arc<dyn WorkspaceReader>,
+    pub workspace_persist: Arc<dyn WorkspaceWriter>,
     pub task_persist: Arc<dyn task::TaskPersist>,
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
@@ -446,7 +446,7 @@ impl MainSessionWiring {
     }
 
     /// Returns the current project identity used to scope Session list/resume.
-    pub fn project_identity(&self) -> ProjectIdentity {
+    pub fn project_identity(&self) -> ProjectIdentityData {
         self.workspace_read.project_identity()
     }
 
@@ -511,7 +511,7 @@ impl MainSessionWiring {
     }
 
     /// Returns a gate-aware [`ConfigWriter`] façade backed by this wiring's
-    /// [`ProjectConfigParticipant`], [`WorkspaceRead`] and [`MemoryOpener`].
+    /// [`ProjectConfigParticipant`], [`WorkspaceReader`] and [`MemoryOpener`].
     ///
     /// See [`GateAwareConfigWriter`] for the full semantics.
     pub fn config_writer(&self) -> Arc<dyn ConfigWriter> {
@@ -578,7 +578,7 @@ impl MainSessionWiring {
         //
         // The prepared identity is used by downstream Config/Memory only after
         // it has been proven to belong to the current stable project.
-        let prepared_workspace: PreparedWorkspaceRestore = match &session.workspace {
+        let prepared_workspace: WorkspaceRestoreData = match &session.workspace {
             SnapshotState::Captured(dto) => match self.workspace_persist.prepare_restore(dto) {
                 Ok(prepared) => prepared,
                 Err(WorkspaceRestoreError::PathNotFound { .. }) => {
@@ -680,13 +680,13 @@ impl MainSessionWiring {
     /// projects — matching the derivation used by [`ProjectMemoryKey`].
     fn build_config_location(
         &self,
-        identity: &ProjectIdentity,
+        identity: &ProjectIdentityData,
     ) -> Result<ProjectConfigLocation, MainSessionError> {
         derive_config_location(identity)
     }
 }
 
-/// Derives the canonical project-config location from a [`ProjectIdentity`].
+/// Derives the canonical project-config location from a [`ProjectIdentityData`].
 ///
 /// The `search_root` is the identity's `initial_cwd`; the `stable_identity`
 /// is the `git_common_dir` for git projects or `initial_cwd` for non-git
@@ -696,7 +696,7 @@ impl MainSessionWiring {
 /// [`MainSessionWiring::resume_prepared`] (session resume) to ensure
 /// identical location derivation in both paths.
 pub(crate) fn derive_config_location(
-    identity: &ProjectIdentity,
+    identity: &ProjectIdentityData,
 ) -> Result<ProjectConfigLocation, MainSessionError> {
     let search_root = std::path::PathBuf::from(&identity.initial_cwd);
     let stable_identity: &[u8] = match identity.git_common_dir.as_deref() {
@@ -773,7 +773,7 @@ impl ConfigQuery for GateAwareConfigQuery {
 pub struct GateAwareConfigWriter {
     gate: SessionSwitchGate,
     config_participant: Arc<dyn ProjectConfigParticipant>,
-    workspace_read: Arc<dyn WorkspaceRead>,
+    workspace_read: Arc<dyn WorkspaceReader>,
     memory_opener: Box<dyn MemoryOpener>,
     committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
 }
@@ -894,7 +894,7 @@ pub mod test_support {
         async fn load_for_project(
             &self,
             id: &str,
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
         ) -> Result<CanonicalSession, crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),
@@ -903,7 +903,7 @@ pub mod test_support {
 
         async fn list_for_project(
             &self,
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
             Vec<crate::domain::session::SessionListEntry>,
             crate::domain::session::SessionManagementError,
@@ -914,7 +914,7 @@ pub mod test_support {
         async fn export_for_project(
             &self,
             id: &str,
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
         ) -> Result<Vec<u8>, crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),
@@ -924,7 +924,7 @@ pub mod test_support {
         async fn import_for_project(
             &self,
             _bytes: &[u8],
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
             crate::domain::session::SessionListEntry,
             crate::domain::session::SessionManagementError,
@@ -937,7 +937,7 @@ pub mod test_support {
         async fn update_metadata_for_project(
             &self,
             id: &str,
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
             _update: crate::domain::session::SessionMetadataUpdate,
         ) -> Result<
             crate::domain::session::SessionListEntry,
@@ -951,7 +951,7 @@ pub mod test_support {
         async fn delete_for_project(
             &self,
             id: &str,
-            _project: &share::session_types::ProjectIdentity,
+            _project: &share::session_types::ProjectIdentityData,
         ) -> Result<(), crate::domain::session::SessionManagementError> {
             Err(crate::domain::session::SessionManagementError::NotFound(
                 id.to_string(),
@@ -963,7 +963,7 @@ pub mod test_support {
     /// filesystem adapter. Test callers must provide an explicit port so a
     /// Session consumer never silently falls back to global filesystem state.
     pub async fn wire_in_memory(
-        workspace: &project::WorkspaceViews,
+        workspace: &project::Workspace,
         task_persist: Arc<dyn task::TaskPersist>,
         config_reader: Arc<dyn ConfigReader>,
         config_participant: Arc<dyn ProjectConfigParticipant>,

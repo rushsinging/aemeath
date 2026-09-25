@@ -157,7 +157,7 @@ impl MemoryOpener for TrackingMemoryOpener {
 struct FacadeHarness {
     wiring: MainSessionWiring,
     #[allow(dead_code)]
-    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     config_service: Arc<ConfigAppService>,
     memory_opener: Arc<TrackingMemoryOpener>,
     _tmp: TempDir,

@@ -1,3 +1,5 @@
+use share::session_types::ProjectIdentityData;
+use share::session_types::WorkspaceId;
 use std::{
     collections::HashMap,
     future::Future,
@@ -10,7 +12,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use project::{ProjectIdentity, WorkspaceError, WorkspaceId, WorkspaceRead};
+use project::{WorkspaceError, WorkspaceReader};
 use serde_json::{json, Value};
 
 use super::{
@@ -560,19 +562,19 @@ impl FakeWorkspace {
     fn new() -> Self {
         Self {
             root: std::env::temp_dir(),
-            id: WorkspaceId::from("contract-workspace"),
+            id: WorkspaceId::new("contract-workspace"),
         }
     }
 }
-impl WorkspaceRead for FakeWorkspace {
+impl WorkspaceReader for FakeWorkspace {
     fn current_workspace_root(&self) -> PathBuf {
         self.root.clone()
     }
     fn workspace_id(&self) -> WorkspaceId {
         self.id.clone()
     }
-    fn project_identity(&self) -> ProjectIdentity {
-        ProjectIdentity {
+    fn project_identity(&self) -> ProjectIdentityData {
+        ProjectIdentityData {
             initial_cwd: self.root.display().to_string(),
             git_common_dir: None,
         }

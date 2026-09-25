@@ -135,7 +135,7 @@ pub struct SessionRuntime {
     // ── Session identity & workspace ──
     pub(crate) session_state:
         Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
-    pub workspace: project::WorkspaceViews,
+    pub workspace: project::Workspace,
     pub wiring: Arc<context::MainSessionWiring>,
 
     // ── Config ──
@@ -211,7 +211,7 @@ impl SessionRuntime {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         session_state: Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
-        workspace: project::WorkspaceViews,
+        workspace: project::Workspace,
         wiring: Arc<context::MainSessionWiring>,
         config_query: Arc<dyn config::ConfigQuery>,
         config_writer: Arc<dyn config::ConfigWriter>,

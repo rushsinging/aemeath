@@ -52,7 +52,7 @@ fn cancellation() -> Arc<dyn tools::CancellationSignal> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-fn temp_workspace() -> (tempfile::TempDir, project::WorkspaceWiring) {
+fn temp_workspace() -> (tempfile::TempDir, project::Workspace) {
     let temp = tempfile::tempdir().expect("create temp dir");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root dir");
@@ -61,7 +61,7 @@ fn temp_workspace() -> (tempfile::TempDir, project::WorkspaceWiring) {
 }
 
 /// Returns the canonical workspace root path.
-fn workspace_root(workspace: &project::WorkspaceWiring) -> std::path::PathBuf {
+fn workspace_root(workspace: &project::Workspace) -> std::path::PathBuf {
     workspace
         .read()
         .project_identity()
@@ -74,7 +74,7 @@ fn workspace_root(workspace: &project::WorkspaceWiring) -> std::path::PathBuf {
 /// The scope's `workspace_root` is set to the project's initial_cwd so
 /// invocation scopes built with the same root pass the equality check
 /// in `BoundExecutionContexts::resolve`.
-fn tool_context(workspace: &project::WorkspaceWiring, run_id: &str) -> tools::ToolExecutionContext {
+fn tool_context(workspace: &project::Workspace, run_id: &str) -> tools::ToolExecutionContext {
     let root: std::path::PathBuf = workspace_root(workspace);
     let scope =
         tools::ExecutionScope::builder(run_id, workspace.read().workspace_id(), root).build();
@@ -95,7 +95,7 @@ fn tool_context(workspace: &project::WorkspaceWiring, run_id: &str) -> tools::To
 
 /// Create a temp file inside the workspace root, write content, return its path.
 fn write_file_in_root(
-    workspace: &project::WorkspaceWiring,
+    workspace: &project::Workspace,
     name: &str,
     content: &str,
 ) -> std::path::PathBuf {

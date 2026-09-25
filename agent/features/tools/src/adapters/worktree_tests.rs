@@ -19,12 +19,12 @@ impl WorkspaceControl for RecordingWorkspaceControl {
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<project::WorkspaceFrame, project::WorkspaceError> {
+    ) -> Result<project::WorkspaceData, project::WorkspaceError> {
         *self.enter_args.lock().expect("recording control lock") = Some((path, branch, base));
         Err(project::WorkspaceError::UnsupportedForNonGit)
     }
 
-    fn exit(&self) -> Result<project::WorkspaceFrame, project::WorkspaceError> {
+    fn exit(&self) -> Result<project::WorkspaceData, project::WorkspaceError> {
         Err(project::WorkspaceError::UnsupportedForNonGit)
     }
 }
@@ -315,7 +315,7 @@ fn init_git(path: &Path) {
 }
 
 /// NonGit 目录调用 EnterWorktree 必须返回 error，
-/// 且 WorkspacePersist snapshot 完全不变。
+/// 且 WorkspaceWriter snapshot 完全不变。
 #[tokio::test]
 async fn enter_worktree_nongit_returns_error_and_snapshot_unchanged() {
     let tmp = tempfile::tempdir().unwrap();
@@ -424,7 +424,7 @@ async fn exit_worktree_with_path_input_is_rejected_and_state_unchanged() {
 // 通过 `TypedTool::call()` 端到端验证真实 git 成功路径：
 //   1) EnterWorktree{branch}：用真实 `git worktree add` 创建 linked worktree，
 //      断言 result data 字段与 mutation 后 `ctx.workspace_read()` 一致，
-//      `WorkspacePersist::snapshot()` 的 `context_stack.len() == 1` 且 `worktree_kind == Linked`。
+//      `WorkspaceWriter::snapshot()` 的 `context_stack.len() == 1` 且 `worktree_kind == Linked`。
 //   2) ExitWorktree{}：弹出栈帧回到 primary，断言 data/read/snapshot 回到原根、
 //      stack 空、kind == Primary。
 //

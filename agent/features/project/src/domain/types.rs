@@ -3,15 +3,30 @@
 //! 这些类型由 `WorkspaceService` / `WorkspaceState` 实现与消费，并由 crate root
 //! 精确 re-export 为 Project 的稳定 façade。
 
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+use share::session_types::{
+    PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
+};
 use std::path::{Path, PathBuf};
 
-/// Runtime worktree stack frame（替代 share::tool::WorkingContext）。
+/// workspace 域快照：标识 + 路径 + 类型合一（原 Frame/Id/Kind 三导出合并）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceFrame {
+pub struct WorkspaceData {
+    pub id: WorkspaceId,
     pub path_base: PathBuf,
     pub workspace_root: PathBuf,
     pub worktree_kind: WorktreeKind,
+}
+
+impl WorkspaceData {
+    /// 持久化/memory key 用的稳定标识。
+    pub fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    /// worktree 类型（TUI 展示/分支逻辑）。
+    pub fn kind(&self) -> WorktreeKind {
+        self.worktree_kind
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,9 +187,9 @@ impl std::fmt::Display for WorkspaceRestoreError {
 impl std::error::Error for WorkspaceRestoreError {}
 
 /// 读当前 workspace 位置（所有 tool 可用）。
-pub trait WorkspaceRead: Send + Sync {
+pub trait WorkspaceReader: Send + Sync {
     fn workspace_id(&self) -> WorkspaceId;
-    fn project_identity(&self) -> ProjectIdentity;
+    fn project_identity(&self) -> ProjectIdentityData;
     fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
@@ -228,16 +243,16 @@ pub trait WorkspaceControl: Send + Sync {
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<WorkspaceFrame, WorkspaceError>;
-    fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError>;
+    ) -> Result<WorkspaceData, WorkspaceError>;
+    fn exit(&self) -> Result<WorkspaceData, WorkspaceError>;
 }
 
 /// session 边界持久化。
-pub trait WorkspacePersist: Send + Sync {
+pub trait WorkspaceWriter: Send + Sync {
     fn snapshot(&self) -> PersistedWorkspaceContext;
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<crate::domain::state::PreparedWorkspaceRestore, WorkspaceRestoreError>;
-    fn commit_restore(&self, prepared: crate::domain::state::PreparedWorkspaceRestore);
+    ) -> Result<crate::domain::state::WorkspaceRestoreData, WorkspaceRestoreError>;
+    fn commit_restore(&self, prepared: crate::domain::state::WorkspaceRestoreData);
 }

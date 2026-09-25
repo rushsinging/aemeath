@@ -5,7 +5,7 @@
 //! 1. **Real Memory opener uses project/config** — the production wiring
 //!    constructs `DatasetMemoryOpener` with `storage::file_system_dataset` +
 //!    `FileLegacyMemorySourceFactory`, eager-opens memory from the workspace
-//!    `ProjectIdentity` + committed `MemoryConfig`, and the resulting
+//!    `ProjectIdentityData` + committed `MemoryConfig`, and the resulting
 //!    `MemoryPort` is filesystem-backed (writes persist).
 //! 2. **Runtime gets the same wiring** — the session id returned by
 //!    `AgentClientImpl::session_id()` matches the wiring's
@@ -167,9 +167,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(
         &root,
         &agents_dir,
@@ -248,9 +246,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
         .await
         .expect("wire config");
@@ -342,9 +338,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(
         &root,
         &agents_dir,
@@ -546,9 +540,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
         .await
         .expect("wire config");
@@ -706,8 +698,7 @@ async fn config_storage_worktrees_dir_drives_workspace_default_derivation() {
             .worktrees_dir()
             .map(std::path::Path::to_path_buf),
     )
-    .expect("workspace wiring")
-    .into_views();
+    .expect("workspace wiring");
 
     workspace
         .control()

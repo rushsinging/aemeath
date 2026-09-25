@@ -4,53 +4,22 @@ use std::sync::Arc;
 use crate::adapters::git::GitCli;
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
 use crate::domain::service::WorkspaceService;
-use crate::domain::types::{WorkspaceControl, WorkspaceInitError, WorkspacePersist, WorkspaceRead};
-use share::session_types::{ProjectIdentity, WorktreeKind};
+use crate::domain::types::{
+    WorkspaceControl, WorkspaceInitError, WorkspaceReader, WorkspaceWriter,
+};
+use share::session_types::{ProjectIdentityData, WorktreeKind};
 
+/// workspace 域句柄角色：三窄面 accessor + 隔离派生。
 #[derive(Clone)]
-pub struct WorkspaceWiring {
-    service: Arc<WorkspaceService>,
-}
-
-impl WorkspaceWiring {
-    pub fn read(&self) -> Arc<dyn WorkspaceRead> {
-        self.service.clone()
-    }
-
-    pub fn control(&self) -> Arc<dyn WorkspaceControl> {
-        self.service.clone()
-    }
-
-    pub fn persist(&self) -> Arc<dyn WorkspacePersist> {
-        self.service.clone()
-    }
-
-    pub fn derive_isolated(&self) -> Self {
-        Self {
-            service: self.service.seed_isolated(),
-        }
-    }
-
-    pub fn into_views(self) -> WorkspaceViews {
-        WorkspaceViews {
-            read: self.read(),
-            control: self.control(),
-            persist: self.persist(),
-            derive_isolated: Arc::new(move || self.derive_isolated().into_views()),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct WorkspaceViews {
-    read: Arc<dyn WorkspaceRead>,
+pub struct Workspace {
+    read: Arc<dyn WorkspaceReader>,
     control: Arc<dyn WorkspaceControl>,
-    persist: Arc<dyn WorkspacePersist>,
-    derive_isolated: Arc<dyn Fn() -> WorkspaceViews + Send + Sync>,
+    persist: Arc<dyn WorkspaceWriter>,
+    derive_isolated: Arc<dyn Fn() -> Workspace + Send + Sync>,
 }
 
-impl WorkspaceViews {
-    pub fn read(&self) -> Arc<dyn WorkspaceRead> {
+impl Workspace {
+    pub fn read(&self) -> Arc<dyn WorkspaceReader> {
         self.read.clone()
     }
 
@@ -58,7 +27,7 @@ impl WorkspaceViews {
         self.control.clone()
     }
 
-    pub fn persist(&self) -> Arc<dyn WorkspacePersist> {
+    pub fn persist(&self) -> Arc<dyn WorkspaceWriter> {
         self.persist.clone()
     }
 
@@ -70,7 +39,7 @@ impl WorkspaceViews {
 pub fn wire_production_workspace(
     cwd: PathBuf,
     worktrees_dir: Option<PathBuf>,
-) -> Result<WorkspaceWiring, WorkspaceInitError> {
+) -> Result<Workspace, WorkspaceInitError> {
     log::info!(target: crate::LOG_TARGET, "wire_production_workspace enter");
     match build_workspace(cwd, worktrees_dir) {
         Ok((wiring, kind)) => {
@@ -106,7 +75,7 @@ fn init_error_category(error: &WorkspaceInitError) -> &'static str {
 fn build_workspace(
     cwd: PathBuf,
     worktrees_dir: Option<PathBuf>,
-) -> Result<(WorkspaceWiring, WorktreeKind), WorkspaceInitError> {
+) -> Result<(Workspace, WorktreeKind), WorkspaceInitError> {
     let metadata = std::fs::metadata(&cwd).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => WorkspaceInitError::PathNotFound { path: cwd.clone() },
         std::io::ErrorKind::PermissionDenied => {
@@ -135,7 +104,7 @@ fn build_workspace(
             canonical_common_dir,
             worktree_kind,
         } => (
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: canonical.display().to_string(),
                 git_common_dir: Some(canonical_common_dir.display().to_string()),
             },
@@ -143,7 +112,7 @@ fn build_workspace(
             worktree_kind,
         ),
         RepositoryProbe::NonGit => (
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: canonical.display().to_string(),
                 git_common_dir: None,
             },
@@ -152,19 +121,26 @@ fn build_workspace(
         ),
     };
     let worktrees_root = resolve_worktrees_root(worktrees_dir, &workspace_root);
-    Ok((
-        WorkspaceWiring {
-            service: WorkspaceService::with_verified_git(
-                identity,
-                workspace_root,
-                canonical_path_base,
-                kind,
-                worktrees_root,
-                git,
-            ),
-        },
+    let service = WorkspaceService::with_verified_git(
+        identity,
+        workspace_root,
+        canonical_path_base,
         kind,
-    ))
+        worktrees_root,
+        git,
+    );
+    Ok((workspace_handle(service), kind))
+}
+
+/// 由底层 service 构造域句柄（隔离派生链经 seed_isolated 递归生成）。
+fn workspace_handle(service: Arc<WorkspaceService>) -> Workspace {
+    let derive_service = Arc::clone(&service);
+    Workspace {
+        read: service.clone(),
+        control: service.clone(),
+        persist: service,
+        derive_isolated: Arc::new(move || workspace_handle(derive_service.seed_isolated())),
+    }
 }
 
 /// 解析 worktree 默认根目录：未配置时用全局 `~/.agents/worktrees`；

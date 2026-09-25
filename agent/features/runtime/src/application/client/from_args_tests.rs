@@ -231,9 +231,7 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
@@ -533,9 +531,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let original = workspace.clone();
     workspace
         .control()
@@ -794,7 +790,7 @@ async fn interaction_bridge_is_single_source_on_shell() {
 }
 
 /// Startup resume must run before the committed snapshot is read, while
-/// Context rejects any session whose ProjectIdentity differs from the
+/// Context rejects any session whose ProjectIdentityData differs from the
 /// live workspace; a failed resume therefore cannot change Config/Memory.
 #[test]
 fn startup_resume_precedes_current_project_config_read() {

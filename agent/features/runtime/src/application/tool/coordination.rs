@@ -24,7 +24,7 @@ pub(crate) struct ToolRoundContext<'a> {
     pub agent: crate::application::tool::agent::Agent,
     pub turn_context: crate::application::loop_engine::chat::RuntimeRunContext,
     pub language: &'a str,
-    pub workspace_read: std::sync::Arc<dyn project::WorkspaceRead>,
+    pub workspace_read: std::sync::Arc<dyn project::WorkspaceReader>,
     pub session_id: &'a str,
     pub materializer:
         &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,

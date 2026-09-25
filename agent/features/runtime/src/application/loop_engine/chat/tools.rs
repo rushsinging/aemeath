@@ -42,7 +42,7 @@ pub(crate) async fn execute_tool_round<S>(
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
 ) -> ToolRoundResult
 where
@@ -313,7 +313,7 @@ pub(crate) async fn run_post_tool_hooks(
     execution: &ToolExecution,
     session_id: &str,
     cancel: &CancellationToken,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
 ) {
     let workspace_root = workspace_read.current_workspace_root();
     let output = &execution.outcome.text;

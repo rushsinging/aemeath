@@ -303,8 +303,7 @@ pub(super) fn make_parent_context() -> RuntimeContext {
 
 pub(super) fn make_parent_workspace() -> RuntimeWorkspaceAccess {
     let views = project::wire_production_workspace(std::env::temp_dir(), None)
-        .expect("wire test workspace")
-        .into_views();
+        .expect("wire test workspace");
     RuntimeWorkspaceAccess::new(views)
 }
 

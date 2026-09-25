@@ -3,9 +3,8 @@ use crate::domain::{
     ProgressSink, ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::{
-    ProjectIdentity, WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspaceId, WorkspaceRead,
-};
+use project::{WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader};
+use share::session_types::{ProjectIdentityData, WorkspaceId};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -55,12 +54,12 @@ impl FakeWorkspace {
     }
 }
 
-impl WorkspaceRead for FakeWorkspace {
+impl WorkspaceReader for FakeWorkspace {
     fn workspace_id(&self) -> WorkspaceId {
-        WorkspaceId::from(format!("test-workspace:{}", self.initial_root.display()))
+        WorkspaceId::new(format!("test-workspace:{}", self.initial_root.display()))
     }
-    fn project_identity(&self) -> ProjectIdentity {
-        ProjectIdentity {
+    fn project_identity(&self) -> ProjectIdentityData {
+        ProjectIdentityData {
             initial_cwd: self.initial_root.display().to_string(),
             git_common_dir: None,
         }
@@ -123,10 +122,10 @@ impl WorkspaceControl for FakeWorkspace {
         _path: Option<PathBuf>,
         _branch: Option<String>,
         _base: Option<String>,
-    ) -> Result<WorkspaceFrame, WorkspaceError> {
+    ) -> Result<WorkspaceData, WorkspaceError> {
         Err(WorkspaceError::UnsupportedForNonGit)
     }
-    fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError> {
+    fn exit(&self) -> Result<WorkspaceData, WorkspaceError> {
         Err(WorkspaceError::UnsupportedForNonGit)
     }
 }

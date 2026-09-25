@@ -191,8 +191,7 @@ fn sub_agent_workspace_isolated() {
     let child_dir = main_dir.path().join("child");
     std::fs::create_dir_all(&child_dir).unwrap();
     let parent = project::wire_production_workspace(main_dir.path().to_path_buf(), None)
-        .expect("workspace initialization")
-        .into_views();
+        .expect("workspace initialization");
     parent
         .control()
         .change_directory(child_dir.clone())

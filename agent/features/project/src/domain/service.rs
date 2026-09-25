@@ -1,14 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+use share::session_types::{
+    PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
+};
 
 use crate::domain::git::GitWorktreeOps;
-use crate::domain::state::PreparedWorkspaceRestore;
+use crate::domain::state::WorkspaceRestoreData;
 use crate::domain::state::{self as rules, WorkspaceState};
 use crate::domain::types::{
-    WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
-    WorkspaceRestoreError,
+    WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceRestoreError,
+    WorkspaceWriter,
 };
 
 const MAX_PATH_DEPTH: usize = 64;
@@ -109,7 +111,7 @@ pub(crate) struct WorkspaceService {
 
 impl WorkspaceService {
     pub(crate) fn with_verified_git(
-        project_identity: ProjectIdentity,
+        project_identity: ProjectIdentityData,
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
@@ -131,7 +133,7 @@ impl WorkspaceService {
     #[cfg(test)]
     pub(crate) fn with_git(cwd: PathBuf, git: Arc<dyn GitWorktreeOps>) -> Arc<Self> {
         Self::with_verified_git(
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: cwd.display().to_string(),
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
@@ -178,11 +180,11 @@ impl WorkspaceService {
     }
 }
 
-impl WorkspaceRead for WorkspaceService {
+impl WorkspaceReader for WorkspaceService {
     fn workspace_id(&self) -> WorkspaceId {
         self.lock().workspace_id()
     }
-    fn project_identity(&self) -> ProjectIdentity {
+    fn project_identity(&self) -> ProjectIdentityData {
         self.lock().project_identity.clone()
     }
     fn current_workspace_root(&self) -> PathBuf {
@@ -264,14 +266,14 @@ impl WorkspaceControl for WorkspaceService {
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<WorkspaceFrame, WorkspaceError> {
+    ) -> Result<WorkspaceData, WorkspaceError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
         let frame = rules::enter(&mut candidate, self.git.as_ref(), path, branch, base)?;
         self.commit(candidate);
         Ok(frame)
     }
-    fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError> {
+    fn exit(&self) -> Result<WorkspaceData, WorkspaceError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
         let frame = rules::exit(&mut candidate, self.git.as_ref())?;
@@ -280,7 +282,7 @@ impl WorkspaceControl for WorkspaceService {
     }
 }
 
-impl WorkspacePersist for WorkspaceService {
+impl WorkspaceWriter for WorkspaceService {
     fn snapshot(&self) -> PersistedWorkspaceContext {
         rules::snapshot(&self.lock())
     }
@@ -288,12 +290,12 @@ impl WorkspacePersist for WorkspaceService {
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
+    ) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
         let live = self.candidate();
         rules::prepare_restore(&live, dto, self.git.as_ref())
     }
 
-    fn commit_restore(&self, prepared: PreparedWorkspaceRestore) {
+    fn commit_restore(&self, prepared: WorkspaceRestoreData) {
         let _control = self.lock_control();
         rules::commit_restore(&mut self.lock(), prepared);
     }
@@ -535,7 +537,8 @@ mod tests {
             let mut s = parent.lock();
             s.path_base = "/wt".into();
             s.workspace_root = "/wt".into();
-            s.stack.push(WorkspaceFrame {
+            s.stack.push(WorkspaceData {
+                id: WorkspaceId::new("test-frame"),
                 path_base: "/repo".into(),
                 workspace_root: "/repo".into(),
                 worktree_kind: WorktreeKind::Primary,
@@ -552,11 +555,11 @@ mod tests {
         assert_eq!(parent.lock().stack.len(), 1);
     }
 
-    // ---- #894: WorkspacePersist prepare_restore / commit_restore 令牌协议 ----
+    // ---- #894: WorkspaceWriter prepare_restore / commit_restore 令牌协议 ----
 
     /// 构造一个位于真实 temp root 的 git service，并配置 FakeGit 使 probe 自洽。
     fn git_service_at(root: &Path, common: &str) -> Arc<WorkspaceService> {
-        let identity = ProjectIdentity {
+        let identity = ProjectIdentityData {
             initial_cwd: root.display().to_string(),
             git_common_dir: Some(common.to_string()),
         };
@@ -579,7 +582,7 @@ mod tests {
         let sub = root.join("sub");
         std::fs::create_dir_all(&sub).unwrap();
         let sub = sub.canonicalize().unwrap();
-        let identity = ProjectIdentity {
+        let identity = ProjectIdentityData {
             initial_cwd: root.display().to_string(),
             git_common_dir: Some(common.to_string()),
         };

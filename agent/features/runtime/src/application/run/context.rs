@@ -398,7 +398,7 @@ pub struct LifecycleBindings {
 /// - `task` 从旧空壳 `TaskPort` 校正为生产已使用的 `TaskAccess`。
 /// - `provider` 收敛为 `ProviderBinding`（含 port + model 约束）。
 /// - 新增 `InteractionBridge` 与 `ReflectionHistoryStore`。
-/// - 不含 `MainSessionWiring`、`WorkspaceViews`、`SessionQueryPort`、`ConfigQuery`/`ConfigWriter`。
+/// - 不含 `MainSessionWiring`、`Workspace`、`SessionQueryPort`、`ConfigQuery`/`ConfigWriter`。
 ///
 /// ## Clone & cancellation
 ///

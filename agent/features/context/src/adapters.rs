@@ -89,7 +89,7 @@ pub fn isolated_context_with_skill(
 pub fn isolated_context_with_workspace_skills(
     session_id: &str,
     catalog: Arc<dyn tools::SkillCatalogPort>,
-    workspace: Arc<dyn project::WorkspaceRead>,
+    workspace: Arc<dyn project::WorkspaceReader>,
 ) -> Arc<dyn crate::ports::ContextPort> {
     isolated_context_with_skill(
         session_id,

@@ -7,7 +7,9 @@ use context::{
 use context::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+use share::session_types::{
+    PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
+};
 
 use tools::{SkillLoadDecision, SkillLoadScope};
 
@@ -504,7 +506,7 @@ fn canonical_writer_never_emits_top_level_cwd() {
     let mut session = CanonicalSession::fixture("no-cwd");
     session.workspace = SnapshotState::Captured(PersistedWorkspaceContext {
         workspace_id: WorkspaceId::from("ws-cwd-guard"),
-        project_identity: ProjectIdentity {
+        project_identity: ProjectIdentityData {
             initial_cwd: "/tmp/project".to_string(),
             git_common_dir: None,
         },
@@ -547,7 +549,7 @@ fn legacy_cwd_upgrades_to_full_non_git_workspace() {
     assert!(decoded.upgraded_from_legacy);
 
     let ctx = captured_workspace(&decoded.session.workspace);
-    let expected_identity = ProjectIdentity {
+    let expected_identity = ProjectIdentityData {
         initial_cwd: cwd.clone(),
         git_common_dir: None,
     };
@@ -609,7 +611,7 @@ fn legacy_workspace_backfills_missing_identity_id_and_kind() {
     assert_eq!(ctx.path_base, base);
 
     // 缺失的 identity/id/kind 必须被补全，而不是保留空默认值。
-    let expected_identity = ProjectIdentity {
+    let expected_identity = ProjectIdentityData {
         initial_cwd: root.clone(),
         git_common_dir: None,
     };
@@ -635,7 +637,7 @@ fn legacy_workspace_backfills_missing_identity_id_and_kind() {
 /// 也不是笼统的 `InvalidJson`。
 #[test]
 fn legacy_cwd_conflicting_with_complete_workspace_identity_is_typed_error() {
-    let identity = ProjectIdentity {
+    let identity = ProjectIdentityData {
         initial_cwd: "/repo/one".to_string(),
         git_common_dir: None,
     };
@@ -736,7 +738,7 @@ fn legacy_git_primary_backfills_and_normalizes_root_to_top_level() {
     );
     assert_eq!(ctx.worktree_kind, WorktreeKind::Primary);
 
-    let expected_identity = ProjectIdentity {
+    let expected_identity = ProjectIdentityData {
         initial_cwd: work_text.clone(),
         git_common_dir: Some(common),
     };
@@ -791,7 +793,7 @@ fn legacy_non_git_mismatched_cwd_and_root_is_typed_error() {
 fn legacy_complete_workspace_with_fabricated_id_is_rejected() {
     let (dir, root) = unique_non_git_dir("fabricated_id");
 
-    let identity = ProjectIdentity {
+    let identity = ProjectIdentityData {
         initial_cwd: root.clone(),
         git_common_dir: None,
     };
@@ -829,7 +831,7 @@ fn legacy_complete_workspace_with_fabricated_id_is_rejected() {
 fn legacy_complete_consistent_workspace_is_accepted() {
     let (dir, root) = unique_non_git_dir("complete_ok");
 
-    let identity = ProjectIdentity {
+    let identity = ProjectIdentityData {
         initial_cwd: root.clone(),
         git_common_dir: None,
     };

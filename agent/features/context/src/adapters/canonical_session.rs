@@ -302,7 +302,7 @@ impl MainContextFactory for ProductionMainContextFactory {
         &self,
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
@@ -392,7 +392,7 @@ impl Drop for AutoCompactAttemptPermit {
 pub struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
-    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     writer: Arc<dyn CanonicalSessionWriter>,
     accepted_input_writer: Arc<dyn AcceptedInputWriter>,
     tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
@@ -407,7 +407,7 @@ impl CanonicalSessionRepository {
     pub fn new(
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         writer: Arc<dyn CanonicalSessionWriter>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {

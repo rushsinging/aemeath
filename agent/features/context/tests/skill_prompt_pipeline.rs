@@ -127,12 +127,12 @@ async fn chinese_header_and_budget_are_deterministic() {
 }
 
 struct FakeWorkspace(PathBuf);
-impl project::WorkspaceRead for FakeWorkspace {
-    fn workspace_id(&self) -> project::WorkspaceId {
-        project::WorkspaceId::default()
+impl project::WorkspaceReader for FakeWorkspace {
+    fn workspace_id(&self) -> share::session_types::WorkspaceId {
+        share::session_types::WorkspaceId::default()
     }
-    fn project_identity(&self) -> project::ProjectIdentity {
-        project::ProjectIdentity::default()
+    fn project_identity(&self) -> share::session_types::ProjectIdentityData {
+        share::session_types::ProjectIdentityData::default()
     }
     fn current_workspace_root(&self) -> PathBuf {
         self.0.clone()

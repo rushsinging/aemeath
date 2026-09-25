@@ -19,7 +19,7 @@ impl context::MainContextFactory for FixedMainContextFactory {
         &self,
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
         _task_persist: Arc<dyn task::TaskPersist>,
-        _workspace_persist: Arc<dyn project::WorkspacePersist>,
+        _workspace_persist: Arc<dyn project::WorkspaceWriter>,
         _memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         _mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
@@ -273,8 +273,7 @@ impl SessionRunFixtureBuilder {
         );
         let session_snapshot = session_state.snapshot_for_run();
         let workspace = project::wire_production_workspace(self.workspace_root.clone(), None)
-            .expect("wire fixture workspace")
-            .into_views();
+            .expect("wire fixture workspace");
         let workspace_access =
             crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone());
         let task_store = Arc::new(task::TaskStore::new());

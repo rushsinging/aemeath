@@ -58,12 +58,10 @@ impl Drop for EnvGuard {
 
 async fn make_wiring_and_workspace(
     temp: &tempfile::TempDir,
-) -> (Arc<MainSessionWiring>, project::WorkspaceViews) {
+) -> (Arc<MainSessionWiring>, project::Workspace) {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = config::wire_project_config(
         &root,
         config::native_override_store(
@@ -92,7 +90,7 @@ async fn make_wiring_and_workspace(
     (wiring, workspace)
 }
 
-async fn seed_session(wiring: &MainSessionWiring, workspace: &project::WorkspaceViews, id: &str) {
+async fn seed_session(wiring: &MainSessionWiring, workspace: &project::Workspace, id: &str) {
     let bytes = serde_json::to_vec(&serde_json::json!({
         "id": id,
         "created_at": "2026-01-01T00:00:00Z",
@@ -230,9 +228,7 @@ async fn config_query_and_writer_come_from_wiring() {
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = config::wire_project_config(
         &root,
         config::native_override_store(
@@ -372,9 +368,8 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
 
     // Project B — resume target with disabled memory and inject_count=3.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
-        .expect("wire workspace B")
-        .into_views();
+    let workspace_b =
+        project::wire_production_workspace(root_b.clone(), None).expect("wire workspace B");
     seed_session(&wiring, &workspace_b, "cross-project-memory-target").await;
 
     // Bind before resume — should see project A defaults.
@@ -414,7 +409,7 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
 // ─── Test 7: Cross-project resume preserves current Config/Memory ─────────
 //
 // Runtime uses the same helper for startup and runtime resume. Context rejects
-// a foreign ProjectIdentity before Config/Memory can switch.
+// a foreign ProjectIdentityData before Config/Memory can switch.
 
 #[tokio::test]
 async fn cross_project_resume_keeps_current_model_and_memory() {
@@ -430,9 +425,8 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
 
     // Project B — target with a distinct model and disabled memory.
     let root_b = make_target_project(&temp);
-    let workspace_b = project::wire_production_workspace(root_b.clone(), None)
-        .expect("wire workspace B")
-        .into_views();
+    let workspace_b =
+        project::wire_production_workspace(root_b.clone(), None).expect("wire workspace B");
     seed_session(&wiring, &workspace_b, "cross-project-config-target").await;
 
     // Before resume: default model string should not contain "target-model".

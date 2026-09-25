@@ -105,7 +105,7 @@ pub(crate) fn make_agent(
     runtime_context: &RuntimeContext,
     agent_runner: Option<Arc<dyn tools::AgentRunner>>,
     language: &str,
-    workspace: &project::WorkspaceViews,
+    workspace: &project::Workspace,
     cancel: &CancellationToken,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
@@ -295,7 +295,7 @@ impl crate::application::hook::stop_coordination::StopHookObserver for ChatStopH
 
 pub(crate) struct ChatToolRoundObserver {
     pub runtime_context: RuntimeContext,
-    pub workspace_read: Arc<dyn project::WorkspaceRead>,
+    pub workspace_read: Arc<dyn project::WorkspaceReader>,
     pub turn_context: RuntimeRunContext,
     pub session_id: String,
     pub materializer:

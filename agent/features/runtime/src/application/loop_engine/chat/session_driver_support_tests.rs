@@ -156,7 +156,7 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 fn test_wiring() -> Arc<context::MainSessionWiring> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let persist = workspace.persist();
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
@@ -293,7 +293,7 @@ fn test_shell_with_catalog(
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();
     let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
@@ -398,7 +398,7 @@ fn test_shell_with_task_store(
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
     let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();

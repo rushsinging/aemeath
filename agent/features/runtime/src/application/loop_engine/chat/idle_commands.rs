@@ -42,7 +42,7 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 pub async fn execute_session(
     args: &str,
     session_id: &str,
-    project: &share::session_types::ProjectIdentity,
+    project: &share::session_types::ProjectIdentityData,
     session_management: &dyn SessionManagementPort,
 ) -> (String, bool) {
     let parts: Vec<&str> = args.split_whitespace().collect();

@@ -184,7 +184,7 @@ fn init_logging(
 fn wire_workspace_with_config(
     cwd: &std::path::Path,
     config: &config::ConfigWiring,
-) -> Result<project::WorkspaceViews, SdkError> {
+) -> Result<project::Workspace, SdkError> {
     project::wire_production_workspace(
         cwd.to_path_buf(),
         config
@@ -194,7 +194,6 @@ fn wire_workspace_with_config(
             .map(Path::to_path_buf),
     )
     .map_err(|error| SdkError::Init(error.to_string()))
-    .map(project::WorkspaceWiring::into_views)
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {

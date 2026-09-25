@@ -105,9 +105,7 @@ fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBo
 fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootstrapAssembly {
     runtime::SkillBootstrapAssembly::new(
         tools::composition::wire_skills().catalog(),
-        project::wire_production_workspace(root.to_path_buf(), None)
-            .expect("wire test workspace")
-            .into_views(),
+        project::wire_production_workspace(root.to_path_buf(), None).expect("wire test workspace"),
         tools::SkillQuery::new(root.to_path_buf(), Vec::new(), Default::default()),
     )
 }
@@ -136,14 +134,14 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn load_for_project(
         &self,
         id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 
     async fn list_for_project(
         &self,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<context::SessionListEntry>, context::SessionManagementError> {
         Ok(Vec::new())
     }
@@ -151,7 +149,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn export_for_project(
         &self,
         id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<u8>, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
@@ -159,7 +157,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn import_for_project(
         &self,
         _bytes: &[u8],
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<context::SessionListEntry, context::SessionManagementError> {
         Err(context::SessionManagementError::Storage(
             "test port".to_string(),
@@ -169,7 +167,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn update_metadata_for_project(
         &self,
         id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
         _update: context::SessionMetadataUpdate,
     ) -> Result<context::SessionListEntry, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
@@ -178,7 +176,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn delete_for_project(
         &self,
         id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<(), context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
@@ -220,9 +218,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     )
     .await
     .unwrap();
-    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None)
-        .unwrap()
-        .into_views();
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None).unwrap();
     let task = task::wire_task();
     let access = task.access();
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(

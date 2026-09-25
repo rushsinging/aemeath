@@ -1816,17 +1816,15 @@
         "value": "agent/features/project/src"
       },
       "allowed_symbols": [
-        "PreparedWorkspaceRestore",
-        "ProjectIdentity",
+        "Workspace",
         "WorkspaceControl",
+        "WorkspaceData",
         "WorkspaceError",
-        "WorkspaceFrame",
         "WorkspaceId",
-        "WorkspacePersist",
-        "WorkspaceRead",
+        "WorkspaceReader",
+        "WorkspaceRestoreData",
         "WorkspaceRestoreError",
-        "WorkspaceViews",
-        "WorkspaceWiring",
+        "WorkspaceWriter",
         "WorktreeKind",
         "wire_production_workspace"
       ],

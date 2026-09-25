@@ -1,30 +1,27 @@
 //! Project：workspace/worktree 的探测、装配与生命周期。
 //!
-//! # Published Language（#1711 收敛后，14 实体）
+//! # Published Language（四类语法 + DomainError）
 //!
-//! | 类别 | 实体 | 消费者 |
+//! | 类 | 实体 | 说明 |
 //! |---|---|---|
-//! | 装配 | `wire_production_workspace` | composition、runtime、tools |
-//! | Port | `WorkspaceRead`、`WorkspaceControl`、`WorkspacePersist`、`WorkspaceViews`、`WorkspaceWiring` | context、runtime、tools、composition |
-//! | 核心类型 | `ProjectIdentity`、`WorkspaceId`、`WorktreeKind`、`WorkspaceFrame` | 广泛（cli TUI 10 处、share、context） |
-//! | 恢复 | `PreparedWorkspaceRestore`、`WorkspaceRestoreError` | context |
-//! | 错误 | `WorkspaceError` | tools |
+//! | 工厂 | `wire_production_workspace` | 返回 `Workspace`（域句柄） |
+//! | Role | `Workspace`（三窄面 accessor + 隔离派生；原 Wiring/Views 合并）、`WorkspaceReader`/`WorkspaceControl`/`WorkspaceWriter`（窄 trait） | |
+//! | Data | `WorkspaceData`（快照：id 内嵌 + 路径 + kind；原 Frame/Id/Kind 三导出合并——Id/Kind 物理在 share::session_types，本 crate 不再转发） | |
+//! | Error | `share::error::DomainError`（三错误统一折叠；细变体 crate 内） | 错误统一随 #1711 并入 |
 //!
-//! 边界判定：全部符号有跨 crate 生产消费实锤；错误家族
-//! `WorkspaceError`/`WorkspaceRestoreError` 消费面为窄域单点（tools/context），
-//! 保留双错误形态（折叠为 ProjectError 的收益不足，记录于本判定）。
+//! `ProjectIdentityData`/`WorkspaceId`/`WorktreeKind` 定义于 `share::session_types`，
+//! 消费方直连 share（本 crate 零转发）。
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
 mod adapters;
 mod domain;
 
-pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
-pub use domain::state::PreparedWorkspaceRestore;
+pub use adapters::wiring::{wire_production_workspace, Workspace};
+pub use domain::state::WorkspaceRestoreData;
 pub use domain::types::{
-    WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
-    WorkspaceRestoreError,
+    WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceRestoreError,
+    WorkspaceWriter,
 };
-pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 
 #[cfg(test)]
 mod tests {
@@ -166,13 +163,13 @@ mod tests {
 
     // ---- #894: production wiring 对 Git / NonGit 初始化并返回 Result / 结构化错误 ----
 
-    /// #894: production wiring 必须返回 `Result`；成功路径经 `WorkspaceRead`
+    /// #894: production wiring 必须返回 `Result`；成功路径经 `WorkspaceReader`
     /// 暴露完整 `project_identity` 与稳定 `workspace_id`。在临时 git repo 中验证。
     #[test]
     fn production_wiring_returns_result_and_exposes_identity() {
         let tmp = TempDir::new("identity");
         tmp.init_git();
-        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+        let wiring: Workspace = wire_production_workspace(tmp.path().to_path_buf(), None)
             .expect("git repo 应初始化成功");
         let read = wiring.read();
         assert!(
@@ -250,7 +247,7 @@ mod tests {
     #[test]
     fn production_wiring_initializes_non_git_directory() {
         let tmp = TempDir::new("nongit");
-        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+        let wiring: Workspace = wire_production_workspace(tmp.path().to_path_buf(), None)
             .expect("普通目录应初始化成功");
         let read = wiring.read();
         assert!(
