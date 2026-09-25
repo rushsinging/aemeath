@@ -2,9 +2,9 @@ use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
 use config::{
-    ConfigChangeSet, ConfigPersistOutcome, ConfigReader, ConfigSubscription, ConfigUpdate,
-    ConfigWriter, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
-    ProjectConfigParticipant,
+    ConfigChangeData, ConfigPersistOutcomeData, ConfigReader, ConfigSubscriptionData,
+    ConfigUpdateData, ConfigWriter, PreparedConfigUpdateData, PreparedProjectConfigData,
+    ProjectConfigLocationData, ProjectConfigParticipant,
 };
 use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceWriter};
@@ -616,7 +616,7 @@ impl MainSessionWiring {
         // identity. Its worktree root may differ while its stable project
         // identity remains the same.
         let config_location = self.build_config_location(&prepared_identity)?;
-        let prepared_config: PreparedProjectConfig = self
+        let prepared_config: PreparedProjectConfigData = self
             .config_participant
             .prepare_for_project(&config_location)
             .await
@@ -680,7 +680,7 @@ impl MainSessionWiring {
     fn build_config_location(
         &self,
         identity: &ProjectIdentityData,
-    ) -> Result<ProjectConfigLocation, MainSessionError> {
+    ) -> Result<ProjectConfigLocationData, MainSessionError> {
         derive_config_location(identity)
     }
 }
@@ -696,13 +696,13 @@ impl MainSessionWiring {
 /// identical location derivation in both paths.
 pub(crate) fn derive_config_location(
     identity: &ProjectIdentityData,
-) -> Result<ProjectConfigLocation, MainSessionError> {
+) -> Result<ProjectConfigLocationData, MainSessionError> {
     let search_root = std::path::PathBuf::from(&identity.initial_cwd);
     let stable_identity: &[u8] = match identity.git_common_dir.as_deref() {
         Some(common) if !common.is_empty() => common.as_bytes(),
         _ => identity.initial_cwd.as_bytes(),
     };
-    ProjectConfigLocation::try_from_project_identity(search_root, stable_identity)
+    ProjectConfigLocationData::try_from_project_identity(search_root, stable_identity)
         .map_err(MainSessionError::ConfigLocation)
 }
 
@@ -732,7 +732,7 @@ impl ConfigReader for GateAwareConfigReader {
         self.config_reader.subscribe_committed()
     }
 
-    async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcome {
+    async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
         self.config_reader.refresh_if_sources_changed().await
     }
 
@@ -744,14 +744,14 @@ impl ConfigReader for GateAwareConfigReader {
         Ok(self.config_reader.committed_snapshot())
     }
 
-    async fn subscribe(&self) -> Result<ConfigSubscription, share::error::DomainError> {
+    async fn subscribe(&self) -> Result<ConfigSubscriptionData, share::error::DomainError> {
         let _permit =
             self.gate.acquire_shared().await.map_err(|_| {
                 share::error::DomainError::unavailable("config", "配置读取暂不可用")
             })?;
         let changes = self.config_reader.subscribe_committed();
         let initial = changes.borrow().clone();
-        Ok(ConfigSubscription { initial, changes })
+        Ok(ConfigSubscriptionData { initial, changes })
     }
 }
 
@@ -763,7 +763,7 @@ impl ConfigReader for GateAwareConfigReader {
 ///
 /// 1. **Acquire exclusive permit** — blocks all shared bindings and resumes
 ///    until the entire update is settled.
-/// 2. **Config prepare_update** — produces a [`PreparedConfigUpdate`] without
+/// 2. **Config prepare_update** — produces a [`PreparedConfigUpdateData`] without
 ///    committing anything.
 /// 3. **Eager open candidate Memory** — based on the current committed
 ///    workspace identity and the candidate `MemoryConfig` from the prepared
@@ -775,7 +775,7 @@ impl ConfigReader for GateAwareConfigReader {
 ///      returns `Err(Persist(…))`.
 ///    - **Committed** — candidate Memory is installed into the committed holder,
 ///      then `commit_update` fires the config watch **last**. A
-///      [`ConfigCommitWarning`] is logged but **not** converted to an error.
+///      [`ConfigCommitWarningData`] is logged but **not** converted to an error.
 ///
 /// The `update()` future awaits the spawned JoinHandle. Once execution reaches
 /// the durable handoff (`tokio::spawn`), cancelling or dropping the outer future
@@ -793,15 +793,15 @@ pub struct GateAwareConfigWriter {
 impl ConfigWriter for GateAwareConfigWriter {
     async fn update(
         &self,
-        command: ConfigUpdate,
-    ) -> Result<ConfigChangeSet, share::error::DomainError> {
+        command: ConfigUpdateData,
+    ) -> Result<ConfigChangeData, share::error::DomainError> {
         // 1. Acquire owned exclusive permit.
         let permit = self.gate.acquire_owned_exclusive().await.map_err(|_| {
             share::error::DomainError::invalid("config", "session switch gate closed")
         })?;
 
         // 2. Config prepare_update (does not commit).
-        let prepared: PreparedConfigUpdate =
+        let prepared: PreparedConfigUpdateData =
             self.config_participant.prepare_update(command).await?;
 
         // 3. Derive memory key from the current committed workspace identity.
@@ -835,14 +835,14 @@ impl ConfigWriter for GateAwareConfigWriter {
 
             let outcome = config_participant.persist_update(prepared).await;
             match outcome {
-                ConfigPersistOutcome::NotCommitted(err) => {
+                ConfigPersistOutcomeData::NotCommitted(err) => {
                     // Old Memory and Config are kept untouched.
                     Err(share::error::DomainError::storage(
                         "config",
                         format!("配置持久化失败：{err}"),
                     ))
                 }
-                ConfigPersistOutcome::Committed(ready) => {
+                ConfigPersistOutcomeData::Committed(ready) => {
                     // Warnings are informational — do NOT convert to error.
                     if let Some(warning) = ready.warning() {
                         log::warn!(

@@ -5,10 +5,12 @@
 //! | 类别 | 实体 | 消费者 |
 //! |---|---|---|
 //! | 装配工厂 | `wire_project_config*`、`native_override_store`、`ConfigWiring` | composition |
-//! | Port | `ConfigReader`（读轨合一：committed + async snapshot/subscribe，ConfigQuery 消亡）、`ConfigWriter`、`ConfigSubscription`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
+//! | Port | `ConfigReader`（读轨合一：committed + async snapshot/subscribe，ConfigQuery 消亡）、`ConfigWriter`、`ConfigSubscriptionData`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
 //! | 服务 | `ConfigAppService`、`NativeConfigStore` | composition、share snapshot |
-//! | DTO | `ConfigUpdate`、`ConfigChangeSet`、`ConfigField`、`ConfigChangeCause`、`ConfigRefreshOutcome`、`ConfigPersistOutcome`、`PreparedConfigUpdate`、`PreparedProjectConfig`、`ProjectConfigLocation`、`CliConfigInput` | context、runtime、sdk、cli |
+//! | DTO | `ConfigUpdateData`、`ConfigChangeData`、`ConfigFieldData`、`ConfigChangeCauseData`、`ConfigRefreshOutcomeData`、`ConfigPersistOutcomeData`、`PreparedConfigUpdateData`、`PreparedProjectConfigData`、`ProjectConfigLocationData`、`CliConfigInputData` | context、runtime、sdk、cli |
 //! | 错误 | `share::error::DomainError`（跨界唯一；四错误折叠为内部细变体 + From） | 全部跨界签名 |
+//!
+//! 四类语法：wire_* 工厂 / *Data 数据（本批 DTO 全量 Data 化）/ Reader·Writer·Participant 角色 / DomainError 错误。
 //! //!
 //! 边界判定：`CliArgsAdapter`/`EnvAdapter`/`FileAdapter` 为 wire 工厂内部实现收窄 crate 内（此前消费分析误报：share/config 存在另一套同名独立实现，词命中假阳性）；`ConfigPersistError` 本批收窄 crate 内（context 测试断言改行为级）；
 //! 错误家族 4 个有活跃 match 消费，折叠为统一 `ConfigError` 属后续设计决策
@@ -20,11 +22,11 @@ mod adapters;
 mod domain;
 mod ports;
 
-pub use adapters::{CliConfigInput, ConfigAppService, NativeConfigStore};
+pub use adapters::{CliConfigInputData, ConfigAppService, NativeConfigStore};
 pub use domain::{
-    ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigField, ConfigPersistOutcome,
-    ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation,
+    ConfigChangeCauseData, ConfigChangeData, ConfigCommitWarningData, ConfigFieldData,
+    ConfigPersistOutcomeData, ConfigRefreshOutcomeData, ConfigSubscriptionData, ConfigUpdateData,
+    PreparedConfigUpdateData, PreparedProjectConfigData, ProjectConfigLocationData,
 };
 pub use ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 
@@ -66,7 +68,7 @@ pub fn native_override_store(
 pub async fn wire_project_config_with_cli(
     project_dir: &Path,
     native_store: NativeConfigStore,
-    cli: CliConfigInput,
+    cli: CliConfigInputData,
 ) -> Result<ConfigWiring, share::error::DomainError> {
     log::debug!(
         target: crate::LOG_TARGET,
@@ -120,7 +122,7 @@ pub async fn wire_project_config_with_agents_dir(
     project_dir: &Path,
     agents_dir: &Path,
     native_store: NativeConfigStore,
-    cli: CliConfigInput,
+    cli: CliConfigInputData,
 ) -> Result<ConfigWiring, share::error::DomainError> {
     log::debug!(
         target: crate::LOG_TARGET,
@@ -133,7 +135,7 @@ pub async fn wire_project_config_with_agents_dir(
                 domain::ProjectConfigLocationError::NotCanonical,
             ))
         })?;
-        let location = ProjectConfigLocation::try_from_project_identity(
+        let location = ProjectConfigLocationData::try_from_project_identity(
             canonical.clone(),
             canonical.to_string_lossy().as_bytes(),
         )?;

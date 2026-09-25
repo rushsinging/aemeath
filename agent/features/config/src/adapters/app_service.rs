@@ -5,10 +5,11 @@ use crate::adapters::{
     NativeConfigStore, SourceFingerprints,
 };
 use crate::domain::{
-    ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistError, ConfigPersistOutcome, ConfigRefreshError, ConfigRefreshOutcome,
-    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError, ReadyConfigCommit,
+    ConfigChangeCauseData, ConfigChangeData, ConfigCommitWarningData, ConfigError, ConfigFieldData,
+    ConfigPersistError, ConfigPersistOutcomeData, ConfigRefreshError, ConfigRefreshOutcomeData,
+    ConfigSubscriptionData, ConfigUpdateData, ConfigUpdateError, PreparedConfigUpdateData,
+    PreparedProjectConfigData, ProjectConfigLocationData, ProjectConfigLocationError,
+    ReadyConfigCommitData,
 };
 use crate::ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 use async_trait::async_trait;
@@ -32,7 +33,7 @@ pub struct ConfigAppService {
 
 struct ActiveConfig {
     config: Config,
-    location: Option<ProjectConfigLocation>,
+    location: Option<ProjectConfigLocationData>,
 }
 
 struct Inner {
@@ -52,7 +53,7 @@ impl ConfigAppService {
                 ProjectConfigLocationError::NotCanonical,
             ))
         })?;
-        let location = ProjectConfigLocation::try_from_project_identity(
+        let location = ProjectConfigLocationData::try_from_project_identity(
             canonical.clone(),
             canonical.to_string_lossy().as_bytes(),
         )?;
@@ -106,7 +107,7 @@ impl ConfigAppService {
         self
     }
 
-    pub(crate) fn set_project_location(&self, location: ProjectConfigLocation) {
+    pub(crate) fn set_project_location(&self, location: ProjectConfigLocationData) {
         self.active.write().unwrap().location = Some(location);
     }
 
@@ -193,15 +194,15 @@ async fn load_config(
 }
 
 fn patch_for_update(
-    command: ConfigUpdate,
-) -> Result<(ConfigField, ConfigPatch), ConfigUpdateError> {
+    command: ConfigUpdateData,
+) -> Result<(ConfigFieldData, ConfigPatch), ConfigUpdateError> {
     match command {
-        ConfigUpdate::SetModel { model } => {
+        ConfigUpdateData::SetModel { model } => {
             if model.trim().is_empty() {
                 return Err(ConfigUpdateError::Invalid("model 不能为空".into()));
             }
             Ok((
-                ConfigField::Model,
+                ConfigFieldData::Model,
                 ConfigPatch {
                     model: Some(share::config::domain::merge::ModelConfigPatch {
                         name: Some(model.clone()),
@@ -215,8 +216,8 @@ fn patch_for_update(
                 },
             ))
         }
-        ConfigUpdate::SetPermissionMode { mode } => Ok((
-            ConfigField::PermissionMode,
+        ConfigUpdateData::SetPermissionMode { mode } => Ok((
+            ConfigFieldData::PermissionMode,
             ConfigPatch {
                 permissions: Some(share::config::domain::merge::PermissionConfigPatch {
                     mode: Some(mode),
@@ -225,8 +226,8 @@ fn patch_for_update(
                 ..Default::default()
             },
         )),
-        ConfigUpdate::SetMemoryConfig { config } => Ok((
-            ConfigField::Memory,
+        ConfigUpdateData::SetMemoryConfig { config } => Ok((
+            ConfigFieldData::Memory,
             ConfigPatch {
                 memory: Some(share::config::domain::merge::MemoryConfigPatch {
                     enabled: Some(config.enabled),
@@ -248,14 +249,14 @@ fn patch_for_update(
     }
 }
 
-fn map_commit_warning(warning: storage::CommitWarning) -> ConfigCommitWarning {
+fn map_commit_warning(warning: storage::CommitWarning) -> ConfigCommitWarningData {
     match warning {
         storage::CommitWarning::PreviousPromotionPending => {
-            ConfigCommitWarning::PreviousPromotionPending
+            ConfigCommitWarningData::PreviousPromotionPending
         }
         storage::CommitWarning::JournalCleanupPending
         | storage::CommitWarning::MemberPublishRecoveryPending => {
-            ConfigCommitWarning::JournalCleanupPending
+            ConfigCommitWarningData::JournalCleanupPending
         }
     }
 }
@@ -278,10 +279,10 @@ impl ConfigReader for ConfigAppService {
         Ok(self.committed_snapshot())
     }
 
-    async fn subscribe(&self) -> Result<ConfigSubscription, share::error::DomainError> {
+    async fn subscribe(&self) -> Result<ConfigSubscriptionData, share::error::DomainError> {
         let changes = self.subscribe_committed();
         let initial = changes.borrow().clone();
-        Ok(ConfigSubscription { initial, changes })
+        Ok(ConfigSubscriptionData { initial, changes })
     }
 
     fn committed_snapshot(&self) -> ConfigSnapshot {
@@ -292,7 +293,7 @@ impl ConfigReader for ConfigAppService {
         self.tx.subscribe()
     }
 
-    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome {
+    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcomeData {
         let _mutation = self.mutation_lock.lock().await;
         let inner = self.inner.read().await;
         let current_sources = source_fingerprints(
@@ -302,7 +303,7 @@ impl ConfigReader for ConfigAppService {
         )
         .await;
         if current_sources == *self.source_fingerprints.read().unwrap() {
-            return ConfigRefreshOutcome::Unchanged;
+            return ConfigRefreshOutcomeData::Unchanged;
         }
 
         let project_key = self
@@ -328,7 +329,7 @@ impl ConfigReader for ConfigAppService {
         let config = match loaded {
             Ok(config) => config,
             Err(error) => {
-                return ConfigRefreshOutcome::Rejected {
+                return ConfigRefreshOutcomeData::Rejected {
                     error: refresh_error(error),
                 }
             }
@@ -336,7 +337,7 @@ impl ConfigReader for ConfigAppService {
         let candidate_fingerprint = match config_fingerprint(&config) {
             Ok(fingerprint) => fingerprint,
             Err(error) => {
-                return ConfigRefreshOutcome::Rejected {
+                return ConfigRefreshOutcomeData::Rejected {
                     error: refresh_error(error),
                 }
             }
@@ -345,7 +346,7 @@ impl ConfigReader for ConfigAppService {
         let active_fingerprint = match config_fingerprint(&active.config) {
             Ok(fingerprint) => fingerprint,
             Err(error) => {
-                return ConfigRefreshOutcome::Rejected {
+                return ConfigRefreshOutcomeData::Rejected {
                     error: refresh_error(error),
                 }
             }
@@ -354,14 +355,14 @@ impl ConfigReader for ConfigAppService {
         drop(active);
         *self.source_fingerprints.write().unwrap() = current_sources;
         if candidate_fingerprint == active_fingerprint {
-            return ConfigRefreshOutcome::Unchanged;
+            return ConfigRefreshOutcomeData::Unchanged;
         }
 
         let revision = self.committed_snapshot().revision().next();
         let snapshot = ConfigSnapshot::new_with_revision(revision, config.clone());
         self.active.write().unwrap().config = config;
         self.tx.send_replace(snapshot.clone());
-        ConfigRefreshOutcome::Reloaded { snapshot, scopes }
+        ConfigRefreshOutcomeData::Reloaded { snapshot, scopes }
     }
 }
 
@@ -383,15 +384,15 @@ fn refresh_error(error: ConfigAdapterError) -> ConfigRefreshError {
 impl ConfigWriter for ConfigAppService {
     async fn update(
         &self,
-        command: ConfigUpdate,
-    ) -> Result<ConfigChangeSet, share::error::DomainError> {
+        command: ConfigUpdateData,
+    ) -> Result<ConfigChangeData, share::error::DomainError> {
         let _mutation = self.mutation_lock.lock().await;
         let prepared = ProjectConfigParticipant::prepare_update(self, command).await?;
         match ProjectConfigParticipant::persist_update(self, prepared).await {
-            ConfigPersistOutcome::NotCommitted(error) => Err(share::error::DomainError::from(
+            ConfigPersistOutcomeData::NotCommitted(error) => Err(share::error::DomainError::from(
                 ConfigUpdateError::Persist(error),
             )),
-            ConfigPersistOutcome::Committed(ready) => {
+            ConfigPersistOutcomeData::Committed(ready) => {
                 Ok(ProjectConfigParticipant::commit_update(self, *ready))
             }
         }
@@ -402,8 +403,8 @@ impl ConfigWriter for ConfigAppService {
 impl ProjectConfigParticipant for ConfigAppService {
     async fn prepare_for_project(
         &self,
-        location: &ProjectConfigLocation,
-    ) -> Result<PreparedProjectConfig, share::error::DomainError> {
+        location: &ProjectConfigLocationData,
+    ) -> Result<PreparedProjectConfigData, share::error::DomainError> {
         let inner = self.inner.read().await;
         let project_path = share::config::paths::project_config_path(location.search_root());
         let claude = share::config::paths::project_claude_settings_path(location.search_root());
@@ -418,7 +419,7 @@ impl ProjectConfigParticipant for ConfigAppService {
         )
         .await
         .map_err(|error| ConfigError::Load(format!("配置加载失败：{error:?}")))?;
-        Ok(PreparedProjectConfig {
+        Ok(PreparedProjectConfigData {
             location: location.clone(),
             config: config.clone(),
             snapshot: ConfigSnapshot::new(config),
@@ -429,7 +430,7 @@ impl ProjectConfigParticipant for ConfigAppService {
         self.committed_snapshot()
     }
 
-    async fn commit_project(&self, prepared: PreparedProjectConfig) {
+    async fn commit_project(&self, prepared: PreparedProjectConfigData) {
         let _mutation = self.mutation_lock.lock().await;
         let revision = self.committed_snapshot().revision().next();
         let snapshot = prepared.snapshot.with_revision(revision);
@@ -442,8 +443,8 @@ impl ProjectConfigParticipant for ConfigAppService {
 
     async fn prepare_update(
         &self,
-        command: ConfigUpdate,
-    ) -> Result<PreparedConfigUpdate, share::error::DomainError> {
+        command: ConfigUpdateData,
+    ) -> Result<PreparedConfigUpdateData, share::error::DomainError> {
         let (base, project_key) = {
             let active = self.active.read().unwrap();
             (
@@ -465,7 +466,7 @@ impl ProjectConfigParticipant for ConfigAppService {
             .map_err(|error| ConfigUpdateError::Invalid(format!("{error:?}")))?;
         let _ = encode_native_patch(&override_patch)
             .map_err(|_| ConfigUpdateError::Persist(ConfigPersistError::Serialization))?;
-        Ok(PreparedConfigUpdate {
+        Ok(PreparedConfigUpdateData {
             project_key,
             config: config.clone(),
             override_patch,
@@ -474,46 +475,48 @@ impl ProjectConfigParticipant for ConfigAppService {
         })
     }
 
-    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome {
+    async fn persist_update(&self, prepared: PreparedConfigUpdateData) -> ConfigPersistOutcomeData {
         let Some(store) = &self.native_store else {
-            return ConfigPersistOutcome::NotCommitted(ConfigPersistError::UnsupportedDurability);
+            return ConfigPersistOutcomeData::NotCommitted(
+                ConfigPersistError::UnsupportedDurability,
+            );
         };
         let existing = match store.read_override(&prepared.project_key).await {
             Ok(existing) => existing.unwrap_or_default(),
             Err(error) => {
-                return ConfigPersistOutcome::NotCommitted(map_adapter_persist_error(error))
+                return ConfigPersistOutcomeData::NotCommitted(map_adapter_persist_error(error))
             }
         };
         let override_patch = match merge_native_patches(existing, prepared.override_patch) {
             Ok(patch) => patch,
             Err(error) => {
-                return ConfigPersistOutcome::NotCommitted(map_adapter_persist_error(error))
+                return ConfigPersistOutcomeData::NotCommitted(map_adapter_persist_error(error))
             }
         };
         let bytes = match encode_native_patch(&override_patch) {
             Ok(bytes) => bytes,
             Err(error) => {
-                return ConfigPersistOutcome::NotCommitted(map_adapter_persist_error(error))
+                return ConfigPersistOutcomeData::NotCommitted(map_adapter_persist_error(error))
             }
         };
         match store.write_override(&prepared.project_key, &bytes).await {
-            Ok(warning) => ConfigPersistOutcome::Committed(Box::new(ReadyConfigCommit {
+            Ok(warning) => ConfigPersistOutcomeData::Committed(Box::new(ReadyConfigCommitData {
                 config: prepared.config,
                 snapshot: prepared.snapshot,
                 fields: prepared.fields,
                 warning: warning.map(map_commit_warning),
             })),
-            Err(error) => ConfigPersistOutcome::NotCommitted(map_adapter_persist_error(error)),
+            Err(error) => ConfigPersistOutcomeData::NotCommitted(map_adapter_persist_error(error)),
         }
     }
 
-    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet {
+    fn commit_update(&self, ready: ReadyConfigCommitData) -> ConfigChangeData {
         let revision = self.committed_snapshot().revision().next();
         let snapshot = ready.snapshot.with_revision(revision);
         self.active.write().unwrap().config = ready.config;
         self.tx.send_replace(snapshot.clone());
-        ConfigChangeSet {
-            cause: ConfigChangeCause::ClientUpdate,
+        ConfigChangeData {
+            cause: ConfigChangeCauseData::ClientUpdate,
             fields: ready.fields,
             snapshot,
         }

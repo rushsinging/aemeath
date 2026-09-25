@@ -65,8 +65,8 @@ fn make_agents_dir(temp: &tempfile::TempDir) -> std::path::PathBuf {
     agents_dir
 }
 
-fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
-    config::CliConfigInput {
+fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInputData {
+    config::CliConfigInputData {
         api_key: args.api_key.clone(),
         base_url: args.base_url.clone(),
         model: args.model.clone(),
@@ -87,7 +87,7 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
 async fn wire_config_with_agents_dir(
     project_dir: &Path,
     agents_dir: &Path,
-    cli: config::CliConfigInput,
+    cli: config::CliConfigInputData,
 ) -> Result<config::ConfigWiring, share::error::DomainError> {
     config::wire_project_config_with_agents_dir(
         project_dir,
@@ -247,9 +247,10 @@ async fn production_context_append_reopens_from_atomic_blob() {
     std::fs::create_dir_all(&root).expect("create project root");
 
     let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
-    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
-        .await
-        .expect("wire config");
+    let config =
+        wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInputData::default())
+            .await
+            .expect("wire config");
     let task_wiring = task::wire_task();
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
@@ -541,9 +542,10 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     std::fs::create_dir_all(&root).expect("create project root");
 
     let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
-    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
-        .await
-        .expect("wire config");
+    let config =
+        wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInputData::default())
+            .await
+            .expect("wire config");
 
     let task_wiring = task::wire_task();
 
@@ -676,10 +678,13 @@ async fn config_storage_worktrees_dir_drives_workspace_default_derivation() {
         assert!(status.success(), "unexpected exit for git {args:?}");
     }
 
-    let config =
-        wire_config_with_agents_dir(&repo_root, &agents_dir, config::CliConfigInput::default())
-            .await
-            .expect("config wiring");
+    let config = wire_config_with_agents_dir(
+        &repo_root,
+        &agents_dir,
+        config::CliConfigInputData::default(),
+    )
+    .await
+    .expect("config wiring");
     assert_eq!(
         config
             .reader()

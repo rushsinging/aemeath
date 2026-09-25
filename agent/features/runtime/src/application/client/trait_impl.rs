@@ -21,12 +21,14 @@ impl AgentClient for AgentClientImpl {
 
     async fn update_config(
         &self,
-        update: sdk::ConfigUpdate,
+        update: sdk::ConfigUpdateData,
     ) -> Result<sdk::ConfigUpdateResult, SdkError> {
         let command = match update {
-            sdk::ConfigUpdate::SetModel { model } => config::ConfigUpdate::SetModel { model },
-            sdk::ConfigUpdate::SetPermissionMode { mode } => {
-                config::ConfigUpdate::SetPermissionMode {
+            sdk::ConfigUpdateData::SetModel { model } => {
+                config::ConfigUpdateData::SetModel { model }
+            }
+            sdk::ConfigUpdateData::SetPermissionMode { mode } => {
+                config::ConfigUpdateData::SetPermissionMode {
                     mode: match mode {
                         sdk::PermissionModeView::Ask => share::config::PermissionModeConfig::Ask,
                         sdk::PermissionModeView::AutoRead => {

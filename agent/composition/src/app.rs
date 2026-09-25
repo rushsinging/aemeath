@@ -59,8 +59,8 @@ fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::Policy> {
     policy::configured(move || reader.committed_snapshot().permission_mode().into())
 }
 
-fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
-    config::CliConfigInput {
+fn cli_config_input(args: &AgentArgs) -> config::CliConfigInputData {
+    config::CliConfigInputData {
         api_key: args.api_key.clone(),
         base_url: args.base_url.clone(),
         model: args.model.clone(),

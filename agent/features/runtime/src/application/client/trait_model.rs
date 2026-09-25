@@ -160,8 +160,8 @@ mod tests {
             receiver
         }
 
-        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcome {
-            config::ConfigRefreshOutcome::Unchanged
+        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
+            config::ConfigRefreshOutcomeData::Unchanged
         }
 
         async fn snapshot(&self) -> std::result::Result<ConfigSnapshot, share::error::DomainError> {
@@ -171,7 +171,8 @@ mod tests {
 
         async fn subscribe(
             &self,
-        ) -> std::result::Result<config::ConfigSubscription, share::error::DomainError> {
+        ) -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError>
+        {
             Err(share::error::DomainError::unavailable(
                 "config",
                 "配置读取暂不可用",

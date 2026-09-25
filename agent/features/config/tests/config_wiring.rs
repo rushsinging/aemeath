@@ -13,7 +13,7 @@ async fn wiring_reads_runtime_override_from_injected_native_store() {
         .expect("wire config with injected store");
     first
         .service()
-        .update(config::ConfigUpdate::SetPermissionMode {
+        .update(config::ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::AllowAll,
         })
         .await

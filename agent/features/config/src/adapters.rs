@@ -182,7 +182,7 @@ fn driver_key_envs() -> &'static [(&'static str, &'static str)] {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CliConfigInput {
+pub struct CliConfigInputData {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
@@ -198,7 +198,7 @@ pub struct CliConfigInput {
 pub struct CliArgsAdapter;
 
 impl CliArgsAdapter {
-    pub fn read(input: &CliConfigInput) -> ConfigPatch {
+    pub fn read(input: &CliConfigInputData) -> ConfigPatch {
         let api = (input.api_key.is_some() || input.base_url.is_some()).then(|| ApiConfigPatch {
             key: input.api_key.clone(),
             base_url: input.base_url.clone(),

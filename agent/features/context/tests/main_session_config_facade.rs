@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    native_override_store, ConfigAppService, ConfigReader, ConfigUpdate, ProjectConfigParticipant,
+    native_override_store, ConfigAppService, ConfigReader, ConfigUpdateData,
+    ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
 use context::{CanonicalSession, SnapshotState};
@@ -187,7 +188,7 @@ async fn build_facade_harness(
             Some(common) if !common.is_empty() => common.as_bytes(),
             _ => identity.initial_cwd.as_bytes(),
         };
-        config::ProjectConfigLocation::try_from_project_identity(search_root, stable_identity)
+        config::ProjectConfigLocationData::try_from_project_identity(search_root, stable_identity)
             .unwrap()
     };
     let prepared_config = config_service
@@ -440,7 +441,7 @@ async fn update_not_committed_keeps_old_memory_and_config() {
     // ConfigAppService without native_store → persist_update returns
     // NotCommitted(UnsupportedDurability).
     let result = writer
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "new-model".into(),
         })
         .await;
@@ -483,7 +484,7 @@ async fn update_committed_installs_memory_and_advances_watch() {
     let pre_memory = h.wiring.committed_memory();
 
     let change_set = writer
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "committed-model".into(),
         })
         .await
@@ -544,7 +545,7 @@ async fn update_committed_installs_after_caller_drop() {
     let writer_for_task = writer.clone();
     let update_task = tokio::spawn(async move {
         writer_for_task
-            .update(ConfigUpdate::SetModel {
+            .update(ConfigUpdateData::SetModel {
                 model: "bg-model".into(),
             })
             .await
@@ -605,7 +606,7 @@ async fn writer_update_blocks_bind_main_run() {
 
     let blocked = tokio::time::timeout(
         Duration::from_millis(100),
-        writer.update(ConfigUpdate::SetModel {
+        writer.update(ConfigUpdateData::SetModel {
             model: "blocked".into(),
         }),
     )
@@ -618,7 +619,7 @@ async fn writer_update_blocks_bind_main_run() {
     drop(exclusive);
     // Now the writer can proceed (it will fail on NotCommitted since no store).
     let result = writer
-        .update(ConfigUpdate::SetModel { model: "ok".into() })
+        .update(ConfigUpdateData::SetModel { model: "ok".into() })
         .await;
     let _ = result;
 }

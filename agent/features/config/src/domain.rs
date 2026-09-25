@@ -9,23 +9,23 @@ use std::path::{Path, PathBuf};
 use tokio::sync::watch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigField {
+pub enum ConfigFieldData {
     Model,
     PermissionMode,
     Memory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigChangeCause {
+pub enum ConfigChangeCauseData {
     ClientUpdate,
     ProjectCommit,
     FileReload,
 }
 
 #[derive(Debug, Clone)]
-pub struct ConfigChangeSet {
-    pub cause: ConfigChangeCause,
-    pub fields: Vec<ConfigField>,
+pub struct ConfigChangeData {
+    pub cause: ConfigChangeCauseData,
+    pub fields: Vec<ConfigFieldData>,
     pub snapshot: ConfigSnapshot,
 }
 
@@ -37,7 +37,7 @@ pub enum ConfigRefreshError {
 }
 
 #[derive(Debug, Clone)]
-pub enum ConfigRefreshOutcome {
+pub enum ConfigRefreshOutcomeData {
     Unchanged,
     Reloaded {
         snapshot: ConfigSnapshot,
@@ -49,13 +49,13 @@ pub enum ConfigRefreshOutcome {
 }
 
 #[derive(Debug)]
-pub struct ConfigSubscription {
+pub struct ConfigSubscriptionData {
     pub initial: ConfigSnapshot,
     pub changes: watch::Receiver<ConfigSnapshot>,
 }
 
 #[derive(Debug, Clone)]
-pub enum ConfigUpdate {
+pub enum ConfigUpdateData {
     SetModel { model: String },
     SetPermissionMode { mode: PermissionModeConfig },
     SetMemoryConfig { config: MemoryConfig },
@@ -77,7 +77,7 @@ impl std::fmt::Display for ConfigUpdateError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProjectConfigLocation {
+pub struct ProjectConfigLocationData {
     canonical_search_root: PathBuf,
     key: String,
 }
@@ -101,7 +101,7 @@ impl std::fmt::Display for ProjectConfigLocationError {
 
 impl std::error::Error for ProjectConfigLocationError {}
 
-impl ProjectConfigLocation {
+impl ProjectConfigLocationData {
     pub fn try_from_project_identity(
         canonical_search_root: PathBuf,
         stable_identity: &[u8],
@@ -144,14 +144,14 @@ fn utils_key(stable_identity: &[u8]) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedProjectConfig {
-    pub(crate) location: ProjectConfigLocation,
+pub struct PreparedProjectConfigData {
+    pub(crate) location: ProjectConfigLocationData,
     pub(crate) config: Config,
     pub(crate) snapshot: ConfigSnapshot,
 }
 
-impl PreparedProjectConfig {
-    pub fn location(&self) -> &ProjectConfigLocation {
+impl PreparedProjectConfigData {
+    pub fn location(&self) -> &ProjectConfigLocationData {
         &self.location
     }
 
@@ -165,15 +165,15 @@ impl PreparedProjectConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedConfigUpdate {
+pub struct PreparedConfigUpdateData {
     pub(crate) project_key: String,
     pub(crate) config: Config,
     pub(crate) override_patch: ConfigPatch,
     pub(crate) snapshot: ConfigSnapshot,
-    pub(crate) fields: Vec<ConfigField>,
+    pub(crate) fields: Vec<ConfigFieldData>,
 }
 
-impl PreparedConfigUpdate {
+impl PreparedConfigUpdateData {
     pub fn snapshot(&self) -> &ConfigSnapshot {
         &self.snapshot
     }
@@ -205,33 +205,33 @@ impl std::fmt::Display for ConfigPersistError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigCommitWarning {
+pub enum ConfigCommitWarningData {
     PreviousPromotionPending,
     JournalCleanupPending,
 }
 
 #[derive(Debug, Clone)]
-pub struct ReadyConfigCommit {
+pub struct ReadyConfigCommitData {
     pub(crate) config: Config,
     pub(crate) snapshot: ConfigSnapshot,
-    pub(crate) fields: Vec<ConfigField>,
-    pub(crate) warning: Option<ConfigCommitWarning>,
+    pub(crate) fields: Vec<ConfigFieldData>,
+    pub(crate) warning: Option<ConfigCommitWarningData>,
 }
 
-impl ReadyConfigCommit {
+impl ReadyConfigCommitData {
     pub fn snapshot(&self) -> &ConfigSnapshot {
         &self.snapshot
     }
 
-    pub fn warning(&self) -> Option<ConfigCommitWarning> {
+    pub fn warning(&self) -> Option<ConfigCommitWarningData> {
         self.warning
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum ConfigPersistOutcome {
+pub enum ConfigPersistOutcomeData {
     NotCommitted(ConfigPersistError),
-    Committed(Box<ReadyConfigCommit>),
+    Committed(Box<ReadyConfigCommitData>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
