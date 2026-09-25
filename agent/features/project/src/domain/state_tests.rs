@@ -53,7 +53,7 @@ fn exit_empty_stack_errors() {
     let mut s = st("/repo");
     assert_eq!(
         exit(&mut s, &FakeGit::default()),
-        Err(WorkspaceError::EmptyStack)
+        Err(share::error::DomainError::from(WorkspaceError::EmptyStack))
     );
 }
 
@@ -117,8 +117,8 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
 
     assert_eq!(
         result,
-        Err(WorkspaceError::GitProbeFailed(
-            crate::domain::types::GitProbeError::InvalidOutput
+        Err(share::error::DomainError::from(
+            WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -155,8 +155,8 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
 
     assert_eq!(
         result,
-        Err(WorkspaceError::GitProbeFailed(
-            crate::domain::types::GitProbeError::InvalidOutput
+        Err(share::error::DomainError::from(
+            WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -192,8 +192,8 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
 
     assert_eq!(
         result,
-        Err(WorkspaceError::GitProbeFailed(
-            crate::domain::types::GitProbeError::InvalidOutput
+        Err(share::error::DomainError::from(
+            WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -343,7 +343,7 @@ fn prepare_restore_path_not_found_keeps_live_state() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::PathNotFound { .. })
+            Err(crate::domain::types::WorkspaceRestoreError::PathNotFound { .. })
         ),
         "expected PathNotFound, got {result:?}"
     );
@@ -366,7 +366,7 @@ fn prepare_restore_path_outside_root_keeps_live_state() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::PathOutsideWorkspaceRoot { .. })
+            Err(crate::domain::types::WorkspaceRestoreError::PathOutsideWorkspaceRoot { .. })
         ),
         "expected PathOutsideWorkspaceRoot, got {result:?}"
     );
@@ -392,7 +392,7 @@ fn prepare_restore_workspace_id_mismatch_keeps_live_state() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::WorkspaceIdMismatch)
+            Err(crate::domain::types::WorkspaceRestoreError::WorkspaceIdMismatch)
         ),
         "expected WorkspaceIdMismatch, got {result:?}"
     );
@@ -417,7 +417,7 @@ fn prepare_restore_repo_mismatch_keeps_live_state() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::RepositoryMismatch)
+            Err(crate::domain::types::WorkspaceRestoreError::RepositoryMismatch)
         ),
         "expected RepositoryMismatch, got {result:?}"
     );
@@ -452,7 +452,10 @@ fn prepare_restore_non_git_with_stack_is_invalid_stack_shape() {
     let result = prepare_restore(&live, &dto, &git);
 
     assert!(
-        matches!(result, Err(crate::WorkspaceRestoreError::InvalidStackShape)),
+        matches!(
+            result,
+            Err(crate::domain::types::WorkspaceRestoreError::InvalidStackShape)
+        ),
         "expected InvalidStackShape, got {result:?}"
     );
     assert_eq!(live.stack, before);
@@ -484,8 +487,8 @@ fn prepare_restore_non_git_disguise_over_real_git_keeps_live_state() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::RepositoryMismatch)
-                | Err(crate::WorkspaceRestoreError::InvalidProjectIdentity)
+            Err(crate::domain::types::WorkspaceRestoreError::RepositoryMismatch)
+                | Err(crate::domain::types::WorkspaceRestoreError::InvalidProjectIdentity)
         ),
         "expected structured NonGit-disguise mismatch, got {result:?}"
     );
@@ -536,8 +539,10 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
 
     assert_eq!(
         result,
-        Err(WorkspaceError::GitOperationFailed(
-            crate::domain::types::GitOperationError::CommandFailed { exit_code: None }
+        Err(share::error::DomainError::from(
+            WorkspaceError::GitOperationFailed(
+                crate::domain::types::GitOperationError::CommandFailed { exit_code: None }
+            )
         ))
     );
     assert_eq!(state.path_base, PathBuf::from("/repo"));
@@ -559,7 +564,12 @@ fn enter_with_stale_stack_and_missing_target_keeps_full_state_unchanged() {
 
     let result = enter(&mut state, &git, None, None, None);
 
-    assert_eq!(result, Err(WorkspaceError::MissingPathAndBranch));
+    assert_eq!(
+        result,
+        Err(share::error::DomainError::from(
+            WorkspaceError::MissingPathAndBranch
+        ))
+    );
     assert_eq!(snapshot(&state), before);
 }
 
@@ -574,14 +584,13 @@ fn enter_rejects_nested_when_in_worktree() {
         workspace_root: "/prev".into(),
         worktree_kind: WorktreeKind::Primary,
     });
-    assert!(matches!(
-        enter(&mut s, &git, Some("/other".into()), None, None),
-        Err(WorkspaceError::NestedWorktree {
-            current_workspace_root,
-            current_path_base,
-        }) if current_workspace_root == Path::new("/repo")
-           && current_path_base == Path::new("/repo")
-    ));
+    let enter_error = enter(&mut s, &git, Some("/other".into()), None, None).unwrap_err();
+    assert!(
+        enter_error.message().contains("已在 worktree 中")
+            && enter_error.message().contains("/repo"),
+        "unexpected: {}",
+        enter_error.message()
+    );
 }
 
 #[test]
@@ -609,7 +618,9 @@ fn enter_missing_path_and_branch_errors() {
     let mut s = st("/repo");
     assert_eq!(
         enter(&mut s, &git, None, None, None),
-        Err(WorkspaceError::MissingPathAndBranch)
+        Err(share::error::DomainError::from(
+            WorkspaceError::MissingPathAndBranch
+        ))
     );
 }
 
@@ -791,9 +802,11 @@ fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
 
     assert_eq!(
         result,
-        Err(WorkspaceError::NotLinkedWorktree {
-            path: target.clone()
-        })
+        Err(share::error::DomainError::from(
+            WorkspaceError::NotLinkedWorktree {
+                path: target.clone()
+            }
+        ))
     );
     assert_eq!(
         result.unwrap_err().to_string(),
@@ -923,7 +936,9 @@ fn enter_rejects_non_git_identity() {
     s.worktree_kind = WorktreeKind::NonGit;
     assert_eq!(
         enter(&mut s, &git, Some("/repo/wt".into()), None, None),
-        Err(WorkspaceError::UnsupportedForNonGit)
+        Err(share::error::DomainError::from(
+            WorkspaceError::UnsupportedForNonGit
+        ))
     );
     assert!(git.added.lock().unwrap().is_empty());
 }
@@ -1041,7 +1056,7 @@ fn restore_keeps_failing_closed_with_nonempty_stack_when_path_base_foreign() {
     assert!(
         matches!(
             result,
-            Err(crate::WorkspaceRestoreError::RepositoryMismatch)
+            Err(crate::domain::types::WorkspaceRestoreError::RepositoryMismatch)
         ),
         "栈非空时 path_base mismatch 必须保持 fail-closed，got {result:?}"
     );

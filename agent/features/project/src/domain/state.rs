@@ -107,7 +107,7 @@ fn resolve_worktree_path(
     state: &WorkspaceState,
     path: Option<PathBuf>,
     branch: Option<&str>,
-) -> Result<PathBuf, WorkspaceError> {
+) -> Result<PathBuf, share::error::DomainError> {
     match path.filter(|value| !value.as_os_str().is_empty()) {
         Some(p) if p.is_absolute() => Ok(p),
         Some(p) => Ok(state.path_base.join(p)),
@@ -116,7 +116,7 @@ fn resolve_worktree_path(
                 .worktrees_root
                 .join(workspace_repo_segment(state)?)
                 .join(sanitize_branch_for_path(b)?)),
-            _ => Err(WorkspaceError::MissingPathAndBranch),
+            _ => Err(WorkspaceError::MissingPathAndBranch.into()),
         },
     }
 }
@@ -126,12 +126,15 @@ fn resolve_worktree_base(base: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_WORKTREE_BASE)
 }
 
-pub fn change_directory(state: &mut WorkspaceState, path: PathBuf) -> Result<(), WorkspaceError> {
+pub fn change_directory(
+    state: &mut WorkspaceState,
+    path: PathBuf,
+) -> Result<(), share::error::DomainError> {
     let canonical = path
         .canonicalize()
         .map_err(|_| WorkspaceError::PathNotFound(path.clone()))?;
     if !canonical.is_dir() {
-        return Err(WorkspaceError::NotDirectory(canonical));
+        return Err(WorkspaceError::NotDirectory(canonical).into());
     }
     let canonical_root = state
         .workspace_root
@@ -141,7 +144,8 @@ pub fn change_directory(state: &mut WorkspaceState, path: PathBuf) -> Result<(),
         return Err(WorkspaceError::PathOutsideWorkspaceRoot {
             path: canonical,
             root: canonical_root,
-        });
+        }
+        .into());
     }
     state.path_base = canonical;
     Ok(())
@@ -200,9 +204,9 @@ pub fn enter(
     path: Option<PathBuf>,
     branch: Option<String>,
     base: Option<String>,
-) -> Result<WorkspaceData, WorkspaceError> {
+) -> Result<WorkspaceData, share::error::DomainError> {
     if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit);
+        return Err(WorkspaceError::UnsupportedForNonGit.into());
     }
     let mut next_stack = state.stack.clone();
     if !next_stack.is_empty() {
@@ -215,7 +219,8 @@ pub fn enter(
                 return Err(WorkspaceError::NestedWorktree {
                     current_workspace_root: state.workspace_root.clone(),
                     current_path_base: state.path_base.clone(),
-                });
+                }
+                .into());
             }
         }
     }
@@ -235,7 +240,7 @@ pub fn enter(
     }
     let (canonical, worktree_root, worktree_kind) = validate_in_repo(state, git, &target)?;
     if worktree_kind != WorktreeKind::Linked {
-        return Err(WorkspaceError::NotLinkedWorktree { path: canonical });
+        return Err(WorkspaceError::NotLinkedWorktree { path: canonical }.into());
     }
     let frame = WorkspaceData {
         id: state.workspace_id(),
@@ -254,9 +259,9 @@ pub fn enter(
 pub fn exit(
     state: &mut WorkspaceState,
     git: &dyn GitWorktreeOps,
-) -> Result<WorkspaceData, WorkspaceError> {
+) -> Result<WorkspaceData, share::error::DomainError> {
     if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit);
+        return Err(WorkspaceError::UnsupportedForNonGit.into());
     }
     let prev = state
         .stack
@@ -268,7 +273,7 @@ pub fn exit(
         || worktree_root != prev.workspace_root
         || worktree_kind != prev.worktree_kind
     {
-        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput));
+        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput).into());
     }
     state.stack.pop();
     state.workspace_root = worktree_root;

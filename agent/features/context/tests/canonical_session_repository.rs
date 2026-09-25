@@ -13,7 +13,7 @@ use context::{
     SessionCommitPlan, SnapshotState,
 };
 use context::{CanonicalSessionRepository, CanonicalSessionWriter};
-use project::{WorkspaceRestoreData, WorkspaceRestoreError, WorkspaceWriter};
+use project::{WorkspaceRestoreData, WorkspaceWriter};
 use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -183,7 +183,7 @@ impl WorkspaceWriter for FixedWorkspace {
     fn prepare_restore(
         &self,
         _dto: &PersistedWorkspaceContext,
-    ) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
+    ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
         panic!("not used")
     }
 

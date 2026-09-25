@@ -85,13 +85,16 @@ impl UsageQueryPort for UsageQueryService {
 }
 
 impl UsageQueryService {
-    /// PL 固有读出入口（消费者无需导入 Port trait；边界错误为粗分类 AuditError）。
+    /// PL 固有读出入口（消费者无需导入 Port trait；边界错误为 share::error::DomainError）。
     pub async fn query_page(
         &self,
         query: UsageQueryData,
-    ) -> Result<UsagePageData, crate::AuditError> {
+    ) -> Result<UsagePageData, share::error::DomainError> {
         let port = self as &dyn crate::ports::UsageQueryPort;
-        port.query(query).await.map_err(crate::AuditError::from)
+        port.query(query)
+            .await
+            .map_err(crate::AuditError::from)
+            .map_err(Into::into)
     }
 
     async fn streams(

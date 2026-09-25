@@ -143,19 +143,22 @@ impl project::WorkspaceReader for FakeWorkspace {
     fn resolve(&self, rel: &std::path::Path) -> PathBuf {
         self.0.join(rel)
     }
-    fn resolve_file_path(&self, rel: &std::path::Path) -> Result<PathBuf, project::WorkspaceError> {
+    fn resolve_file_path(
+        &self,
+        rel: &std::path::Path,
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }
     fn resolve_search_path(
         &self,
         rel: &std::path::Path,
-    ) -> Result<PathBuf, project::WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }
     fn in_worktree(&self) -> bool {
         false
     }
-    fn current_branch(&self) -> Result<Option<String>, project::WorkspaceError> {
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         Ok(None)
     }
     fn initial_cwd(&self) -> PathBuf {

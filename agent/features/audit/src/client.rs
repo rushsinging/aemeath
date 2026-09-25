@@ -13,7 +13,6 @@ use crate::domain::{
     UsageDropReasonData, UsageEmitOutcomeData, UsagePageData, UsageQueryData, UsageRecordData,
 };
 use crate::ports::UsageAppendStorePort;
-use crate::AuditError;
 
 /// audit 存储句柄：内部 SPI（`UsageAppendStorePort`）不出签名的轻量包装。
 #[derive(Clone)]
@@ -111,7 +110,10 @@ pub struct AuditReader {
 
 impl AuditReader {
     /// 读：分页查询用量（粗分类边界错误）。
-    pub async fn query_page(&self, query: UsageQueryData) -> Result<UsagePageData, AuditError> {
+    pub async fn query_page(
+        &self,
+        query: UsageQueryData,
+    ) -> Result<UsagePageData, share::error::DomainError> {
         self.query.query_page(query).await
     }
 }

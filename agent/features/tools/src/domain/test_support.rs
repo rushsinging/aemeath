@@ -3,7 +3,7 @@ use crate::domain::{
     ProgressSink, ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
-use project::{WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader};
+use project::{WorkspaceControl, WorkspaceData, WorkspaceReader};
 use share::session_types::{ProjectIdentityData, WorkspaceId};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -73,31 +73,37 @@ impl WorkspaceReader for FakeWorkspace {
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.normalized(rel)
     }
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let resolved = self.normalized(path);
         if resolved.starts_with(&self.initial_root) {
             Ok(resolved)
         } else {
-            Err(WorkspaceError::PathOutsideWorkspaceRoot {
-                path: resolved,
-                root: self.initial_root.clone(),
-            })
+            Err(share::error::DomainError::invalid(
+                "tools",
+                format!("路径 {} 超出工作区根", resolved.display()),
+            ))
         }
     }
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let resolved = self.resolve_file_path(path)?;
         if !resolved.exists() {
-            return Err(WorkspaceError::PathNotFound(resolved));
+            return Err(share::error::DomainError::invalid(
+                "tools",
+                format!("路径不存在 {}", resolved.display()),
+            ));
         }
         if !resolved.is_dir() {
-            return Err(WorkspaceError::NotDirectory(resolved));
+            return Err(share::error::DomainError::invalid(
+                "tools",
+                format!("路径不是目录 {}", resolved.display()),
+            ));
         }
         Ok(resolved)
     }
     fn in_worktree(&self) -> bool {
         false
     }
-    fn current_branch(&self) -> Result<Option<String>, WorkspaceError> {
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         Ok(None)
     }
     fn initial_cwd(&self) -> PathBuf {
@@ -106,13 +112,19 @@ impl WorkspaceReader for FakeWorkspace {
 }
 
 impl WorkspaceControl for FakeWorkspace {
-    fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError> {
+    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
         let resolved = self.normalized(&path);
         if !resolved.exists() {
-            return Err(WorkspaceError::PathNotFound(resolved));
+            return Err(share::error::DomainError::invalid(
+                "tools",
+                format!("路径不存在 {}", resolved.display()),
+            ));
         }
         if !resolved.is_dir() {
-            return Err(WorkspaceError::NotDirectory(resolved));
+            return Err(share::error::DomainError::invalid(
+                "tools",
+                format!("路径不是目录 {}", resolved.display()),
+            ));
         }
         *self.current.lock().expect("fake workspace lock") = resolved;
         Ok(())
@@ -122,11 +134,17 @@ impl WorkspaceControl for FakeWorkspace {
         _path: Option<PathBuf>,
         _branch: Option<String>,
         _base: Option<String>,
-    ) -> Result<WorkspaceData, WorkspaceError> {
-        Err(WorkspaceError::UnsupportedForNonGit)
+    ) -> Result<WorkspaceData, share::error::DomainError> {
+        Err(share::error::DomainError::invalid(
+            "tools",
+            "NonGit 环境不支持 worktree 操作",
+        ))
     }
-    fn exit(&self) -> Result<WorkspaceData, WorkspaceError> {
-        Err(WorkspaceError::UnsupportedForNonGit)
+    fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
+        Err(share::error::DomainError::invalid(
+            "tools",
+            "NonGit 环境不支持 worktree 操作",
+        ))
     }
 }
 

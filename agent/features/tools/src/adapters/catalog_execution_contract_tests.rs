@@ -12,7 +12,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use project::{WorkspaceError, WorkspaceReader};
+use project::WorkspaceReader;
 use serde_json::{json, Value};
 
 use super::{
@@ -585,16 +585,22 @@ impl WorkspaceReader for FakeWorkspace {
     fn resolve(&self, path: &std::path::Path) -> PathBuf {
         self.root.join(path)
     }
-    fn resolve_file_path(&self, path: &std::path::Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_file_path(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.resolve(path))
     }
-    fn resolve_search_path(&self, path: &std::path::Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_search_path(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.resolve(path))
     }
     fn in_worktree(&self) -> bool {
         false
     }
-    fn current_branch(&self) -> Result<Option<String>, WorkspaceError> {
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         Ok(None)
     }
     fn initial_cwd(&self) -> PathBuf {

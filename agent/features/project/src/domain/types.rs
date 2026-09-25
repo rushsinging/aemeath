@@ -46,7 +46,7 @@ pub enum GitOperationError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceInitError {
+pub(crate) enum WorkspaceInitError {
     PathNotFound { path: PathBuf },
     NotDirectory { path: PathBuf },
     PermissionDenied { path: PathBuf },
@@ -72,7 +72,7 @@ impl std::error::Error for WorkspaceInitError {}
 
 /// Workspace 层集中错误（用户可见消息为中文）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceError {
+pub(crate) enum WorkspaceError {
     PathNotFound(PathBuf),
     NotDirectory(PathBuf),
     PathOutsideWorkspaceRoot {
@@ -158,7 +158,7 @@ impl std::fmt::Display for WorkspaceError {
 impl std::error::Error for WorkspaceError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceRestoreError {
+pub(crate) enum WorkspaceRestoreError {
     InvalidProjectIdentity,
     PathNotFound { path: String },
     PathOutsideWorkspaceRoot { path: String, root: String },
@@ -194,12 +194,12 @@ pub trait WorkspaceReader: Send + Sync {
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
     /// 解析文件路径；默认限制在 workspace root，授权方可显式放行越界路径。
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError>;
     fn resolve_file_path_authorized(
         &self,
         path: &Path,
         allow_outside_workspace: bool,
-    ) -> Result<PathBuf, WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         if allow_outside_workspace {
             Ok(self.resolve(path))
         } else {
@@ -207,12 +207,12 @@ pub trait WorkspaceReader: Send + Sync {
         }
     }
     /// 解析已存在的搜索目录；默认限制在 workspace root。
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError>;
     fn resolve_search_path_authorized(
         &self,
         path: &Path,
         allow_outside_workspace: bool,
-    ) -> Result<PathBuf, WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         if !allow_outside_workspace {
             return self.resolve_search_path(path);
         }
@@ -221,7 +221,7 @@ pub trait WorkspaceReader: Send + Sync {
             .canonicalize()
             .map_err(|_| WorkspaceError::CannotResolveSearchPath(path.to_path_buf()))?;
         if !resolved.is_dir() {
-            return Err(WorkspaceError::NotDirectory(resolved));
+            return Err(WorkspaceError::NotDirectory(resolved).into());
         }
         Ok(resolved)
     }
@@ -229,7 +229,7 @@ pub trait WorkspaceReader: Send + Sync {
     /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;
     /// 当前分支名。detached HEAD / 无分支时返回 `Ok(None)`。
-    fn current_branch(&self) -> Result<Option<String>, WorkspaceError>;
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError>;
     /// 项目启动时的 cwd（init root），worktree 切换时**不变**。
     /// memory 等需要绑定项目身份（而非工作目录）的读写必须用此路径。
     fn initial_cwd(&self) -> PathBuf;
@@ -237,14 +237,14 @@ pub trait WorkspaceReader: Send + Sync {
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
 pub trait WorkspaceControl: Send + Sync {
-    fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError>;
+    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError>;
     fn enter(
         &self,
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<WorkspaceData, WorkspaceError>;
-    fn exit(&self) -> Result<WorkspaceData, WorkspaceError>;
+    ) -> Result<WorkspaceData, share::error::DomainError>;
+    fn exit(&self) -> Result<WorkspaceData, share::error::DomainError>;
 }
 
 /// session 边界持久化。
@@ -253,6 +253,52 @@ pub trait WorkspaceWriter: Send + Sync {
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<crate::domain::state::WorkspaceRestoreData, WorkspaceRestoreError>;
+    ) -> Result<crate::domain::state::WorkspaceRestoreData, share::error::DomainError>;
     fn commit_restore(&self, prepared: crate::domain::state::WorkspaceRestoreData);
+}
+
+// ─── DomainError 折叠层（跨界唯一错误）────────────────────────────────
+
+fn workspace_category(error: &WorkspaceError) -> share::error::ErrorCategory {
+    use share::error::ErrorCategory;
+    match error {
+        WorkspaceError::GitProbeFailed(_) | WorkspaceError::GitOperationFailed(_) => {
+            ErrorCategory::Storage
+        }
+        _ => ErrorCategory::Invalid,
+    }
+}
+
+impl From<WorkspaceError> for share::error::DomainError {
+    fn from(inner: WorkspaceError) -> Self {
+        let category = workspace_category(&inner);
+        let message = inner.to_string();
+        share::error::DomainError::from_parts("project", category, message)
+            .with_source(std::sync::Arc::new(inner))
+    }
+}
+
+impl From<WorkspaceRestoreError> for share::error::DomainError {
+    fn from(inner: WorkspaceRestoreError) -> Self {
+        let category = match inner {
+            WorkspaceRestoreError::GitProbeFailed(_) => share::error::ErrorCategory::Storage,
+            _ => share::error::ErrorCategory::Invalid,
+        };
+        let message = inner.to_string();
+        share::error::DomainError::from_parts("project", category, message)
+            .with_source(std::sync::Arc::new(inner))
+    }
+}
+
+impl From<WorkspaceInitError> for share::error::DomainError {
+    fn from(inner: WorkspaceInitError) -> Self {
+        let category = match inner {
+            WorkspaceInitError::GitProbeFailed(_) => share::error::ErrorCategory::Storage,
+            WorkspaceInitError::PermissionDenied { .. } => share::error::ErrorCategory::Unavailable,
+            _ => share::error::ErrorCategory::Invalid,
+        };
+        let message = inner.to_string();
+        share::error::DomainError::from_parts("project", category, message)
+            .with_source(std::sync::Arc::new(inner))
+    }
 }

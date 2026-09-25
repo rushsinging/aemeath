@@ -9,8 +9,7 @@ use crate::domain::git::GitWorktreeOps;
 use crate::domain::state::WorkspaceRestoreData;
 use crate::domain::state::{self as rules, WorkspaceState};
 use crate::domain::types::{
-    WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceRestoreError,
-    WorkspaceWriter,
+    WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceWriter,
 };
 
 const MAX_PATH_DEPTH: usize = 64;
@@ -20,9 +19,11 @@ fn resolve_path(
     path_base: &Path,
     workspace_root: Option<&Path>,
     must_exist: bool,
-) -> Result<PathBuf, WorkspaceError> {
+) -> Result<PathBuf, share::error::DomainError> {
     if path.components().count() > MAX_PATH_DEPTH {
-        return Err(WorkspaceError::PathTooDeep(path.to_path_buf()));
+        return Err(share::error::DomainError::from(
+            WorkspaceError::PathTooDeep(path.to_path_buf()),
+        ));
     }
 
     let joined = if path.is_absolute() {
@@ -43,10 +44,12 @@ fn resolve_path(
             .canonicalize()
             .unwrap_or_else(|_| lexical_normalize(workspace_root));
         if !resolved.starts_with(&workspace) {
-            return Err(WorkspaceError::PathOutsideWorkspaceRoot {
-                path: resolved,
-                root: workspace,
-            });
+            return Err(share::error::DomainError::from(
+                WorkspaceError::PathOutsideWorkspaceRoot {
+                    path: resolved,
+                    root: workspace,
+                },
+            ));
         }
     }
     Ok(resolved)
@@ -196,7 +199,7 @@ impl WorkspaceReader for WorkspaceService {
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.lock().resolve(rel)
     }
-    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         resolve_path(path, &state.path_base, Some(&state.workspace_root), false)
     }
@@ -204,7 +207,7 @@ impl WorkspaceReader for WorkspaceService {
         &self,
         path: &Path,
         allow_outside_workspace: bool,
-    ) -> Result<PathBuf, WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         resolve_path(
             path,
@@ -213,7 +216,7 @@ impl WorkspaceReader for WorkspaceService {
             false,
         )
     }
-    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         resolve_path(path, &state.path_base, Some(&state.workspace_root), true)
     }
@@ -221,7 +224,7 @@ impl WorkspaceReader for WorkspaceService {
         &self,
         path: &Path,
         allow_outside_workspace: bool,
-    ) -> Result<PathBuf, WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
         let resolved = resolve_path(
             path,
@@ -230,14 +233,16 @@ impl WorkspaceReader for WorkspaceService {
             true,
         )?;
         if !resolved.is_dir() {
-            return Err(WorkspaceError::NotDirectory(resolved));
+            return Err(share::error::DomainError::from(
+                WorkspaceError::NotDirectory(resolved),
+            ));
         }
         Ok(resolved)
     }
     fn in_worktree(&self) -> bool {
         self.lock().worktree_kind == WorktreeKind::Linked
     }
-    fn current_branch(&self) -> Result<Option<String>, WorkspaceError> {
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         let state = self.lock();
         if state.worktree_kind == WorktreeKind::NonGit {
             return Ok(None);
@@ -247,6 +252,7 @@ impl WorkspaceReader for WorkspaceService {
         self.git
             .current_branch(&root)
             .map_err(WorkspaceError::GitOperationFailed)
+            .map_err(Into::into)
     }
     fn initial_cwd(&self) -> PathBuf {
         PathBuf::from(&self.lock().project_identity.initial_cwd)
@@ -254,7 +260,7 @@ impl WorkspaceReader for WorkspaceService {
 }
 
 impl WorkspaceControl for WorkspaceService {
-    fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError> {
+    fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
         rules::change_directory(&mut candidate, path)?;
@@ -266,14 +272,14 @@ impl WorkspaceControl for WorkspaceService {
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<WorkspaceData, WorkspaceError> {
+    ) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
         let frame = rules::enter(&mut candidate, self.git.as_ref(), path, branch, base)?;
         self.commit(candidate);
         Ok(frame)
     }
-    fn exit(&self) -> Result<WorkspaceData, WorkspaceError> {
+    fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
         let frame = rules::exit(&mut candidate, self.git.as_ref())?;
@@ -290,9 +296,9 @@ impl WorkspaceWriter for WorkspaceService {
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
+    ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
         let live = self.candidate();
-        rules::prepare_restore(&live, dto, self.git.as_ref())
+        rules::prepare_restore(&live, dto, self.git.as_ref()).map_err(Into::into)
     }
 
     fn commit_restore(&self, prepared: WorkspaceRestoreData) {
@@ -395,10 +401,12 @@ mod tests {
 
         let result = service.resolve_file_path(Path::new("../outside.rs"));
 
-        assert!(matches!(
-            result,
-            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
-        ));
+        let error = result.unwrap_err();
+        assert!(
+            error.message().starts_with("路径 "),
+            "unexpected: {}",
+            error.message()
+        );
     }
 
     #[test]
@@ -421,10 +429,12 @@ mod tests {
 
         let result = service.resolve_search_path(&outside);
 
-        assert!(matches!(
-            result,
-            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
-        ));
+        let error = result.unwrap_err();
+        assert!(
+            error.message().starts_with("路径 "),
+            "unexpected: {}",
+            error.message()
+        );
     }
 
     #[cfg(unix)]
@@ -438,10 +448,12 @@ mod tests {
 
         let result = service.resolve_file_path(Path::new("escape/file.rs"));
 
-        assert!(matches!(
-            result,
-            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
-        ));
+        let error = result.unwrap_err();
+        assert!(
+            error.message().starts_with("路径 "),
+            "unexpected: {}",
+            error.message()
+        );
     }
 
     #[test]
@@ -547,10 +559,11 @@ mod tests {
         let child = parent.seed_isolated();
         assert_eq!(child.current_path_base(), PathBuf::from("/wt")); // 继承当前
                                                                      // 子退栈应为空（独立空栈）
-        assert_eq!(
-            WorkspaceControl::exit(child.as_ref()),
-            Err(WorkspaceError::EmptyStack)
-        );
+        let exit_result = WorkspaceControl::exit(child.as_ref());
+        assert!(matches!(
+            exit_result,
+            Err(error) if error.category() == share::error::ErrorCategory::Invalid
+        ));
         // 父仍有一帧（不受子影响）
         assert_eq!(parent.lock().stack.len(), 1);
     }
@@ -648,10 +661,10 @@ mod tests {
         let result = service.prepare_restore(&dto);
 
         assert!(
-            matches!(
-                result,
-                Err(crate::WorkspaceRestoreError::PathNotFound { .. })
-            ),
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.message().contains("路径不存在")),
             "expected PathNotFound, got {result:?}"
         );
         assert_eq!(service.current_path_base(), before);

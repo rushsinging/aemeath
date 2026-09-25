@@ -18,10 +18,7 @@ mod domain;
 
 pub use adapters::wiring::{wire_production_workspace, Workspace};
 pub use domain::state::WorkspaceRestoreData;
-pub use domain::types::{
-    WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceRestoreError,
-    WorkspaceWriter,
-};
+pub use domain::types::{WorkspaceControl, WorkspaceData, WorkspaceReader, WorkspaceWriter};
 
 #[cfg(test)]
 mod tests {
@@ -218,10 +215,10 @@ mod tests {
         let missing = PathBuf::from("/definitely/not/here/aemeath-894-xyz");
         let result = wire_production_workspace(missing, None);
         assert!(
-            matches!(
-                result,
-                Err(domain::types::WorkspaceInitError::PathNotFound { .. })
-            ),
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.message().starts_with("路径不存在")),
             "缺失路径应返回结构化 PathNotFound 错误"
         );
     }
@@ -234,10 +231,10 @@ mod tests {
         std::fs::write(&file_path, "content").unwrap();
         let result = wire_production_workspace(file_path, None);
         assert!(
-            matches!(
-                result,
-                Err(domain::types::WorkspaceInitError::NotDirectory { .. })
-            ),
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.message().starts_with("路径不是目录")),
             "文件路径应返回结构化 NotDirectory 错误"
         );
     }
@@ -366,8 +363,8 @@ mod tests {
             "应记录 failure exit：{joined}"
         );
         assert!(
-            logs.iter().any(|(_, m)| m.contains("PathNotFound")),
-            "failure 日志应包含安全的错误类别：{joined}"
+            logs.iter().any(|(_, m)| m.contains("category=invalid")),
+            "failure 日志应包含安全的错误类别（无路径）：{joined}"
         );
 
         let path_str = missing.display().to_string();

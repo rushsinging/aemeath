@@ -10,8 +10,11 @@ struct RecordingWorkspaceControl {
 }
 
 impl WorkspaceControl for RecordingWorkspaceControl {
-    fn change_directory(&self, _path: PathBuf) -> Result<(), project::WorkspaceError> {
-        Err(project::WorkspaceError::UnsupportedForNonGit)
+    fn change_directory(&self, _path: PathBuf) -> Result<(), share::error::DomainError> {
+        Err(share::error::DomainError::invalid(
+            "tools",
+            "NonGit 环境不支持 worktree 操作",
+        ))
     }
 
     fn enter(
@@ -19,13 +22,19 @@ impl WorkspaceControl for RecordingWorkspaceControl {
         path: Option<PathBuf>,
         branch: Option<String>,
         base: Option<String>,
-    ) -> Result<project::WorkspaceData, project::WorkspaceError> {
+    ) -> Result<project::WorkspaceData, share::error::DomainError> {
         *self.enter_args.lock().expect("recording control lock") = Some((path, branch, base));
-        Err(project::WorkspaceError::UnsupportedForNonGit)
+        Err(share::error::DomainError::invalid(
+            "tools",
+            "NonGit 环境不支持 worktree 操作",
+        ))
     }
 
-    fn exit(&self) -> Result<project::WorkspaceData, project::WorkspaceError> {
-        Err(project::WorkspaceError::UnsupportedForNonGit)
+    fn exit(&self) -> Result<project::WorkspaceData, share::error::DomainError> {
+        Err(share::error::DomainError::invalid(
+            "tools",
+            "NonGit 环境不支持 worktree 操作",
+        ))
     }
 }
 

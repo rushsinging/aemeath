@@ -79,6 +79,20 @@ impl DomainError {
         self
     }
 
+    /// 折叠层构造（各 crate 的 From impl 使用；消费方用三个具名构造器）。
+    pub fn from_parts(
+        domain: &'static str,
+        category: ErrorCategory,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            domain,
+            category,
+            message: message.into(),
+            source: None,
+        }
+    }
+
     /// 控制流分类。
     pub fn category(&self) -> ErrorCategory {
         self.category
@@ -87,6 +101,20 @@ impl DomainError {
     /// 来源 crate 标签（诊断定位）。
     pub fn domain(&self) -> &'static str {
         self.domain
+    }
+
+    /// 呈现文案（测试断言与结构化消费）。
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl PartialEq for DomainError {
+    /// 等价性按 domain/category/message（source 为诊断链，不参与等价）。
+    fn eq(&self, other: &Self) -> bool {
+        self.domain == other.domain
+            && self.category == other.category
+            && self.message == other.message
     }
 }
 

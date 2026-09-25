@@ -39,7 +39,7 @@ impl Workspace {
 pub fn wire_production_workspace(
     cwd: PathBuf,
     worktrees_dir: Option<PathBuf>,
-) -> Result<Workspace, WorkspaceInitError> {
+) -> Result<Workspace, share::error::DomainError> {
     log::info!(target: crate::LOG_TARGET, "wire_production_workspace enter");
     match build_workspace(cwd, worktrees_dir) {
         Ok((wiring, kind)) => {
@@ -53,21 +53,10 @@ pub fn wire_production_workspace(
             log::warn!(
                 target: crate::LOG_TARGET,
                 "wire_production_workspace failure category={}",
-                init_error_category(&error)
+                error.category().as_str()
             );
             Err(error)
         }
-    }
-}
-
-/// 稳定的错误类别名（仅 discriminant，不含路径等敏感信息），供安全日志使用。
-fn init_error_category(error: &WorkspaceInitError) -> &'static str {
-    match error {
-        WorkspaceInitError::PathNotFound { .. } => "PathNotFound",
-        WorkspaceInitError::NotDirectory { .. } => "NotDirectory",
-        WorkspaceInitError::PermissionDenied { .. } => "PermissionDenied",
-        WorkspaceInitError::CanonicalizeFailed { .. } => "CanonicalizeFailed",
-        WorkspaceInitError::GitProbeFailed(_) => "GitProbeFailed",
     }
 }
 
@@ -75,7 +64,7 @@ fn init_error_category(error: &WorkspaceInitError) -> &'static str {
 fn build_workspace(
     cwd: PathBuf,
     worktrees_dir: Option<PathBuf>,
-) -> Result<(Workspace, WorktreeKind), WorkspaceInitError> {
+) -> Result<(Workspace, WorktreeKind), share::error::DomainError> {
     let metadata = std::fs::metadata(&cwd).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => WorkspaceInitError::PathNotFound { path: cwd.clone() },
         std::io::ErrorKind::PermissionDenied => {
@@ -84,7 +73,9 @@ fn build_workspace(
         _ => WorkspaceInitError::CanonicalizeFailed { path: cwd.clone() },
     })?;
     if !metadata.is_dir() {
-        return Err(WorkspaceInitError::NotDirectory { path: cwd });
+        return Err(share::error::DomainError::from(
+            WorkspaceInitError::NotDirectory { path: cwd },
+        ));
     }
     let canonical = cwd.canonicalize().map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => WorkspaceInitError::PathNotFound { path: cwd.clone() },

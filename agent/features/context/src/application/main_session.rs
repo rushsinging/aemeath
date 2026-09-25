@@ -8,7 +8,7 @@ use config::{
     ProjectConfigParticipant,
 };
 use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
-use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceRestoreError, WorkspaceWriter};
+use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::session_types::ProjectIdentityData;
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
@@ -99,7 +99,7 @@ pub enum MainSessionError {
 
     /// `WorkspaceWriter::prepare_restore` rejected the candidate.
     #[error("workspace restore prepare failed: {0}")]
-    WorkspaceRestore(#[from] WorkspaceRestoreError),
+    WorkspaceRestore(#[from] share::error::DomainError),
 
     /// Deriving the canonical project-config location failed.
     #[error("invalid config location: {0:?}")]
@@ -581,7 +581,7 @@ impl MainSessionWiring {
         let prepared_workspace: WorkspaceRestoreData = match &session.workspace {
             SnapshotState::Captured(dto) => match self.workspace_persist.prepare_restore(dto) {
                 Ok(prepared) => prepared,
-                Err(WorkspaceRestoreError::PathNotFound { .. }) => {
+                Err(error) if error.message().contains("路径不存在") => {
                     let live_identity = self.workspace_read.project_identity();
                     if !same_project_identity(&live_identity, &dto.project_identity) {
                         return Err(MainSessionError::ProjectMismatch);

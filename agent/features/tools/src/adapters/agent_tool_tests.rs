@@ -185,8 +185,6 @@ async fn agent_tool_rejects_missing_agent_before_dispatch() {
 /// it inherits the current location but subsequent child mutations cannot affect the parent.
 #[test]
 fn sub_agent_workspace_isolated() {
-    use project::WorkspaceError;
-
     let main_dir = tempfile::tempdir().unwrap();
     let child_dir = main_dir.path().join("child");
     std::fs::create_dir_all(&child_dir).unwrap();
@@ -211,7 +209,10 @@ fn sub_agent_workspace_isolated() {
     assert_eq!(parent.read().current_path_base(), canonical_child);
     assert_eq!(
         child.control().exit(),
-        Err(WorkspaceError::UnsupportedForNonGit)
+        Err(share::error::DomainError::invalid(
+            "project",
+            "非 Git 项目不支持 worktree 操作"
+        ))
     );
 }
 
