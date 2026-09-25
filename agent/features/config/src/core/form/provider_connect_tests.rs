@@ -193,6 +193,31 @@ fn zhipu_endpoint_pages_publish_distinct_default_urls() {
 }
 
 #[test]
+fn zhipu_user_agent_page_prefills_official_sdk_client_ua() {
+    // zhipu 系（含 Z.ai）有已核验的官方客户端 UA 时，表单必须预填，
+    // 用户不应手动输入；LiteLLM 无证据时保持空，交由全局默认回退。
+    for (source, expected_ua) in [
+        ("Zhipu", Some("ZCode/3.11.2")),
+        ("Zhipu Coding Plan", Some("ZCode/3.11.2")),
+        ("Z.ai", Some("ZCode/3.11.2")),
+        ("Z.ai Coding Plan", Some("ZCode/3.11.2")),
+        ("Anthropic", Some("claude-cli/2.1.267 (external, sdk-cli)")),
+        ("LiteLLM", None),
+    ] {
+        let mut view = connect_view(ConnectStage::EditUserAgent);
+        view.draft.source = Some(crate::catalog::find_by_source(source).unwrap().source);
+
+        let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+        assert_eq!(
+            form.page.fields[0].display_value.as_deref(),
+            expected_ua,
+            "{source} 官方客户端 UA 预填不符"
+        );
+    }
+}
+
+#[test]
 fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
     let mut view = connect_view(ConnectStage::EditCustomModel);
     view.draft.source = Some(crate::catalog::ProviderSource::new("LiteLLM"));

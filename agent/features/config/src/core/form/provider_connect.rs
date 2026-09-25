@@ -145,7 +145,18 @@ fn page_for_connect(
                 "provider_user_agent",
                 "User-Agent",
                 false,
-                connect.draft.provider_user_agent.clone(),
+                connect.draft.provider_user_agent.clone().or_else(|| {
+                    connect
+                        .draft
+                        .source
+                        .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                        .and_then(|entry| {
+                            entry
+                                .official_sdk_user_agent
+                                .as_ref()
+                                .map(|official| official.value.to_string())
+                        })
+                }),
             )?],
         ),
         ConnectStage::SelectModel => (
