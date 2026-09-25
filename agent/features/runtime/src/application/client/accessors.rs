@@ -162,6 +162,8 @@ pub struct SessionRuntime {
     // ── Skills ──
     pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     pub initial_skill_snapshot: tools::SkillCatalogSnapshot,
+    /// 轮次边界重扫；新 Run 启动前调用以刷新 TUI slash 目录。
+    pub skill_refresh: crate::application::client::SkillCatalogRefresh,
 
     // ── Config values ──
     pub memory_config: MemoryConfig,
@@ -226,6 +228,7 @@ impl SessionRuntime {
         prompt_model_id: String,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
         initial_skill_snapshot: tools::SkillCatalogSnapshot,
+        skill_refresh: crate::application::client::SkillCatalogRefresh,
         memory_config: MemoryConfig,
         context_size: usize,
         language: String,
@@ -267,6 +270,7 @@ impl SessionRuntime {
             prompt_model_id,
             skill_catalog,
             initial_skill_snapshot,
+            skill_refresh,
             memory_config,
             context_size,
             language,

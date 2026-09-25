@@ -621,6 +621,9 @@ where
                         segment_id: next_segment,
                         accepted_inputs,
                     } => {
+                        // 轮次边界重扫 skill 目录：上一轮结束后磁盘上的
+                        // skill 变更经 SkillsUpdated 事件刷新 TUI slash 目录。
+                        shell.skill_refresh.refresh(&sink).await;
                         // 新 Run 只取得本轮 accepted 输入；已提交历史由 Context backing 提供。
                         messages = initial_git_context
                             .take()

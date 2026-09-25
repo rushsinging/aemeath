@@ -294,6 +294,14 @@ fn test_shell_with_catalog(
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         .into_views();
+    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_catalog = ::tools::composition::wire_skills().catalog();
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_catalog.clone(),
+        workspace.clone(),
+        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     crate::application::client::SessionRuntime {
         session_state: Arc::new(std::sync::RwLock::new(
@@ -331,8 +339,9 @@ fn test_shell_with_catalog(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
-        skill_catalog: ::tools::composition::wire_skills().catalog(),
-        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
+        skill_catalog,
+        initial_skill_snapshot,
+        skill_refresh,
         memory_config: share::config::MemoryConfig::default(),
         context_size: 200_000,
         language: "en".to_string(),
@@ -391,6 +400,14 @@ fn test_shell_with_task_store(
         .expect("workspace 初始化成功")
         .into_views();
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
+    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let skill_catalog = ::tools::composition::wire_skills().catalog();
+    let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
+        skill_catalog.clone(),
+        workspace.clone(),
+        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        &initial_skill_snapshot,
+    );
 
     crate::application::client::SessionRuntime {
         session_state: Arc::new(std::sync::RwLock::new(
@@ -428,8 +445,9 @@ fn test_shell_with_task_store(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
-        skill_catalog: ::tools::composition::wire_skills().catalog(),
-        initial_skill_snapshot: ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new()),
+        skill_catalog,
+        initial_skill_snapshot,
+        skill_refresh,
         memory_config: share::config::MemoryConfig::default(),
         context_size: 200_000,
         language: "en".to_string(),

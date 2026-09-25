@@ -333,10 +333,8 @@ pub(crate) async fn from_args_with_gateways(
         snapshot.skills().dirs.clone(),
         available_tools,
     );
-    let descriptors = skill_catalog.list(skill_query);
-    let skills = runtime::SkillBootstrapAssembly::new(
-        tools::SkillCatalogSnapshot::from_descriptors(descriptors),
-    );
+    let skills =
+        runtime::SkillBootstrapAssembly::new(skill_catalog.clone(), workspace.clone(), skill_query);
 
     let (max_tool_concurrency, max_agent_concurrency) = runtime::resolve_concurrency_limits(
         args.max_tool_concurrency,
