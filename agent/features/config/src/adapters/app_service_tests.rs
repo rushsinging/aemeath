@@ -1,8 +1,8 @@
 //! ConfigAppService（adapters 层 port 实现）测试。
 use super::*;
+use crate::adapters::ConfigAppService;
 use crate::domain::*;
 use crate::ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
-use crate::ConfigAppService;
 use share::config::domain::merge::ConfigPatch;
 
 struct FakeEnv(std::collections::HashMap<String, String>);
@@ -24,11 +24,13 @@ async fn cli_layer_overrides_env() {
         )]))),
     );
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
-            api_key: Some("cli-key".into()),
-            model: Some("cli-model".into()),
-            ..Default::default()
-        }))
+        .set_cli_patch(crate::CliArgsAdapter::read(
+            &crate::adapters::CliConfigInput {
+                api_key: Some("cli-key".into()),
+                model: Some("cli-model".into()),
+                ..Default::default()
+            },
+        ))
         .await;
     service.load().await.unwrap();
     assert_eq!(service.committed_snapshot().model_name(), "cli-model");
@@ -219,10 +221,12 @@ async fn cli_permission_override_remains_highest_after_dynamic_update() {
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
-            allow_all: true,
-            ..Default::default()
-        }))
+        .set_cli_patch(crate::CliArgsAdapter::read(
+            &crate::adapters::CliConfigInput {
+                allow_all: true,
+                ..Default::default()
+            },
+        ))
         .await;
     service.load().await.unwrap();
 
@@ -270,10 +274,12 @@ async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
             std::collections::HashMap::from([("AEMEATH_MODEL".into(), "env".into())]),
         )));
     service
-        .set_cli_patch(crate::CliArgsAdapter::read(&crate::CliConfigInput {
-            model: Some("cli".into()),
-            ..Default::default()
-        }))
+        .set_cli_patch(crate::CliArgsAdapter::read(
+            &crate::adapters::CliConfigInput {
+                model: Some("cli".into()),
+                ..Default::default()
+            },
+        ))
         .await;
 
     service.load().await.unwrap();

@@ -178,7 +178,7 @@ async fn wire_entry_never_logs_sensitive_config_values() {
     let _ = wire_project_config_with_cli(
         project.path(),
         test_native_store(project.path()),
-        crate::CliConfigInput {
+        crate::adapters::CliConfigInput {
             api_key: Some(secret.into()),
             ..Default::default()
         },

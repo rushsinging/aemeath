@@ -450,6 +450,7 @@ impl CompatibilityAdapter {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn read_paths(
         mut paths: Vec<PathBuf>,
     ) -> Result<Vec<ConfigPatch>, ConfigAdapterError> {

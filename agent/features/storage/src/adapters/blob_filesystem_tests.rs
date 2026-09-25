@@ -4,8 +4,8 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::FileSystemBlobAdapter;
 use crate::domain::{Durability, SafePathSegment, StorageKey, StorageNamespace, WriteOptions};
+use crate::ports::AtomicBlobPort;
 use crate::test_log;
-use crate::AtomicBlobPort;
 
 fn fault_env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

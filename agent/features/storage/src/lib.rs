@@ -41,18 +41,15 @@ pub fn file_system_dataset(
     }
 }
 
-pub use adapters::{
-    SafeOpenOptions, SafeStorageDir, SafeStorageEntry, SafeStorageFileType, SafeStorageRoot,
-};
+pub use adapters::{SafeOpenOptions, SafeStorageDir, SafeStorageFileType, SafeStorageRoot};
 pub use domain::{
-    decide_blob_recovery, decide_orphan_previous, BlobRead, CommitWarning, CorruptTransactionError,
-    CorruptionReason, DatasetChangeSet, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey,
-    DatasetManifest, DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetRead,
-    DatasetReadOutcome, DatasetRevision, DeleteOptions, DeleteOutcome, DigestObservation,
-    Durability, Generation, JournalPhase, PreviousPolicy, PromoteOutcome, QuarantineDisposition,
-    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, RecoveryDecision,
+    BlobRead, CommitWarning, CorruptTransactionError, CorruptionReason, DatasetChangeSet,
+    DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
+    DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome, DatasetRevision,
+    DeleteOptions, DeleteOutcome, Durability, Generation, PreviousPolicy, PromoteOutcome,
+    QuarantineDisposition, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
     SafePathSegment, StorageEntry, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
-    TransactionDigest, TransactionScope, WriteOptions, WriteReceipt,
+    TransactionScope, WriteOptions, WriteReceipt,
 };
 pub use ports::{AtomicBlobPort, AtomicDatasetPort};
 

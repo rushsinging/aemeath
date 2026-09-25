@@ -17,11 +17,10 @@ pub use application::tool::tool_result_materializer::{
 pub use application::client::{
     build_agent_runner, config_snapshot_to_sdk, from_args_with_workspace,
     resolve_concurrency_limits, resolve_model_runtime_settings, resume_session_to_backing,
-    AgentClientImpl, AgentRunnerAssembly, CompactModelOrigin, CompactModelResolveError,
-    CompactModelResolver, CompactModelTarget, InitialProviderAssembly, ModelRuntimeSettings,
-    PromptAssembly, ResumeError, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
-    RuntimeIngressAssembly, RuntimeToolAssemblyDependencies, SessionBootstrapAssembly,
-    SessionModelSlot, SkillBootstrapAssembly,
+    AgentClientImpl, AgentRunnerAssembly, CompactModelResolver, InitialProviderAssembly,
+    ModelRuntimeSettings, PromptAssembly, RuntimeBootstrapDependencies, RuntimeCoreDependencies,
+    RuntimeToolAssemblyDependencies, SessionBootstrapAssembly, SessionModelSlot,
+    SkillBootstrapAssembly,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
@@ -30,16 +29,16 @@ pub use application::compact_generator::ProviderCompactGenerator;
 pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
 pub use application::prompt::prompt_build_ext::build_static_prompt;
 pub use application::reflection::{
-    CompleteReflectionResult, ReflectionError, ReflectionTaskAdapter, ReflectionTaskCompletion,
-    ReflectionTaskCompletionStatus, ReflectionTaskMetadata, ReflectionTaskRequest,
-    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+    CompleteReflectionResult, ReflectionError, ReflectionTaskAdapter,
+    ReflectionTaskCompletionStatus, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
+    ReflectionTaskTrigger,
 };
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
 pub use domain::agent_run::RuntimeLifecycleEvent;
 pub use ports::{
-    ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobError,
-    ToolResultBlobPort, ToolResultBlobRef, UnavailableUsageSink, UsageSink,
+    ProviderBinding, ProviderBuildSpec, ProviderFactory, ProviderPort, ToolResultBlobPort,
+    UnavailableUsageSink, UsageSink,
 };
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, ProjectContext, TaskSummary,

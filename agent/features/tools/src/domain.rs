@@ -61,24 +61,23 @@ pub use command_pl::{
 };
 pub use command_ports::{CommandCatalogPort, CommandRouterPort};
 pub use context::{
-    AuthorizationContext, CancellationSignal, ExecutionScope, ExecutionScopeBuilder, FixedGuidance,
-    FixedPlanMode, Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
+    AuthorizationContext, CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode,
+    Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
-    CancellationDeclaration, CleanupConfirmation, ConcurrencyDeclaration, InputSafetyDeclaration,
-    RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogSnapshot,
-    ToolDescriptor, ToolErrorKind, ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome,
-    ToolProfileName, ToolTerminalDetails,
+    CancellationDeclaration, CleanupConfirmation, RegistryScopeName, ToolCapabilities,
+    ToolCapability, ToolCatalogError, ToolCatalogSnapshot, ToolErrorKind, ToolInvocation, ToolName,
+    ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
 pub use resources::CatalogQuery;
-pub use scope_profile::{ProfileExpansionError, ToolProfile};
+pub use scope_profile::ToolProfile;
 // Dynamic Skill Published Language + Catalog/Load ports (Issue #1438).
 pub use skill_pl::{
-    LoadedSkill, SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery,
-    SkillSlashRoute, SkillSource, SkillSourceKind,
+    SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadQuery, SkillQuery, SkillSource,
+    SkillSourceKind,
 };
 pub use skill_ports::{SkillCatalogPort, SkillLoadPort};
 pub use skill_state::{

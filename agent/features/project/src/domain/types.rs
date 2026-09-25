@@ -238,6 +238,6 @@ pub trait WorkspacePersist: Send + Sync {
     fn prepare_restore(
         &self,
         dto: &PersistedWorkspaceContext,
-    ) -> Result<crate::PreparedWorkspaceRestore, WorkspaceRestoreError>;
-    fn commit_restore(&self, prepared: crate::PreparedWorkspaceRestore);
+    ) -> Result<crate::domain::state::PreparedWorkspaceRestore, WorkspaceRestoreError>;
+    fn commit_restore(&self, prepared: crate::domain::state::PreparedWorkspaceRestore);
 }

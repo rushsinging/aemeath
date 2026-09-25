@@ -24,8 +24,7 @@ pub use ports::SessionManagementPort;
 pub use application::test_support;
 pub use application::{
     wire_main_session, BoundMainRun, MainSessionDependencies, MainSessionError, MainSessionWiring,
-    MainSessionWiringBuilder, OwnedSessionExclusivePermit, OwnedSessionSharedPermit,
-    SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
+    MainSessionWiringBuilder, OwnedSessionSharedPermit, SessionSwitchGate,
 };
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
@@ -42,11 +41,11 @@ pub use adapters::{
 pub use application::{main_session, ContextApplicationService};
 pub use application::{SessionLoadError, SessionPersistenceService};
 pub use domain::session::{
-    project_dir_segment, session_project_dir, AcceptedInputProjection, ActiveCompactMarker,
-    CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    CommittedStepMessages, FinalizedOutcomeProjection, RunStepCursor, SessionCodec,
-    SessionCodecError, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
-    SessionGenerationWireError, SessionHistory, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    project_dir_segment, AcceptedInputProjection, ActiveCompactMarker, CanonicalSession,
+    ChatSegment, CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepMessages,
+    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SessionCommitPlan,
+    SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
+    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use domain::{
     AcceptedInputAppend, AcceptedInputError, ContextAppend, ContextMessages, ContextRequestId,

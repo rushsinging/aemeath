@@ -131,12 +131,10 @@ pub(crate) const LOG_TARGET: &str = "aemeath:agent:task";
 mod adapters;
 mod domain;
 
-pub use adapters::{wire_task, TaskSnapshotCodecError, TaskStore, TaskWiring};
+pub use adapters::{wire_task, TaskStore, TaskWiring};
 pub use domain::{
-    detect_batch_all_completed, detect_interrupted_batch, detect_stale_batches, Batch,
-    BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, PreparedTaskRestore,
-    StaleBatchInfo, Task, TaskAccess, TaskBatchSnapshot, TaskBatchStats, TaskCommandError,
-    TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId, TaskIdParseError, TaskLifecycleSnapshot,
-    TaskPersist, TaskPriority, TaskPriorityStats, TaskProgressItem, TaskProgressSnapshot,
-    TaskRevision, TaskSnapshot, TaskSnapshotValidationError, TaskStatus, TaskStoreStats, TaskView,
+    Batch, BatchCreateSpec, BatchId, BatchStatus, PreparedTaskRestore, Task, TaskAccess,
+    TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId, TaskPersist,
+    TaskPriority, TaskProgressItem, TaskProgressSnapshot, TaskRevision, TaskSnapshot,
+    TaskSnapshotValidationError, TaskStatus, TaskView,
 };

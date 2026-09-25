@@ -2,7 +2,7 @@ use super::{
     Batch, BatchCreateSpec, BatchId, Task, TaskCreateSpec, TaskId, TaskPriority, TaskRevision,
     TaskSnapshot, TaskStoreState,
 };
-use crate::TaskSnapshotCodecError;
+use crate::adapters::TaskSnapshotCodecError;
 
 const EMPTY_V2: &[u8] = br#"{
   "schema_version": 2,
