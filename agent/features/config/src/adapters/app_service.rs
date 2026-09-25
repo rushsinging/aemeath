@@ -6,12 +6,11 @@ use crate::adapters::{
 };
 use crate::domain::{
     ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshError,
-    ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate, ConfigUpdateError,
-    PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError,
-    ReadyConfigCommit,
+    ConfigPersistError, ConfigPersistOutcome, ConfigRefreshError, ConfigRefreshOutcome,
+    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
+    PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError, ReadyConfigCommit,
 };
-use crate::ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
+use crate::ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 use async_trait::async_trait;
 use share::config::domain::merge::{ConfigPatch, PriorityChain};
 use share::config::domain::scope::classify_application_scopes;
@@ -47,15 +46,16 @@ impl ConfigAppService {
     pub(crate) fn for_project(
         project_dir: &Path,
         native_store: NativeConfigStore,
-    ) -> Result<Self, ConfigError> {
-        let canonical = project_dir
-            .canonicalize()
-            .map_err(|_| ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical))?;
+    ) -> Result<Self, share::error::DomainError> {
+        let canonical = project_dir.canonicalize().map_err(|_| {
+            share::error::DomainError::from(ConfigError::InvalidLocation(
+                ProjectConfigLocationError::NotCanonical,
+            ))
+        })?;
         let location = ProjectConfigLocation::try_from_project_identity(
             canonical.clone(),
             canonical.to_string_lossy().as_bytes(),
-        )
-        .map_err(ConfigError::InvalidLocation)?;
+        )?;
         let service = Self::with_global_path(
             Some(project_dir),
             share::config::paths::global_config_path(),
@@ -274,6 +274,16 @@ fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
 
 #[async_trait]
 impl ConfigReader for ConfigAppService {
+    async fn snapshot(&self) -> Result<ConfigSnapshot, share::error::DomainError> {
+        Ok(self.committed_snapshot())
+    }
+
+    async fn subscribe(&self) -> Result<ConfigSubscription, share::error::DomainError> {
+        let changes = self.subscribe_committed();
+        let initial = changes.borrow().clone();
+        Ok(ConfigSubscription { initial, changes })
+    }
+
     fn committed_snapshot(&self) -> ConfigSnapshot {
         self.tx.borrow().clone()
     }
@@ -369,25 +379,18 @@ fn refresh_error(error: ConfigAdapterError) -> ConfigRefreshError {
 }
 
 #[async_trait]
-impl ConfigQuery for ConfigAppService {
-    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError> {
-        Ok(self.committed_snapshot())
-    }
-
-    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError> {
-        let changes = self.subscribe_committed();
-        let initial = changes.borrow().clone();
-        Ok(ConfigSubscription { initial, changes })
-    }
-}
-
 #[async_trait]
 impl ConfigWriter for ConfigAppService {
-    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError> {
+    async fn update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<ConfigChangeSet, share::error::DomainError> {
         let _mutation = self.mutation_lock.lock().await;
         let prepared = ProjectConfigParticipant::prepare_update(self, command).await?;
         match ProjectConfigParticipant::persist_update(self, prepared).await {
-            ConfigPersistOutcome::NotCommitted(error) => Err(ConfigUpdateError::Persist(error)),
+            ConfigPersistOutcome::NotCommitted(error) => Err(share::error::DomainError::from(
+                ConfigUpdateError::Persist(error),
+            )),
             ConfigPersistOutcome::Committed(ready) => {
                 Ok(ProjectConfigParticipant::commit_update(self, *ready))
             }
@@ -400,7 +403,7 @@ impl ProjectConfigParticipant for ConfigAppService {
     async fn prepare_for_project(
         &self,
         location: &ProjectConfigLocation,
-    ) -> Result<PreparedProjectConfig, ConfigError> {
+    ) -> Result<PreparedProjectConfig, share::error::DomainError> {
         let inner = self.inner.read().await;
         let project_path = share::config::paths::project_config_path(location.search_root());
         let claude = share::config::paths::project_claude_settings_path(location.search_root());
@@ -440,7 +443,7 @@ impl ProjectConfigParticipant for ConfigAppService {
     async fn prepare_update(
         &self,
         command: ConfigUpdate,
-    ) -> Result<PreparedConfigUpdate, ConfigUpdateError> {
+    ) -> Result<PreparedConfigUpdate, share::error::DomainError> {
         let (base, project_key) = {
             let active = self.active.read().unwrap();
             (

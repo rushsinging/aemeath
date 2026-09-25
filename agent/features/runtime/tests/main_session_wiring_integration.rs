@@ -11,7 +11,7 @@
 //! 3. **Bound lease blocks resume until run ends** — `bind_main_run` acquires
 //!    a shared permit that blocks `resume_prepared` (exclusive) until dropped.
 //! 4. **Config query/writer come from wiring** — the wiring façade provides
-//!    gate-aware `ConfigQuery` and `ConfigWriter`.
+//!    gate-aware `ConfigReader` and `ConfigWriter`.
 
 use std::sync::Arc;
 

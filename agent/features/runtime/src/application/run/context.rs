@@ -6,7 +6,7 @@
 //! 不可序列化，不进 Run 聚合。
 //!
 //! #1385：冻结生产契约 —— 只持当前生产可用的 per-Run 活契约；
-//! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigQuery / ConfigWriter 不进入。
+//! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigReader / ConfigWriter 不进入。
 //! Main 由 Composition 提供父能力装配；Sub 从父收缩派生。
 //!
 //! #1248 Task 3 refactor —— 生命周期拆分：
@@ -398,7 +398,7 @@ pub struct LifecycleBindings {
 /// - `task` 从旧空壳 `TaskPort` 校正为生产已使用的 `TaskAccess`。
 /// - `provider` 收敛为 `ProviderBinding`（含 port + model 约束）。
 /// - 新增 `InteractionBridge` 与 `ReflectionHistoryStore`。
-/// - 不含 `MainSessionWiring`、`Workspace`、`SessionQueryPort`、`ConfigQuery`/`ConfigWriter`。
+/// - 不含 `MainSessionWiring`、`Workspace`、`SessionQueryPort`、`ConfigReader`/`ConfigWriter`。
 ///
 /// ## Clone & cancellation
 ///

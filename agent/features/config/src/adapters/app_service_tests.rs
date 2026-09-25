@@ -2,7 +2,7 @@
 use super::*;
 use crate::adapters::ConfigAppService;
 use crate::domain::*;
-use crate::ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
+use crate::ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 use share::config::domain::merge::ConfigPatch;
 
 struct FakeEnv(std::collections::HashMap<String, String>);
@@ -303,7 +303,9 @@ async fn persist_failure_does_not_publish_candidate() {
 
     assert_eq!(
         error,
-        ConfigUpdateError::Persist(ConfigPersistError::UnsupportedDurability)
+        share::error::DomainError::from(ConfigUpdateError::Persist(
+            ConfigPersistError::UnsupportedDurability
+        ))
     );
     assert_eq!(service.committed_snapshot().models().default, before);
 }
@@ -315,7 +317,7 @@ async fn committed_update_notifies_subscription_with_same_snapshot() {
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
-    let mut subscription = ConfigQuery::subscribe(&service).await.unwrap();
+    let mut subscription = ConfigReader::subscribe(&service).await.unwrap();
 
     service
         .update(ConfigUpdate::SetModel {
@@ -373,7 +375,7 @@ async fn subscription_initial_matches_committed_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"));
-    let subscription = ConfigQuery::subscribe(&service).await.unwrap();
+    let subscription = ConfigReader::subscribe(&service).await.unwrap();
     assert_eq!(
         subscription.initial.model_name(),
         service.committed_snapshot().model_name()

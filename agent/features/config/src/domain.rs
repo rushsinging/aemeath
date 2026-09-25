@@ -54,11 +54,6 @@ pub struct ConfigSubscription {
     pub changes: watch::Receiver<ConfigSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigQueryError {
-    Unavailable,
-}
-
 #[derive(Debug, Clone)]
 pub enum ConfigUpdate {
     SetModel { model: String },
@@ -67,9 +62,18 @@ pub enum ConfigUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigUpdateError {
+pub(crate) enum ConfigUpdateError {
     Invalid(String),
     Persist(ConfigPersistError),
+}
+
+impl std::fmt::Display for ConfigUpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) => write!(formatter, "配置更新非法：{message}"),
+            Self::Persist(error) => write!(formatter, "配置持久化失败：{error}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,7 +83,7 @@ pub struct ProjectConfigLocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProjectConfigLocationError {
+pub(crate) enum ProjectConfigLocationError {
     NotAbsolute,
     NotCanonical,
     EmptyIdentity,
@@ -101,18 +105,18 @@ impl ProjectConfigLocation {
     pub fn try_from_project_identity(
         canonical_search_root: PathBuf,
         stable_identity: &[u8],
-    ) -> Result<Self, ProjectConfigLocationError> {
+    ) -> Result<Self, share::error::DomainError> {
         if !canonical_search_root.is_absolute() {
-            return Err(ProjectConfigLocationError::NotAbsolute);
+            return Err(ProjectConfigLocationError::NotAbsolute.into());
         }
         if stable_identity.is_empty() {
-            return Err(ProjectConfigLocationError::EmptyIdentity);
+            return Err(ProjectConfigLocationError::EmptyIdentity.into());
         }
         let canonical = canonical_search_root
             .canonicalize()
             .map_err(|_| ProjectConfigLocationError::NotCanonical)?;
         if canonical != canonical_search_root {
-            return Err(ProjectConfigLocationError::NotCanonical);
+            return Err(ProjectConfigLocationError::NotCanonical.into());
         }
         let key = utils_key(stable_identity);
         Ok(Self {
@@ -188,6 +192,18 @@ pub enum ConfigPersistError {
     CorruptTransaction,
 }
 
+impl std::fmt::Display for ConfigPersistError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Serialization => write!(formatter, "配置序列化失败"),
+            Self::Io => write!(formatter, "配置写入 IO 失败"),
+            Self::PermissionDenied => write!(formatter, "配置写入权限被拒绝"),
+            Self::UnsupportedDurability => write!(formatter, "不支持的持久化模式"),
+            Self::CorruptTransaction => write!(formatter, "配置事务文件损坏"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigCommitWarning {
     PreviousPromotionPending,
@@ -219,7 +235,7 @@ pub enum ConfigPersistOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     Load(String),
     InvalidLocation(ProjectConfigLocationError),
 }
@@ -238,3 +254,35 @@ impl std::error::Error for ConfigError {}
 #[cfg(test)]
 #[path = "domain_tests.rs"]
 mod tests;
+
+// ─── DomainError 折叠层（跨界唯一错误）────────────────────────────────
+
+impl From<ConfigUpdateError> for share::error::DomainError {
+    fn from(inner: ConfigUpdateError) -> Self {
+        let category = match &inner {
+            ConfigUpdateError::Persist(_) => share::error::ErrorCategory::Storage,
+            ConfigUpdateError::Invalid(_) => share::error::ErrorCategory::Invalid,
+        };
+        share::error::DomainError::from_parts("config", category, inner.to_string())
+    }
+}
+
+impl From<ProjectConfigLocationError> for share::error::DomainError {
+    fn from(inner: ProjectConfigLocationError) -> Self {
+        share::error::DomainError::from_parts(
+            "config",
+            share::error::ErrorCategory::Invalid,
+            inner.to_string(),
+        )
+    }
+}
+
+impl From<ConfigError> for share::error::DomainError {
+    fn from(inner: ConfigError) -> Self {
+        let category = match &inner {
+            ConfigError::Load(_) => share::error::ErrorCategory::Storage,
+            ConfigError::InvalidLocation(_) => share::error::ErrorCategory::Invalid,
+        };
+        share::error::DomainError::from_parts("config", category, inner.to_string())
+    }
+}

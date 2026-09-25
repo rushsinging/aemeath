@@ -2,9 +2,8 @@ use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
 use config::{
-    ConfigChangeSet, ConfigError, ConfigPersistOutcome, ConfigQuery, ConfigQueryError,
-    ConfigReader, ConfigSubscription, ConfigUpdate, ConfigUpdateError, ConfigWriter,
-    PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError,
+    ConfigChangeSet, ConfigPersistOutcome, ConfigReader, ConfigSubscription, ConfigUpdate,
+    ConfigWriter, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
     ProjectConfigParticipant,
 };
 use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
@@ -103,11 +102,11 @@ pub enum MainSessionError {
 
     /// Deriving the canonical project-config location failed.
     #[error("invalid config location: {0:?}")]
-    ConfigLocation(ProjectConfigLocationError),
+    ConfigLocation(share::error::DomainError),
 
     /// `ProjectConfigParticipant::prepare_for_project` failed.
     #[error("config prepare failed: {0:?}")]
-    ConfigPrepare(ConfigError),
+    ConfigPrepare(share::error::DomainError),
 
     /// Deriving the project memory key failed.
     #[error("memory key derivation failed: {0}")]
@@ -317,7 +316,7 @@ pub async fn wire_main_session(
 /// # Gate-aware Config façades
 ///
 /// [`Self::config_query`] and [`Self::config_writer`] return gate-aware façades
-/// implementing [`ConfigQuery`] and [`ConfigWriter`]. The Query captures
+/// implementing [`ConfigReader`] and [`ConfigWriter`]. The Query captures
 /// snapshot/subscription under a shared permit; the Writer acquires an exclusive
 /// permit, eagerly opens candidate Memory, then hands everything to a spawned
 /// critical section that persists the config update.
@@ -496,15 +495,15 @@ impl MainSessionWiring {
 
     // ── gate-aware Config façade factories ──
 
-    /// Returns a gate-aware [`ConfigQuery`] façade backed by this wiring's
+    /// Returns a gate-aware [`ConfigReader`] façade backed by this wiring's
     /// [`ConfigReader`].
     ///
     /// `snapshot` / `subscribe` capture the current committed snapshot under a
     /// shared session-switch permit, ensuring the read is not racing with a
     /// resume. The returned watch receiver continues to receive updates after
     /// the permit is released.
-    pub fn config_query(&self) -> Arc<dyn ConfigQuery> {
-        Arc::new(GateAwareConfigQuery {
+    pub fn config_query(&self) -> Arc<dyn ConfigReader> {
+        Arc::new(GateAwareConfigReader {
             gate: self.gate.clone(),
             config_reader: Arc::clone(&self.config_reader),
         })
@@ -707,37 +706,49 @@ pub(crate) fn derive_config_location(
         .map_err(MainSessionError::ConfigLocation)
 }
 
-// ─── GateAwareConfigQuery ────────────────────────────────────────────
+// ─── GateAwareConfigReader ────────────────────────────────────────────
 
-/// Gate-aware [`ConfigQuery`] façade produced by [`MainSessionWiring::config_query`].
+/// Gate-aware [`ConfigReader`] façade produced by [`MainSessionWiring::config_query`].
 ///
 /// `snapshot` / `subscribe` acquire a **shared** session-switch permit before
 /// reading, ensuring no resume is in progress when the snapshot is captured.
 /// The permit is released immediately after capture; a returned
 /// `watch::Receiver` continues to receive future updates without holding the
 /// permit.
-pub struct GateAwareConfigQuery {
+pub struct GateAwareConfigReader {
     gate: SessionSwitchGate,
     config_reader: Arc<dyn ConfigReader>,
 }
 
 #[async_trait]
-impl ConfigQuery for GateAwareConfigQuery {
-    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError> {
-        let _permit = self
-            .gate
-            .acquire_shared()
-            .await
-            .map_err(|_| ConfigQueryError::Unavailable)?;
+impl ConfigReader for GateAwareConfigReader {
+    // 同步委托：async gate 只能覆盖 async 入口；同步读经 gate-aware writer 的
+    // 互斥已由会话切换协议保证（与原 ConfigQuery 面一致）。
+    fn committed_snapshot(&self) -> ConfigSnapshot {
+        self.config_reader.committed_snapshot()
+    }
+
+    fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<ConfigSnapshot> {
+        self.config_reader.subscribe_committed()
+    }
+
+    async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcome {
+        self.config_reader.refresh_if_sources_changed().await
+    }
+
+    async fn snapshot(&self) -> Result<ConfigSnapshot, share::error::DomainError> {
+        let _permit =
+            self.gate.acquire_shared().await.map_err(|_| {
+                share::error::DomainError::unavailable("config", "配置读取暂不可用")
+            })?;
         Ok(self.config_reader.committed_snapshot())
     }
 
-    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError> {
-        let _permit = self
-            .gate
-            .acquire_shared()
-            .await
-            .map_err(|_| ConfigQueryError::Unavailable)?;
+    async fn subscribe(&self) -> Result<ConfigSubscription, share::error::DomainError> {
+        let _permit =
+            self.gate.acquire_shared().await.map_err(|_| {
+                share::error::DomainError::unavailable("config", "配置读取暂不可用")
+            })?;
         let changes = self.config_reader.subscribe_committed();
         let initial = changes.borrow().clone();
         Ok(ConfigSubscription { initial, changes })
@@ -780,13 +791,14 @@ pub struct GateAwareConfigWriter {
 
 #[async_trait]
 impl ConfigWriter for GateAwareConfigWriter {
-    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError> {
+    async fn update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<ConfigChangeSet, share::error::DomainError> {
         // 1. Acquire owned exclusive permit.
-        let permit = self
-            .gate
-            .acquire_owned_exclusive()
-            .await
-            .map_err(|_| ConfigUpdateError::Invalid("session switch gate closed".into()))?;
+        let permit = self.gate.acquire_owned_exclusive().await.map_err(|_| {
+            share::error::DomainError::invalid("config", "session switch gate closed")
+        })?;
 
         // 2. Config prepare_update (does not commit).
         let prepared: PreparedConfigUpdate =
@@ -797,14 +809,21 @@ impl ConfigWriter for GateAwareConfigWriter {
         let candidate_memory_config = prepared.memory_config().clone();
         let memory_key =
             ProjectMemoryKey::derive(&identity.initial_cwd, identity.git_common_dir.as_deref())
-                .map_err(|e| ConfigUpdateError::Invalid(format!("memory key derivation: {e}")))?;
+                .map_err(|e| {
+                    share::error::DomainError::invalid(
+                        "config",
+                        format!("memory key derivation: {e}"),
+                    )
+                })?;
 
         // 4. Eager open candidate memory.
         let candidate_memory: Arc<dyn MemoryPort> = self
             .memory_opener
             .open_memory(&memory_key, &candidate_memory_config)
             .await
-            .map_err(|e| ConfigUpdateError::Invalid(format!("memory open: {e}")))?;
+            .map_err(|e| {
+                share::error::DomainError::invalid("config", format!("memory open: {e}"))
+            })?;
 
         // 5. Spawn owned critical section: persist_update + conditional commit.
         let config_participant = Arc::clone(&self.config_participant);
@@ -818,7 +837,10 @@ impl ConfigWriter for GateAwareConfigWriter {
             match outcome {
                 ConfigPersistOutcome::NotCommitted(err) => {
                     // Old Memory and Config are kept untouched.
-                    Err(ConfigUpdateError::Persist(err))
+                    Err(share::error::DomainError::storage(
+                        "config",
+                        format!("配置持久化失败：{err}"),
+                    ))
                 }
                 ConfigPersistOutcome::Committed(ready) => {
                     // Warnings are informational — do NOT convert to error.
@@ -843,9 +865,10 @@ impl ConfigWriter for GateAwareConfigWriter {
         // future drops only the JoinHandle; the owned task keeps running.
         match handle.await {
             Ok(result) => result,
-            Err(join_err) => Err(ConfigUpdateError::Invalid(format!(
-                "background config task: {join_err}"
-            ))),
+            Err(join_err) => Err(share::error::DomainError::invalid(
+                "config",
+                format!("background config task: {join_err}"),
+            )),
         }
     }
 }

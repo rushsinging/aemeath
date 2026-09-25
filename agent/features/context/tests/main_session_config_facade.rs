@@ -1,4 +1,4 @@
-//! Integration tests for the gate-aware ConfigQuery / ConfigWriter façades
+//! Integration tests for the gate-aware ConfigReader / ConfigWriter façades
 //! produced by `MainSessionWiring`, plus cross-project resume verification.
 //!
 //! These tests use the real `ConfigAppService` (with explicit paths, no env
@@ -11,8 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    native_override_store, ConfigAppService, ConfigReader, ConfigUpdate, ConfigUpdateError,
-    ProjectConfigParticipant,
+    native_override_store, ConfigAppService, ConfigReader, ConfigUpdate, ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
 use context::{CanonicalSession, SnapshotState};
@@ -372,7 +371,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     );
 }
 
-/// `ConfigQuery::snapshot` is blocked while an exclusive permit is held.
+/// `ConfigReader::snapshot` is blocked while an exclusive permit is held.
 #[tokio::test]
 async fn query_snapshot_blocked_by_exclusive_permit() {
     let _guard = git_lock().await;
@@ -399,7 +398,7 @@ async fn query_snapshot_blocked_by_exclusive_permit() {
     let _ = snapshot; // just verify we got a snapshot
 }
 
-/// `ConfigQuery::subscribe` is also blocked by an exclusive permit.
+/// `ConfigReader::subscribe` is also blocked by an exclusive permit.
 #[tokio::test]
 async fn query_subscribe_blocked_by_exclusive_permit() {
     let _guard = git_lock().await;
@@ -447,7 +446,10 @@ async fn update_not_committed_keeps_old_memory_and_config() {
         .await;
 
     assert!(
-        matches!(result, Err(ConfigUpdateError::Persist(_))),
+        matches!(
+            result,
+            Err(ref error) if error.category() == share::error::ErrorCategory::Storage
+        ),
         "expected Persist(UnsupportedDurability), got {result:?}"
     );
 

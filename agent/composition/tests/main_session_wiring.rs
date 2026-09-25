@@ -88,7 +88,7 @@ async fn wire_config_with_agents_dir(
     project_dir: &Path,
     agents_dir: &Path,
     cli: config::CliConfigInput,
-) -> Result<config::ConfigWiring, config::ConfigError> {
+) -> Result<config::ConfigWiring, share::error::DomainError> {
     config::wire_project_config_with_agents_dir(
         project_dir,
         agents_dir,

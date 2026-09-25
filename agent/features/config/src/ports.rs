@@ -3,9 +3,8 @@
 //! R8 方向：ports 只依赖 domain（`crate::domain`）；trait 签名引用的
 //! 领域类型均定义在 domain.rs，NEVER 在本文件引入技术实现细节。
 use crate::domain::{
-    ConfigChangeSet, ConfigError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome,
-    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation, ReadyConfigCommit,
+    ConfigChangeSet, ConfigPersistOutcome, ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate,
+    PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation, ReadyConfigCommit,
 };
 use async_trait::async_trait;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -16,17 +15,18 @@ pub trait ConfigReader: Send + Sync {
     fn committed_snapshot(&self) -> ConfigSnapshot;
     fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
     async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome;
-}
-
-#[async_trait]
-pub trait ConfigQuery: Send + Sync {
-    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError>;
-    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError>;
+    /// 异步快照（gate-aware 视图实现经内部 gate 校验后委托）。
+    async fn snapshot(&self) -> Result<ConfigSnapshot, share::error::DomainError>;
+    /// 订阅（gate-aware 同上）。
+    async fn subscribe(&self) -> Result<ConfigSubscription, share::error::DomainError>;
 }
 
 #[async_trait]
 pub trait ConfigWriter: Send + Sync {
-    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError>;
+    async fn update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<ConfigChangeSet, share::error::DomainError>;
 }
 
 #[async_trait]
@@ -34,13 +34,13 @@ pub trait ProjectConfigParticipant: Send + Sync {
     async fn prepare_for_project(
         &self,
         location: &ProjectConfigLocation,
-    ) -> Result<PreparedProjectConfig, ConfigError>;
+    ) -> Result<PreparedProjectConfig, share::error::DomainError>;
     fn snapshot(&self) -> ConfigSnapshot;
     async fn commit_project(&self, prepared: PreparedProjectConfig);
     async fn prepare_update(
         &self,
         command: ConfigUpdate,
-    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
+    ) -> Result<PreparedConfigUpdate, share::error::DomainError>;
     async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome;
     fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet;
 }

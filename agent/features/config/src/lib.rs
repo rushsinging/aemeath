@@ -5,10 +5,10 @@
 //! | 类别 | 实体 | 消费者 |
 //! |---|---|---|
 //! | 装配工厂 | `wire_project_config*`、`native_override_store`、`ConfigWiring` | composition |
-//! | Port | `ConfigReader`、`ConfigWriter`、`ConfigQuery`、`ConfigSubscription`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
+//! | Port | `ConfigReader`（读轨合一：committed + async snapshot/subscribe，ConfigQuery 消亡）、`ConfigWriter`、`ConfigSubscription`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
 //! | 服务 | `ConfigAppService`、`NativeConfigStore` | composition、share snapshot |
 //! | DTO | `ConfigUpdate`、`ConfigChangeSet`、`ConfigField`、`ConfigChangeCause`、`ConfigRefreshOutcome`、`ConfigPersistOutcome`、`PreparedConfigUpdate`、`PreparedProjectConfig`、`ProjectConfigLocation`、`CliConfigInput` | context、runtime、sdk、cli |
-//! | 错误 | `ConfigError`、`ConfigQueryError`、`ConfigUpdateError`、`ProjectConfigLocationError` | context、runtime（match 消费面活跃） |
+//! | 错误 | `share::error::DomainError`（跨界唯一；四错误折叠为内部细变体 + From） | 全部跨界签名 |
 //! //!
 //! 边界判定：`CliArgsAdapter`/`EnvAdapter`/`FileAdapter` 为 wire 工厂内部实现收窄 crate 内（此前消费分析误报：share/config 存在另一套同名独立实现，词命中假阳性）；`ConfigPersistError` 本批收窄 crate 内（context 测试断言改行为级）；
 //! 错误家族 4 个有活跃 match 消费，折叠为统一 `ConfigError` 属后续设计决策
@@ -22,12 +22,11 @@ mod ports;
 
 pub use adapters::{CliConfigInput, ConfigAppService, NativeConfigStore};
 pub use domain::{
-    ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate,
-    ConfigUpdateError, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
-    ProjectConfigLocationError,
+    ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigField, ConfigPersistOutcome,
+    ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate, PreparedConfigUpdate,
+    PreparedProjectConfig, ProjectConfigLocation,
 };
-pub use ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
+pub use ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 
 // ---------- composition-only wiring（crate 根装配点，06-code-organization 基线形态） ----------
 use std::path::Path;
@@ -42,10 +41,6 @@ impl ConfigWiring {
     }
 
     pub fn reader(&self) -> std::sync::Arc<dyn ConfigReader> {
-        self.service.clone()
-    }
-
-    pub fn query(&self) -> std::sync::Arc<dyn ConfigQuery> {
         self.service.clone()
     }
 
@@ -72,7 +67,7 @@ pub async fn wire_project_config_with_cli(
     project_dir: &Path,
     native_store: NativeConfigStore,
     cli: CliConfigInput,
-) -> Result<ConfigWiring, ConfigError> {
+) -> Result<ConfigWiring, share::error::DomainError> {
     log::debug!(
         target: crate::LOG_TARGET,
         "wire_project_config_with_cli: enter"
@@ -83,7 +78,10 @@ pub async fn wire_project_config_with_cli(
         service
             .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
             .await;
-        service.load().await.map_err(ConfigError::Load)?;
+        service
+            .load()
+            .await
+            .map_err(|message| share::error::DomainError::storage("config", message))?;
         Ok(ConfigWiring { service })
     }
     .await;
@@ -103,9 +101,12 @@ pub async fn wire_project_config_with_cli(
 pub async fn wire_project_config(
     project_dir: &Path,
     native_store: NativeConfigStore,
-) -> Result<ConfigWiring, ConfigError> {
+) -> Result<ConfigWiring, share::error::DomainError> {
     let service = std::sync::Arc::new(ConfigAppService::for_project(project_dir, native_store)?);
-    service.load().await.map_err(ConfigError::Load)?;
+    service
+        .load()
+        .await
+        .map_err(|message| share::error::DomainError::storage("config", message))?;
     Ok(ConfigWiring { service })
 }
 
@@ -120,21 +121,22 @@ pub async fn wire_project_config_with_agents_dir(
     agents_dir: &Path,
     native_store: NativeConfigStore,
     cli: CliConfigInput,
-) -> Result<ConfigWiring, ConfigError> {
+) -> Result<ConfigWiring, share::error::DomainError> {
     log::debug!(
         target: crate::LOG_TARGET,
         "wire_project_config_with_agents_dir: enter (agents_dir={})",
         agents_dir.display()
     );
     let result = async {
-        let canonical = project_dir
-            .canonicalize()
-            .map_err(|_| ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical))?;
+        let canonical = project_dir.canonicalize().map_err(|_| {
+            share::error::DomainError::from(domain::ConfigError::InvalidLocation(
+                domain::ProjectConfigLocationError::NotCanonical,
+            ))
+        })?;
         let location = ProjectConfigLocation::try_from_project_identity(
             canonical.clone(),
             canonical.to_string_lossy().as_bytes(),
-        )
-        .map_err(ConfigError::InvalidLocation)?;
+        )?;
         let global_path = agents_dir.join(share::config::paths::NEW_CONFIG_FILE);
         let service = std::sync::Arc::new(
             ConfigAppService::with_global_path(Some(project_dir), global_path)
@@ -144,7 +146,10 @@ pub async fn wire_project_config_with_agents_dir(
         service
             .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
             .await;
-        service.load().await.map_err(ConfigError::Load)?;
+        service
+            .load()
+            .await
+            .map_err(|message| share::error::DomainError::storage("config", message))?;
         Ok(ConfigWiring { service })
     }
     .await;

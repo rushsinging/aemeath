@@ -147,7 +147,9 @@ async fn wire_entry_logs_debug_enter_then_warn_failure_on_err_and_returns_origin
     };
     assert_eq!(
         error,
-        ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical),
+        share::error::DomainError::from(crate::domain::ConfigError::InvalidLocation(
+            crate::domain::ProjectConfigLocationError::NotCanonical,
+        )),
         "original error must be returned unchanged"
     );
     let logs = drain_captured_config_logs();

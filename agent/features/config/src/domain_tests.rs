@@ -4,13 +4,17 @@ use super::*;
 fn project_config_location_rejects_relative_path_and_empty_identity() {
     assert_eq!(
         ProjectConfigLocation::try_from_project_identity(PathBuf::from("relative"), b"id"),
-        Err(ProjectConfigLocationError::NotAbsolute)
+        Err(share::error::DomainError::from(
+            ProjectConfigLocationError::NotAbsolute
+        ))
     );
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     assert_eq!(
         ProjectConfigLocation::try_from_project_identity(root, b""),
-        Err(ProjectConfigLocationError::EmptyIdentity)
+        Err(share::error::DomainError::from(
+            ProjectConfigLocationError::EmptyIdentity
+        ))
     );
 }
 
