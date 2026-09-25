@@ -3,12 +3,14 @@ use sha2::{Digest, Sha256};
 use super::TransactionScope;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub enum JournalPhase {
     Prepared,
     Committed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub enum DigestObservation {
     New,
     Old,
@@ -28,6 +30,7 @@ pub enum CorruptionReason {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub enum RecoveryDecision {
     RollForward,
     RollBack,
@@ -35,6 +38,7 @@ pub enum RecoveryDecision {
     Corrupt(CorruptionReason),
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn decide_blob_recovery(
     phase: JournalPhase,
     observation: DigestObservation,
@@ -54,6 +58,7 @@ pub fn decide_blob_recovery(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn decide_orphan_previous(matches_primary: bool) -> RecoveryDecision {
     if matches_primary {
         RecoveryDecision::CleanOrphan
@@ -63,8 +68,10 @@ pub fn decide_orphan_previous(matches_primary: bool) -> RecoveryDecision {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct TransactionDigest([u8; 32]);
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl TransactionDigest {
     pub fn blob_bytes(bytes: &[u8]) -> Self {
         Self::calculate(b"aemeath.storage.blob.bytes.v1\0", bytes)

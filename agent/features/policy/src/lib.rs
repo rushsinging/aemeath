@@ -6,6 +6,6 @@ mod domain;
 pub use adapters::{AllowAllPolicy, ConfiguredPolicy, StandardPolicy};
 pub use domain::{
     ApprovalSubject, PolicyDecision, PolicyMode, PolicyModeSource, PolicyPort, PolicyReason,
-    PolicyRequest, PolicyRequestError,
+    PolicyRequest,
 };
 pub use tools::AuthorizationContext;

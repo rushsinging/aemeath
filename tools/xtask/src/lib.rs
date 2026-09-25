@@ -2,6 +2,7 @@ pub mod coverage;
 pub mod guard_registry;
 pub mod guards;
 pub mod guards_engine;
+pub mod guards_facade_trim;
 pub mod guards_rules;
 pub mod reachability;
 pub mod sdk_wire_schema;

@@ -116,7 +116,7 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -153,7 +153,7 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -189,7 +189,7 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     assert_eq!(snapshot(&state), before);
@@ -282,7 +282,7 @@ fn prepare_restore_success_does_not_mutate_live_state() {
     let before_root = live.workspace_root.clone();
     let before_identity = live.project_identity.clone();
 
-    let prepared: crate::PreparedWorkspaceRestore =
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
         prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
 
     // live state（不可变借用）必须原样保留。
@@ -530,7 +530,7 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
     assert_eq!(
         result,
         Err(WorkspaceError::GitOperationFailed(
-            crate::GitOperationError::CommandFailed { exit_code: None }
+            crate::domain::types::GitOperationError::CommandFailed { exit_code: None }
         ))
     );
     assert_eq!(state.path_base, PathBuf::from("/repo"));
@@ -588,7 +588,7 @@ fn validate_in_repo_reports_invalid_probe_instead_of_repo_mismatch_for_non_git_t
     assert_eq!(
         result,
         Err(WorkspaceError::GitProbeFailed(
-            crate::GitProbeError::InvalidOutput
+            crate::domain::types::GitProbeError::InvalidOutput
         ))
     );
     let _ = std::fs::remove_dir_all(target);
@@ -979,8 +979,9 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_turns_foreign_rep
         .insert(sub.clone(), PathBuf::from("/foreign/.git"));
 
     let mut live = st("/repo");
-    let prepared: crate::PreparedWorkspaceRestore = prepare_restore(&live, &dto, &git)
-        .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
+        prepare_restore(&live, &dto, &git)
+            .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
     commit_restore(&mut live, prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());
     assert_eq!(live.workspace_root, root.canonicalize().unwrap());
@@ -998,7 +999,7 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_probe_fails() {
         .insert(missing.canonicalize().unwrap_or(missing.clone()));
 
     let mut live = st("/repo");
-    let prepared: crate::PreparedWorkspaceRestore =
+    let prepared: crate::domain::state::PreparedWorkspaceRestore =
         prepare_restore(&live, &dto, &git).expect("path_base 探测失败时必须回退 workspace_root");
     commit_restore(&mut live, prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());

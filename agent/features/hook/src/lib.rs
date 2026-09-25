@@ -12,10 +12,8 @@ pub use adapters::config::build_dispatcher;
 pub use adapters::dispatcher::Dispatcher;
 pub use domain::invocation::*;
 pub use domain::{
-    classify_directive, ClassifyError, HookBlockDetail, HookClass, HookCommand, HookDirective,
-    HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
-    HookFailurePolicy, HookInvocation, HookMatcher, HookOutcome, HookPoint, HookPointMetadata,
-    HookReason, HookSubscription, ProtocolViolation, SubscriptionError,
+    HookClass, HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution,
+    HookExecutionStatus, HookInvocation, HookMatcher, HookOutcome, HookPoint, HookReason,
 };
 pub use ports::{
     CancellationSignal, HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,

@@ -76,6 +76,7 @@ pub(crate) fn truncate(text: &str) -> String {
 /// - `can_add_context=false` 收到 Context → `Err(Protocol{ContextOnNonContextual})`。
 ///
 /// 分类失败（`Err`）对应 ExecutionFailed 路径，可重试；业务 Block 永不重试。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn classify_directive(
     point: HookPoint,
     exit_code: Option<i32>,

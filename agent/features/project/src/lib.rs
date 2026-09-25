@@ -5,8 +5,8 @@ mod domain;
 pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
 pub use domain::state::PreparedWorkspaceRestore;
 pub use domain::types::{
-    GitOperationError, GitProbeError, WorkspaceControl, WorkspaceError, WorkspaceFrame,
-    WorkspaceInitError, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError,
+    WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
+    WorkspaceRestoreError,
 };
 pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 
@@ -205,7 +205,10 @@ mod tests {
         let missing = PathBuf::from("/definitely/not/here/aemeath-894-xyz");
         let result = wire_production_workspace(missing, None);
         assert!(
-            matches!(result, Err(WorkspaceInitError::PathNotFound { .. })),
+            matches!(
+                result,
+                Err(domain::types::WorkspaceInitError::PathNotFound { .. })
+            ),
             "缺失路径应返回结构化 PathNotFound 错误"
         );
     }
@@ -218,7 +221,10 @@ mod tests {
         std::fs::write(&file_path, "content").unwrap();
         let result = wire_production_workspace(file_path, None);
         assert!(
-            matches!(result, Err(WorkspaceInitError::NotDirectory { .. })),
+            matches!(
+                result,
+                Err(domain::types::WorkspaceInitError::NotDirectory { .. })
+            ),
             "文件路径应返回结构化 NotDirectory 错误"
         );
     }

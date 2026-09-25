@@ -8,8 +8,8 @@ use crate::domain::{
     DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetReadOutcome,
     DatasetRevision, Durability, SafePathSegment, StorageErrorKind, StorageNamespace, WriteOptions,
 };
+use crate::ports::AtomicDatasetPort;
 use crate::test_log;
-use crate::AtomicDatasetPort;
 
 fn fault_env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

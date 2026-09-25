@@ -4,12 +4,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 use crate::domain::git::GitWorktreeOps;
+use crate::domain::state::PreparedWorkspaceRestore;
 use crate::domain::state::{self as rules, WorkspaceState};
 use crate::domain::types::{
     WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
     WorkspaceRestoreError,
 };
-use crate::PreparedWorkspaceRestore;
 
 const MAX_PATH_DEPTH: usize = 64;
 
@@ -319,7 +319,8 @@ mod tests {
         fn probe_repository(
             &self,
             path: &Path,
-        ) -> Result<crate::domain::git::RepositoryProbe, crate::GitProbeError> {
+        ) -> Result<crate::domain::git::RepositoryProbe, crate::domain::types::GitProbeError>
+        {
             // enter() 要求目标是 linked worktree，替身固定报告 Linked。
             Ok(crate::domain::git::RepositoryProbe::Git {
                 canonical_top_level: path.to_path_buf(),
@@ -328,14 +329,20 @@ mod tests {
             })
         }
 
-        fn show_toplevel(&self, path: &Path) -> Result<PathBuf, crate::GitOperationError> {
+        fn show_toplevel(
+            &self,
+            path: &Path,
+        ) -> Result<PathBuf, crate::domain::types::GitOperationError> {
             assert_eq!(path, self.target);
             self.io_started.send(()).unwrap();
             self.io_release.lock().unwrap().recv().unwrap();
             Ok(self.worktree_root.clone())
         }
 
-        fn is_linked_worktree(&self, _path: &Path) -> Result<bool, crate::GitOperationError> {
+        fn is_linked_worktree(
+            &self,
+            _path: &Path,
+        ) -> Result<bool, crate::domain::types::GitOperationError> {
             Ok(false)
         }
 
@@ -345,11 +352,14 @@ mod tests {
             _path: &Path,
             _branch: &str,
             _base: &str,
-        ) -> Result<(), crate::GitOperationError> {
+        ) -> Result<(), crate::domain::types::GitOperationError> {
             Ok(())
         }
 
-        fn current_branch(&self, _path: &Path) -> Result<Option<String>, crate::GitOperationError> {
+        fn current_branch(
+            &self,
+            _path: &Path,
+        ) -> Result<Option<String>, crate::domain::types::GitOperationError> {
             Ok(None)
         }
     }
