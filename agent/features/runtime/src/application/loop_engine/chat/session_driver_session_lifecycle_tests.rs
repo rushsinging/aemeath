@@ -1444,3 +1444,77 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         "API 错误后应能正常开启下一回合: {events:?}"
     );
 }
+
+/// Run 计数器（Reflection interval 触发频控）per-session 隔离：
+/// `/clear` 重置会话后，新回合从 `RunChanged:1` 重新计数，NEVER 延续旧计数。
+#[tokio::test]
+async fn test_clear_resets_run_counter_for_new_session_epoch() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成。
+        loop {
+            if driver_sink.events().iter().any(|e| e.as_str() == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // /clear：Reset 事件走 idle gate → reset_requested。
+        input_tx.send(sdk::ChatInputEvent::Reset).unwrap();
+        loop {
+            if driver_sink.events().iter().any(|e| e.as_str() == "SessionReset") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 新会话 epoch 的第一个回合。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let provider = SequenceProvider::new(vec!["r1", "r2"]);
+    let shell = test_shell_with_hooks(test_hook_port());
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(provider)),
+    );
+    shell.set_test_session_id("test-clear-resets-run-counter");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_session_command_driver(ctx),
+    )
+    .await
+    .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    let first_epoch = events.iter().filter(|e| e.as_str() == "RunChanged:1").count();
+    assert!(
+        first_epoch >= 2,
+        "clear 前后两个 epoch 的首回合都应为 RunChanged:1: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|e| e.starts_with("RunChanged:2")),
+        "clear 重置后新回合 NEVER 延续旧 epoch 计数: {events:?}"
+    );
+}

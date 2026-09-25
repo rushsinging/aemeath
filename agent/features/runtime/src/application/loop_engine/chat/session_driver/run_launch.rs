@@ -437,6 +437,9 @@ where
                                 &session_id,
                             )
                             .await;
+                            // Run 计数器（Reflection interval 频控）per-session：
+                            // resume 切换 session 后从 0 重数，NEVER 延续旧 session 计数。
+                            step_count = 0;
                             shell
                                 .session_state
                                 .write()
@@ -650,6 +653,9 @@ where
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
                                 messages.clear();
+                                // Run 计数器（Reflection interval 频控）绑定
+                                // session epoch：/clear 即新 epoch，从 0 重数。
+                                step_count = 0;
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {

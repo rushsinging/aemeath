@@ -90,7 +90,7 @@ Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息�
 
 | 时机 | Trigger | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
-| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_turns`（默认 10）轮结束时提交；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
+| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Run 触发一次；计数 per-session，`/clear` 与 resume 切换后从 0 重数；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
 | **Pre-compact** | `PreCompact` | Runtime 单槽异步 submit | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才 submit，不等待 Reflection |
 | **手动请求** | `Manual` | Runtime 单槽异步 submit | `/reflect-now` 命令（#1289） | 与另两种 trigger 共用 slot；busy 时同样 skip；`/reflect [limit]` **NEVER** 进入此入口 |
 

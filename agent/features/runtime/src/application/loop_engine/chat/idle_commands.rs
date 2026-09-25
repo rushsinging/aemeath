@@ -69,11 +69,8 @@ pub async fn execute_session(
             }
             (lines, false)
         }
-        "new" => {
-            // NewSession action — 通知 TUI 创建新会话
-            // 通过返回特殊文本来触发 TUI 行为
-            ("[action:new_session]".to_string(), false)
-        }
+        // "new" 子命令已退役：`[action:new_session]` 文本协议从无 TUI 消费方，
+        // 新会话由启动新进程承担；未知子命令落入下方兜底分支。
         "rename" => {
             if parts.len() < 3 {
                 return ("Usage: /session rename <id> <name>".to_string(), true);

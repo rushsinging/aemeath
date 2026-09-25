@@ -184,12 +184,12 @@ pub(crate) fn should_run_turn_reflection(
     if before_finish_gate_continue
         || !config.enabled
         || !config.reflection.enabled
-        || config.reflection.interval_run_steps == 0
+        || config.reflection.interval_runs == 0
     {
         return false;
     }
     if has_tool_calls && stop_reason != &ProviderStopReason::EndTurn {
         return false;
     }
-    step_count.is_multiple_of(config.reflection.interval_run_steps)
+    step_count.is_multiple_of(config.reflection.interval_runs)
 }
