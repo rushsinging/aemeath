@@ -855,3 +855,7 @@ pub enum SessionResumeFailureKind {
     /// 底层 IO 错误。
     Io,
 }
+
+#[cfg(test)]
+#[path = "chat_event_naming_tests.rs"]
+mod chat_event_naming_tests;

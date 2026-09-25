@@ -681,6 +681,10 @@ pub async fn parse_stream(
 }
 
 #[cfg(test)]
+#[path = "stream_usage_tests.rs"]
+mod stream_usage_tests;
+
+#[cfg(test)]
 #[path = "stream_contract_tests.rs"]
 mod contract_tests;
 
