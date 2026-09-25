@@ -471,6 +471,7 @@ impl SubRunFinalizer {
                 )),
                 workspace_root: &self.workspace_root,
                 session_id: &self.session_id,
+                main_session_id: self.runtime_context.main_session_id(),
                 prompt: &self.prompt,
                 system: &self.system,
                 model_spec: self.model_spec.as_deref(),

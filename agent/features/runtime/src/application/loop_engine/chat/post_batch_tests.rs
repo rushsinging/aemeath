@@ -91,6 +91,7 @@ async fn post_tool_batch_reads_workspace_root_when_dispatch_begins() {
         &hook_port,
         &ActivityCoordinator::production_without_publisher(sdk::RunId::new_v7()),
         &sdk::RunStepId::new_v7(),
+        "test-post-batch-session",
         &tokio_util::sync::CancellationToken::new(),
         1,
         1,

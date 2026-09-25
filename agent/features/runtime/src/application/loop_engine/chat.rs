@@ -6,6 +6,8 @@ pub(crate) mod events;
 mod events_tests;
 pub(crate) mod finalize;
 pub(crate) mod hook_ui;
+#[cfg(test)]
+mod hook_ui_tests;
 mod idle_commands;
 mod idle_lifecycle;
 mod input_gate;

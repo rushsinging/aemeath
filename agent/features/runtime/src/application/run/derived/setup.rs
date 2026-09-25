@@ -333,6 +333,7 @@ impl AgentRunner for CliAgentRunner {
                     model_spec: Some(model_display.clone()),
                 }),
                 &workspace_root,
+                derived.instance.context().main_session_id(),
                 &tokio_util::sync::CancellationToken::new(),
             )
             .await;

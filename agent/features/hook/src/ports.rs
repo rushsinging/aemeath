@@ -4,6 +4,10 @@
 //! 一个类型化端口——Main 使用 Full；Sub Run 使用 `BoundaryOnly`，过滤由
 //! Hook-owned `HookPointMetadata.class` 完成并保留 Stop 与生命周期 Boundary。
 
+#[cfg(test)]
+#[path = "ports_tests.rs"]
+mod tests;
+
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -42,11 +46,14 @@ pub trait HookSubscriptionExecutionObserver: Send + Sync {
 
 /// Hook 一次 dispatch 的工作区上下文。
 ///
-/// Runtime 每次调用只提供当前 Workspace 的 cwd；Hook adapter 根据当前 invocation
-/// 生成兼容环境变量并执行环境隔离。生命周期 observer 只报告 typed subscription 事实。
+/// Runtime 每次调用提供当前 Workspace 的 cwd 与 Main Session id；Hook adapter
+/// 根据当前 invocation 生成兼容环境变量并执行环境隔离。session_id 经
+/// `AEMEATH_SESSION_ID` 注入 hook 子进程，供外部集成（如终端会话恢复工具）
+/// 捕获当前会话。生命周期 observer 只报告 typed subscription 事实。
 #[derive(Clone)]
 pub struct HookDispatchContext {
     cwd: PathBuf,
+    session_id: Option<String>,
     subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
 }
 
@@ -54,8 +61,14 @@ impl HookDispatchContext {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),
+            session_id: None,
             subscription_execution_observer: None,
         }
+    }
+
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
     }
 
     pub fn with_subscription_execution_observer(
@@ -74,6 +87,10 @@ impl HookDispatchContext {
 
     pub fn cwd(&self) -> &Path {
         &self.cwd
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
     }
 }
 

@@ -127,6 +127,7 @@ impl CommittedSideEffectHandler for TaskCommittedSideEffectHandler {
                 step_id,
                 invocation,
                 Path::new(&self.workspace_root),
+                &self.session_id,
                 cancel,
             )
             .await;

@@ -549,6 +549,13 @@ impl RuntimeContext {
     pub fn skill_load_session_id(&self) -> &str {
         &self.skill_load_session_id
     }
+    /// 当前 Main Session identity；Sub Run 继承父 Main 的同一 id。
+    ///
+    /// hook dispatch 等会话级集成经此获得可 resume 的 Main Session id，
+    /// **NEVER** 使用 Sub Run 的 isolated session id 替代。
+    pub fn main_session_id(&self) -> &str {
+        &self.skill_load_session_id
+    }
     /// Reasoning 端口，`Arc` clone。
     pub fn reasoning(&self) -> Arc<Mutex<share::reasoning::ReasoningLevel>> {
         self.reasoning.clone()

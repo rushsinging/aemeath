@@ -275,8 +275,14 @@ pub struct ElicitationResultInput {
 // ── 生命周期 ──
 
 /// SessionStart / SessionEnd 输入。
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SessionInput {}
+///
+/// `session_id` 是本次 Main Session 的稳定标识，随 stdin payload 传给 hook
+/// 子进程，供外部集成（如终端会话恢复工具）捕获当前会话。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInput {
+    /// 当前 Main Session id。
+    pub session_id: String,
+}
 
 /// SubRunStart 输入。
 #[derive(Debug, Clone, Serialize, Deserialize)]

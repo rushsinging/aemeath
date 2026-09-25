@@ -140,6 +140,65 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
     assert_eq!(calls[1].stdin["StopFailure"]["run_steps"], 9);
 }
 
+/// dispatch context 携带 session_id 时注入 `AEMEATH_SESSION_ID`（任意 point）；
+/// 未携带时不得注入该键（无 session 的调用方保持环境最小化）。
+#[tokio::test]
+async fn dispatch_at_injects_session_id_environment_only_when_context_carries_it() {
+    let subscriptions = vec![
+        sub(HookPoint::PreToolUse, "tool"),
+        sub(HookPoint::Stop, "stop"),
+    ];
+    let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+    let workspace = std::path::PathBuf::from("/tmp/aemeath-session-workspace");
+
+    dispatcher
+        .dispatch_at(
+            pre_tool_use("Bash"),
+            HookDispatchContext::new(&workspace).with_session_id("sess-abc-123"),
+            &CancellationToken::new(),
+        )
+        .await;
+    dispatcher
+        .dispatch_at(
+            stop(3),
+            HookDispatchContext::new(&workspace),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    let calls = scripted.calls();
+    assert_eq!(calls[0].env["AEMEATH_SESSION_ID"], "sess-abc-123");
+    assert_eq!(calls[1].env["AEMEATH_HOOK_EVENT"], "\"Stop\"");
+    assert!(!calls[1].env.contains_key("AEMEATH_SESSION_ID"));
+}
+
+/// StopFailure 派发同样继承 dispatch context 的 session_id。
+#[tokio::test]
+async fn stop_failure_environment_inherits_session_id_from_context() {
+    let subscriptions = vec![
+        sub(HookPoint::Stop, "stop"),
+        sub(HookPoint::StopFailure, "observe"),
+    ];
+    let scripted = Scripted::from_steps([
+        ScriptStep::fault(ExecutionFault::Timeout),
+        ScriptStep::ok_exit(0, ""),
+    ]);
+    let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
+
+    dispatcher
+        .dispatch_at(
+            stop(5),
+            HookDispatchContext::new("/tmp/aemeath-stop-workspace").with_session_id("sess-def-456"),
+            &CancellationToken::new(),
+        )
+        .await;
+
+    let calls = scripted.calls();
+    assert_eq!(calls[0].env["AEMEATH_SESSION_ID"], "sess-def-456");
+    assert_eq!(calls[1].env["AEMEATH_SESSION_ID"], "sess-def-456");
+}
+
 // 各测试直接内联构造 Dispatcher + Scripted，以保持调用顺序与步骤入队的可读性。
 
 // ════════════════════════════════════════════════════════════

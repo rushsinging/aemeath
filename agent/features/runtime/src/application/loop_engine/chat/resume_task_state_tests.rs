@@ -141,8 +141,9 @@ fn restored_session(
 fn resumed_shell(
     task_store: Arc<task::TaskStore>,
     session_management: Arc<dyn context::SessionManagementPort>,
+    hooks: Arc<dyn hook::HookPort>,
 ) -> crate::application::client::SessionRuntime {
-    let mut shell = test_shell_with_task_store(noop_hook_port(), task_store.clone());
+    let mut shell = test_shell_with_task_store(hooks, task_store.clone());
     let workspace = shell.workspace.clone();
     let config = Arc::new(config::ConfigAppService::with_global_path(
         Some(&workspace.read().initial_cwd()),
@@ -228,6 +229,7 @@ async fn successful_resume_emits_session_then_same_complete_task_state_contract(
                 snapshot_with_one_task(),
             ),
         }),
+        noop_hook_port(),
     );
 
     let sink = run_resume(session_id, shell).await;
@@ -262,6 +264,7 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
                 task::TaskSnapshot::empty(),
             ),
         }),
+        noop_hook_port(),
     );
 
     let sink = run_resume(session_id, shell).await;
@@ -274,4 +277,88 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
         }
         other => panic!("expected empty TaskStateChanged after SessionResumed, got {other:?}"),
     }
+}
+
+// ════════════════════════════════════════════════════════════
+// SessionStart emit（/resume 成功后重新捕获会话 ID）
+// ════════════════════════════════════════════════════════════
+
+/// 记录 (触发点, context.session_id) 的 dispatch 轨迹。
+type SessionDispatchLog = Arc<Mutex<Vec<(hook::HookPoint, Option<String>)>>>;
+
+/// 记录型 HookPort：捕获每次 dispatch_at 的触发点与 context 携带的 session_id。
+#[derive(Clone, Default)]
+struct RecordingSessionStartHookPort {
+    dispatches: SessionDispatchLog,
+}
+
+#[async_trait::async_trait]
+impl hook::HookPort for RecordingSessionStartHookPort {
+    async fn dispatch(
+        &self,
+        _invocation: hook::HookInvocation,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        unreachable!("resume emit 必须经 dispatch_at 携带 workspace 上下文");
+    }
+
+    async fn dispatch_at(
+        &self,
+        invocation: hook::HookInvocation,
+        context: hook::HookDispatchContext,
+        _cancellation: &dyn hook::CancellationSignal,
+    ) -> hook::HookOutcome {
+        self.dispatches
+            .lock()
+            .unwrap()
+            .push((invocation.point(), context.session_id().map(str::to_string)));
+        hook::HookOutcome {
+            executions: Vec::new(),
+            directive: hook::HookDirective::Continue,
+            messages: Vec::new(),
+            block_detail: None,
+        }
+    }
+}
+
+/// /resume 成功后必须 emit 一次 SessionStart：invocation 与 dispatch context
+/// 都携带恢复后的新 session id，外部集成（终端会话恢复）据此重新捕获。
+#[tokio::test]
+async fn successful_resume_emits_session_start_hook_with_resumed_session_id() {
+    let session_id = "session-resume-start";
+    let task_store = Arc::new(task::TaskStore::new());
+    let recording_hook = RecordingSessionStartHookPort::default();
+    let shell = resumed_shell(
+        task_store,
+        Arc::new(ResumeSessionManagement {
+            session: restored_session(
+                session_id,
+                shell_workspace_snapshot(),
+                task::TaskSnapshot::empty(),
+            ),
+        }),
+        Arc::new(recording_hook.clone()),
+    );
+
+    let sink = run_resume(session_id, shell).await;
+    assert!(
+        !sink.events.lock().unwrap().is_empty(),
+        "resume 本身必须先成功"
+    );
+
+    let dispatches = recording_hook.dispatches.lock().unwrap();
+    let session_starts: Vec<_> = dispatches
+        .iter()
+        .filter(|(point, _)| *point == hook::HookPoint::SessionStart)
+        .collect();
+    assert_eq!(
+        session_starts.len(),
+        1,
+        "resume 成功后恰好 emit 一次 SessionStart，实际 dispatches: {dispatches:?}"
+    );
+    assert_eq!(
+        session_starts[0].1.as_deref(),
+        Some(session_id),
+        "SessionStart 的 dispatch context 必须携带恢复后的 session id"
+    );
 }

@@ -169,6 +169,12 @@ pub struct HooksConfig {
     #[serde(default)]
     pub max_stop_hook_blocks: Option<usize>,
 
+    /// 额外透传给 hook 子进程的父环境变量 glob 模式（如 `CMUX_*`）。
+    /// 默认空 = 仅基础白名单（PATH/HOME/SHELL/LANG/LC_ALL/TERM）；
+    /// `AEMEATH_*` 按次变量恒为权威注入，父环境同名值不透传。
+    #[serde(default, alias = "envPassthrough")]
+    pub env_passthrough: Vec<String>,
+
     /// 按事件类型分组的 hook 列表
     #[serde(flatten)]
     pub events: HashMap<HookEvent, Vec<HookEntry>>,

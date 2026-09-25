@@ -90,16 +90,21 @@ pub(crate) fn subscription_activity_observer(
 }
 
 /// 执行一次 Hook dispatch。生命周期展示只通过 ActivityCoordinator 发布。
+///
+/// `session_id` 是当前 Main Session id，写入 dispatch context 后由 Hook adapter
+/// 注入子进程环境（`AEMEATH_SESSION_ID`），供外部集成捕获会话。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_hook(
     hook_port: &Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     run_step_id: &sdk::RunStepId,
     invocation: HookInvocation,
     workspace_root: &Path,
+    session_id: &str,
     cancel: &CancellationToken,
 ) -> RuntimeHookDispatch {
     let subscription_execution_observer = subscription_activity_observer(activities, run_step_id);
-    let mut context = HookDispatchContext::new(workspace_root);
+    let mut context = HookDispatchContext::new(workspace_root).with_session_id(session_id);
     if let Some(observer) = subscription_execution_observer {
         context = context.with_subscription_execution_observer(observer);
     }

@@ -819,3 +819,19 @@ fn startup_resume_precedes_current_project_config_read() {
             Context rejects cross-project sessions before this snapshot can change"
     );
 }
+
+#[test]
+fn startup_emits_session_start_after_session_resolution() {
+    let source = include_str!("from_args.rs");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+    let session_resolution = production
+        .find("resolve_startup_session")
+        .expect("startup 必须解析 session");
+    let session_start_emit = production
+        .find("emit_session_start")
+        .unwrap_or_else(|| panic!("startup 必须在 session id 确定后 emit SessionStart"));
+    assert!(
+        session_resolution < session_start_emit,
+        "SessionStart emit 必须位于 resolve_startup_session 之后（session id 已确定）"
+    );
+}
