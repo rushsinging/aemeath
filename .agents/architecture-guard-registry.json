@@ -308,6 +308,18 @@
       "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
       "tracking_issue": 1385,
       "guard": "check-cross-bc-construction-registry.sh"
+    },
+    {
+      "id": "construction.config.wire-config-override-store",
+      "symbol": "wire_config_override_store",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "native override 注入工厂（原 native_override_store 更名 wire_ 前缀类）；唯一跨 BC 调用点为 composition 装配",
+      "tracking_issue": 1706
     }
   ],
   "entries": [
@@ -393,7 +405,7 @@
         "FileSystemBlobAdapter::new("
       ],
       "exclusions": [],
-      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
+      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 wire_config_override_store 工厂）",
       "profile": "full"
     },
     {
