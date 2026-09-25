@@ -526,6 +526,21 @@ const MIMO_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
     official_sdk_user_agent: None,
 };
 
+/// MiMo Token Plan：固定订阅费套餐使用专属 BASE_URL 与专属 API Key，
+/// 与按量付费端点互不通用（官方文档"如使用 Token Plan 需替换 BASE_URL"）。
+const MIMO_TOKEN_PLAN_ENTRY: ProviderCatalogEntry = ProviderCatalogEntry {
+    source: ProviderSource::new("Mimo Token Plan"),
+    driver: DriverId::new("mimo"),
+    default_endpoint: Some(DefaultEndpoint {
+        url: "https://token-plan-cn.xiaomimimo.com/v1",
+        evidence_url: "https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call",
+        verified_at: VERIFIED_AT_2026_09_10,
+    }),
+    recommended_models: MIMO_MODELS,
+    api_key_hint: Some("Xiaomi MiMo 开放平台 → Token Plan 专属 API Key"),
+    official_sdk_user_agent: None,
+};
+
 /// DeepSeek 当前在线模型。
 ///
 /// 2026-09-10 核验：`deepseek-v4-flash` 已退役，官方模型名改为 `deepseek-flash`
@@ -602,6 +617,7 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
     MINIMAX_ENTRY,
     MINIMAX_INTERNATIONAL_ENTRY,
     MIMO_ENTRY,
+    MIMO_TOKEN_PLAN_ENTRY,
     DEEPSEEK_ENTRY,
     AGNES_ENTRY,
     OLLAMA_ENTRY,

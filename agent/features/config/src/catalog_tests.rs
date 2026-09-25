@@ -29,6 +29,7 @@ const EXPECTED_SOURCES: &[(&str, &str)] = &[
     ("Minimax", "minimax"),
     ("Minimax.io", "minimax"),
     ("Mimo", "mimo"),
+    ("Mimo Token Plan", "mimo"),
     ("DeepSeek", "deepseek"),
     ("Agnes", "agnes"),
     ("Ollama", "ollama"),
