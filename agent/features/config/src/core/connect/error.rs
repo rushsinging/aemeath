@@ -105,6 +105,8 @@ pub(crate) fn command_name(command: &ConnectCommand) -> &'static str {
     match command {
         ConnectCommand::Back => "Back",
         ConnectCommand::SelectProvider { .. } => "SelectProvider",
+        ConnectCommand::BeginCustomProvider => "BeginCustomProvider",
+        ConnectCommand::SelectCustomProvider { .. } => "SelectCustomProvider",
         ConnectCommand::ConfirmOverwrite => "ConfirmOverwrite",
         ConnectCommand::RejectOverwrite => "RejectOverwrite",
         ConnectCommand::SetEndpoint { .. } => "SetEndpoint",

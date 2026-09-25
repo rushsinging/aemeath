@@ -57,10 +57,10 @@ pub fn provider_connect_form_view(
 pub fn connect_command_for_form(
     connect: &ConnectView,
     command: ConfigFormCommand,
-    _catalog: &'static [ProviderCatalogEntry],
+    catalog: &'static [ProviderCatalogEntry],
 ) -> Result<ConnectCommand, ProviderConnectFormError> {
     match command {
-        ConfigFormCommand::SubmitPage { values } => submit_for_stage(connect, values),
+        ConfigFormCommand::SubmitPage { values } => submit_for_stage(connect, catalog, values),
         ConfigFormCommand::InvokeAction { action_id } => action_for_id(action_id.as_str()),
         ConfigFormCommand::Cancel => Err(ProviderConnectFormError::InvalidSubmission(
             "取消应调用 Connect cancel 入口".to_string(),
@@ -77,24 +77,49 @@ fn page_for_connect(
     catalog: &'static [ProviderCatalogEntry],
 ) -> Result<ConfigFormPage, ConfigFormError> {
     let (id, title, fields) = match connect.stage {
-        ConnectStage::SelectProvider => (
-            "select_provider",
-            "选择 Provider",
-            vec![select_field(
-                "provider_source",
-                "Provider",
-                catalog
-                    .iter()
-                    .map(|entry| {
-                        option(
-                            entry.source.as_str(),
-                            entry.source.as_str(),
-                            Some(entry.driver.as_str()),
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?],
-        ),
+        ConnectStage::SelectProvider => {
+            let mut options: Vec<ConfigFormOption> = catalog
+                .iter()
+                .map(|entry| {
+                    option(
+                        entry.source.as_str(),
+                        entry.source.as_str(),
+                        Some(entry.driver.as_str()),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            options.push(option("custom", "自定义（完全自定义）", None)?);
+            (
+                "select_provider",
+                "选择 Provider",
+                vec![select_field("provider_source", "Provider", options)?],
+            )
+        }
+        ConnectStage::EditCustomProvider => {
+            // 完全自定义：名称 / driver / endpoint 全手填，无 catalog 默认。
+            let mut driver_ids: Vec<&str> = Vec::new();
+            for entry in catalog {
+                if !driver_ids.contains(&entry.driver.as_str()) {
+                    driver_ids.push(entry.driver.as_str());
+                }
+            }
+            (
+                "edit_custom_provider",
+                "自定义 Provider",
+                vec![
+                    text_field("provider_name", "Provider 名称", true, None)?,
+                    select_field(
+                        "custom_driver",
+                        "Driver",
+                        driver_ids
+                            .into_iter()
+                            .map(|driver| option(driver, driver, None))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )?,
+                    text_field("custom_base_url", "Base URL", true, None)?,
+                ],
+            )
+        }
         ConnectStage::ConfirmOverwrite => (
             "confirm_overwrite",
             "确认覆盖 Provider",
@@ -108,10 +133,8 @@ fn page_for_connect(
                     .unwrap_or_else(|| "已存在".to_string()),
             )?],
         ),
-        ConnectStage::EditEndpoint => (
-            "edit_endpoint",
-            "设置 Base URL",
-            vec![text_field(
+        ConnectStage::EditEndpoint => {
+            let mut fields = vec![text_field(
                 "base_url",
                 "Base URL",
                 true,
@@ -119,7 +142,8 @@ fn page_for_connect(
                     connect
                         .draft
                         .source
-                        .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                        .as_ref()
+                        .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
                         .and_then(|entry| {
                             entry
                                 .default_endpoint
@@ -127,8 +151,40 @@ fn page_for_connect(
                                 .map(|endpoint| endpoint.url.to_string())
                         })
                 }),
-            )?],
-        ),
+            )?];
+            // OpenAI 系 driver 提供 Chat Completions / Responses 接口风格
+            // 选择；anthropic / ollama 仅支持 Chat，不显示该字段。driver
+            // 优先取 draft，缺失时由 catalog source 推导。
+            let resolved_driver = connect.draft.driver.map(|driver| driver).or_else(|| {
+                connect
+                    .draft
+                    .source
+                    .as_ref()
+                    .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
+                    .map(|entry| entry.driver)
+            });
+            if let Some(driver) = resolved_driver {
+                if supports_responses_api(driver.as_str()) {
+                    let mut style_field = select_field(
+                        "api_style",
+                        "接口风格",
+                        vec![
+                            option("chat", "Chat Completions", None)?,
+                            option("responses", "Responses", None)?,
+                        ],
+                    )?;
+                    let label = if connect.draft.api_style.as_deref() == Some("responses") {
+                        "Responses"
+                    } else {
+                        "Chat Completions"
+                    };
+                    style_field.has_value = true;
+                    style_field.display_value = Some(label.to_string());
+                    fields.push(style_field);
+                }
+            }
+            ("edit_endpoint", "设置 Base URL", fields)
+        }
         ConnectStage::EditCredential => {
             let mut field = secret_field("api_key", "API Key", connect.draft.has_api_key)?;
             if let Some(mask) = connect.draft.credential_mask.as_deref() {
@@ -150,7 +206,8 @@ fn page_for_connect(
                     connect
                         .draft
                         .source
-                        .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                        .as_ref()
+                        .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
                         .and_then(|entry| {
                             entry
                                 .official_sdk_user_agent
@@ -256,6 +313,7 @@ fn page_for_connect(
 
 fn submit_for_stage(
     connect: &ConnectView,
+    catalog: &'static [ProviderCatalogEntry],
     values: Vec<ConfigFormFieldValue>,
 ) -> Result<ConnectCommand, ProviderConnectFormError> {
     let stage = connect.stage;
@@ -271,16 +329,58 @@ fn submit_for_stage(
             else {
                 return Err(invalid_type("provider_source"));
             };
+            if option_id.as_str() == "custom" {
+                return Ok(ConnectCommand::BeginCustomProvider);
+            }
             let entry = find_by_source(option_id.as_str()).ok_or_else(|| {
                 ProviderConnectFormError::UnknownProvider(option_id.as_str().to_string())
             })?;
             ConnectCommand::SelectProvider {
-                source: entry.source,
+                source: entry.source.clone(),
             }
         }
-        ConnectStage::EditEndpoint => ConnectCommand::SetEndpoint {
-            base_url: text_value(field("base_url")?, "base_url")?,
-        },
+        ConnectStage::EditCustomProvider => {
+            let name = text_value(field("provider_name")?, "provider_name")?;
+            let ConfigFormValue::SelectedOption(option_id) = &field("custom_driver")?.value else {
+                return Err(invalid_type("custom_driver"));
+            };
+            let base_url = text_value(field("custom_base_url")?, "custom_base_url")?;
+            ConnectCommand::SelectCustomProvider {
+                name,
+                driver: option_id.as_str().to_string(),
+                base_url,
+            }
+        }
+        ConnectStage::EditEndpoint => {
+            let base_url = text_value(field("base_url")?, "base_url")?;
+            let resolved_driver = connect.draft.driver.clone().or_else(|| {
+                connect
+                    .draft
+                    .source
+                    .as_ref()
+                    .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
+                    .map(|entry| entry.driver)
+            });
+            let api_style = if resolved_driver
+                .map(|driver| supports_responses_api(driver.as_str()))
+                .unwrap_or(false)
+            {
+                let ConfigFormValue::SelectedOption(option_id) = &field("api_style")?.value else {
+                    return Err(invalid_type("api_style"));
+                };
+                match option_id.as_str() {
+                    "chat" => None,
+                    "responses" => Some("responses".to_string()),
+                    _ => return Err(invalid_value("api_style")),
+                }
+            } else {
+                None
+            };
+            ConnectCommand::SetEndpoint {
+                base_url,
+                api_style,
+            }
+        }
         ConnectStage::EditCredential => {
             let mut api_key = secret_value(field("api_key")?, "api_key")?;
             // 掩码原样提交（用户未改动预填值）归一为空提交，保留现有 key。
@@ -393,7 +493,9 @@ fn action_schema(
         | AvailableAction::SelectRecommendedModel
         | AvailableAction::EnterCustomModel
         | AvailableAction::SetCustomModel
-        | AvailableAction::SetGlobalDefault => return None,
+        | AvailableAction::SetGlobalDefault
+        | AvailableAction::BeginCustomProvider
+        | AvailableAction::SelectCustomProvider => return None,
         AvailableAction::ConfirmOverwrite => ("confirm_overwrite", "覆盖", primary),
         AvailableAction::RejectOverwrite => ("reject_overwrite", "返回", secondary),
         AvailableAction::SkipProbe => ("skip_probe", "跳过测试", secondary),
@@ -424,6 +526,13 @@ fn busy_for_connect(connect: &ConnectView) -> Option<ConfigFormBusy> {
         }),
         _ => None,
     }
+}
+
+/// 判断 driver 是否支持 Responses API 接口风格。与 provider crate 的
+/// `driver_acl` 保持同一规则：anthropic / ollama 仅 Chat，其余 OpenAI 系
+/// 均支持 Responses。
+fn supports_responses_api(driver: &str) -> bool {
+    !driver.eq_ignore_ascii_case("anthropic") && !driver.eq_ignore_ascii_case("ollama")
 }
 
 fn select_field(
@@ -560,7 +669,8 @@ fn recommended_model_field(
     let mut options = connect
         .draft
         .source
-        .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+        .as_ref()
+        .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
         .map(|entry| {
             entry
                 .recommended_models
@@ -605,6 +715,7 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
         connect
             .draft
             .source
+            .as_ref()
             .map(|source| source.as_str().to_string())
             .unwrap_or_else(|| "未选择".to_string()),
     )?);
@@ -617,15 +728,60 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
             .clone()
             .unwrap_or_else(|| "未设置".to_string()),
     )?);
+    if connect.draft.api_style.is_some() {
+        fields.push(summary_field(
+            "review_api_style",
+            "接口风格",
+            "Responses".to_string(),
+        )?);
+    }
     fields.push(summary_field(
         "review_credential",
         "API Key",
         if connect.draft.has_api_key {
-            "已设置"
+            connect
+                .draft
+                .credential_mask
+                .clone()
+                .unwrap_or_else(|| "已设置".to_string())
         } else {
-            "未设置"
-        }
-        .to_string(),
+            "未设置".to_string()
+        },
+    )?);
+    fields.push(summary_field(
+        "review_model",
+        "模型",
+        connect
+            .draft
+            .model
+            .as_ref()
+            .map(|model| {
+                format!(
+                    "{}（Context {} · Max {}）",
+                    model.model_id,
+                    model.context_window.unwrap_or(0),
+                    model.max_tokens.unwrap_or(0),
+                )
+            })
+            .unwrap_or_else(|| "未选择".to_string()),
+    )?);
+    fields.push(summary_field(
+        "review_user_agent",
+        "User-Agent",
+        connect
+            .draft
+            .provider_user_agent
+            .clone()
+            .unwrap_or_else(|| "使用全局默认".to_string()),
+    )?);
+    fields.push(summary_field(
+        "review_global_default",
+        "设为全局默认",
+        if connect.draft.set_global_default {
+            "是".to_string()
+        } else {
+            "否".to_string()
+        },
     )?);
     Ok(fields)
 }
@@ -633,7 +789,7 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
 fn step_for_stage(stage: ConnectStage) -> Option<ConfigFormStep> {
     let current = match stage {
         ConnectStage::SelectProvider | ConnectStage::ConfirmOverwrite => 1,
-        ConnectStage::EditEndpoint => 2,
+        ConnectStage::EditCustomProvider | ConnectStage::EditEndpoint => 2,
         ConnectStage::EditCredential => 3,
         ConnectStage::EditUserAgent => 4,
         ConnectStage::SelectModel | ConnectStage::EditCustomModel => 5,
@@ -655,7 +811,8 @@ fn model_id(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -> 
             connect
                 .draft
                 .source
-                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .as_ref()
+                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
                 .and_then(|entry| entry.recommended_models.first())
                 .map(|model| model.model_id.to_string())
         })
@@ -672,7 +829,8 @@ fn context_window(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry
             connect
                 .draft
                 .source
-                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .as_ref()
+                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
                 .and_then(|entry| entry.recommended_models.first())
                 .and_then(|model| u64::try_from(model.context_window).ok())
         })
@@ -689,7 +847,8 @@ fn max_tokens(connect: &ConnectView, catalog: &'static [ProviderCatalogEntry]) -
             connect
                 .draft
                 .source
-                .and_then(|source| catalog.iter().find(|entry| entry.source == source))
+                .as_ref()
+                .and_then(|source| catalog.iter().find(|entry| entry.source == *source))
                 .and_then(|entry| entry.recommended_models.first())
                 .map(|model| u64::from(model.max_tokens))
         })

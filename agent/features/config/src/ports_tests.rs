@@ -138,6 +138,7 @@ fn provider_probe_request_field_set_is_stable() {
         max_tokens: 8192,
         final_user_agent: "Aemeath/0.1.0 cli macos/aarch64".to_string(),
         timeout: Duration::from_secs(15),
+        api_style: None,
     };
     // 字段稳定性断言：每个字段都必须存在并按预期类型持有数据。
     assert_eq!(request.driver.as_str(), "anthropic");
@@ -161,6 +162,7 @@ fn provider_probe_request_supports_absent_credential_for_env_less_endpoints() {
         max_tokens: 1024,
         final_user_agent: "Aemeath/0.1.0 cli linux/x86_64".to_string(),
         timeout: Duration::from_secs(10),
+        api_style: None,
     };
     assert!(
         request.credential.is_none(),
@@ -213,6 +215,7 @@ async fn static_probe_returns_success_when_behavior_is_success() {
         max_tokens: 8192,
         final_user_agent: "Aemeath/0.1.0 cli macos/aarch64".to_string(),
         timeout: Duration::from_secs(5),
+        api_style: None,
     };
     let result = probe.probe(request.clone()).await.expect("success");
     assert_eq!(result.latency, Duration::from_millis(1));
@@ -235,6 +238,7 @@ async fn static_probe_returns_failure_with_stable_kind() {
         max_tokens: 8192,
         final_user_agent: "Aemeath/0.1.0 cli macos/aarch64".to_string(),
         timeout: Duration::from_secs(5),
+        api_style: None,
     };
     let err = probe
         .probe(request)

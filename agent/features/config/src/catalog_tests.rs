@@ -186,7 +186,9 @@ fn catalog_provider_source_for_driver_returns_canonical_source() {
         assert_eq!(source, first_entry.source);
     }
     assert_eq!(
-        provider_source_for_driver("zhipu").map(ProviderSource::as_str),
+        provider_source_for_driver("zhipu")
+            .as_ref()
+            .map(ProviderSource::as_str),
         Some("Zhipu"),
         "driver-only 兼容入口必须稳定返回普通 Zhipu；精确配置应按 source 查询"
     );

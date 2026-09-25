@@ -48,6 +48,8 @@ pub struct ConnectDraftView {
     pub source: Option<ProviderSource>,
     pub driver: Option<DriverId>,
     pub base_url: Option<String>,
+    /// OpenAI 系接口风格（`Some("responses")` = Responses API）。
+    pub api_style: Option<String>,
     /// 是否有非空 API key。**NEVER** 暴露明文。
     pub has_api_key: bool,
     pub provider_user_agent: Option<String>,
@@ -58,8 +60,8 @@ pub struct ConnectDraftView {
 }
 
 impl ConnectDraftView {
-    pub fn source(&self) -> Option<ProviderSource> {
-        self.source
+    pub fn source(&self) -> Option<&ProviderSource> {
+        self.source.as_ref()
     }
 
     pub fn driver(&self) -> Option<DriverId> {
@@ -123,6 +125,8 @@ impl From<&ExistingProviderSnapshot> for ExistingProviderSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AvailableAction {
     SelectProvider,
+    BeginCustomProvider,
+    SelectCustomProvider,
     ConfirmOverwrite,
     RejectOverwrite,
     SetEndpoint,
@@ -146,6 +150,9 @@ impl AvailableAction {
     pub fn for_stage(stage: ConnectStage, probe_status: Option<&ProbeStatusView>) -> Vec<Self> {
         match stage {
             ConnectStage::SelectProvider => vec![Self::SelectProvider, Self::Cancel],
+            ConnectStage::EditCustomProvider => {
+                vec![Self::SelectCustomProvider, Self::Cancel]
+            }
             ConnectStage::ConfirmOverwrite => {
                 vec![Self::ConfirmOverwrite, Self::RejectOverwrite, Self::Cancel]
             }

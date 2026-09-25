@@ -35,7 +35,7 @@ impl ConnectCommitRequest {
     /// 从 draft 派生稳定 `ProviderSource`：本字段由 service 在写完 draft 后
     /// 拷贝出来，避免 adapter 在 fs 错误路径上回头访问 draft。
     pub fn source(&self) -> Option<ProviderSource> {
-        self.draft.source
+        self.draft.source.clone()
     }
 }
 

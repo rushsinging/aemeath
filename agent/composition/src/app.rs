@@ -573,14 +573,36 @@ fn config_command(
     use config::connect::ConnectCommand as Target;
     use sdk::ConnectCommand as Source;
     Ok(match command {
-        Source::SelectProvider { source } => Target::SelectProvider {
-            source: config::catalog::find_by_source(&source)
-                .ok_or_else(|| sdk::SdkError::Internal("未知 Provider".to_string()))?
-                .source,
+        Source::SelectProvider { source } => {
+            if source == "custom" {
+                return Ok(Target::BeginCustomProvider);
+            }
+            Target::SelectProvider {
+                source: config::catalog::find_by_source(&source)
+                    .ok_or_else(|| sdk::SdkError::Internal("未知 Provider".to_string()))?
+                    .source
+                    .clone(),
+            }
+        }
+        Source::BeginCustomProvider => Target::BeginCustomProvider,
+        Source::SelectCustomProvider {
+            name,
+            driver,
+            base_url,
+        } => Target::SelectCustomProvider {
+            name,
+            driver,
+            base_url,
         },
         Source::ConfirmOverwrite => Target::ConfirmOverwrite,
         Source::RejectOverwrite => Target::RejectOverwrite,
-        Source::SetEndpoint { base_url } => Target::SetEndpoint { base_url },
+        Source::SetEndpoint {
+            base_url,
+            api_style,
+        } => Target::SetEndpoint {
+            base_url,
+            api_style,
+        },
         Source::SetCredential { api_key } => Target::SetCredential { api_key },
         Source::SetProviderUserAgent { raw } => Target::SetProviderUserAgent { raw },
         Source::SelectRecommendedModel { index } => Target::SelectRecommendedModel { index },
@@ -673,6 +695,7 @@ fn sdk_stage(stage: config::connect::ConnectStage) -> sdk::ConnectStage {
     use config::connect::ConnectStage as Source;
     match stage {
         Source::SelectProvider => sdk::ConnectStage::SelectProvider,
+        Source::EditCustomProvider => sdk::ConnectStage::EditCustomProvider,
         Source::ConfirmOverwrite => sdk::ConnectStage::ConfirmOverwrite,
         Source::EditEndpoint => sdk::ConnectStage::EditEndpoint,
         Source::EditCredential => sdk::ConnectStage::EditCredential,
@@ -693,6 +716,8 @@ fn sdk_action(action: config::connect::AvailableAction) -> sdk::ConnectAvailable
     use config::connect::AvailableAction as Source;
     match action {
         Source::SelectProvider => sdk::ConnectAvailableAction::SelectProvider,
+        Source::BeginCustomProvider => sdk::ConnectAvailableAction::BeginCustomProvider,
+        Source::SelectCustomProvider => sdk::ConnectAvailableAction::SelectCustomProvider,
         Source::ConfirmOverwrite => sdk::ConnectAvailableAction::ConfirmOverwrite,
         Source::RejectOverwrite => sdk::ConnectAvailableAction::RejectOverwrite,
         Source::SetEndpoint => sdk::ConnectAvailableAction::SetEndpoint,

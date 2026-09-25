@@ -97,6 +97,7 @@ fn request() -> ProviderProbeRequest {
         max_tokens: 64,
         final_user_agent: "probe-agent/1.0".to_string(),
         timeout: std::time::Duration::from_secs(9),
+        api_style: None,
     }
 }
 

@@ -169,7 +169,7 @@ async fn ready_to_probe_for_source(
         service,
         view,
         ConnectCommand::SelectProvider {
-            source: find_by_source(source_name).unwrap().source,
+            source: find_by_source(source_name).unwrap().source.clone(),
         },
     )
     .await;
@@ -178,6 +178,7 @@ async fn ready_to_probe_for_source(
         view,
         ConnectCommand::SetEndpoint {
             base_url: "https://example.test".into(),
+            api_style: None,
         },
     )
     .await;
@@ -258,7 +259,7 @@ async fn selecting_provider_prefills_catalog_endpoint_in_server_draft() {
             &service,
             view,
             ConnectCommand::SelectProvider {
-                source: find_by_source(source).unwrap().source,
+                source: find_by_source(source).unwrap().source.clone(),
             },
         )
         .await;
@@ -285,7 +286,7 @@ async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
             &service,
             initial,
             ConnectCommand::SelectProvider {
-                source: entry.source,
+                source: entry.source.clone(),
             },
         )
         .await;
@@ -294,6 +295,7 @@ async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
             endpoint,
             ConnectCommand::SetEndpoint {
                 base_url: "https://api.anthropic.com".into(),
+                api_style: None,
             },
         )
         .await;
@@ -341,7 +343,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
         &service,
         view,
         ConnectCommand::SelectProvider {
-            source: find_by_source("Anthropic").unwrap().source,
+            source: find_by_source("Anthropic").unwrap().source.clone(),
         },
     )
     .await;
@@ -353,6 +355,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
         endpoint,
         ConnectCommand::SetEndpoint {
             base_url: "https://api.anthropic.com".into(),
+            api_style: None,
         },
     )
     .await;
@@ -433,7 +436,7 @@ async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
         &service,
         initial,
         ConnectCommand::SelectProvider {
-            source: find_by_source("Anthropic").unwrap().source,
+            source: find_by_source("Anthropic").unwrap().source.clone(),
         },
     )
     .await;
@@ -444,6 +447,7 @@ async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
             endpoint.revision,
             ConnectCommand::SetEndpoint {
                 base_url: String::new(),
+                api_style: None,
             },
         )
         .await
@@ -481,7 +485,7 @@ async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft
         &service,
         initial,
         ConnectCommand::SelectProvider {
-            source: find_by_source("Anthropic").unwrap().source,
+            source: find_by_source("Anthropic").unwrap().source.clone(),
         },
     )
     .await;
@@ -490,6 +494,7 @@ async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft
         endpoint.clone(),
         ConnectCommand::SetEndpoint {
             base_url: "https://custom.example.test".into(),
+            api_style: None,
         },
     )
     .await;
@@ -507,6 +512,7 @@ async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft
         provider_selection
             .draft
             .source
+            .as_ref()
             .map(|source| source.as_str()),
         Some("Anthropic")
     );
@@ -547,7 +553,7 @@ async fn stale_revision_rejects_command_without_changing_view() {
             view.session_id,
             ConnectRevision::from_value(99),
             ConnectCommand::SelectProvider {
-                source: find_by_source("Anthropic").unwrap().source,
+                source: find_by_source("Anthropic").unwrap().source.clone(),
             },
         )
         .await
@@ -774,6 +780,7 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
         confirmed,
         ConnectCommand::SetEndpoint {
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            api_style: None,
         },
     )
     .await;
@@ -789,6 +796,181 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
     .await;
 
     assert!(submitted.draft.has_api_key, "空提交必须保持已保留的 key");
+}
+
+#[tokio::test]
+async fn preserved_existing_key_is_sent_to_probe() {
+    // 确认覆盖后一路回车（空提交保留 key）到探测：probe 请求必须携带
+    // 已有明文凭证，否则 Coding Plan 等探测必然失败。
+    let probe = CapturingProbe::success();
+    let existing = ExistingProviderSnapshot::from_provider_config(
+        "Zhipu Coding Plan",
+        "https://open.bigmodel.cn/api/coding/paas/v4",
+        Some("hidden-key"),
+        Some("zhipu"),
+        "glm-5.3",
+        1_048_576,
+        16_384,
+        None,
+    );
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .build();
+    let view = service
+        .start_connect(
+            ConnectOrigin::ExplicitCommand,
+            test_global_revision(),
+            Some(existing),
+        )
+        .await;
+    let mut view = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
+    view = advance(
+        &service,
+        view,
+        ConnectCommand::SetEndpoint {
+            base_url: "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
+            api_style: None,
+        },
+    )
+    .await;
+    view = advance(
+        &service,
+        view,
+        ConnectCommand::SetCredential {
+            api_key: String::new(),
+        },
+    )
+    .await;
+    view = advance(
+        &service,
+        view,
+        ConnectCommand::SetProviderUserAgent { raw: None },
+    )
+    .await;
+    view = advance(&service, view, ConnectCommand::EnterCustomModel).await;
+    view = advance(
+        &service,
+        view,
+        ConnectCommand::SetCustomModel {
+            model_id: "glm-5.3".to_string(),
+            context_window: 1_048_576,
+            max_tokens: 16_384,
+        },
+    )
+    .await;
+    view = advance(
+        &service,
+        view,
+        ConnectCommand::SetGlobalDefault {
+            set_as_default: false,
+        },
+    )
+    .await;
+    // BeginProbe：StubProbe 瞬时完成，返回 view 可能已推进到 Review/Probing。
+    let probed = advance(&service, view, ConnectCommand::BeginProbe).await;
+
+    let requests = probe.requests.lock().await;
+    let probe_request = requests.last().expect("BeginProbe 必须发出 probe 请求");
+    assert_eq!(
+        probe_request.credential.as_deref(),
+        Some("hidden-key"),
+        "保留的已有 key 必须进入 probe 请求"
+    );
+    assert_ne!(probed.stage, ConnectStage::ChooseProbe);
+}
+
+#[tokio::test]
+async fn custom_provider_flow_uses_user_supplied_name_and_driver() {
+    // 完全自定义：名称 / driver / endpoint 全手填，无 catalog 默认与 UA。
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .await;
+
+    let custom_page = advance(&service, view, ConnectCommand::BeginCustomProvider).await;
+    assert_eq!(custom_page.stage, ConnectStage::EditCustomProvider);
+
+    let submitted = advance(
+        &service,
+        custom_page,
+        ConnectCommand::SelectCustomProvider {
+            name: "  MyProxy  ".to_string(),
+            driver: "openai".to_string(),
+            base_url: "https://proxy.example.test/v1".to_string(),
+        },
+    )
+    .await;
+
+    assert_eq!(submitted.stage, ConnectStage::EditCredential);
+    assert_eq!(
+        submitted
+            .draft
+            .source
+            .as_ref()
+            .map(|source| source.as_str()),
+        Some("MyProxy"),
+        "自定义名称去空白后成为 source key"
+    );
+    assert_eq!(
+        submitted
+            .draft
+            .driver
+            .as_ref()
+            .map(|driver| driver.as_str()),
+        Some("openai")
+    );
+    assert_eq!(
+        submitted.draft.base_url.as_deref(),
+        Some("https://proxy.example.test/v1")
+    );
+}
+
+#[tokio::test]
+async fn custom_provider_rejects_blank_name_and_unknown_driver() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .await;
+    let custom_page = advance(&service, view, ConnectCommand::BeginCustomProvider).await;
+
+    let blank = service
+        .apply(
+            custom_page.session_id,
+            custom_page.revision,
+            ConnectCommand::SelectCustomProvider {
+                name: "   ".to_string(),
+                driver: "openai".to_string(),
+                base_url: "https://proxy.example.test/v1".to_string(),
+            },
+        )
+        .await;
+    assert!(matches!(
+        blank,
+        Err(ConnectError::Validation { field, .. }) if field == "provider_name"
+    ));
+
+    let unknown_driver = service
+        .apply(
+            custom_page.session_id,
+            custom_page.revision,
+            ConnectCommand::SelectCustomProvider {
+                name: "MyProxy".to_string(),
+                driver: "no-such-driver".to_string(),
+                base_url: "https://proxy.example.test/v1".to_string(),
+            },
+        )
+        .await;
+    assert!(matches!(
+        unknown_driver,
+        Err(ConnectError::Validation { field, .. }) if field == "driver"
+    ));
 }
 
 #[tokio::test]

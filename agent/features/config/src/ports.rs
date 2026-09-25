@@ -115,6 +115,9 @@ pub struct ProviderProbeRequest {
     pub max_tokens: u32,
     pub final_user_agent: String,
     pub timeout: Duration,
+    /// OpenAI 系接口风格：`None` = Chat Completions，
+    /// `Some("responses")` = Responses API。anthropic / ollama 忽略。
+    pub api_style: Option<String>,
 }
 
 /// Provider 探测结果。`latency` 仅用于可观测性，不参与业务判定。

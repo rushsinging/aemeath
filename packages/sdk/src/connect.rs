@@ -18,6 +18,7 @@ pub enum ConnectOrigin {
 #[serde(rename_all = "snake_case")]
 pub enum ConnectStage {
     SelectProvider,
+    EditCustomProvider,
     ConfirmOverwrite,
     EditEndpoint,
     EditCredential,
@@ -39,10 +40,17 @@ pub enum ConnectCommand {
     SelectProvider {
         source: String,
     },
+    BeginCustomProvider,
+    SelectCustomProvider {
+        name: String,
+        driver: String,
+        base_url: String,
+    },
     ConfirmOverwrite,
     RejectOverwrite,
     SetEndpoint {
         base_url: String,
+        api_style: Option<String>,
     },
     SetCredential {
         api_key: String,
@@ -100,6 +108,8 @@ pub struct ConnectExistingProviderView {
 #[serde(rename_all = "snake_case")]
 pub enum ConnectAvailableAction {
     SelectProvider,
+    BeginCustomProvider,
+    SelectCustomProvider,
     ConfirmOverwrite,
     RejectOverwrite,
     SetEndpoint,

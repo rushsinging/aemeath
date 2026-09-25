@@ -35,6 +35,8 @@ use crate::catalog::ProviderSource;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConnectStage {
     SelectProvider,
+    /// 完全自定义 Provider（名称 / driver / endpoint 全手填，无 catalog 默认）。
+    EditCustomProvider,
     ConfirmOverwrite,
     EditEndpoint,
     EditCredential,
@@ -183,6 +185,9 @@ pub struct ExistingProviderSnapshot {
     /// 已有凭证的掩码形态（首 4 + `****` + 尾 4；短凭证整体 `****`）。
     /// 仅用于向导展示；明文不离开全局配置存储。
     pub credential_mask: Option<String>,
+    /// 已有凭证明文（服务端内存内持有，供 probe 携带；view **NEVER** 投影，
+    /// commit 由 port 在全局文档内复制）。
+    pub api_key: Option<String>,
 }
 
 /// 由明文凭证计算展示掩码：长度 ≥ 12 时首 4 + `****` + 尾 4，否则整体 `****`。
@@ -279,6 +284,9 @@ impl ExistingProviderSnapshot {
             max_tokens: (max_tokens > 0).then_some(max_tokens),
             user_agent: normalized_user_agent,
             credential_mask,
+            api_key: api_key
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
         }
     }
 
@@ -286,6 +294,6 @@ impl ExistingProviderSnapshot {
     /// 否则返回 `None`。**所有 session 构建路径**应优先调用此函数以保
     /// 证 source 一致性。
     pub fn catalog_source(&self) -> Option<ProviderSource> {
-        crate::catalog::find_by_source(&self.source_key).map(|entry| entry.source)
+        crate::catalog::find_by_source(&self.source_key).map(|entry| entry.source.clone())
     }
 }

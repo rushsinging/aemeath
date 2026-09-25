@@ -62,6 +62,206 @@ fn credential_page_is_secret_and_never_contains_plaintext() {
 }
 
 #[test]
+fn review_page_displays_every_chosen_configuration() {
+    // 预览页必须显示全部已选配置：Provider / endpoint / key 掩码 /
+    // 模型 / UA / 全局默认。
+    let mut view = connect_view(ConnectStage::Review);
+    view.draft.source = Some(
+        crate::catalog::find_by_source("Zhipu Coding Plan")
+            .unwrap()
+            .source
+            .clone(),
+    );
+    view.draft.base_url = Some("https://open.bigmodel.cn/api/coding/paas/v4".to_string());
+    view.draft.has_api_key = true;
+    view.draft.credential_mask = Some("sk-h****wxyz".to_string());
+    view.draft.provider_user_agent = Some("ZCode/3.11.2".to_string());
+    view.draft.model = Some(crate::connect::ModelDraftView {
+        model_id: "glm-5.3".to_string(),
+        context_window: Some(1_048_576),
+        max_tokens: Some(16_384),
+    });
+    view.draft.set_global_default = true;
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    let labels: Vec<&str> = form
+        .page
+        .fields
+        .iter()
+        .map(|field| field.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        vec![
+            "Provider",
+            "Base URL",
+            "API Key",
+            "模型",
+            "User-Agent",
+            "设为全局默认"
+        ]
+    );
+    let values: Vec<&str> = form
+        .page
+        .fields
+        .iter()
+        .filter_map(|field| field.display_value.as_deref())
+        .collect();
+    assert_eq!(
+        values,
+        vec![
+            "Zhipu Coding Plan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "sk-h****wxyz",
+            "glm-5.3（Context 1048576 · Max 16384）",
+            "ZCode/3.11.2",
+            "是",
+        ]
+    );
+}
+
+#[test]
+fn endpoint_page_offers_api_style_for_openai_family_only() {
+    // OpenAI 系 driver（zhipu/openai/deepseek 等）必须在 endpoint 页提供
+    // 接口风格选择（Chat Completions / Responses）；anthropic / ollama
+    // 不支持 Responses，不显示该字段。
+    for (source, expects_style_field) in [
+        ("OpenAI", true),
+        ("Zhipu Coding Plan", true),
+        ("DeepSeek", true),
+        ("LiteLLM", true),
+        ("Anthropic", false),
+        ("Ollama", false),
+    ] {
+        let mut view = connect_view(ConnectStage::EditEndpoint);
+        view.draft.source = Some(
+            crate::catalog::find_by_source(source)
+                .unwrap()
+                .source
+                .clone(),
+        );
+
+        let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+        let style_fields = form
+            .page
+            .fields
+            .iter()
+            .filter(|field| field.id.as_str() == "api_style")
+            .count();
+        assert_eq!(
+            style_fields,
+            usize::from(expects_style_field),
+            "{source} 接口风格字段出现数不符"
+        );
+        if expects_style_field {
+            let field = form
+                .page
+                .fields
+                .iter()
+                .find(|field| field.id.as_str() == "api_style")
+                .unwrap();
+            let labels: Vec<&str> = field
+                .options
+                .iter()
+                .map(|option| option.label.as_str())
+                .collect();
+            assert_eq!(labels, vec!["Chat Completions", "Responses"]);
+            assert!(field.has_value, "{source} 必须预选接口风格");
+        }
+    }
+}
+
+#[test]
+fn endpoint_submission_carries_api_style_choice() {
+    for (option_id, expected) in [("chat", None), ("responses", Some("responses"))] {
+        let mut view = connect_view(ConnectStage::EditEndpoint);
+        view.draft.source = Some(
+            crate::catalog::find_by_source("OpenAI")
+                .unwrap()
+                .source
+                .clone(),
+        );
+        let command = connect_command_for_form(
+            &view,
+            ConfigFormCommand::SubmitPage {
+                values: vec![
+                    ConfigFormFieldValue {
+                        field_id: ConfigFormFieldId::new("base_url").unwrap(),
+                        value: ConfigFormValue::Text("https://api.openai.com/v1".to_string()),
+                    },
+                    ConfigFormFieldValue {
+                        field_id: ConfigFormFieldId::new("api_style").unwrap(),
+                        value: ConfigFormValue::SelectedOption(
+                            ConfigFormOptionId::new(option_id).unwrap(),
+                        ),
+                    },
+                ],
+            },
+            crate::catalog::PROVIDER_CATALOG,
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                &command,
+                crate::connect::ConnectCommand::SetEndpoint { base_url, api_style }
+                    if base_url == "https://api.openai.com/v1"
+                        && *api_style == expected.map(str::to_string)
+            ),
+            "选项 {option_id} 必须映射 api_style={expected:?}"
+        );
+    }
+}
+
+#[test]
+fn provider_selection_ends_with_fully_custom_option() {
+    // Provider 列表末尾必须有"自定义（完全自定义）"选项；选中后提交映射
+    // BeginCustomProvider；EditCustomProvider 页提供名称/driver/endpoint 三字段。
+    let form = provider_connect_form_view(
+        &connect_view(ConnectStage::SelectProvider),
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    let last_option = form.page.fields[0].options.last().unwrap();
+    assert_eq!(last_option.id.as_str(), "custom");
+    assert_eq!(last_option.label, "自定义（完全自定义）");
+
+    let command = connect_command_for_form(
+        &connect_view(ConnectStage::SelectProvider),
+        ConfigFormCommand::SubmitPage {
+            values: vec![ConfigFormFieldValue {
+                field_id: ConfigFormFieldId::new("provider_source").unwrap(),
+                value: ConfigFormValue::SelectedOption(ConfigFormOptionId::new("custom").unwrap()),
+            }],
+        },
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    assert!(matches!(
+        command,
+        crate::connect::ConnectCommand::BeginCustomProvider
+    ));
+
+    let custom_form = provider_connect_form_view(
+        &connect_view(ConnectStage::EditCustomProvider),
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    assert_eq!(custom_form.page.id.as_str(), "edit_custom_provider");
+    let ids: Vec<&str> = custom_form
+        .page
+        .fields
+        .iter()
+        .map(|field| field.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["provider_name", "custom_driver", "custom_base_url"]
+    );
+}
+
+#[test]
 fn credential_page_displays_existing_key_mask_above_and_prefills_input() {
     // 已保留 key 时：字段上方显示掩码（display_value），输入框预填掩码
     // 原文（TUI Secret 按长度打点显示）；掩码原样提交 = 保留（空提交）。
@@ -286,7 +486,12 @@ fn zhipu_endpoint_pages_publish_distinct_default_urls() {
         ),
     ] {
         let mut view = connect_view(ConnectStage::EditEndpoint);
-        view.draft.source = Some(crate::catalog::find_by_source(source).unwrap().source);
+        view.draft.source = Some(
+            crate::catalog::find_by_source(source)
+                .unwrap()
+                .source
+                .clone(),
+        );
 
         let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 
@@ -311,7 +516,12 @@ fn zhipu_user_agent_page_prefills_official_sdk_client_ua() {
         ("LiteLLM", None),
     ] {
         let mut view = connect_view(ConnectStage::EditUserAgent);
-        view.draft.source = Some(crate::catalog::find_by_source(source).unwrap().source);
+        view.draft.source = Some(
+            crate::catalog::find_by_source(source)
+                .unwrap()
+                .source
+                .clone(),
+        );
 
         let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 
@@ -328,7 +538,12 @@ fn model_select_page_marks_existing_draft_model_as_selected() {
     // 确认覆盖已有 Provider 后 draft.model 来自全局配置；SelectModel 页必须
     // 把该模型标记为已选（has_value + display_value），供 TUI 预选 option。
     let mut view = connect_view(ConnectStage::SelectModel);
-    view.draft.source = Some(crate::catalog::find_by_source("Zhipu").unwrap().source);
+    view.draft.source = Some(
+        crate::catalog::find_by_source("Zhipu")
+            .unwrap()
+            .source
+            .clone(),
+    );
     view.draft.model = Some(crate::connect::ModelDraftView {
         model_id: "glm-5.2".to_string(),
         context_window: Some(204_800),

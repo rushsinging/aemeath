@@ -30,6 +30,7 @@ fn expected_stages_reject_terminal_pair_for_non_save_commands() {
         ConnectCommand::RejectOverwrite,
         ConnectCommand::SetEndpoint {
             base_url: "https://x".into(),
+            api_style: None,
         },
     ] {
         let stages = expected_stages(&variant);

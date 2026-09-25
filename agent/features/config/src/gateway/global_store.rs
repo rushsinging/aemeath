@@ -243,6 +243,7 @@ impl GlobalConfigConnectStore for FilesystemGlobalConfigConnectStore {
 fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalConfigStoreError> {
     let source = draft
         .source
+        .clone()
         .ok_or(GlobalConfigStoreError::InvalidDraft("source"))?;
     let driver = draft
         .driver
@@ -292,6 +293,16 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
         provider.insert(
             "userAgent".to_string(),
             Value::String(user_agent.trim().to_string()),
+        );
+    }
+    if let Some(api_style) = draft
+        .api_style
+        .as_ref()
+        .filter(|style| !style.trim().is_empty())
+    {
+        provider.insert(
+            "apiStyle".to_string(),
+            Value::String(api_style.trim().to_string()),
         );
     }
     if let Some(key) = existing_key {

@@ -424,6 +424,7 @@ impl ConnectAppService {
             max_tokens: model.max_tokens,
             final_user_agent: self.resolve_user_agent(&session.draft),
             timeout: PROBE_TIMEOUT,
+            api_style: session.draft.api_style.clone(),
         })
     }
 
@@ -481,10 +482,22 @@ impl ConnectAppService {
         use crate::connect::ConnectCommand as Cmd;
         match command {
             Cmd::Back => self.sync_back(session),
-            Cmd::SelectProvider { source } => self.sync_select_provider(session, *source),
+            Cmd::SelectProvider { source } => self.sync_select_provider(session, source.clone()),
+            Cmd::BeginCustomProvider => {
+                session.stage = ConnectStage::EditCustomProvider;
+                (None, SyncOutcome::Proceed)
+            }
+            Cmd::SelectCustomProvider {
+                name,
+                driver,
+                base_url,
+            } => self.sync_select_custom_provider(session, name, driver, base_url),
             Cmd::ConfirmOverwrite => self.sync_confirm_overwrite(session),
             Cmd::RejectOverwrite => self.sync_reject_overwrite(session),
-            Cmd::SetEndpoint { base_url } => self.sync_set_endpoint(session, base_url),
+            Cmd::SetEndpoint {
+                base_url,
+                api_style,
+            } => self.sync_set_endpoint(session, base_url, api_style.as_deref()),
             Cmd::SetCredential { api_key } => self.sync_set_credential(session, api_key),
             Cmd::SetProviderUserAgent { raw } => {
                 self.sync_set_provider_user_agent(session, raw.as_deref())
@@ -509,8 +522,8 @@ impl ConnectAppService {
         }
     }
 
-    fn catalog_entry(&self, source: ProviderSource) -> Option<&'static ProviderCatalogEntry> {
-        self.catalog.iter().find(|entry| entry.source == source)
+    fn catalog_entry(&self, source: &ProviderSource) -> Option<&'static ProviderCatalogEntry> {
+        self.catalog.iter().find(|entry| &entry.source == source)
     }
 
     fn sync_back(&self, session: &mut ConnectSession) -> (Option<ConnectError>, SyncOutcome) {
@@ -543,12 +556,56 @@ impl ConnectAppService {
         (None, SyncOutcome::Proceed)
     }
 
+    fn sync_select_custom_provider(
+        &self,
+        session: &mut ConnectSession,
+        name: &str,
+        driver: &str,
+        base_url: &str,
+    ) -> (Option<ConnectError>, SyncOutcome) {
+        let trimmed_name = name.trim();
+        if trimmed_name.is_empty() {
+            return (
+                Some(ConnectError::Validation {
+                    field: "provider_name",
+                    reason: "Provider 名称不能为空".to_string(),
+                }),
+                SyncOutcome::Proceed,
+            );
+        }
+        let Some(entry) = crate::catalog::find_by_driver(driver.trim()) else {
+            return (
+                Some(ConnectError::Validation {
+                    field: "driver",
+                    reason: format!("未知 driver：{}", driver.trim()),
+                }),
+                SyncOutcome::Proceed,
+            );
+        };
+        match ConnectDraft::normalize_base_url(base_url) {
+            Ok(url) => {
+                session.draft.source = Some(ProviderSource::new_owned(trimmed_name.to_string()));
+                session.draft.driver = Some(entry.driver);
+                session.draft.base_url = Some(url);
+                session.stage = ConnectStage::EditCredential;
+                (None, SyncOutcome::Proceed)
+            }
+            Err(err) => (
+                Some(ConnectError::Validation {
+                    field: "endpoint",
+                    reason: err.message().to_string(),
+                }),
+                SyncOutcome::Proceed,
+            ),
+        }
+    }
+
     fn sync_select_provider(
         &self,
         session: &mut ConnectSession,
         source: ProviderSource,
     ) -> (Option<ConnectError>, SyncOutcome) {
-        if self.catalog_entry(source).is_none() {
+        if self.catalog_entry(&source).is_none() {
             return (
                 Some(ConnectError::CatalogUnavailable {
                     reason: format!("未知 source: {}", source.as_str()),
@@ -556,13 +613,14 @@ impl ConnectAppService {
                 SyncOutcome::Proceed,
             );
         }
-        let entry = self.catalog_entry(source).expect("checked above");
+        let entry = self.catalog_entry(&source).expect("checked above");
+        let source_key = source.as_str().to_string();
         session.draft.source = Some(source);
         session.draft.driver = Some(entry.driver);
         if session
             .existing_provider
             .as_ref()
-            .is_some_and(|provider| provider.source_key == source.as_str())
+            .is_some_and(|provider| provider.source_key == source_key)
         {
             session.stage = ConnectStage::ConfirmOverwrite;
             return (None, SyncOutcome::Proceed);
@@ -611,6 +669,7 @@ impl ConnectAppService {
                 super::states::ExistingCredentialStatus::Present
             ) {
                 session.draft.preserve_existing_credential();
+                session.draft.preserved_api_key = provider.api_key.clone();
             } else {
                 session.draft.set_user_credential(String::new());
             }
@@ -629,6 +688,7 @@ impl ConnectAppService {
         session.draft.credential = crate::connect::draft::CredentialState::NotSet;
         session.draft.provider_user_agent = None;
         session.draft.credential_mask = None;
+        session.draft.preserved_api_key = None;
         (None, SyncOutcome::Proceed)
     }
 
@@ -636,10 +696,15 @@ impl ConnectAppService {
         &self,
         session: &mut ConnectSession,
         base_url: &str,
+        api_style: Option<&str>,
     ) -> (Option<ConnectError>, SyncOutcome) {
         match ConnectDraft::normalize_base_url(base_url) {
             Ok(value) => {
                 session.draft.base_url = Some(value);
+                session.draft.api_style = api_style
+                    .map(str::trim)
+                    .filter(|style| !style.is_empty())
+                    .map(str::to_string);
                 session.stage = ConnectStage::EditCredential;
                 (None, SyncOutcome::Proceed)
             }
@@ -693,7 +758,7 @@ impl ConnectAppService {
         session: &mut ConnectSession,
         index: usize,
     ) -> (Option<ConnectError>, SyncOutcome) {
-        let source = match session.draft.source {
+        let source = match session.draft.source.clone() {
             Some(s) => s,
             None => {
                 return (
@@ -705,7 +770,7 @@ impl ConnectAppService {
                 );
             }
         };
-        let entry = match self.catalog_entry(source) {
+        let entry = match self.catalog_entry(&source) {
             Some(e) => e,
             None => {
                 return (
@@ -875,7 +940,7 @@ impl ConnectAppService {
         resolve_provider_user_agent_str(assemble_provider_user_agent_inputs(
             ProviderUserAgentRequest {
                 provider_user_agent: draft.provider_user_agent.as_deref(),
-                source_key: draft.source.map(ProviderSource::as_str),
+                source_key: draft.source.as_ref().map(ProviderSource::as_str),
                 driver: draft.driver.map(DriverId::as_str),
                 global_user_agent: self.global_user_agent.as_deref(),
             },
@@ -933,9 +998,10 @@ fn bump_revision(revision: ConnectRevision) -> ConnectRevision {
 
 fn project_draft(draft: &ConnectDraft) -> ConnectDraftView {
     ConnectDraftView {
-        source: draft.source,
+        source: draft.source.clone(),
         driver: draft.driver,
         base_url: draft.base_url.clone(),
+        api_style: draft.api_style.clone(),
         has_api_key: draft.has_api_key(),
         provider_user_agent: draft.provider_user_agent.clone(),
         credential_mask: draft.credential_mask.clone(),

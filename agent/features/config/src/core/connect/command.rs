@@ -43,15 +43,25 @@ pub enum ConnectCommand {
     SelectProvider {
         source: ProviderSource,
     },
+    /// 进入完全自定义 Provider 编辑页（名称 / driver / endpoint 全手填）。
+    BeginCustomProvider,
+    /// 提交自定义 Provider 三要素；source 名为用户输入（无需在 Catalog）。
+    SelectCustomProvider {
+        name: String,
+        driver: String,
+        base_url: String,
+    },
     /// 确认覆盖现有 Provider，迁移至 EditEndpoint 并以 existing 预填 draft。
     ConfirmOverwrite,
     /// 拒绝覆盖，回退至 SelectProvider 并清空已选 source / driver。
     RejectOverwrite,
 
     // --- EditEndpoint ---
-    /// 设置 base URL，归一化为合法 http(s)。
+    /// 设置 base URL，归一化为合法 http(s)；`api_style` 仅 OpenAI 系 driver
+    /// 有意义（`Some("responses")` 走 Responses API，`None` 为 Chat Completions）。
     SetEndpoint {
         base_url: String,
+        api_style: Option<String>,
     },
 
     // --- EditCredential ---
@@ -128,6 +138,8 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
             Review,
         ],
         ConnectCommand::SelectProvider { .. } => &[SelectProvider],
+        ConnectCommand::BeginCustomProvider => &[SelectProvider],
+        ConnectCommand::SelectCustomProvider { .. } => &[EditCustomProvider],
         ConnectCommand::ConfirmOverwrite | ConnectCommand::RejectOverwrite => &[ConfirmOverwrite],
         ConnectCommand::SetEndpoint { .. } => &[EditEndpoint],
         ConnectCommand::SetCredential { .. } => &[EditCredential],

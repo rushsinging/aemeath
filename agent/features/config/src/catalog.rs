@@ -35,16 +35,23 @@
 /// TUI 只展示 Catalog DTO，禁止自行拼接 source。`ProviderSource::new` 仅允许
 /// 与 [`PROVIDER_CATALOG`] 中已注册的固定名称相等，运行时输入的 source key 必须
 /// 在配置层校验后进入 Config BC。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProviderSource(&'static str);
+/// Provider source 稳定 key。Catalog 条目为 `Borrowed` 静态字面量；
+/// 完全自定义 Provider 经 [`ProviderSource::new_owned`] 持有运行时名称。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProviderSource(std::borrow::Cow<'static, str>);
 
 impl ProviderSource {
     pub const fn new(value: &'static str) -> Self {
-        Self(value)
+        Self(std::borrow::Cow::Borrowed(value))
     }
 
-    pub const fn as_str(self) -> &'static str {
-        self.0
+    /// 持有运行时自定义 source 名称（Connect 向导"完全自定义"路径）。
+    pub fn new_owned(value: String) -> Self {
+        Self(std::borrow::Cow::Owned(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -651,7 +658,7 @@ pub fn is_known_driver(driver: &str) -> bool {
 
 /// 按 driver 查询对应的固定 source 名称（大小写不敏感）。
 pub fn provider_source_for_driver(driver: &str) -> Option<ProviderSource> {
-    find_by_driver(driver).map(|entry| entry.source)
+    find_by_driver(driver).map(|entry| entry.source.clone())
 }
 
 /// 返回 Catalog 中指定 source 的默认 base URL（字符串切片视图）。

@@ -282,6 +282,7 @@ struct ProbeClientSpec {
     max_tokens: u32,
     timeout_secs: u64,
     user_agent: String,
+    api_style: Option<String>,
 }
 
 trait ProbeClientFactory: Send + Sync {
@@ -295,7 +296,7 @@ impl ProbeClientFactory for DefaultProbeClientFactory {
         let client = LlmClient::from_config(LlmConfigOptions {
             driver: spec.driver,
             source_key: "connect-probe".to_string(),
-            api_style: None,
+            api_style: spec.api_style,
             api_key: spec.api_key,
             base_url: spec.base_url,
             model: spec.model,
@@ -345,6 +346,7 @@ impl ProviderProbePort for ProviderProbeAdapter {
                 max_tokens: 1,
                 timeout_secs: timeout.as_secs().max(1),
                 user_agent: request.final_user_agent,
+                api_style: request.api_style,
             })
             .map_err(map_probe_error)?;
         let scope = client

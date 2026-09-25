@@ -7,7 +7,7 @@ use crate::connect::{ConnectDraft, ModelDraft};
 fn draft() -> ConnectDraft {
     let entry = find_by_source("Anthropic").unwrap();
     let mut draft = ConnectDraft::empty();
-    draft.source = Some(entry.source);
+    draft.source = Some(entry.source.clone());
     draft.driver = Some(entry.driver);
     draft.base_url = Some("https://example.test".to_string());
     draft.provider_user_agent = Some("test-agent".to_string());

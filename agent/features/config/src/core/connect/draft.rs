@@ -118,12 +118,18 @@ pub struct ConnectDraft {
     pub source: Option<ProviderSource>,
     pub driver: Option<DriverId>,
     pub base_url: Option<String>,
+    /// OpenAI 系接口风格：`None` = Chat Completions，
+    /// `Some("responses")` = Responses API。anthropic / ollama 忽略。
+    pub api_style: Option<String>,
     pub(crate) credential: CredentialState,
     /// Provider 专属 UA 覆盖。`None` 或全空白等同未配置。
     pub provider_user_agent: Option<String>,
     /// 已保留凭证的展示掩码（来自全局配置快照）；仅用于向导展示，
     /// **NEVER** 存放明文。
     pub credential_mask: Option<String>,
+    /// PreservedFromExisting 路径的明文凭证（服务端内存内持有，供 probe
+    /// 携带）；view **NEVER** 投影，用户输入新值时被替换。
+    pub(crate) preserved_api_key: Option<String>,
     pub model: Option<ModelDraft>,
     pub set_global_default: bool,
 }
@@ -134,9 +140,11 @@ impl ConnectDraft {
             source: None,
             driver: None,
             base_url: None,
+            api_style: None,
             credential: CredentialState::NotSet,
             provider_user_agent: None,
             credential_mask: None,
+            preserved_api_key: None,
             model: None,
             set_global_default: false,
         }
@@ -148,13 +156,15 @@ impl ConnectDraft {
         self.credential.is_present()
     }
 
-    /// API key 明文（仅供 service 内部使用）。`PreservedFromExisting`
-    /// 路径返回 `None`。外部路径必须走
-    /// [`ConnectDraft::has_api_key`] 或 [`ConnectDraftView::has_api_key`]。
+    /// API key 明文（仅供 service 内部使用，如 probe 携带凭证）。
+    /// `UserSet` 返回用户输入；`PreservedFromExisting` 返回快照明文。
+    /// 外部路径必须走 [`ConnectDraft::has_api_key`] 或
+    /// [`ConnectDraftView::has_api_key`]。
     pub(crate) fn api_key_plaintext(&self) -> Option<&str> {
         match &self.credential {
             CredentialState::UserSet { api_key } => Some(api_key.as_str()),
-            _ => None,
+            CredentialState::PreservedFromExisting => self.preserved_api_key.as_deref(),
+            CredentialState::NotSet => None,
         }
     }
 
@@ -174,6 +184,7 @@ impl ConnectDraft {
         } else {
             CredentialState::UserSet { api_key: raw }
         };
+        self.preserved_api_key = None;
     }
 
     /// 在 ConfirmOverwrite 路径上确认保留旧 key。

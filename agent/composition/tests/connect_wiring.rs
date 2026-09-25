@@ -314,7 +314,7 @@ async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest(
     std::fs::write(store.config_path(), r#"{"language":"external"}"#).unwrap();
     let mut draft = config::connect::ConnectDraft::empty();
     let entry = config::catalog::find_by_source("Anthropic").unwrap();
-    draft.source = Some(entry.source);
+    draft.source = Some(entry.source.clone());
     draft.driver = Some(entry.driver);
     draft.base_url = Some("https://example.test".to_string());
     draft.model = Some(config::connect::ModelDraft {
