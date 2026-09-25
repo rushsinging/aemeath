@@ -110,6 +110,16 @@ pub enum UsageQueryError {
     InvalidCursor,
 }
 
+impl std::fmt::Display for UsageQueryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UsageQueryError::Storage(message) => write!(formatter, "存储读取失败: {message}"),
+            UsageQueryError::InvalidRange => write!(formatter, "非法查询区间"),
+            UsageQueryError::InvalidCursor => write!(formatter, "非法分页游标"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UsageQueryWarning {
     CorruptLine { stream: String, line_number: u64 },

@@ -4,10 +4,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::{
-    AppendLogStream, UsageAppendStorePort, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,
-    UsageRecord,
-};
+use crate::domain::{UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1, UsageRecord};
+use crate::ports::{AppendLogStream, UsageAppendStorePort};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UsageWorkerConfig {

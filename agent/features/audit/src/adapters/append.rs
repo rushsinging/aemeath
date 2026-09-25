@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use sdk::SessionId;
 use storage::{SafeOpenOptions, SafePathSegment, SafeStorageFileType, SafeStorageRoot};
 
-use crate::{
+use crate::ports::{
     AppendLogError, AppendLogLine, AppendLogNamespace, AppendLogReader, AppendLogStream,
     UsageAppendStorePort,
 };

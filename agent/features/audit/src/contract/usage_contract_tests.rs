@@ -1,4 +1,4 @@
-use audit::{
+use crate::domain::{
     Pagination, TimeRange, UsageCursor, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,
     UsageQuery, UsageRecord, CURRENT_USAGE_SCHEMA_VERSION,
 };

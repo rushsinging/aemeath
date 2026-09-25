@@ -6,9 +6,9 @@ use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use tokio::sync::{mpsc, Semaphore};
 
 use super::ingest::{start_usage_worker, UsageWorkerConfig};
-use crate::{
+use crate::domain::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use crate::ports::{
     AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
-    UsageDropReason, UsageEmitOutcome, UsageRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
