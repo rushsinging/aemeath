@@ -1543,7 +1543,6 @@
         "ConfigUpdate",
         "ConfigUpdateError",
         "ConfigValidator",
-        "ConfigWiring",
         "ConfigWriter",
         "EnvAdapter",
         "EnvSource",
@@ -1557,11 +1556,7 @@
         "ProjectConfigParticipant",
         "ReadyConfigCommit",
         "encode_native_patch",
-        "merge_native_patches",
-        "native_override_store",
-        "wire_project_config",
-        "wire_project_config_with_agents_dir",
-        "wire_project_config_with_cli"
+        "merge_native_patches"
       ],
       "reason": "F-2：config crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -1700,19 +1695,15 @@
         "ToolTerminalReceipt",
         "Urgency",
         "WorkspaceSkillQueryFactory",
-        "api",
         "assess_guidance",
         "autocompact_threshold",
         "capture_session_lifecycle",
-        "compact",
-        "context_port",
         "decode_session",
         "effective_context_window",
         "estimate_message_tokens",
         "estimate_messages_tokens",
         "estimate_tokens",
         "estimate_tool_schemas_tokens",
-        "guidance",
         "init_guidance_dir",
         "isolated_context",
         "isolated_context_with_skill",
@@ -1722,9 +1713,7 @@
         "project_dir_segment",
         "resolve_guidance",
         "resolve_guidance_async",
-        "session",
         "session_project_dir",
-        "skill",
         "skill_prompt_budget",
         "test_support",
         "universal_execution_discipline",
@@ -1766,19 +1755,8 @@
         "HookSubscriptionExecutionEvent",
         "HookSubscriptionExecutionObserver",
         "HookSubscriptionExecutionTerminal",
-        "InstructionsInput",
-        "MAX_ATTEMPTS",
-        "PermissionInput",
-        "PostToolBatchInput",
-        "PostToolUseFailureInput",
-        "PostToolUseInput",
-        "PreToolUseInput",
         "ProtocolViolation",
-        "StopInput",
-        "SubRunInput",
-        "SubRunStopInput",
         "SubscriptionError",
-        "TaskInput",
         "build_dispatcher",
         "classify_directive"
       ],
@@ -1794,23 +1772,13 @@
       },
       "allowed_symbols": [
         "*",
-        "AtomicDatasetMemoryStore",
         "AtomicDatasetReflectionHistoryStore",
         "CompactResult",
         "DatasetMemoryOpener",
         "EvictionCandidate",
         "FileLegacyMemorySourceFactory",
         "InMemoryMemory",
-        "LegacyMemoryLayer",
-        "LegacyMemoryMember",
-        "LegacyMemorySource",
-        "LegacyMemorySourceError",
-        "LegacyMemorySourceFactory",
         "MemoryCategory",
-        "MemoryCommitReceipt",
-        "MemoryCommitVisibility",
-        "MemoryDataset",
-        "MemoryDatasetStore",
         "MemoryEntry",
         "MemoryError",
         "MemoryId",
@@ -1828,7 +1796,6 @@
         "MemorySearchResult",
         "MemorySource",
         "MemoryStats",
-        "MemoryStorageErrorKind",
         "MemorySuggestion",
         "NoOpMemory",
         "ProjectMemoryKey",
@@ -1852,8 +1819,7 @@
         "ReflectionWorkflow",
         "ReflectionWorkflowError",
         "RestoreResult",
-        "WriteResult",
-        "map_storage_error"
+        "WriteResult"
       ],
       "reason": "F-2：memory crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -1893,7 +1859,6 @@
         "GitOperationError",
         "GitProbeError",
         "PreparedWorkspaceRestore",
-        "ProjectContext",
         "ProjectIdentity",
         "WorkspaceControl",
         "WorkspaceError",
@@ -1921,7 +1886,6 @@
       "allowed_symbols": [
         "CancellationSignal",
         "CapabilityFingerprint",
-        "DEFAULT_TIMEOUT_SECS",
         "InvocationDelta",
         "InvocationEvent",
         "InvocationOptions",
@@ -1929,11 +1893,9 @@
         "InvocationScope",
         "InvocationStream",
         "LlmClient",
-        "LlmClientPool",
         "LlmConfigOptions",
         "LlmError",
         "LlmProvider",
-        "LlmProviderGateway",
         "ModelCapability",
         "ModelId",
         "ModelToolSchema",
@@ -1953,9 +1915,7 @@
         "RequestedInvocationOptions",
         "ResolvedInvocationOptions",
         "SystemBlock",
-        "TransportPool",
-        "composition",
-        "test_harness"
+        "TransportPool"
       ],
       "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -2088,9 +2048,7 @@
         "WriteOptions",
         "WriteReceipt",
         "decide_blob_recovery",
-        "decide_orphan_previous",
-        "file_system_blob",
-        "file_system_dataset"
+        "decide_orphan_previous"
       ],
       "reason": "F-2：storage crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -2188,7 +2146,6 @@
         "ImageData",
         "InputSafetyDeclaration",
         "InvocationSource",
-        "LOG_TARGET",
         "LoadedSkill",
         "McpConnectionManager",
         "McpServerConfig",
@@ -2268,7 +2225,6 @@
         "WorkspaceReadAccess",
         "ask_user_suspension",
         "compile_role_profile",
-        "composition",
         "format_tool_input_error",
         "is_readonly_command",
         "role_profile_name",
@@ -2280,19 +2236,6 @@
         "wire_skills"
       ],
       "reason": "F-2：tools crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
-    },
-    {
-      "id": "facade.workflow.root-exports",
-      "assertion": "facade_whitelist",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/workflow/src"
-      },
-      "allowed_symbols": [
-        "adaptive_reasoning"
-      ],
-      "reason": "F-2：workflow crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
     },
     {
