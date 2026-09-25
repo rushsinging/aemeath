@@ -83,7 +83,11 @@ pub enum ConnectCommand {
         models: Vec<super::draft::ModelDraft>,
     },
     /// 切换至 EditCustomModel 阶段（添加 / 编辑模型，可无限次进入）。
-    EnterCustomModel,
+    /// `target_model` 为模型页当前高亮 option 对应的已配置模型 id（编辑目标）；
+    /// `None` = 添加新模型。
+    EnterCustomModel {
+        target_model: Option<String>,
+    },
     /// 在 EditCustomModel 阶段提交模型字段；model_id 命中已有条目即编辑
     /// （替换属性），否则追加，随后返回模型页。
     UpsertCustomModel {
@@ -142,7 +146,7 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
         ConnectCommand::SetEndpoint { .. } => &[EditEndpoint],
         ConnectCommand::SetCredential { .. } => &[EditCredential],
         ConnectCommand::SetProviderUserAgent { .. } => &[EditUserAgent],
-        ConnectCommand::SetSelectedModels { .. } | ConnectCommand::EnterCustomModel => {
+        ConnectCommand::SetSelectedModels { .. } | ConnectCommand::EnterCustomModel { .. } => {
             &[SelectModel]
         }
         ConnectCommand::UpsertCustomModel { .. } => &[EditCustomModel],

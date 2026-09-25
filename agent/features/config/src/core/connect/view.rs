@@ -58,6 +58,8 @@ pub struct ConnectDraftView {
     /// 已保留凭证的展示掩码（首 4 + `****` + 尾 4）。
     pub credential_mask: Option<String>,
     pub models: Vec<ModelDraftView>,
+    /// "添加 / 编辑模型"目标（模型页高亮项）；None = 添加。
+    pub editing_model_id: Option<String>,
     pub set_global_default: bool,
 }
 

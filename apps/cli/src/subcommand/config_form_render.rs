@@ -166,7 +166,7 @@ fn render_fields(
                             let highlighted =
                                 is_focused && option_index == interaction.selected_option;
                             let checked = chosen.contains(&option_index);
-                            let option_marker = if checked { "    ☑ " } else { "    ☐ " };
+                            let option_marker = if checked { "    [✓] " } else { "    [ ] " };
                             let option_style = if highlighted {
                                 Style::default().fg(theme::ACCENT_BRIGHT)
                             } else {

@@ -216,7 +216,12 @@ async fn ready_to_probe_for_source(
         },
     )
     .await;
-    view = advance(service, view, ConnectCommand::EnterCustomModel).await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::EnterCustomModel { target_model: None },
+    )
+    .await;
     view = advance(
         service,
         view,

@@ -134,6 +134,8 @@ pub struct ConnectDraft {
     /// 携带）；view **NEVER** 投影，用户输入新值时被替换。
     pub(crate) preserved_api_key: Option<String>,
     pub models: Vec<ModelDraft>,
+    /// "添加 / 编辑模型"目标：模型页高亮的已配置模型 id；None = 添加。
+    pub editing_model_id: Option<String>,
     pub set_global_default: bool,
 }
 
@@ -149,6 +151,7 @@ impl ConnectDraft {
             credential_mask: None,
             preserved_api_key: None,
             models: Vec::new(),
+            editing_model_id: None,
             set_global_default: false,
         }
     }

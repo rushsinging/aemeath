@@ -72,7 +72,11 @@ pub enum ConnectCommand {
     SetSelectedModels {
         models: Vec<ConnectModelSpec>,
     },
-    EnterCustomModel,
+    EnterCustomModel {
+        /// 编辑目标模型 id（模型页高亮项）；None = 添加。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_model: Option<String>,
+    },
     UpsertCustomModel {
         model: ConnectModelSpec,
     },

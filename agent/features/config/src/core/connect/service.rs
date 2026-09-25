@@ -489,7 +489,9 @@ impl ConnectAppService {
                 self.sync_set_provider_user_agent(session, raw.as_deref())
             }
             Cmd::SetSelectedModels { models } => self.sync_set_selected_models(session, models),
-            Cmd::EnterCustomModel => self.sync_enter_custom_model(session),
+            Cmd::EnterCustomModel { target_model } => {
+                self.sync_enter_custom_model(session, target_model.clone())
+            }
             Cmd::UpsertCustomModel { model } => self.sync_upsert_custom_model(session, model),
             Cmd::SetGlobalDefault { set_as_default } => {
                 self.sync_set_global_default(session, *set_as_default)
@@ -773,7 +775,9 @@ impl ConnectAppService {
     fn sync_enter_custom_model(
         &self,
         session: &mut ConnectSession,
+        target_model: Option<String>,
     ) -> (Option<ConnectError>, SyncOutcome) {
+        session.draft.editing_model_id = target_model;
         session.stage = ConnectStage::EditCustomModel;
         (None, SyncOutcome::Proceed)
     }
@@ -966,6 +970,7 @@ fn project_draft(draft: &ConnectDraft) -> ConnectDraftView {
         has_api_key: draft.has_api_key(),
         provider_user_agent: draft.provider_user_agent.clone(),
         credential_mask: draft.credential_mask.clone(),
+        editing_model_id: draft.editing_model_id.clone(),
         models: draft
             .models
             .iter()

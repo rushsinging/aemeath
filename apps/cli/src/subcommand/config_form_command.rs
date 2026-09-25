@@ -231,6 +231,10 @@ impl ConfigFormModel {
         }
     }
 
+    fn current_field(&self) -> Option<&sdk::ConfigFormField> {
+        self.view.page.fields.get(self.focused_field)
+    }
+
     fn submit_or_invoke(&mut self) -> Option<ConfigFormEffect> {
         if self.view.busy.is_some() || self.view.terminal.is_some() {
             return None;
@@ -250,12 +254,37 @@ impl ConfigFormModel {
                 .page
                 .actions
                 .get(self.focused_action)
-                .map(|action| ConfigFormEffect::InvokeAction {
-                    command: sdk::ConfigFormInvokeAction {
-                        session_id: self.view.session_id.clone(),
-                        expected_revision: self.view.revision,
-                        action_id: action.id.clone(),
-                    },
+                .map(|action| {
+                    // 附加当前高亮 option 作为参数后缀（如编辑目标
+                    // enter_custom_model:configured-xxx）；业务侧解析主名，
+                    // 无高亮 option 时不附加，其他 action 忽略后缀。
+                    let option_suffix = self
+                        .current_field()
+                        .filter(|field| {
+                            matches!(
+                                field.field_type,
+                                sdk::ConfigFormFieldType::SingleSelect
+                                    | sdk::ConfigFormFieldType::MultiSelect
+                            )
+                        })
+                        .and_then(|field| {
+                            field
+                                .options
+                                .get(self.selected_option)
+                                .map(|option| format!(":{}", option.id.as_str()))
+                        })
+                        .unwrap_or_default();
+                    ConfigFormEffect::InvokeAction {
+                        command: sdk::ConfigFormInvokeAction {
+                            session_id: self.view.session_id.clone(),
+                            expected_revision: self.view.revision,
+                            action_id: sdk::ConfigFormActionId(format!(
+                                "{}{}",
+                                action.id.as_str(),
+                                option_suffix
+                            )),
+                        },
+                    }
                 });
         }
         self.save_focused_field_input();
@@ -371,7 +400,10 @@ impl ConfigFormModel {
     }
 
     fn navigate_down(&mut self) {
-        if self.focused_field_type() == Some(sdk::ConfigFormFieldType::SingleSelect) {
+        if matches!(
+            self.focused_field_type(),
+            Some(sdk::ConfigFormFieldType::SingleSelect | sdk::ConfigFormFieldType::MultiSelect)
+        ) {
             self.select_next();
         } else if self.view.page.fields.len() > 1 {
             self.focus_next_field();
@@ -381,7 +413,10 @@ impl ConfigFormModel {
     }
 
     fn navigate_up(&mut self) {
-        if self.focused_field_type() == Some(sdk::ConfigFormFieldType::SingleSelect) {
+        if matches!(
+            self.focused_field_type(),
+            Some(sdk::ConfigFormFieldType::SingleSelect | sdk::ConfigFormFieldType::MultiSelect)
+        ) {
             self.select_previous();
         } else if self.view.page.fields.len() > 1 {
             self.focus_previous_field();

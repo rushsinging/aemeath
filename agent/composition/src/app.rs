@@ -661,7 +661,7 @@ fn config_command(
                 })
                 .collect(),
         },
-        Source::EnterCustomModel => Target::EnterCustomModel,
+        Source::EnterCustomModel { target_model } => Target::EnterCustomModel { target_model },
         Source::UpsertCustomModel { model } => Target::UpsertCustomModel {
             model: config::connect::ModelDraft {
                 model_id: model.model_id,

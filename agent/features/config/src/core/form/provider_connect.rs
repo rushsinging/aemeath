@@ -238,8 +238,20 @@ fn page_for_connect(
             vec![recommended_models_field(connect, catalog)?],
         ),
         ConnectStage::EditCustomModel => {
-            // 预填 draft 首个已选模型（编辑场景）；添加场景用户直接覆盖。
-            let editing = connect.draft.models.first();
+            // 预填编辑目标（模型页高亮项，经 action 后缀传入）；
+            // 无目标时回落首个已选模型；纯添加场景用户直接覆盖输入。
+            let editing = connect
+                .draft
+                .editing_model_id
+                .as_deref()
+                .and_then(|target| {
+                    connect
+                        .draft
+                        .models
+                        .iter()
+                        .find(|model| model.model_id == target)
+                })
+                .or_else(|| connect.draft.models.first());
             let mut effort_field = select_field(
                 "reasoning_effort",
                 "Reasoning Effort",
@@ -527,16 +539,29 @@ fn action_for_id(action_id: &str) -> Result<ConnectCommand, ProviderConnectFormE
     Ok(match action_id {
         "confirm_overwrite" => ConnectCommand::ConfirmOverwrite,
         "reject_overwrite" => ConnectCommand::RejectOverwrite,
-        "enter_custom_model" => ConnectCommand::EnterCustomModel,
         "skip_probe" => ConnectCommand::SkipProbe,
         "begin_probe" => ConnectCommand::BeginProbe,
         "continue_after_probe" => ConnectCommand::ContinueAfterProbe,
         "edit_after_probe_failure" => ConnectCommand::EditAfterProbeFailure,
         "confirm_save" | "retry_save" => ConnectCommand::ConfirmSave,
-        _ => {
-            return Err(ProviderConnectFormError::InvalidSubmission(format!(
-                "未知动作：{action_id}"
-            )))
+        // 支持 `{name}:{option_id}` 后缀（TUI 附带高亮 option 作参数）。
+        raw => {
+            let (main, target) = raw.split_once(':').unwrap_or((raw, ""));
+            match main {
+                "enter_custom_model" => ConnectCommand::EnterCustomModel {
+                    target_model: (!target.is_empty()).then(|| {
+                        target
+                            .strip_prefix("configured-")
+                            .unwrap_or(target)
+                            .to_string()
+                    }),
+                },
+                _ => {
+                    return Err(ProviderConnectFormError::InvalidSubmission(format!(
+                        "未知动作：{action_id}"
+                    )))
+                }
+            }
         }
     })
 }
