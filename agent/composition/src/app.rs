@@ -57,18 +57,12 @@ impl ConnectFacade {
     ) -> Result<sdk::ConnectView, sdk::SdkError> {
         let command = match command {
             sdk::ConnectCommand::SelectProvider { source } => {
-                let existing_provider = self.existing_provider(&source).await?;
-                if let Some(existing_provider) = existing_provider {
-                    self.service
-                        .attach_existing_provider(
-                            config::connect::ConnectSessionId::from_transport_str(&session_id.0)
-                                .map_err(sdk::SdkError::Internal)?,
-                            config::connect::ConnectRevision::from_value(revision.0),
-                            existing_provider,
-                        )
-                        .await
-                        .map_err(connect_sdk_error)?;
-                }
+                self.attach_existing_if_known(
+                    &session_id,
+                    config::connect::ConnectRevision::from_value(revision.0),
+                    &source,
+                )
+                .await?;
                 sdk::ConnectCommand::SelectProvider { source }
             }
             other => other,
@@ -84,6 +78,29 @@ impl ConnectFacade {
             .await
             .map(sdk_view)
             .map_err(connect_sdk_error)
+    }
+
+    /// 选择 source 前查全局配置已有 Provider 并附加快照（单点 helper）。
+    ///
+    /// source 选择有两条入口通向同一状态机——sdk 命令路径（`apply`）与
+    /// TUI 表单路径（`submit_page`）；两者**MUST**都经本 helper 完成
+    /// existing 查询与 attach，否则 ConfirmOverwrite 与已有值预填
+    ///（endpoint / key 掩码 / UA / 模型）在该入口静默失效。
+    async fn attach_existing_if_known(
+        &self,
+        session_id: &sdk::ConnectSessionId,
+        revision: config::connect::ConnectRevision,
+        source: &str,
+    ) -> Result<(), sdk::SdkError> {
+        if let Some(existing_provider) = self.existing_provider(source).await? {
+            let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
+                .map_err(sdk::SdkError::Internal)?;
+            self.service
+                .attach_existing_provider(session_id, revision, existing_provider)
+                .await
+                .map_err(connect_sdk_error)?;
+        }
+        Ok(())
     }
 
     async fn existing_provider(
@@ -163,6 +180,15 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = sdk_form_command(command.values, &current)?;
+        // 表单路径与 sdk 命令路径同等对待（见 attach_existing_if_known）。
+        if let config::connect::ConnectCommand::SelectProvider { ref source } = form_command {
+            self.attach_existing_if_known(
+                &sdk::ConnectSessionId(command.session_id.0.clone()),
+                config::connect::ConnectRevision::from_value(command.expected_revision.0),
+                source.as_str(),
+            )
+            .await?;
+        }
         let connect_view = match self
             .service
             .apply(

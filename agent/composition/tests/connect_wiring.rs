@@ -206,6 +206,56 @@ async fn first_chat_preflight_rejects_non_interactive_missing_config_without_cre
 }
 
 #[tokio::test]
+async fn form_path_selecting_existing_provider_confirms_and_prefills_credential_mask() {
+    // TUI 表单路径（start_form/submit_page）选择已有 source 必须与 sdk 命令
+    // 路径同等触发 ConfirmOverwrite，确认后 EditCredential 表单显示掩码。
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("aemeath.json"),
+        r#"{"models":{"providers":{"Anthropic":{"driver":"anthropic","baseUrl":"https://existing.test","apiKey":"existing-secret-key-1234","models":[{"id":"existing-model","contextWindow":1000,"maxTokens":100}]}}}}"#,
+    )
+    .unwrap();
+    let bootstrap = build_connect_bootstrap_with_agents_dir(temp.path())
+        .await
+        .unwrap();
+    let start = bootstrap
+        .forms
+        .start_form(
+            sdk::ConfigFormWorkflowId("provider_connect".to_string()),
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await
+        .unwrap();
+
+    let selected = bootstrap
+        .forms
+        .submit_page(sdk::ConfigFormSubmitPage {
+            session_id: start.session_id.clone(),
+            expected_revision: start.revision,
+            values: vec![sdk::ConfigFormFieldValue {
+                field_id: sdk::ConfigFormFieldId("provider_source".to_string()),
+                value: sdk::ConfigFormValue::SelectedOption(sdk::ConfigFormOptionId(
+                    "Anthropic".to_string(),
+                )),
+            }],
+        })
+        .await
+        .unwrap();
+    assert_eq!(selected.page.id.as_str(), "confirm_overwrite");
+
+    let confirmed = bootstrap
+        .forms
+        .invoke_action(sdk::ConfigFormInvokeAction {
+            session_id: start.session_id.clone(),
+            expected_revision: selected.revision,
+            action_id: sdk::ConfigFormActionId("confirm_overwrite".to_string()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(confirmed.page.id.as_str(), "edit_endpoint");
+}
+
+#[tokio::test]
 async fn selecting_an_existing_provider_requires_overwrite_confirmation() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
