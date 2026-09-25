@@ -40,6 +40,7 @@ mod service_tests;
 pub use command::ConnectCommand;
 pub use commit::{
     ConnectCommitError, ConnectCommitPort, ConnectCommitReceipt, ConnectCommitRequest,
+    ConnectProviderDirectory,
 };
 pub use draft::{ConnectDraft, DraftValidationError, ModelDraft};
 pub use error::{ConnectError, PersistErrorKind};

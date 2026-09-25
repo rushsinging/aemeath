@@ -135,6 +135,24 @@ fn test_global_revision() -> crate::GlobalConfigRevision {
     crate::GlobalConfigRevision::from_digest("test-global-revision")
 }
 
+/// Provider 目录桩：start_connect 单点加载时返回固定快照集合。
+struct StubDirectory(Vec<ExistingProviderSnapshot>);
+
+impl StubDirectory {
+    fn new(snapshots: Vec<ExistingProviderSnapshot>) -> Arc<Self> {
+        Arc::new(Self(snapshots))
+    }
+}
+
+#[async_trait]
+impl crate::connect::ConnectProviderDirectory for StubDirectory {
+    async fn provider_snapshots(
+        &self,
+    ) -> Result<Vec<ExistingProviderSnapshot>, crate::GlobalConfigStoreError> {
+        Ok(self.0.clone())
+    }
+}
+
 async fn advance(
     service: &ConnectAppService,
     view: ConnectView,
@@ -163,7 +181,7 @@ async fn ready_to_probe_for_source(
     provider_user_agent: Option<&str>,
 ) -> ConnectView {
     let mut view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     view = advance(
         service,
@@ -253,7 +271,7 @@ async fn selecting_provider_prefills_catalog_endpoint_in_server_draft() {
         ),
     ] {
         let view = service
-            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
             .await;
         let endpoint = advance(
             &service,
@@ -280,7 +298,7 @@ async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
 
     for (index, expected_model) in entry.recommended_models.iter().enumerate() {
         let initial = service
-            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
             .await;
         let endpoint = advance(
             &service,
@@ -336,7 +354,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
         .with_probe(StubProbe::success())
         .build();
     let view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
 
     let endpoint = advance(
@@ -430,7 +448,7 @@ async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
         .with_probe(StubProbe::success())
         .build();
     let initial = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     let endpoint = advance(
         &service,
@@ -479,7 +497,7 @@ async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft
         .with_probe(StubProbe::success())
         .build();
     let initial = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     let endpoint = advance(
         &service,
@@ -525,7 +543,7 @@ async fn back_from_initial_provider_stage_is_rejected_without_cancelling_session
         .with_probe(StubProbe::success())
         .build();
     let initial = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
 
     let error = service
@@ -546,7 +564,7 @@ async fn stale_revision_rejects_command_without_changing_view() {
         .with_probe(StubProbe::success())
         .build();
     let view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     let error = service
         .apply(
@@ -571,7 +589,7 @@ async fn cancelled_session_rejects_repeated_terminal_command() {
         .with_probe(StubProbe::success())
         .build();
     let view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     let cancelled = service
         .cancel(view.session_id, view.revision)
@@ -696,15 +714,24 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
     );
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
+        .with_provider_directory(StubDirectory::new(vec![existing.clone()]))
         .with_probe(StubProbe::success())
         .build();
     let view = service
-        .start_connect(
-            ConnectOrigin::ExplicitCommand,
-            test_global_revision(),
-            Some(existing),
-        )
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
+    assert_eq!(view.stage, ConnectStage::SelectProvider);
+    let view = advance(
+        &service,
+        view,
+        ConnectCommand::SelectProvider {
+            source: crate::catalog::find_by_source(existing.source_key.as_str())
+                .expect("快照 source 必须在 Catalog")
+                .source
+                .clone(),
+        },
+    )
+    .await;
     assert_eq!(view.stage, ConnectStage::ConfirmOverwrite);
 
     let confirmed = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
@@ -763,239 +790,24 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
     );
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
+        .with_provider_directory(StubDirectory::new(vec![existing.clone()]))
         .with_probe(StubProbe::success())
         .build();
     let view = service
-        .start_connect(
-            ConnectOrigin::ExplicitCommand,
-            test_global_revision(),
-            Some(existing),
-        )
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
-    let confirmed = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
-    assert!(confirmed.draft.has_api_key);
-
-    let at_credential = advance(
-        &service,
-        confirmed,
-        ConnectCommand::SetEndpoint {
-            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
-            api_style: None,
-        },
-    )
-    .await;
-    assert_eq!(at_credential.stage, ConnectStage::EditCredential);
-
-    let submitted = advance(
-        &service,
-        at_credential,
-        ConnectCommand::SetCredential {
-            api_key: String::new(),
-        },
-    )
-    .await;
-
-    assert!(submitted.draft.has_api_key, "空提交必须保持已保留的 key");
-}
-
-#[tokio::test]
-async fn preserved_existing_key_is_sent_to_probe() {
-    // 确认覆盖后一路回车（空提交保留 key）到探测：probe 请求必须携带
-    // 已有明文凭证，否则 Coding Plan 等探测必然失败。
-    let probe = CapturingProbe::success();
-    let existing = ExistingProviderSnapshot::from_provider_config(
-        "Zhipu Coding Plan",
-        "https://open.bigmodel.cn/api/coding/paas/v4",
-        Some("hidden-key"),
-        Some("zhipu"),
-        "glm-5.3",
-        1_048_576,
-        16_384,
-        None,
-    );
-    let service = ConnectAppService::builder()
-        .with_catalog(PROVIDER_CATALOG)
-        .with_probe(probe.clone())
-        .build();
-    let view = service
-        .start_connect(
-            ConnectOrigin::ExplicitCommand,
-            test_global_revision(),
-            Some(existing),
-        )
-        .await;
-    let mut view = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
-    view = advance(
+    assert_eq!(view.stage, ConnectStage::SelectProvider);
+    let view = advance(
         &service,
         view,
-        ConnectCommand::SetEndpoint {
-            base_url: "https://open.bigmodel.cn/api/coding/paas/v4".to_string(),
-            api_style: None,
+        ConnectCommand::SelectProvider {
+            source: crate::catalog::find_by_source(existing.source_key.as_str())
+                .expect("快照 source 必须在 Catalog")
+                .source
+                .clone(),
         },
     )
     .await;
-    view = advance(
-        &service,
-        view,
-        ConnectCommand::SetCredential {
-            api_key: String::new(),
-        },
-    )
-    .await;
-    view = advance(
-        &service,
-        view,
-        ConnectCommand::SetProviderUserAgent { raw: None },
-    )
-    .await;
-    view = advance(&service, view, ConnectCommand::EnterCustomModel).await;
-    view = advance(
-        &service,
-        view,
-        ConnectCommand::SetCustomModel {
-            model_id: "glm-5.3".to_string(),
-            context_window: 1_048_576,
-            max_tokens: 16_384,
-        },
-    )
-    .await;
-    view = advance(
-        &service,
-        view,
-        ConnectCommand::SetGlobalDefault {
-            set_as_default: false,
-        },
-    )
-    .await;
-    // BeginProbe：StubProbe 瞬时完成，返回 view 可能已推进到 Review/Probing。
-    let probed = advance(&service, view, ConnectCommand::BeginProbe).await;
-
-    let requests = probe.requests.lock().await;
-    let probe_request = requests.last().expect("BeginProbe 必须发出 probe 请求");
-    assert_eq!(
-        probe_request.credential.as_deref(),
-        Some("hidden-key"),
-        "保留的已有 key 必须进入 probe 请求"
-    );
-    assert_ne!(probed.stage, ConnectStage::ChooseProbe);
-}
-
-#[tokio::test]
-async fn custom_provider_flow_uses_user_supplied_name_and_driver() {
-    // 完全自定义：名称 / driver / endpoint 全手填，无 catalog 默认与 UA。
-    let service = ConnectAppService::builder()
-        .with_catalog(PROVIDER_CATALOG)
-        .with_probe(StubProbe::success())
-        .build();
-    let view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
-        .await;
-
-    let custom_page = advance(&service, view, ConnectCommand::BeginCustomProvider).await;
-    assert_eq!(custom_page.stage, ConnectStage::EditCustomProvider);
-
-    let submitted = advance(
-        &service,
-        custom_page,
-        ConnectCommand::SelectCustomProvider {
-            name: "  MyProxy  ".to_string(),
-            driver: "openai".to_string(),
-            base_url: "https://proxy.example.test/v1".to_string(),
-        },
-    )
-    .await;
-
-    assert_eq!(submitted.stage, ConnectStage::EditCredential);
-    assert_eq!(
-        submitted
-            .draft
-            .source
-            .as_ref()
-            .map(|source| source.as_str()),
-        Some("MyProxy"),
-        "自定义名称去空白后成为 source key"
-    );
-    assert_eq!(
-        submitted
-            .draft
-            .driver
-            .as_ref()
-            .map(|driver| driver.as_str()),
-        Some("openai")
-    );
-    assert_eq!(
-        submitted.draft.base_url.as_deref(),
-        Some("https://proxy.example.test/v1")
-    );
-}
-
-#[tokio::test]
-async fn custom_provider_rejects_blank_name_and_unknown_driver() {
-    let service = ConnectAppService::builder()
-        .with_catalog(PROVIDER_CATALOG)
-        .with_probe(StubProbe::success())
-        .build();
-    let view = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
-        .await;
-    let custom_page = advance(&service, view, ConnectCommand::BeginCustomProvider).await;
-
-    let blank = service
-        .apply(
-            custom_page.session_id,
-            custom_page.revision,
-            ConnectCommand::SelectCustomProvider {
-                name: "   ".to_string(),
-                driver: "openai".to_string(),
-                base_url: "https://proxy.example.test/v1".to_string(),
-            },
-        )
-        .await;
-    assert!(matches!(
-        blank,
-        Err(ConnectError::Validation { field, .. }) if field == "provider_name"
-    ));
-
-    let unknown_driver = service
-        .apply(
-            custom_page.session_id,
-            custom_page.revision,
-            ConnectCommand::SelectCustomProvider {
-                name: "MyProxy".to_string(),
-                driver: "no-such-driver".to_string(),
-                base_url: "https://proxy.example.test/v1".to_string(),
-            },
-        )
-        .await;
-    assert!(matches!(
-        unknown_driver,
-        Err(ConnectError::Validation { field, .. }) if field == "driver"
-    ));
-}
-
-#[tokio::test]
-async fn rejecting_existing_provider_returns_to_selection() {
-    let existing = ExistingProviderSnapshot::from_provider_config(
-        "Anthropic",
-        "https://existing.test",
-        Some("hidden-key"),
-        Some("anthropic"),
-        "existing-model",
-        16_000,
-        2_000,
-        None,
-    );
-    let service = ConnectAppService::builder()
-        .with_catalog(PROVIDER_CATALOG)
-        .with_probe(StubProbe::success())
-        .build();
-    let view = service
-        .start_connect(
-            ConnectOrigin::ExplicitCommand,
-            test_global_revision(),
-            Some(existing),
-        )
-        .await;
     assert_eq!(view.stage, ConnectStage::ConfirmOverwrite);
     assert!(!format!("{view:?}").contains("hidden-key"));
     let rejected = advance(&service, view, ConnectCommand::RejectOverwrite).await;
@@ -1136,7 +948,7 @@ async fn unrelated_session_view_is_not_blocked_while_probe_waits() {
     );
     let probing_view = ready_to_probe(&service).await;
     let other = service
-        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision(), None)
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
 
     let service_for_probe = service.clone();

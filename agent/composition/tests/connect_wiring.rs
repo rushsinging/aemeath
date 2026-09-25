@@ -328,7 +328,7 @@ async fn connect_facade_maps_identity_revision_origin_and_redacted_view() {
     let facade = ConnectFacade::new(service, store);
 
     let view = facade
-        .start(sdk::ConnectOrigin::ExplicitCommand, None)
+        .start(sdk::ConnectOrigin::ExplicitCommand)
         .await
         .unwrap();
     assert_eq!(view.origin, sdk::ConnectOrigin::ExplicitCommand);
@@ -413,7 +413,7 @@ async fn config_origin_remains_distinct_through_composition_acl() {
     );
     let facade = ConnectFacade::new(service, store);
     let first_chat = facade
-        .start(sdk::ConnectOrigin::FirstChatBootstrap, None)
+        .start(sdk::ConnectOrigin::FirstChatBootstrap)
         .await
         .unwrap();
     assert_eq!(first_chat.origin, sdk::ConnectOrigin::FirstChatBootstrap);

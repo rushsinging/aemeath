@@ -19,7 +19,9 @@ use tokio::sync::Mutex;
 
 use crate::catalog::{DriverId, ProviderCatalogEntry, ProviderSource};
 use crate::connect::command::expected_stages;
-use crate::connect::commit::{ConnectCommitError, ConnectCommitPort, ConnectCommitRequest};
+use crate::connect::commit::{
+    ConnectCommitError, ConnectCommitPort, ConnectCommitRequest, ConnectProviderDirectory,
+};
 use crate::connect::draft::ConnectDraft;
 use crate::connect::error::{command_name as command_name_fn, ConnectError};
 use crate::connect::outcome::ConnectOutcome;
@@ -48,6 +50,11 @@ struct ConnectSession {
     stage: ConnectStage,
     draft: ConnectDraft,
     probe_status: Option<ProbeStatusView>,
+    /// start 时一次性加载的已有 Provider 快照（source key → 脱敏快照）。
+    /// SelectProvider 的 ConfirmOverwrite 判断与预填全部走该内存快照，
+    /// source 选择路径上 **NEVER** 再做 IO。
+    existing_providers: std::collections::HashMap<String, ExistingProviderSnapshot>,
+    /// 当前选中 source 对应的快照（ConfirmOverwrite 阶段的 view 投影）。
     existing_provider: Option<ExistingProviderSnapshot>,
     /// 最近一次命令错误的投影。终态置 `None`，UI 据此判定是否显示提示。
     last_error: Option<ConnectError>,
@@ -60,39 +67,18 @@ impl ConnectSession {
         session_id: ConnectSessionId,
         origin: ConnectOrigin,
         expected_global_revision: crate::GlobalConfigRevision,
-        existing_provider: Option<ExistingProviderSnapshot>,
+        existing_providers: std::collections::HashMap<String, ExistingProviderSnapshot>,
     ) -> Self {
-        let stage = if existing_provider.is_some() {
-            ConnectStage::ConfirmOverwrite
-        } else {
-            ConnectStage::SelectProvider
-        };
-        let mut draft = ConnectDraft::empty();
-        if let Some(provider) = existing_provider.as_ref() {
-            if let Some(catalog_source) = provider.catalog_source() {
-                draft.source = Some(catalog_source);
-            }
-            if let Some(driver) = provider.driver.as_ref().and_then(|d| d.as_known()) {
-                draft.driver = Some(*driver);
-            }
-            if !provider.base_url.is_empty() {
-                draft.base_url = Some(provider.base_url.clone());
-            }
-            // 覆盖确认路径：保留 has_api_key 投影；新凭证在 SetCredential 时由用户重写。
-            // 注意：进入 ConfirmOverwrite 阶段时，session 还没"确认覆盖"，
-            // 因此 credential 仍是 NotSet；待 ConfirmOverwrite 命令调用后
-            // 才切到 PreservedFromExisting。
-            draft.credential = crate::connect::draft::CredentialState::NotSet;
-        }
         Self {
             session_id,
             revision: ConnectRevision::initial(),
             origin,
             expected_global_revision,
-            stage,
-            draft,
+            stage: ConnectStage::SelectProvider,
+            draft: ConnectDraft::empty(),
             probe_status: None,
-            existing_provider,
+            existing_providers,
+            existing_provider: None,
             last_error: None,
             outcome: None,
         }
@@ -106,6 +92,8 @@ pub struct ConnectAppService {
     /// 测试 / 真实 adapter 可能未注入；service 在 Save 路径据此返回
     /// `PersistUnavailable`，确保 UI 立刻失效而非偷偷失败。
     commit: Option<Arc<dyn ConnectCommitPort>>,
+    /// start_connect 单点加载 Provider 目录快照的读端口。
+    provider_directory: Option<Arc<dyn ConnectProviderDirectory>>,
     sessions: Mutex<std::collections::HashMap<ConnectSessionId, Arc<Mutex<ConnectSession>>>>,
     pub(crate) system: SystemInformation,
     pub(crate) version: &'static str,
@@ -121,6 +109,7 @@ pub struct ConnectAppServiceBuilder {
     catalog: Option<&'static [ProviderCatalogEntry]>,
     probe: Option<Arc<dyn ProviderProbePort>>,
     commit_state: CommitSlot,
+    provider_directory: Option<Arc<dyn ConnectProviderDirectory>>,
     system: Option<SystemInformation>,
     version: Option<&'static str>,
     global_user_agent: Option<String>,
@@ -157,6 +146,15 @@ impl ConnectAppServiceBuilder {
         self
     }
 
+    /// 注入 Provider 目录读端口：start_connect 单点加载已有 Provider 快照。
+    pub fn with_provider_directory(
+        mut self,
+        provider_directory: Arc<dyn ConnectProviderDirectory>,
+    ) -> Self {
+        self.provider_directory = Some(provider_directory);
+        self
+    }
+
     pub fn with_system(mut self, system: SystemInformation) -> Self {
         self.system = Some(system);
         self
@@ -187,6 +185,7 @@ impl ConnectAppServiceBuilder {
                 .probe
                 .expect("ConnectAppService 必须注入 ProviderProbePort"),
             commit,
+            provider_directory: self.provider_directory,
             sessions: Mutex::new(std::collections::HashMap::new()),
             system: self.system.unwrap_or_else(|| SystemInformation {
                 os_name: "unknown-os".into(),
@@ -205,6 +204,7 @@ impl Default for ConnectAppServiceBuilder {
             catalog: None,
             probe: None,
             commit_state: CommitSlot::Absent,
+            provider_directory: None,
             system: None,
             version: None,
             global_user_agent: None,
@@ -223,14 +223,28 @@ impl ConnectAppService {
         &self,
         origin: ConnectOrigin,
         expected_global_revision: crate::GlobalConfigRevision,
-        existing_provider: Option<ExistingProviderSnapshot>,
     ) -> ConnectView {
+        // Provider 目录快照在此单点加载；读失败降级为空目录（向导仍可用，
+        // 只是不触发 ConfirmOverwrite / 已有值预填），不阻断会话。
+        let existing_providers = match self.provider_directory.as_ref() {
+            Some(directory) => directory
+                .provider_snapshots()
+                .await
+                .map(|snapshots| {
+                    snapshots
+                        .into_iter()
+                        .map(|snapshot| (snapshot.source_key.clone(), snapshot))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => std::collections::HashMap::new(),
+        };
         let session_id = ConnectSessionId::new();
         let session = ConnectSession::new(
             session_id,
             origin,
             expected_global_revision,
-            existing_provider,
+            existing_providers,
         );
         let view = self.project_view(&session);
         self.sessions
@@ -238,36 +252,6 @@ impl ConnectAppService {
             .await
             .insert(session_id, Arc::new(Mutex::new(session)));
         view
-    }
-
-    /// 在用户选择 source 前，把同名现有 Provider 的脱敏快照附加到 session。
-    pub async fn attach_existing_provider(
-        &self,
-        session_id: ConnectSessionId,
-        expected_revision: ConnectRevision,
-        existing_provider: ExistingProviderSnapshot,
-    ) -> Result<(), ConnectError> {
-        let session = self.sessions.lock().await.get(&session_id).cloned().ok_or(
-            ConnectError::InvalidTransition {
-                command: "AttachExistingProvider",
-                actual: ConnectStage::Cancelled,
-            },
-        )?;
-        let mut session = session.lock().await;
-        if session.stage != ConnectStage::SelectProvider || session.outcome.is_some() {
-            return Err(ConnectError::InvalidTransition {
-                command: "AttachExistingProvider",
-                actual: session.stage,
-            });
-        }
-        if session.revision != expected_revision {
-            return Err(ConnectError::StaleRevision {
-                actual: session.revision,
-                provided: expected_revision,
-            });
-        }
-        session.existing_provider = Some(existing_provider);
-        Ok(())
     }
 
     /// 取得当前 session 的最新 view。
@@ -617,11 +601,9 @@ impl ConnectAppService {
         let source_key = source.as_str().to_string();
         session.draft.source = Some(source);
         session.draft.driver = Some(entry.driver);
-        if session
-            .existing_provider
-            .as_ref()
-            .is_some_and(|provider| provider.source_key == source_key)
-        {
+        // 已有 Provider 判断走 start 时加载的内存快照（路径无关）。
+        if let Some(existing) = session.existing_providers.remove(&source_key) {
+            session.existing_provider = Some(existing);
             session.stage = ConnectStage::ConfirmOverwrite;
             return (None, SyncOutcome::Proceed);
         }

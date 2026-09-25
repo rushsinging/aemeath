@@ -34,7 +34,6 @@ impl ConnectFacade {
     pub async fn start(
         &self,
         origin: sdk::ConnectOrigin,
-        existing_provider: Option<ExistingProviderSnapshot>,
     ) -> Result<sdk::ConnectView, sdk::SdkError> {
         let document = self
             .store
@@ -44,7 +43,7 @@ impl ConnectFacade {
             .ok_or_else(|| sdk::SdkError::Internal("全局配置不存在".to_string()))?;
         let view = self
             .service
-            .start_connect(config_origin(origin), document.revision, existing_provider)
+            .start_connect(config_origin(origin), document.revision)
             .await;
         Ok(sdk_view(view))
     }
@@ -55,18 +54,8 @@ impl ConnectFacade {
         revision: sdk::ConnectRevision,
         command: sdk::ConnectCommand,
     ) -> Result<sdk::ConnectView, sdk::SdkError> {
-        let command = match command {
-            sdk::ConnectCommand::SelectProvider { source } => {
-                self.attach_existing_if_known(
-                    &session_id,
-                    config::connect::ConnectRevision::from_value(revision.0),
-                    &source,
-                )
-                .await?;
-                sdk::ConnectCommand::SelectProvider { source }
-            }
-            other => other,
-        };
+        // existing 快照已在 start_connect 经 directory 单点加载进 session；
+        // SelectProvider 的 ConfirmOverwrite 判断由状态机内存完成，翻译层零 IO。
         let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
             .map_err(sdk::SdkError::Internal)?;
         self.service
@@ -78,41 +67,6 @@ impl ConnectFacade {
             .await
             .map(sdk_view)
             .map_err(connect_sdk_error)
-    }
-
-    /// 选择 source 前查全局配置已有 Provider 并附加快照（单点 helper）。
-    ///
-    /// source 选择有两条入口通向同一状态机——sdk 命令路径（`apply`）与
-    /// TUI 表单路径（`submit_page`）；两者**MUST**都经本 helper 完成
-    /// existing 查询与 attach，否则 ConfirmOverwrite 与已有值预填
-    ///（endpoint / key 掩码 / UA / 模型）在该入口静默失效。
-    async fn attach_existing_if_known(
-        &self,
-        session_id: &sdk::ConnectSessionId,
-        revision: config::connect::ConnectRevision,
-        source: &str,
-    ) -> Result<(), sdk::SdkError> {
-        if let Some(existing_provider) = self.existing_provider(source).await? {
-            let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
-                .map_err(sdk::SdkError::Internal)?;
-            self.service
-                .attach_existing_provider(session_id, revision, existing_provider)
-                .await
-                .map_err(connect_sdk_error)?;
-        }
-        Ok(())
-    }
-
-    async fn existing_provider(
-        &self,
-        source: &str,
-    ) -> Result<Option<ExistingProviderSnapshot>, sdk::SdkError> {
-        let document = self
-            .store
-            .load_global_document()
-            .await
-            .map_err(|error| sdk::SdkError::Internal(error.to_string()))?;
-        Ok(document.and_then(|document| existing_provider_snapshot(&document.value, source)))
     }
 
     pub async fn cancel(
@@ -160,7 +114,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .ok_or_else(|| SdkError::Internal("全局配置不存在".to_string()))?;
         let connect_view = self
             .service
-            .start_connect(config_form_origin(origin), document.revision, None)
+            .start_connect(config_form_origin(origin), document.revision)
             .await;
         provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
             .map(sdk_form_view)
@@ -180,15 +134,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = sdk_form_command(command.values, &current)?;
-        // 表单路径与 sdk 命令路径同等对待（见 attach_existing_if_known）。
-        if let config::connect::ConnectCommand::SelectProvider { ref source } = form_command {
-            self.attach_existing_if_known(
-                &sdk::ConnectSessionId(command.session_id.0.clone()),
-                config::connect::ConnectRevision::from_value(command.expected_revision.0),
-                source.as_str(),
-            )
-            .await?;
-        }
+        // existing 快照已在 start_connect 单点加载；表单与命令路径都不做 IO。
         let connect_view = match self
             .service
             .apply(
@@ -320,7 +266,7 @@ impl sdk::ConnectClient for ConnectFacade {
         &self,
         origin: sdk::ConnectOrigin,
     ) -> Result<sdk::ConnectView, SdkError> {
-        self.start(origin, None).await
+        self.start(origin).await
     }
 
     async fn apply_connect(
@@ -350,6 +296,30 @@ impl sdk::ConnectClient for ConnectFacade {
 
 pub struct GlobalConnectCommitAdapter {
     store: Arc<dyn config::GlobalConfigConnectStore>,
+}
+
+/// Provider 目录读适配器：start_connect 经此一次加载全量已有 Provider 快照。
+struct GlobalConnectDirectoryAdapter {
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+}
+
+impl GlobalConnectDirectoryAdapter {
+    fn new(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<Self> {
+        Arc::new(Self { store })
+    }
+}
+
+#[async_trait::async_trait]
+impl config::connect::ConnectProviderDirectory for GlobalConnectDirectoryAdapter {
+    async fn provider_snapshots(
+        &self,
+    ) -> Result<Vec<ExistingProviderSnapshot>, config::GlobalConfigStoreError> {
+        let document = self.store.load_global_document().await?;
+        Ok(document
+            .as_ref()
+            .map(|document| existing_provider_snapshots(&document.value))
+            .unwrap_or_default())
+    }
 }
 
 impl GlobalConnectCommitAdapter {
@@ -505,11 +475,13 @@ fn wire_connect_with_store(
     global_user_agent: Option<String>,
 ) -> Arc<ConnectFacade> {
     let commit = GlobalConnectCommitAdapter::new(store.clone());
+    let directory = GlobalConnectDirectoryAdapter::new(store.clone());
     let service = Arc::new(
         ConnectAppService::builder()
             .with_catalog(config::catalog::PROVIDER_CATALOG)
             .with_probe(crate::provider::ProviderProbeAdapter::new())
             .with_commit(commit)
+            .with_provider_directory(directory)
             .with_global_user_agent(global_user_agent)
             .with_system(config::ports::SystemInformation {
                 os_name: std::env::consts::OS.to_string(),
@@ -521,11 +493,25 @@ fn wire_connect_with_store(
     ConnectFacade::new(service, store)
 }
 
-fn existing_provider_snapshot(
-    document: &serde_json::Value,
+/// 从全局文档加载全部已有 Provider 快照（Connect 目录单点读取入口）。
+fn existing_provider_snapshots(document: &serde_json::Value) -> Vec<ExistingProviderSnapshot> {
+    document
+        .get("models")
+        .and_then(|models| models.get("providers"))
+        .and_then(serde_json::Value::as_object)
+        .map(|providers| {
+            providers
+                .iter()
+                .filter_map(|(source, provider)| provider_snapshot_from_config(source, provider))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn provider_snapshot_from_config(
     source: &str,
+    provider: &serde_json::Value,
 ) -> Option<ExistingProviderSnapshot> {
-    let provider = document.get("models")?.get("providers")?.get(source)?;
     let model = provider
         .get("models")
         .and_then(serde_json::Value::as_array)

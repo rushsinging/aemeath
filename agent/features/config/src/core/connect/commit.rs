@@ -19,8 +19,9 @@ use crate::catalog::ProviderSource;
 
 use super::draft::ConnectDraft;
 use super::error::PersistErrorKind;
-use super::states::{ConnectOrigin, ConnectSessionId};
+use super::states::{ConnectOrigin, ConnectSessionId, ExistingProviderSnapshot};
 use crate::GlobalConfigRevision;
+use crate::GlobalConfigStoreError;
 
 /// Connect 提交请求的归一化投影。
 #[derive(Debug, Clone)]
@@ -99,6 +100,18 @@ pub trait ConnectCommitPort: Send + Sync {
         &self,
         request: ConnectCommitRequest,
     ) -> Result<ConnectCommitReceipt, ConnectCommitError>;
+}
+
+/// Connect 会话开始时的 Provider 目录读端口：一次性加载全局配置中全部
+/// 已有 Provider 的脱敏快照。`start_connect` 单点调用，存入 session 后
+/// `SelectProvider` 的 ConfirmOverwrite 判断与预填全部走内存快照，
+/// **MUST NOT** 在 source 选择等后续命令路径上再做 IO——那会把 existing
+/// 查询时机耦合到 composition 的每个入口（曾导致表单路径静默跳过）。
+#[async_trait]
+pub trait ConnectProviderDirectory: Send + Sync {
+    async fn provider_snapshots(
+        &self,
+    ) -> Result<Vec<ExistingProviderSnapshot>, GlobalConfigStoreError>;
 }
 
 /// 测试 / 桩实现：直接返回 caller 配置的结果。**仅**在 `connect::commit`
