@@ -1,48 +1,44 @@
 use std::path::Path;
+use std::sync::Arc;
 
-use audit::{
-    file_usage_append_store, start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig,
-};
+use audit::{wire_audit_client, wire_audit_store, AuditClient};
 use share::config::domain::snapshot::ConfigSnapshot;
 use storage::SafeStorageRoot;
 
-pub fn usage_worker_config_from_snapshot(snapshot: &ConfigSnapshot) -> UsageWorkerConfig {
-    snapshot.usage_worker_config().into()
-}
-
+/// runtime 侧用量发送端口适配（UsageSink → AuditClient 写行为）。
 pub struct AuditUsageSink {
-    sender: UsageSender,
+    client: AuditClient,
 }
 
 impl AuditUsageSink {
-    pub fn new(sender: UsageSender) -> Self {
-        Self { sender }
+    pub fn new(client: AuditClient) -> Self {
+        Self { client }
     }
 }
 
 impl runtime::UsageSink for AuditUsageSink {
-    fn try_record(&self, record: audit::UsageRecord) -> audit::UsageEmitOutcome {
-        self.sender.try_record(record)
+    fn try_record(&self, record: audit::UsageRecordData) -> audit::UsageEmitOutcomeData {
+        self.client.try_record(record)
     }
 }
 
-pub struct AuditWorkerAssembly {
-    pub sender: UsageSender,
-    pub worker: UsageWorker,
-}
-
+/// 会话审计装配：sink + 生命周期句柄（读写合一 client）。
 pub struct SessionAudit {
-    sink: std::sync::Arc<dyn runtime::UsageSink>,
-    worker: UsageWorker,
+    sink: Arc<dyn runtime::UsageSink>,
+    client: AuditClient,
 }
 
 impl SessionAudit {
-    pub fn usage_sink(&self) -> std::sync::Arc<dyn runtime::UsageSink> {
-        std::sync::Arc::clone(&self.sink)
+    pub fn usage_sink(&self) -> Arc<dyn runtime::UsageSink> {
+        Arc::clone(&self.sink)
+    }
+
+    pub fn client(&self) -> &AuditClient {
+        &self.client
     }
 
     pub async fn shutdown(self) {
-        self.worker.shutdown().await;
+        self.client.shutdown().await;
     }
 }
 
@@ -50,21 +46,14 @@ pub fn wire_session_audit(
     agents_dir: &Path,
     snapshot: &ConfigSnapshot,
 ) -> Result<SessionAudit, String> {
-    let assembly = wire_audit_worker(agents_dir, snapshot)?;
-    let sink = std::sync::Arc::new(AuditUsageSink::new(assembly.sender));
-    Ok(SessionAudit {
-        sink,
-        worker: assembly.worker,
-    })
-}
-
-pub fn wire_audit_worker(
-    agents_dir: &Path,
-    snapshot: &ConfigSnapshot,
-) -> Result<AuditWorkerAssembly, String> {
     let root =
         SafeStorageRoot::open(agents_dir.join("audit")).map_err(|error| error.to_string())?;
-    let store = std::sync::Arc::new(file_usage_append_store(root));
-    let (sender, worker) = start_usage_worker(store, usage_worker_config_from_snapshot(snapshot));
-    Ok(AuditWorkerAssembly { sender, worker })
+    let store = wire_audit_store(audit::append_store_for(root));
+    let client = wire_audit_client(
+        &store,
+        snapshot.usage_worker_config().capacity(),
+        snapshot.usage_worker_config().shutdown_timeout(),
+    );
+    let sink = Arc::new(AuditUsageSink::new(client.clone()));
+    Ok(SessionAudit { sink, client })
 }

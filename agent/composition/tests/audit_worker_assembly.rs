@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use audit::{
-    file_usage_append_store, usage_query_service, UsageDropReason, UsageEmitOutcome, UsageQuery,
-    UsageRecord,
+    append_store_for, wire_audit_client, wire_audit_store, UsageDropReasonData,
+    UsageEmitOutcomeData, UsageQueryData, UsageRecordData,
 };
-use composition::audit::{usage_worker_config_from_snapshot, wire_session_audit, AuditUsageSink};
+use composition::audit::{wire_session_audit, AuditUsageSink};
 use runtime::UsageSink;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -14,13 +14,10 @@ use share::config::Config;
 async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = storage::SafeStorageRoot::open(temp.path()).expect("storage root");
-    let store = std::sync::Arc::new(file_usage_append_store(root));
-    let (sender, worker) = audit::start_usage_worker(
-        store,
-        audit::UsageWorkerConfig::new(1, Duration::from_secs(1)),
-    );
-    let sink = AuditUsageSink::new(sender);
-    let record = UsageRecord {
+    let store = wire_audit_store(append_store_for(root));
+    let client = wire_audit_client(&store, 1, Duration::from_secs(1));
+    let sink = AuditUsageSink::new(client.clone());
+    let record = UsageRecordData {
         recorded_at_unix_ms: 1,
         session_id: SessionId::new("01900000-0000-7000-8000-000000000001"),
         run_id: RunId::new("01900000-0000-7000-8000-000000000002"),
@@ -35,11 +32,14 @@ async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
         reasoning_tokens: None,
     };
 
-    assert_eq!(sink.try_record(record.clone()), UsageEmitOutcome::Accepted);
-    worker.shutdown().await;
+    assert_eq!(
+        sink.try_record(record.clone()),
+        UsageEmitOutcomeData::Accepted
+    );
+    client.shutdown().await;
     assert_eq!(
         sink.try_record(record),
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
 }
 
@@ -50,7 +50,7 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
     let snapshot = ConfigSnapshot::new(Config::default());
     let session_audit = wire_session_audit(&agents_dir, &snapshot).expect("wire audit worker");
     let sink = session_audit.usage_sink();
-    let record = UsageRecord {
+    let record = UsageRecordData {
         recorded_at_unix_ms: 1,
         session_id: SessionId::new("01900000-0000-7000-8000-000000000011"),
         run_id: RunId::new("01900000-0000-7000-8000-000000000012"),
@@ -65,18 +65,24 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
         reasoning_tokens: None,
     };
 
-    assert_eq!(sink.try_record(record.clone()), UsageEmitOutcome::Accepted);
+    assert_eq!(
+        sink.try_record(record.clone()),
+        UsageEmitOutcomeData::Accepted
+    );
     session_audit.shutdown().await;
     assert_eq!(
         sink.try_record(record.clone()),
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
     let audit_root = storage::SafeStorageRoot::open(agents_dir.join("audit"))
         .expect("reopen production audit root");
-    let query_service =
-        usage_query_service(std::sync::Arc::new(file_usage_append_store(audit_root)));
-    let page = query_service
-        .query_page(UsageQuery {
+    let read_client = wire_audit_client(
+        &wire_audit_store(append_store_for(audit_root)),
+        1,
+        std::time::Duration::from_secs(1),
+    );
+    let page = read_client
+        .query_page(UsageQueryData {
             session_id: Some(record.session_id.clone()),
             run_id: Some(record.run_id.clone()),
             run_step_id: Some(record.run_step_id.clone()),
@@ -84,7 +90,7 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
             provider: Some(record.provider.clone()),
             model: Some(record.model.clone()),
             recorded_range: None,
-            pagination: audit::Pagination {
+            pagination: audit::UsagePaginationData {
                 cursor: None,
                 limit: std::num::NonZeroUsize::new(10).expect("non-zero query limit"),
             },
@@ -112,7 +118,7 @@ fn composition_extracts_usage_worker_config_by_value() {
     config.audit.usage_shutdown_timeout_ms = 321;
     let snapshot = ConfigSnapshot::new(config);
 
-    let value = usage_worker_config_from_snapshot(&snapshot);
+    let value = snapshot.usage_worker_config();
     assert_eq!(value.capacity(), 17);
     assert_eq!(value.shutdown_timeout(), Duration::from_millis(321));
 }

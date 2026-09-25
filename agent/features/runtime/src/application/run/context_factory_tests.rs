@@ -12,13 +12,13 @@ use crate::application::run::factory::RunFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::UsageSink;
-use audit::{UsageEmitOutcome, UsageRecord};
+use audit::{UsageEmitOutcomeData, UsageRecordData};
 
 struct RecordingUsageSink;
 
 impl UsageSink for RecordingUsageSink {
-    fn try_record(&self, _record: UsageRecord) -> UsageEmitOutcome {
-        UsageEmitOutcome::Accepted
+    fn try_record(&self, _record: UsageRecordData) -> UsageEmitOutcomeData {
+        UsageEmitOutcomeData::Accepted
     }
 }
 

@@ -1,12 +1,11 @@
-mod append;
-mod query;
+pub(crate) mod append;
+pub(crate) mod query;
 
 #[cfg(test)]
 #[path = "adapters/query_tests.rs"]
 mod query_tests;
 
-pub use append::file_usage_append_store;
 #[allow(unused_imports)]
 pub use append::FileUsageAppendStore;
 #[allow(unused_imports)]
-pub use query::{usage_query_service, UsageQueryService};
+pub(crate) use query::UsageQueryService;

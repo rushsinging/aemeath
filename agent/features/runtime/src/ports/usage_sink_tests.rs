@@ -1,10 +1,10 @@
 use super::{UnavailableUsageSink, UsageSink};
-use audit::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use std::sync::Arc;
 
-fn record() -> UsageRecord {
-    UsageRecord {
+fn record() -> UsageRecordData {
+    UsageRecordData {
         recorded_at_unix_ms: 1_720_000_000_000,
         session_id: SessionId::new("01900000-0000-7000-8000-000000000001"),
         run_id: RunId::new("01900000-0000-7000-8000-000000000002"),
@@ -26,7 +26,7 @@ fn unavailable_sink_synchronously_reports_worker_unavailable() {
 
     assert_eq!(
         outcome,
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
 }
 
@@ -40,6 +40,6 @@ fn usage_sink_trait_object_is_send_sync_and_arc_shareable() {
 
     assert_eq!(
         shared.try_record(record()),
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
 }

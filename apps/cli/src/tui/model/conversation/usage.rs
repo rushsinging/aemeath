@@ -1,5 +1,5 @@
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct UsageSummary {
+pub struct UsageSummaryData {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub last_input_tokens: u64,

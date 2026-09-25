@@ -6,7 +6,7 @@
 //! - 调 `ProviderPort` 发起 LLM 调用
 //! - 组装流式响应
 //! - 提取 tool_calls
-//! - 记录 `RawUsageSnapshot` -> 构造 `UsageRecord` 经 `RuntimeStreamEvent::Usage` 路径发出
+//! - 记录 `RawUsageSnapshot` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
 //! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
 //! - Fatal(4xx) 直接失败；context 超限 -> compact
 //! - 重试期 emit `ModelInvocationRetrying{attempt}`

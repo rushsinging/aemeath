@@ -1,7 +1,7 @@
 pub mod usage;
 
 pub use usage::{
-    Pagination, TimeRange, UsageCursor, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,
-    UsagePage, UsageQuery, UsageQueryError, UsageQueryWarning, UsageRecord, UsageSummary,
-    CURRENT_USAGE_SCHEMA_VERSION,
+    UsageCursor, UsageDropReasonData, UsageEmitOutcomeData, UsageEnvelopeV1, UsagePageData,
+    UsagePaginationData, UsageQueryData, UsageQueryError, UsageQueryWarning, UsageRecordData,
+    UsageSummaryData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };

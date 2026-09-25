@@ -7,12 +7,12 @@ use super::query::{
     validate_query, CursorPosition, MAX_USAGE_QUERY_LIMIT,
 };
 use crate::domain::{
-    Pagination, TimeRange, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryWarning,
-    UsageRecord, UsageSummary, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageEnvelopeV1, UsagePaginationData, UsageQueryData, UsageQueryError, UsageQueryWarning,
+    UsageRecordData, UsageSummaryData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 
-fn record(timestamp: u64) -> UsageRecord {
-    UsageRecord {
+fn record(timestamp: u64) -> UsageRecordData {
+    UsageRecordData {
         recorded_at_unix_ms: timestamp,
         session_id: SessionId::new("session-a"),
         run_id: RunId::new("run-a"),
@@ -28,8 +28,8 @@ fn record(timestamp: u64) -> UsageRecord {
     }
 }
 
-fn query(limit: usize) -> UsageQuery {
-    UsageQuery {
+fn query(limit: usize) -> UsageQueryData {
+    UsageQueryData {
         session_id: None,
         run_id: None,
         run_step_id: None,
@@ -37,7 +37,7 @@ fn query(limit: usize) -> UsageQuery {
         provider: None,
         model: None,
         recorded_range: None,
-        pagination: Pagination {
+        pagination: UsagePaginationData {
             cursor: None,
             limit: NonZeroUsize::new(limit).expect("non-zero query limit"),
         },
@@ -47,7 +47,7 @@ fn query(limit: usize) -> UsageQuery {
 #[test]
 fn validate_query_accepts_half_open_range_and_clamps_limit() {
     let mut request = query(MAX_USAGE_QUERY_LIMIT + 1);
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(10),
         to_exclusive_unix_ms: Some(11),
     });
@@ -59,7 +59,7 @@ fn validate_query_accepts_half_open_range_and_clamps_limit() {
 fn validate_query_rejects_equal_or_reversed_range() {
     for (from, to) in [(10, 10), (11, 10)] {
         let mut request = query(1);
-        request.recorded_range = Some(TimeRange {
+        request.recorded_range = Some(UsageTimeRangeData {
             from_inclusive_unix_ms: Some(from),
             to_exclusive_unix_ms: Some(to),
         });
@@ -145,7 +145,7 @@ fn query_fingerprint_changes_for_each_filter_but_not_pagination() {
         },
         {
             let mut value = baseline;
-            value.recorded_range = Some(TimeRange {
+            value.recorded_range = Some(UsageTimeRangeData {
                 from_inclusive_unix_ms: Some(1),
                 to_exclusive_unix_ms: Some(2),
             });
@@ -193,13 +193,13 @@ fn matches_uses_inclusive_start_and_exclusive_end_for_every_filter() {
     request.model_invocation_id = Some(target.model_invocation_id.clone());
     request.provider = Some(target.provider.clone());
     request.model = Some(target.model.clone());
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(10),
         to_exclusive_unix_ms: Some(11),
     });
     assert!(matches(&request, &target));
 
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(9),
         to_exclusive_unix_ms: Some(10),
     });
@@ -244,7 +244,7 @@ fn matches_uses_inclusive_start_and_exclusive_end_for_every_filter() {
 
 #[test]
 fn add_summary_accumulates_optional_tokens_without_cost_fields() {
-    let mut summary = UsageSummary::default();
+    let mut summary = UsageSummaryData::default();
     add_summary(&mut summary, &record(10));
     let mut no_optional_tokens = record(11);
     no_optional_tokens.input_tokens = 7;

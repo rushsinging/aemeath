@@ -1,8 +1,8 @@
-use audit::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 
 /// Runtime-owned non-blocking outbound port for Audit usage facts.
 pub trait UsageSink: Send + Sync {
-    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
+    fn try_record(&self, record: UsageRecordData) -> UsageEmitOutcomeData;
 }
 
 /// Default sink used when the Audit worker is not available.
@@ -10,8 +10,8 @@ pub trait UsageSink: Send + Sync {
 pub struct UnavailableUsageSink;
 
 impl UsageSink for UnavailableUsageSink {
-    fn try_record(&self, _record: UsageRecord) -> UsageEmitOutcome {
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+    fn try_record(&self, _record: UsageRecordData) -> UsageEmitOutcomeData {
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     }
 }
 

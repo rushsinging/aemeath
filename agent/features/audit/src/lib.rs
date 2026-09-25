@@ -1,23 +1,23 @@
 //! Audit：Usage Fact 的追加式存储与读出。
 //!
-//! # Published Language（#1705 收敛后，15 实体）
+//! # Published Language（四类封闭语法）
 //!
-//! | 类别 | 实体 | 消费者 |
+//! | 类 | 实体 | 消费者 |
 //! |---|---|---|
-//! | 装配 | `start_usage_worker`、`file_usage_append_store`、`UsageWorker`、`UsageSender`、`UsageWorkerConfig` | composition（装配根）；Config 另被 share snapshot 引用 |
-//! | 数据契约 | `UsageEmitOutcome`、`UsageRecord`、`UsageSummary`、`UsageDropReason` | composition、runtime（发送分支/事实记录）；Summary 被 cli TUI 用量展示消费 |
-//! | 读出（未接线） | `usage_query_service`、`UsageQuery`、`UsagePage`、`Pagination`、`TimeRange` | 暂无生产消费者（集成测试流程探针）；TUI 用量页接线时评审 |
-//! | 边界错误 | `AuditError`（crate 根定义，`#[non_exhaustive]`） | 消费方只 match 粗分类；内部变体经 `From` 折叠不越界 |
+//! | `wire_*` 工厂 | `wire_audit_client`、`wire_audit_store` | composition |
+//! | `*<Role>` 角色 | `AuditClient`（读写合一：try_record/query_page/shutdown）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配） |
+//! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageSummaryData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
+//! | `*Error` 错误 | `AuditError`（crate 根定义，粗分类） | query_page 签名 |
 //!
-//! 边界约定：查询/Append 内部面（Port trait、schema 版本、Envelope、AppendLog 细节）
-//! 为 crate 私有；错误细粒度原因保留在本 crate 日志，跨界仅传
-//! `share::error::ErrorCategory` 对齐的粗分类。
+//! Role 词表：Client/Port/Sink/Source/Control/Registry/Pool/Catalog/Store；
+//! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀。
 
 /// Audit 模块自身的运行诊断 target；Audit Usage Fact 使用独立 append store。
 pub(crate) const LOG_TARGET: &str = "aemeath:diagnostic:audit";
 
 mod adapters;
 mod application;
+pub mod client;
 pub(crate) mod contract;
 mod domain;
 mod ports;
@@ -78,9 +78,15 @@ impl From<crate::ports::AppendLogError> for AuditError {
 ///
 /// 查询/Append 内部面未接线（无生产消费者），按消费者证明制收窄 crate 内；
 /// 契约测试已迁 crate 内单元测试（#1705）。
-pub use adapters::{file_usage_append_store, usage_query_service};
-pub use application::{start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig};
+use crate::adapters::append::file_usage_append_store;
+pub use client::{wire_audit_client, wire_audit_store, AuditClient, AuditStore};
+/// 文件系统审计存储工厂（SPI 经 AuditStore 包装，此处返回 port 以便装配）。
+pub fn append_store_for(
+    root: storage::SafeStorageRoot,
+) -> std::sync::Arc<dyn crate::ports::UsageAppendStorePort> {
+    std::sync::Arc::new(file_usage_append_store(root))
+}
 pub use domain::{
-    Pagination, TimeRange, UsageDropReason, UsageEmitOutcome, UsagePage, UsageQuery, UsageRecord,
-    UsageSummary,
+    UsageDropReasonData, UsageEmitOutcomeData, UsagePageData, UsagePaginationData, UsageQueryData,
+    UsageRecordData, UsageSummaryData, UsageTimeRangeData,
 };

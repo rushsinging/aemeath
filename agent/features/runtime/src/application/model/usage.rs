@@ -1,4 +1,4 @@
-use audit::UsageRecord;
+use audit::UsageRecordData;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 use crate::ports::{ModelId, RawUsageSnapshot};
@@ -28,8 +28,8 @@ where
         &self,
         context: UsageRecordContext,
         usage: RawUsageSnapshot,
-    ) -> Option<UsageRecord> {
-        usage.was_reported().then(|| UsageRecord {
+    ) -> Option<UsageRecordData> {
+        usage.was_reported().then(|| UsageRecordData {
             recorded_at_unix_ms: (self.clock)(),
             session_id: context.session_id,
             run_id: context.run_id,
