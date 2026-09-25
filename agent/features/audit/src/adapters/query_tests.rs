@@ -1,9 +1,9 @@
+use super::query::UsageQueryService;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::query::usage_query_service;
-use crate::domain::{Pagination, UsageQuery, UsageQueryError};
+use crate::domain::{UsagePaginationData, UsageQueryData, UsageQueryError};
 use crate::ports::{
     AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
     UsageQueryPort,
@@ -47,8 +47,8 @@ impl UsageAppendStorePort for FailingQueryStore {
     }
 }
 
-fn query() -> UsageQuery {
-    UsageQuery {
+fn query() -> UsageQueryData {
+    UsageQueryData {
         session_id: None,
         run_id: None,
         run_step_id: None,
@@ -56,7 +56,7 @@ fn query() -> UsageQuery {
         provider: None,
         model: None,
         recorded_range: None,
-        pagination: Pagination {
+        pagination: UsagePaginationData {
             cursor: None,
             limit: std::num::NonZeroUsize::new(10).expect("non-zero query limit"),
         },
@@ -66,7 +66,7 @@ fn query() -> UsageQuery {
 #[tokio::test]
 async fn query_maps_list_and_read_failures_to_storage_error() {
     for operation in [FailingOperation::List, FailingOperation::Read] {
-        let service = usage_query_service(Arc::new(FailingQueryStore { operation }));
+        let service = UsageQueryService::from_store(Arc::new(FailingQueryStore { operation }));
 
         assert_eq!(
             service.query(query()).await,

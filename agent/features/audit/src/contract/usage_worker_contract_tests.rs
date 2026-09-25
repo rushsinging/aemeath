@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::application::{start_usage_worker, UsageWorkerConfig};
-use crate::domain::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use crate::client::{wire_audit_client, wire_audit_store};
+use crate::domain::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use crate::ports::{
     AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
 };
@@ -45,8 +45,8 @@ impl UsageAppendStorePort for RecordingStore {
     }
 }
 
-fn record(id: &str) -> UsageRecord {
-    UsageRecord {
+fn record(id: &str) -> UsageRecordData {
+    UsageRecordData {
         recorded_at_unix_ms: 1,
         session_id: SessionId::new(format!("session-{id}")),
         run_id: RunId::new(format!("run-{id}")),
@@ -65,10 +65,8 @@ fn record(id: &str) -> UsageRecord {
 #[tokio::test]
 async fn public_worker_partitions_records_drains_once_and_rejects_late_records() {
     let store = Arc::new(RecordingStore::default());
-    let (sender, worker) = start_usage_worker(
-        store.clone(),
-        UsageWorkerConfig::new(4, Duration::from_secs(1)),
-    );
+    let client = wire_audit_client(&wire_audit_store(store.clone()), 4, Duration::from_secs(1));
+    let sender = client.clone();
     let first = record("a");
     let second = record("b");
     let first_stream = AppendLogStream::for_session(&first.session_id)
@@ -78,9 +76,9 @@ async fn public_worker_partitions_records_drains_once_and_rejects_late_records()
         .as_str()
         .to_string();
 
-    assert_eq!(sender.try_record(first), UsageEmitOutcome::Accepted);
-    assert_eq!(sender.try_record(second), UsageEmitOutcome::Accepted);
-    worker.shutdown().await;
+    assert_eq!(sender.try_record(first), UsageEmitOutcomeData::Accepted);
+    assert_eq!(sender.try_record(second), UsageEmitOutcomeData::Accepted);
+    client.shutdown().await;
 
     assert_eq!(
         store.calls.lock().expect("store calls lock").as_slice(),
@@ -93,6 +91,6 @@ async fn public_worker_partitions_records_drains_once_and_rejects_late_records()
     );
     assert_eq!(
         sender.try_record(record("late")),
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
 }

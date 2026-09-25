@@ -9,4 +9,5 @@ mod ingest_tests;
 #[path = "application/query_tests.rs"]
 mod query_tests;
 
-pub use ingest::{start_usage_worker, UsageSender, UsageWorker, UsageWorkerConfig};
+pub(crate) use ingest::run_usage_worker;
+pub use ingest::UsageWorkerHandle;

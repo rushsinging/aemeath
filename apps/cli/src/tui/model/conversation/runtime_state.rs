@@ -5,7 +5,7 @@
 
 use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
-use super::usage::UsageSummary;
+use super::usage::UsageSummaryData;
 use std::time::Instant;
 
 /// 会话运行态聚合——usage / workspace / status 等基础设施关注点。
@@ -13,7 +13,7 @@ use std::time::Instant;
 /// TODO: 字段将逐步私有化，改为只经业务方法操作。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuntimeState {
-    pub usage: UsageSummary,
+    pub usage: UsageSummaryData,
     pub live_tps: Option<f64>,
     pub runtime_status: Option<crate::tui::adapter::runtime_status::TuiRuntimeStatus>,
     pub task_status: TaskStatusSnapshot,
