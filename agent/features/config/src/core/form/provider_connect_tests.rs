@@ -12,11 +12,76 @@ fn connect_view(stage: ConnectStage) -> ConnectView {
         origin: ConnectOrigin::ExplicitCommand,
         draft: ConnectDraftView::default(),
         existing_provider: None,
+        existing_providers: Vec::new(),
         available_actions: crate::connect::AvailableAction::for_stage(stage, None),
         probe_status: None,
         last_error: None,
         terminal: None,
     }
+}
+
+#[test]
+fn provider_selection_lists_existing_custom_sources_before_custom_option() {
+    // 全局配置已有但不在 catalog 的自定义 Provider（如 OmniRoute）必须
+    // 出现在列表（覆盖路径），而不是强迫用户走"自定义"重新输入。
+    let mut view = connect_view(ConnectStage::SelectProvider);
+    view.existing_providers = vec![
+        crate::connect::ExistingProviderSummary {
+            source: "Zhipu".to_string(),
+            driver: Some("zhipu".to_string()),
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+            api_key_status: crate::connect::ExistingCredentialStatus::Present,
+            model_id: Some("glm-5.3".to_string()),
+        },
+        crate::connect::ExistingProviderSummary {
+            source: "OmniRoute".to_string(),
+            driver: Some("openai".to_string()),
+            base_url: "https://genius.infra.wanaka.app".to_string(),
+            api_key_status: crate::connect::ExistingCredentialStatus::Present,
+            model_id: Some("cursor/auto".to_string()),
+        },
+    ];
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    let ids: Vec<&str> = form.page.fields[0]
+        .options
+        .iter()
+        .map(|option| option.id.as_str())
+        .collect();
+    assert!(
+        ids.contains(&"OmniRoute"),
+        "自定义已有 source 必须出现在列表"
+    );
+    assert_eq!(
+        ids.iter().filter(|id| **id == "Zhipu").count(),
+        1,
+        "catalog 内 source 不因快照重复追加"
+    );
+    assert_eq!(ids.last().copied(), Some("custom"));
+
+    // 提交 OmniRoute（非 catalog）→ SelectProvider{source: new_owned}
+    let command = connect_command_for_form(
+        &view,
+        ConfigFormCommand::SubmitPage {
+            values: vec![ConfigFormFieldValue {
+                field_id: ConfigFormFieldId::new("provider_source").unwrap(),
+                value: ConfigFormValue::SelectedOption(
+                    ConfigFormOptionId::new("OmniRoute").unwrap(),
+                ),
+            }],
+        },
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            command,
+            crate::connect::ConnectCommand::SelectProvider { source }
+                if source.as_str() == "OmniRoute"
+        ),
+        "非 catalog 已有 source 必须映射为 SelectProvider"
+    );
 }
 
 #[test]

@@ -589,7 +589,10 @@ impl ConnectAppService {
         session: &mut ConnectSession,
         source: ProviderSource,
     ) -> (Option<ConnectError>, SyncOutcome) {
-        if self.catalog_entry(&source).is_none() {
+        // catalog 外的自定义已有 source（如用户此前完全自定义配置的
+        // OmniRoute 等）同样允许：命中快照即走覆盖确认与已有值预填。
+        let catalog_entry = self.catalog_entry(&source);
+        if catalog_entry.is_none() && !session.existing_providers.contains_key(source.as_str()) {
             return (
                 Some(ConnectError::CatalogUnavailable {
                     reason: format!("未知 source: {}", source.as_str()),
@@ -597,20 +600,21 @@ impl ConnectAppService {
                 SyncOutcome::Proceed,
             );
         }
-        let entry = self.catalog_entry(&source).expect("checked above");
         let source_key = source.as_str().to_string();
+        if let Some(entry) = catalog_entry {
+            session.draft.driver = Some(entry.driver);
+            if session.draft.base_url.is_none() {
+                if let Some(endpoint) = entry.default_endpoint {
+                    session.draft.base_url = Some(endpoint.url.to_string());
+                }
+            }
+        }
         session.draft.source = Some(source);
-        session.draft.driver = Some(entry.driver);
         // 已有 Provider 判断走 start 时加载的内存快照（路径无关）。
         if let Some(existing) = session.existing_providers.remove(&source_key) {
             session.existing_provider = Some(existing);
             session.stage = ConnectStage::ConfirmOverwrite;
             return (None, SyncOutcome::Proceed);
-        }
-        if session.draft.base_url.is_none() {
-            if let Some(endpoint) = entry.default_endpoint {
-                session.draft.base_url = Some(endpoint.url.to_string());
-            }
         }
         session.stage = ConnectStage::EditEndpoint;
         (None, SyncOutcome::Proceed)
@@ -627,6 +631,13 @@ impl ConnectAppService {
         if let Some(provider) = session.existing_provider.as_ref() {
             if !provider.base_url.trim().is_empty() {
                 session.draft.base_url = Some(provider.base_url.clone());
+            }
+            // 自定义已有 source 无 catalog 条目；driver 从快照补齐，
+            // 供 endpoint 页接口风格判定与 probe / commit 使用。
+            if session.draft.driver.is_none() {
+                if let Some(driver) = provider.driver.as_ref().and_then(|d| d.as_known()) {
+                    session.draft.driver = Some(*driver);
+                }
             }
             if provider.user_agent.is_some() {
                 session.draft.provider_user_agent = provider.user_agent.clone();
@@ -942,6 +953,11 @@ impl ConnectAppService {
             origin: session.origin,
             draft: project_draft(&session.draft),
             existing_provider: session.existing_provider.as_ref().map(Into::into),
+            existing_providers: session
+                .existing_providers
+                .values()
+                .map(Into::into)
+                .collect(),
             available_actions,
             probe_status,
             last_error: session.last_error.clone(),

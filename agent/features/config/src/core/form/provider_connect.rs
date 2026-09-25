@@ -1,4 +1,4 @@
-use crate::catalog::{find_by_source, ProviderCatalogEntry};
+use crate::catalog::{find_by_source, ProviderCatalogEntry, ProviderSource};
 use crate::connect::{AvailableAction, ConnectCommand, ConnectOutcome};
 use crate::connect::{ConnectStage, ConnectView, ProbeStatusView};
 
@@ -88,6 +88,21 @@ fn page_for_connect(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            // 全局配置已有但不在 catalog 的自定义 Provider（如 OmniRoute 等）
+            // 也进入列表，选中后走覆盖确认与已有值预填，而不是强迫用户
+            // 经"自定义"重新输入全部信息。
+            for existing in &connect.existing_providers {
+                if !catalog
+                    .iter()
+                    .any(|entry| entry.source.as_str() == existing.source)
+                {
+                    options.push(option(
+                        &existing.source,
+                        &existing.source,
+                        existing.driver.as_deref(),
+                    )?);
+                }
+            }
             options.push(option("custom", "自定义（完全自定义）", None)?);
             (
                 "select_provider",
@@ -332,12 +347,12 @@ fn submit_for_stage(
             if option_id.as_str() == "custom" {
                 return Ok(ConnectCommand::BeginCustomProvider);
             }
-            let entry = find_by_source(option_id.as_str()).ok_or_else(|| {
-                ProviderConnectFormError::UnknownProvider(option_id.as_str().to_string())
-            })?;
-            ConnectCommand::SelectProvider {
-                source: entry.source.clone(),
-            }
+            // catalog 内条目复用静态 source；catalog 外的已有自定义 source
+            //（列表来自 existing 快照）用 new_owned 持有运行时名称。
+            let source = find_by_source(option_id.as_str())
+                .map(|entry| entry.source.clone())
+                .unwrap_or_else(|| ProviderSource::new_owned(option_id.as_str().to_string()));
+            ConnectCommand::SelectProvider { source }
         }
         ConnectStage::EditCustomProvider => {
             let name = text_value(field("provider_name")?, "provider_name")?;

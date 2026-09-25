@@ -95,6 +95,47 @@ fn select_page_view_with_selected_model() -> sdk::ConfigFormView {
 }
 
 #[test]
+fn summary_only_page_enter_invokes_focused_action() {
+    // ConfirmOverwrite 等页只有 Summary 字段 + actions：回车必须触发
+    // action（如"覆盖"），而不是提交空字段集报"页面不接受字段提交"。
+    let mut view = secret_view();
+    view.page.id = sdk::ConfigFormPageId("confirm_overwrite".to_string());
+    view.page.fields = vec![sdk::ConfigFormField {
+        id: sdk::ConfigFormFieldId("existing_provider".to_string()),
+        label: "现有 Provider".to_string(),
+        description: None,
+        field_type: sdk::ConfigFormFieldType::Summary,
+        required: true,
+        has_value: true,
+        display_value: Some("Zhipu Coding Plan".to_string()),
+        options: Vec::new(),
+        error: None,
+    }];
+    view.page.actions = vec![sdk::ConfigFormAction {
+        id: sdk::ConfigFormActionId("confirm_overwrite".to_string()),
+        label: "覆盖".to_string(),
+        style: sdk::ConfigFormActionStyle::Primary,
+        shortcut: None,
+    }];
+
+    let mut model = ConfigFormModel::new(view);
+
+    let effect = model.update(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+
+    assert!(
+        matches!(
+            effect,
+            Some(ConfigFormEffect::InvokeAction { command })
+                if command.action_id.as_str() == "confirm_overwrite"
+        ),
+        "回车必须触发 InvokeAction(覆盖)"
+    );
+}
+
+#[test]
 fn select_page_preselects_option_matching_display_value() {
     // 已有配置预填的模型（has_value + display_value）在进入 select 页时
     // 必须直接高亮对应 option，而不是从第一项开始。

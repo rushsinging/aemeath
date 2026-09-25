@@ -212,7 +212,16 @@ impl ConfigFormModel {
         if self.view.busy.is_some() || self.view.terminal.is_some() {
             return None;
         }
-        if self.view.page.fields.is_empty() {
+        // 无可提交字段（fields 为空，或全部为 Summary / Status 只读字段，
+        // 如 ConfirmOverwrite 摘要页）时，回车触发聚焦 action（覆盖 / 返回），
+        // 而不是提交空字段集导致"页面不接受字段提交"。
+        let has_submittable_field = self.view.page.fields.iter().any(|field| {
+            !matches!(
+                field.field_type,
+                sdk::ConfigFormFieldType::Summary | sdk::ConfigFormFieldType::Status
+            )
+        });
+        if !has_submittable_field {
             return self
                 .view
                 .page

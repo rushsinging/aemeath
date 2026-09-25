@@ -89,6 +89,9 @@ pub struct ConnectView {
     pub origin: ConnectOrigin,
     pub draft: ConnectDraftView,
     pub existing_provider: Option<ExistingProviderSummary>,
+    /// start 时加载的全部已有 Provider 摘要（source / driver / base URL）。
+    /// SelectProvider 列表据此补充 catalog 之外的自定义已有 Provider。
+    pub existing_providers: Vec<ExistingProviderSummary>,
     pub available_actions: Vec<AvailableAction>,
     pub probe_status: Option<ProbeStatusView>,
     pub last_error: Option<ConnectError>,
