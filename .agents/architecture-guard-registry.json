@@ -1006,6 +1006,8 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "contract",
+        "contract.rs",
         "domain",
         "domain.rs",
         "lib.rs"
@@ -1518,7 +1520,6 @@
         "ConfigCommitWarning",
         "ConfigError",
         "ConfigField",
-        "ConfigPersistError",
         "ConfigPersistOutcome",
         "ConfigQuery",
         "ConfigQueryError",
@@ -1800,15 +1801,13 @@
       "allowed_symbols": [
         "AllowAllPolicy",
         "ApprovalSubject",
-        "AuthorizationContext",
         "ConfiguredPolicy",
         "PolicyDecision",
         "PolicyMode",
         "PolicyModeSource",
         "PolicyPort",
         "PolicyReason",
-        "PolicyRequest",
-        "StandardPolicy"
+        "PolicyRequest"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"

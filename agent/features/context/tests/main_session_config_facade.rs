@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    native_override_store, ConfigAppService, ConfigPersistError, ConfigReader, ConfigUpdate,
-    ConfigUpdateError, ProjectConfigParticipant,
+    native_override_store, ConfigAppService, ConfigReader, ConfigUpdate, ConfigUpdateError,
+    ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
 use context::{CanonicalSession, SnapshotState};
@@ -447,12 +447,7 @@ async fn update_not_committed_keeps_old_memory_and_config() {
         .await;
 
     assert!(
-        matches!(
-            result,
-            Err(ConfigUpdateError::Persist(
-                ConfigPersistError::UnsupportedDurability
-            ))
-        ),
+        matches!(result, Err(ConfigUpdateError::Persist(_))),
         "expected Persist(UnsupportedDurability), got {result:?}"
     );
 

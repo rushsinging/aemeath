@@ -1,3 +1,20 @@
+//! Config：分层配置的读取、合并与提交（含 wire 工厂）。
+//!
+//! # Published Language（#1706 本批小步收敛后）
+//!
+//! | 类别 | 实体 | 消费者 |
+//! |---|---|---|
+//! | 装配工厂 | `wire_project_config*`、`native_override_store`、`ConfigWiring` | composition |
+//! | Port | `ConfigReader`、`ConfigWriter`、`ConfigQuery`、`ConfigSubscription`、`ProjectConfigParticipant` | context、runtime、composition、sdk |
+//! | 服务 | `ConfigAppService`、`NativeConfigStore` | composition、share snapshot |
+//! | DTO | `ConfigUpdate`、`ConfigChangeSet`、`ConfigField`、`ConfigChangeCause`、`ConfigRefreshOutcome`、`ConfigPersistOutcome`、`PreparedConfigUpdate`、`PreparedProjectConfig`、`ProjectConfigLocation`、`CliConfigInput` | context、runtime、sdk、cli |
+//! | 错误 | `ConfigError`、`ConfigQueryError`、`ConfigUpdateError`、`ProjectConfigLocationError` | context、runtime（match 消费面活跃） |
+//! | Adapter | `CliArgsAdapter`、`EnvAdapter`、`FileAdapter` | share/config 域 |
+//!
+//! 边界判定：`ConfigPersistError` 本批收窄 crate 内（context 测试断言改行为级）；
+//! 错误家族 4 个有活跃 match 消费，折叠为统一 `ConfigError` 属后续设计决策
+//! （需随消费方错误处理重构一并评审），本批记录判定不硬做。
+
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
 mod adapters;
@@ -9,9 +26,9 @@ pub use adapters::{
 };
 pub use domain::{
     ConfigChangeCause, ConfigChangeSet, ConfigCommitWarning, ConfigError, ConfigField,
-    ConfigPersistError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome,
-    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation, ProjectConfigLocationError,
+    ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome, ConfigSubscription, ConfigUpdate,
+    ConfigUpdateError, PreparedConfigUpdate, PreparedProjectConfig, ProjectConfigLocation,
+    ProjectConfigLocationError,
 };
 pub use ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
 
