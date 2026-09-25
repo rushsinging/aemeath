@@ -336,7 +336,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - **按次变量**：`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`、`AEMEATH_HOOK_EVENT`、`AEMEATH_SESSION_ID`（dispatch context 携带时的当前 Main Session id）与已发布 payload 兼容变量 **MUST** 根据当前 invocation 重新生成；
 - **可配置透传**：`hooks.env_passthrough`（glob 模式列表，默认空）命中 `*` 通配模式的父环境变量透传给 hook 子进程（如 `CMUX_*`）；`AEMEATH_*` 前缀变量与基础白名单项 **NEVER** 经透传进入（按次注入恒为权威值）；配置合并为 overlay 非空整体覆盖、空则继承低层；
 - **NEVER 泄漏密钥**：aemeath 自身 **NEVER** 主动向 Hook 子进程 env 注入 API key、token、secret；透传白名单由用户显式配置，hook 命令亦为用户配置，二者信任级一致；
-- **stdin**：结构化 JSON（含 HookPoint、input payload、session metadata），**NEVER** 包含 ConfigSnapshot 原文。
+- **stdin**：结构化 JSON（含 HookPoint、input payload、session metadata），**NEVER** 包含 ConfigSnapshot 原文。payload 为 tagged enum 形态（如 `{"SessionStart":{…}}`），并在顶层双写扁平字段 `hook_event_name`（事件名，恒有）与 `session_id`（dispatch context 携带时有）——扁平解析器（cmux / Claude Code 生态）与 tagged 脚本同时可读，双写收敛在 Hook adapter 序列化单点。
 - **MUST NOT** 让用户配置非法 HookPoint 能力组合。
 - **MUST NOT** timeout 后遗留未回收子进程。
 
@@ -383,6 +383,7 @@ src/
 | 2026-08-08 | 对齐当前实现：补全 `dispatch_at`/observer/Outcome Published Language，区分 26-point PL 与 production reachability，明确 frozen policies、non-Unix Unsupported 及 Future Config/触发边界；Sub Run Stop 改由 Boundary metadata 决定 | Hook 实现与 Design 对齐 |
 | 2026-08-09 | SessionStart 生产接线（startup 新会话/`--resume` 与运行期 `/resume` 成功后 emit）；`SessionInput` 增加 `session_id`；dispatch context 携带 session id 并注入 `AEMEATH_SESSION_ID` 环境变量，外部集成（终端会话恢复）据此捕获会话 | cmux 会话恢复适配 |
 | 2026-08-09 | 新增 `hooks.env_passthrough` 可配置透传白名单（glob 模式，默认空保持基础白名单模型）：命中模式的父环境变量透传给 hook 子进程；`AEMEATH_*` 前缀永不透传（按次权威注入）；§11 环境变量与安全条款同步改写 | 终端集成上下文透传 |
+| 2026-09-25 | stdin payload 顶层双写 `hook_event_name` / `session_id`（tagged 结构不变）：cmux 等 Claude 生态扁平解析器免适配提取会话标识 | cmux 上游注册适配 |
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
 | 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
 | 2026-07-18 | 修正 Target 层级方向：HookPort 使用的稳定 PL 归 `domain`，进程与兼容 wire detail 归 `adapters`，避免 `ports → adapters` 反向依赖 | [#987](https://github.com/rushsinging/aemeath/issues/987) |
