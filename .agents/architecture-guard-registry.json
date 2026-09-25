@@ -1512,7 +1512,6 @@
         "value": "agent/features/config/src"
       },
       "allowed_symbols": [
-        "CliArgsAdapter",
         "CliConfigInput",
         "ConfigAppService",
         "ConfigChangeCause",
@@ -1529,8 +1528,6 @@
         "ConfigUpdate",
         "ConfigUpdateError",
         "ConfigWriter",
-        "EnvAdapter",
-        "FileAdapter",
         "NativeConfigStore",
         "PreparedConfigUpdate",
         "PreparedProjectConfig",
