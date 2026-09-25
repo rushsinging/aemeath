@@ -1223,7 +1223,8 @@
         "domain.rs",
         "lib.rs",
         "ports",
-        "ports.rs"
+        "ports.rs",
+        "ports_tests.rs"
       ],
       "reason": "F-3：hook Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "full"
