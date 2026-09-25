@@ -752,3 +752,7 @@ pub(crate) enum TuiRuntimeEvent {
 #[cfg(test)]
 #[path = "tui_runtime_event_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tui_event_naming_tests.rs"]
+mod tui_event_naming_tests;

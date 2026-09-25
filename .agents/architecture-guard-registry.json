@@ -312,23 +312,6 @@
   ],
   "entries": [
     {
-      "id": "scope.provider.error-log-self-reference",
-      "guard": "check-provider-http-attempt.sh",
-      "module": "provider",
-      "scope": {
-        "kind": "path",
-        "value": "agent/features/provider/src/adapters/error_log.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "provider",
-      "reason": "The error logging owner is removed only for the no-self-reference sub-check",
-      "tracking_issue": 1033,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "permanent while the dedicated no-self-reference check exists",
-      "status": "active"
-    },
-    {
       "id": "scope.tui.safe-text-owners",
       "guard": "check-tui-unsafe-text-ops.sh",
       "module": "tui",
@@ -360,23 +343,6 @@
       "tracking_issue": 1021,
       "introduced_baseline": "v0.1.0",
       "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "policy.runtime.event-naming",
-      "guard": "check-runtime-event-naming.sh",
-      "module": "runtime",
-      "scope": {
-        "kind": "path",
-        "value": ".agents/runtime-event-naming-baseline.json"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "runtime",
-      "reason": "Runtime, SDK and TUI event variants are explicitly cataloged, indexed and checked for cross-layer fact-name stability without breaking compatibility wire names",
-      "tracking_issue": 945,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent structured event catalog and naming policy",
       "status": "active"
     },
     {
@@ -3601,6 +3567,48 @@
         }
       ],
       "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.http-send-single-executor",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src"
+      },
+      "forbidden_patterns": [
+        ".send().await",
+        "request.send()"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        }
+      ],
+      "reason": "#1679（判据修正②→③）：HTTP 发送唯一经 http_attempt executor；诊断 API（log_network_error/log_http_error 等）限点同理由编译可见性收窄承接；transport_tests 已覆盖发送/超时行为",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.provider.error-log-diag-single-caller",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefix",
+        "value": "agent/features/provider/src/adapters"
+      },
+      "forbidden_patterns": [
+        "log_network_error(",
+        "log_http_error(",
+        "LlmApiErrorRecord"
+      ],
+      "exclusions": [
+        {
+          "path": "agent/features/provider/src/adapters/error_log.rs"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+        }
+      ],
+      "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
       "profile": "full"
     }
   ],

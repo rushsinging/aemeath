@@ -356,3 +356,7 @@ impl ChatEventSink for ChatEventSinkHandle {
         self.inner.send_lifecycle_event(event)
     }
 }
+
+#[cfg(test)]
+#[path = "events_naming_tests.rs"]
+mod events_naming_tests;
