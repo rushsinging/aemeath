@@ -62,6 +62,112 @@ fn credential_page_is_secret_and_never_contains_plaintext() {
 }
 
 #[test]
+fn credential_page_displays_existing_key_mask_above_and_prefills_input() {
+    // 已保留 key 时：字段上方显示掩码（display_value），输入框预填掩码
+    // 原文（TUI Secret 按长度打点显示）；掩码原样提交 = 保留（空提交）。
+    let mut view = connect_view(ConnectStage::EditCredential);
+    view.draft.has_api_key = true;
+    view.draft.credential_mask = Some("sk-h****wxyz".to_string());
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    let field = &form.page.fields[0];
+    assert_eq!(field.display_value.as_deref(), Some("sk-h****wxyz"));
+    assert!(field
+        .description
+        .as_deref()
+        .is_some_and(|description| description.contains("sk-h****wxyz")));
+    assert!(!format!("{form:?}").contains("plaintext-key"));
+
+    let command = connect_command_for_form(
+        &view,
+        ConfigFormCommand::SubmitPage {
+            values: vec![ConfigFormFieldValue {
+                field_id: ConfigFormFieldId::new("api_key").unwrap(),
+                value: ConfigFormValue::Secret("sk-h****wxyz".to_string()),
+            }],
+        },
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            command,
+            crate::connect::ConnectCommand::SetCredential { api_key } if api_key.is_empty()
+        ),
+        "掩码原样提交必须归一为空提交以保留现有 key"
+    );
+}
+
+#[test]
+fn choose_global_default_page_offers_yes_and_no_options() {
+    // 设为全局默认必须是可选的是/否（含预选），而不是只有单值开关。
+    let mut view = connect_view(ConnectStage::ChooseGlobalDefault);
+    view.draft.set_global_default = false;
+
+    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
+
+    let field = &form.page.fields[0];
+    assert_eq!(field.field_type, ConfigFormFieldType::SingleSelect);
+    let labels: Vec<&str> = field
+        .options
+        .iter()
+        .map(|option| option.label.as_str())
+        .collect();
+    assert_eq!(labels, vec!["是", "否"]);
+    assert!(field.has_value, "必须预选当前 draft 值");
+    assert_eq!(field.display_value.as_deref(), Some("否"));
+
+    let mut yes_view = connect_view(ConnectStage::ChooseGlobalDefault);
+    yes_view.draft.set_global_default = true;
+    let yes_form = provider_connect_form_view(&yes_view, crate::catalog::PROVIDER_CATALOG).unwrap();
+    assert_eq!(yes_form.page.fields[0].display_value.as_deref(), Some("是"));
+}
+
+#[test]
+fn global_default_submission_maps_yes_and_no_to_command() {
+    for (option_id, expected) in [("yes", true), ("no", false)] {
+        let command = connect_command_for_form(
+            &connect_view(ConnectStage::ChooseGlobalDefault),
+            ConfigFormCommand::SubmitPage {
+                values: vec![ConfigFormFieldValue {
+                    field_id: ConfigFormFieldId::new("set_global_default").unwrap(),
+                    value: ConfigFormValue::SelectedOption(
+                        ConfigFormOptionId::new(option_id).unwrap(),
+                    ),
+                }],
+            },
+            crate::catalog::PROVIDER_CATALOG,
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                command,
+                crate::connect::ConnectCommand::SetGlobalDefault { set_as_default } if set_as_default == expected
+            ),
+            "选项 {option_id} 必须映射为 {expected}"
+        );
+    }
+}
+
+#[test]
+fn probing_page_submission_maps_to_continue_after_probe() {
+    // 探测失败后回车提交必须映射为"继续"，而不是报
+    // "Probing 页面不接受字段提交"导致表单退出。
+    let command = connect_command_for_form(
+        &connect_view(ConnectStage::Probing),
+        ConfigFormCommand::SubmitPage { values: Vec::new() },
+        crate::catalog::PROVIDER_CATALOG,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(command, crate::connect::ConnectCommand::ContinueAfterProbe),
+        "Probing 页提交必须映射为 ContinueAfterProbe"
+    );
+}
+
+#[test]
 fn typed_provider_selection_maps_to_connect_command() {
     let command = connect_command_for_form(
         &connect_view(ConnectStage::SelectProvider),

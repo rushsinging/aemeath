@@ -524,6 +524,9 @@ impl ConnectAppService {
             ConnectStage::EditCustomModel => ConnectStage::SelectModel,
             ConnectStage::ChooseGlobalDefault => ConnectStage::SelectModel,
             ConnectStage::ChooseProbe => ConnectStage::ChooseGlobalDefault,
+            // 探测中/失败后返回：回到测试选择页（可重新测试或跳过），
+            // 而不是 InvalidTransition 导致表单整体退出。
+            ConnectStage::Probing => ConnectStage::ChooseProbe,
             ConnectStage::Review => ConnectStage::ChooseProbe,
             actual => {
                 return (
@@ -588,6 +591,7 @@ impl ConnectAppService {
             if provider.user_agent.is_some() {
                 session.draft.provider_user_agent = provider.user_agent.clone();
             }
+            session.draft.credential_mask = provider.credential_mask.clone();
             if let (Some(model_id), Some(context_window), Some(max_tokens)) = (
                 provider.model_id.as_deref(),
                 provider.context_window,
@@ -624,6 +628,7 @@ impl ConnectAppService {
         session.draft.base_url = None;
         session.draft.credential = crate::connect::draft::CredentialState::NotSet;
         session.draft.provider_user_agent = None;
+        session.draft.credential_mask = None;
         (None, SyncOutcome::Proceed)
     }
 
@@ -653,7 +658,11 @@ impl ConnectAppService {
         session: &mut ConnectSession,
         api_key: &str,
     ) -> (Option<ConnectError>, SyncOutcome) {
-        session.draft.set_user_credential(api_key.to_string());
+        // 空提交保持现状：已有保留 key（PreservedFromExisting）不因掩码预填下
+        // 直接回车而丢失；显式清除凭证走配置删除而非向导。
+        if !api_key.is_empty() {
+            session.draft.set_user_credential(api_key.to_string());
+        }
         session.stage = ConnectStage::EditUserAgent;
         (None, SyncOutcome::Proceed)
     }
@@ -929,6 +938,7 @@ fn project_draft(draft: &ConnectDraft) -> ConnectDraftView {
         base_url: draft.base_url.clone(),
         has_api_key: draft.has_api_key(),
         provider_user_agent: draft.provider_user_agent.clone(),
+        credential_mask: draft.credential_mask.clone(),
         model: draft.model.as_ref().map(|model| ModelDraftView {
             model_id: model.model_id.clone(),
             context_window: Some(model.context_window),

@@ -725,6 +725,73 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
 }
 
 #[tokio::test]
+async fn back_from_probing_returns_to_probe_choice() {
+    // 探测失败后按 Esc（Back）必须回到测试选择页，而不是报
+    // InvalidTransition 使整个表单退出。
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::failure(ProviderProbeErrorKind::Timeout))
+        .build();
+    let view = ready_to_probe(&service).await;
+    let failed = advance(&service, view, ConnectCommand::BeginProbe).await;
+    assert_eq!(failed.stage, ConnectStage::Probing);
+
+    let backed = advance(&service, failed, ConnectCommand::Back).await;
+
+    assert_eq!(backed.stage, ConnectStage::ChooseProbe);
+}
+
+#[tokio::test]
+async fn empty_credential_submission_keeps_preserved_existing_key() {
+    // 确认覆盖后 key 已标记保留；用户在掩码预填下直接回车（空提交）
+    // 必须保持保留状态，而不是把已有 key 降级为未设置。
+    let existing = ExistingProviderSnapshot::from_provider_config(
+        "Zhipu",
+        "https://open.bigmodel.cn/api/paas/v4",
+        Some("hidden-key"),
+        Some("zhipu"),
+        "glm-5.3",
+        1_048_576,
+        16_384,
+        None,
+    );
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(
+            ConnectOrigin::ExplicitCommand,
+            test_global_revision(),
+            Some(existing),
+        )
+        .await;
+    let confirmed = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
+    assert!(confirmed.draft.has_api_key);
+
+    let at_credential = advance(
+        &service,
+        confirmed,
+        ConnectCommand::SetEndpoint {
+            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+        },
+    )
+    .await;
+    assert_eq!(at_credential.stage, ConnectStage::EditCredential);
+
+    let submitted = advance(
+        &service,
+        at_credential,
+        ConnectCommand::SetCredential {
+            api_key: String::new(),
+        },
+    )
+    .await;
+
+    assert!(submitted.draft.has_api_key, "空提交必须保持已保留的 key");
+}
+
+#[tokio::test]
 async fn rejecting_existing_provider_returns_to_selection() {
     let existing = ExistingProviderSnapshot::from_provider_config(
         "Anthropic",

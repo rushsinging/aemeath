@@ -60,7 +60,7 @@ pub fn connect_command_for_form(
     _catalog: &'static [ProviderCatalogEntry],
 ) -> Result<ConnectCommand, ProviderConnectFormError> {
     match command {
-        ConfigFormCommand::SubmitPage { values } => submit_for_stage(connect.stage, values),
+        ConfigFormCommand::SubmitPage { values } => submit_for_stage(connect, values),
         ConfigFormCommand::InvokeAction { action_id } => action_for_id(action_id.as_str()),
         ConfigFormCommand::Cancel => Err(ProviderConnectFormError::InvalidSubmission(
             "取消应调用 Connect cancel 入口".to_string(),
@@ -129,15 +129,16 @@ fn page_for_connect(
                 }),
             )?],
         ),
-        ConnectStage::EditCredential => (
-            "edit_credential",
-            "设置 API Key",
-            vec![secret_field(
-                "api_key",
-                "API Key",
-                connect.draft.has_api_key,
-            )?],
-        ),
+        ConnectStage::EditCredential => {
+            let mut field = secret_field("api_key", "API Key", connect.draft.has_api_key)?;
+            if let Some(mask) = connect.draft.credential_mask.as_deref() {
+                field.display_value = Some(mask.to_string());
+                field.description = Some(format!(
+                    "已加载现有密钥 {mask}（密码格式）；直接回车保留，输入新值覆盖"
+                ));
+            }
+            ("edit_credential", "设置 API Key", vec![field])
+        }
         ConnectStage::EditUserAgent => (
             "edit_user_agent",
             "设置 Provider User-Agent",
@@ -183,15 +184,21 @@ fn page_for_connect(
                 )?,
             ],
         ),
-        ConnectStage::ChooseGlobalDefault => (
-            "choose_global_default",
-            "设置全局默认模型",
-            vec![boolean_field(
+        ConnectStage::ChooseGlobalDefault => {
+            let mut field = select_field(
                 "set_global_default",
                 "设为全局默认",
-                connect.draft.set_global_default,
-            )?],
-        ),
+                vec![option("yes", "是", None)?, option("no", "否", None)?],
+            )?;
+            let label = if connect.draft.set_global_default {
+                "是"
+            } else {
+                "否"
+            };
+            field.has_value = true;
+            field.display_value = Some(label.to_string());
+            ("choose_global_default", "设置全局默认模型", vec![field])
+        }
         ConnectStage::ChooseProbe => ("choose_probe", "测试连接", Vec::new()),
         ConnectStage::Probing => (
             "probe_status",
@@ -248,9 +255,10 @@ fn page_for_connect(
 }
 
 fn submit_for_stage(
-    stage: ConnectStage,
+    connect: &ConnectView,
     values: Vec<ConfigFormFieldValue>,
 ) -> Result<ConnectCommand, ProviderConnectFormError> {
+    let stage = connect.stage;
     let field = |id: &str| {
         values
             .iter()
@@ -273,9 +281,16 @@ fn submit_for_stage(
         ConnectStage::EditEndpoint => ConnectCommand::SetEndpoint {
             base_url: text_value(field("base_url")?, "base_url")?,
         },
-        ConnectStage::EditCredential => ConnectCommand::SetCredential {
-            api_key: secret_value(field("api_key")?, "api_key")?,
-        },
+        ConnectStage::EditCredential => {
+            let mut api_key = secret_value(field("api_key")?, "api_key")?;
+            // 掩码原样提交（用户未改动预填值）归一为空提交，保留现有 key。
+            if let Some(mask) = connect.draft.credential_mask.as_deref() {
+                if api_key == mask {
+                    api_key.clear();
+                }
+            }
+            ConnectCommand::SetCredential { api_key }
+        }
         ConnectStage::EditUserAgent => {
             let value = text_value(field("provider_user_agent")?, "provider_user_agent")?;
             ConnectCommand::SetProviderUserAgent {
@@ -308,9 +323,21 @@ fn submit_for_stage(
             max_tokens: u32::try_from(number_value(field("max_tokens")?, "max_tokens")?)
                 .map_err(|_| invalid_value("max_tokens"))?,
         },
-        ConnectStage::ChooseGlobalDefault => ConnectCommand::SetGlobalDefault {
-            set_as_default: boolean_value(field("set_global_default")?, "set_global_default")?,
-        },
+        ConnectStage::ChooseGlobalDefault => {
+            let ConfigFormValue::SelectedOption(option_id) = &field("set_global_default")?.value
+            else {
+                return Err(invalid_type("set_global_default"));
+            };
+            let set_as_default = match option_id.as_str() {
+                "yes" => true,
+                "no" => false,
+                _ => return Err(invalid_value("set_global_default")),
+            };
+            ConnectCommand::SetGlobalDefault { set_as_default }
+        }
+        // 探测完成（含失败）后回车提交 = 继续到 Review；页面 actions 仍可
+        // 返回编辑或取消。
+        ConnectStage::Probing => ConnectCommand::ContinueAfterProbe,
         _ => {
             return Err(ProviderConnectFormError::InvalidSubmission(format!(
                 "{stage:?} 页面不接受字段提交"
@@ -697,13 +724,6 @@ fn secret_value(
 fn number_value(value: &ConfigFormFieldValue, id: &str) -> Result<u64, ProviderConnectFormError> {
     match value.value {
         ConfigFormValue::Number(value) => Ok(value),
-        _ => Err(invalid_type(id)),
-    }
-}
-
-fn boolean_value(value: &ConfigFormFieldValue, id: &str) -> Result<bool, ProviderConnectFormError> {
-    match value.value {
-        ConfigFormValue::Boolean(value) => Ok(value),
         _ => Err(invalid_type(id)),
     }
 }

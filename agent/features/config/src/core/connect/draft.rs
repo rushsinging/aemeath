@@ -121,6 +121,9 @@ pub struct ConnectDraft {
     pub(crate) credential: CredentialState,
     /// Provider 专属 UA 覆盖。`None` 或全空白等同未配置。
     pub provider_user_agent: Option<String>,
+    /// 已保留凭证的展示掩码（来自全局配置快照）；仅用于向导展示，
+    /// **NEVER** 存放明文。
+    pub credential_mask: Option<String>,
     pub model: Option<ModelDraft>,
     pub set_global_default: bool,
 }
@@ -133,6 +136,7 @@ impl ConnectDraft {
             base_url: None,
             credential: CredentialState::NotSet,
             provider_user_agent: None,
+            credential_mask: None,
             model: None,
             set_global_default: false,
         }

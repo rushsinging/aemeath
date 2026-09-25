@@ -180,6 +180,23 @@ pub struct ExistingProviderSnapshot {
     pub max_tokens: Option<u32>,
     /// 全局配置中该 Provider 的专属 UA（`userAgent`，已归一化空白）。
     pub user_agent: Option<String>,
+    /// 已有凭证的掩码形态（首 4 + `****` + 尾 4；短凭证整体 `****`）。
+    /// 仅用于向导展示；明文不离开全局配置存储。
+    pub credential_mask: Option<String>,
+}
+
+/// 由明文凭证计算展示掩码：长度 ≥ 12 时首 4 + `****` + 尾 4，否则整体 `****`。
+fn mask_credential(api_key: &str) -> String {
+    let chars: Vec<char> = api_key.chars().collect();
+    if chars.len() >= 12 {
+        format!(
+            "{}****{}",
+            chars[..4].iter().collect::<String>(),
+            chars[chars.len() - 4..].iter().collect::<String>()
+        )
+    } else {
+        "****".to_string()
+    }
 }
 
 /// 现有 Provider 的 driver 投影。Catalog 必须先存在才能构造 connector；
@@ -251,6 +268,9 @@ impl ExistingProviderSnapshot {
             let trimmed = value.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         });
+        let credential_mask = api_key
+            .filter(|value| !value.is_empty())
+            .map(mask_credential);
         Self {
             source_key: source.to_string(),
             driver,
@@ -260,6 +280,7 @@ impl ExistingProviderSnapshot {
             context_window: (context_window > 0).then_some(context_window),
             max_tokens: (max_tokens > 0).then_some(max_tokens),
             user_agent: normalized_user_agent,
+            credential_mask,
         }
     }
 

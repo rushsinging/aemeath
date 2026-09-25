@@ -118,6 +118,20 @@ fn select_page_without_selected_value_starts_from_first_option() {
     assert_eq!(model.interaction().selected_option, 0);
 }
 
+#[test]
+fn secret_field_prefills_mask_and_renders_as_dots() {
+    // 已保留 key 的掩码预填输入框（原文作为待编辑值），
+    // visible_input 按长度以密码格式显示。
+    let mut view = secret_view();
+    view.page.id = sdk::ConfigFormPageId("edit_credential".to_string());
+    view.page.fields[0].field_type = sdk::ConfigFormFieldType::Secret;
+    view.page.fields[0].display_value = Some("sk-h****wxyz".to_string());
+
+    let mut model = ConfigFormModel::new(view);
+
+    assert_eq!(model.visible_input(), "•".repeat("sk-h****wxyz".len()));
+}
+
 fn custom_model_view() -> sdk::ConfigFormView {
     let mut view = secret_view();
     view.page.id = sdk::ConfigFormPageId("edit_custom_model".to_string());

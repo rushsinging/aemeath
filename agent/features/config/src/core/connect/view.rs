@@ -51,6 +51,8 @@ pub struct ConnectDraftView {
     /// 是否有非空 API key。**NEVER** 暴露明文。
     pub has_api_key: bool,
     pub provider_user_agent: Option<String>,
+    /// 已保留凭证的展示掩码（首 4 + `****` + 尾 4）。
+    pub credential_mask: Option<String>,
     pub model: Option<ModelDraftView>,
     pub set_global_default: bool,
 }

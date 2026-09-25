@@ -124,6 +124,7 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
             EditCustomModel,
             ChooseGlobalDefault,
             ChooseProbe,
+            Probing,
             Review,
         ],
         ConnectCommand::SelectProvider { .. } => &[SelectProvider],

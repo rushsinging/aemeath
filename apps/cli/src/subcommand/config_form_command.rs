@@ -491,16 +491,13 @@ fn remove_character(value: &mut String, character_index: usize) {
 }
 
 fn initial_field_inputs(view: &sdk::ConfigFormView) -> Vec<String> {
+    // display_value（预填默认值/已保留凭证掩码）作为待编辑初值：
+    // Secret 类型经 visible_input 以密码格式显示，掩码原样提交由表单层
+    // 归一为空（保留现有 key）。
     view.page
         .fields
         .iter()
-        .map(|field| {
-            if field.field_type == sdk::ConfigFormFieldType::Secret {
-                String::new()
-            } else {
-                field.display_value.clone().unwrap_or_default()
-            }
-        })
+        .map(|field| field.display_value.clone().unwrap_or_default())
         .collect()
 }
 
