@@ -47,7 +47,7 @@ enum HookInvocation {
     UserPromptSubmit(UserPromptInput),
     Stop(StopInput),
     StopFailure(StopFailureInput),
-    SessionStart(SessionInput),
+    SessionStart(SessionInput),  // SessionInput { session_id }
     SessionEnd(SessionInput),
     PreCompact(PreCompactInput),
     PostCompact(PostCompactInput),
@@ -130,7 +130,8 @@ enum HookClass {
 | PostToolUse / PostToolUseFailure / PostToolBatch | ✅ | ✅ | 当前 fire-and-forget，不消费 context | 仅 Activity 生命周期 | 部分接线 |
 | TaskCreated / TaskCompleted / PermissionDenied / InstructionsLoaded | ✅ | ✅ | 当前 fire-and-forget | 仅 Activity 生命周期 | 部分接线 |
 | StopFailure | ✅ | ✅，由 Stop 重试耗尽在 Hook BC 内 best-effort 触发 | 观察事件，不改变既定 Stop Block | 仅 Activity 生命周期 | 已接线观察 |
-| UserPromptSubmit / PreCompact / PostCompact / SessionStart / SessionEnd / Notification | ✅ | ❌ | ❌ | ❌ | Future，当前配置不会触发 |
+| UserPromptSubmit / PreCompact / PostCompact / SessionEnd / Notification | ✅ | ❌ | ❌ | ❌ | Future，当前配置不会触发 |
+| SessionStart | ✅ | ✅，startup（新会话与 `--resume`）与运行期 `/resume` 成功后各 emit 一次 | 生命周期点，directive 不消费（Block 无效） | ❌ | 已接线 emit；SessionEnd 仍为 Future |
 | PermissionRequest | ✅ | ❌ | ❌ | ❌ | Future；授权决策流未产生该事件时不得伪造 |
 | Elicitation / ElicitationResult / UserPromptExpansion / ConfigChange / CwdChanged / FileChanged / TeammateIdle | ✅ | ❌ | ❌ | ❌ | Future，等待对应生产触发能力 |
 
@@ -332,7 +333,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 - **env_clear**：Hook 子进程 **MUST** 清空父进程环境，只接收 Hook adapter 构造的环境；
 - **基础白名单**：只从父进程复制 `PATH` / `HOME` / `SHELL` / `LANG` / `LC_ALL` / `TERM`，缺失项不注入；
-- **按次变量**：`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`、`AEMEATH_HOOK_EVENT` 与已发布 payload 兼容变量 **MUST** 根据当前 invocation 重新生成；
+- **按次变量**：`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`、`AEMEATH_HOOK_EVENT`、`AEMEATH_SESSION_ID`（dispatch context 携带时的当前 Main Session id）与已发布 payload 兼容变量 **MUST** 根据当前 invocation 重新生成；
 - **无 Config 扩展**：当前不支持 Config 自定义 Hook 环境变量；未知父环境变量默认不可见；
 - **NEVER 泄漏密钥**：API key、token、secret 等 **NEVER** 进入 Hook 子进程 env；
 - **stdin**：结构化 JSON（含 HookPoint、input payload、session metadata），**NEVER** 包含 ConfigSnapshot 原文。
@@ -380,6 +381,7 @@ src/
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-08-08 | 对齐当前实现：补全 `dispatch_at`/observer/Outcome Published Language，区分 26-point PL 与 production reachability，明确 frozen policies、non-Unix Unsupported 及 Future Config/触发边界；Sub Run Stop 改由 Boundary metadata 决定 | Hook 实现与 Design 对齐 |
+| 2026-08-09 | SessionStart 生产接线（startup 新会话/`--resume` 与运行期 `/resume` 成功后 emit）；`SessionInput` 增加 `session_id`；dispatch context 携带 session id 并注入 `AEMEATH_SESSION_ID` 环境变量，外部集成（终端会话恢复）据此捕获会话 | cmux 会话恢复适配 |
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
 | 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
 | 2026-07-18 | 修正 Target 层级方向：HookPort 使用的稳定 PL 归 `domain`，进程与兼容 wire detail 归 `adapters`，避免 `ports → adapters` 反向依赖 | [#987](https://github.com/rushsinging/aemeath/issues/987) |

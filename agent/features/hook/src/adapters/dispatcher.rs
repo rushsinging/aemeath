@@ -200,7 +200,8 @@ impl HookPort for Dispatcher {
         for sub in matching {
             let current_input =
                 serde_json::to_value(&current_invocation).unwrap_or(serde_json::json!({}));
-            let invocation_env = invocation_environment(&current_invocation, context.cwd());
+            let invocation_env =
+                invocation_environment(&current_invocation, context.cwd(), context.session_id());
             let outcome = self
                 .execute_subscription(
                     sub,
@@ -311,6 +312,7 @@ impl HookPort for Dispatcher {
                                     &current_invocation,
                                     error,
                                     context.cwd(),
+                                    context.session_id(),
                                     cancellation,
                                 )
                                 .await;
@@ -415,6 +417,7 @@ fn first_shell_command_word(command: &str) -> String {
 fn invocation_environment(
     invocation: &HookInvocation,
     cwd: &std::path::Path,
+    session_id: Option<&str>,
 ) -> HashMap<String, String> {
     let mut env = HashMap::new();
     env.insert(
@@ -423,6 +426,10 @@ fn invocation_environment(
     );
     env.insert("AEMEATH_PROJECT_DIR".to_string(), cwd.display().to_string());
     env.insert("CLAUDE_PROJECT_DIR".to_string(), cwd.display().to_string());
+    // 当前 Main Session id：所有 point 统一注入，外部集成据此捕获会话。
+    if let Some(session_id) = session_id {
+        env.insert("AEMEATH_SESSION_ID".to_string(), session_id.to_string());
+    }
     match invocation {
         HookInvocation::PreToolUse(input) => {
             env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
@@ -717,6 +724,7 @@ impl Dispatcher {
         stop_invocation: &HookInvocation,
         error: String,
         cwd: &std::path::Path,
+        session_id: Option<&str>,
         cancellation: &dyn CancellationSignal,
     ) -> HookOutcome {
         let run_steps = match stop_invocation {
@@ -738,7 +746,7 @@ impl Dispatcher {
         matching.sort_by_key(|s| s.order);
 
         let current_input = serde_json::to_value(&invocation).unwrap_or(serde_json::json!({}));
-        let invocation_env = invocation_environment(&invocation, cwd);
+        let invocation_env = invocation_environment(&invocation, cwd, session_id);
         let mut all_executions: Vec<HookExecution> = Vec::new();
         for sub in matching {
             match self

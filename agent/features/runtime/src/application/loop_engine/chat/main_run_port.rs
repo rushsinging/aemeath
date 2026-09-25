@@ -338,6 +338,7 @@ impl crate::application::tool::coordination::ToolRoundObserver for ChatToolRound
             self.runtime_context.hooks_ref(),
             self.runtime_context.activities().as_ref(),
             step_id,
+            self.runtime_context.main_session_id(),
             cancel,
             call_count,
             run_step,

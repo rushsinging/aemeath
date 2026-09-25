@@ -257,6 +257,7 @@ where
                 permission_rule: "deny".to_string(),
             }),
             workspace_root,
+            agent.session_id.as_ref(),
             cancel,
         )
         .await;
@@ -310,6 +311,7 @@ pub(crate) async fn run_post_tool_hooks(
     step_id: &sdk::RunStepId,
     call: &ToolCall,
     execution: &ToolExecution,
+    session_id: &str,
     cancel: &CancellationToken,
     workspace_read: &Arc<dyn project::WorkspaceRead>,
 ) {
@@ -328,6 +330,7 @@ pub(crate) async fn run_post_tool_hooks(
             is_error,
         }),
         &workspace_root,
+        session_id,
         cancel,
     )
     .await;
@@ -343,6 +346,7 @@ pub(crate) async fn run_post_tool_hooks(
                 error: output.to_string(),
             }),
             &workspace_root,
+            session_id,
             cancel,
         )
         .await;

@@ -370,6 +370,16 @@ pub async fn from_args_with_workspace(
     // Session id determined above; committed_config remains bound to the
     // current project because cross-project resume is rejected.
 
+    // 3b. SessionStart 生命周期 hook：会话身份确定（新会话或 --resume）后 emit，
+    // 外部集成（如终端会话恢复）据此捕获可 resume 的会话 id。
+    // 生命周期点非闸门：hook 失败不阻断启动。
+    crate::application::hook::session_start::emit_session_start(
+        &runtime_context_factory.services().hooks,
+        &cwd,
+        &session_id,
+    )
+    .await;
+
     // 4. Read the current committed config snapshot.
     let snapshot = wiring.committed_config();
 

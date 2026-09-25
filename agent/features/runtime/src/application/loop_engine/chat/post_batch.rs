@@ -8,6 +8,7 @@ pub(crate) async fn run_post_tool_batch(
     hook_port: &Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     step_id: &sdk::RunStepId,
+    session_id: &str,
     cancel: &CancellationToken,
     tool_count: usize,
     step_count: usize,
@@ -23,6 +24,7 @@ pub(crate) async fn run_post_tool_batch(
             summary: format!("batch with {tool_count} tools after {step_count} run steps"),
         }),
         &workspace_root,
+        session_id,
         cancel,
     )
     .await;

@@ -429,6 +429,14 @@ where
                     {
                         Ok(resume_view) => {
                             session_id = resume_view.session_id.clone();
+                            // 会话身份已切换：emit SessionStart 让外部集成重新捕获
+                            // 恢复后的会话 id（生命周期点，失败不阻断恢复流程）。
+                            crate::application::hook::session_start::emit_session_start(
+                                &shell.runtime_context_factory.services().hooks,
+                                &workspace.read().current_workspace_root(),
+                                &session_id,
+                            )
+                            .await;
                             shell
                                 .session_state
                                 .write()
