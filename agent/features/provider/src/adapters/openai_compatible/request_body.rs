@@ -36,7 +36,7 @@ impl OpenAICompatibleProvider {
                 messages,
                 !matches!(scope.effective_reasoning(), ReasoningLevel::Off),
             )
-            .map_err(provider_error_from_llm)?;
+            .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?;
             let tools = Self::convert_tools(tool_schemas);
             let mut body = self.base_request_body(scope, openai_messages, true);
             self.apply_reasoning_fields(&mut body, scope);
@@ -70,7 +70,10 @@ impl OpenAICompatibleProvider {
         let response = HttpAttemptExecutor::execute(
             self.http
                 .post(&url)
-                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .headers(
+                    self.build_headers()
+                        .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?,
+                )
                 .json(&request_body),
             &context,
             cancel,
@@ -144,22 +147,6 @@ impl OpenAICompatibleProvider {
         self.driver
             .apply_reasoning_fields(request_body, Some(&scoped_config), reasoning_enabled);
     }
-}
-
-fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
-    let kind = match error {
-        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
-        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            crate::ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
-    };
-    crate::ProviderError::fatal(kind, error.to_string())
 }
 
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {

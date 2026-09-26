@@ -202,7 +202,7 @@ use crate::application::model::test_support::{
 use async_trait::async_trait;
 use futures::StreamExt;
 use hook::HookDispatcher;
-use provider::test_harness::{InvocationScopeData, LlmProvider, SystemBlockData};
+use provider::composition::{InvocationScopeData, LlmProvider, SystemBlockData};
 use share::reasoning::ReasoningLevel;
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,

@@ -50,11 +50,11 @@ impl ScriptedInvocationProvider {
 }
 
 #[async_trait]
-impl provider::test_harness::LlmProvider for ScriptedInvocationProvider {
+impl provider::composition::LlmProvider for ScriptedInvocationProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::test_harness::InvocationScopeData,
-        _system: &[provider::test_harness::SystemBlockData],
+        _scope: &provider::composition::InvocationScopeData,
+        _system: &[provider::composition::SystemBlockData],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
@@ -340,19 +340,19 @@ pub(crate) fn constant_factory(
 // ─── LlmProvider → ProviderPort adapter (#907 loop test migration) ────────
 
 /// Adapter that implements [`crate::ports::ProviderPort`] by delegating to an
-/// existing `provider::test_harness::LlmProvider` scripted fake.
+/// existing `provider::composition::LlmProvider` scripted fake.
 ///
 /// Used only by `runtime` lib tests as a minimal bridge so the legacy scripted
 /// fakes (e.g. `SequenceProvider`, `RecordingProvider`, `CountingProvider`,
 /// `ErrorProvider`) can be wrapped in a `ProviderBinding` without rewriting
 /// every test to the new `ProviderPort` trait.
 struct LlmProviderPortAdapter {
-    provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>,
+    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
     model: provider::ModelIdData,
 }
 
 impl LlmProviderPortAdapter {
-    fn new(provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>) -> Self {
+    fn new(provider: std::sync::Arc<dyn provider::composition::LlmProvider>) -> Self {
         let model = provider::ModelIdData {
             provider: provider.provider_name().to_string(),
             model: provider.model_name().to_string(),
@@ -400,10 +400,10 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         crate::ports::provider_port::ProviderError,
     > {
         // Convert InvocationRequestData into the legacy LlmProvider argument list.
-        let system_blocks: Vec<provider::test_harness::SystemBlockData> = request
+        let system_blocks: Vec<provider::composition::SystemBlockData> = request
             .system
             .iter()
-            .map(|block| provider::test_harness::SystemBlockData::dynamic(block.text().to_string()))
+            .map(|block| provider::composition::SystemBlockData::dynamic(block.text().to_string()))
             .collect();
         let tool_schemas: Vec<serde_json::Value> = request
             .tools
@@ -414,7 +414,7 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         // `CancellationSignal` arg from ProviderPort::invoke is treated as
         // advisory (real cancellation originates from `request.cancellation`).
         let _ = cancellation;
-        let scope = provider::test_harness::InvocationScopeData::new(
+        let scope = provider::composition::InvocationScopeData::new(
             self.model.model.clone(),
             request.options.max_output_tokens.max(1),
             share::reasoning::ReasoningLevel::Off,
@@ -438,14 +438,14 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
     }
 }
 
-/// Wrap an existing `provider::test_harness::LlmProvider` scripted fake into a
+/// Wrap an existing `provider::composition::LlmProvider` scripted fake into a
 /// `ProviderBinding` so session-driver and agent tests can reuse their scripted
 /// providers without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
-    provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>,
+    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
 ) -> std::sync::Arc<crate::ports::ProviderBinding> {
     let model = provider::ModelIdData {
         provider: provider.provider_name().to_string(),

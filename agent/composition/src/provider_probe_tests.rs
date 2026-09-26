@@ -2,12 +2,13 @@ use super::*;
 use async_trait::async_trait;
 use config::ports::{ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest};
 use futures_util::stream;
-use provider::composition::{InvocationScope, LlmClient, LlmProvider, SystemBlock};
+use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
 use provider::{
-    InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
-    ProviderStopReason, ReasoningLevel,
+    InvocationEventData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
+    ProviderErrorKind, ProviderStopReasonData,
 };
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -18,7 +19,7 @@ struct CapturedInvocation {
 }
 
 struct EventProvider {
-    events: Vec<InvocationEvent>,
+    events: Vec<InvocationEventData>,
     captured: Arc<Mutex<CapturedInvocation>>,
 }
 
@@ -26,12 +27,12 @@ struct EventProvider {
 impl LlmProvider for EventProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScope,
-        _system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tools: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<provider::InvocationStream, ProviderError> {
+    ) -> Result<provider::InvocationStreamData, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
         captured.count += 1;
         captured.max_tokens = Some(scope.max_tokens());
@@ -78,10 +79,10 @@ impl ProbeClientFactory for FakeProbeClientFactory {
     }
 }
 
-fn completed() -> InvocationEvent {
-    InvocationEvent::Completed(ProviderCompletion {
-        output: vec![ProviderContentBlock::Text("OK".to_string())],
-        stop_reason: ProviderStopReason::EndTurn,
+fn completed() -> InvocationEventData {
+    InvocationEventData::Completed(ProviderCompletionData {
+        output: vec![ProviderContentBlockData::Text("OK".to_string())],
+        stop_reason: ProviderStopReasonData::EndTurn,
         usage: None,
         effective_reasoning: ReasoningLevel::Off,
     })
@@ -107,7 +108,7 @@ struct ProbeFixture {
     invocation: Arc<Mutex<CapturedInvocation>>,
 }
 
-fn adapter(events: Vec<InvocationEvent>) -> ProbeFixture {
+fn adapter(events: Vec<InvocationEventData>) -> ProbeFixture {
     let invocation = Arc::new(Mutex::new(CapturedInvocation::default()));
     let client = Arc::new(LlmClient::from_provider(Arc::new(EventProvider {
         events,
@@ -154,7 +155,7 @@ async fn probe_requires_completed_terminal_event() {
 #[tokio::test]
 async fn probe_maps_failed_event_without_sensitive_message() {
     let secret = "sk-probe-secret";
-    let failed = InvocationEvent::Failed(ProviderError::fatal(
+    let failed = InvocationEventData::Failed(ProviderError::fatal(
         ProviderErrorKind::Authentication,
         format!("Authorization Bearer {secret}"),
     ));

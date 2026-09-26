@@ -37,14 +37,6 @@ pub mod composition {
     pub use crate::ports::LlmProvider;
     pub use crate::LlmError;
 }
-/// Test-only concrete Provider compatibility surface for migration fixtures.
-#[cfg(feature = "test-harness")]
-pub mod test_harness {
-    pub use crate::adapters::client::LlmClient;
-    pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
-    pub use crate::ports::LlmProvider;
-}
-
 /// Provider HTTP 超时常量（crate 内装配用；跨 crate 零消费）。
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
 pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 30;
@@ -103,6 +95,25 @@ impl LlmError {
     }
 }
 
+// ─── LlmError → ProviderError 权威映射（crate 内三 driver + stream + runtime 装配共用）───
+
+impl From<LlmError> for ProviderError {
+    fn from(error: LlmError) -> Self {
+        let kind = match &error {
+            LlmError::Cancelled => ProviderErrorKind::Cancelled,
+            LlmError::RateLimited => ProviderErrorKind::RateLimited,
+            LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
+            LlmError::Network(_) => ProviderErrorKind::Network,
+            LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
+            LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
+                ProviderErrorKind::StreamTruncated
+            }
+            LlmError::Stream(_) => ProviderErrorKind::Protocol,
+            LlmError::Config(_) => ProviderErrorKind::Configuration,
+        };
+        ProviderError::fatal(kind, error.to_string())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::LlmError;

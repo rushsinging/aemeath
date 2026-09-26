@@ -9,7 +9,7 @@ use crate::application::model::test_support::{
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
-use provider::test_harness::{InvocationScopeData, LlmProvider, SystemBlockData};
+use provider::composition::{InvocationScopeData, LlmProvider, SystemBlockData};
 use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
 use share::config::AgentInstanceConfig;
 use share::message::Message;

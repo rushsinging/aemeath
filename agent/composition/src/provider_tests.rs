@@ -546,8 +546,6 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
 
 // ─── ProviderFactory TDD tests ─────────────────────────────────────
 
-use runtime::ProviderBuildSpec;
-
 fn valid_spec() -> ProviderBuildSpec {
     ProviderBuildSpec {
         driver: "anthropic".to_string(),

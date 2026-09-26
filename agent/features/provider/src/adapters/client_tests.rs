@@ -62,7 +62,7 @@ fn from_config_with_pool_builds_distinct_transport_for_distinct_endpoint() {
 
 #[test]
 fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "anthropic".to_string(),
         source_key: "Anthropic".to_string(),
         api_style: None,
@@ -85,7 +85,7 @@ fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,
@@ -108,7 +108,7 @@ fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_missing_user_agent_instead_of_using_global_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,

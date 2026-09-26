@@ -177,7 +177,10 @@ impl AnthropicProvider {
         let response = HttpAttemptExecutor::execute(
             self.http
                 .post(&endpoint)
-                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .headers(
+                    self.build_headers()
+                        .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?,
+                )
                 .json(&request_json),
             &context,
             cancel,
@@ -194,22 +197,6 @@ impl AnthropicProvider {
             cancel.child_token(),
         ))
     }
-}
-
-fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
-    let kind = match error {
-        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
-        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            crate::ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
-    };
-    crate::ProviderError::fatal(kind, error.to_string())
 }
 
 /// Pull-stream failures share the single typed classification maintained by

@@ -130,22 +130,6 @@ impl OllamaProvider {
     }
 }
 
-fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
-    let kind = match error {
-        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
-        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            crate::ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
-    };
-    crate::ProviderError::fatal(kind, error.to_string())
-}
-
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
     failure.into_provider_error()
 }
@@ -165,7 +149,7 @@ impl LlmProvider for OllamaProvider {
         }
         let request_body = self
             .build_request_body(scope, system, messages, tool_schemas, true)
-            .map_err(provider_error_from_llm)?;
+            .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?;
         let url = format!("{}/api/chat", self.base_url);
         let request_bytes = serde_json::to_string(&request_body)
             .map(|value| value.len())
@@ -186,7 +170,10 @@ impl LlmProvider for OllamaProvider {
         let response = HttpAttemptExecutor::execute(
             self.http
                 .post(&url)
-                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .headers(
+                    self.build_headers()
+                        .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?,
+                )
                 .json(&request_body),
             &context,
             cancel,

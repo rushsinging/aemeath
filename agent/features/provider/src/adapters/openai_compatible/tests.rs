@@ -69,22 +69,23 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
-        driver: crate::domain::capability::ProviderDriverKind::OpenAI
-            .as_str()
-            .to_string(),
-        source_key: "openai".to_string(),
-        api_style: None,
-        api_key: "test-key".to_string(),
-        base_url: Some(base_url),
-        model: "test-model".to_string(),
-        max_tokens: 8192,
-        reasoning: false,
-        reasoning_config: None,
-        timeout_secs: 60,
-        user_agent: Some("aemeath-test/1.0".to_string()),
-    })
-    .expect("valid OpenAI chat config");
+    let client =
+        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+            driver: crate::domain::capability::ProviderDriverKind::OpenAI
+                .as_str()
+                .to_string(),
+            source_key: "openai".to_string(),
+            api_style: None,
+            api_key: "test-key".to_string(),
+            base_url: Some(base_url),
+            model: "test-model".to_string(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            timeout_secs: 60,
+            user_agent: Some("aemeath-test/1.0".to_string()),
+        })
+        .expect("valid OpenAI chat config");
     let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,
@@ -133,22 +134,23 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
-        driver: crate::domain::capability::ProviderDriverKind::OpenAI
-            .as_str()
-            .to_string(),
-        source_key: "openai".to_string(),
-        api_style: Some("responses".to_string()),
-        api_key: "test-key".to_string(),
-        base_url: Some(base_url),
-        model: "test-model".to_string(),
-        max_tokens: 8192,
-        reasoning: false,
-        reasoning_config: None,
-        timeout_secs: 60,
-        user_agent: Some("aemeath-test/1.0".to_string()),
-    })
-    .expect("valid OpenAI responses config");
+    let client =
+        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+            driver: crate::domain::capability::ProviderDriverKind::OpenAI
+                .as_str()
+                .to_string(),
+            source_key: "openai".to_string(),
+            api_style: Some("responses".to_string()),
+            api_key: "test-key".to_string(),
+            base_url: Some(base_url),
+            model: "test-model".to_string(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            timeout_secs: 60,
+            user_agent: Some("aemeath-test/1.0".to_string()),
+        })
+        .expect("valid OpenAI responses config");
     let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,
@@ -204,22 +206,23 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, _) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
-        driver: crate::domain::capability::ProviderDriverKind::OpenAI
-            .as_str()
-            .to_string(),
-        source_key: "openai".to_string(),
-        api_style: Some("responses".to_string()),
-        api_key: "test-key".to_string(),
-        base_url: Some(base_url),
-        model: "test-model".to_string(),
-        max_tokens: 8192,
-        reasoning: false,
-        reasoning_config: None,
-        timeout_secs: 60,
-        user_agent: Some("aemeath-test/1.0".to_string()),
-    })
-    .expect("valid OpenAI responses config");
+    let client =
+        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+            driver: crate::domain::capability::ProviderDriverKind::OpenAI
+                .as_str()
+                .to_string(),
+            source_key: "openai".to_string(),
+            api_style: Some("responses".to_string()),
+            api_key: "test-key".to_string(),
+            base_url: Some(base_url),
+            model: "test-model".to_string(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            timeout_secs: 60,
+            user_agent: Some("aemeath-test/1.0".to_string()),
+        })
+        .expect("valid OpenAI responses config");
     let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,

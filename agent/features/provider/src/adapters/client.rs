@@ -45,7 +45,9 @@ fn reasoning_level_from_options(
 
 /// 校验 invocation 构造输入已完成 Config 解析；base URL / 模型 / UA
 /// 任一缺失时 fail-closed 返回 Configuration 错误，禁止回落 adapter 内置默认值。
-fn ensure_resolved_invocation_inputs(options: &LlmConfigOptions) -> Result<(), crate::LlmError> {
+fn ensure_resolved_invocation_inputs(
+    options: &LlmConfigOptionsData,
+) -> Result<(), crate::LlmError> {
     if options
         .base_url
         .as_deref()
@@ -407,6 +409,77 @@ impl LlmClient {
         self.provider
             .invocation_stream(scope, system, messages, tool_schemas, cancel)
             .await
+    }
+
+    /// 统一请求模型入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
+    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
+    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    pub async fn invoke(
+        &self,
+        capability: &crate::ModelCapabilityData,
+        request: &crate::InvocationRequestData,
+        cancellation: &dyn crate::CancellationSignal,
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+        use crate::{ProviderError, ProviderErrorKind};
+
+        // fast path：调用方信号已触发。
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+
+        // clamp：请求 reasoning 不超过声明能力；scope 用 provider 中性的 model 名。
+        let requested_reasoning = request.options.reasoning;
+        let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
+        let scope = crate::InvocationScopeData::new(
+            request.model.model.clone(),
+            request.options.max_output_tokens,
+            requested_reasoning,
+            effective_reasoning,
+        )
+        .map_err(|error| {
+            ProviderError::fatal(
+                ProviderErrorKind::Configuration,
+                format!("invalid scope: {error}"),
+            )
+        })?;
+
+        // provider 中性 system blocks → legacy 驱动块（Cacheable→cached，Text→dynamic）。
+        let system: Vec<SystemBlockData> = request
+            .system
+            .iter()
+            .map(|block| match block {
+                crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
+                crate::RequestSystemBlockData::Cacheable(text) => {
+                    SystemBlockData::cached(text.clone())
+                }
+            })
+            .collect();
+
+        let tool_schemas: Vec<serde_json::Value> = request
+            .tools
+            .iter()
+            .map(crate::ModelToolSchemaData::to_tool_definition)
+            .collect();
+
+        // request 携带的 token 与调用方信号竞速 establishment。
+        let cancel_token = request.cancellation.clone();
+        let establishment = Box::pin(self.invocation_stream(
+            &scope,
+            &system,
+            &request.messages,
+            &tool_schemas,
+            &cancel_token,
+        ));
+        tokio::pin!(establishment);
+
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                cancel_token.cancel();
+                Err(ProviderError::cancelled())
+            }
+            result = &mut establishment => result,
+        }
     }
 
     fn log_request(

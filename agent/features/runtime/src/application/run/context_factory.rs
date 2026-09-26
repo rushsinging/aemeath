@@ -442,7 +442,7 @@ impl RuntimeContextFactory {
                 api_style: model.api_style.clone(),
                 api_key: source.api_key.clone(),
                 base_url: runtime_provider.base_url,
-                model: crate::ports::ModelId {
+                model: crate::ports::ModelIdData {
                     provider: source_key,
                     model: model.id.clone(),
                 },

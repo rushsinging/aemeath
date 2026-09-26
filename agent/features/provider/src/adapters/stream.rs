@@ -388,32 +388,6 @@ fn completion_from_legacy(
     }
 }
 
-fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
-    let retryable = matches!(
-        error,
-        crate::LlmError::Network(_)
-            | crate::LlmError::StreamInterrupted(_)
-            | crate::LlmError::StreamTruncated { .. }
-    );
-    let kind = match error {
-        crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => ProviderErrorKind::Network,
-        crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => ProviderErrorKind::Configuration,
-    };
-    if retryable {
-        ProviderError::retryable(kind, error.to_string())
-    } else {
-        ProviderError::fatal(kind, error.to_string())
-    }
-}
-
 pub(crate) fn stream_read_error(error: io::Error) -> crate::LlmError {
     if error.kind() == io::ErrorKind::Other {
         crate::LlmError::StreamInterrupted(error.to_string())
@@ -688,6 +662,36 @@ mod stream_usage_tests;
 #[cfg(test)]
 #[path = "stream_contract_tests.rs"]
 mod contract_tests;
+
+/// 流式路径的 LlmError→ProviderError：Network/StreamInterrupted/StreamTruncated
+/// 标记 retryable（重试是安全的——请求未部分生效）；其余 fatal。
+/// 与构造期映射（`From<LlmError>`，全 fatal）语义不同，勿合并。
+fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
+    let retryable = matches!(
+        &error,
+        crate::LlmError::Network(_)
+            | crate::LlmError::StreamInterrupted(_)
+            | crate::LlmError::StreamTruncated { .. }
+    );
+    let kind = match &error {
+        crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
+        crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
+        crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
+        crate::LlmError::Network(_) => ProviderErrorKind::Network,
+        crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
+            ProviderErrorKind::StreamTruncated
+        }
+        crate::LlmError::Stream(_) => ProviderErrorKind::Protocol,
+        crate::LlmError::Config(_) => ProviderErrorKind::Configuration,
+    };
+    let message = error.to_string();
+    if retryable {
+        ProviderError::retryable(kind, message)
+    } else {
+        ProviderError::fatal(kind, message)
+    }
+}
 
 #[cfg(test)]
 mod tests {
