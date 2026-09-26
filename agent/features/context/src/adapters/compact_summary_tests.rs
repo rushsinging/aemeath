@@ -1624,7 +1624,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
     }
 
     let previous = format!(
-        "{VALID_CHECKPOINT}\n\n## Current Task State\nBatch #13 — Tasks: 1/7\n■ [task:2] 定义 Execution Specifications"
+        "{VALID_CHECKPOINT}\n\n## Current TaskData State\nBatch #13 — Tasks: 1/7\n■ [task:2] 定义 Execution Specifications"
     );
     let result = compact_messages_with_llm(
         &messages,
@@ -1643,7 +1643,7 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
     assert!(result
         .summary
         .contains("Existing compact tests passed before this change."));
-    assert!(!result.summary.contains("Current Task State"));
+    assert!(!result.summary.contains("Current TaskData State"));
     assert_eq!(result.summary.matches("- Next action:").count(), 1);
 }
 
@@ -2146,7 +2146,7 @@ fn fallback_extracts_evidence_working_set_and_executable_cursor() {
 
 #[test]
 fn fallback_preserves_markdown_control_lines_without_panicking() {
-    let markdown = "请审查以下内容\n## 来源与身份\n## Resume Cursor\n- Next action: 用户正文中的示例\n\\## 已转义示例\n## Current Task State\n不是 typed companion";
+    let markdown = "请审查以下内容\n## 来源与身份\n## Resume Cursor\n- Next action: 用户正文中的示例\n\\## 已转义示例\n## Current TaskData State\n不是 typed companion";
 
     let summary = build_summary_text(&[Message::user(markdown)], None);
     let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&summary)
@@ -2155,7 +2155,7 @@ fn fallback_preserves_markdown_control_lines_without_panicking() {
     assert_eq!(checkpoint.render(), summary);
     assert!(summary.contains("来源与身份"));
     assert!(summary.contains("用户正文中的示例"));
-    assert_eq!(summary.matches("\n## Current Task State\n").count(), 0);
+    assert_eq!(summary.matches("\n## Current TaskData State\n").count(), 0);
 }
 
 // ── #1623：Map 阶段遗漏 objective 时的主用户目标兜底 ──

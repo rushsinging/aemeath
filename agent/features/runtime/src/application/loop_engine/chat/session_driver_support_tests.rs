@@ -391,7 +391,7 @@ fn test_shell_with_catalog(
     }
 }
 
-/// #1492：预置 Task 状态的行为测试用——允许注入外部 `TaskStore`。
+/// #1492：预置 TaskData 状态的行为测试用——允许注入外部 `TaskStore`。
 fn test_shell_with_task_store(
     hooks: Arc<dyn hook::HookDispatcher>,
     task_store: Arc<task::TaskStore>,

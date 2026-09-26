@@ -80,7 +80,7 @@ pub(crate) fn default_true() -> bool {
     true
 }
 
-/// Task list display configuration (spinner下方窗口化显示)
+/// TaskData list display configuration (spinner下方窗口化显示)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskListConfig {
     /// 最大显示行数（不含摘要行）
@@ -107,7 +107,7 @@ impl Default for TaskListConfig {
     }
 }
 
-/// Task lifecycle management configuration (跨轮次生命周期策略)
+/// TaskData lifecycle management configuration (跨轮次生命周期策略)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskLifecycleConfig {
     /// 新 run 开始时自动清除已完成 batch
@@ -184,11 +184,11 @@ pub struct UiConfig {
     #[serde(default)]
     pub markdown_spacing_overrides: MarkdownSpacingOverrides,
 
-    /// Task list display configuration
+    /// TaskData list display configuration
     #[serde(default)]
     pub task_list: TaskListConfig,
 
-    /// Task lifecycle management configuration
+    /// TaskData lifecycle management configuration
     #[serde(default)]
     pub task_lifecycle: TaskLifecycleConfig,
 }

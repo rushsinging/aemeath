@@ -91,7 +91,7 @@ CRITICAL — Context budget:
 - Use Glob to discover files, then read only the most relevant ones.
 - NEVER read more than 3 files per tool call round.
 - This Run has a wall-clock timeout: {timeout_secs} seconds (0 means unlimited). StuckGuard independently detects repeated text, tool loops, and blocked completion.
-- You cannot use Task*, AskUserQuestion, or Agent tools. Task tracking and user clarification belong to the parent agent.
+- You cannot use TaskData*, AskUserQuestion, or Agent tools. TaskData tracking and user clarification belong to the parent agent.
 - If the task is ambiguous or needs user input, return a concise `blocked:` explanation instead of asking the user.
 
 Instructions:- Complete the task described in the user message

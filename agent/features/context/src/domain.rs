@@ -362,8 +362,8 @@ pub struct CompactRequest {
     /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 typed Task 快照：参与 Rust-owned checkpoint 协调，并由同一快照
-    /// 确定性渲染非权威 `Current Task State` companion。
+    /// 当前 typed TaskData 快照：参与 Rust-owned checkpoint 协调，并由同一快照
+    /// 确定性渲染非权威 `Current TaskData State` companion。
     pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
     /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
     pub cancellation: tokio_util::sync::CancellationToken,
@@ -400,7 +400,7 @@ pub struct ManualCompactRequest {
     pub context_size: usize,
     /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 typed Task 快照，语义同 [`CompactRequest::task_snapshot`]。
+    /// 当前 typed TaskData 快照，语义同 [`CompactRequest::task_snapshot`]。
     pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
 }
 

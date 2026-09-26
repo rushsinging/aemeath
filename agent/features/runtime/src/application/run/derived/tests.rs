@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
-/// #1248 Task 3: shared test factory for CliAgentRunner in tests.
+/// #1248 TaskData 3: shared test factory for CliAgentRunner in tests.
 fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeContextFactory> {
     let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
     let services = crate::application::run::context::RuntimeServices {
@@ -1658,7 +1658,7 @@ fn test_runner(
     test_runner_with_provider(Arc::new(ErrorProvider { error }))
 }
 
-/// #1385 Task 7: Create a `ParentRunContextSource` pre-loaded with a valid
+/// #1385 TaskData 7: Create a `ParentRunContextSource` pre-loaded with a valid
 /// parent frame so `run_agent` tests exercise the real production derivation
 /// path instead of the old `.ok()` fallback.
 /// The returned guard MUST be held for the duration of the test to keep
@@ -1779,7 +1779,7 @@ impl LlmProvider for ErrorProvider {
     }
 }
 
-// ── #1385 Task 6: Sub Context Derivation RED Tests ──
+// ── #1385 TaskData 6: Sub Context Derivation RED Tests ──
 
 #[path = "tests/runtime_context_derivation.rs"]
 mod sub_context_derivation_tests;

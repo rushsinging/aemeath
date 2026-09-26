@@ -4,7 +4,7 @@ use share::message::Message;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
-use task::TaskSnapshot;
+use task::TaskSnapshotData;
 
 use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMutation};
 
@@ -548,12 +548,12 @@ pub struct CanonicalSession {
     pub updated_at: String,
     #[serde(default)]
     pub metadata: SessionMetadata,
-    /// Canonical typed task image owned by the Task BC. The Task snapshot uses
+    /// Canonical typed task image owned by the TaskData BC. The TaskData snapshot uses
     /// its own versioned `encode`/`decode` wire rather than serde on the runtime
     /// entities, so the [`SnapshotState`] slot is bridged through
     /// [`task_snapshot_state`] instead of a plain derive.
     #[serde(with = "task_snapshot_state")]
-    pub tasks: SnapshotState<TaskSnapshot>,
+    pub tasks: SnapshotState<TaskSnapshotData>,
     pub workspace: SnapshotState<PersistedWorkspaceContext>,
     pub revision: u64,
     #[serde(default)]
@@ -879,7 +879,7 @@ struct V2CanonicalSession {
     #[serde(default)]
     metadata: SessionMetadata,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshot>,
+    tasks: SnapshotState<TaskSnapshotData>,
     workspace: SnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     revision: u64,
@@ -959,7 +959,7 @@ struct V1VersionedEnvelope {
     #[serde(default)]
     metadata: SessionMetadata,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshot>,
+    tasks: SnapshotState<TaskSnapshotData>,
     workspace: SnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     revision: u64,
@@ -979,7 +979,7 @@ struct LegacySession {
     #[serde(default)]
     metadata: SessionMetadata,
     /// The pre-#890 on-disk task image remains opaque JSON here. It is upgraded
-    /// through the Task BC's versioned decoder and is never interpreted by
+    /// through the TaskData BC's versioned decoder and is never interpreted by
     /// Context or Storage.
     #[serde(default)]
     tasks: Option<Value>,
@@ -1033,33 +1033,34 @@ pub enum SessionCodecError {
     Encode(String),
 }
 
-/// Upgrades a pre-#890 storage task snapshot to the canonical [`TaskSnapshot`].
+/// Upgrades a pre-#890 storage task snapshot to the canonical [`TaskSnapshotData`].
 ///
 /// The two representations are *not* assumed identical: the legacy DTO is
-/// re-serialized to its wire bytes and decoded through the Task BC's own
+/// re-serialized to its wire bytes and decoded through the TaskData BC's own
 /// versioned V1 decode path, which is the single authority for interpreting
 /// legacy task wire data. Any incompatibility surfaces as a typed decode error
 /// rather than a silent, lossy field-by-field copy.
-fn upgrade_legacy_task_snapshot(legacy: Value) -> Result<TaskSnapshot, SessionCodecError> {
+fn upgrade_legacy_task_snapshot(legacy: Value) -> Result<TaskSnapshotData, SessionCodecError> {
     let bytes = serde_json::to_vec(&legacy)
         .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
-    TaskSnapshot::decode(&bytes).map_err(|error| SessionCodecError::InvalidJson(error.to_string()))
+    TaskSnapshotData::decode(&bytes)
+        .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))
 }
 
-/// serde bridge for `SnapshotState<TaskSnapshot>`.
+/// serde bridge for `SnapshotState<TaskSnapshotData>`.
 ///
-/// [`TaskSnapshot`] intentionally does not implement serde on its runtime
+/// [`TaskSnapshotData`] intentionally does not implement serde on its runtime
 /// entities; its canonical wire form is produced by `encode`/`decode`. This
 /// module reuses the derived [`SnapshotState`] tagging by routing the captured
 /// payload through a `serde_json::Value` produced by that canonical codec, so
-/// the envelope stays a plain typed field while the Task BC keeps sole ownership
+/// the envelope stays a plain typed field while the TaskData BC keeps sole ownership
 /// of its wire format.
 pub(super) mod task_snapshot_state {
-    use super::{SnapshotState, TaskSnapshot, Value};
+    use super::{SnapshotState, TaskSnapshotData, Value};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     pub(in crate::domain::session) fn serialize<S>(
-        state: &SnapshotState<TaskSnapshot>,
+        state: &SnapshotState<TaskSnapshotData>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
@@ -1080,7 +1081,7 @@ pub(super) mod task_snapshot_state {
 
     pub(in crate::domain::session) fn deserialize<'de, D>(
         deserializer: D,
-    ) -> Result<SnapshotState<TaskSnapshot>, D::Error>
+    ) -> Result<SnapshotState<TaskSnapshotData>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -1089,7 +1090,8 @@ pub(super) mod task_snapshot_state {
             SnapshotState::CapturedEmpty => SnapshotState::CapturedEmpty,
             SnapshotState::Captured(value) => {
                 let bytes = serde_json::to_vec(&value).map_err(serde::de::Error::custom)?;
-                let snapshot = TaskSnapshot::decode(&bytes).map_err(serde::de::Error::custom)?;
+                let snapshot =
+                    TaskSnapshotData::decode(&bytes).map_err(serde::de::Error::custom)?;
                 SnapshotState::Captured(snapshot)
             }
         })

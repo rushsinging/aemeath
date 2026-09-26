@@ -1,6 +1,6 @@
 //! Tests for stop hook coordination.
 //!
-//! #1248 Task 6: Verify typed decision variants, Proceed/Block/ExecutionFailed,
+//! #1248 TaskData 6: Verify typed decision variants, Proceed/Block/ExecutionFailed,
 //! and that string-based variant discrimination is impossible.
 //!
 //! Uses real hook dispatchers (via `hook::wire_hook_dispatcher`) to avoid

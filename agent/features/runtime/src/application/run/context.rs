@@ -9,7 +9,7 @@
 //! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigReader / ConfigWriter 不进入。
 //! Main 由 Composition 提供父能力装配；Sub 从父收缩派生。
 //!
-//! #1248 Task 3 refactor —— 生命周期拆分：
+//! #1248 TaskData 3 refactor —— 生命周期拆分：
 //! - [`RuntimeServices`]：跨 Run 稳定共享（tool/policy/reflection/task/hooks + 未来 adapter factories）。
 //! - [`RunCapabilityBindings`]：按 model / I/O / lifecycle 分组的 per-Run 构造输入，
 //!   不是 Snapshot（含活契约），装配后不可变。
@@ -137,7 +137,7 @@ pub(crate) fn tool_stream_progress_sink(
     })
 }
 
-// ── I/O seams (#1385 Task 11) ──
+// ── I/O seams (#1385 TaskData 11) ──
 
 /// Per-Run usage tracker — shares `last_api_total_tokens` across all
 /// clones of the same Run so the loop engine and observers see a
@@ -325,7 +325,7 @@ impl Default for RunInputBufferHandle {
     }
 }
 
-// ── #1248 Task 3: 装配输入拆分 ──
+// ── #1248 TaskData 3: 装配输入拆分 ──
 
 /// 长生命周期共享端口与工厂——会话级作用域，跨 Run 共享。
 ///
@@ -346,7 +346,7 @@ pub struct RuntimeServices {
     pub policy: Arc<dyn Policy>,
     /// Reflection 历史存储（会话级）。
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
-    /// Task BC 低权限访问端口（会话级）。
+    /// TaskData BC 低权限访问端口（会话级）。
     pub task: Arc<dyn TaskAccess>,
     /// Runtime Published State（会话级，跨 Run 复用）。
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
@@ -529,7 +529,7 @@ impl RuntimeContext {
     pub fn reflection_history(&self) -> Arc<dyn ReflectionHistoryStore> {
         self.reflection_history.clone()
     }
-    /// Task 访问端口，`Arc` clone。
+    /// TaskData 访问端口，`Arc` clone。
     pub fn task(&self) -> Arc<dyn TaskAccess> {
         self.task.clone()
     }
@@ -610,7 +610,7 @@ impl RuntimeContext {
     pub fn reflection_history_ref(&self) -> &Arc<dyn ReflectionHistoryStore> {
         &self.reflection_history
     }
-    /// Task access reference.
+    /// TaskData access reference.
     pub fn task_ref(&self) -> &Arc<dyn TaskAccess> {
         &self.task
     }
@@ -627,7 +627,7 @@ impl RuntimeContext {
         &self.config
     }
 
-    // ── I/O seam accessors (#1385 Task 11) ──
+    // ── I/O seam accessors (#1385 TaskData 11) ──
 
     /// 事件输出 sink，`Clone`。
     pub fn event_sink(&self) -> ChatEventSinkHandle {
@@ -661,7 +661,7 @@ pub struct ParentRunFrame {
 /// stale guard (from a cancelled/crashed run) from clearing a fresh frame
 /// installed by a new Main Run.
 ///
-/// #1385 Task 7: Single session has only one Main frame at a time (Agent tool
+/// #1385 TaskData 7: Single session has only one Main frame at a time (Agent tool
 /// is non-recursive), so no stack is needed.  The Main loop holds the guard.
 ///
 /// ## Poison resilience
@@ -705,7 +705,7 @@ struct ParentRunContextSourceInner {
 /// each sub-agent run via [`get`].  The returned [`ParentRunFrameGuard`] RAII
 /// guard clears the frame on drop — no manual `clear()` needed.
 ///
-/// #1385 Task 7: Each source carries its own generation counter (no global
+/// #1385 TaskData 7: Each source carries its own generation counter (no global
 /// static).  Generation wraps on overflow but never hits 0, preventing
 /// stale-guard / fresh-frame collisions.
 ///

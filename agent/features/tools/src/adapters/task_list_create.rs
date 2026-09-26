@@ -3,7 +3,7 @@ use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedT
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{BatchCreateSpec, TaskAccess};
+use task::{BatchCreateSpecData, TaskAccess};
 
 pub struct TaskListCreateTool {
     pub access: Arc<dyn TaskAccess>,
@@ -55,7 +55,7 @@ impl TypedTool for TaskListCreateTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let subject = args.subject;
-        let spec = match BatchCreateSpec::try_new(args.summary) {
+        let spec = match BatchCreateSpecData::try_new(args.summary) {
             Ok(spec) => spec,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
@@ -70,7 +70,7 @@ impl TypedTool for TaskListCreateTool {
         let batch = command_result.value;
         let batch_id = batch.id().to_string();
         TypedToolResult::success(
-            format!("Task list #{} created. Subject: {}", batch_id, subject),
+            format!("TaskData list #{} created. Subject: {}", batch_id, subject),
             TaskListCreateResult { batch_id },
         )
         .with_task_change(task_change)
@@ -145,11 +145,11 @@ mod tests {
         assert!(!result.is_error, "{}", result.text);
         let task = access
             .create_task(
-                task::TaskCreateSpec::try_new(
+                task::TaskCreateSpecData::try_new(
                     "任务".to_string(),
                     "描述".to_string(),
                     None,
-                    task::TaskPriority::Normal,
+                    task::TaskPriorityData::Normal,
                 )
                 .unwrap(),
                 1,

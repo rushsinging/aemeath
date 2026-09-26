@@ -22,7 +22,7 @@ use share::message::Message;
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
-use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
+use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 
 use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
 
@@ -160,18 +160,18 @@ impl context::AcceptedInputWriter for RecordingAcceptedInputWriter {
 struct EmptyTask;
 
 impl TaskPersist for EmptyTask {
-    fn collect_snapshot(&self) -> TaskSnapshot {
-        TaskSnapshot::empty()
+    fn collect_snapshot(&self) -> TaskSnapshotData {
+        TaskSnapshotData::empty()
     }
 
     fn prepare_restore(
         &self,
-        snapshot: &TaskSnapshot,
-    ) -> Result<PreparedTaskRestore, TaskSnapshotValidationError> {
+        snapshot: &TaskSnapshotData,
+    ) -> Result<PreparedTaskRestoreData, share::error::DomainError> {
         task::wire_task().persist().prepare_restore(snapshot)
     }
 
-    fn commit_restore(&self, _token: PreparedTaskRestore) {}
+    fn commit_restore(&self, _token: PreparedTaskRestoreData) {}
 }
 
 struct FixedWorkspace(PersistedWorkspaceContext);
@@ -2120,7 +2120,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     );
 }
 
-/// #1537：compact summary 出口拼接当前 Task 状态，防止递进压缩后上下文丢失。
+/// #1537：compact summary 出口拼接当前 TaskData 状态，防止递进压缩后上下文丢失。
 #[tokio::test]
 async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let writer = Arc::new(RecordingWriter::default());
@@ -2153,14 +2153,17 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let context::CompactOutcome::Committed(result) = &outcome else {
         panic!("expected committed compact: {outcome:?}");
     };
-    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
+    assert_eq!(
+        result.summary.matches("## Current TaskData State").count(),
+        1
+    );
     assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
     assert!(result.summary.contains("- Next action: 实现压缩拼接"));
     assert!(result.summary.contains("## Current Objective"));
     assert!(
         context::compact::estimate_tokens(&result.summary)
             <= context::compact::summary_budget(100_000),
-        "checkpoint 与 Current Task State companion 的完整持久化结果必须在预算内"
+        "checkpoint 与 Current TaskData State companion 的完整持久化结果必须在预算内"
     );
 }
 
@@ -2210,8 +2213,11 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
         context::compact::estimate_tokens(&result.summary)
             <= context::compact::summary_budget(100_000)
     );
-    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
-    assert!(result.summary.contains("Batch #1 — Tasks: 0/30"));
+    assert_eq!(
+        result.summary.matches("## Current TaskData State").count(),
+        1
+    );
+    assert!(result.summary.contains("BatchData #1 — Tasks: 0/30"));
     assert!(result.summary.contains("- Next action:"));
 }
 

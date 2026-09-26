@@ -57,7 +57,7 @@ fn namespace_previous_policy_is_explicit() {
     for namespace in [
         StorageNamespace::Session,
         StorageNamespace::Memory,
-        StorageNamespace::Task,
+        StorageNamespace::TaskData,
         StorageNamespace::History,
         StorageNamespace::ToolResult,
         StorageNamespace::Config,

@@ -321,7 +321,7 @@ impl RuntimeBootstrapDependencies {
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 ///
 /// `task_access` 由 Composition 层注入；Runtime 不得自行创建
-/// Task BC 的 backing 或持久化封套（跨域越权，#890）。
+/// TaskData BC 的 backing 或持久化封套（跨域越权，#890）。
 pub async fn from_args_with_workspace(
     _args: ChatBootstrapArgs,
     dependencies: RuntimeBootstrapDependencies,
@@ -416,7 +416,7 @@ pub async fn from_args_with_workspace(
 
     // 16. Policy 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
 
-    // 17. #1385 Task 7: Memory port is obtained per-run via BoundMainRun
+    // 17. #1385 TaskData 7: Memory port is obtained per-run via BoundMainRun
     // (assemble_main_runtime_context), not at bootstrap time.
 
     // Parent context source and concrete AgentRunner are assembled by Composition.
@@ -484,7 +484,7 @@ pub async fn from_args_with_workspace(
         runtime_context_factory,
     );
 
-    // 21. 构建 handle — #1385 Task 7: shell is the single source.
+    // 21. 构建 handle — #1385 TaskData 7: shell is the single source.
     let handle = RuntimeHandle { shell };
 
     Ok(AgentClientImpl {

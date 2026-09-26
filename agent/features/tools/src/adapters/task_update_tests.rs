@@ -8,20 +8,23 @@ fn test_ctx() -> ToolExecutionContext {
 fn setup() -> (
     Arc<task::TaskStore>,
     Arc<dyn task::TaskAccess>,
-    task::TaskId,
+    task::TaskIdData,
 ) {
     let store = Arc::new(task::TaskStore::new());
     let access: Arc<dyn task::TaskAccess> = store.clone();
     access
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
         .unwrap();
     let created = access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "任务".into(),
                 "描述".into(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -47,7 +50,7 @@ async fn task_update_uses_task_access_and_direct_complete_is_one_commit() {
     assert!(!result.is_error, "{}", result.text);
     assert_eq!(store.revision().get(), revision_before.get() + 1);
     let completed = store.get(id).unwrap();
-    assert_eq!(completed.status(), task::TaskStatus::Completed);
+    assert_eq!(completed.status(), task::TaskStatusData::Completed);
     assert_eq!(completed.started_at(), completed.completed_at());
     assert!(result.text.contains("Status: Completed"));
     assert!(result.text.contains("automatically closed"));
@@ -110,7 +113,7 @@ async fn archived_task_list_can_be_reopened_by_explicit_list_id() {
 
     assert!(!reopened.is_error, "{}", reopened.text);
     assert!(reopened.text.contains("automatically reopened"));
-    assert_eq!(store.current_batch(), Some(task::BatchId::new(1)));
+    assert_eq!(store.current_batch(), Some(task::BatchIdData::new(1)));
     assert!(
         reopened
             .data
@@ -134,7 +137,10 @@ async fn archived_task_list_reopen_conflict_is_atomic() {
     )
     .await;
     access
-        .create_batch(task::BatchCreateSpec::try_new("other".into()).unwrap(), 3)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("other".into()).unwrap(),
+            3,
+        )
         .unwrap();
     let revision = access.revision();
 
@@ -148,7 +154,10 @@ async fn archived_task_list_reopen_conflict_is_atomic() {
     assert!(conflict.is_error);
     assert!(conflict.text.contains("已经 active"));
     assert_eq!(access.revision(), revision);
-    assert_eq!(store.get(id).unwrap().status(), task::TaskStatus::Completed);
+    assert_eq!(
+        store.get(id).unwrap().status(),
+        task::TaskStatusData::Completed
+    );
 }
 
 #[tokio::test]
@@ -186,7 +195,7 @@ async fn task_update_uses_typed_commands_for_mutable_fields() {
     let updated = store.get(id).unwrap();
     assert_eq!(updated.subject(), "新标题");
     assert_eq!(updated.description(), "新描述");
-    assert_eq!(updated.priority(), task::TaskPriority::High);
+    assert_eq!(updated.priority(), task::TaskPriorityData::High);
 }
 
 #[tokio::test]

@@ -1,28 +1,29 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus,
+    BatchCreateSpecData, BatchData, BatchIdData, BatchStatusData, TaskCommandError,
+    TaskCommandResultData, TaskCreateSpecData, TaskData, TaskEventData, TaskIdData,
+    TaskPriorityData, TaskRevisionData, TaskStatusData,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskStoreState {
-    tasks: HashMap<TaskId, Task>,
-    batches: HashMap<BatchId, Batch>,
-    next_task_id: TaskId,
-    next_batch_id: BatchId,
-    current_batch: Option<BatchId>,
-    revision: TaskRevision,
+    tasks: HashMap<TaskIdData, TaskData>,
+    batches: HashMap<BatchIdData, BatchData>,
+    next_task_id: TaskIdData,
+    next_batch_id: BatchIdData,
+    current_batch: Option<BatchIdData>,
+    revision: TaskRevisionData,
 }
 
 impl TaskStoreState {
     pub(crate) fn from_snapshot(
-        tasks: HashMap<TaskId, Task>,
-        batches: HashMap<BatchId, Batch>,
-        next_task_id: TaskId,
-        next_batch_id: BatchId,
-        current_batch: Option<BatchId>,
-        revision: TaskRevision,
+        tasks: HashMap<TaskIdData, TaskData>,
+        batches: HashMap<BatchIdData, BatchData>,
+        next_task_id: TaskIdData,
+        next_batch_id: BatchIdData,
+        current_batch: Option<BatchIdData>,
+        revision: TaskRevisionData,
     ) -> Self {
         Self {
             tasks,
@@ -36,69 +37,69 @@ impl TaskStoreState {
 
     /// Captures all persisted aggregate fields from this state. Tombstones are
     /// excluded, and the reverse `blocks` index remains runtime-derived data.
-    pub(crate) fn capture_snapshot(&self) -> super::TaskSnapshot {
-        super::TaskSnapshot::from_state(self)
+    pub(crate) fn capture_snapshot(&self) -> super::TaskSnapshotData {
+        super::TaskSnapshotData::from_state(self)
     }
 
     pub fn empty() -> Self {
         Self {
             tasks: HashMap::new(),
             batches: HashMap::new(),
-            next_task_id: TaskId::new(1),
-            next_batch_id: BatchId::new(1),
+            next_task_id: TaskIdData::new(1),
+            next_batch_id: BatchIdData::new(1),
             current_batch: None,
-            revision: TaskRevision::new(0),
+            revision: TaskRevisionData::new(0),
         }
     }
-    pub(crate) fn tasks(&self) -> &HashMap<TaskId, Task> {
+    pub(crate) fn tasks(&self) -> &HashMap<TaskIdData, TaskData> {
         &self.tasks
     }
-    pub(crate) fn batches(&self) -> &HashMap<BatchId, Batch> {
+    pub(crate) fn batches(&self) -> &HashMap<BatchIdData, BatchData> {
         &self.batches
     }
-    pub(crate) fn next_task_id_for_snapshot(&self) -> TaskId {
+    pub(crate) fn next_task_id_for_snapshot(&self) -> TaskIdData {
         self.next_task_id
     }
-    pub(crate) fn next_batch_id_for_snapshot(&self) -> BatchId {
+    pub(crate) fn next_batch_id_for_snapshot(&self) -> BatchIdData {
         self.next_batch_id
     }
     #[cfg(test)]
-    pub(crate) fn next_task_id(&self) -> TaskId {
+    pub(crate) fn next_task_id(&self) -> TaskIdData {
         self.next_task_id
     }
     #[cfg(test)]
-    pub(crate) fn next_batch_id(&self) -> BatchId {
+    pub(crate) fn next_batch_id(&self) -> BatchIdData {
         self.next_batch_id
     }
-    pub fn current_batch(&self) -> Option<BatchId> {
+    pub fn current_batch(&self) -> Option<BatchIdData> {
         self.current_batch
     }
     /// Authoritative monotonic revision of the last successful, state-changing
     /// mutation; empty store starts at `0`. Failed commands and idempotent
     /// no-ops never advance it.
-    pub fn revision(&self) -> TaskRevision {
+    pub fn revision(&self) -> TaskRevisionData {
         self.revision
     }
 
     #[cfg(test)]
-    pub(crate) fn with_next_task_id(mut self, id: TaskId) -> Self {
+    pub(crate) fn with_next_task_id(mut self, id: TaskIdData) -> Self {
         self.next_task_id = id;
         self
     }
     #[cfg(test)]
-    pub(crate) fn with_next_batch_id(mut self, id: BatchId) -> Self {
+    pub(crate) fn with_next_batch_id(mut self, id: BatchIdData) -> Self {
         self.next_batch_id = id;
         self
     }
     #[cfg(test)]
-    pub(crate) fn with_revision(mut self, revision: TaskRevision) -> Self {
+    pub(crate) fn with_revision(mut self, revision: TaskRevisionData) -> Self {
         self.revision = revision;
         self
     }
 
     #[cfg(test)]
-    pub(crate) fn with_batch(mut self, batch: Batch) -> Self {
-        if batch.status() == BatchStatus::Active {
+    pub(crate) fn with_batch(mut self, batch: BatchData) -> Self {
+        if batch.status() == BatchStatusData::Active {
             self.current_batch = Some(batch.id());
         }
         self.batches.insert(batch.id(), batch);
@@ -108,21 +109,21 @@ impl TaskStoreState {
     /// Reserves the next revision without mutating any state; callers MUST
     /// perform this before touching maps/counters so a `RevisionExhausted`
     /// error leaves the whole command a true no-op.
-    fn reserve_revision(&self) -> Result<TaskRevision, TaskCommandError> {
+    fn reserve_revision(&self) -> Result<TaskRevisionData, share::error::DomainError> {
         self.revision
             .get()
             .checked_add(1)
-            .map(TaskRevision::new)
-            .ok_or(TaskCommandError::RevisionExhausted)
+            .map(TaskRevisionData::new)
+            .ok_or_else(|| share::error::DomainError::from(TaskCommandError::RevisionExhausted))
     }
 
     /// Commits an already-reserved revision atomically with the mutation
     /// result that produced it.
     fn commit<T>(
         &mut self,
-        mut result: TaskCommandResult<T>,
-        revision: TaskRevision,
-    ) -> TaskCommandResult<T> {
+        mut result: TaskCommandResultData<T>,
+        revision: TaskRevisionData,
+    ) -> TaskCommandResultData<T> {
         self.revision = revision;
         result.commit(revision);
         result
@@ -134,76 +135,81 @@ impl TaskStoreState {
     /// `TaskStoreCleared` event and advances revision exactly once. An already
     /// empty aggregate is an idempotent no-op. The monotonic revision is never
     /// reset to zero.
-    pub fn clear(&mut self) -> Result<TaskCommandResult<()>, TaskCommandError> {
+    pub fn clear(&mut self) -> Result<TaskCommandResultData<()>, share::error::DomainError> {
         if self.tasks.is_empty()
             && self.batches.is_empty()
             && self.current_batch.is_none()
-            && self.next_batch_id == BatchId::new(1)
+            && self.next_batch_id == BatchIdData::new(1)
         {
-            return Ok(TaskCommandResult::uncommitted((), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted((), Vec::new()));
         }
 
         let revision = self.reserve_revision()?;
-        let events = vec![TaskEvent::TaskStoreCleared {
+        let events = vec![TaskEventData::TaskStoreCleared {
             task_count: self.tasks.len(),
             batch_count: self.batches.len(),
         }];
         self.tasks.clear();
         self.batches.clear();
-        self.next_batch_id = BatchId::new(1);
+        self.next_batch_id = BatchIdData::new(1);
         self.current_batch = None;
-        Ok(self.commit(TaskCommandResult::uncommitted((), events), revision))
+        Ok(self.commit(TaskCommandResultData::uncommitted((), events), revision))
     }
 
     pub fn create_batch(
         &mut self,
-        spec: BatchCreateSpec,
+        spec: BatchCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         let id = self.next_batch_id;
         let next_batch_id = id
             .get()
             .checked_add(1)
-            .map(BatchId::new)
-            .ok_or(TaskCommandError::BatchIdExhausted)?;
+            .map(BatchIdData::new)
+            .ok_or_else(|| share::error::DomainError::from(TaskCommandError::BatchIdExhausted))?;
         let revision = self.reserve_revision()?;
         if let Some(active) = self.current_batch {
             self.batches
                 .get_mut(&active)
                 .expect("current batch must exist")
-                .transition_to(BatchStatus::Archived)
+                .transition_to(BatchStatusData::Archived)
                 .expect("current batch must be active");
         }
-        let batch = Batch::create(id, spec, timestamp);
+        let batch = BatchData::create(id, spec, timestamp);
         self.batches.insert(id, batch.clone());
         self.current_batch = Some(id);
         self.next_batch_id = next_batch_id;
-        Ok(self.commit(TaskCommandResult::uncommitted(batch, Vec::new()), revision))
+        Ok(self.commit(
+            TaskCommandResultData::uncommitted(batch, Vec::new()),
+            revision,
+        ))
     }
 
     pub fn create_task(
         &mut self,
-        spec: TaskCreateSpec,
+        spec: TaskCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
-        let batch = self.current_batch.ok_or(TaskCommandError::NoActiveBatch)?;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        let batch = self
+            .current_batch
+            .ok_or_else(|| share::error::DomainError::from(TaskCommandError::NoActiveBatch))?;
         let id = self.next_task_id;
         let next_task_id = id
             .get()
             .checked_add(1)
-            .map(TaskId::new)
-            .ok_or(TaskCommandError::TaskIdExhausted)?;
+            .map(TaskIdData::new)
+            .ok_or_else(|| share::error::DomainError::from(TaskCommandError::TaskIdExhausted))?;
         let revision = self.reserve_revision()?;
         let seq = self
             .tasks
             .values()
             .filter(|task| task.batch() == batch)
-            .map(Task::seq)
+            .map(TaskData::seq)
             .max()
             .unwrap_or(0)
             .checked_add(1)
-            .ok_or(TaskCommandError::TaskIdExhausted)?;
-        let result = Task::create(id, batch, seq, spec, timestamp);
+            .ok_or_else(|| share::error::DomainError::from(TaskCommandError::TaskIdExhausted))?;
+        let result = TaskData::create(id, batch, seq, spec, timestamp);
         self.tasks.insert(id, result.value.clone());
         self.next_task_id = next_task_id;
         Ok(self.commit(result, revision))
@@ -211,20 +217,20 @@ impl TaskStoreState {
 
     pub fn set_subject(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         subject: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id })?;
         if subject.trim().is_empty() {
-            return Err(TaskCommandError::InvalidTaskSubject);
+            return Err(TaskCommandError::InvalidTaskSubject.into());
         }
         if task.subject() == subject {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let task = self.tasks.get_mut(&id).expect("validated task must exist");
@@ -234,17 +240,17 @@ impl TaskStoreState {
 
     pub fn set_description(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         description: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id })?;
         if task.description() == description {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let task = self.tasks.get_mut(&id).expect("validated task must exist");
@@ -254,27 +260,27 @@ impl TaskStoreState {
 
     pub fn set_priority(
         &mut self,
-        id: TaskId,
-        priority: TaskPriority,
+        id: TaskIdData,
+        priority: TaskPriorityData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id })?;
         let from = task.priority();
         if from == priority {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let task = self.tasks.get_mut(&id).expect("validated task must exist");
         task.set_priority(priority, updated_at);
         let snapshot = task.clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(
+            TaskCommandResultData::uncommitted(
                 snapshot,
-                vec![TaskEvent::TaskPriorityChanged {
+                vec![TaskEventData::TaskPriorityChanged {
                     task_id: id,
                     from,
                     to: priority,
@@ -286,26 +292,26 @@ impl TaskStoreState {
 
     pub fn add_tag(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         tag: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id })?;
         if task.tags().contains(&tag) {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let task = self.tasks.get_mut(&id).expect("validated task must exist");
         task.add_tag(tag.clone(), updated_at);
         let snapshot = task.clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(
+            TaskCommandResultData::uncommitted(
                 snapshot,
-                vec![TaskEvent::TaskTagAdded { task_id: id, tag }],
+                vec![TaskEventData::TaskTagAdded { task_id: id, tag }],
             ),
             revision,
         ))
@@ -313,26 +319,26 @@ impl TaskStoreState {
 
     pub fn remove_tag(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         tag: &str,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id })?;
         if !task.tags().iter().any(|existing| existing == tag) {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let task = self.tasks.get_mut(&id).expect("validated task must exist");
         task.remove_tag(tag, updated_at);
         let snapshot = task.clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(
+            TaskCommandResultData::uncommitted(
                 snapshot,
-                vec![TaskEvent::TaskTagRemoved {
+                vec![TaskEventData::TaskTagRemoved {
                     task_id: id,
                     tag: tag.to_string(),
                 }],
@@ -343,34 +349,36 @@ impl TaskStoreState {
 
     pub fn add_dependency(
         &mut self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&task_id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id: task_id })?;
         let blocker = self
             .tasks
             .get(&blocked_by_id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id: blocked_by_id })?;
         if task.batch() != blocker.batch() {
             return Err(TaskCommandError::CrossBatchDependency {
                 task_id,
                 blocked_by_id,
-            });
+            }
+            .into());
         }
         if task.blocked_by().contains(&blocked_by_id) {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         if self.would_create_cycle(task_id, blocked_by_id) {
             return Err(TaskCommandError::DependencyCycle {
                 task_id,
                 blocked_by_id,
-            });
+            }
+            .into());
         }
         let revision = self.reserve_revision()?;
         self.tasks
@@ -387,9 +395,9 @@ impl TaskStoreState {
             .expect("validated task must exist")
             .clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(
+            TaskCommandResultData::uncommitted(
                 snapshot,
-                vec![TaskEvent::TaskDependencyAdded {
+                vec![TaskEventData::TaskDependencyAdded {
                     task_id,
                     blocked_by_id,
                 }],
@@ -400,14 +408,14 @@ impl TaskStoreState {
 
     pub fn replace_dependencies(
         &mut self,
-        task_id: TaskId,
-        mut blocked_by_ids: Vec<TaskId>,
+        task_id: TaskIdData,
+        mut blocked_by_ids: Vec<TaskIdData>,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&task_id)
-            .filter(|task| task.status() != TaskStatus::Deleted)
+            .filter(|task| task.status() != TaskStatusData::Deleted)
             .ok_or(TaskCommandError::TaskNotFound { id: task_id })?;
         let batch = task.batch();
         let current = task.blocked_by().to_vec();
@@ -418,28 +426,30 @@ impl TaskStoreState {
                 return Err(TaskCommandError::DuplicateDependency {
                     task_id,
                     blocked_by_id: pair[0],
-                });
+                }
+                .into());
             }
         }
         for blocked_by_id in &blocked_by_ids {
             let blocker = self
                 .tasks
                 .get(blocked_by_id)
-                .filter(|task| task.status() != TaskStatus::Deleted)
+                .filter(|task| task.status() != TaskStatusData::Deleted)
                 .ok_or(TaskCommandError::TaskNotFound { id: *blocked_by_id })?;
             if blocker.batch() != batch {
                 return Err(TaskCommandError::CrossBatchDependency {
                     task_id,
                     blocked_by_id: *blocked_by_id,
-                });
+                }
+                .into());
             }
         }
         if current == blocked_by_ids {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
 
         let mut dry_run = self.clone();
-        dry_run.revision = TaskRevision::new(0);
+        dry_run.revision = TaskRevisionData::new(0);
         for blocked_by_id in &current {
             dry_run.remove_dependency(task_id, *blocked_by_id, updated_at)?;
         }
@@ -485,37 +495,40 @@ impl TaskStoreState {
             .clone();
         let events = removed
             .into_iter()
-            .map(|blocked_by_id| TaskEvent::TaskDependencyRemoved {
+            .map(|blocked_by_id| TaskEventData::TaskDependencyRemoved {
                 task_id,
                 blocked_by_id,
             })
             .chain(
                 added
                     .into_iter()
-                    .map(|blocked_by_id| TaskEvent::TaskDependencyAdded {
+                    .map(|blocked_by_id| TaskEventData::TaskDependencyAdded {
                         task_id,
                         blocked_by_id,
                     }),
             )
             .collect();
-        Ok(self.commit(TaskCommandResult::uncommitted(snapshot, events), revision))
+        Ok(self.commit(
+            TaskCommandResultData::uncommitted(snapshot, events),
+            revision,
+        ))
     }
 
     pub fn remove_dependency(
         &mut self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&task_id)
             .ok_or(TaskCommandError::TaskNotFound { id: task_id })?;
         if !self.tasks.contains_key(&blocked_by_id) {
-            return Err(TaskCommandError::TaskNotFound { id: blocked_by_id });
+            return Err(TaskCommandError::TaskNotFound { id: blocked_by_id }.into());
         }
         if !task.blocked_by().contains(&blocked_by_id) {
-            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
         }
         let revision = self.reserve_revision()?;
         self.tasks
@@ -532,9 +545,9 @@ impl TaskStoreState {
             .expect("validated task must exist")
             .clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(
+            TaskCommandResultData::uncommitted(
                 snapshot,
-                vec![TaskEvent::TaskDependencyRemoved {
+                vec![TaskEventData::TaskDependencyRemoved {
                     task_id,
                     blocked_by_id,
                 }],
@@ -543,7 +556,7 @@ impl TaskStoreState {
         ))
     }
 
-    pub fn would_create_cycle(&self, task_id: TaskId, blocked_by_id: TaskId) -> bool {
+    pub fn would_create_cycle(&self, task_id: TaskIdData, blocked_by_id: TaskIdData) -> bool {
         if task_id == blocked_by_id {
             return true;
         }
@@ -565,21 +578,21 @@ impl TaskStoreState {
 
     pub fn pause_batch(
         &mut self,
-        id: BatchId,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         let batch = self
             .batches
             .get(&id)
             .ok_or(TaskCommandError::BatchNotFound { id })?;
         let mut dry_run = batch.clone();
-        dry_run.transition_to(BatchStatus::Paused)?;
+        dry_run.transition_to(BatchStatusData::Paused)?;
         let revision = self.reserve_revision()?;
         let batch = self
             .batches
             .get_mut(&id)
             .expect("validated batch must exist");
         batch
-            .transition_to(BatchStatus::Paused)
+            .transition_to(BatchStatusData::Paused)
             .expect("legality pre-validated above");
         if self.current_batch == Some(id) {
             self.current_batch = None;
@@ -590,15 +603,15 @@ impl TaskStoreState {
             .expect("validated batch must exist")
             .clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(snapshot, Vec::new()),
+            TaskCommandResultData::uncommitted(snapshot, Vec::new()),
             revision,
         ))
     }
 
     pub fn resume_batch(
         &mut self,
-        id: BatchId,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         let batch = self
             .batches
             .get(&id)
@@ -608,18 +621,19 @@ impl TaskStoreState {
                 return Err(TaskCommandError::ActiveBatchConflict {
                     active,
                     requested: id,
-                });
+                }
+                .into());
             }
         }
         let mut dry_run = batch.clone();
-        dry_run.transition_to(BatchStatus::Active)?;
+        dry_run.transition_to(BatchStatusData::Active)?;
         let revision = self.reserve_revision()?;
         let batch = self
             .batches
             .get_mut(&id)
             .expect("validated batch must exist");
         batch
-            .transition_to(BatchStatus::Active)
+            .transition_to(BatchStatusData::Active)
             .expect("legality pre-validated above");
         self.current_batch = Some(id);
         let snapshot = self
@@ -628,15 +642,15 @@ impl TaskStoreState {
             .expect("validated batch must exist")
             .clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(snapshot, Vec::new()),
+            TaskCommandResultData::uncommitted(snapshot, Vec::new()),
             revision,
         ))
     }
 
     pub fn archive_batch(
         &mut self,
-        id: BatchId,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         let batch = self
             .batches
             .get(&id)
@@ -645,18 +659,21 @@ impl TaskStoreState {
         // already-archived batch are a true no-op and must never reserve a
         // revision, so they keep succeeding even once the revision counter
         // is exhausted.
-        if batch.status() == BatchStatus::Archived {
-            return Ok(TaskCommandResult::uncommitted(batch.clone(), Vec::new()));
+        if batch.status() == BatchStatusData::Archived {
+            return Ok(TaskCommandResultData::uncommitted(
+                batch.clone(),
+                Vec::new(),
+            ));
         }
         let mut dry_run = batch.clone();
-        dry_run.transition_to(BatchStatus::Archived)?;
+        dry_run.transition_to(BatchStatusData::Archived)?;
         let revision = self.reserve_revision()?;
         let batch = self
             .batches
             .get_mut(&id)
             .expect("validated batch must exist");
         batch
-            .transition_to(BatchStatus::Archived)
+            .transition_to(BatchStatusData::Archived)
             .expect("legality pre-validated above");
         if self.current_batch == Some(id) {
             self.current_batch = None;
@@ -667,23 +684,23 @@ impl TaskStoreState {
             .expect("validated batch must exist")
             .clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(snapshot, Vec::new()),
+            TaskCommandResultData::uncommitted(snapshot, Vec::new()),
             revision,
         ))
     }
 
-    /// Runtime calls this once per Batch at the end of every turn to atomically
+    /// Runtime calls this once per BatchData at the end of every turn to atomically
     /// update `last_active_turn` / `silence_turns`; `active` reports whether the
-    /// turn produced any activity for this Batch. Only an `Active` batch may be
+    /// turn produced any activity for this BatchData. Only an `Active` batch may be
     /// updated; `Paused`/`Archived` batches return a typed error and are left
     /// completely unchanged. Calls that would not change any observable field
     /// are idempotent no-ops and never advance the revision.
     pub fn record_batch_turn(
         &mut self,
-        id: BatchId,
+        id: BatchIdData,
         turn: u64,
         active: bool,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         let batch = self
             .batches
             .get(&id)
@@ -691,7 +708,7 @@ impl TaskStoreState {
         let mut dry_run = batch.clone();
         let changed = dry_run.record_turn(turn, active)?;
         if !changed {
-            return Ok(TaskCommandResult::uncommitted(dry_run, Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(dry_run, Vec::new()));
         }
         let revision = self.reserve_revision()?;
         let batch = self
@@ -703,16 +720,19 @@ impl TaskStoreState {
             .expect("legality and effectiveness pre-validated above");
         let snapshot = batch.clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(snapshot, Vec::new()),
+            TaskCommandResultData::uncommitted(snapshot, Vec::new()),
             revision,
         ))
     }
 
-    pub fn is_blocked(&self, id: TaskId) -> Result<bool, TaskCommandError> {
+    pub fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
         Ok(!self.blocking_ids(id)?.is_empty())
     }
 
-    pub(crate) fn blocking_ids(&self, id: TaskId) -> Result<Vec<TaskId>, TaskCommandError> {
+    pub(crate) fn blocking_ids(
+        &self,
+        id: TaskIdData,
+    ) -> Result<Vec<TaskIdData>, share::error::DomainError> {
         let task = self
             .tasks
             .get(&id)
@@ -725,7 +745,7 @@ impl TaskStoreState {
                 self.tasks.get(dependency_id).is_some_and(|dependency| {
                     !matches!(
                         dependency.status(),
-                        TaskStatus::Completed | TaskStatus::Deleted
+                        TaskStatusData::Completed | TaskStatusData::Deleted
                     )
                 })
             })
@@ -734,14 +754,15 @@ impl TaskStoreState {
 
     pub fn transition_with_progress(
         &mut self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<super::TaskProgressSnapshot>, TaskCommandError> {
-        if to == TaskStatus::InProgress {
+    ) -> Result<TaskCommandResultData<super::TaskProgressSnapshotData>, share::error::DomainError>
+    {
+        if to == TaskStatusData::InProgress {
             let blocked_by = self.blocking_ids(id)?;
             if !blocked_by.is_empty() {
-                return Err(TaskCommandError::TaskBlocked { id, blocked_by });
+                return Err(TaskCommandError::TaskBlocked { id, blocked_by }.into());
             }
         }
         let current = self
@@ -754,8 +775,8 @@ impl TaskStoreState {
             .tasks
             .get_mut(&id)
             .expect("validated task must exist");
-        let task_result = if task.status() == TaskStatus::Completed
-            && matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        let task_result = if task.status() == TaskStatusData::Completed
+            && matches!(to, TaskStatusData::Pending | TaskStatusData::InProgress)
         {
             task.reopen_from_completed(to, updated_at)?
         } else {
@@ -768,15 +789,16 @@ impl TaskStoreState {
             .get(&batch_id)
             .ok_or(TaskCommandError::BatchNotFound { id: batch_id })?
             .status();
-        if batch_status == BatchStatus::Archived
-            && matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        if batch_status == BatchStatusData::Archived
+            && matches!(to, TaskStatusData::Pending | TaskStatusData::InProgress)
         {
             if let Some(active) = dry_run.current_batch {
                 if active != batch_id {
                     return Err(TaskCommandError::ActiveBatchConflict {
                         active,
                         requested: batch_id,
-                    });
+                    }
+                    .into());
                 }
             }
             dry_run
@@ -790,20 +812,23 @@ impl TaskStoreState {
 
         let unfinished = dry_run.tasks.values().any(|task| {
             task.batch() == batch_id
-                && matches!(task.status(), TaskStatus::Pending | TaskStatus::InProgress)
+                && matches!(
+                    task.status(),
+                    TaskStatusData::Pending | TaskStatusData::InProgress
+                )
         });
         let mut auto_closed = false;
         if !unfinished
             && dry_run
                 .batches
                 .get(&batch_id)
-                .is_some_and(|batch| batch.status() == BatchStatus::Active)
+                .is_some_and(|batch| batch.status() == BatchStatusData::Active)
         {
             dry_run
                 .batches
                 .get_mut(&batch_id)
                 .expect("validated batch must exist")
-                .transition_to(BatchStatus::Archived)?;
+                .transition_to(BatchStatusData::Archived)?;
             if dry_run.current_batch == Some(batch_id) {
                 dry_run.current_batch = None;
             }
@@ -816,19 +841,22 @@ impl TaskStoreState {
             .expect("validated task and batch must produce progress");
         let events = task_result.events;
         *self = dry_run;
-        Ok(self.commit(TaskCommandResult::uncommitted(progress, events), revision))
+        Ok(self.commit(
+            TaskCommandResultData::uncommitted(progress, events),
+            revision,
+        ))
     }
 
     pub fn transition(
         &mut self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
-        if to == TaskStatus::InProgress {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        if to == TaskStatusData::InProgress {
             let blocked_by = self.blocking_ids(id)?;
             if !blocked_by.is_empty() {
-                return Err(TaskCommandError::TaskBlocked { id, blocked_by });
+                return Err(TaskCommandError::TaskBlocked { id, blocked_by }.into());
             }
         }
         let current = self
@@ -849,9 +877,10 @@ impl TaskStoreState {
 
     pub fn delete_with_progress(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<super::TaskProgressSnapshot>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<super::TaskProgressSnapshotData>, share::error::DomainError>
+    {
         let batch_id = self
             .tasks
             .get(&id)
@@ -862,20 +891,23 @@ impl TaskStoreState {
         let task_result = dry_run.delete(id, updated_at)?;
         let unfinished = dry_run.tasks.values().any(|task| {
             task.batch() == batch_id
-                && matches!(task.status(), TaskStatus::Pending | TaskStatus::InProgress)
+                && matches!(
+                    task.status(),
+                    TaskStatusData::Pending | TaskStatusData::InProgress
+                )
         });
         let mut auto_closed = false;
         if !unfinished
             && dry_run
                 .batches
                 .get(&batch_id)
-                .is_some_and(|batch| batch.status() == BatchStatus::Active)
+                .is_some_and(|batch| batch.status() == BatchStatusData::Active)
         {
             dry_run
                 .batches
                 .get_mut(&batch_id)
                 .expect("validated batch must exist")
-                .transition_to(BatchStatus::Archived)?;
+                .transition_to(BatchStatusData::Archived)?;
             if dry_run.current_batch == Some(batch_id) {
                 dry_run.current_batch = None;
             }
@@ -886,25 +918,28 @@ impl TaskStoreState {
             .expect("validated task and batch must produce progress");
         let events = task_result.events;
         *self = dry_run;
-        Ok(self.commit(TaskCommandResult::uncommitted(progress, events), revision))
+        Ok(self.commit(
+            TaskCommandResultData::uncommitted(progress, events),
+            revision,
+        ))
     }
 
-    /// Removes all incoming/outgoing dependency edges and marks the Task
-    /// `Deleted` in one commit. Repeated delete of an already-`Deleted` Task
+    /// Removes all incoming/outgoing dependency edges and marks the TaskData
+    /// `Deleted` in one commit. Repeated delete of an already-`Deleted` TaskData
     /// is an idempotent no-op: it returns the current snapshot with empty
     /// `events` and `revision() == None`, and never reserves a new revision.
     pub fn delete(
         &mut self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         let (blocked_by, blocks) = {
             let task = self
                 .tasks
                 .get(&id)
                 .ok_or(TaskCommandError::TaskNotFound { id })?;
-            if task.status() == TaskStatus::Deleted {
-                return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+            if task.status() == TaskStatusData::Deleted {
+                return Ok(TaskCommandResultData::uncommitted(task.clone(), Vec::new()));
             }
             (task.blocked_by().to_vec(), task.blocks().to_vec())
         };
@@ -931,7 +966,10 @@ impl TaskStoreState {
         task.mark_deleted(updated_at);
         let snapshot = task.clone();
         Ok(self.commit(
-            TaskCommandResult::uncommitted(snapshot, vec![TaskEvent::TaskDeleted { task_id: id }]),
+            TaskCommandResultData::uncommitted(
+                snapshot,
+                vec![TaskEventData::TaskDeleted { task_id: id }],
+            ),
             revision,
         ))
     }

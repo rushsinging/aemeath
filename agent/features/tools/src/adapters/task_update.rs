@@ -6,15 +6,15 @@ use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedT
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskId, TaskPriority, TaskStatus};
+use task::{TaskAccess, TaskIdData, TaskPriorityData, TaskStatusData};
 
 pub struct TaskUpdateTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
 fn parse_seq(value: &str, field: &str) -> Result<u64, String> {
-    TaskId::parse_tool_input(value)
-        .map(TaskId::get)
+    TaskIdData::parse_tool_input(value)
+        .map(TaskIdData::get)
         .map_err(|_| format!("{field} must be a non-zero decimal task ID sequence: {value}"))
 }
 
@@ -23,7 +23,7 @@ fn task_id(
     task_list_id: Option<&str>,
     value: &str,
     field: &str,
-) -> Result<TaskId, String> {
+) -> Result<TaskIdData, String> {
     let seq = parse_seq(value, field)?;
     match task_list_id {
         Some(value) => {
@@ -31,7 +31,7 @@ fn task_id(
                 .parse::<u64>()
                 .ok()
                 .filter(|id| *id > 0)
-                .map(task::BatchId::new)
+                .map(task::BatchIdData::new)
                 .ok_or_else(|| format!("invalid task list id: {value}"))?;
             access
                 .batch_snapshot(batch_id)
@@ -40,54 +40,54 @@ fn task_id(
                         .tasks()
                         .iter()
                         .find(|task| task.seq() == seq)
-                        .map(task::Task::id)
+                        .map(task::TaskData::id)
                 })
-                .ok_or_else(|| format!("Task not found in task list #{batch_id}: {value}"))
+                .ok_or_else(|| format!("TaskData not found in task list #{batch_id}: {value}"))
         }
         None => access
             .current_task_by_seq(seq)
             .map(|task| task.id())
-            .ok_or_else(|| format!("Task not found in current task list: {value}")),
+            .ok_or_else(|| format!("TaskData not found in current task list: {value}")),
     }
 }
 
-fn parse_priority(value: &str) -> Result<TaskPriority, String> {
+fn parse_priority(value: &str) -> Result<TaskPriorityData, String> {
     match value.to_ascii_lowercase().as_str() {
-        "low" => Ok(TaskPriority::Low),
-        "normal" | "medium" => Ok(TaskPriority::Normal),
-        "high" => Ok(TaskPriority::High),
-        "urgent" | "critical" => Ok(TaskPriority::Urgent),
+        "low" => Ok(TaskPriorityData::Low),
+        "normal" | "medium" => Ok(TaskPriorityData::Normal),
+        "high" => Ok(TaskPriorityData::High),
+        "urgent" | "critical" => Ok(TaskPriorityData::Urgent),
         _ => Err(format!("invalid priority: {value}")),
     }
 }
 
-fn status_label(status: TaskStatus) -> &'static str {
+fn status_label(status: TaskStatusData) -> &'static str {
     match status {
-        TaskStatus::Pending => "pending",
-        TaskStatus::InProgress => "in_progress",
-        TaskStatus::Completed => "completed",
-        TaskStatus::Deleted => "deleted",
+        TaskStatusData::Pending => "pending",
+        TaskStatusData::InProgress => "in_progress",
+        TaskStatusData::Completed => "completed",
+        TaskStatusData::Deleted => "deleted",
     }
 }
 
-fn display_status(status: TaskStatus) -> &'static str {
+fn display_status(status: TaskStatusData) -> &'static str {
     match status {
-        TaskStatus::Pending => "Pending",
-        TaskStatus::InProgress => "InProgress",
-        TaskStatus::Completed => "Completed",
-        TaskStatus::Deleted => "Deleted",
+        TaskStatusData::Pending => "Pending",
+        TaskStatusData::InProgress => "InProgress",
+        TaskStatusData::Completed => "Completed",
+        TaskStatusData::Deleted => "Deleted",
     }
 }
 
-fn task_list_status_label(status: task::BatchStatus) -> &'static str {
+fn task_list_status_label(status: task::BatchStatusData) -> &'static str {
     match status {
-        task::BatchStatus::Active => "active",
-        task::BatchStatus::Paused => "paused",
-        task::BatchStatus::Archived => "archived",
+        task::BatchStatusData::Active => "active",
+        task::BatchStatusData::Paused => "paused",
+        task::BatchStatusData::Archived => "archived",
     }
 }
 
-fn progress_item(item: &task::TaskProgressItem) -> TaskProgressItemResult {
+fn progress_item(item: &task::TaskProgressItemData) -> TaskProgressItemResult {
     TaskProgressItemResult {
         task_id: item.seq.to_string(),
         subject: item.subject.clone(),
@@ -95,7 +95,7 @@ fn progress_item(item: &task::TaskProgressItem) -> TaskProgressItemResult {
     }
 }
 
-fn progress_result(snapshot: &task::TaskProgressSnapshot) -> TaskProgressResult {
+fn progress_result(snapshot: &task::TaskProgressSnapshotData) -> TaskProgressResult {
     TaskProgressResult {
         task_list: TaskProgressListResult {
             task_list_id: snapshot.task_list_id.to_string(),
@@ -121,7 +121,7 @@ fn progress_result(snapshot: &task::TaskProgressSnapshot) -> TaskProgressResult 
     }
 }
 
-fn render_progress(snapshot: &task::TaskProgressSnapshot, lang: &str) -> String {
+fn render_progress(snapshot: &task::TaskProgressSnapshotData, lang: &str) -> String {
     let mut lines = vec![if lang == "zh" {
         format!(
             "任务列表 #{}「{}」当前进度：",
@@ -212,12 +212,12 @@ fn render_progress(snapshot: &task::TaskProgressSnapshot, lang: &str) -> String 
     lines.join("\n")
 }
 
-fn priority_label(priority: TaskPriority) -> &'static str {
+fn priority_label(priority: TaskPriorityData) -> &'static str {
     match priority {
-        TaskPriority::Low => "low",
-        TaskPriority::Normal => "normal",
-        TaskPriority::High => "high",
-        TaskPriority::Urgent => "urgent",
+        TaskPriorityData::Low => "low",
+        TaskPriorityData::Normal => "normal",
+        TaskPriorityData::High => "high",
+        TaskPriorityData::Urgent => "urgent",
     }
 }
 
@@ -278,13 +278,13 @@ impl TypedTool for TaskUpdateTool {
         let timestamp = chrono::Utc::now().timestamp_millis() as u64;
         if args.key == "status" {
             let target = match value {
-                "pending" => TaskStatus::Pending,
-                "in_progress" => TaskStatus::InProgress,
-                "completed" => TaskStatus::Completed,
-                "deleted" => TaskStatus::Deleted,
+                "pending" => TaskStatusData::Pending,
+                "in_progress" => TaskStatusData::InProgress,
+                "completed" => TaskStatusData::Completed,
+                "deleted" => TaskStatusData::Deleted,
                 _ => return TypedToolResult::error(format!("invalid status: {value}")),
             };
-            let snapshot = if target == TaskStatus::Deleted {
+            let snapshot = if target == TaskStatusData::Deleted {
                 self.access.delete_with_progress(id, timestamp)
             } else {
                 self.access.transition_with_progress(id, target, timestamp)
@@ -302,7 +302,7 @@ impl TypedTool for TaskUpdateTool {
             let task_id = updated.seq().to_string();
             let status = status_label(updated.status()).to_owned();
             let text = format!(
-                "Task #{} updated. Status: {}\n\n{}",
+                "TaskData #{} updated. Status: {}\n\n{}",
                 task_id,
                 display_status(updated.status()),
                 render_progress(&snapshot, ctx.guidance().language())
@@ -358,7 +358,7 @@ impl TypedTool for TaskUpdateTool {
             .filter_map(|id| self.access.get(*id).map(|task| format!("#{}", task.seq())))
             .collect();
         TypedToolResult::success(
-            format!("Task #{} updated. Status: {}", task_id, status),
+            format!("TaskData #{} updated. Status: {}", task_id, status),
             TaskUpdateResult {
                 task_id,
                 status,

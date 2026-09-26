@@ -43,7 +43,7 @@ where
                 session_queries,
             } = input;
 
-            // #1385 Task 12: Construct real ChatEventSinkHandle from session sink.
+            // #1385 TaskData 12: Construct real ChatEventSinkHandle from session sink.
             // The handle is Clone and can be used in place of S everywhere.
             let sink_handle =
                 crate::application::loop_engine::chat::ChatEventSinkHandle::new(sink.clone());
@@ -814,7 +814,7 @@ where
                 let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
                     active_run.clone();
 
-                // #1385 Task 7: Install parent frame via RAII guard so sub-agent
+                // #1385 TaskData 7: Install parent frame via RAII guard so sub-agent
                 // derivation can read the true parent spec + context.
                 // The guard clears its own generation on drop — no manual clear.
                 let _parent_frame_guard = shell.parent_context_source.install(Arc::new(
@@ -1034,7 +1034,7 @@ where
                 heartbeat_cancel.cancel();
                 let _ = heartbeat_task.await;
 
-                  // #1385 Task 7: Guard is dropped when the block ends,
+                  // #1385 TaskData 7: Guard is dropped when the block ends,
                   // clearing only the generation we installed.
 
                 match launch_result {

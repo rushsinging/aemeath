@@ -679,7 +679,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     drop(parent_frame_guard);
 }
 
-// ── #1385 Task 12: Sub-agent I/O seam tests ──
+// ── #1385 TaskData 12: Sub-agent I/O seam tests ──
 
 /// Deriving a sub-run produces a RuntimeContext whose event_sink is
 /// a real handle (not causing panics when used), usage tracker starts

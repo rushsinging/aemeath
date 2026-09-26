@@ -1,26 +1,27 @@
-//! Red tests for #888 aggregate `TaskSnapshot` validation.
+//! Red tests for #888 aggregate `TaskSnapshotData` validation.
 //!
-//! This module intentionally exercises an API that does **not** exist yet:
-//! Public `TaskSnapshot::validate() -> Result<(), TaskSnapshotValidationError>`
+//! This module intentionally exercises an API that does *not* exist yet:
+//! Public `TaskSnapshotData::validate() -> Result<(), share::error::DomainError>`
 //! checks aggregate validity; the final consistency test uses crate-private
 //! `prepare()` to inspect the reconstructed candidate state.
-//! Per #888 scope, decode (`TaskSnapshot::decode`) only enforces *wire format*
+//! Per #888 scope, decode (`TaskSnapshotData::decode`) only enforces *wire format*
 //! rules (typed ID string shape, non-zero IDs on the V2 path, JSON schema
 //! version). `validate()` is the separate, pure, side-effect-free layer that
 //! checks *aggregate* invariants on an already-decoded snapshot: duplicate
 //! entity IDs, dangling/duplicate/cyclic/cross-batch dependency edges,
-//! persisted tombstones, Batch/current_batch consistency, next-ID counters
+//! persisted tombstones, BatchData/current_batch consistency, next-ID counters
 //! and created/updated/started/completed timestamp legality.
 //!
-//! `cargo test -p task snapshot_validation` is expected to **fail to
-//! compile** until the validator and its error type land: this is the
+//! `cargo test -p task snapshot_validation` is expected to *fail to
+//! compile* until the validator and its error type land: this is the
 //! documented Red state, not a test-logic bug. Do not add a validator
 //! implementation or any production code while resolving this file.
 
-use super::{BatchId, TaskId, TaskRevision, TaskSnapshot, TaskSnapshotValidationError};
+use super::snapshot::TaskSnapshotValidationError;
+use super::{BatchIdData, TaskIdData, TaskRevisionData, TaskSnapshotData};
 
-fn decode(bytes: &[u8]) -> TaskSnapshot {
-    TaskSnapshot::decode(bytes).expect("fixture must decode")
+fn decode(bytes: &[u8]) -> TaskSnapshotData {
+    TaskSnapshotData::decode(bytes).expect("fixture must decode")
 }
 
 /// One `TaskWireV2` entry. Every field mirrors `TaskWireV2` exactly so a
@@ -139,7 +140,7 @@ fn snapshot_validate_rejects_duplicate_task_id() {
 
     assert!(matches!(
         error,
-        TaskSnapshotValidationError::DuplicateTaskId { id } if id == TaskId::new(1)
+        _ if error.message().contains("duplicate task ID: 1")
     ));
 }
 
@@ -164,8 +165,8 @@ fn snapshot_validate_rejects_duplicate_batch_id() {
         .expect_err("duplicate batch ID must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::DuplicateBatchId { id } if id == BatchId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::DuplicateBatchId { id }) if *id == BatchIdData::new(1)
     ));
 }
 
@@ -173,10 +174,10 @@ fn snapshot_validate_rejects_duplicate_batch_id() {
 fn snapshot_validate_rejects_zero_entity_id_surfaced_by_legacy_v1_upgrade() {
     // V2 decode already rejects a zero ID at the wire-format layer (see
     // `snapshot_v2_rejects_numeric_mixed_and_zero_id_representations` in
-    // `snapshot_tests.rs`), and V1 Task IDs go through the same non-zero
+    // `snapshot_tests.rs`), and V1 TaskData IDs go through the same non-zero
     // `parse_id` check. Legacy V1 `BatchWireV1::id` is a bare `u64` with no
     // such check, so it is the only remaining route through which a
-    // structurally-valid `TaskSnapshot` can carry a zero entity ID — this is
+    // structurally-valid `TaskSnapshotData` can carry a zero entity ID — this is
     // exactly the aggregate-level defect `validate()` must still catch.
     let legacy = br#"{
       "tasks": [],
@@ -197,8 +198,8 @@ fn snapshot_validate_rejects_zero_entity_id_surfaced_by_legacy_v1_upgrade() {
         .expect_err("zero batch ID entity must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::ZeroBatchId { id } if id == BatchId::new(0)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::ZeroBatchId { id }) if *id == BatchIdData::new(0)
     ));
 }
 
@@ -223,8 +224,8 @@ fn snapshot_validate_rejects_persisted_deleted_task() {
         .expect_err("persisted Deleted tombstone must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::PersistedDeletedTask { id } if id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::PersistedDeletedTask { id }) if *id == TaskIdData::new(1)
     ));
 }
 
@@ -239,9 +240,9 @@ fn snapshot_validate_rejects_missing_batch_reference() {
         .expect_err("task referencing a non-existent batch must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidBatchReference { task_id, batch_id }
-            if task_id == TaskId::new(1) && batch_id == BatchId::new(9)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidBatchReference { task_id, batch_id })
+            if *task_id == TaskIdData::new(1) && *batch_id == BatchIdData::new(9)
     ));
 }
 
@@ -256,9 +257,9 @@ fn snapshot_validate_rejects_dangling_dependency() {
         .expect_err("dependency on a non-existent task must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::DanglingDependency { task_id, dependency_id }
-            if task_id == TaskId::new(1) && dependency_id == TaskId::new(99)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::DanglingDependency { task_id, dependency_id })
+            if *task_id == TaskIdData::new(1) && *dependency_id == TaskIdData::new(99)
     ));
 }
 
@@ -273,8 +274,8 @@ fn snapshot_validate_rejects_self_dependency() {
         .expect_err("a task blocked by itself must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::SelfDependency { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::SelfDependency { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -299,8 +300,8 @@ fn snapshot_validate_rejects_indirect_dependency_cycle() {
         .expect_err("an indirect dependency cycle must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::DependencyCycle
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::DependencyCycle)
     ));
 }
 
@@ -329,9 +330,9 @@ fn snapshot_validate_rejects_cross_batch_dependency() {
         .expect_err("a dependency edge crossing batches must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::CrossBatchDependency { task_id, blocked_by_id }
-            if task_id == TaskId::new(2) && blocked_by_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::CrossBatchDependency { task_id, blocked_by_id })
+            if *task_id == TaskIdData::new(2) && *blocked_by_id == TaskIdData::new(1)
     ));
 }
 
@@ -347,9 +348,9 @@ fn snapshot_validate_rejects_duplicate_blocked_by_reference() {
         .expect_err("a repeated blocked_by entry must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::DuplicateDependencyReference { task_id, dependency_id }
-            if task_id == TaskId::new(2) && dependency_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::DuplicateDependencyReference { task_id, dependency_id })
+            if *task_id == TaskIdData::new(2) && *dependency_id == TaskIdData::new(1)
     ));
 }
 
@@ -369,8 +370,8 @@ fn snapshot_validate_rejects_multiple_active_batches() {
         .expect_err("more than one Active batch must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::MultipleActiveBatches { first, second }
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::MultipleActiveBatches { first, second })
             if [first.get(), second.get()].iter().all(|id| [1, 2].contains(id))
                 && first != second
     ));
@@ -391,8 +392,8 @@ fn snapshot_validate_rejects_current_batch_missing_reference() {
         .expect_err("current_batch pointing at a non-existent batch must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidCurrentBatch { batch_id } if batch_id == BatchId::new(9)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidCurrentBatch { batch_id }) if *batch_id == BatchIdData::new(9)
     ));
 }
 
@@ -411,8 +412,8 @@ fn snapshot_validate_rejects_current_batch_pointing_to_non_active_batch() {
         .expect_err("current_batch pointing at a non-Active batch must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidCurrentBatch { batch_id } if batch_id == BatchId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidCurrentBatch { batch_id }) if *batch_id == BatchIdData::new(1)
     ));
 }
 
@@ -427,9 +428,9 @@ fn snapshot_validate_rejects_current_batch_mismatch_with_actual_active_batch() {
         .expect_err("current_batch missing while an Active batch exists must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::CurrentBatchMismatch { current: None, active }
-            if active == BatchId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::CurrentBatchMismatch { current: None, active })
+            if *active == BatchIdData::new(1)
     ));
 }
 
@@ -445,8 +446,8 @@ fn snapshot_validate_rejects_next_task_id_not_greater_than_max_task_id() {
         .expect_err("next_task_id <= max existing task ID must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidNextTaskId
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidNextTaskId)
     ));
 }
 
@@ -466,8 +467,8 @@ fn snapshot_validate_rejects_next_batch_id_not_greater_than_max_batch_id() {
         .expect_err("next_batch_id <= max existing batch ID must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidNextBatchId
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidNextBatchId)
     ));
 }
 
@@ -492,8 +493,8 @@ fn snapshot_validate_rejects_updated_at_before_created_at() {
         .expect_err("updated_at before created_at must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -518,8 +519,8 @@ fn snapshot_validate_rejects_started_at_before_created_at() {
         .expect_err("started_at before created_at must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -544,8 +545,8 @@ fn snapshot_validate_rejects_completed_at_before_started_at() {
         .expect_err("completed_at before started_at must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -570,8 +571,8 @@ fn snapshot_validate_rejects_completed_status_missing_completed_at() {
         .expect_err("Completed status without completed_at must be rejected");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -617,8 +618,8 @@ fn snapshot_validate_rejects_pending_status_with_completed_at() {
         .expect_err("pending 任务携带 completed_at 必须继续拒绝");
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -631,9 +632,9 @@ fn snapshot_validate_rejects_pending_status_with_completed_at() {
 /// legacy record that never persisted them decodes today with both fields as
 /// `None`. `valid_task_timestamps` in `snapshot.rs` then requires
 /// `InProgress` to carry `started_at.is_some()` and rejects the task with
-/// `InvalidTaskTimestamps` -- confirmed empirically: `TaskSnapshot::decode`
+/// `InvalidTaskTimestamps` -- confirmed empirically: `TaskSnapshotData::decode`
 /// on the fixture below succeeds, but `.prepare()` currently returns
-/// `Err(InvalidTaskTimestamps { task_id: TaskId(1) })`, so the
+/// `Err(InvalidTaskTimestamps { task_id: TaskIdData(1) })`, so the
 /// `.expect(..)` below currently panics (Red). The desired fix derives
 /// `started_at = updated_at` and leaves `completed_at = None` for `InProgress`
 /// so the record round-trips into a valid V2 aggregate instead of being
@@ -657,7 +658,7 @@ fn snapshot_validate_derives_in_progress_started_at_from_updated_at_for_legacy_v
     let task = prepared
         .candidate()
         .tasks()
-        .get(&TaskId::new(1))
+        .get(&TaskIdData::new(1))
         .expect("derived task must be installed");
 
     assert_eq!(
@@ -675,7 +676,7 @@ fn snapshot_validate_derives_in_progress_started_at_from_updated_at_for_legacy_v
 /// Red: companion to the `InProgress` derivation test above for legacy V1
 /// `Completed` tasks. Confirmed empirically: `.prepare()` on the fixture
 /// below currently returns
-/// `Err(InvalidTaskTimestamps { task_id: TaskId(1) })` because both
+/// `Err(InvalidTaskTimestamps { task_id: TaskIdData(1) })` because both
 /// `started_at` and `completed_at` decode as `None`, so the `.expect(..)`
 /// below currently panics (Red). The desired fix derives both
 /// `started_at = updated_at` *and* `completed_at = updated_at` for
@@ -698,7 +699,7 @@ fn snapshot_validate_derives_completed_started_and_completed_at_from_updated_at_
     let task = prepared
         .candidate()
         .tasks()
-        .get(&TaskId::new(1))
+        .get(&TaskIdData::new(1))
         .expect("derived task must be installed");
 
     assert_eq!(
@@ -719,7 +720,7 @@ fn snapshot_validate_derives_completed_started_and_completed_at_from_updated_at_
 /// derivation for missing `started_at`/`completed_at` lands. `updated_at <
 /// created_at` is checked unconditionally in `valid_task_timestamps` before
 /// any per-status derivation could apply, so this fixture already returns
-/// `Err(InvalidTaskTimestamps { task_id: TaskId(1) })` today -- confirmed
+/// `Err(InvalidTaskTimestamps { task_id: TaskIdData(1) })` today -- confirmed
 /// empirically -- and must continue to do so after the derivation fix above
 /// is implemented. This test locks that invariant so a future, naive
 /// "derive first, validate second" implementation cannot accidentally paper
@@ -742,8 +743,8 @@ fn snapshot_validate_rejects_legacy_v1_completed_task_when_created_at_exceeds_up
     );
 
     assert!(matches!(
-        error,
-        TaskSnapshotValidationError::InvalidTaskTimestamps { task_id } if task_id == TaskId::new(1)
+        error.source_downcast_ref::<TaskSnapshotValidationError>(),
+        Some(TaskSnapshotValidationError::InvalidTaskTimestamps { task_id }) if *task_id == TaskIdData::new(1)
     ));
 }
 
@@ -755,7 +756,7 @@ fn snapshot_validate_rejects_legacy_v1_completed_task_when_created_at_exceeds_up
 /// color-marking DFS: `visit(index, ..)` recurses once per hop along
 /// `blocked_by` before returning. Because the *outer* loop
 /// `(0..tasks.len()).any(|index| visit(index, ..))` starts a fresh DFS from
-/// every array index in order, a chain listed in **ascending** dependency
+/// every array index in order, a chain listed in *ascending* dependency
 /// order (task 1, then 2 which depends on 1, then 3 which depends on 2, ..)
 /// never recurses deeper than one hop: by the time `visit` reaches task k,
 /// task k-1 was already colored black by an earlier outer-loop iteration.
@@ -768,13 +769,13 @@ fn snapshot_validate_rejects_legacy_v1_completed_task_when_created_at_exceeds_up
 ///
 /// Confirmed empirically on this machine (aarch64 macOS, debug profile,
 /// default 2 MiB test-thread stack, no `RUST_MIN_STACK` override): a
-/// **20,000**-task reverse-ordered chain reliably aborts the entire test
+/// *20,000*-task reverse-ordered chain reliably aborts the entire test
 /// process with `fatal runtime error: stack overflow` (SIGABRT) -- not a
 /// catchable panic, an unrecoverable process abort that would take the rest
-/// of the `cargo test -p task` binary down with it. A **15,000**-task chain
-/// reproduces the same abort; a **10,000**-task chain does not. Per this
+/// of the `cargo test -p task` binary down with it. A *15,000*-task chain
+/// reproduces the same abort; a *10,000*-task chain does not. Per this
 /// task's own explicit fallback ("若危险可仅写 5k 并记录"), this committed
-/// test therefore exercises only **5,000** reverse-ordered tasks -- safely
+/// test therefore exercises only *5,000* reverse-ordered tasks -- safely
 /// below the observed crash threshold on this machine, but still large
 /// enough to exercise realistic aggregate sizes -- and currently passes
 /// (Green) rather than demonstrating the crash directly. The crash itself
@@ -829,11 +830,11 @@ fn snapshot_validate_accepts_fully_consistent_snapshot_and_installs_store_state(
     let state = prepared.candidate();
 
     assert_eq!(state.tasks().len(), 1);
-    assert!(state.tasks().contains_key(&TaskId::new(1)));
+    assert!(state.tasks().contains_key(&TaskIdData::new(1)));
     assert_eq!(state.batches().len(), 1);
-    assert!(state.batches().contains_key(&BatchId::new(1)));
-    assert_eq!(state.current_batch(), Some(BatchId::new(1)));
-    assert_eq!(state.revision(), TaskRevision::new(5));
-    assert_eq!(state.next_task_id(), TaskId::new(2));
-    assert_eq!(state.next_batch_id(), BatchId::new(2));
+    assert!(state.batches().contains_key(&BatchIdData::new(1)));
+    assert_eq!(state.current_batch(), Some(BatchIdData::new(1)));
+    assert_eq!(state.revision(), TaskRevisionData::new(5));
+    assert_eq!(state.next_task_id(), TaskIdData::new(2));
+    assert_eq!(state.next_batch_id(), BatchIdData::new(2));
 }
