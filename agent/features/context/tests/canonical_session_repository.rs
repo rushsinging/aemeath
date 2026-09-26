@@ -14,11 +14,11 @@ use context::{
 };
 use context::{CanonicalSessionRepository, CanonicalSessionWriter};
 use project::{WorkspaceRestoreData, WorkspaceWriter};
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };

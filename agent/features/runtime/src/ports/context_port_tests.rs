@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use provider::ReasoningLevel;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
+use share::reasoning::ReasoningLevel;
 
 use super::*;
 

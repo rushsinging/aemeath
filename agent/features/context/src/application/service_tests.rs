@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message};
+use share::reasoning::ReasoningLevel;
 
 use super::performance::{capture, percentiles_ns};
 use super::service::{

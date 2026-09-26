@@ -1,3 +1,19 @@
+//! Provider：LLM 上游的 HTTP/stream 实现与请求编排。
+//!
+//! # Published Language（四类语法，#1712 收敛·第一 PR）
+//!
+//! | 组 | 实体 |
+//! |---|---|
+//! | 工厂 | 零根工厂（判定：`composition` 构造面逻辑收进 provider 自有 wire 是本 issue 第二 PR——composition 不留复杂逻辑，wire 由 crate 提供） |
+//! | 角色和职能 | `LlmProvider`（上游驱动 trait，Arc<dyn>）、`LlmClient`（具体客户端；composition 直包——同 ConfigAppService 判例，收窄随 #1696）、`TransportPool`（传输池构造面）、`CancellationSignal`（**归 #1739 信号统一，本批不动**） |
+//! | 数据和生命周期 | 21 个 Data：`InvocationRequestData`（生命周期载体：含 cancellation 按值）、`InvocationStreamData`、`InvocationEventData`、`InvocationDeltaData`、`ModelIdData`、`ModelCapabilityData`、`ModelToolSchemaData`、`RequestSystemBlockData`、`SystemBlockData`、`InvocationScopeData`、`LlmConfigOptionsData`、`InvocationOptionsData`、`ProviderCompletionData`、`ProviderContentBlockData`、`ProviderToolCallData`、`ProviderToolCallIdData`、`ProviderStopReasonData`、`RawUsageSnapshotData`、`ReasoningCapabilityData`、`ReasoningMappingKindData` |
+//! | Error | `ProviderError`（事实三字段；retryable/retry_after 迁出归 **#1740**）、`ProviderErrorKind`（13 变体）、`LlmError`（9 变体）——Error 类**不 Data 化** |
+//!
+//! 本批删除（零消费/转发）：`CapabilityFingerprint`、`RequestedInvocationOptions`、
+//! `ResolvedInvocationOptions`、`ProviderDriverKind`（组内）、6 超时常量降 `pub(crate)`、
+//! `ReasoningLevel` 转发（消费方直连 share::reasoning）。
+//! 按 docs/design/03-engineering/05-published-language.md SOP。
+
 //! LLM client library for aemeath.
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
@@ -11,15 +27,13 @@ mod ports;
 pub mod published_language;
 
 pub(crate) use domain::capability::ProviderDriverKind;
-pub use domain::capability::ReasoningLevel;
-pub(crate) use domain::invoke::InvocationScope;
+pub(crate) use domain::invoke::InvocationScopeData;
 
 /// Composition Root 专用构造面；业务消费者不得引用。
 pub mod composition {
-    pub use crate::adapters::client::{LlmClient, LlmConfigOptions};
+    pub use crate::adapters::client::{LlmClient, LlmConfigOptionsData};
     pub use crate::adapters::pool::TransportPool;
-    pub use crate::domain::capability::ProviderDriverKind;
-    pub use crate::domain::invoke::{InvocationScope, SystemBlock};
+    pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
     pub use crate::ports::LlmProvider;
     pub use crate::LlmError;
 }
@@ -27,26 +41,26 @@ pub mod composition {
 #[cfg(feature = "test-harness")]
 pub mod test_harness {
     pub use crate::adapters::client::LlmClient;
-    pub use crate::domain::invoke::{InvocationScope, SystemBlock};
+    pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
     pub use crate::ports::LlmProvider;
 }
 
-pub use published_language::{
-    CancellationSignal, CapabilityFingerprint, InvocationDelta, InvocationEvent, InvocationOptions,
-    InvocationRequest, InvocationStream, ModelCapability, ModelId, ModelToolSchema,
-    ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason,
-    ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningCapability,
-    ReasoningMappingKind, RequestSystemBlock, RequestedInvocationOptions,
-    ResolvedInvocationOptions,
-};
+/// Provider HTTP 超时常量（crate 内装配用；跨 crate 零消费）。
+pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 1800;
+pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 30;
+pub(crate) const ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS: u64 = 90;
+pub(crate) const OPENAI_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
+pub(crate) const OLLAMA_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
+pub(crate) const STALL_THRESHOLD_SECS: u64 = 30;
 
-/// Provider HTTP 超时常量。
-pub const DEFAULT_TIMEOUT_SECS: u64 = 1800;
-pub const CONNECT_TIMEOUT_SECS: u64 = 30;
-pub const ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS: u64 = 90;
-pub const OPENAI_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
-pub const OLLAMA_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
-pub const STALL_THRESHOLD_SECS: u64 = 30;
+pub use published_language::{
+    CancellationSignal, InvocationDeltaData, InvocationEventData, InvocationOptionsData,
+    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData,
+    ModelToolSchemaData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
+    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
+    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
+    RequestSystemBlockData,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ports::provider_port::{ModelId, ProviderError, ProviderPort, ReasoningLevel};
+use crate::ports::provider_port::{ModelIdData, ProviderError, ProviderPort, ReasoningLevel};
 
 // ─── ProviderBuildSpec ──────────────────────────────────────
 
@@ -16,7 +16,7 @@ use crate::ports::provider_port::{ModelId, ProviderError, ProviderPort, Reasonin
 /// via provider config options and wrap it in a `ProviderPort`.
 ///
 /// All fields map directly to provider config options except `context_window`, which
-/// feeds the `ModelCapability.context_limit` constructed alongside the client.
+/// feeds the `ModelCapabilityData.context_limit` constructed alongside the client.
 #[derive(Debug, Clone)]
 pub struct ProviderBuildSpec {
     /// Driver kind (e.g. `"Anthropic"`, `"OpenAI"`, `"Zhipu"`).
@@ -30,7 +30,7 @@ pub struct ProviderBuildSpec {
     /// Base URL override.
     pub base_url: Option<String>,
     /// Model identifier.
-    pub model: ModelId,
+    pub model: ModelIdData,
     /// Maximum output tokens.
     pub max_tokens: u32,
     /// Requested reasoning level before Provider capability clamp.
@@ -52,7 +52,7 @@ pub struct ProviderBinding {
     /// The built provider port.
     pub provider: Arc<dyn ProviderPort>,
     /// Model identifier.
-    pub model: ModelId,
+    pub model: ModelIdData,
     /// Maximum output tokens for invocations through this binding.
     pub max_tokens: u32,
     /// Requested reasoning level (before clamping).
@@ -77,7 +77,7 @@ impl std::fmt::Debug for ProviderBinding {
 /// Factory that builds a [`ProviderBinding`] from a [`ProviderBuildSpec`].
 ///
 /// The factory owns the knowledge of how to construct a provider client and
-/// how to construct a `ModelCapability`. The caller (Runtime) only provides the
+/// how to construct a `ModelCapabilityData`. The caller (Runtime) only provides the
 /// spec — the factory **never** queries external config.
 pub trait ProviderFactory: Send + Sync {
     /// Build a provider binding from the given spec.

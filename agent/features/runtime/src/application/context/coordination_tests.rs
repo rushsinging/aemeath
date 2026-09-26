@@ -10,11 +10,11 @@ use crate::ports::{
     ToolOutcomeKind, Urgency,
 };
 use async_trait::async_trait;
-use provider::ReasoningLevel;
 use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message, Role};
+use share::reasoning::ReasoningLevel;
 
 use super::{apply_automatic_compact_outcome, ContextCoordinator};
 

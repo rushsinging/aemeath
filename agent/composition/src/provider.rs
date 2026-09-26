@@ -2,14 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use provider::composition::{InvocationScope, LlmClient, LlmConfigOptions, LlmError, SystemBlock};
+use provider::composition::{
+    InvocationScopeData, LlmClient, LlmConfigOptionsData, LlmError, SystemBlockData,
+};
 use provider::{
-    CancellationSignal, InvocationRequest, InvocationStream, ModelCapability, ModelId,
-    ProviderError, ProviderErrorKind, ReasoningCapability, ReasoningLevel, ReasoningMappingKind,
+    CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
+    ModelIdData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
+    ReasoningMappingKindData,
 };
 use runtime::{
     ProviderBinding, ProviderBuildSpec, ProviderFactory as ProviderFactoryTrait, ProviderPort,
 };
+use share::reasoning::ReasoningLevel;
 
 // ─── New adapter: ProviderPort via LlmClient ────────────────
 
@@ -20,12 +24,15 @@ use runtime::{
 /// direction is `runtime → provider`; Composition depends on both.
 pub struct ProviderAdapter {
     client: Arc<LlmClient>,
-    capabilities: HashMap<ModelId, ModelCapability>,
+    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
 }
 
 impl ProviderAdapter {
     /// Create a new adapter over an opaque LLM client and its known capabilities.
-    pub fn new(client: Arc<LlmClient>, capabilities: HashMap<ModelId, ModelCapability>) -> Self {
+    pub fn new(
+        client: Arc<LlmClient>,
+        capabilities: HashMap<ModelIdData, ModelCapabilityData>,
+    ) -> Self {
         Self {
             client,
             capabilities,
@@ -38,14 +45,14 @@ impl ProviderAdapter {
 /// Composition-owned adapter.
 pub fn provider_port(
     client: Arc<LlmClient>,
-    capabilities: HashMap<ModelId, ModelCapability>,
+    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
 ) -> Arc<dyn ProviderPort> {
     Arc::new(ProviderAdapter::new(client, capabilities))
 }
 
 #[async_trait]
 impl ProviderPort for ProviderAdapter {
-    fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError> {
+    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
         self.capabilities.get(model).cloned().ok_or_else(|| {
             ProviderError::fatal(
                 ProviderErrorKind::ModelUnavailable,
@@ -56,9 +63,9 @@ impl ProviderPort for ProviderAdapter {
 
     async fn invoke(
         &self,
-        request: InvocationRequest,
+        request: InvocationRequestData,
         cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         // Fast path: signal already fired.
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
@@ -73,7 +80,7 @@ impl ProviderPort for ProviderAdapter {
 
         // (3) Scope model uses the provider-neutral model name
         // (`request.model.model`), NOT the composite "provider/model" string.
-        let scope = InvocationScope::new(
+        let scope = InvocationScopeData::new(
             request.model.model.clone(),
             request.options.max_output_tokens,
             requested_reasoning,
@@ -87,21 +94,25 @@ impl ProviderPort for ProviderAdapter {
         })?;
 
         // (2) Convert provider-neutral system blocks into the legacy
-        // `provider::SystemBlock` — `Cacheable` → ephemeral cached block,
+        // `provider::SystemBlockData` — `Cacheable` → ephemeral cached block,
         // `Text` → dynamic (uncached) block.
-        let system_blocks: Vec<SystemBlock> = request
+        let system_blocks: Vec<SystemBlockData> = request
             .system
             .iter()
             .map(|block| match block {
-                provider::RequestSystemBlock::Text(text) => SystemBlock::dynamic(text.clone()),
-                provider::RequestSystemBlock::Cacheable(text) => SystemBlock::cached(text.clone()),
+                provider::RequestSystemBlockData::Text(text) => {
+                    SystemBlockData::dynamic(text.clone())
+                }
+                provider::RequestSystemBlockData::Cacheable(text) => {
+                    SystemBlockData::cached(text.clone())
+                }
             })
             .collect();
 
-        // (2) Convert each ModelToolSchema into a complete wire JSON object
+        // (2) Convert each ModelToolSchemaData into a complete wire JSON object
         // {name, description, input_schema} rather than passing the bare
         // input_schema. The JSON is built inside the provider crate
-        // (`ModelToolSchema::to_tool_definition`) so Composition does not need
+        // (`ModelToolSchemaData::to_tool_definition`) so Composition does not need
         // a direct serde_json dependency.
         let tool_schemas: Vec<_> = request
             .tools
@@ -138,7 +149,7 @@ impl ProviderPort for ProviderAdapter {
 
 /// Default `ProviderFactory` implementation: builds a `ProviderBinding` from a
 /// `ProviderBuildSpec` through the Provider-owned Composition construction API,
-/// building a `ModelCapability` from the client's max reasoning level and spec
+/// building a `ModelCapabilityData` from the client's max reasoning level and spec
 /// limits, and wrapping the client in the existing `ProviderAdapter`.
 ///
 /// 持有进程级 `TransportPool`：同 transport key（driver/endpoint/认证域/
@@ -177,7 +188,7 @@ pub fn provider_factory() -> Arc<DefaultProviderFactory> {
 
 impl ProviderFactoryTrait for DefaultProviderFactory {
     fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
-        let config = LlmConfigOptions {
+        let config = LlmConfigOptionsData {
             driver: spec.driver.clone(),
             source_key: spec.source_key.clone(),
             api_style: spec.api_style.clone(),
@@ -216,14 +227,14 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
                 })?,
         );
 
-        // Build a ReasoningCapability whose supported levels are every level
+        // Build a ReasoningCapabilityData whose supported levels are every level
         // from Off up to the client's reported max reasoning level (inclusive).
         let max_reasoning = client.max_reasoning_level();
         let reasoning_cap = reasoning_capability_from_max(max_reasoning);
 
         let requested_reasoning = client.default_scope().requested_reasoning();
 
-        let capability = ModelCapability {
+        let capability = ModelCapabilityData {
             model: spec.model.clone(),
             supports_tools: true,
             supports_parallel_tool_calls: true,
@@ -246,9 +257,9 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
     }
 }
 
-/// Build a `ReasoningCapability` that supports every level from `Off` up to
+/// Build a `ReasoningCapabilityData` that supports every level from `Off` up to
 /// and including `max`.
-fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapability {
+fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapabilityData {
     let all_levels = [
         ReasoningLevel::Off,
         ReasoningLevel::Minimal,
@@ -259,8 +270,8 @@ fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapability {
         ReasoningLevel::Max,
     ];
     let supported: Vec<_> = all_levels.into_iter().filter(|l| *l <= max).collect();
-    ReasoningCapability::new(supported, ReasoningMappingKind::Effort)
-        .unwrap_or_else(|_| ReasoningCapability::none())
+    ReasoningCapabilityData::new(supported, ReasoningMappingKindData::Effort)
+        .unwrap_or_else(|_| ReasoningCapabilityData::none())
 }
 
 use std::time::Instant;

@@ -9,8 +9,8 @@ use crate::application::model::test_support::{
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
-use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
-use provider::{InvocationStream, ProviderError, ProviderErrorKind};
+use provider::test_harness::{InvocationScopeData, LlmProvider, SystemBlockData};
+use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
 use std::sync::Arc;
@@ -122,12 +122,12 @@ impl CapturingBuildFactory {
 impl LlmProvider for CapturingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
         captured.system = system.iter().map(|block| block.text.clone()).collect();
         captured.tool_names = tool_schemas
@@ -552,8 +552,8 @@ fn llm_output_log_preserves_per_invocation_elapsed_time() {
             }],
             metadata: None,
         },
-        stop_reason: provider::ProviderStopReason::EndTurn,
-        usage: crate::ports::RawUsageSnapshot::default(),
+        stop_reason: provider::ProviderStopReasonData::EndTurn,
+        usage: crate::ports::RawUsageSnapshotData::default(),
     };
 
     let data = build_llm_output_log("test-provider", &response, 1.25, "subagent:test");
@@ -1027,7 +1027,10 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
         .take()
         .expect("provider build spec");
     assert_eq!(spec.api_style.as_deref(), Some("responses"));
-    assert_eq!(spec.requested_reasoning, provider::ReasoningLevel::High);
+    assert_eq!(
+        spec.requested_reasoning,
+        share::reasoning::ReasoningLevel::High
+    );
     assert_eq!(spec.context_window, Some(64_000));
     assert_eq!(spec.max_tokens, 16_384);
 }
@@ -1106,7 +1109,10 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
         .unwrap()
         .take()
         .expect("provider build spec");
-    assert_eq!(spec.requested_reasoning, provider::ReasoningLevel::Medium);
+    assert_eq!(
+        spec.requested_reasoning,
+        share::reasoning::ReasoningLevel::Medium
+    );
 }
 
 #[tokio::test]
@@ -1171,7 +1177,10 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
         .unwrap()
         .take()
         .expect("provider build spec");
-    assert_eq!(spec.requested_reasoning, provider::ReasoningLevel::Medium);
+    assert_eq!(
+        spec.requested_reasoning,
+        share::reasoning::ReasoningLevel::Medium
+    );
 }
 
 #[tokio::test]
@@ -1704,12 +1713,12 @@ struct BlockingThenCancelledProvider {
 impl LlmProvider for BlockingThenCancelledProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
             *guard += 1;
@@ -1742,12 +1751,12 @@ struct ContextRecordingProvider {
 impl LlmProvider for ContextRecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         self.seen.lock().unwrap().push(scoped_logging::capture());
         Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
     }
@@ -1769,12 +1778,12 @@ struct ErrorProvider {
 impl LlmProvider for ErrorProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         Err(self.error.clone())
     }
 

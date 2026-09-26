@@ -7,16 +7,16 @@
 //! - tools 扁平格式 `{ type:"function", name, description, parameters }`
 
 use super::OpenAICompatibleProvider;
-use crate::domain::invoke::{InvocationScope, SystemBlock};
-use crate::ports::ReasoningLevel;
+use crate::domain::capability::ReasoningLevel;
+use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use share::message::Message;
 
 impl OpenAICompatibleProvider {
     /// 构造 Responses API 请求 body
     pub(crate) fn build_responses_request_body(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,

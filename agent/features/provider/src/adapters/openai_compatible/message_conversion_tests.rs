@@ -3,7 +3,7 @@ use share::message::{ContentBlock, Message, Role};
 
 #[test]
 fn system_message_uses_stable_prefix_without_anthropic_cache_control() {
-    let system = vec![crate::domain::invoke::SystemBlock::dynamic(
+    let system = vec![crate::domain::invoke::SystemBlockData::dynamic(
         "stable instructions".to_string(),
     )];
     let converted = OpenAICompatibleProvider::convert_messages(&system, &[], false).unwrap();

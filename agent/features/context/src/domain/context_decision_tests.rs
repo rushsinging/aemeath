@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use provider::ReasoningLevel;
 use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 
 use super::{
     context_decision, ContextRequest, ContextRequestId, DecisionReason, Language, SessionId,

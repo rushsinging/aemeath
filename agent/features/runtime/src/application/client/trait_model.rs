@@ -47,7 +47,7 @@ pub(crate) fn build_provider_binding_from_runtime_model(
 
     let runtime_provider = resolve_provider_runtime(snapshot, &resolved_model, base_url_override);
     let base_url = runtime_provider.base_url;
-    let model_id = provider::ModelId {
+    let model_id = provider::ModelIdData {
         provider: resolved_model.source_key.clone(),
         model: resolved_model.model.id.clone(),
     };
@@ -56,11 +56,11 @@ pub(crate) fn build_provider_binding_from_runtime_model(
         .model
         .reasoning_effort
         .as_deref()
-        .and_then(provider::ReasoningLevel::parse)
+        .and_then(share::reasoning::ReasoningLevel::parse)
         .unwrap_or(if resolved_model.model.reasoning.unwrap_or(true) {
-            provider::ReasoningLevel::Medium
+            share::reasoning::ReasoningLevel::Medium
         } else {
-            provider::ReasoningLevel::Off
+            share::reasoning::ReasoningLevel::Off
         });
 
     let spec = ProviderBuildSpec {
@@ -93,7 +93,7 @@ pub(crate) fn build_provider_binding_from_runtime_model(
     let result = sdk::ModelSwitchResult {
         display_name: display,
         context_window: resolved_model.model.context_window,
-        reasoning_active: Some(requested_reasoning != provider::ReasoningLevel::Off),
+        reasoning_active: Some(requested_reasoning != share::reasoning::ReasoningLevel::Off),
         reasoning_level: Some(requested_reasoning),
     };
 
@@ -219,22 +219,22 @@ mod tests {
     // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
     fn test_factory() -> Arc<dyn ProviderFactory> {
         use crate::ports::provider_port::{
-            CancellationSignal, InvocationRequest, InvocationStream, ModelCapability,
-            ProviderError, ProviderErrorKind, ReasoningCapability, ReasoningLevel,
-            ReasoningMappingKind,
+            CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
+            ProviderError, ProviderErrorKind, ReasoningCapabilityData, ReasoningLevel,
+            ReasoningMappingKindData,
         };
         use crate::ports::ProviderPort as ProviderPortTrait;
 
         struct TestPort {
-            capabilities: std::collections::HashMap<provider::ModelId, ModelCapability>,
+            capabilities: std::collections::HashMap<provider::ModelIdData, ModelCapabilityData>,
         }
 
         #[async_trait::async_trait]
         impl ProviderPortTrait for TestPort {
             fn capabilities(
                 &self,
-                model: &provider::ModelId,
-            ) -> std::result::Result<ModelCapability, ProviderError> {
+                model: &provider::ModelIdData,
+            ) -> std::result::Result<ModelCapabilityData, ProviderError> {
                 self.capabilities.get(model).cloned().ok_or_else(|| {
                     ProviderError::fatal(
                         ProviderErrorKind::ModelUnavailable,
@@ -245,9 +245,9 @@ mod tests {
 
             async fn invoke(
                 &self,
-                _request: InvocationRequest,
+                _request: InvocationRequestData,
                 _cancellation: &dyn CancellationSignal,
-            ) -> std::result::Result<InvocationStream, ProviderError> {
+            ) -> std::result::Result<InvocationStreamData, ProviderError> {
                 Err(ProviderError::fatal(
                     ProviderErrorKind::UpstreamUnavailable,
                     "test provider does not support invocation",
@@ -261,20 +261,20 @@ mod tests {
                 &self,
                 spec: ProviderBuildSpec,
             ) -> std::result::Result<crate::ports::ProviderBinding, ProviderError> {
-                let capability = ModelCapability {
+                let capability = ModelCapabilityData {
                     model: spec.model.clone(),
                     supports_tools: true,
                     supports_parallel_tool_calls: true,
                     supports_streaming: true,
-                    reasoning: ReasoningCapability::new(
+                    reasoning: ReasoningCapabilityData::new(
                         vec![
                             ReasoningLevel::Off,
                             ReasoningLevel::Low,
                             ReasoningLevel::Medium,
                         ],
-                        ReasoningMappingKind::Effort,
+                        ReasoningMappingKindData::Effort,
                     )
-                    .unwrap_or_else(|_| ReasoningCapability::none()),
+                    .unwrap_or_else(|_| ReasoningCapabilityData::none()),
                     context_limit: spec.context_window,
                     output_limit: Some(spec.max_tokens as usize),
                 };

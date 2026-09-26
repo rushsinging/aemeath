@@ -1,12 +1,12 @@
 //! Chat Provider driver 抽象：不同供应商的推理字段差异化处理
 
-use crate::ports::ReasoningLevel;
-use crate::{ProviderDriverKind, ReasoningCapability, ReasoningMappingKind};
+use crate::domain::capability::ReasoningLevel;
+use crate::{ProviderDriverKind, ReasoningCapabilityData, ReasoningMappingKindData};
 
 use super::ReasoningConfig;
 
-fn effort_capability(maximum: ReasoningLevel) -> ReasoningCapability {
-    ReasoningCapability::new(
+fn effort_capability(maximum: ReasoningLevel) -> ReasoningCapabilityData {
+    ReasoningCapabilityData::new(
         [
             ReasoningLevel::Off,
             ReasoningLevel::Low,
@@ -17,15 +17,15 @@ fn effort_capability(maximum: ReasoningLevel) -> ReasoningCapability {
         ]
         .into_iter()
         .filter(|level| *level <= maximum),
-        ReasoningMappingKind::Effort,
+        ReasoningMappingKindData::Effort,
     )
     .expect("driver capability includes off")
 }
 
-fn toggle_capability(on_level: ReasoningLevel) -> ReasoningCapability {
-    ReasoningCapability::new(
+fn toggle_capability(on_level: ReasoningLevel) -> ReasoningCapabilityData {
+    ReasoningCapabilityData::new(
         [ReasoningLevel::Off, on_level],
-        ReasoningMappingKind::ThinkingToggle,
+        ReasoningMappingKindData::ThinkingToggle,
     )
     .expect("toggle capability includes off")
 }
@@ -64,7 +64,7 @@ pub trait ChatApiDriver: Send + Sync {
             .unwrap_or(effort)
     }
 
-    fn reasoning_capability(&self) -> crate::ReasoningCapability;
+    fn reasoning_capability(&self) -> crate::ReasoningCapabilityData;
 
     fn max_reasoning_level(&self) -> ReasoningLevel {
         self.reasoning_capability().maximum()
@@ -96,8 +96,8 @@ pub struct DeepSeekDriver;
 pub struct AgnesDriver;
 
 impl ChatApiDriver for OpenAiDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
-        ReasoningCapability::new(
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
+        ReasoningCapabilityData::new(
             [
                 ReasoningLevel::Off,
                 ReasoningLevel::Minimal,
@@ -107,7 +107,7 @@ impl ChatApiDriver for OpenAiDriver {
                 ReasoningLevel::Xhigh,
                 ReasoningLevel::Max,
             ],
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         )
         .expect("OpenAI capability includes off")
     }
@@ -135,7 +135,7 @@ impl ChatApiDriver for OpenAiDriver {
 }
 
 impl ChatApiDriver for ZhipuDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         effort_capability(ReasoningLevel::Max)
     }
 
@@ -163,7 +163,7 @@ impl ChatApiDriver for ZhipuDriver {
 }
 
 impl ChatApiDriver for LiteLlmDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         effort_capability(ReasoningLevel::Max)
     }
 
@@ -183,7 +183,7 @@ impl ChatApiDriver for LiteLlmDriver {
 }
 
 impl ChatApiDriver for VolcengineDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         effort_capability(ReasoningLevel::Medium)
     }
 
@@ -217,7 +217,7 @@ impl ChatApiDriver for VolcengineDriver {
 }
 
 impl ChatApiDriver for MinimaxDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         toggle_capability(ReasoningLevel::Medium)
     }
 
@@ -263,7 +263,7 @@ impl ChatApiDriver for MinimaxDriver {
 }
 
 impl ChatApiDriver for MimoDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         toggle_capability(ReasoningLevel::Medium)
     }
 
@@ -288,7 +288,7 @@ impl ChatApiDriver for MimoDriver {
 }
 
 impl ChatApiDriver for DeepSeekDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         effort_capability(ReasoningLevel::Max)
     }
 
@@ -317,7 +317,7 @@ impl ChatApiDriver for DeepSeekDriver {
 }
 
 impl ChatApiDriver for AgnesDriver {
-    fn reasoning_capability(&self) -> ReasoningCapability {
+    fn reasoning_capability(&self) -> ReasoningCapabilityData {
         toggle_capability(ReasoningLevel::Medium)
     }
 

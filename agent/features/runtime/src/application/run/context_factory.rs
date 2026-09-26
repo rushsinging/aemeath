@@ -421,11 +421,11 @@ impl RuntimeContextFactory {
         let requested_reasoning = model
             .reasoning_effort
             .as_deref()
-            .and_then(provider::ReasoningLevel::parse)
+            .and_then(share::reasoning::ReasoningLevel::parse)
             .unwrap_or(if model.reasoning.unwrap_or(false) {
-                provider::ReasoningLevel::Medium
+                share::reasoning::ReasoningLevel::Medium
             } else {
-                provider::ReasoningLevel::Off
+                share::reasoning::ReasoningLevel::Off
             });
         let runtime_provider = config::resolve_provider_runtime_for_selection(
             request.session().config(),

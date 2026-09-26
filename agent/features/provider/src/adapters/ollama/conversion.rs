@@ -1,21 +1,21 @@
 //! 消息格式转换：将 Anthropic 风格转换为 Ollama 原生 /api/chat 格式。
 
 use super::OllamaProvider;
-use crate::domain::invoke::{InvocationScope, SystemBlock};
+use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use share::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。
 pub(crate) trait OllamaProviderConversion {
     fn convert_messages(
         &self,
-        system: &[SystemBlock],
+        system: &[SystemBlockData],
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError>;
     fn convert_tools(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value>;
     fn build_request_body(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -32,7 +32,7 @@ impl OllamaProviderConversion for OllamaProvider {
     ///   (no `tool_call_id` / `tool_name` fields required)
     fn convert_messages(
         &self,
-        system: &[SystemBlock],
+        system: &[SystemBlockData],
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {
         let mut ollama_messages = Vec::new();
@@ -187,8 +187,8 @@ impl OllamaProviderConversion for OllamaProvider {
     /// and non-streaming paths; toggle `stream` accordingly.
     fn build_request_body(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -201,7 +201,7 @@ impl OllamaProviderConversion for OllamaProvider {
             "messages": ollama_messages,
             "stream": stream,
             // think toggles reasoning mode natively (qwen3, deepseek-r1, gpt-oss...)
-            "think": scope.effective_reasoning() != crate::ports::ReasoningLevel::Off,
+            "think": scope.effective_reasoning() != crate::domain::capability::ReasoningLevel::Off,
         });
 
         // ollama uses `options.num_predict` for max tokens

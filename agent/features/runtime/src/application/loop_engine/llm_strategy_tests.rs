@@ -3,7 +3,7 @@ use crate::ports::{
     CompactionDecision, ContextWindow, DecisionReason, SessionRevision, SystemBlock, TokenBudget,
     Urgency,
 };
-use provider::RequestSystemBlock;
+use provider::RequestSystemBlockData;
 use share::message::{ContentBlock, Message, MessageMetadata, MessageSource, Role};
 
 fn window(messages: Vec<Message>) -> ContextWindow {
@@ -200,6 +200,6 @@ fn continuation_checkpoint_system_block_is_consumed_verbatim_once() {
     assert_eq!(invocation.system_blocks.len(), 1);
     assert_eq!(
         invocation.system_blocks[0],
-        RequestSystemBlock::Cacheable(checkpoint.to_string())
+        RequestSystemBlockData::Cacheable(checkpoint.to_string())
     );
 }

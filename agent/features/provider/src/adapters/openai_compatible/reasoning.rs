@@ -22,10 +22,10 @@ impl ReasoningConfig {
 
     pub(super) fn for_scope(
         &self,
-        level: crate::ReasoningLevel,
+        level: crate::domain::capability::ReasoningLevel,
         driver: &dyn ChatApiDriver,
     ) -> ReasoningConfig {
-        if matches!(level, crate::ReasoningLevel::Off) {
+        if matches!(level, crate::domain::capability::ReasoningLevel::Off) {
             return Self::Bool(false);
         }
 
@@ -51,10 +51,10 @@ impl ReasoningConfig {
     }
 
     pub(super) fn from_scope(
-        level: crate::ReasoningLevel,
+        level: crate::domain::capability::ReasoningLevel,
         driver: &dyn ChatApiDriver,
     ) -> ReasoningConfig {
-        if matches!(level, crate::ReasoningLevel::Off) {
+        if matches!(level, crate::domain::capability::ReasoningLevel::Off) {
             Self::Bool(false)
         } else {
             Self::Object(serde_json::json!({

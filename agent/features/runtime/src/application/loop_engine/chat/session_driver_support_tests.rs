@@ -202,12 +202,12 @@ use crate::application::model::test_support::{
 use async_trait::async_trait;
 use futures::StreamExt;
 use hook::HookDispatcher;
-use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
-use provider::ReasoningLevel;
+use provider::test_harness::{InvocationScopeData, LlmProvider, SystemBlockData};
+use share::reasoning::ReasoningLevel;
 use provider::{
-    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
-    ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall, ProviderToolCallId,
-    RawUsageSnapshot,
+    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
+    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
+    RawUsageSnapshotData,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::config::models::ResolvedModel;
@@ -829,12 +829,12 @@ struct TwoTurnProvider;
 impl LlmProvider for TwoTurnProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let text = if messages
             .iter()
             .any(|message| message.text_content() == "stop-hook input")
@@ -880,12 +880,12 @@ impl SequenceProvider {
 impl LlmProvider for SequenceProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         self.requests.lock().unwrap().push(messages.to_vec());
         let text = self
             .responses
@@ -905,8 +905,8 @@ impl LlmProvider for SequenceProvider {
     }
 }
 
-fn retryable_stream_failure() -> InvocationEvent {
-    InvocationEvent::Failed(ProviderError::retryable(
+fn retryable_stream_failure() -> InvocationEventData {
+    InvocationEventData::Failed(ProviderError::retryable(
         ProviderErrorKind::StreamTruncated,
         "stream connection interrupted: unexpected EOF during chunk size line",
     ))

@@ -1,17 +1,18 @@
 //! Stream parsing utilities for Anthropic API format.
 //!
-//! Internal decoders emit `InvocationDelta` events through the crate-private
+//! Internal decoders emit `InvocationDeltaData` events through the crate-private
 //! [`InvocationSink`] trait; the [`InvocationEventHandler`] converts those
-//! deltas into a pull-based `InvocationStream` of `InvocationEvent`s. The
+//! deltas into a pull-based `InvocationStreamData` of `InvocationEventData`s. The
 //! decoder-side helper methods (`on_text`, `on_tool_use_start`, …) keep the
 //! per-driver call sites unchanged while routing every emission through the
 //! unified [`InvocationSink::on_delta`] entry point.
 
+use crate::domain::capability::ReasoningLevel;
 use crate::domain::invoke::*;
 use crate::{
-    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
-    ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall, ProviderToolCallId,
-    RawUsageSnapshot, ReasoningLevel,
+    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
+    ProviderContentBlockData, ProviderError, ProviderErrorKind, ProviderStopReasonData,
+    ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
 };
 use futures_util::StreamExt;
 use reqwest::Response;
@@ -24,15 +25,15 @@ use tokio_util::sync::CancellationToken;
 /// Provider 内部 decoder 用来发射流式 delta 的内部接收器。
 ///
 /// 此 trait **不**对外暴露——它只在 Provider crate 内部被 SSE/NDJSON decoder
-/// 与 `InvocationStream` 构造器共享。Runtime/Context 与测试替身不得依赖。
+/// 与 `InvocationStreamData` 构造器共享。Runtime/Context 与测试替身不得依赖。
 /// 旧 sink 迁移桥已物理清零（#907）；本 trait 是 decoder 与
-/// pull-based `InvocationStream` 之间的唯一内部契约。
+/// pull-based `InvocationStreamData` 之间的唯一内部契约。
 pub(crate) trait InvocationSink: Send {
-    /// 推入一个流式增量；Runtime 通过 `InvocationStream` 收到同样的事件。
-    fn on_delta(&mut self, delta: InvocationDelta);
+    /// 推入一个流式增量；Runtime 通过 `InvocationStreamData` 收到同样的事件。
+    fn on_delta(&mut self, delta: InvocationDeltaData);
 
     /// 推入原始 SSE/NDJSON 行——仅供内部 usage 提取使用，不出现在
-    /// `InvocationStream` 上。
+    /// `InvocationStreamData` 上。
     fn on_raw_line(&mut self, _line: &str) {}
 
     /// 流式中途诊断消息（idle timeout、retry/retry-able 等）；记录到 provider
@@ -51,20 +52,20 @@ pub(crate) trait InvocationSink: Send {
     }
 
     fn emit_text(&mut self, text: &str) {
-        self.on_delta(InvocationDelta::Text(text.to_string()));
+        self.on_delta(InvocationDeltaData::Text(text.to_string()));
     }
 
     fn emit_thinking(&mut self, text: &str) {
-        self.on_delta(InvocationDelta::Thinking {
+        self.on_delta(InvocationDeltaData::Thinking {
             thinking: text.to_string(),
             signature: None,
         });
     }
 
     fn emit_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
-        self.on_delta(InvocationDelta::ToolCallStarted {
+        self.on_delta(InvocationDeltaData::ToolCallStarted {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
             name: name.to_string(),
         });
     }
@@ -76,9 +77,9 @@ pub(crate) trait InvocationSink: Send {
         provider_id: Option<&str>,
         partial_args: &str,
     ) {
-        self.on_delta(InvocationDelta::ToolArgumentsDelta {
+        self.on_delta(InvocationDeltaData::ToolArgumentsDelta {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
             partial_json: partial_args.to_string(),
         });
     }
@@ -91,10 +92,10 @@ pub(crate) trait InvocationSink: Send {
         name: String,
         arguments: serde_json::Value,
     ) {
-        self.on_delta(InvocationDelta::ToolCallCompleted {
+        self.on_delta(InvocationDeltaData::ToolCallCompleted {
             index,
-            call: ProviderToolCall {
-                id: ProviderToolCallId(id),
+            call: ProviderToolCallData {
+                id: ProviderToolCallIdData(id),
                 name,
                 arguments,
             },
@@ -113,7 +114,7 @@ pub(crate) enum InvocationDecoder {
 }
 
 impl InvocationDecoder {
-    fn raw_usage_from_line(self, line: &str) -> Option<RawUsageSnapshot> {
+    fn raw_usage_from_line(self, line: &str) -> Option<RawUsageSnapshotData> {
         match self {
             Self::Anthropic => anthropic_raw_usage_from_line(line),
             Self::OpenAiChat => openai_chat_raw_usage_from_line(line),
@@ -130,14 +131,14 @@ fn json_payload(line: &str) -> Option<&str> {
         .filter(|payload| !payload.is_empty() && *payload != "[DONE]")
 }
 
-fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     let usage = match value.get("type").and_then(|kind| kind.as_str()) {
         Some("message_start") => value.get("message")?.get("usage")?,
         Some("message_delta") => value.get("usage")?,
         _ => return None,
     };
-    Some(RawUsageSnapshot {
+    Some(RawUsageSnapshotData {
         input_tokens: optional_u32(usage, "input_tokens"),
         output_tokens: optional_u32(usage, "output_tokens"),
         cache_read_tokens: optional_u32(usage, "cache_read_input_tokens"),
@@ -146,7 +147,7 @@ fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
     })
 }
 
-fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     value
         .get("usage")
@@ -154,7 +155,7 @@ fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
         .map(crate::adapters::openai_compatible::parse_chat_raw_usage)
 }
 
-fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     (value.get("type").and_then(|kind| kind.as_str()) == Some("response.completed"))
         .then(|| value.get("response")?.get("usage"))
@@ -162,16 +163,16 @@ fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> 
         .map(crate::adapters::openai_compatible::parse_responses_raw_usage)
 }
 
-fn ollama_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshot> {
+fn ollama_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    Some(RawUsageSnapshot {
+    Some(RawUsageSnapshotData {
         input_tokens: optional_u32(&value, "prompt_eval_count"),
         output_tokens: optional_u32(&value, "eval_count"),
         cache_read_tokens: None,
         cache_write_tokens: None,
         reasoning_tokens: None,
     })
-    .filter(RawUsageSnapshot::was_reported)
+    .filter(RawUsageSnapshotData::was_reported)
 }
 
 fn optional_u32(value: &serde_json::Value, field: &str) -> Option<u32> {
@@ -185,7 +186,7 @@ pub(crate) fn parse_invocation_stream(
     response: Response,
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
-) -> InvocationStream {
+) -> InvocationStreamData {
     invocation_stream_from_decoder(
         response,
         effective_reasoning,
@@ -219,7 +220,7 @@ pub(crate) fn invocation_stream_from_decoder(
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
     decoder: InvocationDecoder,
-) -> InvocationStream {
+) -> InvocationStreamData {
     let (sender, receiver) = std::sync::mpsc::sync_channel(INVOCATION_STREAM_CAPACITY);
     let runtime = tokio::runtime::Handle::current();
     let bridge_context = logging::capture();
@@ -229,7 +230,7 @@ pub(crate) fn invocation_stream_from_decoder(
     tokio::task::spawn_blocking(move || {
         producer_runtime.block_on(logging::instrument(producer_context, async move {
             observe_bridge_context("producer");
-            let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshot::default()));
+            let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshotData::default()));
             let mut handler = InvocationEventHandler::new(
                 sender.clone(),
                 producer_cancel.clone(),
@@ -266,7 +267,7 @@ pub(crate) fn invocation_stream_from_decoder(
                 }
             };
             let terminal = match result {
-                Ok(response) => InvocationEvent::Completed(completion_from_legacy(
+                Ok(response) => InvocationEventData::Completed(completion_from_legacy(
                     response,
                     usage
                         .lock()
@@ -275,7 +276,7 @@ pub(crate) fn invocation_stream_from_decoder(
                         .into_reported(),
                     effective_reasoning,
                 )),
-                Err(error) => InvocationEvent::Failed(provider_error_from_legacy(error)),
+                Err(error) => InvocationEventData::Failed(provider_error_from_legacy(error)),
             };
             let _ = sender.send(terminal);
         }));
@@ -303,18 +304,18 @@ pub(crate) fn invocation_stream_from_decoder(
 }
 
 struct InvocationEventHandler {
-    sender: std::sync::mpsc::SyncSender<InvocationEvent>,
+    sender: std::sync::mpsc::SyncSender<InvocationEventData>,
     cancel: CancellationToken,
     decoder: InvocationDecoder,
-    usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
+    usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshotData>>,
 }
 
 impl InvocationEventHandler {
     fn new(
-        sender: std::sync::mpsc::SyncSender<InvocationEvent>,
+        sender: std::sync::mpsc::SyncSender<InvocationEventData>,
         cancel: CancellationToken,
         decoder: InvocationDecoder,
-        usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshot>>,
+        usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshotData>>,
     ) -> Self {
         Self {
             sender,
@@ -324,16 +325,16 @@ impl InvocationEventHandler {
         }
     }
 
-    fn send_delta(&self, delta: InvocationDelta) {
+    fn send_delta(&self, delta: InvocationDeltaData) {
         observe_bridge_context("event");
-        if self.sender.send(InvocationEvent::Delta(delta)).is_err() {
+        if self.sender.send(InvocationEventData::Delta(delta)).is_err() {
             self.cancel.cancel();
         }
     }
 }
 
 impl InvocationSink for InvocationEventHandler {
-    fn on_delta(&mut self, delta: InvocationDelta) {
+    fn on_delta(&mut self, delta: InvocationDeltaData) {
         self.send_delta(delta);
     }
 
@@ -349,25 +350,25 @@ impl InvocationSink for InvocationEventHandler {
 
 fn completion_from_legacy(
     response: StreamResponse,
-    usage: Option<RawUsageSnapshot>,
+    usage: Option<RawUsageSnapshotData>,
     effective_reasoning: ReasoningLevel,
-) -> ProviderCompletion {
+) -> ProviderCompletionData {
     let output = response
         .assistant_message
         .content
         .into_iter()
         .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(ProviderContentBlock::Text(text)),
+            ContentBlock::Text { text } => Some(ProviderContentBlockData::Text(text)),
             ContentBlock::Thinking {
                 thinking,
                 signature,
-            } => Some(ProviderContentBlock::Thinking {
+            } => Some(ProviderContentBlockData::Thinking {
                 thinking,
                 signature,
             }),
             ContentBlock::ToolUse { id, name, input } => {
-                Some(ProviderContentBlock::ToolCall(ProviderToolCall {
-                    id: ProviderToolCallId(id),
+                Some(ProviderContentBlockData::ToolCall(ProviderToolCallData {
+                    id: ProviderToolCallIdData(id),
                     name,
                     arguments: input,
                 }))
@@ -375,12 +376,12 @@ fn completion_from_legacy(
             ContentBlock::ToolResult { .. } | ContentBlock::Image { .. } => None,
         })
         .collect();
-    ProviderCompletion {
+    ProviderCompletionData {
         output,
         stop_reason: match response.stop_reason {
-            StopReason::EndTurn => ProviderStopReason::EndTurn,
-            StopReason::ToolUse => ProviderStopReason::ToolUse,
-            StopReason::MaxTokens => ProviderStopReason::MaxOutputTokens,
+            StopReason::EndTurn => ProviderStopReasonData::EndTurn,
+            StopReason::ToolUse => ProviderStopReasonData::ToolUse,
+            StopReason::MaxTokens => ProviderStopReasonData::MaxOutputTokens,
         },
         usage,
         effective_reasoning,
@@ -691,8 +692,8 @@ mod contract_tests;
 #[cfg(test)]
 mod tests {
     use super::{bridge_context_observations, invocation_stream_from_decoder, InvocationDecoder};
+    use crate::domain::capability::ReasoningLevel;
     use crate::domain::invoke::StreamEvent;
-    use crate::ReasoningLevel;
     use futures_util::StreamExt;
     use tokio_util::sync::CancellationToken;
 

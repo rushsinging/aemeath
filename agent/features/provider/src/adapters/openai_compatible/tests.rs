@@ -69,8 +69,8 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
-        driver: crate::composition::ProviderDriverKind::OpenAI
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        driver: crate::domain::capability::ProviderDriverKind::OpenAI
             .as_str()
             .to_string(),
         source_key: "openai".to_string(),
@@ -85,11 +85,11 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
         user_agent: Some("aemeath-test/1.0".to_string()),
     })
     .expect("valid OpenAI chat config");
-    let scope = crate::InvocationScope::new(
+    let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ReasoningLevel::Off,
-        crate::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
 
@@ -110,9 +110,9 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEvent::Delta(crate::InvocationDelta::Text(first)),
-            crate::InvocationEvent::Delta(crate::InvocationDelta::Text(second)),
-            crate::InvocationEvent::Completed(_)
+            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
+            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
+            crate::InvocationEventData::Completed(_)
         ] if first == "open" && second == "ai"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
@@ -133,8 +133,8 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
-        driver: crate::composition::ProviderDriverKind::OpenAI
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        driver: crate::domain::capability::ProviderDriverKind::OpenAI
             .as_str()
             .to_string(),
         source_key: "openai".to_string(),
@@ -149,11 +149,11 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
         user_agent: Some("aemeath-test/1.0".to_string()),
     })
     .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScope::new(
+    let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ReasoningLevel::Off,
-        crate::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
 
@@ -174,12 +174,12 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEvent::Delta(crate::InvocationDelta::Text(text)),
-            crate::InvocationEvent::Completed(_)
+            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(text)),
+            crate::InvocationEventData::Completed(_)
         ] if text == "response"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-    let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
         panic!("expected completed event");
     };
     let usage = completion.usage.as_ref().expect("responses usage reported");
@@ -204,8 +204,8 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     );
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, _) = spawn_openai_counting_server(leaked).await;
-    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
-        driver: crate::composition::ProviderDriverKind::OpenAI
+    let client = crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        driver: crate::domain::capability::ProviderDriverKind::OpenAI
             .as_str()
             .to_string(),
         source_key: "openai".to_string(),
@@ -220,11 +220,11 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
         user_agent: Some("aemeath-test/1.0".to_string()),
     })
     .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScope::new(
+    let scope = crate::InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ReasoningLevel::Off,
-        crate::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
 
@@ -241,7 +241,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
         .collect()
         .await;
 
-    let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
         panic!("expected completed event");
     };
     assert_eq!(
@@ -250,7 +250,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     );
     assert!(matches!(
         &completion.output[..],
-        [crate::ProviderContentBlock::ToolCall(call)]
+        [crate::ProviderContentBlockData::ToolCall(call)]
             if call.id.0 == "call_hello"
                 && call.name == "Write"
                 && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})

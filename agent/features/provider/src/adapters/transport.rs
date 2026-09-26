@@ -1,7 +1,7 @@
 //! 不可变 Provider Transport：跨 invocation 共享的连接与认证事实。
 //!
 //! Transport 构造后不可变，生命周期可覆盖多个 Run；不保存 current model、
-//! current reasoning 或 current max tokens（那些属于 `InvocationScope`）。
+//! current reasoning 或 current max tokens（那些属于 `InvocationScopeData`）。
 
 use std::time::Duration;
 

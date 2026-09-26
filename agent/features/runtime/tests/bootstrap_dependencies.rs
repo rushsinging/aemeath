@@ -13,8 +13,8 @@ impl runtime::ProviderFactory for TestProviderFactory {
         impl runtime::ProviderPort for UnusedPort {
             fn capabilities(
                 &self,
-                _model: &provider::ModelId,
-            ) -> Result<provider::ModelCapability, provider::ProviderError> {
+                _model: &provider::ModelIdData,
+            ) -> Result<provider::ModelCapabilityData, provider::ProviderError> {
                 Err(provider::ProviderError::fatal(
                     provider::ProviderErrorKind::ModelUnavailable,
                     "unused test provider",
@@ -23,9 +23,9 @@ impl runtime::ProviderFactory for TestProviderFactory {
 
             async fn invoke(
                 &self,
-                _request: provider::InvocationRequest,
+                _request: provider::InvocationRequestData,
                 _cancellation: &dyn provider::CancellationSignal,
-            ) -> Result<provider::InvocationStream, provider::ProviderError> {
+            ) -> Result<provider::InvocationStreamData, provider::ProviderError> {
                 Err(provider::ProviderError::fatal(
                     provider::ProviderErrorKind::UpstreamUnavailable,
                     "unused test provider",
@@ -49,12 +49,12 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
         api_style: None,
         api_key: "test-key".to_string(),
         base_url: None,
-        model: provider::ModelId {
+        model: provider::ModelIdData {
             provider: "test".to_string(),
             model: "test-model".to_string(),
         },
         max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Off,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(8192),
         timeout: std::time::Duration::from_secs(30),
         user_agent: "aemeath-test".to_string(),

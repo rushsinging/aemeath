@@ -158,7 +158,7 @@ pub(crate) async fn from_args_with_gateways(
             (!resolved_model.source_config.base_url.is_empty())
                 .then(|| resolved_model.source_config.base_url.clone())
         }),
-        model: provider::ModelId {
+        model: provider::ModelIdData {
             provider: resolved_model.source_key.clone(),
             model: resolved_model.model.id.clone(),
         },
@@ -166,11 +166,11 @@ pub(crate) async fn from_args_with_gateways(
         requested_reasoning: runtime_settings
             .reasoning_effort
             .as_deref()
-            .and_then(provider::ReasoningLevel::parse)
+            .and_then(share::reasoning::ReasoningLevel::parse)
             .unwrap_or(if runtime_settings.reasoning {
-                provider::ReasoningLevel::Medium
+                share::reasoning::ReasoningLevel::Medium
             } else {
-                provider::ReasoningLevel::Off
+                share::reasoning::ReasoningLevel::Off
             }),
         context_window: (resolved_model.model.context_window > 0)
             .then_some(resolved_model.model.context_window),
@@ -310,7 +310,7 @@ pub(crate) async fn from_args_with_gateways(
     )
     .await;
     let prompt = runtime::PromptAssembly::new(
-        vec![provider::RequestSystemBlock::Cacheable(static_prompt)],
+        vec![provider::RequestSystemBlockData::Cacheable(static_prompt)],
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
         initial_provider.binding().model.model.clone(),

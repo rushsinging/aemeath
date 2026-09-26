@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use super::capability::ReasoningLevel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvocationScope {
+pub struct InvocationScopeData {
     model: String,
     max_tokens: u32,
     requested_reasoning: ReasoningLevel,
     effective_reasoning: ReasoningLevel,
 }
 
-impl InvocationScope {
+impl InvocationScopeData {
     pub fn new(
         model: impl Into<String>,
         max_tokens: u32,
@@ -64,7 +64,7 @@ mod invocation_scope_tests {
 
     #[test]
     fn invocation_scope_freezes_resolved_values() {
-        let scope = InvocationScope::new(
+        let scope = InvocationScopeData::new(
             "claude-sonnet",
             4096,
             ReasoningLevel::High,
@@ -80,15 +80,18 @@ mod invocation_scope_tests {
 
     #[test]
     fn invocation_scope_rejects_zero_max_tokens() {
-        assert!(
-            InvocationScope::new("claude-sonnet", 0, ReasoningLevel::Off, ReasoningLevel::Off,)
-                .is_err()
-        );
+        assert!(InvocationScopeData::new(
+            "claude-sonnet",
+            0,
+            ReasoningLevel::Off,
+            ReasoningLevel::Off,
+        )
+        .is_err());
     }
 
     #[test]
     fn invocation_scope_rejects_effective_reasoning_above_requested() {
-        assert!(InvocationScope::new(
+        assert!(InvocationScopeData::new(
             "claude-sonnet",
             4096,
             ReasoningLevel::Low,
@@ -100,7 +103,7 @@ mod invocation_scope_tests {
 
 /// A block within the system prompt, supporting prompt caching via cache_control.
 #[derive(Debug, Clone, Serialize)]
-pub struct SystemBlock {
+pub struct SystemBlockData {
     #[serde(rename = "type")]
     pub block_type: String,
     pub text: String,
@@ -114,7 +117,7 @@ pub struct CacheControl {
     pub control_type: String,
 }
 
-impl SystemBlock {
+impl SystemBlockData {
     /// Create a static block with ephemeral cache control.
     pub fn cached(text: String) -> Self {
         Self {
@@ -142,7 +145,7 @@ pub struct CreateMessageRequest {
     pub max_tokens: u32,
     #[serde(skip_serializing)]
     pub effort: Option<String>,
-    system: Vec<SystemBlock>,
+    system: Vec<SystemBlockData>,
     messages: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<serde_json::Value>,
@@ -154,7 +157,7 @@ impl CreateMessageRequest {
         model: String,
         max_tokens: u32,
         effort: Option<String>,
-        system: Vec<SystemBlock>,
+        system: Vec<SystemBlockData>,
         messages: Vec<serde_json::Value>,
         tools: Vec<serde_json::Value>,
         stream: bool,

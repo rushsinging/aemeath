@@ -9,7 +9,7 @@ use crate::application::reflection::{
 use crate::ports::{CompactOutcome, ProviderBinding};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
-use provider::ProviderStopReason;
+use provider::ProviderStopReasonData;
 
 /// Submit interval reflection with an owned message snapshot. This function does
 /// not await execution and never exposes generated reflection text to chat UI.
@@ -178,7 +178,7 @@ pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
     step_count: usize,
     has_tool_calls: bool,
-    stop_reason: &ProviderStopReason,
+    stop_reason: &ProviderStopReasonData,
     before_finish_gate_continue: bool,
 ) -> bool {
     if before_finish_gate_continue
@@ -188,7 +188,7 @@ pub(crate) fn should_run_turn_reflection(
     {
         return false;
     }
-    if has_tool_calls && stop_reason != &ProviderStopReason::EndTurn {
+    if has_tool_calls && stop_reason != &ProviderStopReasonData::EndTurn {
         return false;
     }
     step_count.is_multiple_of(config.reflection.interval_runs)

@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use context::ContextRequest;
 use context::SkillQueryFactory;
-use provider::ReasoningLevel;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
+use share::reasoning::ReasoningLevel;
 use tools::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
 
 struct FakeCatalog;

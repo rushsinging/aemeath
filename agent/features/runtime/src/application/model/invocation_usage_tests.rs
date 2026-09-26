@@ -1,7 +1,7 @@
 use super::record_successful_usage;
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::model::usage::UsageRecordContext;
-use crate::ports::{ModelId, RawUsageSnapshot, UsageSink};
+use crate::ports::{ModelIdData, RawUsageSnapshotData, UsageSink};
 use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use share::message::Message;
@@ -34,18 +34,18 @@ fn context() -> UsageRecordContext {
         run_id: RunId::new("run"),
         run_step_id: RunStepId::new("step"),
         model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000004"),
-        model: ModelId {
+        model: ModelIdData {
             provider: "provider".to_string(),
             model: "model".to_string(),
         },
     }
 }
 
-fn response(usage: RawUsageSnapshot) -> InvocationResponse {
+fn response(usage: RawUsageSnapshotData) -> InvocationResponse {
     InvocationResponse {
         assistant_message: Message::user("done"),
         usage,
-        stop_reason: provider::ProviderStopReason::EndTurn,
+        stop_reason: provider::ProviderStopReasonData::EndTurn,
     }
 }
 
@@ -59,7 +59,7 @@ fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
     record_successful_usage(
         &sink,
         expected_context.clone(),
-        &response(RawUsageSnapshot {
+        &response(RawUsageSnapshotData {
             input_tokens: Some(10),
             output_tokens: Some(2),
             cache_write_tokens: Some(3),
@@ -97,7 +97,7 @@ fn successful_unreported_usage_does_not_call_sink() {
     record_successful_usage(
         &sink,
         context(),
-        &response(RawUsageSnapshot::default()),
+        &response(RawUsageSnapshotData::default()),
         || 99,
     );
 

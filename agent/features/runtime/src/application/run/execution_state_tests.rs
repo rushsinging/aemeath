@@ -4,8 +4,8 @@ use crate::ports::{
     CompactionDecision, ContextRequest, ContextRequestId, ContextWindow, DecisionReason, Language,
     SessionId, SessionRevision, SystemPromptSpec, TokenBudget, Urgency,
 };
-use provider::ReasoningLevel;
 use sdk::{RunId, RunStepId};
+use share::reasoning::ReasoningLevel;
 use share::{
     config::{domain::snapshot::ConfigSnapshot, Config},
     message::Message,

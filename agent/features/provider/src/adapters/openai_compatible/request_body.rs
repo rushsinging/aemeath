@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
-use crate::domain::invoke::{InvocationScope, SystemBlock};
+use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use crate::ports::{LlmProvider, ReasoningLevel};
 
 use super::{OpenAICompatibleProvider, ReasoningConfig};
@@ -14,12 +14,12 @@ use super::{OpenAICompatibleProvider, ReasoningConfig};
 impl OpenAICompatibleProvider {
     pub(crate) async fn invoke_single_request_stream(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
@@ -91,7 +91,7 @@ impl OpenAICompatibleProvider {
 
     pub(crate) fn base_request_body(
         &self,
-        scope: &InvocationScope,
+        scope: &InvocationScopeData,
         messages: Vec<serde_json::Value>,
         stream: bool,
     ) -> serde_json::Value {
@@ -131,7 +131,7 @@ impl OpenAICompatibleProvider {
     pub(crate) fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
-        scope: &InvocationScope,
+        scope: &InvocationScopeData,
     ) {
         let reasoning_enabled = !matches!(scope.effective_reasoning(), ReasoningLevel::Off);
         let scoped_config = self
@@ -170,12 +170,12 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for OpenAICompatibleProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         self.invoke_single_request_stream(scope, system, messages, tool_schemas, cancel)
             .await
     }
@@ -188,7 +188,7 @@ impl LlmProvider for OpenAICompatibleProvider {
         &self.config.source_key
     }
 
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+    fn max_reasoning_level(&self) -> crate::domain::capability::ReasoningLevel {
         self.driver.max_reasoning_level()
     }
 }

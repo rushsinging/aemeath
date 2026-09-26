@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 use share::message::Message;
+pub(crate) use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
-pub use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::{InvocationScope, SystemBlock};
+use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 
 /// LLM Provider trait - all providers must implement this
 #[async_trait]
@@ -13,12 +13,12 @@ pub trait LlmProvider: Send + Sync {
     /// 返回由 Runtime 主动 poll 的单请求事件流。
     async fn invocation_stream(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError>;
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError>;
 
     /// Get the model name
     fn model_name(&self) -> &str;

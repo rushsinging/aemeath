@@ -26,12 +26,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use provider::{ModelToolSchema, ReasoningLevel};
+use provider::ModelToolSchemaData;
 use sdk::RunId;
 pub use sdk::{RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
 pub use share::message::Message as ContextMessage;
+use share::reasoning::ReasoningLevel;
 
 macro_rules! string_value_object {
     ($name:ident) => {
@@ -165,7 +166,7 @@ pub struct ContextRequest {
     /// [`DecisionReason::HeuristicFallback`] 路径；`None` 或超出
     /// `[0.5, 2.0]` 的值按 1.0（不校准）处理。
     pub heuristic_calibration: Option<f64>,
-    pub tool_schemas: Vec<ModelToolSchema>,
+    pub tool_schemas: Vec<ModelToolSchemaData>,
     pub tool_schema_tokens: usize,
 }
 
@@ -307,7 +308,7 @@ pub struct ContextWindow {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: ContextMessages,
-    pub tool_schemas: Vec<ModelToolSchema>,
+    pub tool_schemas: Vec<ModelToolSchemaData>,
     pub token_estimation: TokenBudget,
     pub compaction_decision: CompactionDecision,
 }

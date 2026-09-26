@@ -2,11 +2,11 @@
 async fn main_partial_stream_failure_retries_without_rollback() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
         vec![
-            InvocationEvent::Delta(InvocationDelta::Text("partial".to_string())),
+            InvocationEventData::Delta(InvocationDeltaData::Text("partial".to_string())),
             retryable_stream_failure(),
         ],
         vec![
-            InvocationEvent::Delta(InvocationDelta::Text("complete".to_string())),
+            InvocationEventData::Delta(InvocationDeltaData::Text("complete".to_string())),
             successful_completion("complete"),
         ],
     ]));
@@ -59,7 +59,7 @@ async fn main_empty_completion_retries_and_succeeds() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
         vec![empty_completion()],
         vec![
-            InvocationEvent::Delta(InvocationDelta::Text("complete".to_string())),
+            InvocationEventData::Delta(InvocationDeltaData::Text("complete".to_string())),
             successful_completion("complete"),
         ],
     ]));

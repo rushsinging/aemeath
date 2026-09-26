@@ -56,9 +56,9 @@ impl From<ReflectionWorkflowError> for ReflectionExecutionError {
 
 pub(crate) struct ReflectionInvocation<'a> {
     pub provider: &'a dyn ProviderPort,
-    pub model: &'a provider::ModelId,
+    pub model: &'a provider::ModelIdData,
     pub max_tokens: u32,
-    pub requested_reasoning: provider::ReasoningLevel,
+    pub requested_reasoning: share::reasoning::ReasoningLevel,
     pub system_prompt_text: &'a str,
 }
 
@@ -118,17 +118,19 @@ async fn call_provider(
     prompt: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<(String, u32, u32)> {
-    use crate::ports::provider_port::{InvocationOptions, InvocationRequest, RequestSystemBlock};
+    use crate::ports::provider_port::{
+        InvocationOptionsData, InvocationRequestData, RequestSystemBlockData,
+    };
 
-    let request = InvocationRequest {
+    let request = InvocationRequestData {
         model: invocation.model.clone(),
         cancellation: cancel.clone(),
         messages: vec![share::message::Message::user(prompt)].into(),
-        system: vec![RequestSystemBlock::Text(
+        system: vec![RequestSystemBlockData::Text(
             invocation.system_prompt_text.to_string(),
         )],
         tools: vec![],
-        options: InvocationOptions::new(invocation.max_tokens, invocation.requested_reasoning),
+        options: InvocationOptionsData::new(invocation.max_tokens, invocation.requested_reasoning),
     };
     let mut stream = invocation
         .provider
@@ -137,12 +139,12 @@ async fn call_provider(
         .map_err(|_| ReflectionExecutionError::LlmCall)?;
     while let Some(event) = stream.next().await {
         match event {
-            provider::InvocationEvent::Completed(completion) => {
+            provider::InvocationEventData::Completed(completion) => {
                 let text = completion
                     .output
                     .iter()
                     .filter_map(|block| match block {
-                        provider::ProviderContentBlock::Text(text) => Some(text.as_str()),
+                        provider::ProviderContentBlockData::Text(text) => Some(text.as_str()),
                         _ => None,
                     })
                     .collect::<String>()
@@ -158,10 +160,10 @@ async fn call_provider(
                     usage.output_tokens.unwrap_or(0),
                 ));
             }
-            provider::InvocationEvent::Failed(_) => {
+            provider::InvocationEventData::Failed(_) => {
                 return Err(ReflectionExecutionError::LlmCall);
             }
-            provider::InvocationEvent::Delta(_) => {}
+            provider::InvocationEventData::Delta(_) => {}
         }
     }
     Err(ReflectionExecutionError::LlmCall)

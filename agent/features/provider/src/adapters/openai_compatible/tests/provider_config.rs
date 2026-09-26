@@ -50,11 +50,11 @@ fn minimax_provider_uses_max_completion_tokens_field() {
         30,
     );
 
-    let scope = crate::domain::invoke::InvocationScope::new(
+    let scope = crate::domain::invoke::InvocationScopeData::new(
         "MiniMax-M3",
         8192,
-        crate::ports::ReasoningLevel::High,
-        crate::ports::ReasoningLevel::High,
+        crate::domain::capability::ReasoningLevel::High,
+        crate::domain::capability::ReasoningLevel::High,
     )
     .unwrap();
     let body = provider.base_request_body(&scope, Vec::new(), false);
@@ -373,11 +373,11 @@ fn openai_provider_uses_scope_max_tokens_in_request_body() {
     );
 
     // max_tokens is now immutable; the scope carries the per-request value
-    let scope = crate::domain::invoke::InvocationScope::new(
+    let scope = crate::domain::invoke::InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
     let body = provider.base_request_body(&scope, Vec::new(), false);
@@ -398,12 +398,12 @@ fn invocation_scope_requires_non_zero_max_tokens() {
         30,
     );
 
-    // InvocationScope enforces max_tokens > 0 at construction time
-    let scope = crate::domain::invoke::InvocationScope::new(
+    // InvocationScopeData enforces max_tokens > 0 at construction time
+    let scope = crate::domain::invoke::InvocationScopeData::new(
         "test-model",
         32000,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
     let body = provider.base_request_body(&scope, Vec::new(), false);
@@ -425,11 +425,11 @@ fn volcengine_provider_uses_max_output_tokens_field() {
         30,
     );
 
-    let scope = crate::domain::invoke::InvocationScope::new(
+    let scope = crate::domain::invoke::InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .unwrap();
     let body = provider.base_request_body(&scope, Vec::new(), false);

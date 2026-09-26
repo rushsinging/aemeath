@@ -9,8 +9,6 @@
 //!
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -45,14 +43,14 @@ impl CancellationSignal for tokio_util::sync::CancellationToken {
 ///
 /// 跨 BC 稳定标识一个 LLM 模型源，不携带 driver 或 transport 细节。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModelId {
+pub struct ModelIdData {
     /// provider 名称（如 "Anthropic"、"Zhipu"）。
     pub provider: String,
     /// 模型名称（如 "claude-fable-5-1"）。
     pub model: String,
 }
 
-impl std::fmt::Display for ModelId {
+impl std::fmt::Display for ModelIdData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}", self.provider, self.model)
     }
@@ -61,11 +59,11 @@ impl std::fmt::Display for ModelId {
 // ─── Reasoning ──────────────────────────────────────────
 
 /// Re-export ReasoningLevel from core::provider for PL consumers.
-pub use crate::ports::ReasoningLevel;
+pub use crate::domain::capability::ReasoningLevel;
 
 /// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReasoningMappingKind {
+pub enum ReasoningMappingKindData {
     /// OpenAI 风格 effort 字符串。
     Effort,
     /// Anthropic 风格 thinking 开关。
@@ -80,16 +78,16 @@ pub enum ReasoningMappingKind {
 
 /// 模型 reasoning 能力声明。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ReasoningCapability {
+pub struct ReasoningCapabilityData {
     supported: Vec<ReasoningLevel>,
     /// 映射方式。
-    pub mapping: ReasoningMappingKind,
+    pub mapping: ReasoningMappingKindData,
 }
 
-impl ReasoningCapability {
+impl ReasoningCapabilityData {
     pub fn new(
         supported: impl IntoIterator<Item = ReasoningLevel>,
-        mapping: ReasoningMappingKind,
+        mapping: ReasoningMappingKindData,
     ) -> Result<Self, ProviderError> {
         let mut supported: Vec<_> = supported.into_iter().collect();
         supported.sort_unstable();
@@ -107,7 +105,7 @@ impl ReasoningCapability {
     pub fn none() -> Self {
         Self {
             supported: vec![ReasoningLevel::Off],
-            mapping: ReasoningMappingKind::None,
+            mapping: ReasoningMappingKindData::None,
         }
     }
 
@@ -132,15 +130,15 @@ impl ReasoningCapability {
     }
 }
 
-// ─── ModelCapability ────────────────────────────────────
+// ─── ModelCapabilityData ────────────────────────────────────
 
 /// 模型能力声明。
 ///
 /// Runtime 可用于前置校验和展示；Provider 在请求编码前仍必须复核。
 #[derive(Debug, Clone)]
-pub struct ModelCapability {
+pub struct ModelCapabilityData {
     /// 模型标识。
-    pub model: ModelId,
+    pub model: ModelIdData,
     /// 是否支持 tool use。
     pub supports_tools: bool,
     /// 是否支持并行 tool calls。
@@ -148,54 +146,14 @@ pub struct ModelCapability {
     /// 是否支持流式。
     pub supports_streaming: bool,
     /// Reasoning 能力。
-    pub reasoning: ReasoningCapability,
+    pub reasoning: ReasoningCapabilityData,
     /// 上下文窗口大小（token 数），`None` 表示未知。
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
     pub output_limit: Option<usize>,
 }
 
-impl ModelCapability {
-    pub fn fingerprint(&self) -> CapabilityFingerprint {
-        let mut hasher = DefaultHasher::new();
-        self.model.hash(&mut hasher);
-        self.supports_tools.hash(&mut hasher);
-        self.supports_parallel_tool_calls.hash(&mut hasher);
-        self.supports_streaming.hash(&mut hasher);
-        self.reasoning.hash(&mut hasher);
-        self.context_limit.hash(&mut hasher);
-        self.output_limit.hash(&mut hasher);
-        CapabilityFingerprint(hasher.finish())
-    }
-
-    pub fn resolve_invocation_options(
-        &self,
-        requested: RequestedInvocationOptions,
-    ) -> Result<ResolvedInvocationOptions, ProviderError> {
-        if requested.context_size == 0
-            || requested.context_size == usize::MAX && self.context_limit.is_none()
-            || requested.max_output_tokens == 0
-        {
-            return Err(ProviderError::fatal(
-                ProviderErrorKind::Configuration,
-                "invocation token limit 必须大于零",
-            ));
-        }
-        let context_size = self.context_limit.unwrap_or(requested.context_size);
-        let max_output_tokens = self
-            .output_limit
-            .map_or(requested.max_output_tokens, |limit| {
-                requested.max_output_tokens.min(limit)
-            });
-        Ok(ResolvedInvocationOptions {
-            context_size,
-            max_output_tokens,
-            requested_reasoning: requested.reasoning,
-            effective_reasoning: self.reasoning.resolve(requested.reasoning),
-            capability_fingerprint: self.fingerprint(),
-        })
-    }
-}
+impl ModelCapabilityData {}
 
 // ─── Tool Call（Provider 边界） ─────────────────────────
 
@@ -205,9 +163,9 @@ impl ModelCapability {
 /// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
 /// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderToolCallId(pub String);
+pub struct ProviderToolCallIdData(pub String);
 
-impl std::fmt::Display for ProviderToolCallId {
+impl std::fmt::Display for ProviderToolCallIdData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
@@ -215,9 +173,9 @@ impl std::fmt::Display for ProviderToolCallId {
 
 /// Provider 边界的 tool call 完整形态。
 #[derive(Debug, Clone)]
-pub struct ProviderToolCall {
+pub struct ProviderToolCallData {
     /// Provider 原始 tool-call ID。
-    pub id: ProviderToolCallId,
+    pub id: ProviderToolCallIdData,
     /// 工具名称。
     pub name: String,
     /// 验证过的 JSON 参数。
@@ -226,7 +184,7 @@ pub struct ProviderToolCall {
 
 /// Provider 返回的 assistant 内容块。
 #[derive(Debug, Clone)]
-pub enum ProviderContentBlock {
+pub enum ProviderContentBlockData {
     /// 文本内容。
     Text(String),
     /// Thinking/reasoning 内容（签名可选）。
@@ -235,7 +193,7 @@ pub enum ProviderContentBlock {
         signature: Option<String>,
     },
     /// Tool call。
-    ToolCall(ProviderToolCall),
+    ToolCall(ProviderToolCallData),
 }
 
 // ─── Raw Usage ──────────────────────────────────────────
@@ -245,7 +203,7 @@ pub enum ProviderContentBlock {
 /// 所有字段区分"未报告"（`None`）与真实零值（`Some(0)`）。
 /// Provider 只做协议标准化，不计算 cost。
 #[derive(Debug, Clone, Default)]
-pub struct RawUsageSnapshot {
+pub struct RawUsageSnapshotData {
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
     pub cache_read_tokens: Option<u32>,
@@ -253,7 +211,7 @@ pub struct RawUsageSnapshot {
     pub reasoning_tokens: Option<u32>,
 }
 
-impl RawUsageSnapshot {
+impl RawUsageSnapshotData {
     pub fn was_reported(&self) -> bool {
         self.input_tokens.is_some()
             || self.output_tokens.is_some()
@@ -290,7 +248,7 @@ impl RawUsageSnapshot {
 /// 统一停止原因。
 ///
 /// 注意：与 legacy `business::types::StopReason`（3 变体）不同。
-/// 对外 re-export 时使用别名 `ProviderStopReason` 以避免命名冲突。
+/// 对外 re-export 时使用别名 `ProviderStopReasonData` 以避免命名冲突。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
     /// 模型自然结束回复。
@@ -308,22 +266,22 @@ pub enum StopReason {
 }
 
 /// 别名导出——contract.rs 用此名 re-export，避免与 legacy StopReason 冲突。
-pub use StopReason as ProviderStopReason;
+pub use StopReason as ProviderStopReasonData;
 
-// ─── ProviderCompletion ─────────────────────────────────
+// ─── ProviderCompletionData ─────────────────────────────────
 
 /// 一次调用的终结完成态。
 ///
 /// `output` 必须是所有已发 delta 的完整最终形态，
 /// 并保留 provider tool-call ID。
 #[derive(Debug, Clone)]
-pub struct ProviderCompletion {
+pub struct ProviderCompletionData {
     /// 最终 assistant 内容块。
-    pub output: Vec<ProviderContentBlock>,
+    pub output: Vec<ProviderContentBlockData>,
     /// 停止原因。
     pub stop_reason: StopReason,
     /// 最终 usage 快照（`None` = provider 未返回 usage）。
-    pub usage: Option<RawUsageSnapshot>,
+    pub usage: Option<RawUsageSnapshotData>,
     /// 有效 reasoning level（clamp 后的实际档位）。
     pub effective_reasoning: ReasoningLevel,
 }
@@ -332,10 +290,10 @@ pub struct ProviderCompletion {
 
 /// 流式 delta——非终结增量。
 ///
-/// 终结增量通过 `InvocationEvent::Completed` / `InvocationEvent::Failed` 表达，
-/// 不出现在 `InvocationDelta` 中。
+/// 终结增量通过 `InvocationEventData::Completed` / `InvocationEventData::Failed` 表达，
+/// 不出现在 `InvocationDeltaData` 中。
 #[derive(Debug, Clone)]
-pub enum InvocationDelta {
+pub enum InvocationDeltaData {
     /// 文本增量。
     Text(String),
     /// Thinking/reasoning 增量。
@@ -346,22 +304,22 @@ pub enum InvocationDelta {
     /// Tool call 开始。
     ToolCallStarted {
         index: usize,
-        provider_id: Option<ProviderToolCallId>,
+        provider_id: Option<ProviderToolCallIdData>,
         name: String,
     },
     /// Tool arguments 增量字符串片段。
     ToolArgumentsDelta {
         index: usize,
-        provider_id: Option<ProviderToolCallId>,
+        provider_id: Option<ProviderToolCallIdData>,
         partial_json: String,
     },
     /// Tool call 完成（给出验证过的 JSON 值）。
     ToolCallCompleted {
         index: usize,
-        call: ProviderToolCall,
+        call: ProviderToolCallData,
     },
     /// Usage 快照更新。
-    UsageSnapshot(RawUsageSnapshot),
+    UsageSnapshot(RawUsageSnapshotData),
 }
 
 // ─── Error ──────────────────────────────────────────────
@@ -483,7 +441,7 @@ impl std::error::Error for ProviderError {}
 ///
 /// 这是 Tool Catalog 的模型可见投影。driver 转换时只保留供应商允许字段。
 #[derive(Debug, Clone)]
-pub struct ModelToolSchema {
+pub struct ModelToolSchemaData {
     /// 工具名称。
     pub name: String,
     /// 工具描述。
@@ -492,7 +450,7 @@ pub struct ModelToolSchema {
     pub input_schema: serde_json::Value,
 }
 
-impl ModelToolSchema {
+impl ModelToolSchemaData {
     /// 渲染为完整的 tool 定义 JSON 对象
     /// `{ "name", "description", "input_schema" }`。
     ///
@@ -508,83 +466,18 @@ impl ModelToolSchema {
     }
 }
 
-// ─── InvocationOptions ──────────────────────────────────
-
-/// 同一进程内检测 capability 变化的指纹；NEVER 持久化或跨构建比较。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CapabilityFingerprint(u64);
-
-impl CapabilityFingerprint {
-    pub const fn get(self) -> u64 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RequestedInvocationOptions {
-    context_size: usize,
-    max_output_tokens: usize,
-    reasoning: ReasoningLevel,
-}
-
-impl RequestedInvocationOptions {
-    /// 构造请求；若 capability 未声明 context limit，调用方必须用
-    /// `with_context_size` 提供实际 fallback，resolver 会拒绝未设置值。
-    pub fn new(max_output_tokens: usize, reasoning: ReasoningLevel) -> Self {
-        Self {
-            context_size: usize::MAX,
-            max_output_tokens,
-            reasoning,
-        }
-    }
-
-    pub fn with_context_size(mut self, context_size: usize) -> Self {
-        self.context_size = context_size;
-        self
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolvedInvocationOptions {
-    context_size: usize,
-    max_output_tokens: usize,
-    requested_reasoning: ReasoningLevel,
-    effective_reasoning: ReasoningLevel,
-    capability_fingerprint: CapabilityFingerprint,
-}
-
-impl ResolvedInvocationOptions {
-    pub const fn context_size(&self) -> usize {
-        self.context_size
-    }
-
-    pub const fn max_output_tokens(&self) -> usize {
-        self.max_output_tokens
-    }
-
-    pub const fn requested_reasoning(&self) -> ReasoningLevel {
-        self.requested_reasoning
-    }
-
-    pub const fn effective_reasoning(&self) -> ReasoningLevel {
-        self.effective_reasoning
-    }
-
-    pub const fn capability_fingerprint(&self) -> CapabilityFingerprint {
-        self.capability_fingerprint
-    }
-}
+// ─── InvocationOptionsData ──────────────────────────────────
 
 /// Legacy 一次调用选项；生产 resolver 接线延期到 v0.2.0 决策。
 #[derive(Debug, Clone)]
-pub struct InvocationOptions {
+pub struct InvocationOptionsData {
     /// 最大输出 token。
     pub max_output_tokens: u32,
     /// 期望 reasoning level（Workflow 已应用 Config 静态上限）。
     pub reasoning: ReasoningLevel,
 }
 
-impl InvocationOptions {
+impl InvocationOptionsData {
     /// 构造默认选项。
     pub fn new(max_output_tokens: u32, reasoning: ReasoningLevel) -> Self {
         Self {
@@ -600,38 +493,38 @@ impl InvocationOptions {
 ///
 /// Runtime 构造的 system prompt 内容，区分可缓存（静态、稳定）与动态文本。
 /// `Cacheable` 表示该块适合 prompt caching；是否真正命中缓存由 provider 决定。
-/// driver/adapter 负责转换到 vendor wire DTO（如 Anthropic 的 `SystemBlock`）。
+/// driver/adapter 负责转换到 vendor wire DTO（如 Anthropic 的 `SystemBlockData`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequestSystemBlock {
+pub enum RequestSystemBlockData {
     /// 动态文本块，不参与 prompt caching。
     Text(String),
     /// 静态文本块，建议 provider 应用 prompt caching（如 Anthropic ephemeral）。
     Cacheable(String),
 }
 
-impl RequestSystemBlock {
+impl RequestSystemBlockData {
     /// 块的文本内容。
     pub fn text(&self) -> &str {
         match self {
-            RequestSystemBlock::Text(t) | RequestSystemBlock::Cacheable(t) => t,
+            RequestSystemBlockData::Text(t) | RequestSystemBlockData::Cacheable(t) => t,
         }
     }
 
     /// 是否建议 provider 缓存。
     pub fn is_cacheable(&self) -> bool {
-        matches!(self, RequestSystemBlock::Cacheable(_))
+        matches!(self, RequestSystemBlockData::Cacheable(_))
     }
 }
 
-// ─── InvocationRequest ──────────────────────────────────
+// ─── InvocationRequestData ──────────────────────────────────
 
 /// 一次 LLM 调用请求。
 ///
-/// 一个 `InvocationRequest` 固定一个 model 和一份不可变 options。
+/// 一个 `InvocationRequestData` 固定一个 model 和一份不可变 options。
 #[derive(Debug, Clone)]
-pub struct InvocationRequest {
+pub struct InvocationRequestData {
     /// 目标模型。
-    pub model: ModelId,
+    pub model: ModelIdData,
     /// Runtime-owned cancellation token for this invocation.
     ///
     /// The Provider adapter uses the same token for stream establishment and the
@@ -640,19 +533,19 @@ pub struct InvocationRequest {
     /// 本轮上下文窗口消息。
     pub messages: std::sync::Arc<[Message]>,
     /// 本轮 system prompt 块（provider-neutral）。
-    pub system: Vec<RequestSystemBlock>,
+    pub system: Vec<RequestSystemBlockData>,
     /// 模型可见 tool schema 列表。
-    pub tools: Vec<ModelToolSchema>,
+    pub tools: Vec<ModelToolSchemaData>,
     /// 调用选项。
-    pub options: InvocationOptions,
+    pub options: InvocationOptionsData,
 }
 
-impl InvocationRequest {
+impl InvocationRequestData {
     /// 构造一个最小请求（无 system、无 tools）。
     pub fn new(
-        model: ModelId,
+        model: ModelIdData,
         messages: impl Into<std::sync::Arc<[Message]>>,
-        options: InvocationOptions,
+        options: InvocationOptionsData,
     ) -> Self {
         Self {
             model,
@@ -665,7 +558,7 @@ impl InvocationRequest {
     }
 }
 
-// ─── InvocationEvent ────────────────────────────────────
+// ─── InvocationEventData ────────────────────────────────────
 
 /// 一次调用的流式事件。
 ///
@@ -673,23 +566,23 @@ impl InvocationRequest {
 /// 取消以 `Failed(ProviderError::cancelled())` 终结。
 /// 终结事件后下一次 `next()` 返回 `None`。
 #[derive(Debug, Clone)]
-pub enum InvocationEvent {
+pub enum InvocationEventData {
     /// 非终结增量。
-    Delta(InvocationDelta),
+    Delta(InvocationDeltaData),
     /// 完成终结（恰好出现一次）。
-    Completed(ProviderCompletion),
+    Completed(ProviderCompletionData),
     /// 失败终结（恰好出现一次，取消也归入此变体）。
     Failed(ProviderError),
 }
 
-impl InvocationEvent {
+impl InvocationEventData {
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Completed(_) | Self::Failed(_))
     }
 }
 
 /// 一次上游语义请求的有序 pull stream。
-pub type InvocationStream = Pin<Box<dyn Stream<Item = InvocationEvent> + Send>>;
+pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
 
 #[cfg(test)]
 mod tests {
@@ -697,7 +590,7 @@ mod tests {
 
     #[test]
     fn model_id_display() {
-        let id = ModelId {
+        let id = ModelIdData {
             provider: "Anthropic".to_string(),
             model: "claude-sonnet-4".to_string(),
         };
@@ -728,29 +621,29 @@ mod tests {
 
     #[test]
     fn reasoning_capability_none() {
-        let cap = ReasoningCapability::none();
+        let cap = ReasoningCapabilityData::none();
         assert_eq!(cap.supported(), &[ReasoningLevel::Off]);
         assert_eq!(cap.maximum(), ReasoningLevel::Off);
-        assert_eq!(cap.mapping, ReasoningMappingKind::None);
+        assert_eq!(cap.mapping, ReasoningMappingKindData::None);
     }
 
     #[test]
     fn resolver_selects_highest_supported_level_not_above_requested() {
-        let capability = ModelCapability {
-            model: ModelId {
+        let capability = ModelCapabilityData {
+            model: ModelIdData {
                 provider: "fake".to_string(),
                 model: "sparse-levels".to_string(),
             },
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: ReasoningCapability::new(
+            reasoning: ReasoningCapabilityData::new(
                 [
                     ReasoningLevel::Off,
                     ReasoningLevel::Medium,
                     ReasoningLevel::Max,
                 ],
-                ReasoningMappingKind::Effort,
+                ReasoningMappingKindData::Effort,
             )
             .expect("valid sparse capability"),
             context_limit: Some(128_000),
@@ -766,14 +659,9 @@ mod tests {
             (ReasoningLevel::Xhigh, ReasoningLevel::Medium),
             (ReasoningLevel::Max, ReasoningLevel::Max),
         ] {
-            let resolved = capability
-                .resolve_invocation_options(RequestedInvocationOptions::new(16_384, requested))
-                .expect("capability should resolve");
-            assert_eq!(resolved.requested_reasoning(), requested);
-            assert_eq!(resolved.effective_reasoning(), expected);
-            assert!(resolved.effective_reasoning() <= resolved.requested_reasoning());
-            assert_eq!(resolved.context_size(), 128_000);
-            assert_eq!(resolved.max_output_tokens(), 8_192);
+            let effective = capability.reasoning.resolve(requested);
+            assert_eq!(effective, expected);
+            assert!(effective <= requested);
         }
     }
 
@@ -781,7 +669,7 @@ mod tests {
     fn resolver_preserves_minimal_and_max_when_capability_declares_minimal() {
         // OpenAI driver 的 capability 显式声明七档；resolver 必须把 Minimal 与
         // Max 原样下传，证明共享枚举新增档位不会自动丢失。
-        let openai = ReasoningCapability::new(
+        let openai = ReasoningCapabilityData::new(
             [
                 ReasoningLevel::Off,
                 ReasoningLevel::Minimal,
@@ -791,7 +679,7 @@ mod tests {
                 ReasoningLevel::Xhigh,
                 ReasoningLevel::Max,
             ],
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         )
         .expect("OpenAI capability includes off and seven levels");
 
@@ -807,13 +695,13 @@ mod tests {
         // Legacy driver（如 Zhipu/LiteLLM）的 capability 不包含 Minimal：
         // resolver 必须把 Minimal 向下退到 Off，禁止把 Off 静默升级到 Minimal，
         // 也禁止因为 Minimal 不在集合里而 panic 或返回任何非 Off 档位。
-        let legacy = ReasoningCapability::new(
+        let legacy = ReasoningCapabilityData::new(
             [
                 ReasoningLevel::Off,
                 ReasoningLevel::Low,
                 ReasoningLevel::Medium,
             ],
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         )
         .expect("legacy capability includes off");
 
@@ -821,43 +709,13 @@ mod tests {
     }
 
     #[test]
-    fn capability_fingerprint_is_stable_and_changes_with_semantics() {
-        let model = ModelId {
-            provider: "fake".to_string(),
-            model: "fingerprinted".to_string(),
-        };
-        let base = ModelCapability {
-            model: model.clone(),
-            supports_tools: true,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: ReasoningCapability::new(
-                [ReasoningLevel::Off, ReasoningLevel::High],
-                ReasoningMappingKind::Effort,
-            )
-            .unwrap(),
-            context_limit: Some(100_000),
-            output_limit: Some(4_096),
-        };
-        let same = base.clone();
-        let mut changed = base.clone();
-        changed.reasoning = ReasoningCapability::new(
-            [ReasoningLevel::Off, ReasoningLevel::Medium],
-            ReasoningMappingKind::Effort,
-        )
-        .unwrap();
-
-        assert_eq!(base.fingerprint(), same.fingerprint());
-        assert_ne!(base.fingerprint(), changed.fingerprint());
-    }
-
-    #[test]
     fn reasoning_capability_rejects_empty_or_missing_off_levels() {
-        assert!(ReasoningCapability::new([], ReasoningMappingKind::None).is_err());
-        assert!(
-            ReasoningCapability::new([ReasoningLevel::Medium], ReasoningMappingKind::Effort,)
-                .is_err()
-        );
+        assert!(ReasoningCapabilityData::new([], ReasoningMappingKindData::None).is_err());
+        assert!(ReasoningCapabilityData::new(
+            [ReasoningLevel::Medium],
+            ReasoningMappingKindData::Effort,
+        )
+        .is_err());
     }
 
     #[test]
@@ -871,19 +729,19 @@ mod tests {
 
     #[test]
     fn provider_tool_call_id_display() {
-        let id = ProviderToolCallId("toolu_123".to_string());
+        let id = ProviderToolCallIdData("toolu_123".to_string());
         assert_eq!(id.to_string(), "toolu_123");
     }
 
     #[test]
     fn raw_usage_distinguishes_unreported_from_reported_zero() {
-        let unreported = RawUsageSnapshot::default();
+        let unreported = RawUsageSnapshotData::default();
         assert!(!unreported.was_reported());
         assert!(unreported.into_reported().is_none());
 
-        let reported_zero = RawUsageSnapshot {
+        let reported_zero = RawUsageSnapshotData {
             input_tokens: Some(0),
-            ..RawUsageSnapshot::default()
+            ..RawUsageSnapshotData::default()
         };
         assert!(reported_zero.was_reported());
         assert_eq!(reported_zero.into_reported().unwrap().input_tokens, Some(0));
@@ -891,16 +749,16 @@ mod tests {
 
     #[test]
     fn raw_usage_latest_reported_fields_merge_without_erasing_previous_values() {
-        let mut usage = RawUsageSnapshot {
+        let mut usage = RawUsageSnapshotData {
             input_tokens: Some(10),
             cache_read_tokens: Some(3),
-            ..RawUsageSnapshot::default()
+            ..RawUsageSnapshotData::default()
         };
-        usage.merge_reported(RawUsageSnapshot {
+        usage.merge_reported(RawUsageSnapshotData {
             output_tokens: Some(7),
             cache_read_tokens: None,
             reasoning_tokens: Some(0),
-            ..RawUsageSnapshot::default()
+            ..RawUsageSnapshotData::default()
         });
 
         assert_eq!(usage.input_tokens, Some(10));
@@ -911,7 +769,7 @@ mod tests {
 
     #[test]
     fn raw_usage_snapshot_default_all_none() {
-        let usage = RawUsageSnapshot::default();
+        let usage = RawUsageSnapshotData::default();
         assert!(usage.input_tokens.is_none());
         assert!(usage.output_tokens.is_none());
         assert!(usage.cache_read_tokens.is_none());
@@ -919,75 +777,75 @@ mod tests {
 
     #[test]
     fn invocation_request_new_has_empty_tools() {
-        let req = InvocationRequest::new(
-            ModelId {
+        let req = InvocationRequestData::new(
+            ModelIdData {
                 provider: "test".to_string(),
                 model: "m".to_string(),
             },
             Vec::new(),
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
         assert!(req.tools.is_empty());
     }
 
     #[test]
     fn invocation_request_new_has_empty_system() {
-        let req = InvocationRequest::new(
-            ModelId {
+        let req = InvocationRequestData::new(
+            ModelIdData {
                 provider: "test".to_string(),
                 model: "m".to_string(),
             },
             Vec::new(),
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
         assert!(req.system.is_empty());
     }
 
     #[test]
     fn request_system_block_exposes_text_and_cacheable_flag() {
-        let dynamic = RequestSystemBlock::Text("dynamic".to_string());
+        let dynamic = RequestSystemBlockData::Text("dynamic".to_string());
         assert_eq!(dynamic.text(), "dynamic");
         assert!(!dynamic.is_cacheable());
 
-        let cached = RequestSystemBlock::Cacheable("static".to_string());
+        let cached = RequestSystemBlockData::Cacheable("static".to_string());
         assert_eq!(cached.text(), "static");
         assert!(cached.is_cacheable());
     }
 
     #[test]
     fn invocation_event_delta_is_non_terminal() {
-        let evt = InvocationEvent::Delta(InvocationDelta::Text("hi".to_string()));
+        let evt = InvocationEventData::Delta(InvocationDeltaData::Text("hi".to_string()));
         assert!(!evt.is_terminal());
     }
 
     #[test]
     fn invocation_event_completed_and_failed_are_terminal() {
-        let completion = ProviderCompletion {
+        let completion = ProviderCompletionData {
             output: Vec::new(),
             stop_reason: StopReason::EndTurn,
             usage: None,
             effective_reasoning: ReasoningLevel::Off,
         };
-        assert!(InvocationEvent::Completed(completion).is_terminal());
-        assert!(InvocationEvent::Failed(ProviderError::cancelled()).is_terminal());
+        assert!(InvocationEventData::Completed(completion).is_terminal());
+        assert!(InvocationEventData::Failed(ProviderError::cancelled()).is_terminal());
     }
 
     #[test]
     fn tool_call_identity_can_bind_provider_id_after_start() {
-        let started = InvocationDelta::ToolCallStarted {
+        let started = InvocationDeltaData::ToolCallStarted {
             index: 2,
             provider_id: None,
             name: "Write".to_string(),
         };
-        let arguments = InvocationDelta::ToolArgumentsDelta {
+        let arguments = InvocationDeltaData::ToolArgumentsDelta {
             index: 2,
-            provider_id: Some(ProviderToolCallId("call_late".to_string())),
+            provider_id: Some(ProviderToolCallIdData("call_late".to_string())),
             partial_json: "{}".to_string(),
         };
 
         assert!(matches!(
             started,
-            InvocationDelta::ToolCallStarted {
+            InvocationDeltaData::ToolCallStarted {
                 index: 2,
                 provider_id: None,
                 ..
@@ -995,9 +853,9 @@ mod tests {
         ));
         assert!(matches!(
             arguments,
-            InvocationDelta::ToolArgumentsDelta {
+            InvocationDeltaData::ToolArgumentsDelta {
                 index: 2,
-                provider_id: Some(ProviderToolCallId(ref id)),
+                provider_id: Some(ProviderToolCallIdData(ref id)),
                 ..
             } if id == "call_late"
         ));

@@ -4,7 +4,7 @@
 #[path = "llm_strategy_tests.rs"]
 mod tests;
 
-use provider::RequestSystemBlock;
+use provider::RequestSystemBlockData;
 use share::message::Message;
 
 use crate::application::loop_engine::chat::InvocationResponse;
@@ -16,7 +16,7 @@ use crate::ports::ContextWindow;
 pub(crate) struct InvocationContext {
     messages_for_api: Vec<Message>,
     pub tool_schemas: Vec<serde_json::Value>,
-    pub system_blocks: Vec<RequestSystemBlock>,
+    pub system_blocks: Vec<RequestSystemBlockData>,
 }
 
 impl InvocationContext {
@@ -70,9 +70,9 @@ pub(crate) fn extract_invocation_context(window: &ContextWindow) -> InvocationCo
         .map(|block| {
             if block.cache_break {
                 debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
-                RequestSystemBlock::Cacheable(block.content.clone())
+                RequestSystemBlockData::Cacheable(block.content.clone())
             } else {
-                RequestSystemBlock::Text(block.content.clone())
+                RequestSystemBlockData::Text(block.content.clone())
             }
         })
         .collect::<Vec<_>>();

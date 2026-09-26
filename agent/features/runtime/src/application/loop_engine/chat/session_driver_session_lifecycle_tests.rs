@@ -107,12 +107,12 @@ impl IdenticalReplyProvider {
 impl LlmProvider for IdenticalReplyProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         tokio::time::sleep(self.per_turn_delay).await;
         Ok(text_completion_stream(self.reply.clone(), 1, 1))
     }
@@ -250,12 +250,12 @@ impl RecordingProvider {
 impl LlmProvider for RecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let last_user = messages
             .iter()
             .rev()
@@ -617,12 +617,12 @@ impl CancellableThenNormalProvider {
 impl LlmProvider for CancellableThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -790,12 +790,12 @@ impl CompleteThenCancellableProvider {
 impl LlmProvider for CompleteThenCancellableProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -989,12 +989,12 @@ async fn test_chat_impl_idle_until_first_input_event() {
     impl LlmProvider for CountingProvider {
         async fn invocation_stream(
             &self,
-            _scope: &InvocationScope,
-            _system: &[SystemBlock],
+            _scope: &InvocationScopeData,
+            _system: &[SystemBlockData],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
             _cancel: &CancellationToken,
-        ) -> Result<InvocationStream, ProviderError> {
+        ) -> Result<InvocationStreamData, ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(text_completion_stream("hi response", 1, 1))
         }
@@ -1323,12 +1323,12 @@ impl ApiErrorThenNormalProvider {
 impl LlmProvider for ApiErrorThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScope,
-        _system: &[SystemBlock],
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;

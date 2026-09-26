@@ -11,7 +11,7 @@ use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
 use crate::adapters::stream::parse_invocation_stream;
-use crate::domain::invoke::{CreateMessageRequest, SystemBlock};
+use crate::domain::invoke::{CreateMessageRequest, SystemBlockData};
 use crate::ports::LlmProvider;
 
 use message_conversion::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};
@@ -35,7 +35,7 @@ impl AnthropicProvider {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
-        reasoning_level: crate::ports::ReasoningLevel,
+        reasoning_level: crate::domain::capability::ReasoningLevel,
         timeout_secs: u64,
     ) -> Self {
         Self::new_with_user_agent(
@@ -54,7 +54,7 @@ impl AnthropicProvider {
         base_url: Option<String>,
         model: Option<String>,
         _max_tokens: u32,
-        _reasoning_level: crate::ports::ReasoningLevel,
+        _reasoning_level: crate::domain::capability::ReasoningLevel,
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
@@ -123,12 +123,12 @@ impl AnthropicProvider {
 
     pub(crate) async fn invoke_stream(
         &self,
-        scope: &crate::InvocationScope,
-        system: &[SystemBlock],
+        scope: &crate::InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
@@ -144,7 +144,7 @@ impl AnthropicProvider {
             }
         }
         let effort = match scope.effective_reasoning() {
-            crate::ports::ReasoningLevel::Off => None,
+            crate::domain::capability::ReasoningLevel::Off => None,
             level => Some(level.as_str().to_string()),
         };
         let request = CreateMessageRequest::new(
@@ -226,12 +226,12 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for AnthropicProvider {
     async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScope,
-        system: &[SystemBlock],
+        scope: &crate::InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         self.invoke_stream(scope, system, messages, tool_schemas, cancel)
             .await
     }
@@ -244,15 +244,15 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::Max
+    fn max_reasoning_level(&self) -> crate::domain::capability::ReasoningLevel {
+        crate::domain::capability::ReasoningLevel::Max
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::AnthropicProvider;
-    use crate::domain::invoke::{CreateMessageRequest, InvocationScope};
+    use crate::domain::invoke::{CreateMessageRequest, InvocationScopeData};
     use crate::ports::{LlmProvider, ReasoningLevel};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -321,7 +321,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
 
         let error = match provider
@@ -364,7 +364,7 @@ mod tests {
         let leaked: &'static str = Box::leak(response.into_boxed_str());
         let (base_url, request_count) = spawn_counting_server(leaked).await;
         let client =
-            crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+            crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
                 driver: crate::ProviderDriverKind::Anthropic.as_str().to_string(),
                 source_key: "anthropic".to_string(),
                 api_style: None,
@@ -379,7 +379,7 @@ mod tests {
             })
             .expect("valid anthropic config");
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
 
         let events: Vec<_> = client
@@ -399,8 +399,8 @@ mod tests {
         assert!(matches!(
             &events[..],
             [
-                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(text)),
-                crate::InvocationEvent::Completed(_)
+                crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(text)),
+                crate::InvocationEventData::Completed(_)
             ] if text == "production"
         ));
     }
@@ -434,7 +434,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
 
@@ -451,13 +451,13 @@ mod tests {
         assert!(matches!(
             &events[..],
             [
-                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(first)),
-                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(second)),
-                crate::InvocationEvent::Completed(_)
+                crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
+                crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
+                crate::InvocationEventData::Completed(_)
             ] if first == "hel" && second == "lo"
         ));
         assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-        let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+        let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
             panic!("expected completed event");
         };
         let usage = completion.usage.as_ref().expect("anthropic usage reported");
@@ -484,7 +484,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
 
@@ -524,7 +524,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
 
@@ -564,7 +564,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
 
@@ -677,7 +677,7 @@ mod tests {
             60,
         );
         let scope =
-            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+            InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
                 .expect("valid scope");
         let cancel = CancellationToken::new();
 

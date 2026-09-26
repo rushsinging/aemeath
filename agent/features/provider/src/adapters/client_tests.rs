@@ -1,9 +1,9 @@
-use super::{reasoning_level_from_options, LlmClient, LlmConfigOptions, ReasoningConfig};
+use super::{reasoning_level_from_options, LlmClient, LlmConfigOptionsData, ReasoningConfig};
 use crate::adapters::pool::TransportPool;
-use crate::ReasoningLevel;
+use crate::domain::capability::ReasoningLevel;
 
-fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> LlmConfigOptions {
-    LlmConfigOptions {
+fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> LlmConfigOptionsData {
+    LlmConfigOptionsData {
         driver: "anthropic".to_string(),
         source_key: "anthropic".to_string(),
         api_style: None,

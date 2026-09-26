@@ -6,42 +6,42 @@ fn every_openai_compatible_driver_derives_maximum_from_capability() {
         (
             ProviderDriverKind::OpenAI,
             ReasoningLevel::Max,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         ),
         (
             ProviderDriverKind::Zhipu,
             ReasoningLevel::Max,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         ),
         (
             ProviderDriverKind::LiteLLM,
             ReasoningLevel::Max,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         ),
         (
             ProviderDriverKind::Volcengine,
             ReasoningLevel::Medium,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         ),
         (
             ProviderDriverKind::Minimax,
             ReasoningLevel::Medium,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
         ),
         (
             ProviderDriverKind::Mimo,
             ReasoningLevel::Medium,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
         ),
         (
             ProviderDriverKind::DeepSeek,
             ReasoningLevel::Max,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
         ),
         (
             ProviderDriverKind::Agnes,
             ReasoningLevel::Medium,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
         ),
     ] {
         let driver = driver_for_provider_driver(kind);
@@ -60,12 +60,12 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
     // 静默加入 supported。expected_supported 已排序且 Off 在首。
     let expectation: &[(
         ProviderDriverKind,
-        ReasoningMappingKind,
+        ReasoningMappingKindData,
         Vec<ReasoningLevel>,
     )] = &[
         (
             ProviderDriverKind::OpenAI,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
             vec![
                 ReasoningLevel::Off,
                 ReasoningLevel::Minimal,
@@ -78,7 +78,7 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         ),
         (
             ProviderDriverKind::Zhipu,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
             vec![
                 ReasoningLevel::Off,
                 ReasoningLevel::Low,
@@ -90,7 +90,7 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         ),
         (
             ProviderDriverKind::LiteLLM,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
             vec![
                 ReasoningLevel::Off,
                 ReasoningLevel::Low,
@@ -102,7 +102,7 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         ),
         (
             ProviderDriverKind::Volcengine,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
             vec![
                 ReasoningLevel::Off,
                 ReasoningLevel::Low,
@@ -111,17 +111,17 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         ),
         (
             ProviderDriverKind::Minimax,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
             vec![ReasoningLevel::Off, ReasoningLevel::Medium],
         ),
         (
             ProviderDriverKind::Mimo,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
             vec![ReasoningLevel::Off, ReasoningLevel::Medium],
         ),
         (
             ProviderDriverKind::DeepSeek,
-            ReasoningMappingKind::Effort,
+            ReasoningMappingKindData::Effort,
             vec![
                 ReasoningLevel::Off,
                 ReasoningLevel::Low,
@@ -133,7 +133,7 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         ),
         (
             ProviderDriverKind::Agnes,
-            ReasoningMappingKind::ThinkingToggle,
+            ReasoningMappingKindData::ThinkingToggle,
             vec![ReasoningLevel::Off, ReasoningLevel::Medium],
         ),
     ];
