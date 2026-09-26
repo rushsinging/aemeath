@@ -99,7 +99,7 @@ impl Drop for TempDir {
 
 // ─── Test serialization ──────────────────────────────────────────────
 //
-// `wire_production_workspace` and `WorkspacePersist::prepare_restore` both
+// `wire_production_workspace` and `WorkspaceWriter::prepare_restore` both
 // spawn `git` subprocesses.  Under heavy parallel test execution the OS can
 // intermittently fail to spawn the subprocess (`ErrorKind::NotFound`),
 // producing `GitProbeFailed(GitUnavailable)`.  We serialize all tests that
@@ -163,7 +163,7 @@ impl MemoryOpener for MockMemoryOpener {
 
 struct Harness {
     wiring: MainSessionWiring,
-    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     task_store: Arc<TaskStore>,
     task_access: Arc<dyn TaskAccess>,
     config_service: Arc<ConfigAppService>,

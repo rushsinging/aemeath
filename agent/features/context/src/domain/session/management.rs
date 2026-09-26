@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
-use share::session_types::ProjectIdentity;
+use share::session_types::ProjectIdentityData;
 
 use super::{
     extract_project_name, CanonicalSession, DisplayHistoryStepIndex, SessionMetadata,
@@ -56,7 +56,7 @@ impl SessionListEntry {
 
 /// project 显示名：显式 `metadata.project` 优先（用户可编辑 override），
 /// 否则从 workspace 快照的 project identity 推导目录名。
-/// project 的单一事实源是 workspace `ProjectIdentity`，不在 session
+/// project 的单一事实源是 workspace `ProjectIdentityData`，不在 session
 /// 创建时冗余写入 metadata（避免双事实源）。
 fn session_display_project(session: &CanonicalSession) -> Option<String> {
     if let Some(explicit) = session.metadata.project.as_deref() {
@@ -71,7 +71,10 @@ fn session_display_project(session: &CanonicalSession) -> Option<String> {
 /// Compares stable project identity without treating individual worktree roots
 /// as distinct projects. Git projects use `git_common_dir`; non-git projects use
 /// their canonical `initial_cwd`.
-pub fn same_project_identity(current: &ProjectIdentity, persisted: &ProjectIdentity) -> bool {
+pub fn same_project_identity(
+    current: &ProjectIdentityData,
+    persisted: &ProjectIdentityData,
+) -> bool {
     match (
         current.git_common_dir.as_deref(),
         persisted.git_common_dir.as_deref(),
@@ -82,7 +85,7 @@ pub fn same_project_identity(current: &ProjectIdentity, persisted: &ProjectIdent
     }
 }
 
-pub fn session_matches_project(session: &CanonicalSession, current: &ProjectIdentity) -> bool {
+pub fn session_matches_project(session: &CanonicalSession, current: &ProjectIdentityData) -> bool {
     let SnapshotState::Captured(workspace) = &session.workspace else {
         return false;
     };

@@ -13,14 +13,14 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn load_for_project(
         &self,
         _id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<context::session::CanonicalSession, SessionManagementError> {
         Ok(self.session.clone())
     }
 
     async fn list_for_project(
         &self,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<context::SessionListEntry>, SessionManagementError> {
         Ok(Vec::new())
     }
@@ -28,7 +28,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn export_for_project(
         &self,
         _id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<u8>, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
@@ -36,7 +36,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn import_for_project(
         &self,
         _bytes: &[u8],
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<context::SessionListEntry, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
@@ -44,7 +44,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn update_metadata_for_project(
         &self,
         _id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
         _update: context::SessionMetadataUpdate,
     ) -> Result<context::SessionListEntry, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
@@ -53,7 +53,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn delete_for_project(
         &self,
         _id: &str,
-        _project: &share::session_types::ProjectIdentity,
+        _project: &share::session_types::ProjectIdentityData,
     ) -> Result<(), SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
@@ -211,7 +211,6 @@ fn snapshot_with_one_task() -> task::TaskSnapshot {
 fn shell_workspace_snapshot() -> share::session_types::PersistedWorkspaceContext {
     project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace")
-        .into_views()
         .persist()
         .snapshot()
 }

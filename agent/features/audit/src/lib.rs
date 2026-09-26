@@ -5,12 +5,13 @@
 //! | 类 | 实体 | 消费者 |
 //! |---|---|---|
 //! | `wire_*` 工厂 | `wire_audit_client`、`wire_audit_store` | composition |
-//! | `*<Role>` 角色 | `AuditClient`（读写合一：try_record/query_page/shutdown）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配） |
-//! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageSummaryData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
-//! | `*Error` 错误 | `AuditError`（crate 根定义，粗分类） | query_page 签名 |
+//! | `*<Role>` 角色 | `AuditWriter`（try_record/shutdown，拥有 worker 管道）、`AuditReader`（query_page 纯读）、`AuditStore`（存储句柄，SPI 不出签名） | composition、runtime（经 UsageSink 适配）、TUI（Reader 接线待评审） |
+//! | `*Data` 数据 | `UsageRecordData`、`UsageEmitOutcomeData`、`UsageDropReasonData`、`UsageQueryData`、`UsagePageData`、`UsagePaginationData`、`UsageTimeRangeData` | composition、runtime、cli TUI（Summary） |
+//! | 错误 | `share::error::DomainError`（跨界唯一；AuditError 降级 crate 内细分类） | query_page 签名 |
 //!
-//! Role 词表：Client/Port/Sink/Source/Control/Registry/Pool/Catalog/Store；
-//! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀。
+//! Role 词表（v3，拟人/明确名词）：Reader/Writer/Control/Registry/Pool/Catalog/Store；
+//! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀；
+//! 读写配套由同一 wire 工厂产出（Writer+Reader），不造全能 Client。
 
 /// Audit 模块自身的运行诊断 target；Audit Usage Fact 使用独立 append store。
 pub(crate) const LOG_TARGET: &str = "aemeath:diagnostic:audit";
@@ -26,10 +27,9 @@ mod ports;
 /// 内部错误（domain/ports 细节）经 `From` 折叠，细粒度原因留在 crate 内日志。
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuditError {
+pub(crate) enum AuditError {
     Storage(String),
     Invalid(String),
-    Unavailable(String),
 }
 
 impl std::fmt::Display for AuditError {
@@ -37,18 +37,6 @@ impl std::fmt::Display for AuditError {
         match self {
             AuditError::Storage(message) => write!(formatter, "storage: {message}"),
             AuditError::Invalid(message) => write!(formatter, "invalid: {message}"),
-            AuditError::Unavailable(message) => write!(formatter, "unavailable: {message}"),
-        }
-    }
-}
-
-impl AuditError {
-    /// 与 `share::error::ErrorCategory` 对齐的粗分类。
-    pub fn category(&self) -> share::error::ErrorCategory {
-        match self {
-            AuditError::Storage(_) => share::error::ErrorCategory::Storage,
-            AuditError::Invalid(_) => share::error::ErrorCategory::Invalid,
-            AuditError::Unavailable(_) => share::error::ErrorCategory::Unavailable,
         }
     }
 }
@@ -79,14 +67,24 @@ impl From<crate::ports::AppendLogError> for AuditError {
 /// 查询/Append 内部面未接线（无生产消费者），按消费者证明制收窄 crate 内；
 /// 契约测试已迁 crate 内单元测试（#1705）。
 use crate::adapters::append::file_usage_append_store;
-pub use client::{wire_audit_client, wire_audit_store, AuditClient, AuditStore};
+pub use client::{wire_audit_client, wire_audit_store, AuditReader, AuditStore, AuditWriter};
 /// 文件系统审计存储工厂（SPI 经 AuditStore 包装，此处返回 port 以便装配）。
-pub fn append_store_for(
+pub fn wire_append_store_for(
     root: storage::SafeStorageRoot,
 ) -> std::sync::Arc<dyn crate::ports::UsageAppendStorePort> {
     std::sync::Arc::new(file_usage_append_store(root))
 }
 pub use domain::{
     UsageDropReasonData, UsageEmitOutcomeData, UsagePageData, UsagePaginationData, UsageQueryData,
-    UsageRecordData, UsageSummaryData, UsageTimeRangeData,
+    UsageRecordData, UsageTimeRangeData,
 };
+
+impl From<AuditError> for share::error::DomainError {
+    fn from(inner: AuditError) -> Self {
+        let (category, message) = match &inner {
+            AuditError::Storage(message) => (share::error::ErrorCategory::Storage, message.clone()),
+            AuditError::Invalid(message) => (share::error::ErrorCategory::Invalid, message.clone()),
+        };
+        share::error::DomainError::from_parts("audit", category, message)
+    }
+}

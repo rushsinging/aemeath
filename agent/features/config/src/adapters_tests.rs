@@ -185,9 +185,9 @@ fn env_adapter_does_not_read_retired_logging_output_env() {
 
 #[test]
 fn cli_adapter_only_maps_explicit_values() {
-    let empty = CliArgsAdapter::read(&CliConfigInput::default());
+    let empty = CliArgsAdapter::read(&CliConfigInputData::default());
     assert!(empty.is_empty());
-    let patch = CliArgsAdapter::read(&CliConfigInput {
+    let patch = CliArgsAdapter::read(&CliConfigInputData {
         model: Some("local/model".into()),
         max_tool_concurrency: Some(7),
         ..Default::default()

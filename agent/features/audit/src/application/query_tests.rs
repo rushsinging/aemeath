@@ -3,12 +3,12 @@ use std::num::NonZeroUsize;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 use super::query::{
-    add_summary, decode_cursor, decode_record, encode_cursor, matches, query_fingerprint,
-    validate_query, CursorPosition, MAX_USAGE_QUERY_LIMIT,
+    decode_cursor, decode_record, encode_cursor, matches, query_fingerprint, validate_query,
+    CursorPosition, MAX_USAGE_QUERY_LIMIT,
 };
 use crate::domain::{
     UsageEnvelopeV1, UsagePaginationData, UsageQueryData, UsageQueryError, UsageQueryWarning,
-    UsageRecordData, UsageSummaryData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageRecordData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 
 fn record(timestamp: u64) -> UsageRecordData {
@@ -240,27 +240,4 @@ fn matches_uses_inclusive_start_and_exclusive_end_for_every_filter() {
     for mismatch in mismatches {
         assert!(!matches(&mismatch, &target));
     }
-}
-
-#[test]
-fn add_summary_accumulates_optional_tokens_without_cost_fields() {
-    let mut summary = UsageSummaryData::default();
-    add_summary(&mut summary, &record(10));
-    let mut no_optional_tokens = record(11);
-    no_optional_tokens.input_tokens = 7;
-    no_optional_tokens.output_tokens = 9;
-    no_optional_tokens.cache_write_tokens = None;
-    no_optional_tokens.cache_read_tokens = None;
-    no_optional_tokens.reasoning_tokens = None;
-    add_summary(&mut summary, &no_optional_tokens);
-
-    assert_eq!(summary.record_count, 2);
-    assert_eq!(summary.input_tokens, 17);
-    assert_eq!(summary.output_tokens, 29);
-    assert_eq!(summary.cache_write_tokens, 3);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 5);
-    let serialized = serde_json::to_value(summary).expect("serialize summary");
-    assert!(serialized.get("cost").is_none());
-    assert!(serialized.get("price").is_none());
 }

@@ -1,10 +1,10 @@
-use config::{native_override_store, ConfigWriter};
+use config::{wire_config_override_store, ConfigWriter};
 
 #[tokio::test]
 async fn wiring_reads_runtime_override_from_injected_native_store() {
     let project = tempfile::tempdir().expect("create project directory");
     let storage = tempfile::tempdir().expect("create override storage directory");
-    let store = native_override_store(
+    let store = wire_config_override_store(
         storage::file_system_blob(storage.path()).expect("create override blob"),
     );
 
@@ -13,7 +13,7 @@ async fn wiring_reads_runtime_override_from_injected_native_store() {
         .expect("wire config with injected store");
     first
         .service()
-        .update(config::ConfigUpdate::SetPermissionMode {
+        .update(config::ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::AllowAll,
         })
         .await

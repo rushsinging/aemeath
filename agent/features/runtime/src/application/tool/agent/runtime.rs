@@ -82,7 +82,7 @@ pub struct Agent {
     pub ctx: ToolExecutionContext,
     pub max_tool_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub workspace_persist: Arc<dyn project::WorkspacePersist>,
+    pub workspace_persist: Arc<dyn project::WorkspaceWriter>,
     pub(crate) context: ContextCoordinator,
     pub(crate) session_id: context::SessionId,
     pub(crate) tool_result_materializer:

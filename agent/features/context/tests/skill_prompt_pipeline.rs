@@ -127,12 +127,12 @@ async fn chinese_header_and_budget_are_deterministic() {
 }
 
 struct FakeWorkspace(PathBuf);
-impl project::WorkspaceRead for FakeWorkspace {
-    fn workspace_id(&self) -> project::WorkspaceId {
-        project::WorkspaceId::default()
+impl project::WorkspaceReader for FakeWorkspace {
+    fn workspace_id(&self) -> share::session_types::WorkspaceId {
+        share::session_types::WorkspaceId::default()
     }
-    fn project_identity(&self) -> project::ProjectIdentity {
-        project::ProjectIdentity::default()
+    fn project_identity(&self) -> share::session_types::ProjectIdentityData {
+        share::session_types::ProjectIdentityData::default()
     }
     fn current_workspace_root(&self) -> PathBuf {
         self.0.clone()
@@ -143,19 +143,22 @@ impl project::WorkspaceRead for FakeWorkspace {
     fn resolve(&self, rel: &std::path::Path) -> PathBuf {
         self.0.join(rel)
     }
-    fn resolve_file_path(&self, rel: &std::path::Path) -> Result<PathBuf, project::WorkspaceError> {
+    fn resolve_file_path(
+        &self,
+        rel: &std::path::Path,
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }
     fn resolve_search_path(
         &self,
         rel: &std::path::Path,
-    ) -> Result<PathBuf, project::WorkspaceError> {
+    ) -> Result<PathBuf, share::error::DomainError> {
         Ok(self.0.join(rel))
     }
     fn in_worktree(&self) -> bool {
         false
     }
-    fn current_branch(&self) -> Result<Option<String>, project::WorkspaceError> {
+    fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         Ok(None)
     }
     fn initial_cwd(&self) -> PathBuf {

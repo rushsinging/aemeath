@@ -1,4 +1,4 @@
-//! Integration tests for the gate-aware ConfigQuery / ConfigWriter façades
+//! Integration tests for the gate-aware ConfigReader / ConfigWriter façades
 //! produced by `MainSessionWiring`, plus cross-project resume verification.
 //!
 //! These tests use the real `ConfigAppService` (with explicit paths, no env
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use config::{
-    native_override_store, ConfigAppService, ConfigReader, ConfigUpdate, ConfigUpdateError,
+    wire_config_override_store, ConfigAppService, ConfigReader, ConfigUpdateData,
     ProjectConfigParticipant,
 };
 use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
@@ -157,7 +157,7 @@ impl MemoryOpener for TrackingMemoryOpener {
 struct FacadeHarness {
     wiring: MainSessionWiring,
     #[allow(dead_code)]
-    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     config_service: Arc<ConfigAppService>,
     memory_opener: Arc<TrackingMemoryOpener>,
     _tmp: TempDir,
@@ -188,7 +188,7 @@ async fn build_facade_harness(
             Some(common) if !common.is_empty() => common.as_bytes(),
             _ => identity.initial_cwd.as_bytes(),
         };
-        config::ProjectConfigLocation::try_from_project_identity(search_root, stable_identity)
+        config::ProjectConfigLocationData::try_from_project_identity(search_root, stable_identity)
             .unwrap()
     };
     let prepared_config = config_service
@@ -273,7 +273,7 @@ async fn build_with_store_harness() -> FacadeHarness {
     let storage = storage::file_system_blob(tmp.path()).unwrap();
     let config_service = Arc::new(
         ConfigAppService::with_global_path(None, tmp.path().join("global.json"))
-            .with_native_store(native_override_store(storage)),
+            .with_native_store(wire_config_override_store(storage)),
     );
     let memory_opener = Arc::new(TrackingMemoryOpener::new());
     build_facade_harness(tmp, config_service, memory_opener).await
@@ -372,7 +372,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     );
 }
 
-/// `ConfigQuery::snapshot` is blocked while an exclusive permit is held.
+/// `ConfigReader::snapshot` is blocked while an exclusive permit is held.
 #[tokio::test]
 async fn query_snapshot_blocked_by_exclusive_permit() {
     let _guard = git_lock().await;
@@ -399,7 +399,7 @@ async fn query_snapshot_blocked_by_exclusive_permit() {
     let _ = snapshot; // just verify we got a snapshot
 }
 
-/// `ConfigQuery::subscribe` is also blocked by an exclusive permit.
+/// `ConfigReader::subscribe` is also blocked by an exclusive permit.
 #[tokio::test]
 async fn query_subscribe_blocked_by_exclusive_permit() {
     let _guard = git_lock().await;
@@ -441,13 +441,16 @@ async fn update_not_committed_keeps_old_memory_and_config() {
     // ConfigAppService without native_store → persist_update returns
     // NotCommitted(UnsupportedDurability).
     let result = writer
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "new-model".into(),
         })
         .await;
 
     assert!(
-        matches!(result, Err(ConfigUpdateError::Persist(_))),
+        matches!(
+            result,
+            Err(ref error) if error.category() == share::error::ErrorCategory::Storage
+        ),
         "expected Persist(UnsupportedDurability), got {result:?}"
     );
 
@@ -481,7 +484,7 @@ async fn update_committed_installs_memory_and_advances_watch() {
     let pre_memory = h.wiring.committed_memory();
 
     let change_set = writer
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "committed-model".into(),
         })
         .await
@@ -542,7 +545,7 @@ async fn update_committed_installs_after_caller_drop() {
     let writer_for_task = writer.clone();
     let update_task = tokio::spawn(async move {
         writer_for_task
-            .update(ConfigUpdate::SetModel {
+            .update(ConfigUpdateData::SetModel {
                 model: "bg-model".into(),
             })
             .await
@@ -603,7 +606,7 @@ async fn writer_update_blocks_bind_main_run() {
 
     let blocked = tokio::time::timeout(
         Duration::from_millis(100),
-        writer.update(ConfigUpdate::SetModel {
+        writer.update(ConfigUpdateData::SetModel {
             model: "blocked".into(),
         }),
     )
@@ -616,7 +619,7 @@ async fn writer_update_blocks_bind_main_run() {
     drop(exclusive);
     // Now the writer can proceed (it will fail on NotCommitted since no store).
     let result = writer
-        .update(ConfigUpdate::SetModel { model: "ok".into() })
+        .update(ConfigUpdateData::SetModel { model: "ok".into() })
         .await;
     let _ = result;
 }

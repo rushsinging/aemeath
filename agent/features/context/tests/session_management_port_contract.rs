@@ -4,11 +4,13 @@ use context::decode_session;
 use context::SessionManagementPort;
 use context::{CanonicalSession, SessionCodec, SnapshotState};
 use context::{SessionId, ToolCallIdentity};
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+use share::session_types::{
+    PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
+};
 
 fn session_for_project(
     id: &str,
-    identity: ProjectIdentity,
+    identity: ProjectIdentityData,
     workspace_root: &str,
 ) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -34,7 +36,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         storage::file_system_blob(&root).expect("create filesystem blob adapter");
     let port = context::AtomicBlobSessionManagement::new(Arc::clone(&blob));
     let writer = context::AtomicBlobCanonicalSessionWriter::new(blob);
-    let project = ProjectIdentity {
+    let project = ProjectIdentityData {
         initial_cwd: "/receipt-ledger".to_string(),
         git_common_dir: None,
     };
@@ -82,15 +84,15 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
     let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
         storage::file_system_blob(&root).expect("create filesystem blob adapter"),
     ));
-    let project_a = ProjectIdentity {
+    let project_a = ProjectIdentityData {
         initial_cwd: "/project-a".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
     };
-    let project_b = ProjectIdentity {
+    let project_b = ProjectIdentityData {
         initial_cwd: "/project-b".to_string(),
         git_common_dir: Some("/project-b/.git".to_string()),
     };
-    let same_git_other_worktree = ProjectIdentity {
+    let same_git_other_worktree = ProjectIdentityData {
         initial_cwd: "/project-a/.worktrees/feature".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
     };
@@ -102,7 +104,7 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         ),
         (
             session_for_project("project-b", project_b, "/project-b"),
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: "/project-b".to_string(),
                 git_common_dir: Some("/project-b/.git".to_string()),
             },
@@ -180,7 +182,7 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
     let blob = storage::file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
         Arc::new(context::AtomicBlobSessionManagement::new(blob));
-    let project = ProjectIdentity {
+    let project = ProjectIdentityData {
         initial_cwd: "/session-primary".to_string(),
         git_common_dir: None,
     };
@@ -212,7 +214,7 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
     let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
         storage::file_system_blob(&root).expect("create filesystem blob adapter"),
     ));
-    let project = ProjectIdentity {
+    let project = ProjectIdentityData {
         initial_cwd: "/session-lifecycle".to_string(),
         git_common_dir: None,
     };

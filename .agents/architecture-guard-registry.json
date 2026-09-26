@@ -308,6 +308,30 @@
       "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
       "tracking_issue": 1385,
       "guard": "check-cross-bc-construction-registry.sh"
+    },
+    {
+      "id": "construction.config.wire-config-override-store",
+      "symbol": "wire_config_override_store",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "native override 注入工厂（原 native_override_store 更名 wire_ 前缀类）；唯一跨 BC 调用点为 composition 装配",
+      "tracking_issue": 1706
+    },
+    {
+      "id": "construction.audit.wire-append-store-for",
+      "symbol": "wire_append_store_for",
+      "owner_crate": "audit",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "审计追加存储的文件系统适配工厂（原 append_store_for 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
+      "tracking_issue": 1705
     }
   ],
   "entries": [
@@ -393,7 +417,7 @@
         "FileSystemBlobAdapter::new("
       ],
       "exclusions": [],
-      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 native_override_store 工厂）",
+      "reason": "config application 只消费注入的 NativeConfigStore；blob 实现选择权在 composition（#1683 构造已收窄 wire_config_override_store 工厂）",
       "profile": "full"
     },
     {
@@ -1488,15 +1512,15 @@
         "value": "agent/features/audit/src"
       },
       "allowed_symbols": [
-        "AuditClient",
+        "AuditReader",
         "AuditStore",
+        "AuditWriter",
         "UsageDropReasonData",
         "UsageEmitOutcomeData",
         "UsagePageData",
         "UsagePaginationData",
         "UsageQueryData",
         "UsageRecordData",
-        "UsageSummaryData",
         "UsageTimeRangeData",
         "wire_audit_client",
         "wire_audit_store"
@@ -1512,27 +1536,23 @@
         "value": "agent/features/config/src"
       },
       "allowed_symbols": [
-        "CliConfigInput",
+        "CliConfigInputData",
         "ConfigAppService",
-        "ConfigChangeCause",
-        "ConfigChangeSet",
-        "ConfigCommitWarning",
-        "ConfigError",
-        "ConfigField",
-        "ConfigPersistOutcome",
+        "ConfigChangeCauseData",
+        "ConfigChangeData",
+        "ConfigCommitWarningData",
+        "ConfigFieldData",
+        "ConfigPersistOutcomeData",
         "ConfigQuery",
-        "ConfigQueryError",
         "ConfigReader",
-        "ConfigRefreshOutcome",
-        "ConfigSubscription",
-        "ConfigUpdate",
-        "ConfigUpdateError",
+        "ConfigRefreshOutcomeData",
+        "ConfigSubscriptionData",
+        "ConfigUpdateData",
         "ConfigWriter",
         "NativeConfigStore",
-        "PreparedConfigUpdate",
-        "PreparedProjectConfig",
-        "ProjectConfigLocation",
-        "ProjectConfigLocationError",
+        "PreparedConfigUpdateData",
+        "PreparedProjectConfigData",
+        "ProjectConfigLocationData",
         "ProjectConfigParticipant"
       ],
       "reason": "F-2：config crate 根窄 façade（#1022 登记，消费者证明制）",
@@ -1796,15 +1816,14 @@
         "value": "agent/features/policy/src"
       },
       "allowed_symbols": [
-        "AllowAllPolicy",
-        "ApprovalSubject",
-        "ConfiguredPolicy",
-        "PolicyDecision",
-        "PolicyMode",
-        "PolicyModeSource",
-        "PolicyPort",
-        "PolicyReason",
-        "PolicyRequest"
+        "ApprovalSubjectData",
+        "Policy",
+        "PolicyDecisionData",
+        "PolicyModeData",
+        "PolicyReasonData",
+        "PolicyRequestData",
+        "allow_all",
+        "configured"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -1817,17 +1836,15 @@
         "value": "agent/features/project/src"
       },
       "allowed_symbols": [
-        "PreparedWorkspaceRestore",
-        "ProjectIdentity",
+        "Workspace",
         "WorkspaceControl",
+        "WorkspaceData",
         "WorkspaceError",
-        "WorkspaceFrame",
         "WorkspaceId",
-        "WorkspacePersist",
-        "WorkspaceRead",
+        "WorkspaceReader",
+        "WorkspaceRestoreData",
         "WorkspaceRestoreError",
-        "WorkspaceViews",
-        "WorkspaceWiring",
+        "WorkspaceWriter",
         "WorktreeKind",
         "wire_production_workspace"
       ],

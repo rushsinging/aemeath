@@ -12,7 +12,7 @@ fn wire_components_document_exposes_only_pure_wire_contracts() {
         "https://json-schema.org/draft/2020-12/schema"
     );
     assert!(schemas.contains_key("InteractionRequest"));
-    assert!(schemas.contains_key("ConfigUpdate"));
+    assert!(schemas.contains_key("ConfigUpdateData"));
     assert!(schemas.contains_key("ConfigView"));
     assert!(schemas.contains_key("MarkdownSpacingModeView"));
     assert!(schemas.contains_key("ElementSpacingView"));

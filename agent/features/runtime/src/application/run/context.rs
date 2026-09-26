@@ -6,7 +6,7 @@
 //! 不可序列化，不进 Run 聚合。
 //!
 //! #1385：冻结生产契约 —— 只持当前生产可用的 per-Run 活契约；
-//! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigQuery / ConfigWriter 不进入。
+//! WorkspacePort / MainSessionWiring / SessionQueryPort / ConfigReader / ConfigWriter 不进入。
 //! Main 由 Composition 提供父能力装配；Sub 从父收缩派生。
 //!
 //! #1248 Task 3 refactor —— 生命周期拆分：
@@ -26,7 +26,7 @@ use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, PolicyPort, ProviderBinding};
+use crate::ports::{ContextPort, Policy, ProviderBinding};
 use hook::HookPort;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
@@ -343,7 +343,7 @@ pub struct RuntimeServices {
     /// Tool BC 执行端口。
     pub tool_execution: Arc<dyn ToolExecutionPort>,
     /// Policy BC 出站端口。
-    pub policy: Arc<dyn PolicyPort>,
+    pub policy: Arc<dyn Policy>,
     /// Reflection 历史存储（会话级）。
     pub reflection_history: Arc<dyn ReflectionHistoryStore>,
     /// Task BC 低权限访问端口（会话级）。
@@ -398,7 +398,7 @@ pub struct LifecycleBindings {
 /// - `task` 从旧空壳 `TaskPort` 校正为生产已使用的 `TaskAccess`。
 /// - `provider` 收敛为 `ProviderBinding`（含 port + model 约束）。
 /// - 新增 `InteractionBridge` 与 `ReflectionHistoryStore`。
-/// - 不含 `MainSessionWiring`、`WorkspaceViews`、`SessionQueryPort`、`ConfigQuery`/`ConfigWriter`。
+/// - 不含 `MainSessionWiring`、`Workspace`、`SessionQueryPort`、`ConfigReader`/`ConfigWriter`。
 ///
 /// ## Clone & cancellation
 ///
@@ -415,7 +415,7 @@ pub struct RuntimeContext {
     provider: Arc<ProviderBinding>,
     tool_catalog: Arc<dyn ToolCatalogPort>,
     tool_execution: Arc<dyn ToolExecutionPort>,
-    policy: Arc<dyn PolicyPort>,
+    policy: Arc<dyn Policy>,
     interaction: Arc<dyn InteractionPort>,
     memory: Arc<dyn MemoryPort>,
     reflection_history: Arc<dyn ReflectionHistoryStore>,
@@ -514,7 +514,7 @@ impl RuntimeContext {
         self.tool_execution.clone()
     }
     /// Policy 端口，`Arc` clone。
-    pub fn policy(&self) -> Arc<dyn PolicyPort> {
+    pub fn policy(&self) -> Arc<dyn Policy> {
         self.policy.clone()
     }
     /// 交互桥，`Arc` clone。
@@ -595,7 +595,7 @@ impl RuntimeContext {
         &self.tool_execution
     }
     /// Policy port reference.
-    pub fn policy_ref(&self) -> &Arc<dyn PolicyPort> {
+    pub fn policy_ref(&self) -> &Arc<dyn Policy> {
         &self.policy
     }
     /// Interaction port reference.

@@ -1200,18 +1200,18 @@ fn legacy_agent_progress(
     }
 }
 
-fn config_field(value: sdk::ConfigField) -> TuiConfigField {
+fn config_field(value: sdk::ConfigFieldData) -> TuiConfigField {
     match value {
-        sdk::ConfigField::Model => TuiConfigField::Model,
-        sdk::ConfigField::PermissionMode => TuiConfigField::PermissionMode,
-        sdk::ConfigField::Memory => TuiConfigField::Memory,
+        sdk::ConfigFieldData::Model => TuiConfigField::Model,
+        sdk::ConfigFieldData::PermissionMode => TuiConfigField::PermissionMode,
+        sdk::ConfigFieldData::Memory => TuiConfigField::Memory,
     }
 }
-fn config_cause(value: sdk::ConfigChangeCause) -> TuiConfigChangeCause {
+fn config_cause(value: sdk::ConfigChangeCauseData) -> TuiConfigChangeCause {
     match value {
-        sdk::ConfigChangeCause::ClientUpdate => TuiConfigChangeCause::ClientUpdate,
-        sdk::ConfigChangeCause::ProjectCommit => TuiConfigChangeCause::ProjectCommit,
-        sdk::ConfigChangeCause::FileReload => TuiConfigChangeCause::FileReload,
+        sdk::ConfigChangeCauseData::ClientUpdate => TuiConfigChangeCause::ClientUpdate,
+        sdk::ConfigChangeCauseData::ProjectCommit => TuiConfigChangeCause::ProjectCommit,
+        sdk::ConfigChangeCauseData::FileReload => TuiConfigChangeCause::FileReload,
     }
 }
 fn config_view(value: sdk::ConfigView) -> TuiConfigView {

@@ -103,7 +103,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn load_for_project(
         &self,
         id: &str,
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
     ) -> Result<CanonicalSession, SessionManagementError> {
         let project_dir = project_dir_segment(project);
         let session = self.load_canonical(Some(&project_dir), id).await?;
@@ -119,7 +119,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     /// identity 过滤。跨项目 key 零加载。
     async fn list_for_project(
         &self,
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<SessionListEntry>, SessionManagementError> {
         let project_dir = project_dir_segment(project);
         let entries = self
@@ -154,7 +154,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn export_for_project(
         &self,
         id: &str,
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
     ) -> Result<Vec<u8>, SessionManagementError> {
         let session = self.load_for_project(id, project).await?;
         SessionCodec::encode(&session)
@@ -164,7 +164,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn import_for_project(
         &self,
         bytes: &[u8],
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
     ) -> Result<SessionListEntry, SessionManagementError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
@@ -191,7 +191,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn update_metadata_for_project(
         &self,
         id: &str,
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
         update: SessionMetadataUpdate,
     ) -> Result<SessionListEntry, SessionManagementError> {
         let mut session = self.load_for_project(id, project).await?;
@@ -212,7 +212,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn delete_for_project(
         &self,
         id: &str,
-        project: &share::session_types::ProjectIdentity,
+        project: &share::session_types::ProjectIdentityData,
     ) -> Result<(), SessionManagementError> {
         let session = self.load_for_project(id, project).await?;
         // 三种历史布局位置一并清理（scoped / 平铺 / 平铺 .json）。

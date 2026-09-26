@@ -27,7 +27,7 @@ pub struct SubRunRequest {
 /// derived launcher. Run ownership stays in `instance`; remaining fields are
 /// derived-only metadata and never duplicate Run execution state.
 ///
-/// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::WorkspaceViews`]);
+/// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::Workspace`]);
 /// all scope/read_access/persist/skill query/hook workspace root come from the
 /// workspace capability retained by `DerivedRun.instance`.
 pub struct DerivedRun {

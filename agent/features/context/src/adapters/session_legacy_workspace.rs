@@ -11,7 +11,8 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::Value;
 use share::session_types::{
-    PersistedWorkspaceContext, PersistedWorkspaceFrame, ProjectIdentity, WorkspaceId, WorktreeKind,
+    PersistedWorkspaceContext, PersistedWorkspaceFrame, ProjectIdentityData, WorkspaceId,
+    WorktreeKind,
 };
 
 use crate::domain::session::{DecodedSession, SessionCodec, SessionCodecError};
@@ -33,7 +34,7 @@ struct LegacyWorkspace {
     #[serde(default)]
     workspace_id: Option<WorkspaceId>,
     #[serde(default)]
-    project_identity: Option<ProjectIdentity>,
+    project_identity: Option<ProjectIdentityData>,
     path_base: String,
     #[serde(alias = "working_root")]
     workspace_root: String,
@@ -55,7 +56,7 @@ struct LegacyWorkspaceFrame {
 /// A legacy snapshot that already carries every published field, ready for lightweight validation.
 struct CompleteWorkspace {
     workspace_id: WorkspaceId,
-    project_identity: ProjectIdentity,
+    project_identity: ProjectIdentityData,
     path_base: String,
     workspace_root: String,
     worktree_kind: WorktreeKind,
@@ -325,7 +326,7 @@ fn backfill(
             return Err(SessionCodecError::LegacyWorkspaceInvalidNonGitLayout { path: path_base });
         }
 
-        let identity = ProjectIdentity {
+        let identity = ProjectIdentityData {
             initial_cwd: path_text(&initial_cwd),
             git_common_dir: None,
         };
@@ -360,7 +361,7 @@ fn backfill(
         });
     }
 
-    let identity = ProjectIdentity {
+    let identity = ProjectIdentityData {
         initial_cwd: path_text(&initial_cwd),
         git_common_dir: identity_probe.common_dir.as_deref().map(path_text),
     };
@@ -390,7 +391,7 @@ pub(crate) fn upgrade(
         let initial_cwd = canonicalize(Path::new(&cwd))?;
         let repository = probe(&initial_cwd)?;
         let workspace_root = repository.top_level.clone();
-        let identity = ProjectIdentity {
+        let identity = ProjectIdentityData {
             initial_cwd: path_text(&initial_cwd),
             git_common_dir: repository.common_dir.as_deref().map(path_text),
         };

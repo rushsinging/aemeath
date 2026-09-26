@@ -2,7 +2,7 @@
 use super::*;
 use crate::adapters::ConfigAppService;
 use crate::domain::*;
-use crate::ports::{ConfigQuery, ConfigReader, ConfigWriter, ProjectConfigParticipant};
+use crate::ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
 use share::config::domain::merge::ConfigPatch;
 
 struct FakeEnv(std::collections::HashMap<String, String>);
@@ -25,7 +25,7 @@ async fn cli_layer_overrides_env() {
     );
     service
         .set_cli_patch(crate::adapters::CliArgsAdapter::read(
-            &crate::adapters::CliConfigInput {
+            &crate::adapters::CliConfigInputData {
                 api_key: Some("cli-key".into()),
                 model: Some("cli-model".into()),
                 ..Default::default()
@@ -45,7 +45,7 @@ async fn update_replaces_committed_snapshot_even_without_receiver() {
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
     service
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "provider/model".into(),
         })
         .await
@@ -65,13 +65,13 @@ async fn consecutive_updates_preserve_previously_committed_fields() {
             .with_native_store(NativeConfigStore::new(storage));
 
     service
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "provider/model".into(),
         })
         .await
         .unwrap();
     service
-        .update(ConfigUpdate::SetPermissionMode {
+        .update(ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::AllowAll,
         })
         .await
@@ -110,7 +110,7 @@ async fn concurrent_updates_are_serialized_without_losing_fields() {
         let service = service.clone();
         tokio::spawn(async move {
             service
-                .update(ConfigUpdate::SetModel {
+                .update(ConfigUpdateData::SetModel {
                     model: "concurrent/model".into(),
                 })
                 .await
@@ -120,7 +120,7 @@ async fn concurrent_updates_are_serialized_without_losing_fields() {
         let service = service.clone();
         tokio::spawn(async move {
             service
-                .update(ConfigUpdate::SetPermissionMode {
+                .update(ConfigUpdateData::SetPermissionMode {
                     mode: share::config::PermissionModeConfig::AllowAll,
                 })
                 .await
@@ -146,7 +146,7 @@ async fn runtime_override_is_restored_after_service_rebuild() {
     let service =
         ConfigAppService::with_global_path(None, global.clone()).with_native_store(store.clone());
     service
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "runtime/model".into(),
         })
         .await
@@ -171,15 +171,15 @@ async fn prepare_update_does_not_publish_before_commit() {
             .with_native_store(NativeConfigStore::new(storage));
     let before = service.committed_snapshot().models().default.clone();
     let prepared = service
-        .prepare_update(ConfigUpdate::SetModel {
+        .prepare_update(ConfigUpdateData::SetModel {
             model: "local/model".into(),
         })
         .await
         .unwrap();
     assert_eq!(service.committed_snapshot().models().default, before);
     let ready = match service.persist_update(prepared).await {
-        ConfigPersistOutcome::Committed(ready) => ready,
-        ConfigPersistOutcome::NotCommitted(error) => panic!("unexpected {error:?}"),
+        ConfigPersistOutcomeData::Committed(ready) => ready,
+        ConfigPersistOutcomeData::NotCommitted(error) => panic!("unexpected {error:?}"),
     };
     service.commit_update(*ready);
     assert_eq!(service.committed_snapshot().models().default, "local/model");
@@ -201,7 +201,7 @@ async fn env_permission_override_remains_above_dynamic_local_update() {
     service.load().await.unwrap();
 
     service
-        .update(ConfigUpdate::SetPermissionMode {
+        .update(ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::Ask,
         })
         .await
@@ -222,7 +222,7 @@ async fn cli_permission_override_remains_highest_after_dynamic_update() {
             .with_native_store(NativeConfigStore::new(storage));
     service
         .set_cli_patch(crate::adapters::CliArgsAdapter::read(
-            &crate::adapters::CliConfigInput {
+            &crate::adapters::CliConfigInputData {
                 allow_all: true,
                 ..Default::default()
             },
@@ -231,7 +231,7 @@ async fn cli_permission_override_remains_highest_after_dynamic_update() {
     service.load().await.unwrap();
 
     service
-        .update(ConfigUpdate::SetPermissionMode {
+        .update(ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::Ask,
         })
         .await
@@ -275,7 +275,7 @@ async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
         )));
     service
         .set_cli_patch(crate::adapters::CliArgsAdapter::read(
-            &crate::adapters::CliConfigInput {
+            &crate::adapters::CliConfigInputData {
                 model: Some("cli".into()),
                 ..Default::default()
             },
@@ -295,7 +295,7 @@ async fn persist_failure_does_not_publish_candidate() {
     let before = service.committed_snapshot().models().default.clone();
 
     let error = service
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "uncommitted/model".into(),
         })
         .await
@@ -303,7 +303,9 @@ async fn persist_failure_does_not_publish_candidate() {
 
     assert_eq!(
         error,
-        ConfigUpdateError::Persist(ConfigPersistError::UnsupportedDurability)
+        share::error::DomainError::from(ConfigUpdateError::Persist(
+            ConfigPersistError::UnsupportedDurability
+        ))
     );
     assert_eq!(service.committed_snapshot().models().default, before);
 }
@@ -315,10 +317,10 @@ async fn committed_update_notifies_subscription_with_same_snapshot() {
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
-    let mut subscription = ConfigQuery::subscribe(&service).await.unwrap();
+    let mut subscription = ConfigReader::subscribe(&service).await.unwrap();
 
     service
-        .update(ConfigUpdate::SetModel {
+        .update(ConfigUpdateData::SetModel {
             model: "notified/model".into(),
         })
         .await
@@ -346,7 +348,8 @@ async fn project_commit_becomes_baseline_for_following_update() {
     )
     .unwrap();
     let root = project.canonicalize().unwrap();
-    let location = ProjectConfigLocation::try_from_project_identity(root, b"project-a").unwrap();
+    let location =
+        ProjectConfigLocationData::try_from_project_identity(root, b"project-a").unwrap();
     let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
     let service = ConfigAppService::with_global_path(None, dir.path().join("global.json"))
         .with_native_store(NativeConfigStore::new(storage));
@@ -354,7 +357,7 @@ async fn project_commit_becomes_baseline_for_following_update() {
     let prepared = service.prepare_for_project(&location).await.unwrap();
     service.commit_project(prepared).await;
     service
-        .update(ConfigUpdate::SetPermissionMode {
+        .update(ConfigUpdateData::SetPermissionMode {
             mode: share::config::PermissionModeConfig::AllowAll,
         })
         .await
@@ -373,7 +376,7 @@ async fn subscription_initial_matches_committed_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"));
-    let subscription = ConfigQuery::subscribe(&service).await.unwrap();
+    let subscription = ConfigReader::subscribe(&service).await.unwrap();
     assert_eq!(
         subscription.initial.model_name(),
         service.committed_snapshot().model_name()
@@ -418,7 +421,7 @@ async fn refresh_rejects_invalid_source_and_preserves_committed_snapshot() {
     std::fs::write(&global, "not json").unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcome::Rejected {
+        ConfigRefreshOutcomeData::Rejected {
             error: ConfigRefreshError::Parse
         }
     ));
@@ -443,7 +446,7 @@ async fn refresh_does_not_publish_file_change_overridden_by_env() {
     std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcome::Unchanged
+        ConfigRefreshOutcomeData::Unchanged
     ));
     assert_eq!(service.committed_snapshot().model_name(), "env-model");
     assert_eq!(service.committed_snapshot().revision(), before.revision());
@@ -462,7 +465,7 @@ async fn refresh_reports_run_scope_for_allow_all() {
 
     assert!(matches!(
         outcome,
-        ConfigRefreshOutcome::Reloaded { scopes, .. }
+        ConfigRefreshOutcomeData::Reloaded { scopes, .. }
             if scopes == vec![share::config::domain::scope::ConfigApplicationScope::Run]
     ));
 }
@@ -480,7 +483,7 @@ async fn refresh_reports_session_restart_scope_for_tui_change() {
 
     assert!(matches!(
         outcome,
-        ConfigRefreshOutcome::Reloaded { scopes, .. }
+        ConfigRefreshOutcomeData::Reloaded { scopes, .. }
             if scopes == vec![share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired]
     ));
 }
@@ -497,7 +500,7 @@ async fn refresh_publishes_to_watch_subscribers_once() {
     std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcome::Reloaded { .. }
+        ConfigRefreshOutcomeData::Reloaded { .. }
     ));
     changes.changed().await.unwrap();
     assert_eq!(changes.borrow().model_name(), "second");

@@ -74,7 +74,7 @@ pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
 #[derive(Clone)]
 pub struct StopHookExecutionContext {
     hook_port: Arc<dyn HookPort>,
-    workspace_read: Arc<dyn project::WorkspaceRead>,
+    workspace_read: Arc<dyn project::WorkspaceReader>,
     session_id: String,
     language: String,
     subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
@@ -83,7 +83,7 @@ pub struct StopHookExecutionContext {
 impl StopHookExecutionContext {
     pub fn new(
         hook_port: Arc<dyn HookPort>,
-        workspace_read: Arc<dyn project::WorkspaceRead>,
+        workspace_read: Arc<dyn project::WorkspaceReader>,
         session_id: String,
         language: String,
     ) -> Self {

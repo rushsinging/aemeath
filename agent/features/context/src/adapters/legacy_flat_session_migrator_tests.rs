@@ -2,12 +2,12 @@ use super::*;
 use crate::adapters::AtomicBlobSessionManagement;
 use crate::domain::session::{CanonicalSession, SessionCodec, SessionMetadata, SnapshotState};
 use crate::ports::{SessionManagementPort, SessionSnapshotStore};
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity};
+use share::session_types::{PersistedWorkspaceContext, ProjectIdentityData};
 use std::sync::Arc;
 use storage::{file_system_blob, AtomicBlobPort, StorageNamespace};
 
 fn captured_session(id: &str, common_dir: &str) -> CanonicalSession {
-    let identity = ProjectIdentity {
+    let identity = ProjectIdentityData {
         initial_cwd: format!("/repos/work-{id}"),
         git_common_dir: Some(common_dir.to_string()),
     };
@@ -104,7 +104,7 @@ async fn bare_id_flat_sessions_move_into_project_dirs_and_become_listable() {
         "迁移后不应残留单段平铺 key"
     );
 
-    let alpha_identity = ProjectIdentity {
+    let alpha_identity = ProjectIdentityData {
         initial_cwd: "/repos/work-sess-plain-a".to_string(),
         git_common_dir: Some("/repos/alpha/.git".to_string()),
     };
@@ -144,7 +144,7 @@ async fn flat_json_sessions_move_into_project_dirs_and_become_listable() {
             .collect::<Vec<_>>()
     );
 
-    let alpha_identity = ProjectIdentity {
+    let alpha_identity = ProjectIdentityData {
         initial_cwd: "/repos/work-sess-a".to_string(),
         git_common_dir: Some("/repos/alpha/.git".to_string()),
     };

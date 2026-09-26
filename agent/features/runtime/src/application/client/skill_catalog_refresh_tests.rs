@@ -52,10 +52,8 @@ fn descriptor(name: &str, description: &str) -> SkillDescriptor {
     )
 }
 
-fn workspace_views() -> project::WorkspaceViews {
-    project::wire_production_workspace(std::env::temp_dir(), None)
-        .expect("wire test workspace")
-        .into_views()
+fn workspace_views() -> project::Workspace {
+    project::wire_production_workspace(std::env::temp_dir(), None).expect("wire test workspace")
 }
 
 fn refresh_with(

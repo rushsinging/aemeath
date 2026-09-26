@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ConfigField {
+pub enum ConfigFieldData {
     Model,
     PermissionMode,
     Memory,
@@ -13,7 +13,7 @@ pub enum ConfigField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ConfigChangeCause {
+pub enum ConfigChangeCauseData {
     ClientUpdate,
     ProjectCommit,
     FileReload,
@@ -77,14 +77,14 @@ pub struct ConfigView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ConfigUpdate {
+pub enum ConfigUpdateData {
     SetModel { model: String },
     SetPermissionMode { mode: PermissionModeView },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigUpdateResult {
-    pub changed_fields: Vec<ConfigField>,
+    pub changed_fields: Vec<ConfigFieldData>,
     pub view: ConfigView,
 }
 
@@ -106,8 +106,8 @@ pub struct ConfigReloadedEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ConfigChangedEvent {
-    pub cause: ConfigChangeCause,
-    pub changed_fields: Vec<ConfigField>,
+    pub cause: ConfigChangeCauseData,
+    pub changed_fields: Vec<ConfigFieldData>,
     pub view: ConfigView,
 }
 
@@ -117,10 +117,13 @@ mod tests {
 
     #[test]
     fn config_update_round_trips_as_typed_command() {
-        let update = ConfigUpdate::SetPermissionMode {
+        let update = ConfigUpdateData::SetPermissionMode {
             mode: PermissionModeView::AllowAll,
         };
         let json = serde_json::to_string(&update).unwrap();
-        assert_eq!(serde_json::from_str::<ConfigUpdate>(&json).unwrap(), update);
+        assert_eq!(
+            serde_json::from_str::<ConfigUpdateData>(&json).unwrap(),
+            update
+        );
     }
 }

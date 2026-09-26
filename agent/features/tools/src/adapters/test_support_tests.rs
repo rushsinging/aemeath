@@ -26,7 +26,7 @@ impl CancellationSignal for TestCancellation {
 
 struct WorkspaceTestPorts {
     control: Arc<dyn project::WorkspaceControl>,
-    persist: Arc<dyn project::WorkspacePersist>,
+    persist: Arc<dyn project::WorkspaceWriter>,
 }
 
 fn workspace_ports() -> &'static Mutex<HashMap<String, WorkspaceTestPorts>> {
@@ -38,8 +38,7 @@ fn workspace_ports() -> &'static Mutex<HashMap<String, WorkspaceTestPorts>> {
 pub(crate) fn production_execution_context(root: PathBuf) -> ToolExecutionContext {
     let views =
         project::wire_production_workspace(root, Some(std::path::PathBuf::from(".worktrees")))
-            .expect("workspace initialization")
-            .into_views();
+            .expect("workspace initialization");
     let read = views.read();
     let workspace_id = read.workspace_id();
     let workspace_root = read.current_workspace_root();
@@ -83,7 +82,7 @@ pub(crate) fn production_workspace_control(
 
 pub(crate) fn production_workspace_persist(
     context: &ToolExecutionContext,
-) -> Arc<dyn project::WorkspacePersist> {
+) -> Arc<dyn project::WorkspaceWriter> {
     workspace_ports()
         .lock()
         .expect("workspace test ports")

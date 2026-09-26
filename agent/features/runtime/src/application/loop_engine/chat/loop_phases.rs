@@ -6,11 +6,11 @@
 use crate::application::loop_engine::chat::config_reload::check_config_changes;
 use crate::application::loop_engine::chat::snapshot_registry::SourceSnapshotRegistry;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeStreamEvent};
-use config::{ConfigReader, ConfigRefreshOutcome};
+use config::{ConfigReader, ConfigRefreshOutcomeData};
 
 /// Turn 边界配置与 Prompt source 变更检测结果。
 pub(crate) struct TurnBoundaryConfigOutcome {
-    pub refresh: ConfigRefreshOutcome,
+    pub refresh: ConfigRefreshOutcomeData,
     pub guidance_sources_changed: bool,
 }
 
@@ -32,8 +32,8 @@ where
 {
     let refresh = config_reader.refresh_if_sources_changed().await;
     match &refresh {
-        ConfigRefreshOutcome::Unchanged => {}
-        ConfigRefreshOutcome::Reloaded { scopes, .. } => {
+        ConfigRefreshOutcomeData::Unchanged => {}
+        ConfigRefreshOutcomeData::Reloaded { scopes, .. } => {
             let mut changed_keys = vec!["config:reloaded".to_string()];
             changed_keys.extend(
                 scopes
@@ -60,7 +60,7 @@ where
                     .await;
             }
         }
-        ConfigRefreshOutcome::Rejected { error } => {
+        ConfigRefreshOutcomeData::Rejected { error } => {
             sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
                 "[config] 配置重载失败，继续使用已提交配置：{error:?}"
             )))

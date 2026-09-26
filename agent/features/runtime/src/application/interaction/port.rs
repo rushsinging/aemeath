@@ -8,7 +8,7 @@
 //! - pause/resume
 //! - 触发 Run 状态机迁移到 `AwaitingUser` / `AwaitingToolApproval`
 //!
-//! 消费：`InteractionPort`（UI 交互）、`PolicyPort`（权限判断）
+//! 消费：`InteractionPort`（UI 交互）、`Policy`（权限判断）
 //!
 //! #1248 Task 4: 收敛为 Runtime-owned object-safe `InteractionPort` trait。
 //! `InteractionBridge` 实现 client 端口；`UnavailableInteractionPort` 立即

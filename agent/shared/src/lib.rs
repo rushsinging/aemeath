@@ -26,6 +26,10 @@ pub fn version() -> &'static str {
 pub mod adapter;
 pub mod config;
 pub mod error;
+
+#[cfg(test)]
+#[path = "error_domain_tests.rs"]
+mod error_domain_tests;
 pub mod i18n;
 pub mod memory;
 pub mod message;

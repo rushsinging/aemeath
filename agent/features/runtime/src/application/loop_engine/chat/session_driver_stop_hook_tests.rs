@@ -354,7 +354,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     .canonicalize()
     .unwrap();
 
-    let identity = share::session_types::ProjectIdentity {
+    let identity = share::session_types::ProjectIdentityData {
         initial_cwd: main_repo.display().to_string(),
         git_common_dir: Some(common_dir.display().to_string()),
     };
@@ -371,7 +371,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
     // （与主仓路径不同），这正是本测试要验证的 stop hook env 来源。
     let workspace = project::wire_production_workspace(main_repo.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let prepared = workspace
         .persist()
         .prepare_restore(&workspace_dto)
@@ -455,7 +455,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
 }
 
 struct ExitWorktreeBeforeStopProvider {
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
 }
 
 #[async_trait]
@@ -516,7 +516,7 @@ async fn stop_hook_uses_workspace_restored_during_the_same_run() {
     let main_root = repository.path().canonicalize().unwrap();
     let workspace = project::wire_production_workspace(main_root.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     workspace
         .control()
         .enter(Some(linked_root), None, None)

@@ -5,14 +5,15 @@ use async_trait::async_trait;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use tokio::sync::{mpsc, Semaphore};
 
-use crate::client::{wire_audit_client, wire_audit_store, AuditClient};
+use crate::client::{wire_audit_client, wire_audit_store, AuditWriter};
 
 fn start_test_client_with_store(
     store: std::sync::Arc<dyn crate::ports::UsageAppendStorePort>,
     capacity: usize,
     timeout: Duration,
-) -> AuditClient {
-    wire_audit_client(&wire_audit_store(store), capacity, timeout)
+) -> AuditWriter {
+    let (writer, _reader) = wire_audit_client(&wire_audit_store(store), capacity, timeout);
+    writer
 }
 use crate::domain::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use crate::ports::{

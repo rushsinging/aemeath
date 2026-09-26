@@ -223,7 +223,6 @@ mod tests {
         let workspace = tempfile::tempdir().expect("workspace");
         let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
             .expect("workspace wiring")
-            .into_views()
             .control();
         register_named_scope(
             &registry,

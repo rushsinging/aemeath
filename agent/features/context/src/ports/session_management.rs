@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use share::session_types::ProjectIdentity;
+use share::session_types::ProjectIdentityData;
 
 use crate::domain::session::{
     CanonicalSession, DisplayHistoryStepWindow, SessionListEntry, SessionManagementError,
@@ -18,13 +18,13 @@ pub trait SessionManagementPort: Send + Sync {
     async fn load_for_project(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<CanonicalSession, SessionManagementError>;
 
     async fn load_for_resume(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<SessionResumeLoad, SessionManagementError> {
         self.load_for_project(id, project)
             .await
@@ -37,7 +37,7 @@ pub trait SessionManagementPort: Send + Sync {
     async fn load_display_history_steps(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
         generation_revision: u64,
         member_names: &[String],
     ) -> Result<DisplayHistoryStepWindow, SessionManagementError> {
@@ -50,14 +50,14 @@ pub trait SessionManagementPort: Send + Sync {
     /// Lists only sessions belonging to the supplied stable project identity.
     async fn list_for_project(
         &self,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<Vec<SessionListEntry>, SessionManagementError>;
 
     /// Exports only a session belonging to the supplied stable project identity.
     async fn export_for_project(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<Vec<u8>, SessionManagementError>;
 
     /// Imports only a session whose persisted project identity matches the
@@ -65,7 +65,7 @@ pub trait SessionManagementPort: Send + Sync {
     async fn import_for_project(
         &self,
         bytes: &[u8],
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<SessionListEntry, SessionManagementError>;
 
     /// Updates metadata only for a session belonging to the supplied stable
@@ -73,7 +73,7 @@ pub trait SessionManagementPort: Send + Sync {
     async fn update_metadata_for_project(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
         update: SessionMetadataUpdate,
     ) -> Result<SessionListEntry, SessionManagementError>;
 
@@ -81,6 +81,6 @@ pub trait SessionManagementPort: Send + Sync {
     async fn delete_for_project(
         &self,
         id: &str,
-        project: &ProjectIdentity,
+        project: &ProjectIdentityData,
     ) -> Result<(), SessionManagementError>;
 }

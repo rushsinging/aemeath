@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use share::session_types::{
-    PersistedWorkspaceContext, PersistedWorkspaceFrame, ProjectIdentity, WorkspaceId, WorktreeKind,
+    PersistedWorkspaceContext, PersistedWorkspaceFrame, ProjectIdentityData, WorkspaceId,
+    WorktreeKind,
 };
 
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
-use crate::domain::types::{GitProbeError, WorkspaceError, WorkspaceFrame, WorkspaceRestoreError};
+use crate::domain::types::{GitProbeError, WorkspaceData, WorkspaceError, WorkspaceRestoreError};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
 /// 测试构造器默认：repo 根下 `.worktrees`（生产链路由 wiring 注入配置值）。
@@ -15,13 +16,13 @@ const UNNAMED_WORKSPACE_SEGMENT: &str = "workspace";
 
 #[derive(Clone)]
 pub struct WorkspaceState {
-    pub project_identity: ProjectIdentity,
+    pub project_identity: ProjectIdentityData,
     pub workspace_root: PathBuf,
     pub path_base: PathBuf,
     pub worktree_kind: WorktreeKind,
     /// 已解析的 worktree 默认创建根目录（生产由 wiring 注入配置值）。
     pub worktrees_root: PathBuf,
-    pub stack: Vec<WorkspaceFrame>,
+    pub stack: Vec<WorkspaceData>,
 }
 
 impl WorkspaceState {
@@ -29,7 +30,7 @@ impl WorkspaceState {
     #[cfg(test)]
     pub fn new(cwd: PathBuf) -> Self {
         Self::from_verified(
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: cwd.display().to_string(),
                 git_common_dir: Some(cwd.join(".git").display().to_string()),
             },
@@ -41,7 +42,7 @@ impl WorkspaceState {
     }
 
     pub fn from_verified(
-        project_identity: ProjectIdentity,
+        project_identity: ProjectIdentityData,
         workspace_root: PathBuf,
         path_base: PathBuf,
         worktree_kind: WorktreeKind,
@@ -106,7 +107,7 @@ fn resolve_worktree_path(
     state: &WorkspaceState,
     path: Option<PathBuf>,
     branch: Option<&str>,
-) -> Result<PathBuf, WorkspaceError> {
+) -> Result<PathBuf, share::error::DomainError> {
     match path.filter(|value| !value.as_os_str().is_empty()) {
         Some(p) if p.is_absolute() => Ok(p),
         Some(p) => Ok(state.path_base.join(p)),
@@ -115,7 +116,7 @@ fn resolve_worktree_path(
                 .worktrees_root
                 .join(workspace_repo_segment(state)?)
                 .join(sanitize_branch_for_path(b)?)),
-            _ => Err(WorkspaceError::MissingPathAndBranch),
+            _ => Err(WorkspaceError::MissingPathAndBranch.into()),
         },
     }
 }
@@ -125,12 +126,15 @@ fn resolve_worktree_base(base: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_WORKTREE_BASE)
 }
 
-pub fn change_directory(state: &mut WorkspaceState, path: PathBuf) -> Result<(), WorkspaceError> {
+pub fn change_directory(
+    state: &mut WorkspaceState,
+    path: PathBuf,
+) -> Result<(), share::error::DomainError> {
     let canonical = path
         .canonicalize()
         .map_err(|_| WorkspaceError::PathNotFound(path.clone()))?;
     if !canonical.is_dir() {
-        return Err(WorkspaceError::NotDirectory(canonical));
+        return Err(WorkspaceError::NotDirectory(canonical).into());
     }
     let canonical_root = state
         .workspace_root
@@ -140,7 +144,8 @@ pub fn change_directory(state: &mut WorkspaceState, path: PathBuf) -> Result<(),
         return Err(WorkspaceError::PathOutsideWorkspaceRoot {
             path: canonical,
             root: canonical_root,
-        });
+        }
+        .into());
     }
     state.path_base = canonical;
     Ok(())
@@ -199,9 +204,9 @@ pub fn enter(
     path: Option<PathBuf>,
     branch: Option<String>,
     base: Option<String>,
-) -> Result<WorkspaceFrame, WorkspaceError> {
+) -> Result<WorkspaceData, share::error::DomainError> {
     if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit);
+        return Err(WorkspaceError::UnsupportedForNonGit.into());
     }
     let mut next_stack = state.stack.clone();
     if !next_stack.is_empty() {
@@ -214,7 +219,8 @@ pub fn enter(
                 return Err(WorkspaceError::NestedWorktree {
                     current_workspace_root: state.workspace_root.clone(),
                     current_path_base: state.path_base.clone(),
-                });
+                }
+                .into());
             }
         }
     }
@@ -234,9 +240,10 @@ pub fn enter(
     }
     let (canonical, worktree_root, worktree_kind) = validate_in_repo(state, git, &target)?;
     if worktree_kind != WorktreeKind::Linked {
-        return Err(WorkspaceError::NotLinkedWorktree { path: canonical });
+        return Err(WorkspaceError::NotLinkedWorktree { path: canonical }.into());
     }
-    let frame = WorkspaceFrame {
+    let frame = WorkspaceData {
+        id: state.workspace_id(),
         path_base: state.path_base.clone(),
         workspace_root: state.workspace_root.clone(),
         worktree_kind: state.worktree_kind,
@@ -252,9 +259,9 @@ pub fn enter(
 pub fn exit(
     state: &mut WorkspaceState,
     git: &dyn GitWorktreeOps,
-) -> Result<WorkspaceFrame, WorkspaceError> {
+) -> Result<WorkspaceData, share::error::DomainError> {
     if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit);
+        return Err(WorkspaceError::UnsupportedForNonGit.into());
     }
     let prev = state
         .stack
@@ -266,7 +273,7 @@ pub fn exit(
         || worktree_root != prev.workspace_root
         || worktree_kind != prev.worktree_kind
     {
-        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput));
+        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput).into());
     }
     state.stack.pop();
     state.workspace_root = worktree_root;
@@ -295,19 +302,19 @@ pub fn snapshot(state: &WorkspaceState) -> PersistedWorkspaceContext {
 }
 
 #[must_use]
-pub struct PreparedWorkspaceRestore {
+pub struct WorkspaceRestoreData {
     candidate: WorkspaceState,
 }
 
-impl PreparedWorkspaceRestore {
-    pub fn project_identity(&self) -> &ProjectIdentity {
+impl WorkspaceRestoreData {
+    pub fn project_identity(&self) -> &ProjectIdentityData {
         &self.candidate.project_identity
     }
 }
 
-impl std::fmt::Debug for PreparedWorkspaceRestore {
+impl std::fmt::Debug for WorkspaceRestoreData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreparedWorkspaceRestore")
+        f.debug_struct("WorkspaceRestoreData")
             .finish_non_exhaustive()
     }
 }
@@ -370,7 +377,7 @@ pub fn prepare_restore(
     live_state: &WorkspaceState,
     dto: &PersistedWorkspaceContext,
     git: &dyn GitWorktreeOps,
-) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
+) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
     if dto.project_identity.initial_cwd.is_empty() {
         return Err(WorkspaceRestoreError::InvalidProjectIdentity);
     }
@@ -402,7 +409,8 @@ pub fn prepare_restore(
         let frame_root = restore_path(&persisted.workspace_root)?;
         let frame_base = restore_path(&persisted.path_base)?;
         validate_containment(&frame_base, &frame_root)?;
-        stack.push(WorkspaceFrame {
+        stack.push(WorkspaceData {
+            id: dto.workspace_id.clone(),
             path_base: frame_base,
             workspace_root: frame_root,
             worktree_kind: persisted.worktree_kind,
@@ -472,7 +480,7 @@ pub fn prepare_restore(
                     Some(frame.worktree_kind),
                 )?;
             }
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: initial_cwd.to_string_lossy().into_owned(),
                 git_common_dir: Some(common.to_string_lossy().into_owned()),
             }
@@ -490,7 +498,7 @@ pub fn prepare_restore(
             {
                 return Err(WorkspaceRestoreError::RepositoryMismatch);
             }
-            ProjectIdentity {
+            ProjectIdentityData {
                 initial_cwd: initial_cwd.to_string_lossy().into_owned(),
                 git_common_dir: None,
             }
@@ -502,7 +510,7 @@ pub fn prepare_restore(
         return Err(WorkspaceRestoreError::WorkspaceIdMismatch);
     }
 
-    Ok(PreparedWorkspaceRestore {
+    Ok(WorkspaceRestoreData {
         candidate: WorkspaceState {
             project_identity: canonical_identity,
             workspace_root,
@@ -515,7 +523,7 @@ pub fn prepare_restore(
     })
 }
 
-pub fn commit_restore(state: &mut WorkspaceState, prepared: PreparedWorkspaceRestore) {
+pub fn commit_restore(state: &mut WorkspaceState, prepared: WorkspaceRestoreData) {
     *state = prepared.candidate;
 }
 

@@ -182,7 +182,7 @@ fn driver_key_envs() -> &'static [(&'static str, &'static str)] {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct CliConfigInput {
+pub struct CliConfigInputData {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
@@ -198,7 +198,7 @@ pub struct CliConfigInput {
 pub struct CliArgsAdapter;
 
 impl CliArgsAdapter {
-    pub fn read(input: &CliConfigInput) -> ConfigPatch {
+    pub fn read(input: &CliConfigInputData) -> ConfigPatch {
         let api = (input.api_key.is_some() || input.base_url.is_some()).then(|| ApiConfigPatch {
             key: input.api_key.clone(),
             base_url: input.base_url.clone(),
@@ -522,7 +522,7 @@ pub struct NativeConfigStore {
 
 impl NativeConfigStore {
     /// 构造仅限 config crate 内部与测试；crate 外一律经 crate 根
-    /// `native_override_store` 工厂装配，散落构造在编译期不可达。
+    /// `wire_config_override_store` 工厂装配，散落构造在编译期不可达。
     pub(crate) fn new(storage: Arc<dyn AtomicBlobPort>) -> Self {
         Self { storage }
     }
