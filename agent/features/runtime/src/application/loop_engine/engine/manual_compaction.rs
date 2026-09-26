@@ -1,23 +1,28 @@
-//! 手动压缩 Run 的执行阶段：在输入通道已 seal 且无输入时兑现
-//! `RunIntent::ManualCompaction`。
+//! 手动压缩 Run 的执行阶段：runtime 受理 `/compact` 后，Run 由命令直接置为
+//! `Compacting`；压缩完成回到 `DrainingInput`，收口仍由后续 drain 的
+//! `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
 //!
-//! 该阶段不产生 RunStep，也 **NEVER** 调用模型：压缩完成后经
-//! `CompactionOnlySettled` 回到 `DrainingInput`，由第二次 drain 的
-//! `EmptyAndSealed` 收口 `Completed`。
+//! 该阶段不产生 RunStep，也 **NEVER** 调用模型。
 
 use super::*;
+
+/// 手动压缩阶段的收口方向。
+pub(super) enum ManualCompactionDirective {
+    /// 压缩完成并已回到 `DrainingInput`，交给后续 drain 收口。
+    Settled,
+    /// 已取消或超时，Run 已进入终态。
+    Terminal,
+}
 
 pub(super) async fn execute_manual_compaction(
     run: &mut Run,
     execution: &mut RunExecutionState,
     cancel: &CancellationToken,
     port: &mut RunLoop<'_>,
-) -> Result<(), LoopEngineError> {
-    // 首轮 drain 已确认输入通道 seal 且无输入：把「压缩意图」作为内部
-    // continuation 消费，先进入 PreparingContext，再开始压缩。
-    run.apply_drain_decision(DrainDecision::InternalContinuation, None)?;
+) -> Result<ManualCompactionDirective, LoopEngineError> {
+    // 命令驱动置状态：Run 直接进入 `Compacting`，不借用 drain 结果推进。
+    run.begin_manual_compaction()?;
     emit_events(run, execution, port).await?;
-    transition_and_emit(run, execution, port, RunTransition::BeginCompaction).await?;
     let activity_id = match port.start_manual_compaction_activity() {
         Ok(activity_id) => Some(activity_id),
         Err(error) => {
@@ -62,21 +67,22 @@ pub(super) async fn execute_manual_compaction(
                     );
                 }
             }
-            transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
             transition_and_emit(run, execution, port, RunTransition::CompactionOnlySettled).await?;
-            Ok(())
+            Ok(ManualCompactionDirective::Settled)
         }
         ManualCompactionPhaseOutcome::Cancelled => {
             if let Some(activity_id) = activity_id {
                 let _ = port.finish_activity(activity_id, ActivityTerminal::Cancelled);
             }
-            terminate_interrupted_run(run, execution, port).await
+            terminate_interrupted_run(run, execution, port).await?;
+            Ok(ManualCompactionDirective::Terminal)
         }
         ManualCompactionPhaseOutcome::TimedOut => {
             if let Some(activity_id) = activity_id {
                 let _ = port.finish_activity(activity_id, ActivityTerminal::Terminated);
             }
-            timeout_run(run, execution, port).await
+            timeout_run(run, execution, port).await?;
+            Ok(ManualCompactionDirective::Terminal)
         }
     }
 }

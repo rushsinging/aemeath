@@ -804,7 +804,8 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
             Some(RunStatus::DrainingInput)
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
-        (RunStatus::PreparingContext, RunTransition::CompactionOnlySettled) => {
+        (RunStatus::DrainingInput, RunTransition::BeginCompaction) => Some(RunStatus::Compacting),
+        (RunStatus::Compacting, RunTransition::CompactionOnlySettled) => {
             Some(RunStatus::DrainingInput)
         }
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
@@ -838,18 +839,32 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
     }
 }
 
-/// `CompactionOnlySettled` 只对手动压缩 Run 合法：矩阵测试在
-/// `PreparingContext` 上必须改用 compaction-only 意图的 Run，其余组合沿用会话 Run
-/// 以证明该边对会话 Run 被拒绝。
+/// 手动压缩专用的两条迁移只在 `ManualCompaction` 意图下合法：矩阵测试对这两个组合
+/// 改用 compaction-only 意图的 Run，其余组合沿用会话 Run，以证明命令与收口边对会话
+/// Run 被拒绝。
 fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) -> Run {
-    if transition != RunTransition::CompactionOnlySettled || status != RunStatus::PreparingContext {
+    let manual_only = matches!(
+        (status, transition),
+        (RunStatus::DrainingInput, RunTransition::BeginCompaction)
+            | (RunStatus::Compacting, RunTransition::CompactionOnlySettled)
+    );
+    if !manual_only {
         return run_at_status(status);
     }
+    manual_compaction_run_at_status(status)
+}
+
+fn manual_compaction_run_at_status(status: RunStatus) -> Run {
     let mut run = Run::new(RunSpec::manual_compaction(), None);
     run.start_draining().unwrap();
-    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
-        .unwrap();
-    run
+    match status {
+        RunStatus::DrainingInput => run,
+        RunStatus::Compacting => {
+            run.begin_manual_compaction().unwrap();
+            run
+        }
+        other => panic!("手动压缩 fixture 不支持状态: {other:?}"),
+    }
 }
 
 #[test]
@@ -2021,18 +2036,13 @@ fn manual_compaction_spec_declares_compaction_only_intent() {
 }
 
 #[test]
-fn compaction_only_run_settles_through_draining_input_to_completed() {
+fn manual_compaction_command_enters_compacting_and_settles_to_completed() {
     let mut run = Run::new(RunSpec::manual_compaction(), None);
     run.start_draining().unwrap();
-    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
-        .unwrap();
-    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert_eq!(run.status(), RunStatus::DrainingInput);
 
-    run.transition(RunTransition::BeginCompaction).unwrap();
+    run.begin_manual_compaction().unwrap();
     assert_eq!(run.status(), RunStatus::Compacting);
-
-    run.transition(RunTransition::CompactionCompleted).unwrap();
-    assert_eq!(run.status(), RunStatus::PreparingContext);
 
     run.transition(RunTransition::CompactionOnlySettled)
         .unwrap();
@@ -2044,18 +2054,38 @@ fn compaction_only_run_settles_through_draining_input_to_completed() {
 }
 
 #[test]
+fn conversation_run_rejects_manual_compaction_command() {
+    let mut run = run_at_status(RunStatus::DrainingInput);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.begin_manual_compaction(),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::DrainingInput,
+            transition: RunTransition::BeginCompaction,
+        })
+    );
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的手动压缩命令不得发布迁移事件"
+    );
+}
+
+#[test]
 fn conversation_run_rejects_compaction_only_settled() {
-    let mut run = run_at_status(RunStatus::PreparingContext);
+    let mut run = run_at_status(RunStatus::Compacting);
     let events_before = run.events().len();
 
     assert_eq!(
         run.transition(RunTransition::CompactionOnlySettled),
         Err(RunTransitionError::IllegalTransition {
-            from: RunStatus::PreparingContext,
+            from: RunStatus::Compacting,
             transition: RunTransition::CompactionOnlySettled,
         })
     );
-    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert_eq!(run.status(), RunStatus::Compacting);
     assert_eq!(
         run.events().len(),
         events_before,

@@ -80,6 +80,18 @@ async fn run_loop_body(
         emit_events(run, execution, port).await?;
     }
 
+    // 手动压缩 Run：runtime 已受理 `/compact`，压缩前置到主循环之前——命令直接把
+    // Run 置为 `Compacting`，压缩完成后回到 `DrainingInput`，收口仍由主循环里 drain 的
+    // `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
+    if run.spec().intent() == RunIntent::ManualCompaction
+        && matches!(
+            execute_manual_compaction(run, execution, cancel, port).await?,
+            ManualCompactionDirective::Terminal
+        )
+    {
+        return Ok(LoopDirective::Terminal);
+    }
+
     log::debug!(
         target: crate::LOG_TARGET,
         "[run_loop] entered run_id={} parent={} spec={:?}",
@@ -101,8 +113,6 @@ async fn run_loop_body(
     // Completed event. Must live outside the loop block — otherwise
     // Complete→drain→EmptyAndSealed loses the result.
     let mut terminal_text: Option<String> = None;
-    // 手动压缩 Run 只执行一次压缩；该标志区分首轮 drain 与压缩后的收口轮。
-    let mut manual_compaction_settled = false;
     loop {
         if let Some(control) = handle_pending_control(run, execution, port).await? {
             if matches!(control, ControlDirective::Terminal) {
@@ -346,15 +356,6 @@ async fn run_loop_body(
                 #[allow(unused_assignments)]
                 {
                     expected_epoch = expected_epoch.next();
-                }
-
-                // 手动压缩 Run 的首轮收口：输入通道已 seal，先执行压缩，再由下一轮
-                // drain 以既有不变量（DrainingInput + EmptyAndSealed）收口 Completed。
-                if run.spec().intent() == RunIntent::ManualCompaction && !manual_compaction_settled
-                {
-                    execute_manual_compaction(run, execution, cancel, port).await?;
-                    manual_compaction_settled = true;
-                    continue;
                 }
 
                 let text = terminal_text.as_deref();

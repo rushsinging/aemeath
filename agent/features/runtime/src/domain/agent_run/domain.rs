@@ -292,6 +292,22 @@ impl Run {
                 transition,
             });
         }
+        if transition == RunTransition::BeginCompaction
+            && self.status == RunStatus::DrainingInput
+            && self.spec.intent() != RunIntent::ManualCompaction
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 仅手动压缩 Run 可从排空阶段直接进入压缩",
+                self.id,
+                self.spec.intent(),
+                transition,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition,
+            });
+        }
         if transition == RunTransition::ContextPrepared
             && self.spec.intent() == RunIntent::ManualCompaction
         {
@@ -318,7 +334,8 @@ impl Run {
             (RunStatus::Compacting, RunTransition::CompactionCompleted) => {
                 RunStatus::PreparingContext
             }
-            (RunStatus::PreparingContext, RunTransition::CompactionOnlySettled) => {
+            (RunStatus::DrainingInput, RunTransition::BeginCompaction) => RunStatus::Compacting,
+            (RunStatus::Compacting, RunTransition::CompactionOnlySettled) => {
                 RunStatus::DrainingInput
             }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
@@ -563,6 +580,30 @@ impl Run {
             parent_run_id: self.parent_id.clone(),
         });
         Ok(())
+    }
+
+    /// 命令驱动：手动压缩 Run 直接进入 `Compacting`。
+    ///
+    /// 只接受 `ManualCompaction` 意图与 `DrainingInput` 起点，其余组合返回
+    /// `IllegalTransition`。迁移仍经状态矩阵（`(DrainingInput, BeginCompaction)`），
+    /// 因此事件发布与 activity 观察与其它迁移完全一致。
+    pub fn begin_manual_compaction(&mut self) -> Result<(), RunTransitionError> {
+        if self.spec.intent() != RunIntent::ManualCompaction
+            || self.status != RunStatus::DrainingInput
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "manual compaction command rejected: run_id={} intent={:?} status={:?} 仅手动压缩 Run 可从排空阶段进入压缩",
+                self.id,
+                self.spec.intent(),
+                self.status,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition: RunTransition::BeginCompaction,
+            });
+        }
+        self.transition(RunTransition::BeginCompaction).map(|_| ())
     }
 
     /// #1272: Set the completion result text that will be used by
