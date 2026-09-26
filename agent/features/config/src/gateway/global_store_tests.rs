@@ -17,7 +17,7 @@ fn draft() -> ConnectDraft {
         max_tokens: 4_096,
         reasoning_effort: None,
     }];
-    draft.set_global_default = true;
+    draft.default_model_id = Some("model-x".to_string());
     draft.set_user_credential("secret".to_string());
     draft
 }

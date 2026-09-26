@@ -26,7 +26,6 @@ use crate::catalog::ProviderSource;
 ///   凭证 / Provider UA；
 /// - `SelectModel`：选择推荐模型或进入自定义模型编辑；
 /// - `EditCustomModel`：填写自定义 model_id / context_window / max_tokens；
-/// - `ChooseGlobalDefault`：选择是否将本次模型设为全局默认；
 /// - `ChooseProbe`：选择跳过或执行连接探测；
 /// - `Probing`：正在等待 `ProviderProbePort` 返回；
 /// - `Review`：含 review 页面（无密钥明文）并提交；
@@ -43,7 +42,6 @@ pub enum ConnectStage {
     EditUserAgent,
     SelectModel,
     EditCustomModel,
-    ChooseGlobalDefault,
     ChooseProbe,
     Probing,
     Review,

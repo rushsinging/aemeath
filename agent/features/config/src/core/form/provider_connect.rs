@@ -276,6 +276,20 @@ fn page_for_connect(
                     effort_field.display_value = Some(effort.to_string());
                 }
             }
+            // 设为全局默认（全局唯一）：默认否；编辑目标当前是默认时预选是。
+            let mut default_field = select_field(
+                "global_default",
+                "设为全局默认",
+                vec![option("no", "否", None)?, option("yes", "是", None)?],
+            )?;
+            let is_default = connect
+                .draft
+                .default_model_id
+                .as_deref()
+                .is_some_and(|target| editing.is_some_and(|model| model.model_id == target));
+            let default_label = if is_default { "是" } else { "否" };
+            default_field.has_value = true;
+            default_field.display_value = Some(default_label.to_string());
             (
                 "edit_custom_model",
                 "添加 / 编辑模型",
@@ -301,23 +315,9 @@ fn page_for_connect(
                         editing.and_then(|model| model.max_tokens).map(u64::from),
                     )?,
                     effort_field,
+                    default_field,
                 ],
             )
-        }
-        ConnectStage::ChooseGlobalDefault => {
-            let mut field = select_field(
-                "set_global_default",
-                "设为全局默认",
-                vec![option("yes", "是", None)?, option("no", "否", None)?],
-            )?;
-            let label = if connect.draft.set_global_default {
-                "是"
-            } else {
-                "否"
-            };
-            field.has_value = true;
-            field.display_value = Some(label.to_string());
-            ("choose_global_default", "设置全局默认模型", vec![field])
         }
         ConnectStage::ChooseProbe => ("choose_probe", "测试连接", Vec::new()),
         ConnectStage::Probing => (
@@ -510,19 +510,15 @@ fn submit_for_stage(
                         .map_err(|_| invalid_value("max_tokens"))?,
                     reasoning_effort,
                 },
+                set_as_default: {
+                    let ConfigFormValue::SelectedOption(option_id) =
+                        &field("global_default")?.value
+                    else {
+                        return Err(invalid_type("global_default"));
+                    };
+                    option_id.as_str() == "yes"
+                },
             }
-        }
-        ConnectStage::ChooseGlobalDefault => {
-            let ConfigFormValue::SelectedOption(option_id) = &field("set_global_default")?.value
-            else {
-                return Err(invalid_type("set_global_default"));
-            };
-            let set_as_default = match option_id.as_str() {
-                "yes" => true,
-                "no" => false,
-                _ => return Err(invalid_value("set_global_default")),
-            };
-            ConnectCommand::SetGlobalDefault { set_as_default }
         }
         // 探测完成（含失败）后回车提交 = 继续到 Review；页面 actions 仍可
         // 返回编辑或取消。
@@ -547,15 +543,15 @@ fn action_for_id(action_id: &str) -> Result<ConnectCommand, ProviderConnectFormE
         // 支持 `{name}:{option_id}` 后缀（TUI 附带高亮 option 作参数）。
         raw => {
             let (main, target) = raw.split_once(':').unwrap_or((raw, ""));
+            let target_model = (!target.is_empty()).then(|| {
+                target
+                    .strip_prefix("configured-")
+                    .unwrap_or(target)
+                    .to_string()
+            });
             match main {
-                "enter_custom_model" => ConnectCommand::EnterCustomModel {
-                    target_model: (!target.is_empty()).then(|| {
-                        target
-                            .strip_prefix("configured-")
-                            .unwrap_or(target)
-                            .to_string()
-                    }),
-                },
+                "add_model" => ConnectCommand::EnterCustomModel { target_model: None },
+                "edit_model" => ConnectCommand::EnterCustomModel { target_model },
                 _ => {
                     return Err(ProviderConnectFormError::InvalidSubmission(format!(
                         "未知动作：{action_id}"
@@ -595,11 +591,11 @@ fn action_schema(
         | AvailableAction::SetProviderUserAgent
         | AvailableAction::SelectRecommendedModel
         | AvailableAction::SetCustomModel
-        | AvailableAction::SetGlobalDefault
         | AvailableAction::BeginCustomProvider
         | AvailableAction::SelectCustomProvider => return None,
-        // 模型多选页的"添加 / 编辑模型"入口（可无限次进入 upsert）。
-        AvailableAction::EnterCustomModel => ("enter_custom_model", "添加 / 编辑模型", secondary),
+        // 模型页两个独立入口：添加（空表单）/ 编辑（高亮项预填）。
+        AvailableAction::AddModel => ("add_model", "添加模型", secondary),
+        AvailableAction::EditModel => ("edit_model", "编辑模型", secondary),
         AvailableAction::ConfirmOverwrite => ("confirm_overwrite", "覆盖", primary),
         AvailableAction::RejectOverwrite => ("reject_overwrite", "返回", secondary),
         AvailableAction::SkipProbe => ("skip_probe", "跳过测试", secondary),
@@ -928,12 +924,12 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
     )?);
     fields.push(summary_field(
         "review_global_default",
-        "设为全局默认",
-        if connect.draft.set_global_default {
-            "是".to_string()
-        } else {
-            "否".to_string()
-        },
+        "全局默认模型",
+        connect
+            .draft
+            .default_model_id
+            .clone()
+            .unwrap_or_else(|| "未设置".to_string()),
     )?);
     Ok(fields)
 }
@@ -945,12 +941,11 @@ fn step_for_stage(stage: ConnectStage) -> Option<ConfigFormStep> {
         ConnectStage::EditCredential => 3,
         ConnectStage::EditUserAgent => 4,
         ConnectStage::SelectModel | ConnectStage::EditCustomModel => 5,
-        ConnectStage::ChooseGlobalDefault => 6,
-        ConnectStage::ChooseProbe | ConnectStage::Probing => 7,
-        ConnectStage::Review | ConnectStage::Saving => 8,
+        ConnectStage::ChooseProbe | ConnectStage::Probing => 6,
+        ConnectStage::Review | ConnectStage::Saving => 7,
         ConnectStage::Completed | ConnectStage::Cancelled => return None,
     };
-    Some(ConfigFormStep { current, total: 8 })
+    Some(ConfigFormStep { current, total: 7 })
 }
 
 fn probe_status_text(status: Option<&ProbeStatusView>) -> String {

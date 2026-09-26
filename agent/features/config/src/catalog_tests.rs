@@ -272,6 +272,7 @@ fn configured_catalog_defaults_match_product_requirements() {
     // `docs/design/02-modules/config/02-provider-catalog-and-connect.md`。
     let zhipu_models = &[
         ("glm-5.3", 1_000_000, 131_072),
+        ("glm-5.3-flash", 1_048_576, 131_072),
         ("glm-5.2", 1_000_000, 131_072),
         ("glm-5-turbo", 200_000, 131_072),
     ][..];

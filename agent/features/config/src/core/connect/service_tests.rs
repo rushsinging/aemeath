@@ -232,6 +232,7 @@ async fn ready_to_probe_for_source(
                 max_tokens: 4_096,
                 reasoning_effort: None,
             },
+            set_as_default: false,
         },
     )
     .await;
@@ -248,14 +249,7 @@ async fn ready_to_probe_for_source(
         },
     )
     .await;
-    advance(
-        service,
-        view,
-        ConnectCommand::SetGlobalDefault {
-            set_as_default: true,
-        },
-    )
-    .await
+    view
 }
 
 async fn ready_to_review(service: &ConnectAppService) -> ConnectView {
@@ -437,7 +431,7 @@ async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_m
         },
     )
     .await;
-    assert_eq!(selected.stage, ConnectStage::ChooseGlobalDefault);
+    assert_eq!(selected.stage, ConnectStage::ChooseProbe);
     assert_eq!(
         selected
             .draft

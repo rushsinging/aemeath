@@ -18,7 +18,6 @@
 //! | EditUserAgent        | `SetProviderUserAgent`                                                                      |
 //! | SelectModel          | `SelectRecommendedModel` / `EnterCustomModel`                                               |
 //! | EditCustomModel      | `SetCustomModel`                                                                            |
-//! | ChooseGlobalDefault  | `SetGlobalDefault`                                                                          |
 //! | ChooseProbe          | `SkipProbe` / `BeginProbe`                                                                  |
 //! | Probing              | `ContinueAfterProbeFailure` / `EditAfterProbeFailure`（取决于探测结果）                      |
 //! | Review               | `ConfirmSave`                                                                               |
@@ -40,9 +39,7 @@ pub enum ConnectCommand {
 
     // --- SelectProvider / ConfirmOverwrite ---
     /// 选择固定 source，迁移至 EditEndpoint（或经 ConfirmOverwrite）。
-    SelectProvider {
-        source: ProviderSource,
-    },
+    SelectProvider { source: ProviderSource },
     /// 进入完全自定义 Provider 编辑页（名称 / driver / endpoint 全手填）。
     BeginCustomProvider,
     /// 提交自定义 Provider 三要素；source 名为用户输入（无需在 Catalog）。
@@ -66,16 +63,12 @@ pub enum ConnectCommand {
 
     // --- EditCredential ---
     /// 设置 API key。空字符串映射为 `has_api_key = false`，但仍保留字段语义。
-    SetCredential {
-        api_key: String,
-    },
+    SetCredential { api_key: String },
 
     // --- EditUserAgent ---
     /// 设置 Provider 专属 UA。`raw = None` / `raw = Some("")` 清除覆盖；
     /// 含控制字符的输入返回 Validation 错误。
-    SetProviderUserAgent {
-        raw: Option<String>,
-    },
+    SetProviderUserAgent { raw: Option<String> },
 
     // --- SelectModel / EditCustomModel ---
     /// 模型页提交完整所选集合（推荐与自定义的任意组合，整体替换）。
@@ -85,17 +78,13 @@ pub enum ConnectCommand {
     /// 切换至 EditCustomModel 阶段（添加 / 编辑模型，可无限次进入）。
     /// `target_model` 为模型页当前高亮 option 对应的已配置模型 id（编辑目标）；
     /// `None` = 添加新模型。
-    EnterCustomModel {
-        target_model: Option<String>,
-    },
+    EnterCustomModel { target_model: Option<String> },
     /// 在 EditCustomModel 阶段提交模型字段；model_id 命中已有条目即编辑
-    /// （替换属性），否则追加，随后返回模型页。
+    /// （替换属性），否则追加，随后返回模型页。`set_as_default` 把该模型
+    /// 设为全局默认（全局唯一，替换旧默认）；false 且该模型正是当前默认
+    /// 时取消默认。
     UpsertCustomModel {
         model: super::draft::ModelDraft,
-    },
-
-    // --- ChooseGlobalDefault ---
-    SetGlobalDefault {
         set_as_default: bool,
     },
 
@@ -134,7 +123,6 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
             EditUserAgent,
             SelectModel,
             EditCustomModel,
-            ChooseGlobalDefault,
             ChooseProbe,
             Probing,
             Review,
@@ -150,7 +138,6 @@ pub(crate) fn expected_stages(command: &ConnectCommand) -> &'static [super::stat
             &[SelectModel]
         }
         ConnectCommand::UpsertCustomModel { .. } => &[EditCustomModel],
-        ConnectCommand::SetGlobalDefault { .. } => &[ChooseGlobalDefault],
         ConnectCommand::SkipProbe | ConnectCommand::BeginProbe => &[ChooseProbe],
         ConnectCommand::ContinueAfterProbe | ConnectCommand::EditAfterProbeFailure => &[Probing],
         ConnectCommand::ConfirmSave => &[Review, Saving],

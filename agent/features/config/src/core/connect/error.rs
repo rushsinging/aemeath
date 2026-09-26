@@ -115,7 +115,6 @@ pub(crate) fn command_name(command: &ConnectCommand) -> &'static str {
         ConnectCommand::SetSelectedModels { .. } => "SetSelectedModels",
         ConnectCommand::EnterCustomModel { .. } => "EnterCustomModel",
         ConnectCommand::UpsertCustomModel { .. } => "UpsertCustomModel",
-        ConnectCommand::SetGlobalDefault { .. } => "SetGlobalDefault",
         ConnectCommand::SkipProbe => "SkipProbe",
         ConnectCommand::BeginProbe => "BeginProbe",
         ConnectCommand::ContinueAfterProbe => "ContinueAfterProbe",

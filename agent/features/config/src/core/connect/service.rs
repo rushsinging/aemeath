@@ -492,10 +492,10 @@ impl ConnectAppService {
             Cmd::EnterCustomModel { target_model } => {
                 self.sync_enter_custom_model(session, target_model.clone())
             }
-            Cmd::UpsertCustomModel { model } => self.sync_upsert_custom_model(session, model),
-            Cmd::SetGlobalDefault { set_as_default } => {
-                self.sync_set_global_default(session, *set_as_default)
-            }
+            Cmd::UpsertCustomModel {
+                model,
+                set_as_default,
+            } => self.sync_upsert_custom_model(session, model, *set_as_default),
             Cmd::SkipProbe => self.sync_skip_probe(session),
             Cmd::BeginProbe => (None, SyncOutcome::Proceed), // handled in async
             Cmd::ContinueAfterProbe => self.sync_continue_after_probe(session),
@@ -517,8 +517,7 @@ impl ConnectAppService {
             ConnectStage::EditUserAgent => ConnectStage::EditCredential,
             ConnectStage::SelectModel => ConnectStage::EditUserAgent,
             ConnectStage::EditCustomModel => ConnectStage::SelectModel,
-            ConnectStage::ChooseGlobalDefault => ConnectStage::SelectModel,
-            ConnectStage::ChooseProbe => ConnectStage::ChooseGlobalDefault,
+            ConnectStage::ChooseProbe => ConnectStage::SelectModel,
             // 探测中/失败后返回：回到测试选择页（可重新测试或跳过），
             // 而不是 InvalidTransition 导致表单整体退出。
             ConnectStage::Probing => ConnectStage::ChooseProbe,
@@ -768,7 +767,7 @@ impl ConnectAppService {
             }
         }
         session.draft.models = models.to_vec();
-        session.stage = ConnectStage::ChooseGlobalDefault;
+        session.stage = ConnectStage::ChooseProbe;
         (None, SyncOutcome::Proceed)
     }
 
@@ -786,6 +785,7 @@ impl ConnectAppService {
         &self,
         session: &mut ConnectSession,
         model: &ModelDraft,
+        set_as_default: bool,
     ) -> (Option<ConnectError>, SyncOutcome) {
         if let Err(err) = model.validate() {
             return (
@@ -805,18 +805,14 @@ impl ConnectAppService {
             Some(existing) => *existing = model.clone(),
             None => session.draft.models.push(model.clone()),
         }
+        // 全局默认唯一：设为默认替换旧值；取消且目标即当前默认时清除。
+        if set_as_default {
+            session.draft.default_model_id = Some(model.model_id.clone());
+        } else if session.draft.default_model_id.as_deref() == Some(model.model_id.as_str()) {
+            session.draft.default_model_id = None;
+        }
         // 返回模型页：允许继续添加 / 调整勾选后再提交。
         session.stage = ConnectStage::SelectModel;
-        (None, SyncOutcome::Proceed)
-    }
-
-    fn sync_set_global_default(
-        &self,
-        session: &mut ConnectSession,
-        set_as_default: bool,
-    ) -> (Option<ConnectError>, SyncOutcome) {
-        session.draft.set_global_default = set_as_default;
-        session.stage = ConnectStage::ChooseProbe;
         (None, SyncOutcome::Proceed)
     }
 
@@ -981,6 +977,6 @@ fn project_draft(draft: &ConnectDraft) -> ConnectDraftView {
                 reasoning_effort: model.reasoning_effort.clone(),
             })
             .collect(),
-        set_global_default: draft.set_global_default,
+        default_model_id: draft.default_model_id.clone(),
     }
 }

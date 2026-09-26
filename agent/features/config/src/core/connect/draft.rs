@@ -136,7 +136,8 @@ pub struct ConnectDraft {
     pub models: Vec<ModelDraft>,
     /// "添加 / 编辑模型"目标：模型页高亮的已配置模型 id；None = 添加。
     pub editing_model_id: Option<String>,
-    pub set_global_default: bool,
+    /// 全局默认模型 id（全局唯一；None = 不设默认）。
+    pub default_model_id: Option<String>,
 }
 
 impl ConnectDraft {
@@ -152,7 +153,7 @@ impl ConnectDraft {
             preserved_api_key: None,
             models: Vec::new(),
             editing_model_id: None,
-            set_global_default: false,
+            default_model_id: None,
         }
     }
 

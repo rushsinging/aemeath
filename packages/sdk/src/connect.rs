@@ -25,7 +25,6 @@ pub enum ConnectStage {
     EditUserAgent,
     SelectModel,
     EditCustomModel,
-    ChooseGlobalDefault,
     ChooseProbe,
     Probing,
     Review,
@@ -79,8 +78,7 @@ pub enum ConnectCommand {
     },
     UpsertCustomModel {
         model: ConnectModelSpec,
-    },
-    SetGlobalDefault {
+        #[serde(default)]
         set_as_default: bool,
     },
     SkipProbe,
@@ -107,7 +105,7 @@ pub struct ConnectDraftView {
     pub has_api_key: bool,
     pub provider_user_agent: Option<String>,
     pub models: Vec<ConnectModelDraftView>,
-    pub set_global_default: bool,
+    pub default_model_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -131,9 +129,9 @@ pub enum ConnectAvailableAction {
     SetCredential,
     SetProviderUserAgent,
     SelectRecommendedModel,
-    EnterCustomModel,
+    AddModel,
+    EditModel,
     SetCustomModel,
-    SetGlobalDefault,
     SkipProbe,
     BeginProbe,
     ContinueAfterProbe,

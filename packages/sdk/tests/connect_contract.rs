@@ -23,7 +23,7 @@ fn connect_published_language_round_trips_without_credential_material() {
                 max_tokens: Some(4_096),
                 reasoning_effort: None,
             }],
-            set_global_default: true,
+            default_model_id: Some("m".to_string()),
         },
         existing_provider: None,
         available_actions: vec![sdk::ConnectAvailableAction::ConfirmSave],
@@ -66,6 +66,7 @@ fn connect_commands_carry_typed_values_and_origins_are_distinct() {
             max_tokens: 8_192,
             reasoning_effort: None,
         },
+        set_as_default: false,
     };
     let encoded = serde_json::to_value(command).unwrap();
     assert_eq!(

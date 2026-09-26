@@ -147,7 +147,7 @@ fn review_page_displays_every_chosen_configuration() {
         max_tokens: Some(16_384),
         reasoning_effort: None,
     }];
-    view.draft.set_global_default = true;
+    view.draft.default_model_id = Some("glm-5.3".to_string());
 
     let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
 
@@ -165,7 +165,7 @@ fn review_page_displays_every_chosen_configuration() {
             "API Key",
             "模型",
             "User-Agent",
-            "设为全局默认"
+            "全局默认模型"
         ]
     );
     let values: Vec<&str> = form
@@ -182,7 +182,7 @@ fn review_page_displays_every_chosen_configuration() {
             "sk-h****wxyz",
             "glm-5.3（Context 1048576 · Max 16384）",
             "ZCode/3.11.2",
-            "是",
+            "glm-5.3",
         ]
     );
 }
@@ -366,57 +366,6 @@ fn credential_page_displays_existing_key_mask_above_and_prefills_input() {
 }
 
 #[test]
-fn choose_global_default_page_offers_yes_and_no_options() {
-    // 设为全局默认必须是可选的是/否（含预选），而不是只有单值开关。
-    let mut view = connect_view(ConnectStage::ChooseGlobalDefault);
-    view.draft.set_global_default = false;
-
-    let form = provider_connect_form_view(&view, crate::catalog::PROVIDER_CATALOG).unwrap();
-
-    let field = &form.page.fields[0];
-    assert_eq!(field.field_type, ConfigFormFieldType::SingleSelect);
-    let labels: Vec<&str> = field
-        .options
-        .iter()
-        .map(|option| option.label.as_str())
-        .collect();
-    assert_eq!(labels, vec!["是", "否"]);
-    assert!(field.has_value, "必须预选当前 draft 值");
-    assert_eq!(field.display_value.as_deref(), Some("否"));
-
-    let mut yes_view = connect_view(ConnectStage::ChooseGlobalDefault);
-    yes_view.draft.set_global_default = true;
-    let yes_form = provider_connect_form_view(&yes_view, crate::catalog::PROVIDER_CATALOG).unwrap();
-    assert_eq!(yes_form.page.fields[0].display_value.as_deref(), Some("是"));
-}
-
-#[test]
-fn global_default_submission_maps_yes_and_no_to_command() {
-    for (option_id, expected) in [("yes", true), ("no", false)] {
-        let command = connect_command_for_form(
-            &connect_view(ConnectStage::ChooseGlobalDefault),
-            ConfigFormCommand::SubmitPage {
-                values: vec![ConfigFormFieldValue {
-                    field_id: ConfigFormFieldId::new("set_global_default").unwrap(),
-                    value: ConfigFormValue::SelectedOption(
-                        ConfigFormOptionId::new(option_id).unwrap(),
-                    ),
-                }],
-            },
-            crate::catalog::PROVIDER_CATALOG,
-        )
-        .unwrap();
-        assert!(
-            matches!(
-                command,
-                crate::connect::ConnectCommand::SetGlobalDefault { set_as_default } if set_as_default == expected
-            ),
-            "选项 {option_id} 必须映射为 {expected}"
-        );
-    }
-}
-
-#[test]
 fn probing_page_submission_maps_to_continue_after_probe() {
     // 探测失败后回车提交必须映射为"继续"，而不是报
     // "Probing 页面不接受字段提交"导致表单退出。
@@ -486,7 +435,8 @@ fn custom_model_page_requires_three_typed_fields() {
             "model_id",
             "context_window",
             "max_tokens",
-            "reasoning_effort"
+            "reasoning_effort",
+            "global_default",
         ]
     );
 }
@@ -644,7 +594,14 @@ fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
     assert!(form.page.fields[0].display_value.is_none());
     assert!(form.page.fields[1].display_value.is_none());
     assert!(form.page.fields[2].display_value.is_none());
-    assert!(form.page.fields.iter().all(|field| !field.has_value));
+    // global_default 始终预选"否"；其余字段无 catalog 默认时保持空。
+    for field in &form.page.fields {
+        if field.id.as_str() == "global_default" {
+            assert_eq!(field.display_value.as_deref(), Some("否"));
+        } else {
+            assert!(!field.has_value);
+        }
+    }
 }
 
 #[test]
@@ -775,6 +732,10 @@ fn custom_model_submission_maps_all_typed_fields() {
                         ConfigFormOptionId::new("high").unwrap(),
                     ),
                 },
+                ConfigFormFieldValue {
+                    field_id: ConfigFormFieldId::new("global_default").unwrap(),
+                    value: ConfigFormValue::SelectedOption(ConfigFormOptionId::new("yes").unwrap()),
+                },
             ],
         },
         crate::catalog::PROVIDER_CATALOG,
@@ -783,7 +744,7 @@ fn custom_model_submission_maps_all_typed_fields() {
 
     assert!(matches!(
         command,
-        crate::connect::ConnectCommand::UpsertCustomModel { model }
+        crate::connect::ConnectCommand::UpsertCustomModel { model, set_as_default: true }
             if model.model_id == "custom-model"
                 && model.context_window == 128_000
                 && model.max_tokens == 8_192
@@ -801,7 +762,6 @@ fn all_connect_stages_publish_a_form_page_or_terminal() {
         ConnectStage::EditUserAgent,
         ConnectStage::SelectModel,
         ConnectStage::EditCustomModel,
-        ConnectStage::ChooseGlobalDefault,
         ConnectStage::ChooseProbe,
         ConnectStage::Probing,
         ConnectStage::Review,

@@ -60,7 +60,8 @@ pub struct ConnectDraftView {
     pub models: Vec<ModelDraftView>,
     /// "添加 / 编辑模型"目标（模型页高亮项）；None = 添加。
     pub editing_model_id: Option<String>,
-    pub set_global_default: bool,
+    /// 全局默认模型 id（全局唯一）；None = 不设默认。
+    pub default_model_id: Option<String>,
 }
 
 impl ConnectDraftView {
@@ -140,9 +141,9 @@ pub enum AvailableAction {
     SetCredential,
     SetProviderUserAgent,
     SelectRecommendedModel,
-    EnterCustomModel,
+    AddModel,
+    EditModel,
     SetCustomModel,
-    SetGlobalDefault,
     SkipProbe,
     BeginProbe,
     ContinueAfterProbe,
@@ -168,11 +169,11 @@ impl AvailableAction {
             ConnectStage::EditUserAgent => vec![Self::SetProviderUserAgent, Self::Cancel],
             ConnectStage::SelectModel => vec![
                 Self::SelectRecommendedModel,
-                Self::EnterCustomModel,
+                Self::AddModel,
+                Self::EditModel,
                 Self::Cancel,
             ],
             ConnectStage::EditCustomModel => vec![Self::SetCustomModel, Self::Cancel],
-            ConnectStage::ChooseGlobalDefault => vec![Self::SetGlobalDefault, Self::Cancel],
             ConnectStage::ChooseProbe => vec![Self::SkipProbe, Self::BeginProbe, Self::Cancel],
             ConnectStage::Probing => match probe_status {
                 Some(ProbeStatusView::Failed { .. }) => vec![

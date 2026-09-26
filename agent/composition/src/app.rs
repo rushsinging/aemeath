@@ -662,15 +662,18 @@ fn config_command(
                 .collect(),
         },
         Source::EnterCustomModel { target_model } => Target::EnterCustomModel { target_model },
-        Source::UpsertCustomModel { model } => Target::UpsertCustomModel {
+        Source::UpsertCustomModel {
+            model,
+            set_as_default,
+        } => Target::UpsertCustomModel {
             model: config::connect::ModelDraft {
                 model_id: model.model_id,
                 context_window: model.context_window,
                 max_tokens: model.max_tokens,
                 reasoning_effort: model.reasoning_effort,
             },
+            set_as_default,
         },
-        Source::SetGlobalDefault { set_as_default } => Target::SetGlobalDefault { set_as_default },
         Source::SkipProbe => Target::SkipProbe,
         Source::BeginProbe => Target::BeginProbe,
         Source::ContinueAfterProbe => Target::ContinueAfterProbe,
@@ -725,7 +728,7 @@ fn sdk_view(view: ConnectView) -> sdk::ConnectView {
                     reasoning_effort: model.reasoning_effort,
                 })
                 .collect(),
-            set_global_default: view.draft.set_global_default,
+            default_model_id: view.draft.default_model_id.clone(),
         },
         existing_provider: view.existing_provider.map(|provider| {
             sdk::ConnectExistingProviderView {
@@ -762,7 +765,6 @@ fn sdk_stage(stage: config::connect::ConnectStage) -> sdk::ConnectStage {
         Source::EditUserAgent => sdk::ConnectStage::EditUserAgent,
         Source::SelectModel => sdk::ConnectStage::SelectModel,
         Source::EditCustomModel => sdk::ConnectStage::EditCustomModel,
-        Source::ChooseGlobalDefault => sdk::ConnectStage::ChooseGlobalDefault,
         Source::ChooseProbe => sdk::ConnectStage::ChooseProbe,
         Source::Probing => sdk::ConnectStage::Probing,
         Source::Review => sdk::ConnectStage::Review,
@@ -784,9 +786,9 @@ fn sdk_action(action: config::connect::AvailableAction) -> sdk::ConnectAvailable
         Source::SetCredential => sdk::ConnectAvailableAction::SetCredential,
         Source::SetProviderUserAgent => sdk::ConnectAvailableAction::SetProviderUserAgent,
         Source::SelectRecommendedModel => sdk::ConnectAvailableAction::SelectRecommendedModel,
-        Source::EnterCustomModel => sdk::ConnectAvailableAction::EnterCustomModel,
+        Source::AddModel => sdk::ConnectAvailableAction::AddModel,
+        Source::EditModel => sdk::ConnectAvailableAction::EditModel,
         Source::SetCustomModel => sdk::ConnectAvailableAction::SetCustomModel,
-        Source::SetGlobalDefault => sdk::ConnectAvailableAction::SetGlobalDefault,
         Source::SkipProbe => sdk::ConnectAvailableAction::SkipProbe,
         Source::BeginProbe => sdk::ConnectAvailableAction::BeginProbe,
         Source::ContinueAfterProbe => sdk::ConnectAvailableAction::ContinueAfterProbe,

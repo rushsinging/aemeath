@@ -329,18 +329,23 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
         providers.remove(&key);
     }
     providers.insert(source.as_str().to_string(), Value::Object(provider));
-    if draft.set_global_default {
+    // 全局默认模型：编辑页"设为全局默认"勾选产生（全局唯一）；
+    // 未显式指定时回落首个所选模型。
+    let default_model = draft
+        .default_model_id
+        .as_deref()
+        .and_then(|target| {
+            draft
+                .models
+                .iter()
+                .find(|model| model.model_id == target)
+                .map(|model| model.model_id.as_str())
+        })
+        .or_else(|| draft.models.first().map(|model| model.model_id.as_str()));
+    if let Some(default_model) = default_model {
         models.insert(
             "default".to_string(),
-            Value::String(format!(
-                "{}/{}",
-                source.as_str(),
-                draft
-                    .models
-                    .first()
-                    .map(|model| model.model_id.as_str())
-                    .unwrap_or_default()
-            )),
+            Value::String(format!("{}/{}", source.as_str(), default_model)),
         );
     }
     Ok(root.clone().into())

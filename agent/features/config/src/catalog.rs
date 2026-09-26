@@ -287,6 +287,15 @@ const ZHIPU_MODELS: &[RecommendedModel] = &[
         verified_at: VERIFIED_AT_2026_09_10,
     },
     RecommendedModel {
+        // GLM-5.3-Flash/FlashX：首个原生多模态（视觉 Coding），1M 上下文
+        // 与 128K 最大输出（官方模型页核验）。
+        model_id: "glm-5.3-flash",
+        context_window: 1_048_576,
+        max_tokens: 131_072,
+        evidence_url: "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash",
+        verified_at: VERIFIED_AT_2026_09_10,
+    },
+    RecommendedModel {
         model_id: "glm-5.2",
         context_window: 1_000_000,
         max_tokens: 131_072,

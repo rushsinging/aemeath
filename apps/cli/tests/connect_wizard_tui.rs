@@ -105,15 +105,13 @@ fn connect_wizard_full_flow_shows_probe_result() {
     // 4. UA：Anthropic 有 catalog 官方 UA 预填，直接回车
     wait_screen("claude-cli", "UA 页", 10_000);
     submit("");
-    // 5. 模型页：空格勾选首项推荐模型后回车提交
+    // 5. 模型页：空格勾选首项推荐模型后回车提交（全局默认已并入
+    //    模型编辑页，无独立 6/8 页）
     wait_screen("claude-fable", "模型页", 10_000);
     key("space");
     pause();
     submit("");
-    // 6. 全局默认（否）
-    pause();
-    submit("");
-    // 7. 测试页：回车触发 primary（测试连接）
+    // 6. 测试页：回车触发 primary（测试连接）
     wait_screen("跳过测试", "测试页", 10_000);
     submit("");
     // 8. 断言探测结果：不可路由端点必须显示失败详情
