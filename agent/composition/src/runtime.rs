@@ -95,13 +95,13 @@ pub(crate) async fn from_args_with_gateways(
     // StorageNamespace::Memory adds "memory" segment → adapter root is
     // agents_dir so the dataset lives at agents_dir/memory/{project}/...
     // (not agents_dir/memory/memory/...). Legacy memory still uses the
-    // explicit agents_dir.join("memory") path via FileLegacyMemorySourceFactory.
+    // explicit agents_dir.join("memory") path via wire_legacy_memory_source_factory.
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
-        Arc::new(memory_api::AtomicDatasetReflectionHistoryStore::new(
+        memory::wire_reflection_history_store(
             storage::file_system_dataset(agents_dir)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             project_key,
-        ));
+        );
 
     let task_wiring = task::wire_task();
     let hook_runner: Arc<dyn hook::HookDispatcher> =
@@ -204,13 +204,11 @@ pub(crate) async fn from_args_with_gateways(
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
-        memory_opener: Box::new(memory::api::DatasetMemoryOpener::new(
+        memory_opener: memory::wire_memory_opener(
             storage::file_system_dataset(agents_dir_buf)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-            Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
-                agents_dir.join("memory"),
-            )),
-        )),
+            memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
+        ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
             context::ProductionMainContextFactory::new(Arc::new(

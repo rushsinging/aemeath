@@ -1,4 +1,7 @@
-use super::{map_storage_error, AtomicDatasetMemoryStore, ProjectMemoryOpener};
+use super::{
+    map_storage_error, AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore,
+    ProjectMemoryOpener,
+};
 use crate::adapters::MemoryPolicy;
 use crate::{domain::*, ports::*};
 use async_trait::async_trait;
@@ -70,6 +73,16 @@ fn storage_error_acl_maps_only_memory_owned_error_kinds() {
 fn adapter_is_memory_owned_store() {
     fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevision>>() {}
     assert_store::<AtomicDatasetMemoryStore>();
+}
+
+/// #1709 收窄判定点：实现体 `AtomicDatasetReflectionHistoryStore` 已
+/// `pub(crate)`（crate 外只能经 `memory::wire_reflection_history_store` 取得
+/// trait 对象），「实现 Memory-owned 双 trait」的静态断言随收窄迁入 crate 内。
+#[test]
+fn reflection_history_adapter_is_memory_owned_port() {
+    use crate::ports::{ReflectionHistoryQuery, ReflectionHistoryStore};
+    fn assert_store<T: ReflectionHistoryStore + ReflectionHistoryQuery>() {}
+    assert_store::<AtomicDatasetReflectionHistoryStore>();
 }
 
 #[tokio::test]

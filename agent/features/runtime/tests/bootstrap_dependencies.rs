@@ -221,10 +221,10 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None).unwrap();
     let task = task::wire_task();
     let access = task.access();
-    let memory_opener = Box::new(memory::api::DatasetMemoryOpener::new(
+    let memory_opener = memory::wire_memory_opener(
         storage::file_system_dataset(temp.path()).unwrap(),
-        Arc::new(memory::api::FileLegacyMemorySourceFactory::new(temp.path())),
-    ));
+        memory::wire_legacy_memory_source_factory(temp.path()),
+    );
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(NoopSessionManagement);
     let wiring = context::wire_main_session(context::MainSessionDependencies {

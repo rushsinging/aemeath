@@ -14,9 +14,8 @@
 //!    to the new dataset format, and exposes the entries through the port.
 
 use memory::api::{
-    DatasetMemoryOpener, FileLegacyMemorySourceFactory, LegacyMemoryMember, LegacyMemorySource,
-    LegacyMemorySourceError, LegacyMemorySourceFactory, MemoryCategory, MemoryEntry, MemoryId,
-    MemoryLayer, MemoryOpener, MemorySource, ProjectMemoryKey,
+    LegacyMemoryMember, LegacyMemorySource, LegacyMemorySourceError, LegacyMemorySourceFactory,
+    MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemorySource, ProjectMemoryKey,
 };
 use share::config::MemoryConfig;
 use std::sync::Arc;
@@ -74,7 +73,7 @@ async fn missing_files_return_all_missing() {
     let root = unique_root("missing");
     std::fs::create_dir_all(&root).unwrap();
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
     let source = factory.create_for(&key("/missing/project"));
 
     let global = source.probe(MemoryLayer::Global).await.unwrap();
@@ -104,7 +103,7 @@ async fn active_only_present_archive_missing() {
     );
     // No _archive file.
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
     let source = factory.create_for(&project);
 
     let layer = source.probe(MemoryLayer::Project).await.unwrap();
@@ -126,7 +125,7 @@ async fn archive_only_present_active_missing() {
         &legacy_entry_bytes("archived fact", MemoryLayer::Project),
     );
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
     let source = factory.create_for(&project);
 
     let layer = source.probe(MemoryLayer::Project).await.unwrap();
@@ -152,7 +151,7 @@ async fn global_files_read_independently_of_project_files() {
         &legacy_entry_bytes("global archived", MemoryLayer::Global),
     );
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
     // Project files don't exist, but global do.
     let source = factory.create_for(&key("/global/test"));
 
@@ -199,7 +198,7 @@ async fn permission_denied_is_classified() {
         return;
     }
 
-    let factory = FileLegacyMemorySourceFactory::new(&dir);
+    let factory = memory::wire_legacy_memory_source_factory(&dir);
     let source = factory.create_for(&project);
 
     let result = source.probe(MemoryLayer::Project).await;
@@ -227,7 +226,7 @@ async fn directory_in_place_of_file_is_io_error() {
     let file_name = format!("{}.json", legacy_stem("/io/test"));
     std::fs::create_dir_all(root.join(&file_name)).unwrap();
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
     let source = factory.create_for(&project);
 
     let result = source.probe(MemoryLayer::Project).await;
@@ -255,7 +254,7 @@ async fn distinct_projects_have_distinct_legacy_files() {
         &legacy_entry_bytes("project B only", MemoryLayer::Project),
     );
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
 
     let layer_a = factory
         .create_for(&key_a)
@@ -302,7 +301,7 @@ async fn project_a_legacy_invisible_to_project_b_source() {
         &legacy_entry_bytes("A exclusive", MemoryLayer::Project),
     );
 
-    let factory = FileLegacyMemorySourceFactory::new(&root);
+    let factory = memory::wire_legacy_memory_source_factory(&root);
 
     let layer_b = factory
         .create_for(&key_b)
@@ -322,7 +321,7 @@ async fn factory_is_object_safe_and_cloneable() {
     let root = unique_root("factory-dyn");
     std::fs::create_dir_all(&root).unwrap();
     let factory: Box<dyn LegacyMemorySourceFactory> =
-        Box::new(FileLegacyMemorySourceFactory::new(&root));
+        memory::wire_legacy_memory_source_factory(&root).boxed_clone();
 
     let source = factory.create_for(&key("/dyn/test"));
     let layer = source.probe(MemoryLayer::Project).await.unwrap();
@@ -361,9 +360,9 @@ async fn opener_migrates_legacy_global_and_project() {
         &legacy_entry_bytes("legacy project fact", MemoryLayer::Project),
     );
 
-    let opener = DatasetMemoryOpener::new(
+    let opener = memory::wire_memory_opener(
         storage(&storage_dir),
-        Arc::new(FileLegacyMemorySourceFactory::new(&legacy_dir)),
+        memory::wire_legacy_memory_source_factory(&legacy_dir),
     );
 
     let port = opener
@@ -418,7 +417,7 @@ async fn opener_legacy_conflict_when_new_data_exists() {
                 Box::new(self.clone())
             }
         }
-        let opener = DatasetMemoryOpener::new(storage(&storage_dir), Arc::new(NoLegacyFactory));
+        let opener = memory::wire_memory_opener(storage(&storage_dir), Arc::new(NoLegacyFactory));
         let port = opener
             .open_memory(&project, &MemoryConfig::default())
             .await
@@ -445,9 +444,9 @@ async fn opener_legacy_conflict_when_new_data_exists() {
         &legacy_entry_bytes("legacy fact", MemoryLayer::Project),
     );
 
-    let opener = DatasetMemoryOpener::new(
+    let opener = memory::wire_memory_opener(
         storage(&storage_dir),
-        Arc::new(FileLegacyMemorySourceFactory::new(&legacy_dir)),
+        memory::wire_legacy_memory_source_factory(&legacy_dir),
     );
 
     let result = opener.open_memory(&project, &MemoryConfig::default()).await;

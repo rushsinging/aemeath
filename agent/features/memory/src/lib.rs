@@ -30,6 +30,52 @@
 //! 判定记录：随测试迁移批收窄。
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
+
+// ---------- composition-only wiring（根级 wire 工厂，config crate 同判） ----------
+//
+// 三个实现体（`DatasetMemoryOpener`、`FileLegacyMemorySourceFactory`、
+// `AtomicDatasetReflectionHistoryStore`）的构造入口：**composition 及跨 crate
+// 测试的唯一构造点**。实现体本身与 `new` 均已收窄 `pub(crate)`——crate 外
+// 一切散落构造在编译期不可达，只能经下列工厂取得 trait 对象。参数保持
+// composition 既有的输入（存储句柄 / legacy 路径 / project key），装配语义不变。
+
+/// Composition 打开 Memory 的唯一构造入口：返回 `Box<dyn MemoryOpener>`
+/// （MainSession 依赖的消费签名）。`DatasetMemoryOpener` 为 crate 内实现
+/// 细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达；legacy 发现经
+/// [`wire_legacy_memory_source_factory`] 取得的 trait 对象注入。
+pub fn wire_memory_opener(
+    storage: std::sync::Arc<dyn storage::AtomicDatasetPort>,
+    legacy_factory: std::sync::Arc<dyn crate::ports::LegacyMemorySourceFactory>,
+) -> Box<dyn crate::ports::MemoryOpener> {
+    Box::new(crate::adapters::DatasetMemoryOpener::new(
+        storage,
+        legacy_factory,
+    ))
+}
+
+/// Composition 构造 legacy 发现工厂的唯一入口：返回
+/// `Arc<dyn LegacyMemorySourceFactory>`。`FileLegacyMemorySourceFactory`
+/// 为 crate 内实现细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达。
+pub fn wire_legacy_memory_source_factory(
+    base_dir: impl Into<std::path::PathBuf>,
+) -> std::sync::Arc<dyn crate::ports::LegacyMemorySourceFactory> {
+    std::sync::Arc::new(crate::adapters::FileLegacyMemorySourceFactory::new(
+        base_dir,
+    ))
+}
+
+/// Composition 构造反思历史存储的唯一入口：返回
+/// `Arc<dyn ReflectionHistoryStore>`。`AtomicDatasetReflectionHistoryStore`
+/// 为 crate 内实现细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达。
+pub fn wire_reflection_history_store(
+    storage: std::sync::Arc<dyn storage::AtomicDatasetPort>,
+    project: crate::domain::ProjectMemoryKey,
+) -> std::sync::Arc<dyn crate::ports::ReflectionHistoryStore> {
+    std::sync::Arc::new(crate::adapters::AtomicDatasetReflectionHistoryStore::new(
+        storage, project,
+    ))
+}
+
 mod adapters;
 mod application;
 mod codec;
@@ -40,10 +86,7 @@ mod service;
 
 /// Memory crate 的唯一发布面。见 crate 根文档的 DDD 五类说明。
 pub mod api {
-    pub use crate::adapters::{
-        AtomicDatasetReflectionHistoryStore, DatasetMemoryOpener, FileLegacyMemorySourceFactory,
-        InMemoryMemory, MemoryPolicy,
-    };
+    pub use crate::adapters::{InMemoryMemory, MemoryPolicy};
     pub use crate::application::{
         ReflectionExecutionIdentity, ReflectionExecutionResult, ReflectionWorkflow,
         ReflectionWorkflowError,
@@ -63,3 +106,7 @@ pub mod api {
         ReflectionHistoryQuery, ReflectionHistoryStore, RestoreResult, WriteResult,
     };
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod lib_tests;

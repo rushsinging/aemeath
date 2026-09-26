@@ -279,13 +279,15 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
 /// Memory-owned Reflection history adapter. A project gets one independent
 /// atomic dataset containing a single JSON member whose schema is exactly
 /// `Vec<ReflectionRecord>`.
-pub struct AtomicDatasetReflectionHistoryStore {
+///
+/// 收窄：crate 外只能经 `memory::wire_reflection_history_store` 取得。
+pub(crate) struct AtomicDatasetReflectionHistoryStore {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
     dataset: storage_api::DatasetKey,
 }
 
 impl AtomicDatasetReflectionHistoryStore {
-    pub fn new(
+    pub(crate) fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         project: ProjectMemoryKey,
     ) -> Self {
@@ -500,13 +502,13 @@ impl ProjectMemoryOpener {
 /// callers obtain `Arc<dyn MemoryPort>` without depending on concrete Memory
 /// types.
 #[derive(Clone)]
-pub struct DatasetMemoryOpener {
+pub(crate) struct DatasetMemoryOpener {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
     legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
 }
 
 impl DatasetMemoryOpener {
-    pub fn new(
+    pub(crate) fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
     ) -> Self {
@@ -619,12 +621,12 @@ fn read_legacy_member(path: &Path) -> Result<LegacyMemoryMember, LegacyMemorySou
 ///
 /// [`create_for`]: LegacyMemorySourceFactory::create_for
 #[derive(Clone)]
-pub struct FileLegacyMemorySourceFactory {
+pub(crate) struct FileLegacyMemorySourceFactory {
     base_dir: PathBuf,
 }
 
 impl FileLegacyMemorySourceFactory {
-    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+    pub(crate) fn new(base_dir: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: base_dir.into(),
         }
