@@ -168,7 +168,7 @@ impl Run {
             request_id: request_id.clone(),
             continuation,
         });
-        self.apply_state_transition(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser);
+        self.set_status_by_command(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser)?;
         self.events.push(RuntimeLifecycleEvent::AwaitingUser {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -192,10 +192,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.apply_state_transition(
+        self.set_status_by_command(
             pending.continuation.resume_status(),
             RunTransitionReason::UserResumed,
-        );
+        )?;
         self.events.push(RuntimeLifecycleEvent::Resumed {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -219,10 +219,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.apply_state_transition(
+        self.set_status_by_command(
             pending.continuation.resume_status(),
             RunTransitionReason::UserResumed,
-        );
+        )?;
         Ok(pending.continuation)
     }
 
@@ -378,6 +378,26 @@ impl Run {
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_else(|| "-".to_string())
+    }
+
+    /// 命令式状态设置的唯一入口：所有不经迁移矩阵的写入都必须经此 gate，
+    /// 由 [`command_status_allowed`] 的枚举白名单决定是否放行。
+    fn set_status_by_command(
+        &mut self,
+        to: RunStatus,
+        reason: RunTransitionReason,
+    ) -> Result<(), RunTransitionError> {
+        let from = self.status;
+        if !command_status_allowed(from, to) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "command status change rejected: run_id={} from={from:?} to={to:?}",
+                self.id,
+            );
+            return Err(RunTransitionError::IllegalCommandTransition { from, to });
+        }
+        self.apply_state_transition(to, reason);
+        Ok(())
     }
 
     fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
@@ -708,10 +728,17 @@ impl Run {
         }
         self.pending_interaction = None;
         step.status = RunStepStatus::Cancelling;
-        self.apply_state_transition(
+        if let Err(error) = self.set_status_by_command(
             RunStatus::CancellingStep,
             RunTransitionReason::StepCancellationRequested,
-        );
+        ) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run step cancellation rejected: run_id={} error={error}",
+                self.id,
+            );
+            return RunStepCancellationRequest::RunTerminal;
+        }
         self.events
             .push(RuntimeLifecycleEvent::StepCancellationRequested {
                 run_id: self.id.clone(),
@@ -730,10 +757,10 @@ impl Run {
             return Err(RunTransitionError::StepNotActive);
         }
         step.status = RunStepStatus::Finalizing;
-        self.apply_state_transition(
+        self.set_status_by_command(
             RunStatus::FinalizingStep,
             RunTransitionReason::StepFinalizationStarted,
-        );
+        )?;
         self.events
             .push(RuntimeLifecycleEvent::StepFinalizationStarted {
                 run_id: self.id.clone(),
@@ -815,10 +842,17 @@ impl Run {
         }
         self.termination = Some((run_reason, deadline));
         self.pending_interaction = None;
-        self.apply_state_transition(
+        if let Err(error) = self.set_status_by_command(
             RunStatus::Terminating,
             RunTransitionReason::TerminationRequested,
-        );
+        ) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run termination request rejected: run_id={} error={error}",
+                self.id,
+            );
+            return RunTerminationRequest::AlreadyTerminal;
+        }
         self.events
             .push(RuntimeLifecycleEvent::TerminationRequested {
                 run_id: self.id.clone(),
@@ -870,7 +904,7 @@ impl Run {
             );
             return Err(RunTransitionError::RunNotActive(self.status));
         }
-        self.apply_state_transition(RunStatus::Failed, RunTransitionReason::Failed);
+        self.set_status_by_command(RunStatus::Failed, RunTransitionReason::Failed)?;
         self.close_active_steps(RunStepStatus::Failed);
         self.events.push(RuntimeLifecycleEvent::Failed {
             run_id: self.id.clone(),
@@ -879,4 +913,37 @@ impl Run {
         });
         Ok(())
     }
+}
+
+/// 命令式状态设置的枚举白名单：只有列出的 `(from, to)` 组合允许写入状态。
+///
+/// 常规 Step 主流程迁移由 `RunTransition` 矩阵执行，不在此表范围内。
+fn command_status_allowed(from: RunStatus, to: RunStatus) -> bool {
+    if from.is_terminal() {
+        return false;
+    }
+    match to {
+        // 外部控制：终止与失败可从任意非终态发起。
+        RunStatus::Terminating | RunStatus::Failed => true,
+        // Step 取消的可取消性由 `request_step_cancellation` 自行校验。
+        RunStatus::CancellingStep => true,
+        // Step 收口只能从取消态进入。
+        RunStatus::FinalizingStep => from == RunStatus::CancellingStep,
+        // 交互暂停：只允许从工具/模型工作阶段进入。
+        RunStatus::AwaitingUser => matches!(
+            from,
+            RunStatus::InvokingModel
+                | RunStatus::ApplyingResponse
+                | RunStatus::AwaitingToolApproval
+                | RunStatus::ExecutingTools
+        ),
+        // 交互恢复：只能从 AwaitingUser 回到 continuation 保存的工作阶段。
+        RunStatus::ExecutingTools | RunStatus::PreparingContext => from == RunStatus::AwaitingUser,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn command_gate_allows(from: RunStatus, to: RunStatus) -> bool {
+    command_status_allowed(from, to)
 }

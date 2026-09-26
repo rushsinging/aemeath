@@ -580,3 +580,4 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 | 2026-09-26 | 手动 `/compact` 复用 Run 状态机：新增 `RunIntent::ManualCompaction` 与 `PreparingContext --CompactionOnlySettled--> DrainingInput`；手动压缩 Run 不进入 `InvokingModel`，由第二次 drain 的 `EmptyAndSealed` 收口 | — |
 | 2026-09-26 | 手动压缩改为命令驱动置状态：新增 `Run::begin_manual_compaction()` 与迁移 `(DrainingInput, BeginCompaction)`；`CompactionOnlySettled` 源状态由 `PreparingContext` 改为 `Compacting`，压缩前置到主循环之前，删除以 `InternalContinuation` 兑现意图的绕行 | — |
 | 2026-09-26 | 压缩完成只保留 `CompactionCompleted` 一条迁移：收口目标由状态机按“是否存在活动 Step”判定，手动压缩 Run 的收口以 reason `ManualCompactionSettled` 区分，删除 `CompactionOnlySettled` 迁移与 reason | — |
+| 2026-09-26 | 命令式状态设置收敛为唯一入口 `Run::set_status_by_command` + `(from, to)` 枚举白名单 gate（拒绝时 `IllegalCommandTransition` 且不改状态）；源码守卫锁定状态写入只允许出现在 `transition` 矩阵与该 gate 两处 | — |

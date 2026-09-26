@@ -2105,6 +2105,60 @@ fn compaction_only_run_never_enters_model_invocation() {
     );
 }
 
+// ── 命令式状态设置的唯一 gate ──────────────────────────────────────────
+
+#[test]
+fn command_status_gate_whitelist_is_explicit() {
+    let allowed = [
+        (RunStatus::DrainingInput, RunStatus::Terminating),
+        (RunStatus::PreparingContext, RunStatus::Terminating),
+        (RunStatus::InvokingModel, RunStatus::CancellingStep),
+        (RunStatus::ExecutingTools, RunStatus::AwaitingUser),
+        (RunStatus::AwaitingUser, RunStatus::ExecutingTools),
+        (RunStatus::AwaitingUser, RunStatus::PreparingContext),
+        (RunStatus::CancellingStep, RunStatus::FinalizingStep),
+        (RunStatus::ExecutingTools, RunStatus::Failed),
+    ];
+    for (from, to) in allowed {
+        assert!(
+            super::domain::command_gate_allows(from, to),
+            "白名单组合被拒绝: {from:?} → {to:?}"
+        );
+    }
+
+    let rejected = [
+        (RunStatus::Created, RunStatus::Compacting),
+        (RunStatus::Created, RunStatus::ExecutingTools),
+        (RunStatus::DrainingInput, RunStatus::InvokingModel),
+        (RunStatus::PreparingContext, RunStatus::FinalizingStep),
+        (RunStatus::AwaitingUser, RunStatus::AwaitingUser),
+        (RunStatus::Completed, RunStatus::Terminating),
+        (RunStatus::Failed, RunStatus::Terminating),
+    ];
+    for (from, to) in rejected {
+        assert!(
+            !super::domain::command_gate_allows(from, to),
+            "非白名单组合被放行: {from:?} → {to:?}"
+        );
+    }
+}
+
+#[test]
+fn command_status_writes_go_through_the_single_gate() {
+    let domain_source = include_str!("domain.rs");
+    assert_eq!(
+        domain_source
+            .matches("self.apply_state_transition(")
+            .count(),
+        2,
+        "状态写入只允许出现在 transition 矩阵与 set_status_by_command gate 两处"
+    );
+    assert!(
+        domain_source.contains("fn set_status_by_command("),
+        "domain 必须提供唯一的命令式状态写入入口"
+    );
+}
+
 fn event_run_entered_invoking_model(event: &RuntimeLifecycleEvent) -> bool {
     matches!(
         event,

@@ -129,6 +129,8 @@ TerminateRun
 - **结构化交互暂停**：`AwaitingInteraction { request_id }` 只由匹配 `run_id + request_id` 的 reply/cancel 恢复，并按保存的 typed continuation 回到原工作阶段。
 - **控制旁路**：`CancelRunStep` 收口当前 Step 后回到 `DrainingInput`；`TerminateRun` 从任意非终态进入 `Terminating`，最终只能到 `Terminated`。
 
+命令式状态设置（不经迁移矩阵）收敛为唯一入口 `Run::set_status_by_command`，由 `(from, to)` 枚举白名单 gate 决定放行，拒绝时返回 `IllegalCommandTransition` 并保持原状态；常规 Step 主流程迁移始终经 `Run::transition` 矩阵。手动压缩 Run 的进入是矩阵迁移（`(DrainingInput, BeginCompaction)`），不占用命令 gate。
+
 手动压缩 Run（`RunSpec::manual_compaction()`，目的为 `RunIntent::ManualCompaction`）复用同一状态机，进入方式为命令驱动：runtime 受理 `/compact` 后由 `Run::begin_manual_compaction()` 直接把 Run 置为 `Compacting`（仅该意图与 `DrainingInput` 起点），压缩完成由状态机自行判定收口目标（无活动 Step → `DrainingInput`，reason=`ManualCompactionSettled`），再由 drain 的 `EmptyAndSealed` 收口 `Completed`。该目的的 Run **NEVER** 迁移到 `InvokingModel`，也不产生 RunStep。
 
 `Completed`、`Failed`、`Terminated` 是唯一终态。所有领域 mutation 后必须立即发布对应事件；图中的边表示 Run 聚合允许的转换，不表示 Port 或 adapter 可以自行迁移状态。
