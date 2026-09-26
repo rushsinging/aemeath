@@ -1,4 +1,4 @@
-use crate::*;
+use crate::domain::*;
 use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
@@ -116,6 +116,11 @@ pub struct MemoryCommitReceipt<R> {
 }
 
 impl<R> MemoryCommitReceipt<R> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn revision(&self) -> &R {
+        &self.revision
+    }
+
     pub fn new(revision: R, visibility: MemoryCommitVisibility) -> Self {
         Self {
             revision,
@@ -123,10 +128,7 @@ impl<R> MemoryCommitReceipt<R> {
         }
     }
 
-    pub fn revision(&self) -> &R {
-        &self.revision
-    }
-
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn visibility(&self) -> MemoryCommitVisibility {
         self.visibility
     }

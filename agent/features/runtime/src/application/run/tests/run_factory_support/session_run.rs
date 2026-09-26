@@ -20,7 +20,7 @@ impl context::MainContextFactory for FixedMainContextFactory {
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
         _task_persist: Arc<dyn task::TaskPersist>,
         _workspace_persist: Arc<dyn project::WorkspaceWriter>,
-        _memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
+        _memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         _mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
         self.context.clone()
@@ -282,7 +282,7 @@ impl SessionRunFixtureBuilder {
             share::config::paths::global_config_path(),
         ));
         let now = chrono::Utc::now().to_rfc3339();
-        let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::NoOpMemory);
+        let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
         let wiring = Arc::new(context::MainSessionWiring::build(
             context::MainSessionWiringBuilder {
                 workspace_read: workspace.read(),

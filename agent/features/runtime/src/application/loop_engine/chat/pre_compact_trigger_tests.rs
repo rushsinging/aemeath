@@ -359,7 +359,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
+    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let history = noop_reflection_history();
     let snapshot = vec![
         Message::user("kept-by-compact"),
@@ -433,7 +433,7 @@ async fn submit_pre_compact_reflection_enqueues_precompact_request() {
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
+    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let history = noop_reflection_history();
     let snapshot = vec![
         Message::user("alpha"),
@@ -467,7 +467,7 @@ async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
+    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
 
     let outcome = submit_pre_compact_reflection(
         &adapter,

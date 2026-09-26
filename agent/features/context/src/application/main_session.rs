@@ -6,7 +6,7 @@ use config::{
     PreparedConfigUpdateData, PreparedProjectConfigData, ProjectConfigLocationData,
     ProjectConfigParticipant,
 };
-use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
+use memory::api::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::session_types::ProjectIdentityData;
@@ -903,7 +903,7 @@ pub mod test_support {
             _config: &share::config::MemoryConfig,
         ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError> {
             Ok(Arc::new(
-                memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default())
                     .expect("default MemoryPolicy is always valid"),
             ))
         }

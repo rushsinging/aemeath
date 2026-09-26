@@ -12,7 +12,7 @@ async fn shutdown_before_deadline_preserves_completed_task() {
         Duration::from_secs(30),
         |_request: ReflectionTaskRequest, _cancel: CancellationToken| async move {
             Ok(CompleteReflectionResult {
-                output: memory::ReflectionOutput::default(),
+                output: memory::api::ReflectionOutput::default(),
                 input_tokens: 0,
                 output_tokens: 0,
                 apply_result: None,

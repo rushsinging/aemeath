@@ -1,6 +1,33 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 //! Memory 支撑域。
+//!
+//! # PL：`memory::api` 是唯一发布面（根零导出）
+//!
+//! 对照 update crate 的 façade 形态，本 crate 对外只发布 [`api`] 模块；
+//! crate 根不 `pub use` 任何符号，内部模块间一律经真实模块路径
+//! （`crate::domain::…` / `crate::ports::…`）互相引用。按 DDD 分类，
+//! `api` 发布以下五类：
+//!
+//! - **端口（Ports）**：[`api::MemoryPort`]（读写/反思应用）、
+//!   [`api::ReflectionHistoryStore`] / [`api::ReflectionHistoryQuery`]（反思历史）、
+//!   [`api::MemoryOpener`] / [`api::LegacyMemorySourceFactory`]（打开与 legacy 发现）。
+//!   实现方只依赖这些 trait，Storage/文件细节不越界。
+//! - **值对象（Value Objects）**：[`api::MemoryEntry`]、[`api::MemoryId`]、
+//!   [`api::MemoryLayer`]、[`api::MemoryCategory`]、[`api::MemorySource`]、
+//!   [`api::ProjectMemoryKey`]、[`api::MemoryQuery`] 等——纯数据、不可变语义。
+//! - **命令/编排（Commands / Orchestration）**：[`api::ReflectionWorkflow`] 族
+//!   （[`api::ReflectionExecutionIdentity`]、[`api::ReflectionExecutionResult`]、
+//!   [`api::ReflectionWorkflowError`]）——按固定顺序编排端口调用，无状态。
+//! - **适配器（Adapters）**：[`api::InMemoryMemory`] 为内存实现，
+//!   **test-only**；[`api::NoOpMemory`] 为读侧单体空对象
+//!   （Run 禁用 Memory 时的占位实现），生产路径由 composition 注入真实现。
+//! - **错误族（Errors）**：[`api::MemoryError`]、[`api::MemoryOpenerError`]、
+//!   [`api::MemoryOpenError`]、[`api::LegacyMemorySourceError`] 等，
+//!   内部各层经 `From` 透传保留，`Display` **NEVER** 携带 raw 正文/对话。
+//!
+//! 测试独占符号（`CompactResult`、`MemorySuggestion` 等）暂留 `api`，
+//! 判定记录：随测试迁移批收窄。
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
 mod adapters;
@@ -11,30 +38,28 @@ mod noop;
 mod ports;
 mod service;
 
+/// Memory crate 的唯一发布面。见 crate 根文档的 DDD 五类说明。
 pub mod api {
-    pub use crate::{
-        AtomicDatasetReflectionHistoryStore, CompactResult, DatasetMemoryOpener, EvictionCandidate,
-        FileLegacyMemorySourceFactory, InMemoryMemory, MemoryCategory, MemoryEntry, MemoryError,
-        MemoryId, MemoryLayer, MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError,
-        MemoryPolicy, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
-        MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, MemorySuggestion,
-        NoOpMemory, ProjectMemoryKey, ReflectionApplyResult, ReflectionApplyStatus,
-        ReflectionEngine, ReflectionError, ReflectionErrorCategory, ReflectionExecutionIdentity,
-        ReflectionExecutionResult, ReflectionHistoryQuery, ReflectionHistoryStore,
-        ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionResult,
+    pub use crate::adapters::{
+        AtomicDatasetReflectionHistoryStore, DatasetMemoryOpener, FileLegacyMemorySourceFactory,
+        InMemoryMemory, MemoryPolicy,
+    };
+    pub use crate::application::{
+        ReflectionExecutionIdentity, ReflectionExecutionResult, ReflectionWorkflow,
+        ReflectionWorkflowError,
+    };
+    pub use crate::domain::{
+        MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer, MemoryOpenError,
+        MemorySource, MemoryStorageErrorKind, MemorySuggestion, ProjectMemoryKey,
+        ReflectionApplyStatus, ReflectionErrorCategory, ReflectionOutput, ReflectionRecord,
         ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
-        ReflectionWorkflow, ReflectionWorkflowError, RestoreResult, WriteResult,
+    };
+    pub use crate::noop::NoOpMemory;
+    pub use crate::ports::{
+        CompactResult, EvictionCandidate, LegacyMemoryLayer, LegacyMemoryMember,
+        LegacyMemorySource, LegacyMemorySourceError, LegacyMemorySourceFactory, MemoryLocation,
+        MemoryOpener, MemoryOpenerError, MemoryPort, MemoryQuery, MemoryRetrievalMode,
+        MemorySearchHit, MemorySearchQuery, MemorySearchResult, MemoryStats, ReflectionApplyResult,
+        ReflectionHistoryQuery, ReflectionHistoryStore, RestoreResult, WriteResult,
     };
 }
-
-pub use adapters::{
-    AtomicDatasetReflectionHistoryStore, DatasetMemoryOpener, FileLegacyMemorySourceFactory,
-    InMemoryMemory, MemoryPolicy,
-};
-pub use application::{
-    ReflectionExecutionIdentity, ReflectionExecutionResult, ReflectionWorkflow,
-    ReflectionWorkflowError,
-};
-pub use domain::*;
-pub use noop::NoOpMemory;
-pub use ports::*;

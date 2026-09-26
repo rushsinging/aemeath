@@ -7,7 +7,7 @@
 //! reads the current config — the candidate config is supplied by the caller.
 
 use async_trait::async_trait;
-use memory::{
+use memory::api::{
     DatasetMemoryOpener, LegacyMemoryLayer, LegacyMemorySource, LegacyMemorySourceError,
     LegacyMemorySourceFactory, MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryOpener,
     MemoryPort, MemorySource, ProjectMemoryKey,
@@ -139,7 +139,10 @@ async fn opener_config_drives_memory_policy() {
         .write(entry(MemoryLayer::Project, "second"))
         .await
         .unwrap();
-    assert!(matches!(result, memory::WriteResult::NeedsEviction { .. }));
+    assert!(matches!(
+        result,
+        memory::api::WriteResult::NeedsEviction { .. }
+    ));
 
     std::fs::remove_dir_all(root).unwrap();
 }

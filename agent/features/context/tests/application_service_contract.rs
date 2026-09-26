@@ -471,14 +471,14 @@ async fn committed_memory_adapter_switches_from_noop_to_active_memory_for_contex
     let before = source.materialize(&request()).await.unwrap();
     assert!(before.blocks.is_empty());
 
-    let active = memory::InMemoryMemory::new(memory::MemoryPolicy::default()).unwrap();
-    let entry = memory::MemoryEntry::new(
-        memory::MemoryId::now_v7(),
+    let active = memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default()).unwrap();
+    let entry = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
         100,
-        memory::MemoryLayer::Project,
-        memory::MemoryCategory::Fact,
+        memory::api::MemoryLayer::Project,
+        memory::api::MemoryCategory::Fact,
         "active memory fact",
-        memory::MemorySource::User,
+        memory::api::MemorySource::User,
     )
     .unwrap();
     active.write(entry).await.unwrap();
