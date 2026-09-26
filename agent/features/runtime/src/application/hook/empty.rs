@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use hook::{
-    CancellationSignal, HookClassData, HookDispatchContextData, HookDispatcher, HookInvocationData,
-    HookOutcomeData,
+    HookCancellationSignal, HookClassData, HookDispatchContextData, HookDispatcher,
+    HookInvocationData, HookOutcomeData,
 };
 
 #[derive(Clone)]
@@ -28,7 +28,7 @@ impl HookDispatcher for BoundaryHookPort {
     async fn dispatch(
         &self,
         invocation: HookInvocationData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         if Self::allows(invocation.point()) {
             self.inner.dispatch(invocation, cancellation).await
@@ -41,7 +41,7 @@ impl HookDispatcher for BoundaryHookPort {
         &self,
         invocation: HookInvocationData,
         context: HookDispatchContextData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         if Self::allows(invocation.point()) {
             self.inner

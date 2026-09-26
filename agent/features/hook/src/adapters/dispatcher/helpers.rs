@@ -43,11 +43,11 @@ pub(super) fn matcher_source(matcher: &HookMatcherData) -> String {
 /// 提取 invocation 携带的工具名（仅工具相关 point 有）。
 fn tool_name_of(invocation: &HookInvocationData) -> Option<&str> {
     match invocation {
-        HookInvocationData::PreToolUse(i) => Some(&i.tool_name),
-        HookInvocationData::PostToolUse(i) => Some(&i.tool_name),
-        HookInvocationData::PostToolUseFailure(i) => Some(&i.tool_name),
-        HookInvocationData::PermissionRequest(i) => Some(&i.tool_name),
-        HookInvocationData::PermissionDenied(i) => Some(&i.tool_name),
+        HookInvocationData::PreToolUse { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PostToolUse { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PostToolUseFailure { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PermissionRequest { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PermissionDenied { tool_name, .. } => Some(tool_name),
         _ => None,
     }
 }

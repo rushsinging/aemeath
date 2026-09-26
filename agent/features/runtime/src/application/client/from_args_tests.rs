@@ -217,7 +217,7 @@ impl HookDispatcher for FakeHook {
     async fn dispatch(
         &self,
         _invocation: HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> HookOutcomeData {
         HookOutcomeData::proceed()
     }

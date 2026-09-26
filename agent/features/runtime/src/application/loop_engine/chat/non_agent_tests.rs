@@ -174,11 +174,11 @@ impl HookDispatcher for RecordingTaskHook {
     async fn dispatch(
         &self,
         invocation: HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         let kind = match invocation {
-            HookInvocationData::TaskCreated(_) => Some("created"),
-            HookInvocationData::TaskCompleted(_) => Some("completed"),
+            HookInvocationData::TaskCreated { .. } => Some("created"),
+            HookInvocationData::TaskCompleted { .. } => Some("completed"),
             _ => None,
         };
         if let Some(kind) = kind {

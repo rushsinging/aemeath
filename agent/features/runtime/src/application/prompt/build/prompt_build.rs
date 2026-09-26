@@ -196,10 +196,10 @@ async fn read_preferred_user_guidance_layers(
                 Ok(content) => {
                     hook_port
                         .dispatch_at(
-                            HookInvocationData::InstructionsLoaded(hook::InstructionsInput {
+                            HookInvocationData::InstructionsLoaded {
                                 file_path: path.to_string_lossy().to_string(),
                                 instruction_type: "agents_md".to_string(),
-                            }),
+                            },
                             HookDispatchContextData::new(workspace_root),
                             &tokio_util::sync::CancellationToken::new(),
                         )

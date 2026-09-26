@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::tool::agent::{ToolCall, ToolExecution};
-use hook::{HookDispatcher, HookInvocationData, TaskInput};
+use hook::{HookDispatcher, HookInvocationData};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -110,18 +110,14 @@ impl CommittedSideEffectHandler for TaskCommittedSideEffectHandler {
             .await;
         for fact in change.facts() {
             let invocation = match fact {
-                tools::TaskChangeFact::Created { .. } => {
-                    HookInvocationData::TaskCreated(TaskInput {
-                        tool_input: call.input.clone(),
-                        tool_output: execution.outcome.text.clone(),
-                    })
-                }
-                tools::TaskChangeFact::Completed { .. } => {
-                    HookInvocationData::TaskCompleted(TaskInput {
-                        tool_input: call.input.clone(),
-                        tool_output: execution.outcome.text.clone(),
-                    })
-                }
+                tools::TaskChangeFact::Created { .. } => HookInvocationData::TaskCreated {
+                    tool_input: call.input.clone(),
+                    tool_output: execution.outcome.text.clone(),
+                },
+                tools::TaskChangeFact::Completed { .. } => HookInvocationData::TaskCompleted {
+                    tool_input: call.input.clone(),
+                    tool_output: execution.outcome.text.clone(),
+                },
             };
             let _ = super::hook_ui::dispatch_hook(
                 &self.hooks,

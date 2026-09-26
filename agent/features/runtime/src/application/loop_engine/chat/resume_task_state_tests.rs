@@ -296,7 +296,7 @@ impl hook::HookDispatcher for RecordingSessionStartHookPort {
     async fn dispatch(
         &self,
         _invocation: hook::HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         unreachable!("resume emit 必须经 dispatch_at 携带 workspace 上下文");
     }
@@ -305,7 +305,7 @@ impl hook::HookDispatcher for RecordingSessionStartHookPort {
         &self,
         invocation: hook::HookInvocationData,
         context: hook::HookDispatchContextData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         self.dispatches
             .lock()

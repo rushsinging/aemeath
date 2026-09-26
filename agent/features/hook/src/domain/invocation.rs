@@ -55,68 +55,155 @@ pub enum HookPointData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HookInvocationData {
     // ── 前置闸门 ──
-    PreToolUse(PreToolUseInput),
-    UserPromptSubmit(UserPromptInput),
-    PreCompact(PreCompactInput),
-    PermissionRequest(PermissionInput),
-    Elicitation(ElicitationInput),
-    UserPromptExpansion(UserPromptExpansionInput),
+    PreToolUse {
+        tool_name: String,
+        tool_input: serde_json::Value,
+    },
+    UserPromptSubmit {
+        prompt: String,
+    },
+    PreCompact {
+        run_steps: usize,
+        messages_count: usize,
+    },
+    PermissionRequest {
+        tool_name: String,
+        permission_rule: String,
+    },
+    Elicitation {
+        server_name: String,
+        elicitation_text: String,
+    },
+    UserPromptExpansion {
+        original_input: String,
+        expanded_input: String,
+    },
     // ── Stop 闸门 ──
-    Stop(StopInput),
+    Stop {
+        run_steps: usize,
+    },
     // ── 后置增强 ──
-    PostToolUse(PostToolUseInput),
-    PostToolUseFailure(PostToolUseFailureInput),
-    PostCompact(PostCompactInput),
-    PostToolBatch(PostToolBatchInput),
-    ElicitationResult(ElicitationResultInput),
+    PostToolUse {
+        tool_name: String,
+        tool_input: serde_json::Value,
+        tool_output: String,
+        is_error: bool,
+    },
+    PostToolUseFailure {
+        tool_name: String,
+        tool_input: serde_json::Value,
+        error: String,
+    },
+    PostCompact {
+        run_steps: usize,
+        messages_before: usize,
+        messages_after: usize,
+    },
+    PostToolBatch {
+        tool_count: usize,
+        summary: String,
+    },
+    ElicitationResult {
+        server_name: String,
+        user_response: String,
+    },
     // ── 生命周期 ──
-    SessionStart(SessionInput),
-    SessionEnd(SessionInput),
-    SubRunStart(SubRunInput),
-    SubRunStop(SubRunStopInput),
-    TaskCreated(TaskInput),
-    TaskCompleted(TaskInput),
-    Notification(NotificationInput),
-    InstructionsLoaded(InstructionsInput),
+    SessionStart {
+        session_id: String,
+    },
+    SessionEnd {
+        session_id: String,
+    },
+    SubRunStart {
+        prompt: String,
+        system: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_spec: Option<String>,
+    },
+    SubRunStop {
+        prompt: String,
+        system: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_spec: Option<String>,
+        result: String,
+        run_steps: usize,
+        is_error: bool,
+    },
+    TaskCreated {
+        tool_input: serde_json::Value,
+        tool_output: String,
+    },
+    TaskCompleted {
+        tool_input: serde_json::Value,
+        tool_output: String,
+    },
+    Notification {
+        notification_text: String,
+        notification_type: String,
+    },
+    InstructionsLoaded {
+        file_path: String,
+        instruction_type: String,
+    },
     // ── 观察 ──
-    StopFailure(StopFailureInput),
-    PermissionDenied(PermissionInput),
-    ConfigChange(ConfigChangeInput),
-    CwdChanged(CwdChangedInput),
-    FileChanged(FileChangedInput),
-    TeammateIdle(TeammateIdleInput),
+    StopFailure {
+        run_steps: usize,
+        error: String,
+    },
+    PermissionDenied {
+        tool_name: String,
+        permission_rule: String,
+    },
+    ConfigChange {
+        config_file: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        changed_field: Option<String>,
+    },
+    CwdChanged {
+        old_cwd: String,
+        new_cwd: String,
+    },
+    FileChanged {
+        file_path: String,
+        change_type: String,
+    },
+    TeammateIdle {
+        teammate_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        idle_reason: Option<String>,
+    },
 }
 
 impl HookInvocationData {
     /// 返回该调用对应的触发点。
     pub fn point(&self) -> HookPointData {
         match self {
-            Self::PreToolUse(_) => HookPointData::PreToolUse,
-            Self::UserPromptSubmit(_) => HookPointData::UserPromptSubmit,
-            Self::PreCompact(_) => HookPointData::PreCompact,
-            Self::PermissionRequest(_) => HookPointData::PermissionRequest,
-            Self::Elicitation(_) => HookPointData::Elicitation,
-            Self::UserPromptExpansion(_) => HookPointData::UserPromptExpansion,
-            Self::Stop(_) => HookPointData::Stop,
-            Self::PostToolUse(_) => HookPointData::PostToolUse,
-            Self::PostToolUseFailure(_) => HookPointData::PostToolUseFailure,
-            Self::PostCompact(_) => HookPointData::PostCompact,
-            Self::PostToolBatch(_) => HookPointData::PostToolBatch,
-            Self::ElicitationResult(_) => HookPointData::ElicitationResult,
-            Self::SessionStart(_) => HookPointData::SessionStart,
-            Self::SessionEnd(_) => HookPointData::SessionEnd,
-            Self::SubRunStart(_) => HookPointData::SubRunStart,
-            Self::SubRunStop(_) => HookPointData::SubRunStop,
-            Self::TaskCreated(_) => HookPointData::TaskCreated,
-            Self::TaskCompleted(_) => HookPointData::TaskCompleted,
-            Self::Notification(_) => HookPointData::Notification,
-            Self::InstructionsLoaded(_) => HookPointData::InstructionsLoaded,
-            Self::StopFailure(_) => HookPointData::StopFailure,
-            Self::PermissionDenied(_) => HookPointData::PermissionDenied,
-            Self::ConfigChange(_) => HookPointData::ConfigChange,
-            Self::CwdChanged(_) => HookPointData::CwdChanged,
-            Self::FileChanged(_) => HookPointData::FileChanged,
-            Self::TeammateIdle(_) => HookPointData::TeammateIdle,
+            Self::PreToolUse { .. } => HookPointData::PreToolUse,
+            Self::UserPromptSubmit { .. } => HookPointData::UserPromptSubmit,
+            Self::PreCompact { .. } => HookPointData::PreCompact,
+            Self::PermissionRequest { .. } => HookPointData::PermissionRequest,
+            Self::Elicitation { .. } => HookPointData::Elicitation,
+            Self::UserPromptExpansion { .. } => HookPointData::UserPromptExpansion,
+            Self::Stop { .. } => HookPointData::Stop,
+            Self::PostToolUse { .. } => HookPointData::PostToolUse,
+            Self::PostToolUseFailure { .. } => HookPointData::PostToolUseFailure,
+            Self::PostCompact { .. } => HookPointData::PostCompact,
+            Self::PostToolBatch { .. } => HookPointData::PostToolBatch,
+            Self::ElicitationResult { .. } => HookPointData::ElicitationResult,
+            Self::SessionStart { .. } => HookPointData::SessionStart,
+            Self::SessionEnd { .. } => HookPointData::SessionEnd,
+            Self::SubRunStart { .. } => HookPointData::SubRunStart,
+            Self::SubRunStop { .. } => HookPointData::SubRunStop,
+            Self::TaskCreated { .. } => HookPointData::TaskCreated,
+            Self::TaskCompleted { .. } => HookPointData::TaskCompleted,
+            Self::Notification { .. } => HookPointData::Notification,
+            Self::InstructionsLoaded { .. } => HookPointData::InstructionsLoaded,
+            Self::StopFailure { .. } => HookPointData::StopFailure,
+            Self::PermissionDenied { .. } => HookPointData::PermissionDenied,
+            Self::ConfigChange { .. } => HookPointData::ConfigChange,
+            Self::CwdChanged { .. } => HookPointData::CwdChanged,
+            Self::FileChanged { .. } => HookPointData::FileChanged,
+            Self::TeammateIdle { .. } => HookPointData::TeammateIdle,
         }
     }
 
@@ -133,11 +220,17 @@ impl HookInvocationData {
     /// **NEVER** 仅往 enum JSON 顶层插键——payload 结构位置必须保持稳定。
     pub(crate) fn apply_updated_input(&mut self, input: &serde_json::Value) {
         match self {
-            Self::PreToolUse(i) => i.tool_input = input.clone(),
-            Self::UserPromptSubmit(i) => i.prompt = json_value_to_string(input),
-            Self::PermissionRequest(i) => i.permission_rule = json_value_to_string(input),
-            Self::Elicitation(i) => i.elicitation_text = json_value_to_string(input),
-            Self::UserPromptExpansion(i) => i.expanded_input = json_value_to_string(input),
+            Self::PreToolUse { tool_input, .. } => *tool_input = input.clone(),
+            Self::UserPromptSubmit { prompt, .. } => *prompt = json_value_to_string(input),
+            Self::PermissionRequest {
+                permission_rule, ..
+            } => *permission_rule = json_value_to_string(input),
+            Self::Elicitation {
+                elicitation_text, ..
+            } => *elicitation_text = json_value_to_string(input),
+            Self::UserPromptExpansion { expanded_input, .. } => {
+                *expanded_input = json_value_to_string(input)
+            }
             // 不可修改 point：classify_directive 已拒绝，理论不可达。
             _ => {}
         }
@@ -150,242 +243,4 @@ fn json_value_to_string(value: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
     }
-}
-
-// ─── Typed Input Structs ──────────────────────────────────────
-
-// ── 前置闸门 ──
-
-/// PreToolUse 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PreToolUseInput {
-    /// 工具名。
-    pub tool_name: String,
-    /// 工具输入参数（JSON）。
-    pub tool_input: serde_json::Value,
-}
-
-/// UserPromptSubmit 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserPromptInput {
-    /// 用户输入文本。
-    pub prompt: String,
-}
-
-/// PreCompact 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PreCompactInput {
-    /// agent 循环执行的轮次。
-    pub run_steps: usize,
-    /// 压缩前消息数量。
-    pub messages_count: usize,
-}
-
-/// PermissionRequest / PermissionDenied 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PermissionInput {
-    /// 工具名。
-    pub tool_name: String,
-    /// 权限规则。
-    pub permission_rule: String,
-}
-
-/// Elicitation 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ElicitationInput {
-    /// MCP 服务器名。
-    pub server_name: String,
-    /// 请求文本。
-    pub elicitation_text: String,
-}
-
-/// UserPromptExpansion 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserPromptExpansionInput {
-    /// 原始用户输入。
-    pub original_input: String,
-    /// 展开后的输入。
-    pub expanded_input: String,
-}
-
-// ── Stop 闸门 ──
-
-/// Stop 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StopInput {
-    /// agent 循环执行的轮次。
-    pub run_steps: usize,
-}
-
-// ── 后置增强 ──
-
-/// PostToolUse 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostToolUseInput {
-    /// 工具名。
-    pub tool_name: String,
-    /// 工具输入参数（JSON）。
-    pub tool_input: serde_json::Value,
-    /// 工具执行结果。
-    pub tool_output: String,
-    /// 是否为错误结果。
-    pub is_error: bool,
-}
-
-/// PostToolUseFailure 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostToolUseFailureInput {
-    /// 工具名。
-    pub tool_name: String,
-    /// 工具输入参数（JSON）。
-    pub tool_input: serde_json::Value,
-    /// 失败错误信息。
-    pub error: String,
-}
-
-/// PostCompact 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostCompactInput {
-    /// agent 循环执行的轮次。
-    pub run_steps: usize,
-    /// 压缩前消息数量。
-    pub messages_before: usize,
-    /// 压缩后消息数量。
-    pub messages_after: usize,
-}
-
-/// PostToolBatch 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PostToolBatchInput {
-    /// 批量工具数量。
-    pub tool_count: usize,
-    /// 批量执行摘要。
-    pub summary: String,
-}
-
-/// ElicitationResult 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ElicitationResultInput {
-    /// MCP 服务器名。
-    pub server_name: String,
-    /// 用户响应。
-    pub user_response: String,
-}
-
-// ── 生命周期 ──
-
-/// SessionStart / SessionEnd 输入。
-///
-/// `session_id` 是本次 Main Session 的稳定标识，随 stdin payload 传给 hook
-/// 子进程，供外部集成（如终端会话恢复工具）捕获当前会话。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionInput {
-    /// 当前 Main Session id。
-    pub session_id: String,
-}
-
-/// SubRunStart 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubRunInput {
-    /// sub-run 的输入提示。
-    pub prompt: String,
-    /// 系统消息。
-    pub system: String,
-    /// 使用的模型规格（可选）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_spec: Option<String>,
-}
-
-/// SubRunStop 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubRunStopInput {
-    /// sub-run 的输入提示。
-    pub prompt: String,
-    /// 系统消息。
-    pub system: String,
-    /// 使用的模型规格（可选）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_spec: Option<String>,
-    /// 执行结果。
-    pub result: String,
-    /// 执行的轮次。
-    pub run_steps: usize,
-    /// 是否为错误结果。
-    pub is_error: bool,
-}
-
-/// TaskCreated / TaskCompleted 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskInput {
-    /// 工具输入参数（JSON）。
-    pub tool_input: serde_json::Value,
-    /// 工具执行结果。
-    pub tool_output: String,
-}
-
-/// Notification 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationInput {
-    /// 通知文本。
-    pub notification_text: String,
-    /// 通知类型。
-    pub notification_type: String,
-}
-
-/// InstructionsLoaded 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstructionsInput {
-    /// 文件路径。
-    pub file_path: String,
-    /// 指令类型（"claude_md" / "guidance"）。
-    pub instruction_type: String,
-}
-
-// ── 观察 ──
-
-/// StopFailure 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StopFailureInput {
-    /// agent 循环执行的轮次。
-    pub run_steps: usize,
-    /// 导致停止失败的错误信息。
-    pub error: String,
-}
-
-/// ConfigChange 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfigChangeInput {
-    /// 配置文件。
-    pub config_file: String,
-    /// 变更的字段。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub changed_field: Option<String>,
-}
-
-/// CwdChanged 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CwdChangedInput {
-    /// 旧工作目录。
-    pub old_cwd: String,
-    /// 新工作目录。
-    pub new_cwd: String,
-}
-
-/// FileChanged 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileChangedInput {
-    /// 文件路径。
-    pub file_path: String,
-    /// 变更类型。
-    pub change_type: String,
-}
-
-/// TeammateIdle 输入。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TeammateIdleInput {
-    /// 队友名称。
-    pub teammate_name: String,
-    /// 空闲原因。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub idle_reason: Option<String>,
 }

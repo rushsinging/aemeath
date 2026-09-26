@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use hook::{
-    CancellationSignal, HookDirectiveData, HookDispatchContextData, HookDispatcher,
+    HookCancellationSignal, HookDirectiveData, HookDispatchContextData, HookDispatcher,
     HookInvocationData, HookOutcomeData,
 };
 
@@ -23,7 +23,7 @@ impl HookDispatcher for RecordingHookPort {
     async fn dispatch(
         &self,
         _invocation: HookInvocationData,
-        _cancellation: &dyn CancellationSignal,
+        _cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         unreachable!("SessionStart emit 必须经 dispatch_at 携带 workspace 上下文");
     }
@@ -32,7 +32,7 @@ impl HookDispatcher for RecordingHookPort {
         &self,
         invocation: HookInvocationData,
         context: HookDispatchContextData,
-        _cancellation: &dyn CancellationSignal,
+        _cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         self.invocations.lock().unwrap().push(invocation);
         self.context_session_ids
@@ -66,8 +66,8 @@ async fn emit_session_start_dispatches_once_with_session_identity() {
     let invocations = port.invocations.lock().unwrap();
     assert_eq!(invocations.len(), 1);
     match &invocations[0] {
-        HookInvocationData::SessionStart(input) => {
-            assert_eq!(input.session_id, "sess-emit-1");
+        HookInvocationData::SessionStart { session_id, .. } => {
+            assert_eq!(session_id, "sess-emit-1");
         }
         other => panic!("必须是 SessionStart，实际 {other:?}"),
     }
@@ -91,7 +91,7 @@ async fn emit_session_start_never_blocks_caller_on_hook_failure() {
         async fn dispatch(
             &self,
             _invocation: HookInvocationData,
-            _cancellation: &dyn CancellationSignal,
+            _cancellation: &dyn HookCancellationSignal,
         ) -> HookOutcomeData {
             unreachable!();
         }
@@ -100,7 +100,7 @@ async fn emit_session_start_never_blocks_caller_on_hook_failure() {
             &self,
             _invocation: HookInvocationData,
             _context: HookDispatchContextData,
-            _cancellation: &dyn CancellationSignal,
+            _cancellation: &dyn HookCancellationSignal,
         ) -> HookOutcomeData {
             HookOutcomeData {
                 executions: Vec::new(),
