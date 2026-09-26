@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::domain::session::{AcceptedInputProjection, FinalizedOutcomeProjection, SessionHistory};
+use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, SessionHistory};
 use crate::domain::{
     AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
     CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextMessage,
@@ -18,8 +18,8 @@ struct SessionState {
     messages: Vec<ContextMessage>,
     history: SessionHistory,
     active_summary: Option<String>,
-    accepted_steps: HashMap<(String, String), AcceptedInputProjection>,
-    committed_steps: HashMap<(String, String), FinalizedOutcomeProjection>,
+    accepted_steps: HashMap<(String, String), AcceptedInputRecord>,
+    committed_steps: HashMap<(String, String), FinalizedOutcomeRecord>,
     tool_receipts: HashMap<String, ToolCallReceipt>,
     skill_load_records: HashMap<(tools::SkillLoadScope, String), String>,
 }
@@ -124,7 +124,7 @@ impl SessionRepository for InMemorySessionRepository {
                 step_id: append.step_id.clone(),
             });
         }
-        let accepted_input = AcceptedInputProjection::new(
+        let accepted_input = AcceptedInputRecord::new(
             append.messages.clone(),
             append.fingerprint.as_str(),
             state.revision + 1,
@@ -281,7 +281,7 @@ impl SessionRepository for InMemorySessionRepository {
         state.messages.extend(append.messages.clone());
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
-        let outcome = FinalizedOutcomeProjection {
+        let outcome = FinalizedOutcomeRecord {
             finalize_cause: append.finalize_cause,
             duration_ms: append.duration_ms,
             messages: append.messages.clone().into(),

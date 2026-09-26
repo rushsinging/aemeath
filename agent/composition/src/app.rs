@@ -9,12 +9,1027 @@ use logging::{LoggingOutputMode, LoggingSettings, NativeStderrRouting, UnifiedLo
 use share::config::domain::snapshot::ConfigSnapshot;
 use std::path::Path;
 
+use async_trait::async_trait;
+use config::connect::{
+    ConnectAppService, ConnectCommitError, ConnectCommitPort, ConnectCommitReceipt,
+    ConnectCommitRequest, ConnectError, ConnectOrigin, ConnectView, ExistingProviderSnapshot,
+};
+use config::form::{
+    connect_command_for_form, provider_connect_form_view, PROVIDER_CONNECT_WORKFLOW_ID,
+};
+
+pub struct ConnectFacade {
+    service: Arc<ConnectAppService>,
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+}
+
+impl ConnectFacade {
+    pub fn new(
+        service: Arc<ConnectAppService>,
+        store: Arc<dyn config::GlobalConfigConnectStore>,
+    ) -> Arc<Self> {
+        Arc::new(Self { service, store })
+    }
+
+    pub async fn start(
+        &self,
+        origin: sdk::ConnectOrigin,
+    ) -> Result<sdk::ConnectView, sdk::SdkError> {
+        let document = self
+            .store
+            .load_global_document()
+            .await
+            .map_err(|error| sdk::SdkError::Internal(error.to_string()))?
+            .ok_or_else(|| sdk::SdkError::Internal("全局配置不存在".to_string()))?;
+        let view = self
+            .service
+            .start_connect(config_origin(origin), document.revision)
+            .await;
+        Ok(sdk_view(view))
+    }
+
+    pub async fn apply(
+        &self,
+        session_id: sdk::ConnectSessionId,
+        revision: sdk::ConnectRevision,
+        command: sdk::ConnectCommand,
+    ) -> Result<sdk::ConnectView, sdk::SdkError> {
+        // existing 快照已在 start_connect 经 directory 单点加载进 session；
+        // SelectProvider 的 ConfirmOverwrite 判断由状态机内存完成，翻译层零 IO。
+        let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
+            .map_err(sdk::SdkError::Internal)?;
+        self.service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+                config_command(command)?,
+            )
+            .await
+            .map(sdk_view)
+            .map_err(connect_sdk_error)
+    }
+
+    pub async fn cancel(
+        &self,
+        session_id: sdk::ConnectSessionId,
+        revision: sdk::ConnectRevision,
+    ) -> Result<sdk::ConnectView, sdk::SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
+            .map_err(sdk::SdkError::Internal)?;
+        self.service
+            .cancel(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+            )
+            .await
+            .map(sdk_view)
+            .map_err(connect_sdk_error)
+    }
+
+    pub async fn view(
+        &self,
+        session_id: sdk::ConnectSessionId,
+    ) -> Result<Option<sdk::ConnectView>, sdk::SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
+            .map_err(sdk::SdkError::Internal)?;
+        Ok(self.service.view(session_id).await.map(sdk_view))
+    }
+}
+
+#[async_trait::async_trait]
+impl sdk::ConfigFormClient for ConnectFacade {
+    async fn start_form(
+        &self,
+        workflow_id: sdk::ConfigFormWorkflowId,
+        origin: sdk::ConfigFormOrigin,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        if workflow_id.as_str() != PROVIDER_CONNECT_WORKFLOW_ID {
+            return Err(SdkError::Internal("未知 Config Form workflow".to_string()));
+        }
+        let document = self
+            .store
+            .load_global_document()
+            .await
+            .map_err(|error| SdkError::Internal(error.to_string()))?
+            .ok_or_else(|| SdkError::Internal("全局配置不存在".to_string()))?;
+        let connect_view = self
+            .service
+            .start_connect(config_form_origin(origin), document.revision)
+            .await;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn submit_page(
+        &self,
+        command: sdk::ConfigFormSubmitPage,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id =
+            config::connect::ConnectSessionId::from_transport_str(command.session_id.as_str())
+                .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = sdk_form_command(command.values, &current)?;
+        // existing 快照已在 start_connect 单点加载；表单与命令路径都不做 IO。
+        let connect_view = match self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(command.expected_revision.0),
+                form_command,
+            )
+            .await
+        {
+            Ok(view) => view,
+            Err(config::connect::ConnectError::Validation { .. }) => self
+                .service
+                .view(session_id)
+                .await
+                .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?,
+            Err(error) => return Err(connect_sdk_error(error)),
+        };
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn invoke_action(
+        &self,
+        command: sdk::ConfigFormInvokeAction,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id =
+            config::connect::ConnectSessionId::from_transport_str(command.session_id.as_str())
+                .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = connect_command_for_form(
+            &current,
+            config::form::ConfigFormCommand::InvokeAction {
+                action_id: config::form::ConfigFormActionId::new(command.action_id.0)
+                    .map_err(|error| SdkError::Internal(error.display_message()))?,
+            },
+            config::catalog::PROVIDER_CATALOG,
+        )
+        .map_err(form_sdk_error)?;
+        let connect_view = self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(command.expected_revision.0),
+                form_command,
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn back_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+        revision: sdk::ConfigFormRevision,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let current = self
+            .service
+            .view(session_id)
+            .await
+            .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
+        let form_command = connect_command_for_form(
+            &current,
+            config::form::ConfigFormCommand::Back,
+            config::catalog::PROVIDER_CATALOG,
+        )
+        .map_err(form_sdk_error)?;
+        let connect_view = self
+            .service
+            .apply(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+                form_command,
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn cancel_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+        revision: sdk::ConfigFormRevision,
+    ) -> Result<sdk::ConfigFormView, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let connect_view = self
+            .service
+            .cancel(
+                session_id,
+                config::connect::ConnectRevision::from_value(revision.0),
+            )
+            .await
+            .map_err(connect_sdk_error)?;
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map_err(form_sdk_error)
+    }
+
+    async fn refresh_form(
+        &self,
+        session_id: sdk::ConfigFormSessionId,
+    ) -> Result<Option<sdk::ConfigFormView>, SdkError> {
+        let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
+            .map_err(SdkError::Internal)?;
+        let Some(connect_view) = self.service.view(session_id).await else {
+            return Ok(None);
+        };
+        provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)
+            .map(sdk_form_view)
+            .map(Some)
+            .map_err(form_sdk_error)
+    }
+}
+
+#[async_trait::async_trait]
+impl sdk::ConnectClient for ConnectFacade {
+    async fn start_connect(
+        &self,
+        origin: sdk::ConnectOrigin,
+    ) -> Result<sdk::ConnectView, SdkError> {
+        self.start(origin).await
+    }
+
+    async fn apply_connect(
+        &self,
+        session_id: sdk::ConnectSessionId,
+        revision: sdk::ConnectRevision,
+        command: sdk::ConnectCommand,
+    ) -> Result<sdk::ConnectView, SdkError> {
+        self.apply(session_id, revision, command).await
+    }
+
+    async fn cancel_connect(
+        &self,
+        session_id: sdk::ConnectSessionId,
+        revision: sdk::ConnectRevision,
+    ) -> Result<sdk::ConnectView, SdkError> {
+        self.cancel(session_id, revision).await
+    }
+
+    async fn connect_view(
+        &self,
+        session_id: sdk::ConnectSessionId,
+    ) -> Result<Option<sdk::ConnectView>, SdkError> {
+        self.view(session_id).await
+    }
+}
+
+pub struct GlobalConnectCommitAdapter {
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+}
+
+/// Provider 目录读适配器：start_connect 经此一次加载全量已有 Provider 快照。
+struct GlobalConnectDirectoryAdapter {
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+}
+
+impl GlobalConnectDirectoryAdapter {
+    fn new(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<Self> {
+        Arc::new(Self { store })
+    }
+}
+
+#[async_trait::async_trait]
+impl config::connect::ConnectProviderDirectory for GlobalConnectDirectoryAdapter {
+    async fn provider_snapshots(
+        &self,
+    ) -> Result<Vec<ExistingProviderSnapshot>, config::GlobalConfigStoreError> {
+        let document = self.store.load_global_document().await?;
+        Ok(document
+            .as_ref()
+            .map(|document| existing_provider_snapshots(&document.value))
+            .unwrap_or_default())
+    }
+}
+
+impl GlobalConnectCommitAdapter {
+    pub fn new(store: Arc<dyn config::GlobalConfigConnectStore>) -> Arc<Self> {
+        Arc::new(Self { store })
+    }
+}
+
+#[async_trait]
+impl ConnectCommitPort for GlobalConnectCommitAdapter {
+    async fn commit(
+        &self,
+        request: ConnectCommitRequest,
+    ) -> Result<ConnectCommitReceipt, ConnectCommitError> {
+        let receipt = self
+            .store
+            .compare_and_swap(request.expected_global_revision, request.draft)
+            .await
+            .map_err(map_store_error)?;
+        let applied_revision = stable_revision(receipt.revision.as_str());
+        Ok(ConnectCommitReceipt { applied_revision })
+    }
+}
+
+pub struct FirstChatConnectBootstrap {
+    pub connect: Arc<dyn sdk::ConnectClient>,
+    pub forms: Arc<dyn sdk::ConfigFormClient>,
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+    receipt: config::BootstrapConfigReceipt,
+}
+
+impl FirstChatConnectBootstrap {
+    pub async fn rollback(self) -> Result<(), SdkError> {
+        self.store
+            .rollback_bootstrap(self.receipt)
+            .await
+            .map_err(global_connect_store_sdk_error)
+    }
+}
+
+pub async fn prepare_first_chat(
+    interactive: bool,
+) -> Result<Option<FirstChatConnectBootstrap>, SdkError> {
+    let agents_dir = share::config::paths::global_agents_dir();
+    prepare_first_chat_with_agents_dir(&agents_dir, interactive).await
+}
+
+pub async fn prepare_first_chat_with_agents_dir(
+    agents_dir: &Path,
+    interactive: bool,
+) -> Result<Option<FirstChatConnectBootstrap>, SdkError> {
+    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
+        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
+    );
+    if store
+        .load_global_document()
+        .await
+        .map_err(global_connect_store_sdk_error)?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    if !interactive {
+        return Err(SdkError::Init(
+            "缺少全局配置；请在交互终端运行 `aemeath connect`".to_string(),
+        ));
+    }
+    let receipt = store
+        .create_complete_default()
+        .await
+        .map_err(global_connect_store_sdk_error)?;
+    let global_user_agent = load_connect_global_user_agent(&store).await?;
+    Ok(Some(FirstChatConnectBootstrap {
+        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
+        forms: wire_connect_with_store(store.clone(), global_user_agent),
+        store,
+        receipt,
+    }))
+}
+
+pub struct ConnectBootstrap {
+    pub connect: Arc<dyn sdk::ConnectClient>,
+    pub forms: Arc<dyn sdk::ConfigFormClient>,
+}
+
+pub async fn build_connect_bootstrap() -> Result<ConnectBootstrap, SdkError> {
+    let agents_dir = share::config::paths::global_agents_dir();
+    build_connect_bootstrap_with_agents_dir(&agents_dir).await
+}
+
+pub async fn build_connect_bootstrap_with_agents_dir(
+    agents_dir: &Path,
+) -> Result<ConnectBootstrap, SdkError> {
+    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
+        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
+    );
+    if store
+        .load_global_document()
+        .await
+        .map_err(global_connect_store_sdk_error)?
+        .is_none()
+    {
+        store
+            .create_complete_default()
+            .await
+            .map_err(global_connect_store_sdk_error)?;
+    }
+    let global_user_agent = load_connect_global_user_agent(&store).await?;
+    Ok(ConnectBootstrap {
+        connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
+        forms: wire_connect_with_store(store, global_user_agent),
+    })
+}
+
+fn wire_connect(
+    agents_dir: &std::path::Path,
+    global_user_agent: Option<String>,
+) -> Arc<ConnectFacade> {
+    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
+        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
+    );
+    wire_connect_with_store(store, global_user_agent)
+}
+
+/// 从全局配置文档读取 `api.user_agent`，空白视为未配置。
+///
+/// 字段名由 `share::config::Config` 类型定义，**NEVER** 手写 JSON 路径；文档结构
+/// 异常时降级为默认配置语义，不制造非法 UA。
+fn connect_global_user_agent_from_document(
+    document: &config::GlobalConfigDocument,
+) -> Option<String> {
+    let config = serde_json::from_value::<share::config::Config>(document.value.clone())
+        .unwrap_or_else(|_| share::config::Config::default());
+    let value = config.api.user_agent.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// 读取当前全局配置的全局 UA，作为 Connect probe 与正式请求的共同回退来源。
+async fn load_connect_global_user_agent(
+    store: &Arc<dyn config::GlobalConfigConnectStore>,
+) -> Result<Option<String>, SdkError> {
+    let document = store
+        .load_global_document()
+        .await
+        .map_err(global_connect_store_sdk_error)?;
+    Ok(document
+        .as_ref()
+        .and_then(connect_global_user_agent_from_document))
+}
+
+fn wire_connect_with_store(
+    store: Arc<dyn config::GlobalConfigConnectStore>,
+    global_user_agent: Option<String>,
+) -> Arc<ConnectFacade> {
+    let commit = GlobalConnectCommitAdapter::new(store.clone());
+    let directory = GlobalConnectDirectoryAdapter::new(store.clone());
+    let service = Arc::new(
+        ConnectAppService::builder()
+            .with_catalog(config::catalog::PROVIDER_CATALOG)
+            .with_probe(crate::provider::ProviderProbeAdapter::new())
+            .with_commit(commit)
+            .with_provider_directory(directory)
+            .with_global_user_agent(global_user_agent)
+            .with_system(config::ports::SystemInformation {
+                os_name: std::env::consts::OS.to_string(),
+                os_version: None,
+                arch: std::env::consts::ARCH.to_string(),
+            })
+            .build(),
+    );
+    ConnectFacade::new(service, store)
+}
+
+/// 从全局文档加载全部已有 Provider 快照（Connect 目录单点读取入口）。
+fn existing_provider_snapshots(document: &serde_json::Value) -> Vec<ExistingProviderSnapshot> {
+    document
+        .get("models")
+        .and_then(|models| models.get("providers"))
+        .and_then(serde_json::Value::as_object)
+        .map(|providers| {
+            providers
+                .iter()
+                .filter_map(|(source, provider)| provider_snapshot_from_config(source, provider))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn provider_snapshot_from_config(
+    source: &str,
+    provider: &serde_json::Value,
+) -> Option<ExistingProviderSnapshot> {
+    let model = provider
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|models| models.first());
+    Some(ExistingProviderSnapshot::from_provider_config(
+        source,
+        provider
+            .get("baseUrl")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        provider.get("apiKey").and_then(serde_json::Value::as_str),
+        provider.get("driver").and_then(serde_json::Value::as_str),
+        model
+            .and_then(|model| model.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        model
+            .and_then(|model| model.get("contextWindow"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or_default(),
+        model
+            .and_then(|model| model.get("max_tokens").or_else(|| model.get("maxTokens")))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or_default(),
+        provider
+            .get("userAgent")
+            .and_then(serde_json::Value::as_str),
+        model
+            .and_then(|model| model.get("reasoningEffort"))
+            .and_then(serde_json::Value::as_str),
+        provider
+            .get("models")
+            .and_then(serde_json::Value::as_array)
+            .map(|models| {
+                models
+                    .iter()
+                    .filter_map(|model| {
+                        let id = model.get("id").and_then(serde_json::Value::as_str)?;
+                        Some(config::connect::ExistingModelSnapshot {
+                            model_id: id.to_string(),
+                            context_window: model
+                                .get("contextWindow")
+                                .and_then(serde_json::Value::as_u64)
+                                .and_then(|value| usize::try_from(value).ok())
+                                .unwrap_or_default(),
+                            max_tokens: model
+                                .get("max_tokens")
+                                .or_else(|| model.get("maxTokens"))
+                                .and_then(serde_json::Value::as_u64)
+                                .and_then(|value| u32::try_from(value).ok())
+                                .unwrap_or_default(),
+                            reasoning_effort: model
+                                .get("reasoningEffort")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    ))
+}
+
+fn global_connect_store_sdk_error(error: config::GlobalConfigStoreError) -> SdkError {
+    SdkError::Init(format!("全局配置初始化失败：{error}"))
+}
+
+fn map_store_error(error: config::GlobalConfigStoreError) -> ConnectCommitError {
+    match error {
+        config::GlobalConfigStoreError::Conflict { .. } => {
+            ConnectCommitError::PersistConflict { expected: 0 }
+        }
+        config::GlobalConfigStoreError::AlreadyExists
+        | config::GlobalConfigStoreError::InvalidDocument(_)
+        | config::GlobalConfigStoreError::InvalidDraft(_)
+        | config::GlobalConfigStoreError::RollbackRefused => {
+            ConnectCommitError::internal(error.to_string())
+        }
+        config::GlobalConfigStoreError::Io(message) => ConnectCommitError::io(message),
+    }
+}
+
+fn stable_revision(value: &str) -> u64 {
+    let bytes = value.as_bytes();
+    let mut folded = 0_u64;
+    for byte in bytes.iter().take(16) {
+        folded = folded.wrapping_mul(257).wrapping_add(u64::from(*byte));
+    }
+    folded
+}
+
+fn config_origin(origin: sdk::ConnectOrigin) -> ConnectOrigin {
+    match origin {
+        sdk::ConnectOrigin::ExplicitCommand => ConnectOrigin::ExplicitCommand,
+        sdk::ConnectOrigin::FirstChatBootstrap => ConnectOrigin::FirstChatBootstrap,
+    }
+}
+
+fn config_command(
+    command: sdk::ConnectCommand,
+) -> Result<config::connect::ConnectCommand, sdk::SdkError> {
+    use config::connect::ConnectCommand as Target;
+    use sdk::ConnectCommand as Source;
+    Ok(match command {
+        Source::SelectProvider { source } => {
+            if source == "custom" {
+                return Ok(Target::BeginCustomProvider);
+            }
+            Target::SelectProvider {
+                source: config::catalog::find_by_source(&source)
+                    .ok_or_else(|| sdk::SdkError::Internal("未知 Provider".to_string()))?
+                    .source
+                    .clone(),
+            }
+        }
+        Source::BeginCustomProvider => Target::BeginCustomProvider,
+        Source::SelectCustomProvider {
+            name,
+            driver,
+            base_url,
+        } => Target::SelectCustomProvider {
+            name,
+            driver,
+            base_url,
+        },
+        Source::ConfirmOverwrite => Target::ConfirmOverwrite,
+        Source::RejectOverwrite => Target::RejectOverwrite,
+        Source::SetEndpoint {
+            base_url,
+            api_style,
+        } => Target::SetEndpoint {
+            base_url,
+            api_style,
+        },
+        Source::SetCredential { api_key } => Target::SetCredential { api_key },
+        Source::SetProviderUserAgent { raw } => Target::SetProviderUserAgent { raw },
+        Source::SetSelectedModels { models } => Target::SetSelectedModels {
+            models: models
+                .into_iter()
+                .map(|model| config::connect::ModelDraft {
+                    model_id: model.model_id,
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning_effort: model.reasoning_effort,
+                })
+                .collect(),
+        },
+        Source::EnterCustomModel { target_model } => Target::EnterCustomModel { target_model },
+        Source::UpsertCustomModel {
+            model,
+            set_as_default,
+        } => Target::UpsertCustomModel {
+            model: config::connect::ModelDraft {
+                model_id: model.model_id,
+                context_window: model.context_window,
+                max_tokens: model.max_tokens,
+                reasoning_effort: model.reasoning_effort,
+            },
+            set_as_default,
+        },
+        Source::SkipProbe => Target::SkipProbe,
+        Source::BeginProbe => Target::BeginProbe,
+        Source::ContinueAfterProbe => Target::ContinueAfterProbe,
+        Source::EditAfterProbeFailure => Target::EditAfterProbeFailure,
+        Source::ConfirmSave => Target::ConfirmSave,
+    })
+}
+
+fn sdk_view(view: ConnectView) -> sdk::ConnectView {
+    sdk::ConnectView {
+        session_id: sdk::ConnectSessionId(view.session_id.to_transport_string()),
+        revision: sdk::ConnectRevision(view.revision.value()),
+        stage: sdk_stage(view.stage),
+        origin: match view.origin {
+            ConnectOrigin::ExplicitCommand => sdk::ConnectOrigin::ExplicitCommand,
+            ConnectOrigin::FirstChatBootstrap => sdk::ConnectOrigin::FirstChatBootstrap,
+        },
+        catalog: config::catalog::PROVIDER_CATALOG
+            .iter()
+            .map(|entry| sdk::ConnectProviderOption {
+                source: entry.source.as_str().to_string(),
+                driver: entry.driver.as_str().to_string(),
+                default_base_url: entry
+                    .default_endpoint
+                    .map(|endpoint| endpoint.url.to_string())
+                    .unwrap_or_default(),
+                recommended_models: entry
+                    .recommended_models
+                    .iter()
+                    .map(|model| sdk::ConnectRecommendedModelOption {
+                        model_id: model.model_id.to_string(),
+                        context_window: model.context_window,
+                        max_tokens: model.max_tokens,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        draft: sdk::ConnectDraftView {
+            source: view.draft.source.map(|value| value.as_str().to_string()),
+            driver: view.draft.driver.map(|value| value.as_str().to_string()),
+            base_url: view.draft.base_url,
+            has_api_key: view.draft.has_api_key,
+            provider_user_agent: view.draft.provider_user_agent,
+            models: view
+                .draft
+                .models
+                .into_iter()
+                .map(|model| sdk::ConnectModelDraftView {
+                    model_id: model.model_id,
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning_effort: model.reasoning_effort,
+                })
+                .collect(),
+            default_model_id: view.draft.default_model_id.clone(),
+        },
+        existing_provider: view.existing_provider.map(|provider| {
+            sdk::ConnectExistingProviderView {
+                source: provider.source,
+                driver: provider.driver,
+                base_url: provider.base_url,
+                has_api_key: matches!(
+                    provider.api_key_status,
+                    config::connect::ExistingCredentialStatus::Present
+                ),
+                model_id: provider.model_id,
+            }
+        }),
+        available_actions: view.available_actions.into_iter().map(sdk_action).collect(),
+        probe_status: view.probe_status.map(sdk_probe_status),
+        last_error: view.last_error.map(sdk_error_view),
+        terminal: view.terminal.map(|outcome| match outcome {
+            config::connect::ConnectOutcome::Completed { applied_revision } => {
+                sdk::ConnectOutcome::Completed { applied_revision }
+            }
+            config::connect::ConnectOutcome::Cancelled => sdk::ConnectOutcome::Cancelled,
+        }),
+    }
+}
+
+fn sdk_stage(stage: config::connect::ConnectStage) -> sdk::ConnectStage {
+    use config::connect::ConnectStage as Source;
+    match stage {
+        Source::SelectProvider => sdk::ConnectStage::SelectProvider,
+        Source::EditCustomProvider => sdk::ConnectStage::EditCustomProvider,
+        Source::ConfirmOverwrite => sdk::ConnectStage::ConfirmOverwrite,
+        Source::EditEndpoint => sdk::ConnectStage::EditEndpoint,
+        Source::EditCredential => sdk::ConnectStage::EditCredential,
+        Source::EditUserAgent => sdk::ConnectStage::EditUserAgent,
+        Source::SelectModel => sdk::ConnectStage::SelectModel,
+        Source::EditCustomModel => sdk::ConnectStage::EditCustomModel,
+        Source::ChooseProbe => sdk::ConnectStage::ChooseProbe,
+        Source::Probing => sdk::ConnectStage::Probing,
+        Source::Review => sdk::ConnectStage::Review,
+        Source::Saving => sdk::ConnectStage::Saving,
+        Source::Completed => sdk::ConnectStage::Completed,
+        Source::Cancelled => sdk::ConnectStage::Cancelled,
+    }
+}
+
+fn sdk_action(action: config::connect::AvailableAction) -> sdk::ConnectAvailableAction {
+    use config::connect::AvailableAction as Source;
+    match action {
+        Source::SelectProvider => sdk::ConnectAvailableAction::SelectProvider,
+        Source::BeginCustomProvider => sdk::ConnectAvailableAction::BeginCustomProvider,
+        Source::SelectCustomProvider => sdk::ConnectAvailableAction::SelectCustomProvider,
+        Source::ConfirmOverwrite => sdk::ConnectAvailableAction::ConfirmOverwrite,
+        Source::RejectOverwrite => sdk::ConnectAvailableAction::RejectOverwrite,
+        Source::SetEndpoint => sdk::ConnectAvailableAction::SetEndpoint,
+        Source::SetCredential => sdk::ConnectAvailableAction::SetCredential,
+        Source::SetProviderUserAgent => sdk::ConnectAvailableAction::SetProviderUserAgent,
+        Source::SelectRecommendedModel => sdk::ConnectAvailableAction::SelectRecommendedModel,
+        Source::AddModel => sdk::ConnectAvailableAction::AddModel,
+        Source::EditModel => sdk::ConnectAvailableAction::EditModel,
+        Source::SetCustomModel => sdk::ConnectAvailableAction::SetCustomModel,
+        Source::SkipProbe => sdk::ConnectAvailableAction::SkipProbe,
+        Source::BeginProbe => sdk::ConnectAvailableAction::BeginProbe,
+        Source::ContinueAfterProbe => sdk::ConnectAvailableAction::ContinueAfterProbe,
+        Source::EditAfterProbeFailure => sdk::ConnectAvailableAction::EditAfterProbeFailure,
+        Source::ConfirmSave => sdk::ConnectAvailableAction::ConfirmSave,
+        Source::RetrySave => sdk::ConnectAvailableAction::RetrySave,
+        Source::Cancel => sdk::ConnectAvailableAction::Cancel,
+    }
+}
+
+fn sdk_probe_status(status: config::connect::ProbeStatusView) -> sdk::ConnectProbeStatus {
+    match status {
+        config::connect::ProbeStatusView::NotRun => sdk::ConnectProbeStatus::NotRun,
+        config::connect::ProbeStatusView::Running => sdk::ConnectProbeStatus::Running,
+        config::connect::ProbeStatusView::Success { latency_ms } => {
+            sdk::ConnectProbeStatus::Success { latency_ms }
+        }
+        config::connect::ProbeStatusView::Failed { kind, message } => {
+            sdk::ConnectProbeStatus::Failed {
+                kind: sdk_probe_error_kind(kind),
+                message,
+            }
+        }
+    }
+}
+
+fn sdk_probe_error_kind(kind: config::ports::ProviderProbeErrorKind) -> sdk::ConnectProbeErrorKind {
+    match kind {
+        config::ports::ProviderProbeErrorKind::Cancelled => sdk::ConnectProbeErrorKind::Cancelled,
+        config::ports::ProviderProbeErrorKind::Timeout => sdk::ConnectProbeErrorKind::Timeout,
+        config::ports::ProviderProbeErrorKind::Authentication => {
+            sdk::ConnectProbeErrorKind::Authentication
+        }
+        config::ports::ProviderProbeErrorKind::Endpoint => sdk::ConnectProbeErrorKind::Endpoint,
+        config::ports::ProviderProbeErrorKind::Model => sdk::ConnectProbeErrorKind::Model,
+        config::ports::ProviderProbeErrorKind::Protocol => sdk::ConnectProbeErrorKind::Protocol,
+        config::ports::ProviderProbeErrorKind::Internal => sdk::ConnectProbeErrorKind::Internal,
+    }
+}
+
+fn sdk_error_view(error: ConnectError) -> sdk::ConnectErrorView {
+    sdk::ConnectErrorView {
+        kind: match error {
+            ConnectError::InvalidTransition { .. } => sdk::ConnectErrorKind::InvalidTransition,
+            ConnectError::StaleRevision { .. } => sdk::ConnectErrorKind::StaleRevision,
+            ConnectError::Validation { .. } => sdk::ConnectErrorKind::Validation,
+            ConnectError::CatalogUnavailable { .. } => sdk::ConnectErrorKind::CatalogUnavailable,
+            ConnectError::ProbeFailed { .. } => sdk::ConnectErrorKind::ProbeFailed,
+            ConnectError::PersistConflict { .. } => sdk::ConnectErrorKind::PersistConflict,
+            ConnectError::PersistFailed { .. } => sdk::ConnectErrorKind::PersistFailed,
+            ConnectError::PersistUnavailable => sdk::ConnectErrorKind::PersistUnavailable,
+            ConnectError::InteractiveSetupRequired => {
+                sdk::ConnectErrorKind::InteractiveSetupRequired
+            }
+            ConnectError::BootstrapRollbackRefused { .. } => {
+                sdk::ConnectErrorKind::BootstrapRollbackRefused
+            }
+        },
+        message: error.display_message(),
+    }
+}
+
+fn config_form_origin(origin: sdk::ConfigFormOrigin) -> ConnectOrigin {
+    match origin {
+        sdk::ConfigFormOrigin::ExplicitCommand => ConnectOrigin::ExplicitCommand,
+        sdk::ConfigFormOrigin::FirstChatBootstrap => ConnectOrigin::FirstChatBootstrap,
+    }
+}
+
+fn sdk_form_command(
+    values: Vec<sdk::ConfigFormFieldValue>,
+    current: &config::connect::ConnectView,
+) -> Result<config::connect::ConnectCommand, SdkError> {
+    let values = values
+        .into_iter()
+        .map(|value| {
+            Ok(config::form::ConfigFormFieldValue {
+                field_id: config::form::ConfigFormFieldId::new(value.field_id.0)
+                    .map_err(|error| SdkError::Internal(error.display_message()))?,
+                value: match value.value {
+                    sdk::ConfigFormValue::Text(value) => config::form::ConfigFormValue::Text(value),
+                    sdk::ConfigFormValue::Secret(value) => {
+                        config::form::ConfigFormValue::Secret(value)
+                    }
+                    sdk::ConfigFormValue::Number(value) => {
+                        config::form::ConfigFormValue::Number(value)
+                    }
+                    sdk::ConfigFormValue::Boolean(value) => {
+                        config::form::ConfigFormValue::Boolean(value)
+                    }
+                    sdk::ConfigFormValue::SelectedOption(value) => {
+                        config::form::ConfigFormValue::SelectedOption(
+                            config::form::ConfigFormOptionId::new(value.0)
+                                .map_err(|error| SdkError::Internal(error.display_message()))?,
+                        )
+                    }
+                    sdk::ConfigFormValue::SelectedOptions(values) => {
+                        let ids = values
+                            .into_iter()
+                            .map(|value| {
+                                config::form::ConfigFormOptionId::new(value.0)
+                                    .map_err(|error| SdkError::Internal(error.display_message()))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        config::form::ConfigFormValue::SelectedOptions(ids)
+                    }
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    config::form::connect_command_for_form(
+        current,
+        config::form::ConfigFormCommand::SubmitPage { values },
+        config::catalog::PROVIDER_CATALOG,
+    )
+    .map_err(form_sdk_error)
+}
+
+fn sdk_form_view(view: config::form::ConfigFormView) -> sdk::ConfigFormView {
+    sdk::ConfigFormView {
+        workflow_id: sdk::ConfigFormWorkflowId(view.workflow_id.as_str().to_string()),
+        session_id: sdk::ConfigFormSessionId(view.session_id.as_str().to_string()),
+        revision: sdk::ConfigFormRevision(view.revision.value()),
+        origin: match view.origin {
+            config::form::ConfigFormOrigin::ExplicitCommand => {
+                sdk::ConfigFormOrigin::ExplicitCommand
+            }
+            config::form::ConfigFormOrigin::FirstChatBootstrap => {
+                sdk::ConfigFormOrigin::FirstChatBootstrap
+            }
+        },
+        page: sdk_form_page(view.page),
+        busy: view.busy.map(|busy| sdk::ConfigFormBusy {
+            message: busy.message,
+            cancellable: busy.cancellable,
+            refresh_policy: match busy.refresh_policy {
+                config::form::ConfigFormRefreshPolicy::Manual => {
+                    sdk::ConfigFormRefreshPolicy::Manual
+                }
+                config::form::ConfigFormRefreshPolicy::Poll { interval_ms } => {
+                    sdk::ConfigFormRefreshPolicy::Poll { interval_ms }
+                }
+            },
+        }),
+        terminal: view.terminal.map(|terminal| match terminal {
+            config::form::ConfigFormTerminal::Completed { applied_revision } => {
+                sdk::ConfigFormTerminal::Completed { applied_revision }
+            }
+            config::form::ConfigFormTerminal::Cancelled => sdk::ConfigFormTerminal::Cancelled,
+        }),
+    }
+}
+
+fn sdk_form_page(page: config::form::ConfigFormPage) -> sdk::ConfigFormPage {
+    sdk::ConfigFormPage {
+        id: sdk::ConfigFormPageId(page.id.as_str().to_string()),
+        title: page.title,
+        description: page.description,
+        step: page.step.map(|step| sdk::ConfigFormStep {
+            current: step.current,
+            total: step.total,
+        }),
+        fields: page.fields.into_iter().map(sdk_form_field).collect(),
+        error: page.error.map(|error| sdk::ConfigFormPageError {
+            message: error.message,
+        }),
+        actions: page
+            .actions
+            .into_iter()
+            .map(|action| sdk::ConfigFormAction {
+                id: sdk::ConfigFormActionId(action.id.as_str().to_string()),
+                label: action.label,
+                style: match action.style {
+                    config::form::ConfigFormActionStyle::Primary => {
+                        sdk::ConfigFormActionStyle::Primary
+                    }
+                    config::form::ConfigFormActionStyle::Secondary => {
+                        sdk::ConfigFormActionStyle::Secondary
+                    }
+                    config::form::ConfigFormActionStyle::Destructive => {
+                        sdk::ConfigFormActionStyle::Destructive
+                    }
+                },
+                shortcut: action.shortcut,
+            })
+            .collect(),
+    }
+}
+
+fn sdk_form_field(field: config::form::ConfigFormField) -> sdk::ConfigFormField {
+    sdk::ConfigFormField {
+        id: sdk::ConfigFormFieldId(field.id.as_str().to_string()),
+        label: field.label,
+        description: field.description,
+        field_type: match field.field_type {
+            config::form::ConfigFormFieldType::Text => sdk::ConfigFormFieldType::Text,
+            config::form::ConfigFormFieldType::Secret => sdk::ConfigFormFieldType::Secret,
+            config::form::ConfigFormFieldType::Number => sdk::ConfigFormFieldType::Number,
+            config::form::ConfigFormFieldType::SingleSelect => {
+                sdk::ConfigFormFieldType::SingleSelect
+            }
+            config::form::ConfigFormFieldType::MultiSelect => sdk::ConfigFormFieldType::MultiSelect,
+            config::form::ConfigFormFieldType::Boolean => sdk::ConfigFormFieldType::Boolean,
+            config::form::ConfigFormFieldType::Summary => sdk::ConfigFormFieldType::Summary,
+            config::form::ConfigFormFieldType::Status => sdk::ConfigFormFieldType::Status,
+        },
+        required: field.required,
+        has_value: field.has_value,
+        display_value: field.display_value,
+        options: field
+            .options
+            .into_iter()
+            .map(|option| sdk::ConfigFormOption {
+                id: sdk::ConfigFormOptionId(option.id.as_str().to_string()),
+                label: option.label,
+                description: option.description,
+            })
+            .collect(),
+        error: field.error.map(|error| sdk::ConfigFormFieldError {
+            field_id: sdk::ConfigFormFieldId(error.field_id.as_str().to_string()),
+            message: error.message,
+        }),
+    }
+}
+
+fn form_sdk_error(error: impl std::fmt::Display) -> SdkError {
+    SdkError::Internal(error.to_string())
+}
+
+fn connect_sdk_error(error: ConnectError) -> sdk::SdkError {
+    sdk::SdkError::Internal(error.display_message())
+}
+
 pub type AgentClientHandle = Arc<dyn AgentClient>;
 pub type DisplayHistoryQueryHandle = Arc<dyn sdk::DisplayHistoryQuery>;
 pub type RunControlClientHandle = Arc<dyn sdk::RunControlClient>;
 
 pub struct AgentClientBootstrap {
     pub client: AgentClientHandle,
+    pub connect: Arc<dyn sdk::ConnectClient>,
+    pub forms: Arc<dyn sdk::ConfigFormClient>,
     pub run_control_client: RunControlClientHandle,
     pub session_audit: Option<crate::audit::SessionAudit>,
     pub display_history_query: DisplayHistoryQueryHandle,
@@ -35,8 +1050,56 @@ pub struct AgentClientBootstrap {
     pub user_agent: String,
 }
 
+pub struct PreChatAgentClient {
+    runtime: AgentClientImpl,
+}
+
+impl PreChatAgentClient {
+    fn new(runtime: AgentClientImpl) -> Self {
+        Self { runtime }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentClient for PreChatAgentClient {
+    fn cancel_current_run(&self, deadline: sdk::ControlDeadline) -> sdk::CancelCurrentRunOutcome {
+        self.runtime.cancel_current_run(deadline)
+    }
+
+    fn reply_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reply: sdk::InteractionReply,
+    ) -> sdk::InteractionCommandOutcome {
+        self.runtime.reply_interaction(request_id, reply)
+    }
+
+    fn cancel_interaction(
+        &self,
+        request_id: &sdk::InteractionRequestId,
+        reason: sdk::InteractionCancelReason,
+    ) -> sdk::InteractionCommandOutcome {
+        self.runtime.cancel_interaction(request_id, reason)
+    }
+
+    async fn config_view(&self) -> Result<sdk::ConfigView, SdkError> {
+        self.runtime.config_view().await
+    }
+
+    async fn update_config(
+        &self,
+        update: sdk::ConfigUpdateData,
+    ) -> Result<sdk::ConfigUpdateResult, SdkError> {
+        self.runtime.update_config(update).await
+    }
+
+    async fn chat(&self, input: sdk::ChatRequest) -> Result<sdk::ChatStream, SdkError> {
+        self.runtime.chat(input).await
+    }
+}
+
 pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
-    Arc::new(client)
+    Arc::new(PreChatAgentClient::new(client))
 }
 
 pub struct FeatureGateways {
@@ -337,6 +1400,9 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let thinking = requested_level != provider::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
+    let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
+    let connect: Arc<dyn sdk::ConnectClient> = connect_facade.clone();
+    let forms: Arc<dyn sdk::ConfigFormClient> = connect_facade;
     let display_history_query: DisplayHistoryQueryHandle = Arc::new(runtime_client.client.clone());
     let run_control_client: RunControlClientHandle = Arc::new(runtime_client.client.clone());
     let client = agent_client_from_runtime(runtime_client.client);
@@ -345,6 +1411,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
 
     Ok(AgentClientBootstrap {
         client,
+        connect,
+        forms,
         run_control_client,
         session_audit,
         display_history_query,
@@ -372,6 +1440,50 @@ mod tests {
     use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
     use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn document_with_value(value: serde_json::Value) -> config::GlobalConfigDocument {
+        config::GlobalConfigDocument {
+            revision: config::GlobalConfigRevision::from_digest("test-revision"),
+            value,
+        }
+    }
+
+    #[test]
+    fn connect_global_user_agent_reads_trimmed_document_value() {
+        let document = document_with_value(
+            serde_json::json!({"api": {"user_agent": "  company-agent/7.7  "}}),
+        );
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some("company-agent/7.7".to_string())
+        );
+    }
+
+    #[test]
+    fn connect_global_user_agent_treats_blank_value_as_unconfigured() {
+        let document = document_with_value(serde_json::json!({"api": {"user_agent": "   "}}));
+        assert_eq!(connect_global_user_agent_from_document(&document), None);
+    }
+
+    #[test]
+    fn connect_global_user_agent_keeps_config_default_when_api_section_is_absent() {
+        // `api.user_agent` 是带默认值的 legacy 字段；缺失时必须与
+        // `ConfigSnapshot::user_agent()` 一致地回落到默认配置 UA。
+        let document = document_with_value(serde_json::json!({"models": {"providers": {}}}));
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some(Config::default().api.user_agent)
+        );
+    }
+
+    #[test]
+    fn connect_global_user_agent_degrades_for_non_object_document() {
+        let document = document_with_value(serde_json::json!("not-an-object"));
+        assert_eq!(
+            connect_global_user_agent_from_document(&document),
+            Some(Config::default().api.user_agent)
+        );
+    }
 
     #[test]
     fn logging_init_decision_initializes_when_no_logger_exists() {

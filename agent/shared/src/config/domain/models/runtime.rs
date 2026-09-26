@@ -153,6 +153,7 @@ mod tests {
                     api_style: None,
                     input: Vec::new(),
                 }],
+                user_agent: None,
             },
         );
         ModelsConfig {

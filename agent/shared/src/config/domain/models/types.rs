@@ -50,6 +50,48 @@ pub struct ProviderModelsConfig {
     /// Available models for this source.
     #[serde(default)]
     pub models: Vec<ModelEntryConfig>,
+
+    /// Provider 专属 User-Agent 覆盖。
+    ///
+    /// - JSON 字段名固定为 `userAgent`，缺失字段视为未配置，向后兼容旧配置文件。
+    /// - 该字段只属于 Provider source，不复用 legacy `api.user_agent`。
+    /// - Config domain 在 UA resolver 与 Connect candidate 归一化时把空白字符串视为
+    ///   未配置；持有者须经 [`ProviderModelsConfig::normalized_user_agent`] /
+    ///   [`ProviderModelsConfig::with_normalized_user_agent`] 进入回退链，
+    ///   **NEVER** 直接下发原始字符串。
+    #[serde(default, rename = "userAgent", skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
+}
+
+impl ProviderModelsConfig {
+    /// 获取规范化后的 Provider 专属 User-Agent。
+    ///
+    /// - 缺失字段或全空白字符串返回 `None`；
+    /// - 非空白字段去除首尾 ASCII 空白后返回原始字符串切片；
+    /// - 不在此函数内做 `HeaderValue` 合法性校验——调用方必须在 UA resolver 内串入
+    ///   HeaderValue 校验并拒绝含控制字符的片段（见 Config `user_agent.rs`）。
+    pub fn normalized_user_agent(&self) -> Option<&str> {
+        let raw = self.user_agent.as_deref()?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            // 保留原 trimmed 视图：调用方在 HeaderValue 校验失败时仍能读取同一来源。
+            Some(trimmed)
+        }
+    }
+
+    /// 构造一个 user_agent 已归一化的拷贝：空白归一为 `None`，其它字段保持不变。
+    ///
+    /// 用于 Connect candidate 在落盘前清掉空白覆盖，避免下游误把空白当作有效配置。
+    pub fn with_normalized_user_agent(&self) -> Self {
+        let mut clone = self.clone();
+        clone.user_agent = match self.user_agent.as_deref() {
+            Some(raw) if raw.trim().is_empty() => None,
+            _ => clone.user_agent,
+        };
+        clone
+    }
 }
 
 /// A single model entry within a source
@@ -118,3 +160,7 @@ impl ModelEntryConfig {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod types_tests;

@@ -43,6 +43,35 @@ fn reasoning_level_from_options(
     }
 }
 
+/// 校验 invocation 构造输入已完成 Config 解析；base URL / 模型 / UA
+/// 任一缺失时 fail-closed 返回 Configuration 错误，禁止回落 adapter 内置默认值。
+fn ensure_resolved_invocation_inputs(options: &LlmConfigOptions) -> Result<(), crate::LlmError> {
+    if options
+        .base_url
+        .as_deref()
+        .is_none_or(|base_url| base_url.trim().is_empty())
+    {
+        return Err(crate::LlmError::Config(
+            "Provider base URL 未解析：调用方必须传入 Config Catalog 或用户配置值".to_string(),
+        ));
+    }
+    if options.model.trim().is_empty() {
+        return Err(crate::LlmError::Config(
+            "Provider 模型未解析：调用方必须传入 Config Catalog 或用户配置值".to_string(),
+        ));
+    }
+    if options
+        .user_agent
+        .as_deref()
+        .is_none_or(|user_agent| user_agent.trim().is_empty())
+    {
+        return Err(crate::LlmError::Config(
+            "Provider User-Agent 未解析：调用方必须传入 Config resolver 的最终值".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// 解析 driver 字符串与 API style；无效输入显式报 Configuration 错误。
 fn parse_driver_spec(
     options: &LlmConfigOptions,
@@ -245,7 +274,7 @@ impl LlmClient {
             driver: ProviderDriverKind::Anthropic,
             api_key,
             base_url: None,
-            model: None,
+            model: Some("claude-sonnet-5".to_string()),
             max_tokens: 8192,
             reasoning: false,
             reasoning_config: None,
@@ -333,6 +362,7 @@ impl LlmClient {
     }
 
     pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
+        ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let http =
             crate::adapters::transport::build_http_client_for_endpoint(options.base_url.as_deref());
@@ -352,6 +382,7 @@ impl LlmClient {
         options: LlmConfigOptions,
         pool: &crate::adapters::pool::TransportPool,
     ) -> Result<Self, crate::LlmError> {
+        ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let key = transport_key_for(&options, &spec);
         let transport = pool.acquire(key);

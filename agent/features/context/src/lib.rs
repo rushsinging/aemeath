@@ -41,9 +41,9 @@ pub use adapters::{
 pub use application::{main_session, ContextApplicationService};
 pub use application::{SessionLoadError, SessionPersistenceService};
 pub use domain::session::{
-    project_dir_segment, AcceptedInputProjection, ActiveCompactMarker, CanonicalSession,
-    ChatSegment, CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepMessages,
-    FinalizedOutcomeProjection, RunStepCursor, SessionCodec, SessionCodecError, SessionCommitPlan,
+    project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, ChatSegment,
+    CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepMessages,
+    FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError, SessionCommitPlan,
     SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
     SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };

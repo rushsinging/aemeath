@@ -1,6 +1,6 @@
 use super::{
-    AcceptedInputProjection, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    CommittedStepLedger, FinalizedOutcomeProjection, SessionHistory,
+    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepLedger,
+    FinalizedOutcomeRecord, SessionHistory,
 };
 use crate::domain::{FinalizeCause, SessionId, ToolCallIdentity, ToolReceiptMutation};
 use sdk::{RunId, RunStepId};
@@ -20,8 +20,8 @@ fn tool_identity(run_id: &str, step_id: &str) -> ToolCallIdentity {
     }
 }
 
-fn finalized_outcome(text: &str) -> FinalizedOutcomeProjection {
-    FinalizedOutcomeProjection {
+fn finalized_outcome(text: &str) -> FinalizedOutcomeRecord {
+    FinalizedOutcomeRecord {
         finalize_cause: FinalizeCause::Completed,
         duration_ms: Some(3),
         messages: vec![Message::user(text)].into(),
@@ -93,14 +93,14 @@ fn appending_finalized_outcome_reuses_other_run_slice() {
             "run-existing",
             vec![CommittedRunStep::accepted_only(
                 "step-existing",
-                AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+                AcceptedInputRecord::new(vec![Message::user("existing")], "existing", 1),
             )],
         ),
         CommittedRunSlice::new(
             "run-other",
             vec![CommittedRunStep::accepted_only(
                 "step-other",
-                AcceptedInputProjection::new(vec![Message::user("other")], "other", 1),
+                AcceptedInputRecord::new(vec![Message::user("other")], "other", 1),
             )],
         ),
     ]);
@@ -129,7 +129,7 @@ fn advancing_tool_receipt_reuses_other_run_slice_and_returns_changed_receipt() {
         "run-other",
         vec![CommittedRunStep::accepted_only(
             "step-other",
-            AcceptedInputProjection::new(vec![Message::user("other")], "other", 1),
+            AcceptedInputRecord::new(vec![Message::user("other")], "other", 1),
         )],
     )]);
     let other_slice_pointer = Arc::as_ptr(&history.slices()[0]);
@@ -173,7 +173,7 @@ fn clearing_history_returns_empty_without_mutating_existing_history() {
         "run",
         vec![CommittedRunStep::accepted_only(
             "step",
-            AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+            AcceptedInputRecord::new(vec![Message::user("existing")], "existing", 1),
         )],
     )]);
 
@@ -189,7 +189,7 @@ fn adding_a_step_reuses_unchanged_session_history_backing() {
         "run-existing",
         vec![CommittedRunStep::accepted_only(
             "step-existing",
-            AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+            AcceptedInputRecord::new(vec![Message::user("existing")], "existing", 1),
         )],
     );
     let history = SessionHistory::from_slices(vec![existing_slice]);
@@ -198,7 +198,7 @@ fn adding_a_step_reuses_unchanged_session_history_backing() {
     let updated = history.append_accepted_input(
         "run-new",
         "step-new",
-        AcceptedInputProjection::new(vec![Message::user("new")], "new", 2),
+        AcceptedInputRecord::new(vec![Message::user("new")], "new", 2),
     );
 
     assert_eq!(existing_slice_pointer, Arc::as_ptr(&updated.slices()[0]));
@@ -213,14 +213,14 @@ fn updating_an_existing_step_only_replaces_its_own_slice() {
             "run-existing",
             vec![CommittedRunStep::accepted_only(
                 "step-existing",
-                AcceptedInputProjection::new(vec![Message::user("existing")], "existing", 1),
+                AcceptedInputRecord::new(vec![Message::user("existing")], "existing", 1),
             )],
         ),
         CommittedRunSlice::new(
             "run-other",
             vec![CommittedRunStep::accepted_only(
                 "step-other",
-                AcceptedInputProjection::new(vec![Message::user("other")], "other", 1),
+                AcceptedInputRecord::new(vec![Message::user("other")], "other", 1),
             )],
         ),
     ]);
@@ -229,7 +229,7 @@ fn updating_an_existing_step_only_replaces_its_own_slice() {
     let updated = history.append_accepted_input(
         "run-existing",
         "step-existing",
-        AcceptedInputProjection::new(vec![Message::user("replacement")], "replacement", 2),
+        AcceptedInputRecord::new(vec![Message::user("replacement")], "replacement", 2),
     );
 
     assert_eq!(

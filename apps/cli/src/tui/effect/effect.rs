@@ -10,6 +10,9 @@ use crate::tui::model::conversation::interaction::{
 pub enum Effect {
     QuitApplication,
     RequestRender,
+    /// 打开 Provider Connect 向导（/connect）。需独占终端，由 run_loop 层
+    /// 处理（挂起主 TUI → 全屏表单 → 恢复），不经 async executor。
+    OpenConnectWizard,
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },

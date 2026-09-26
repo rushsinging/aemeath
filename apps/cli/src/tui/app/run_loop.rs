@@ -1,6 +1,7 @@
 use super::App;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
+use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
@@ -8,6 +9,69 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::Instant;
+
+impl App {
+    /// 打开 Provider Connect 向导：挂起主 TUI 终端（恢复 cooked 模式与主
+    /// 屏幕）→ 全屏表单循环 → 恢复 TUI。保存成功后全局配置在下一轮对话
+    /// 边界由 ConfigReader 指纹刷新生效（ConfigReloaded 事件）。
+    pub(crate) async fn run_connect_wizard(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) {
+        let Some(forms) = self.connect_forms.clone() else {
+            self.append_error_notice("Connect 向导未装配（forms 缺失）".to_string());
+            return;
+        };
+        // 挂起主 TUI：恢复终端到普通模式，交由表单循环接管。
+        let suspend_result = (|| -> io::Result<()> {
+            crossterm::terminal::disable_raw_mode()?;
+            crossterm::execute!(
+                terminal.backend_mut(),
+                crossterm::event::DisableMouseCapture,
+                crossterm::event::DisableBracketedPaste,
+                crossterm::terminal::LeaveAlternateScreen,
+            )?;
+            terminal.show_cursor()?;
+            Ok(())
+        })();
+        if let Err(error) = suspend_result {
+            self.append_error_notice(format!("挂起终端失败：{error}"));
+            return;
+        }
+        let wizard_result = crate::subcommand::connect_command::run_connect_command_with_origin(
+            forms,
+            sdk::ConfigFormOrigin::ExplicitCommand,
+        )
+        .await;
+        // 恢复主 TUI。
+        let resume_result = (|| -> io::Result<()> {
+            crossterm::terminal::enable_raw_mode()?;
+            crossterm::execute!(
+                terminal.backend_mut(),
+                crossterm::terminal::EnterAlternateScreen,
+                crossterm::event::EnableBracketedPaste,
+                crossterm::event::EnableMouseCapture,
+            )?;
+            terminal.clear()?;
+            Ok(())
+        })();
+        if let Err(error) = resume_result {
+            self.append_error_notice(format!("恢复终端失败：{error}"));
+        }
+        match wizard_result {
+            Ok(sdk::ConfigFormTerminal::Completed { .. }) => {
+                self.append_system_notice(
+                    "Provider 配置已保存；下一次发送消息时自动生效。".to_string(),
+                );
+            }
+            Ok(sdk::ConfigFormTerminal::Cancelled) => {}
+            Err(error) => {
+                self.append_error_notice(format!("Connect 向导失败：{error}"));
+            }
+        }
+    }
+}
+
 use tokio::sync::mpsc;
 
 const MAX_RUNTIME_EVENTS_PER_FRAME: usize = 256;
@@ -139,8 +203,19 @@ impl App {
             );
 
             let frame_effects = self.prepare_frame();
+            // 启动向导（aemeath connect）：首轮直接打开 Connect 向导。
+            if self.startup_connect {
+                self.startup_connect = false;
+                self.run_connect_wizard(terminal).await;
+            }
             self.draw(terminal)?;
             for effect in frame_effects {
+                // 向导独占终端（挂起主 TUI → 全屏表单 → 恢复），
+                // 必须在有 terminal 借用的本层处理，不能进 async executor。
+                if let Effect::OpenConnectWizard = effect {
+                    self.run_connect_wizard(terminal).await;
+                    continue;
+                }
                 self.execute_effect(effect, &ui_tx).await;
             }
 
@@ -227,6 +302,10 @@ impl App {
 
             // --- TEA effect execution: handle side effects inline via AgentClient ---
             for effect in result.effects {
+                if let Effect::OpenConnectWizard = effect {
+                    self.run_connect_wizard(terminal).await;
+                    continue;
+                }
                 self.execute_effect(effect, &ui_tx).await;
             }
             self.input.just_pasted = false;

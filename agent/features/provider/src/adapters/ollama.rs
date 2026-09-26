@@ -64,10 +64,17 @@ impl OllamaProvider {
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
-        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(
-            base_url.as_deref().unwrap_or("http://localhost:11434"),
-        ));
-        Self::from_shared_http(api_key, base_url, model, timeout_secs, user_agent, http)
+        let base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
+        let model = model.expect("Provider construction 必须传入已解析模型");
+        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(&base_url));
+        Self::from_shared_http(
+            api_key,
+            Some(base_url),
+            Some(model),
+            timeout_secs,
+            user_agent,
+            http,
+        )
     }
 
     /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
@@ -82,12 +89,12 @@ impl OllamaProvider {
     ) -> Self {
         Self {
             base_url: {
-                let url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
+                let url = base_url.expect("Provider construction 必须传入已解析 base URL");
                 url.trim_end_matches('/')
                     .trim_end_matches("/v1")
                     .to_string()
             },
-            model: model.unwrap_or_else(|| "llama3.2".to_string()),
+            model: model.expect("Provider construction 必须传入已解析模型"),
             api_key,
             user_agent,
             http,
@@ -245,8 +252,8 @@ mod tests {
     fn custom_user_agent_is_sent_in_ollama_headers() {
         let provider = OllamaProvider::new_with_user_agent(
             "ollama".to_string(),
-            None,
-            None,
+            Some("http://localhost:11434".to_string()),
+            Some("test-model".to_string()),
             8192,
             false,
             60,
@@ -285,7 +292,7 @@ mod tests {
                 reasoning: false,
                 reasoning_config: None,
                 timeout_secs: 60,
-                user_agent: None,
+                user_agent: Some("aemeath-test/1.0".to_string()),
             })
             .expect("valid ollama config");
         let scope = InvocationScope::new(

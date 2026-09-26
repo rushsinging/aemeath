@@ -19,8 +19,28 @@
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
 mod adapters;
+pub mod catalog;
+pub mod connect;
 mod domain;
-mod ports;
+#[path = "core/form.rs"]
+pub mod form;
+#[path = "gateway/global_store.rs"]
+mod global_store;
+pub mod ports;
+pub mod runtime_resolution;
+pub mod user_agent;
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod catalog_tests;
+
+#[cfg(test)]
+#[path = "user_agent_tests.rs"]
+mod user_agent_tests;
+
+#[cfg(test)]
+#[path = "ports_tests.rs"]
+mod ports_tests;
 
 pub use adapters::{CliConfigInputData, ConfigAppService, NativeConfigStore};
 // NativeConfigStore 归类角色（AuditStore 同判：注入式存储句柄，wire 签名载荷）。
@@ -31,7 +51,18 @@ pub use domain::{
     ConfigPersistOutcomeData, ConfigRefreshOutcomeData, ConfigSubscriptionData, ConfigUpdateData,
     PreparedConfigUpdateData, PreparedProjectConfigData, ProjectConfigLocationData,
 };
+pub use global_store::{
+    BootstrapConfigReceipt, FilesystemGlobalConfigConnectStore, GlobalConfigCommitReceipt,
+    GlobalConfigConnectStore, GlobalConfigDocument, GlobalConfigRevision, GlobalConfigStoreError,
+};
 pub use ports::{ConfigReader, ConfigWriter, ProjectConfigParticipant};
+pub use runtime_resolution::{
+    resolve_provider_runtime, resolve_provider_runtime_for_selection, ProviderRuntimeResolver,
+    ResolvedProviderRuntimeConfig,
+};
+pub use user_agent::{
+    build_global_default_user_agent, resolve_provider_user_agent, ProviderUserAgentInputs,
+};
 
 // ---------- composition-only wiring（crate 根装配点，06-code-organization 基线形态） ----------
 use std::path::Path;

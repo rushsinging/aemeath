@@ -97,6 +97,12 @@ impl App {
     pub(crate) async fn execute_effect(&mut self, effect: Effect, ui_tx: &mpsc::Sender<UiEvent>) {
         match effect {
             Effect::RequestRender => {}
+            // 独占终端的向导由 run_loop 层处理；executor 永不应收到本变体。
+            Effect::OpenConnectWizard => {
+                crate::tui::log_warn!(
+                    "OpenConnectWizard 应由 run_loop 层处理，被误投递到 executor"
+                );
+            }
             Effect::QuitApplication => {
                 // #390 A1 常驻 loop shutdown：drop input_event_tx → loop 干净退出 →
                 // spawn task 执行 auto-save。退出路径在 session_lifecycle.rs 中 await 完成。

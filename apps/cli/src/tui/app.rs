@@ -142,6 +142,10 @@ pub struct App {
     pub user_agent: String,
     /// 缓存的配置视图（由 runtime 推送，TUI 只读）
     pub config_view: sdk::ConfigView,
+    /// Provider Connect 向导表单 client（/connect 与启动向导共用）。
+    pub connect_forms: Option<std::sync::Arc<dyn sdk::ConfigFormClient>>,
+    /// 启动即打开 Connect 向导（`aemeath connect`：进主 TUI 后自动发送 /connect）。
+    pub(crate) startup_connect: bool,
 }
 
 #[cfg(test)]
@@ -230,6 +234,8 @@ impl App {
             command_router: command_wiring.map(|wiring| wiring.router()),
             skill_completion_catalog: SkillCompletionCatalog::default(),
             config_view: sdk::ConfigView::default(),
+            connect_forms: None,
+            startup_connect: false,
             agent_client: None,
             run_control_client: None,
             display_history_query: None,

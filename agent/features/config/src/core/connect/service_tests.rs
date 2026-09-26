@@ -1,0 +1,1091 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+
+use super::commit::test_helpers::{CommitOutcome, StubCommitPort};
+use super::*;
+use crate::catalog::{find_by_source, PROVIDER_CATALOG};
+
+struct StubProbe {
+    outcome: tokio::sync::Mutex<Result<ProviderProbeResult, ProviderProbeError>>,
+}
+
+impl StubProbe {
+    fn success() -> Arc<Self> {
+        Arc::new(Self {
+            outcome: tokio::sync::Mutex::new(Ok(ProviderProbeResult {
+                latency: Duration::from_millis(3),
+            })),
+        })
+    }
+
+    fn failure(kind: ProviderProbeErrorKind) -> Arc<Self> {
+        Arc::new(Self {
+            outcome: tokio::sync::Mutex::new(Err(ProviderProbeError {
+                kind,
+                message: "测试探测失败".to_string(),
+            })),
+        })
+    }
+}
+
+#[async_trait]
+impl ProviderProbePort for StubProbe {
+    async fn probe(
+        &self,
+        _request: ProviderProbeRequest,
+    ) -> Result<ProviderProbeResult, ProviderProbeError> {
+        self.outcome.lock().await.clone()
+    }
+}
+
+/// 捕获 probe 请求，用于断言 Config-owned UA resolver 交付的最终 UA。
+struct CapturingProbe {
+    requests: tokio::sync::Mutex<Vec<ProviderProbeRequest>>,
+}
+
+impl CapturingProbe {
+    fn success() -> Arc<Self> {
+        Arc::new(Self {
+            requests: tokio::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    async fn captured_user_agents(&self) -> Vec<String> {
+        self.requests
+            .lock()
+            .await
+            .iter()
+            .map(|request| request.final_user_agent.clone())
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ProviderProbePort for CapturingProbe {
+    async fn probe(
+        &self,
+        request: ProviderProbeRequest,
+    ) -> Result<ProviderProbeResult, ProviderProbeError> {
+        self.requests.lock().await.push(request);
+        Ok(ProviderProbeResult {
+            latency: Duration::from_millis(1),
+        })
+    }
+}
+
+struct BlockingProbe {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl BlockingProbe {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        })
+    }
+}
+
+#[async_trait]
+impl ProviderProbePort for BlockingProbe {
+    async fn probe(
+        &self,
+        _request: ProviderProbeRequest,
+    ) -> Result<ProviderProbeResult, ProviderProbeError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(ProviderProbeResult {
+            latency: Duration::from_millis(1),
+        })
+    }
+}
+
+struct BlockingCommit {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl BlockingCommit {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            entered: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        })
+    }
+}
+
+#[async_trait]
+impl ConnectCommitPort for BlockingCommit {
+    async fn commit(
+        &self,
+        _request: ConnectCommitRequest,
+    ) -> Result<ConnectCommitReceipt, ConnectCommitError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(ConnectCommitReceipt {
+            applied_revision: 11,
+        })
+    }
+}
+
+fn test_global_revision() -> crate::GlobalConfigRevision {
+    crate::GlobalConfigRevision::from_digest("test-global-revision")
+}
+
+/// Provider 目录桩：start_connect 单点加载时返回固定快照集合。
+struct StubDirectory(Vec<ExistingProviderSnapshot>);
+
+impl StubDirectory {
+    fn new(snapshots: Vec<ExistingProviderSnapshot>) -> Arc<Self> {
+        Arc::new(Self(snapshots))
+    }
+}
+
+#[async_trait]
+impl crate::connect::ConnectProviderDirectory for StubDirectory {
+    async fn provider_snapshots(
+        &self,
+    ) -> Result<Vec<ExistingProviderSnapshot>, crate::GlobalConfigStoreError> {
+        Ok(self.0.clone())
+    }
+}
+
+async fn advance(
+    service: &ConnectAppService,
+    view: ConnectView,
+    command: ConnectCommand,
+) -> ConnectView {
+    service
+        .apply(view.session_id, view.revision, command)
+        .await
+        .expect("command should succeed")
+}
+
+async fn ready_to_probe(service: &ConnectAppService) -> ConnectView {
+    ready_to_probe_with_provider_user_agent(service, None).await
+}
+
+async fn ready_to_probe_with_provider_user_agent(
+    service: &ConnectAppService,
+    provider_user_agent: Option<&str>,
+) -> ConnectView {
+    ready_to_probe_for_source(service, "Anthropic", provider_user_agent).await
+}
+
+async fn ready_to_probe_for_source(
+    service: &ConnectAppService,
+    source_name: &str,
+    provider_user_agent: Option<&str>,
+) -> ConnectView {
+    let mut view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SelectProvider {
+            source: find_by_source(source_name).unwrap().source.clone(),
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SetEndpoint {
+            base_url: "https://example.test".into(),
+            api_style: None,
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SetCredential {
+            api_key: "secret-key".into(),
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SetProviderUserAgent {
+            raw: provider_user_agent.map(str::to_string),
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::EnterCustomModel { target_model: None },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::UpsertCustomModel {
+            model: ModelDraft {
+                model_id: "model-1".to_string(),
+                context_window: 32_000,
+                max_tokens: 4_096,
+                reasoning_effort: None,
+            },
+            set_as_default: false,
+        },
+    )
+    .await;
+    view = advance(
+        service,
+        view,
+        ConnectCommand::SetSelectedModels {
+            models: vec![ModelDraft {
+                model_id: "model-1".to_string(),
+                context_window: 32_000,
+                max_tokens: 4_096,
+                reasoning_effort: None,
+            }],
+        },
+    )
+    .await;
+    view
+}
+
+async fn ready_to_review(service: &ConnectAppService) -> ConnectView {
+    let view = ready_to_probe(service).await;
+    advance(service, view, ConnectCommand::SkipProbe).await
+}
+
+#[test]
+fn session_identity_and_revision_round_trip_through_transport_values() {
+    let session_id = ConnectSessionId::new();
+    let encoded = session_id.to_transport_string();
+    assert_eq!(
+        ConnectSessionId::from_transport_str(&encoded).unwrap(),
+        session_id
+    );
+
+    let revision = ConnectRevision::initial().bump();
+    assert_eq!(ConnectRevision::from_value(revision.value()), revision);
+}
+
+#[tokio::test]
+async fn selecting_provider_prefills_catalog_endpoint_in_server_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+
+    for (source, expected_endpoint) in [
+        ("OpenAI", "https://api.openai.com"),
+        ("Zhipu", "https://open.bigmodel.cn/api/paas/v4"),
+        (
+            "Zhipu Coding Plan",
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+    ] {
+        let view = service
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+            .await;
+        let endpoint = advance(
+            &service,
+            view,
+            ConnectCommand::SelectProvider {
+                source: find_by_source(source).unwrap().source.clone(),
+            },
+        )
+        .await;
+
+        assert_eq!(endpoint.stage, ConnectStage::EditEndpoint);
+        assert_eq!(endpoint.draft.base_url(), Some(expected_endpoint));
+    }
+}
+
+#[tokio::test]
+async fn selecting_each_recommended_model_copies_its_own_parameters_to_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let entry = find_by_source("Anthropic").unwrap();
+    assert!(entry.recommended_models.len() >= 2);
+
+    for expected_model in entry.recommended_models.iter() {
+        let initial = service
+            .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+            .await;
+        let endpoint = advance(
+            &service,
+            initial,
+            ConnectCommand::SelectProvider {
+                source: entry.source.clone(),
+            },
+        )
+        .await;
+        let credential = advance(
+            &service,
+            endpoint,
+            ConnectCommand::SetEndpoint {
+                base_url: "https://api.anthropic.com".into(),
+                api_style: None,
+            },
+        )
+        .await;
+        let user_agent = advance(
+            &service,
+            credential,
+            ConnectCommand::SetCredential {
+                api_key: String::new(),
+            },
+        )
+        .await;
+        let models = advance(
+            &service,
+            user_agent,
+            ConnectCommand::SetProviderUserAgent { raw: None },
+        )
+        .await;
+        let selected = advance(
+            &service,
+            models,
+            ConnectCommand::SetSelectedModels {
+                models: vec![ModelDraft {
+                    model_id: expected_model.model_id.to_string(),
+                    context_window: expected_model.context_window,
+                    max_tokens: expected_model.max_tokens,
+                    reasoning_effort: None,
+                }],
+            },
+        )
+        .await;
+        let selected_model = selected
+            .draft
+            .models
+            .first()
+            .expect("推荐模型必须写入服务端 draft")
+            .clone();
+        assert_eq!(selected_model.model_id, expected_model.model_id);
+        assert_eq!(
+            selected_model.context_window,
+            Some(expected_model.context_window)
+        );
+        assert_eq!(selected_model.max_tokens, Some(expected_model.max_tokens));
+    }
+}
+
+#[tokio::test]
+async fn selecting_verified_provider_prefills_catalog_endpoint_and_recommended_model() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+
+    let endpoint = advance(
+        &service,
+        view,
+        ConnectCommand::SelectProvider {
+            source: find_by_source("Anthropic").unwrap().source.clone(),
+        },
+    )
+    .await;
+    assert_eq!(endpoint.stage, ConnectStage::EditEndpoint);
+    assert_eq!(endpoint.draft.base_url(), Some("https://api.anthropic.com"));
+
+    let credential = advance(
+        &service,
+        endpoint,
+        ConnectCommand::SetEndpoint {
+            base_url: "https://api.anthropic.com".into(),
+            api_style: None,
+        },
+    )
+    .await;
+    let user_agent = advance(
+        &service,
+        credential,
+        ConnectCommand::SetCredential {
+            api_key: String::new(),
+        },
+    )
+    .await;
+    let models = advance(
+        &service,
+        user_agent,
+        ConnectCommand::SetProviderUserAgent { raw: None },
+    )
+    .await;
+    let selected = advance(
+        &service,
+        models,
+        ConnectCommand::SetSelectedModels {
+            models: vec![ModelDraft {
+                model_id: "claude-fable-5-1".to_string(),
+                context_window: 1_000_000,
+                max_tokens: 65_536,
+                reasoning_effort: None,
+            }],
+        },
+    )
+    .await;
+    assert_eq!(selected.stage, ConnectStage::ChooseProbe);
+    assert_eq!(
+        selected
+            .draft
+            .models
+            .first()
+            .map(|model| model.model_id.as_str()),
+        Some("claude-fable-5-1")
+    );
+}
+
+#[tokio::test]
+async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
+    let commit = StubCommitPort::new(CommitOutcome::Success {
+        applied_revision: 7,
+    });
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .with_commit(commit.clone())
+        .build();
+
+    let view = ready_to_review(&service).await;
+    assert_eq!(view.stage, ConnectStage::Review);
+    assert!(view.draft.has_api_key);
+    assert!(!format!("{view:?}").contains("secret-key"));
+
+    let saving = advance(&service, view, ConnectCommand::ConfirmSave).await;
+    let completed = wait_for_view(&service, saving.session_id, |view| {
+        matches!(view.terminal, Some(ConnectOutcome::Completed { .. }))
+    })
+    .await;
+    assert_eq!(completed.stage, ConnectStage::Completed);
+    assert_eq!(
+        completed.terminal,
+        Some(ConnectOutcome::Completed {
+            applied_revision: 7
+        })
+    );
+    assert_eq!(commit.requests.lock().await.len(), 1);
+    assert_eq!(
+        commit.requests.lock().await[0]
+            .expected_global_revision
+            .as_str(),
+        test_global_revision().as_str()
+    );
+}
+
+#[tokio::test]
+async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    let endpoint = advance(
+        &service,
+        initial,
+        ConnectCommand::SelectProvider {
+            source: find_by_source("Anthropic").unwrap().source.clone(),
+        },
+    )
+    .await;
+
+    let error = service
+        .apply(
+            endpoint.session_id,
+            endpoint.revision,
+            ConnectCommand::SetEndpoint {
+                base_url: String::new(),
+                api_style: None,
+            },
+        )
+        .await
+        .expect_err("空 endpoint 必须被拒绝");
+
+    assert!(matches!(
+        error,
+        ConnectError::Validation {
+            field: "endpoint",
+            ..
+        }
+    ));
+    let current = service.view(endpoint.session_id).await.unwrap();
+    assert_eq!(current.stage, ConnectStage::EditEndpoint);
+    assert!(matches!(
+        current.last_error,
+        Some(ConnectError::Validation {
+            field: "endpoint",
+            ..
+        })
+    ));
+    assert_eq!(current.terminal, None);
+}
+
+#[tokio::test]
+async fn back_from_each_edit_stage_returns_to_previous_stage_and_preserves_draft() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    let endpoint = advance(
+        &service,
+        initial,
+        ConnectCommand::SelectProvider {
+            source: find_by_source("Anthropic").unwrap().source.clone(),
+        },
+    )
+    .await;
+    let credential = advance(
+        &service,
+        endpoint.clone(),
+        ConnectCommand::SetEndpoint {
+            base_url: "https://custom.example.test".into(),
+            api_style: None,
+        },
+    )
+    .await;
+
+    let returned = advance(&service, credential, ConnectCommand::Back).await;
+
+    assert_eq!(returned.stage, ConnectStage::EditEndpoint);
+    assert_eq!(
+        returned.draft.base_url(),
+        Some("https://custom.example.test")
+    );
+    let provider_selection = advance(&service, returned, ConnectCommand::Back).await;
+    assert_eq!(provider_selection.stage, ConnectStage::SelectProvider);
+    assert_eq!(
+        provider_selection
+            .draft
+            .source
+            .as_ref()
+            .map(|source| source.as_str()),
+        Some("Anthropic")
+    );
+}
+
+#[tokio::test]
+async fn back_from_initial_provider_stage_is_rejected_without_cancelling_session() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let initial = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+
+    let error = service
+        .apply(initial.session_id, initial.revision, ConnectCommand::Back)
+        .await
+        .expect_err("initial stage has no previous page");
+
+    assert!(matches!(error, ConnectError::InvalidTransition { .. }));
+    let current = service.view(initial.session_id).await.unwrap();
+    assert_eq!(current.stage, ConnectStage::SelectProvider);
+    assert_eq!(current.terminal, None);
+}
+
+#[tokio::test]
+async fn stale_revision_rejects_command_without_changing_view() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    let error = service
+        .apply(
+            view.session_id,
+            ConnectRevision::from_value(99),
+            ConnectCommand::SelectProvider {
+                source: find_by_source("Anthropic").unwrap().source.clone(),
+            },
+        )
+        .await
+        .expect_err("stale revision must fail");
+    assert!(matches!(error, ConnectError::StaleRevision { .. }));
+    let current = service.view(view.session_id).await.unwrap();
+    assert_eq!(current.stage, ConnectStage::SelectProvider);
+    assert_eq!(current.revision, view.revision);
+}
+
+#[tokio::test]
+async fn cancelled_session_rejects_repeated_terminal_command() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    let cancelled = service
+        .cancel(view.session_id, view.revision)
+        .await
+        .unwrap();
+    assert_eq!(cancelled.terminal, Some(ConnectOutcome::Cancelled));
+    let error = service
+        .cancel(cancelled.session_id, cancelled.revision)
+        .await
+        .expect_err("terminal command must not repeat");
+    assert!(matches!(error, ConnectError::InvalidTransition { .. }));
+}
+
+#[tokio::test]
+async fn probe_success_moves_directly_to_review() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .build();
+    let view = ready_to_probe(&service).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    let result = wait_for_probe_result(&service, running.session_id).await;
+    // 成功停在结果页等待用户确认，回车（ContinueAfterProbe）才进 Review。
+    assert_eq!(result.stage, ConnectStage::Probing);
+    assert!(matches!(
+        result.probe_status,
+        Some(ProbeStatusView::Success { .. })
+    ));
+    let review = advance(&service, result, ConnectCommand::ContinueAfterProbe).await;
+    assert_eq!(review.stage, ConnectStage::Review);
+}
+
+#[tokio::test]
+async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
+    // DeepSeek 无官方 SDK UA，Catalog 级为空 → probe 必须与正式请求
+    // 使用同一份全局 UA。
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe_for_source(&service, "DeepSeek", None).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    wait_for_probe_result(&service, running.session_id).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["global-agent/9.9".to_string()],
+        "Catalog 无官方客户端 UA 时，probe 必须与正式请求使用同一份全局 UA"
+    );
+}
+
+#[tokio::test]
+async fn probe_user_agent_uses_catalog_client_ua_when_available() {
+    // Anthropic 已核验 Claude Code CLI UA：probe 必须使用它而不是全局 UA。
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe(&service).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    wait_for_probe_result(&service, running.session_id).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["claude-cli/2.1.267 (external, sdk-cli)".to_string()],
+        "Catalog 官方客户端 UA 必须优先于全局配置"
+    );
+}
+
+#[tokio::test]
+async fn probe_user_agent_prefers_provider_override_over_global_config() {
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .with_global_user_agent(Some("global-agent/9.9".to_string()))
+        .build();
+
+    let view = ready_to_probe_with_provider_user_agent(&service, Some("provider-agent/1.0")).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    wait_for_probe_result(&service, running.session_id).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
+        vec!["provider-agent/1.0".to_string()],
+        "Provider 专属 UA 必须在全局 UA 之前命中"
+    );
+}
+
+#[tokio::test]
+async fn probe_failure_requires_explicit_continue_or_edit() {
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::failure(ProviderProbeErrorKind::Timeout))
+        .build();
+    let view = ready_to_probe(&service).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    let failed = wait_for_probe_result(&service, running.session_id).await;
+    assert_eq!(failed.stage, ConnectStage::Probing);
+    assert!(matches!(
+        failed.probe_status,
+        Some(ProbeStatusView::Failed {
+            kind: ProviderProbeErrorKind::Timeout,
+            ..
+        })
+    ));
+    let review = advance(&service, failed.clone(), ConnectCommand::ContinueAfterProbe).await;
+    assert_eq!(review.stage, ConnectStage::Review);
+}
+
+#[tokio::test]
+async fn confirming_overwrite_prefills_draft_from_existing_provider() {
+    // 确认覆盖已有 Provider 后，表单默认值必须来自全局配置中的已有配置
+    //（endpoint / UA / 模型），而不是仅回落 Catalog 默认值。
+    let existing = ExistingProviderSnapshot::from_provider_config(
+        "Zhipu",
+        "https://existing.example.test/api/paas/v4",
+        Some("hidden-key"),
+        Some("zhipu"),
+        "glm-5.3",
+        256_000,
+        16_000,
+        Some("ZCode/3.10.0"),
+        None,
+        vec![
+            ExistingModelSnapshot {
+                model_id: "glm-5.3".to_string(),
+                context_window: 256_000,
+                max_tokens: 16_000,
+                reasoning_effort: Some("high".to_string()),
+            },
+            ExistingModelSnapshot {
+                model_id: "my-private-model".to_string(),
+                context_window: 128_000,
+                max_tokens: 8_192,
+                reasoning_effort: None,
+            },
+        ],
+    );
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_provider_directory(StubDirectory::new(vec![existing.clone()]))
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    assert_eq!(view.stage, ConnectStage::SelectProvider);
+    let view = advance(
+        &service,
+        view,
+        ConnectCommand::SelectProvider {
+            source: crate::catalog::find_by_source(existing.source_key.as_str())
+                .expect("快照 source 必须在 Catalog")
+                .source
+                .clone(),
+        },
+    )
+    .await;
+    assert_eq!(view.stage, ConnectStage::ConfirmOverwrite);
+
+    let confirmed = advance(&service, view, ConnectCommand::ConfirmOverwrite).await;
+
+    assert_eq!(confirmed.stage, ConnectStage::EditEndpoint);
+    assert_eq!(
+        confirmed.draft.base_url.as_deref(),
+        Some("https://existing.example.test/api/paas/v4"),
+        "endpoint 必须预填全局配置已有值"
+    );
+    assert_eq!(
+        confirmed.draft.provider_user_agent.as_deref(),
+        Some("ZCode/3.10.0"),
+        "Provider UA 必须预填全局配置已有值"
+    );
+    let model = confirmed
+        .draft
+        .models
+        .first()
+        .cloned()
+        .expect("模型必须预填全局配置已有值");
+    assert_eq!(model.model_id, "glm-5.3");
+    assert_eq!(model.context_window, Some(256_000));
+    assert_eq!(model.max_tokens, Some(16_000));
+}
+
+#[tokio::test]
+async fn back_from_probing_returns_to_probe_choice() {
+    // 探测失败后按 Esc（Back）必须回到测试选择页，而不是报
+    // InvalidTransition 使整个表单退出。
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::failure(ProviderProbeErrorKind::Timeout))
+        .build();
+    let view = ready_to_probe(&service).await;
+    let failed = advance(&service, view, ConnectCommand::BeginProbe).await;
+    assert_eq!(failed.stage, ConnectStage::Probing);
+
+    let backed = advance(&service, failed, ConnectCommand::Back).await;
+
+    assert_eq!(backed.stage, ConnectStage::ChooseProbe);
+}
+
+#[tokio::test]
+async fn empty_credential_submission_keeps_preserved_existing_key() {
+    // 确认覆盖后 key 已标记保留；用户在掩码预填下直接回车（空提交）
+    // 必须保持保留状态，而不是把已有 key 降级为未设置。
+    let existing = ExistingProviderSnapshot::from_provider_config(
+        "Zhipu",
+        "https://open.bigmodel.cn/api/paas/v4",
+        Some("hidden-key"),
+        Some("zhipu"),
+        "glm-5.3",
+        1_048_576,
+        16_384,
+        None,
+        None,
+        vec![ExistingModelSnapshot {
+            model_id: "glm-5.3".to_string(),
+            context_window: 1_048_576,
+            max_tokens: 16_384,
+            reasoning_effort: None,
+        }],
+    );
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_provider_directory(StubDirectory::new(vec![existing.clone()]))
+        .with_probe(StubProbe::success())
+        .build();
+    let view = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+    assert_eq!(view.stage, ConnectStage::SelectProvider);
+    let view = advance(
+        &service,
+        view,
+        ConnectCommand::SelectProvider {
+            source: crate::catalog::find_by_source(existing.source_key.as_str())
+                .expect("快照 source 必须在 Catalog")
+                .source
+                .clone(),
+        },
+    )
+    .await;
+    assert_eq!(view.stage, ConnectStage::ConfirmOverwrite);
+    assert!(!format!("{view:?}").contains("hidden-key"));
+    let rejected = advance(&service, view, ConnectCommand::RejectOverwrite).await;
+    assert_eq!(rejected.stage, ConnectStage::SelectProvider);
+    assert!(rejected.draft.source.is_none());
+}
+
+#[tokio::test]
+async fn commit_conflict_remains_saving_and_can_retry() {
+    let commit = StubCommitPort::new(CommitOutcome::Failure(
+        ConnectCommitError::PersistConflict { expected: 2 },
+    ));
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(StubProbe::success())
+        .with_commit(commit.clone())
+        .build();
+    let view = ready_to_review(&service).await;
+    // ConfirmSave 立即返回 Saving（busy 轮询观察后台写回）。
+    let saving = advance(&service, view, ConnectCommand::ConfirmSave).await;
+    assert_eq!(saving.stage, ConnectStage::Saving);
+    // 等后台写回 Conflict 状态。
+    let conflicted = wait_for_view(&service, saving.session_id, |view| {
+        matches!(
+            view.last_error,
+            Some(ConnectError::PersistConflict { expected: 2 })
+        )
+    })
+    .await;
+    assert_eq!(conflicted.stage, ConnectStage::Saving);
+    commit
+        .set_outcome(CommitOutcome::Success {
+            applied_revision: 3,
+        })
+        .await;
+    let completed = advance(&service, conflicted, ConnectCommand::ConfirmSave).await;
+    let finished = wait_for_view(&service, completed.session_id, |view| {
+        matches!(view.terminal, Some(ConnectOutcome::Completed { .. }))
+    })
+    .await;
+    assert_eq!(finished.stage, ConnectStage::Completed);
+}
+
+/// 等待探测异步结果写回（probe_status 离开 Running / 出错）。
+async fn wait_for_probe_result(
+    service: &ConnectAppService,
+    session_id: ConnectSessionId,
+) -> ConnectView {
+    wait_for_view(service, session_id, |view| {
+        !matches!(view.probe_status, None | Some(ProbeStatusView::Running))
+            || view.last_error.is_some()
+            || view.terminal.is_some()
+    })
+    .await
+}
+
+/// 轮询 session view 直到谓词命中（异步写回等待）。
+async fn wait_for_view(
+    service: &ConnectAppService,
+    session_id: ConnectSessionId,
+    matches_view: impl Fn(&ConnectView) -> bool,
+) -> ConnectView {
+    for _ in 0..200 {
+        if let Some(view) = service.view(session_id).await {
+            if matches_view(&view) {
+                return view;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("异步状态未在预期时间内写回");
+}
+
+#[tokio::test]
+async fn cancel_same_session_during_probe_wins_over_late_probe_result() {
+    let probe = BlockingProbe::new();
+    let service = Arc::new(
+        ConnectAppService::builder()
+            .with_catalog(PROVIDER_CATALOG)
+            .with_probe(probe.clone())
+            .build(),
+    );
+    let probing_view = ready_to_probe(&service).await;
+    let service_for_probe = service.clone();
+    let probe_task = tokio::spawn(async move {
+        service_for_probe
+            .apply(
+                probing_view.session_id,
+                probing_view.revision,
+                ConnectCommand::BeginProbe,
+            )
+            .await
+    });
+    probe.entered.notified().await;
+
+    // apply 立即返回 Running（异步结果后台写回）。
+    let running = probe_task.await.unwrap().unwrap();
+    assert_eq!(running.stage, ConnectStage::Probing);
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(100),
+        service.cancel(running.session_id, running.revision),
+    )
+    .await
+    .expect("cancel must not wait for probe")
+    .expect("cancel succeeds");
+    assert_eq!(cancelled.terminal, Some(ConnectOutcome::Cancelled));
+
+    probe.release.notify_one();
+    // 后台写回被 outcome 拦截：session 保持 Cancelled。
+    let settled = wait_for_view(&service, running.session_id, |view| {
+        matches!(view.terminal, Some(ConnectOutcome::Cancelled))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let after = service.view(running.session_id).await.unwrap();
+    assert_eq!(after.stage, ConnectStage::Cancelled);
+    assert!(!matches!(
+        settled.terminal,
+        Some(ConnectOutcome::Completed { .. })
+    ));
+    let _ = after;
+}
+
+#[tokio::test]
+async fn cancel_same_session_during_commit_wins_over_late_success() {
+    let commit = BlockingCommit::new();
+    let service = Arc::new(
+        ConnectAppService::builder()
+            .with_catalog(PROVIDER_CATALOG)
+            .with_probe(StubProbe::success())
+            .with_commit(commit.clone())
+            .build(),
+    );
+    let review = ready_to_review(&service).await;
+    let service_for_commit = service.clone();
+    let commit_task = tokio::spawn(async move {
+        service_for_commit
+            .apply(
+                review.session_id,
+                review.revision,
+                ConnectCommand::ConfirmSave,
+            )
+            .await
+    });
+    commit.entered.notified().await;
+
+    let saving = tokio::time::timeout(Duration::from_millis(100), service.view(review.session_id))
+        .await
+        .expect("same session view must remain available during commit")
+        .expect("session exists");
+    assert_eq!(saving.stage, ConnectStage::Saving);
+    let cancelled = tokio::time::timeout(
+        Duration::from_millis(100),
+        service.cancel(saving.session_id, saving.revision),
+    )
+    .await
+    .expect("cancel must not wait for commit")
+    .expect("cancel succeeds");
+    assert_eq!(cancelled.terminal, Some(ConnectOutcome::Cancelled));
+
+    commit.release.notify_one();
+    let _ = commit_task.await.unwrap().unwrap();
+    // 后台写回被 outcome 拦截：session 保持 Cancelled（未 Completed）。
+    let settled = wait_for_view(&service, saving.session_id, |view| {
+        matches!(view.terminal, Some(ConnectOutcome::Cancelled))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let after = service.view(saving.session_id).await.unwrap();
+    assert_eq!(after.stage, ConnectStage::Cancelled);
+    assert!(!matches!(
+        settled.terminal,
+        Some(ConnectOutcome::Completed { .. })
+    ));
+}
+
+#[tokio::test]
+async fn unrelated_session_view_is_not_blocked_while_probe_waits() {
+    let probe = BlockingProbe::new();
+    let service = Arc::new(
+        ConnectAppService::builder()
+            .with_catalog(PROVIDER_CATALOG)
+            .with_probe(probe.clone())
+            .build(),
+    );
+    let probing_view = ready_to_probe(&service).await;
+    let other = service
+        .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
+        .await;
+
+    let service_for_probe = service.clone();
+    let probe_task = tokio::spawn(async move {
+        service_for_probe
+            .apply(
+                probing_view.session_id,
+                probing_view.revision,
+                ConnectCommand::BeginProbe,
+            )
+            .await
+    });
+    probe.entered.notified().await;
+
+    let other_view =
+        tokio::time::timeout(Duration::from_millis(100), service.view(other.session_id))
+            .await
+            .expect("another session must not wait for probe")
+            .expect("other session exists");
+    assert_eq!(other_view.stage, ConnectStage::SelectProvider);
+
+    probe.release.notify_one();
+    probe_task.await.unwrap().unwrap();
+}

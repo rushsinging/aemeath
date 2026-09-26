@@ -58,10 +58,17 @@ impl AnthropicProvider {
         timeout_secs: u64,
         user_agent: String,
     ) -> Self {
-        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(
-            base_url.as_deref().unwrap_or("https://api.anthropic.com"),
-        ));
-        Self::from_shared_http(api_key, base_url, model, timeout_secs, user_agent, http)
+        let base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
+        let model = model.expect("Provider construction 必须传入已解析模型");
+        let http = crate::adapters::transport::build_http_client_for_endpoint(Some(&base_url));
+        Self::from_shared_http(
+            api_key,
+            Some(base_url),
+            Some(model),
+            timeout_secs,
+            user_agent,
+            http,
+        )
     }
 
     /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
@@ -76,8 +83,8 @@ impl AnthropicProvider {
     ) -> Self {
         Self {
             api_key,
-            base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-            model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
+            base_url: base_url.expect("Provider construction 必须传入已解析 base URL"),
+            model: model.expect("Provider construction 必须传入已解析模型"),
             user_agent,
             http,
             timeout_secs,
@@ -281,8 +288,8 @@ mod tests {
     fn custom_user_agent_is_sent_in_anthropic_headers() {
         let provider = AnthropicProvider::new_with_user_agent(
             "test-key".to_string(),
-            None,
-            None,
+            Some("https://api.anthropic.com".to_string()),
+            Some("test-model".to_string()),
             8192,
             ReasoningLevel::Off,
             60,
@@ -368,7 +375,7 @@ mod tests {
                 reasoning: false,
                 reasoning_config: None,
                 timeout_secs: 60,
-                user_agent: None,
+                user_agent: Some("aemeath-test/1.0".to_string()),
             })
             .expect("valid anthropic config");
         let scope =

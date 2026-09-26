@@ -107,6 +107,9 @@ pub enum Commands {
         limit: usize,
     },
 
+    /// Configure a built-in LLM provider interactively
+    Connect,
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -119,6 +122,7 @@ pub enum Commands {
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.
+#[derive(Clone)]
 pub struct Args {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -135,6 +139,8 @@ pub struct Args {
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
     pub max_reasoning: Option<String>,
+    /// 启动即打开 Connect 向导（`aemeath connect`）。
+    pub startup_connect: bool,
 }
 impl From<RunArgs> for Args {
     fn from(r: RunArgs) -> Self {
@@ -154,6 +160,7 @@ impl From<RunArgs> for Args {
             max_agent_concurrency: r.max_agent_concurrency,
             no_think: r.no_think,
             max_reasoning: r.max_reasoning,
+            startup_connect: false,
         }
     }
 }
@@ -193,6 +200,12 @@ impl From<Args> for sdk::ChatBootstrapArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_accepts_connect_subcommand_without_run() {
+        let cli = Cli::try_parse_from(["aemeath", "connect"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Connect)));
+    }
 
     #[test]
     fn tui_and_quiet_modes_map_native_stderr_ownership() {

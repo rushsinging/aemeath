@@ -50,6 +50,13 @@ async fn main() {
         Some(Commands::Run { run_args }) => {
             chat::run_chat(run_args.into()).await;
         }
+        Some(Commands::Connect) => {
+            // 向导在主 TUI 进程内打开（同 /connect slash 命令），保存后
+            // 下一轮对话边界自动刷新配置，无需独立子命令链路。
+            let mut args = Args::from(cli.run_args);
+            args.startup_connect = true;
+            chat::run_chat(args).await;
+        }
         Some(Commands::Update { check }) => {
             let args = Args::from(cli.run_args);
             let user_agent = composition::app::configured_user_agent(args.into())
