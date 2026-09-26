@@ -1,9 +1,9 @@
-use super::{reasoning_level_from_options, LlmClient, LlmConfigOptions, ReasoningConfig};
+use super::{reasoning_level_from_options, LlmClient, LlmConfigOptionsData, ReasoningConfig};
 use crate::adapters::pool::TransportPool;
-use crate::ReasoningLevel;
+use crate::domain::capability::ReasoningLevel;
 
-fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> LlmConfigOptions {
-    LlmConfigOptions {
+fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> LlmConfigOptionsData {
+    LlmConfigOptionsData {
         driver: "anthropic".to_string(),
         source_key: "anthropic".to_string(),
         api_style: None,
@@ -62,7 +62,7 @@ fn from_config_with_pool_builds_distinct_transport_for_distinct_endpoint() {
 
 #[test]
 fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "anthropic".to_string(),
         source_key: "Anthropic".to_string(),
         api_style: None,
@@ -85,7 +85,7 @@ fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,
@@ -108,7 +108,7 @@ fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_missing_user_agent_instead_of_using_global_default() {
-    let error = match LlmClient::from_config(LlmConfigOptions {
+    let error = match LlmClient::from_config(LlmConfigOptionsData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,

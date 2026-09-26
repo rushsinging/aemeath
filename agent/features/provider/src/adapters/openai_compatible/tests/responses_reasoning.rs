@@ -10,8 +10,8 @@
 use super::super::driver::{ChatApiDriver, OpenAiDriver};
 use super::super::OpenAICompatibleProvider;
 use crate::adapters::client::OpenAIProviderConfig;
-use crate::domain::invoke::InvocationScope;
-use crate::ports::ReasoningLevel;
+use crate::domain::capability::ReasoningLevel;
+use crate::domain::invoke::InvocationScopeData;
 use crate::ProviderDriverKind;
 
 fn openai_provider() -> OpenAICompatibleProvider {
@@ -28,8 +28,8 @@ fn openai_provider() -> OpenAICompatibleProvider {
     )
 }
 
-fn scope_with_level(level: ReasoningLevel) -> InvocationScope {
-    InvocationScope::new("test-model", 8192, level, level).expect("valid scope")
+fn scope_with_level(level: ReasoningLevel) -> InvocationScopeData {
+    InvocationScopeData::new("test-model", 8192, level, level).expect("valid scope")
 }
 
 fn chat_reasoning_effort(

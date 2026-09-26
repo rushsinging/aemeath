@@ -153,7 +153,7 @@ pub struct SessionRuntime {
     pub(crate) agent_semaphore: Arc<tokio::sync::Semaphore>,
 
     // ── Prompt bootstrap (static, session-life) ──
-    pub system_blocks: Vec<provider::RequestSystemBlock>,
+    pub system_blocks: Vec<provider::RequestSystemBlockData>,
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
@@ -221,7 +221,7 @@ impl SessionRuntime {
         max_tool_concurrency: usize,
         max_agent_concurrency: usize,
         agent_semaphore: Arc<tokio::sync::Semaphore>,
-        system_blocks: Vec<provider::RequestSystemBlock>,
+        system_blocks: Vec<provider::RequestSystemBlockData>,
         system_prompt_text: String,
         initial_git_context: String,
         user_context: String,
@@ -406,7 +406,7 @@ impl AgentClientImpl {
         self.inner.shell.context_size
     }
 
-    pub fn requested_reasoning(&self) -> provider::ReasoningLevel {
+    pub fn requested_reasoning(&self) -> share::reasoning::ReasoningLevel {
         self.inner.shell.model_state.binding().requested_reasoning
     }
 }

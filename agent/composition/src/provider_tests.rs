@@ -1,22 +1,23 @@
 use super::*;
 use async_trait::async_trait;
-use provider::composition::{InvocationScope, LlmClient, LlmProvider, SystemBlock};
+use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
 use provider::{
-    InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, ModelCapability,
-    ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
-    ProviderStopReason as StopReason, RawUsageSnapshot, ReasoningCapability, ReasoningLevel,
-    ReasoningMappingKind,
+    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
+    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderCompletionData,
+    ProviderContentBlockData, ProviderErrorKind, ProviderStopReasonData as StopReason,
+    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
 };
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 // ─── Captured invocation (what the fake provider received) ────────────
 
 /// Snapshot of everything the fake provider observed in one `invocation_stream`
-/// call: the resolved `InvocationScope` plus the converted system blocks and
+/// call: the resolved `InvocationScopeData` plus the converted system blocks and
 /// tool schemas. The adapter's job is to translate the provider-neutral
-/// `InvocationRequest` into these legacy provider-domain values; the tests
+/// `InvocationRequestData` into these legacy provider-domain values; the tests
 /// assert that translation.
 #[derive(Debug, Default, Clone)]
 struct CapturedInvocation {
@@ -24,7 +25,7 @@ struct CapturedInvocation {
     scope_max_tokens: Option<u32>,
     scope_requested_reasoning: Option<ReasoningLevel>,
     scope_effective_reasoning: Option<ReasoningLevel>,
-    /// `(text, is_cacheable)` per legacy `SystemBlock`.
+    /// `(text, is_cacheable)` per legacy `SystemBlockData`.
     system_blocks: Vec<(String, bool)>,
     tool_schemas: Vec<serde_json::Value>,
     invocation_count: u32,
@@ -82,12 +83,12 @@ impl FakeLlmProvider {
 impl LlmProvider for FakeLlmProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<provider::InvocationStream, provider::ProviderError> {
+    ) -> Result<provider::InvocationStreamData, provider::ProviderError> {
         // Record exactly what the adapter passed down.
         {
             let mut c = self.captured.lock().expect("captured lock poisoned");
@@ -116,11 +117,13 @@ impl LlmProvider for FakeLlmProvider {
             return Err(err.clone());
         }
         Ok(Box::pin(futures_util::stream::iter(vec![
-            InvocationEvent::Delta(InvocationDelta::Text("hello from fake".to_string())),
-            InvocationEvent::Completed(ProviderCompletion {
-                output: vec![ProviderContentBlock::Text("hello from fake".to_string())],
+            InvocationEventData::Delta(InvocationDeltaData::Text("hello from fake".to_string())),
+            InvocationEventData::Completed(ProviderCompletionData {
+                output: vec![ProviderContentBlockData::Text(
+                    "hello from fake".to_string(),
+                )],
                 stop_reason: StopReason::EndTurn,
-                usage: Some(RawUsageSnapshot {
+                usage: Some(RawUsageSnapshotData {
                     input_tokens: Some(5),
                     output_tokens: Some(3),
                     ..Default::default()
@@ -141,20 +144,20 @@ impl LlmProvider for FakeLlmProvider {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-fn test_model_id() -> ModelId {
-    ModelId {
+fn test_model_id() -> ModelIdData {
+    ModelIdData {
         provider: "fake-provider".to_string(),
         model: "fake-model".to_string(),
     }
 }
 
-fn test_capability() -> ModelCapability {
-    ModelCapability {
+fn test_capability() -> ModelCapabilityData {
+    ModelCapabilityData {
         model: test_model_id(),
         supports_tools: true,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: ReasoningCapability::none(),
+        reasoning: ReasoningCapabilityData::none(),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     }
@@ -167,10 +170,10 @@ fn fresh_captured() -> Arc<Mutex<CapturedInvocation>> {
 /// Build a port over a recording fake provider and the given capability,
 /// returning shared access to what the fake observed.
 fn build_port_with_capability(
-    capability: ModelCapability,
+    capability: ModelCapabilityData,
 ) -> (
     Arc<dyn ProviderPort>,
-    ModelId,
+    ModelIdData,
     Arc<Mutex<CapturedInvocation>>,
 ) {
     let captured = fresh_captured();
@@ -188,14 +191,14 @@ fn build_port_with_capability(
 /// Build a port whose fake records into a shared snapshot.
 fn build_port_capturing() -> (
     Arc<dyn ProviderPort>,
-    ModelId,
+    ModelIdData,
     Arc<Mutex<CapturedInvocation>>,
 ) {
     build_port_with_capability(test_capability())
 }
 
 /// Build a port for tests that don't inspect what the fake received.
-fn build_port() -> (Arc<dyn ProviderPort>, ModelId) {
+fn build_port() -> (Arc<dyn ProviderPort>, ModelIdData) {
     let (port, model, _captured) = build_port_capturing();
     (port, model)
 }
@@ -238,7 +241,7 @@ fn capabilities_returns_for_known_model() {
 fn capabilities_rejects_unknown_model() {
     let (port, _) = build_port();
 
-    let unknown = ModelId {
+    let unknown = ModelIdData {
         provider: "unknown".to_string(),
         model: "x".to_string(),
     };
@@ -251,10 +254,10 @@ fn capabilities_rejects_unknown_model() {
 async fn invoke_returns_stream_with_delta_then_completed() {
     let (port, model) = build_port();
 
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
 
@@ -273,11 +276,11 @@ async fn invoke_returns_stream_with_delta_then_completed() {
         "expected exactly 2 events: Delta + Completed"
     );
     assert!(
-        matches!(events[0], InvocationEvent::Delta(InvocationDelta::Text(ref t)) if t == "hello from fake"),
+        matches!(events[0], InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hello from fake"),
         "first event should be a text delta"
     );
     assert!(
-        matches!(events[1], InvocationEvent::Completed(_)),
+        matches!(events[1], InvocationEventData::Completed(_)),
         "second event should be Completed"
     );
 }
@@ -286,10 +289,10 @@ async fn invoke_returns_stream_with_delta_then_completed() {
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
     cancel.cancel();
@@ -304,7 +307,7 @@ async fn invoke_returns_cancelled_when_signal_already_set() {
 #[tokio::test]
 async fn invoke_propagates_provider_error() {
     let captured = fresh_captured();
-    let model = ModelId {
+    let model = ModelIdData {
         provider: "bad-provider".to_string(),
         model: "bad-model".to_string(),
     };
@@ -317,21 +320,21 @@ async fn invoke_propagates_provider_error() {
         ),
     );
     let client = Arc::new(LlmClient::from_provider(fake));
-    let capability = ModelCapability {
+    let capability = ModelCapabilityData {
         model: model.clone(),
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: ReasoningCapability::none(),
+        reasoning: ReasoningCapabilityData::none(),
         context_limit: None,
         output_limit: None,
     };
     let port = provider_port(client, HashMap::from([(model.clone(), capability)]));
 
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
 
@@ -347,10 +350,10 @@ async fn invoke_rejects_invalid_scope() {
     let (port, model) = build_port();
 
     // max_output_tokens = 0 should trigger a scope validation error.
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(0, ReasoningLevel::Off),
+        InvocationOptionsData::new(0, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
 
@@ -367,19 +370,19 @@ async fn invoke_rejects_invalid_scope() {
 async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     let (port, model, captured) = build_port_capturing();
 
-    let mut request = InvocationRequest::new(
+    let mut request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     // Provider-neutral system blocks: one cacheable, one dynamic.
     request.system = vec![
-        provider::RequestSystemBlock::Text("stable prefix first part".to_string()),
-        provider::RequestSystemBlock::Cacheable("stable prefix boundary".to_string()),
-        provider::RequestSystemBlock::Text("today is monday".to_string()),
+        provider::RequestSystemBlockData::Text("stable prefix first part".to_string()),
+        provider::RequestSystemBlockData::Cacheable("stable prefix boundary".to_string()),
+        provider::RequestSystemBlockData::Text("today is monday".to_string()),
     ];
     // A tool schema with full {name, description, input_schema}.
-    request.tools = vec![ModelToolSchema {
+    request.tools = vec![ModelToolSchemaData {
         name: "get_weather".to_string(),
         description: "Get current weather".to_string(),
         input_schema: serde_json::json!({
@@ -424,18 +427,18 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
 async fn invoke_clamps_requested_reasoning_to_capability() {
     // Capability supports only Off and Medium; requesting Max must clamp to Medium.
     let mut capability = test_capability();
-    capability.reasoning = ReasoningCapability::new(
+    capability.reasoning = ReasoningCapabilityData::new(
         [ReasoningLevel::Off, ReasoningLevel::Medium],
-        ReasoningMappingKind::Effort,
+        ReasoningMappingKindData::Effort,
     )
     .expect("valid capability");
 
     let (port, model, captured) = build_port_with_capability(capability);
 
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(4096, ReasoningLevel::Max),
+        InvocationOptionsData::new(4096, ReasoningLevel::Max),
     );
     let cancel = CancellationToken::new();
     let _ = port.invoke(request, &cancel).await.unwrap();
@@ -461,10 +464,10 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
 async fn invoke_invokes_provider_exactly_once() {
     let (port, model, captured) = build_port_capturing();
 
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         model,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
     let mut stream = port.invoke(request, &cancel).await.unwrap();
@@ -483,14 +486,14 @@ async fn invoke_invokes_provider_exactly_once() {
 async fn invoke_rejects_unknown_model() {
     let (port, _known) = build_port();
 
-    let unknown = ModelId {
+    let unknown = ModelIdData {
         provider: "nope".to_string(),
         model: "ghost".to_string(),
     };
-    let request = InvocationRequest::new(
+    let request = InvocationRequestData::new(
         unknown,
         vec![],
-        InvocationOptions::new(8192, ReasoningLevel::Off),
+        InvocationOptionsData::new(8192, ReasoningLevel::Off),
     );
     let cancel = CancellationToken::new();
 
@@ -521,10 +524,10 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
 
     // Drive invoke() on a task so we can fire the external signal mid-flight.
     let handle = tokio::spawn(async move {
-        let request = InvocationRequest::new(
+        let request = InvocationRequestData::new(
             model,
             vec![],
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
         port_for_task.invoke(request, &cancel_for_task).await
     });
@@ -543,8 +546,6 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
 
 // ─── ProviderFactory TDD tests ─────────────────────────────────────
 
-use runtime::ProviderBuildSpec;
-
 fn valid_spec() -> ProviderBuildSpec {
     ProviderBuildSpec {
         driver: "anthropic".to_string(),
@@ -552,7 +553,7 @@ fn valid_spec() -> ProviderBuildSpec {
         api_style: None,
         api_key: "sk-test-key".to_string(),
         base_url: Some("https://api.anthropic.com".to_string()),
-        model: ModelId {
+        model: ModelIdData {
             provider: "Anthropic".to_string(),
             model: "claude-sonnet-4-20250514".to_string(),
         },
@@ -651,7 +652,7 @@ fn factory_build_preserves_requested_reasoning() {
     spec.requested_reasoning = ReasoningLevel::High;
     // Use "openai" which supports reasoning via Effort mapping.
     spec.driver = "openai".to_string();
-    spec.model = ModelId {
+    spec.model = ModelIdData {
         provider: "OpenAI".to_string(),
         model: "gpt-4o".to_string(),
     };
@@ -700,7 +701,7 @@ fn spec_with(
         api_style: None,
         api_key: api_key.to_string(),
         base_url: base_url.map(str::to_string),
-        model: ModelId {
+        model: ModelIdData {
             provider: "Anthropic".to_string(),
             model: model.to_string(),
         },

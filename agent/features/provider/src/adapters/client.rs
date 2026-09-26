@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
-use crate::domain::invoke::SystemBlock;
+use crate::domain::invoke::SystemBlockData;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
 use share::message::Message;
@@ -12,40 +12,42 @@ use tokio_util::sync::CancellationToken;
 fn reasoning_level_from_options(
     reasoning: bool,
     config: Option<&ReasoningConfig>,
-) -> crate::ReasoningLevel {
+) -> crate::domain::capability::ReasoningLevel {
     match config {
         Some(ReasoningConfig::Object(value)) => value
             .get("effort")
             .or_else(|| value.get("reasoning_effort"))
             .and_then(|value| value.as_str())
-            .and_then(crate::ReasoningLevel::parse)
+            .and_then(crate::domain::capability::ReasoningLevel::parse)
             .unwrap_or(if reasoning {
-                crate::ReasoningLevel::High
+                crate::domain::capability::ReasoningLevel::High
             } else {
-                crate::ReasoningLevel::Off
+                crate::domain::capability::ReasoningLevel::Off
             }),
         Some(ReasoningConfig::ThinkingBudget(tokens)) => {
             if *tokens == 0 {
-                crate::ReasoningLevel::Off
+                crate::domain::capability::ReasoningLevel::Off
             } else {
-                crate::ReasoningLevel::High
+                crate::domain::capability::ReasoningLevel::High
             }
         }
         Some(ReasoningConfig::Bool(enabled)) => {
             if *enabled {
-                crate::ReasoningLevel::High
+                crate::domain::capability::ReasoningLevel::High
             } else {
-                crate::ReasoningLevel::Off
+                crate::domain::capability::ReasoningLevel::Off
             }
         }
-        None if reasoning => crate::ReasoningLevel::High,
-        None => crate::ReasoningLevel::Off,
+        None if reasoning => crate::domain::capability::ReasoningLevel::High,
+        None => crate::domain::capability::ReasoningLevel::Off,
     }
 }
 
 /// 校验 invocation 构造输入已完成 Config 解析；base URL / 模型 / UA
 /// 任一缺失时 fail-closed 返回 Configuration 错误，禁止回落 adapter 内置默认值。
-fn ensure_resolved_invocation_inputs(options: &LlmConfigOptions) -> Result<(), crate::LlmError> {
+fn ensure_resolved_invocation_inputs(
+    options: &LlmConfigOptionsData,
+) -> Result<(), crate::LlmError> {
     if options
         .base_url
         .as_deref()
@@ -74,7 +76,7 @@ fn ensure_resolved_invocation_inputs(options: &LlmConfigOptions) -> Result<(), c
 
 /// 解析 driver 字符串与 API style；无效输入显式报 Configuration 错误。
 fn parse_driver_spec(
-    options: &LlmConfigOptions,
+    options: &LlmConfigOptionsData,
 ) -> Result<crate::domain::driver_acl::DriverSpec, crate::LlmError> {
     crate::domain::driver_acl::DriverSpec::parse(&options.driver, options.api_style.as_deref())
         .map_err(|error| crate::LlmError::Config(error.to_string()))
@@ -83,7 +85,7 @@ fn parse_driver_spec(
 /// 从构造配置推导 transport key；model / max_tokens / reasoning 是
 /// invocation 配置，MUST NOT 进入 key。
 fn transport_key_for(
-    options: &LlmConfigOptions,
+    options: &LlmConfigOptionsData,
     spec: &crate::domain::driver_acl::DriverSpec,
 ) -> crate::adapters::transport::TransportKey {
     crate::adapters::transport::TransportKey {
@@ -104,9 +106,9 @@ fn transport_key_for(
 /// `from_config` 与 `from_config_with_pool` 的共用实现。
 fn build_provider_and_scope(
     spec: crate::domain::driver_acl::DriverSpec,
-    options: LlmConfigOptions,
+    options: LlmConfigOptionsData,
     http: reqwest::Client,
-) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScope), crate::LlmError> {
+) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScopeData), crate::LlmError> {
     use crate::domain::driver_acl::{ApiStyle, ProtocolFamily};
 
     let driver = spec.kind();
@@ -152,7 +154,7 @@ fn build_provider_and_scope(
         }
     };
     let effective_reasoning = requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-    let default_scope = crate::InvocationScope::new(
+    let default_scope = crate::InvocationScopeData::new(
         model,
         if options.max_tokens == 0 {
             share::config::models::DEFAULT_MAX_TOKENS
@@ -230,7 +232,7 @@ pub struct LlmProviderOptions {
     pub user_agent: Option<String>,
 }
 
-pub struct LlmConfigOptions {
+pub struct LlmConfigOptionsData {
     pub driver: String,
     pub source_key: String,
     pub api_style: Option<String>,
@@ -246,18 +248,18 @@ pub struct LlmConfigOptions {
 
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
-    default_scope: crate::InvocationScope,
+    default_scope: crate::InvocationScopeData,
     /// 底层共享 transport 的诊断 id；`None` 表示独占（非 pool）HTTP client。
     transport_id: Option<u64>,
 }
 
 impl LlmClient {
     pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
-        let default_scope = crate::InvocationScope::new(
+        let default_scope = crate::InvocationScopeData::new(
             provider.model_name(),
             share::config::models::DEFAULT_MAX_TOKENS,
-            crate::ReasoningLevel::Off,
-            crate::ReasoningLevel::Off,
+            crate::domain::capability::ReasoningLevel::Off,
+            crate::domain::capability::ReasoningLevel::Off,
         )
         .expect("provider defaults must form a valid invocation scope");
         Self {
@@ -294,7 +296,7 @@ impl LlmClient {
                     options.base_url,
                     options.model,
                     options.max_tokens,
-                    crate::ports::ReasoningLevel::Off,
+                    crate::domain::capability::ReasoningLevel::Off,
                     options.timeout_secs,
                     options
                         .user_agent
@@ -343,7 +345,7 @@ impl LlmClient {
         };
         let effective_reasoning =
             requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-        let default_scope = crate::InvocationScope::new(
+        let default_scope = crate::InvocationScopeData::new(
             model.unwrap_or_else(|| provider_impl.model_name().to_string()),
             if options.max_tokens == 0 {
                 share::config::models::DEFAULT_MAX_TOKENS
@@ -361,7 +363,7 @@ impl LlmClient {
         }
     }
 
-    pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
+    pub fn from_config(options: LlmConfigOptionsData) -> Result<Self, crate::LlmError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let http =
@@ -379,7 +381,7 @@ impl LlmClient {
     /// 的多次构造共享同一连接池；model / max_tokens / reasoning 属于
     /// invocation 配置，不影响 transport 复用。
     pub fn from_config_with_pool(
-        options: LlmConfigOptions,
+        options: LlmConfigOptionsData,
         pool: &crate::adapters::pool::TransportPool,
     ) -> Result<Self, crate::LlmError> {
         ensure_resolved_invocation_inputs(&options)?;
@@ -397,21 +399,92 @@ impl LlmClient {
 
     pub async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScope,
-        system: &[SystemBlock],
+        scope: &crate::InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         self.log_request(system, messages, tool_schemas);
         self.provider
             .invocation_stream(scope, system, messages, tool_schemas, cancel)
             .await
     }
 
+    /// 统一请求模型入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
+    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
+    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    pub async fn invoke(
+        &self,
+        capability: &crate::ModelCapabilityData,
+        request: &crate::InvocationRequestData,
+        cancellation: &dyn crate::CancellationSignal,
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+        use crate::{ProviderError, ProviderErrorKind};
+
+        // fast path：调用方信号已触发。
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::cancelled());
+        }
+
+        // clamp：请求 reasoning 不超过声明能力；scope 用 provider 中性的 model 名。
+        let requested_reasoning = request.options.reasoning;
+        let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
+        let scope = crate::InvocationScopeData::new(
+            request.model.model.clone(),
+            request.options.max_output_tokens,
+            requested_reasoning,
+            effective_reasoning,
+        )
+        .map_err(|error| {
+            ProviderError::fatal(
+                ProviderErrorKind::Configuration,
+                format!("invalid scope: {error}"),
+            )
+        })?;
+
+        // provider 中性 system blocks → legacy 驱动块（Cacheable→cached，Text→dynamic）。
+        let system: Vec<SystemBlockData> = request
+            .system
+            .iter()
+            .map(|block| match block {
+                crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
+                crate::RequestSystemBlockData::Cacheable(text) => {
+                    SystemBlockData::cached(text.clone())
+                }
+            })
+            .collect();
+
+        let tool_schemas: Vec<serde_json::Value> = request
+            .tools
+            .iter()
+            .map(crate::ModelToolSchemaData::to_tool_definition)
+            .collect();
+
+        // request 携带的 token 与调用方信号竞速 establishment。
+        let cancel_token = request.cancellation.clone();
+        let establishment = Box::pin(self.invocation_stream(
+            &scope,
+            &system,
+            &request.messages,
+            &tool_schemas,
+            &cancel_token,
+        ));
+        tokio::pin!(establishment);
+
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                cancel_token.cancel();
+                Err(ProviderError::cancelled())
+            }
+            result = &mut establishment => result,
+        }
+    }
+
     fn log_request(
         &self,
-        system: &[SystemBlock],
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
     ) {
@@ -470,9 +543,9 @@ impl LlmClient {
 
     pub fn with_default_reasoning(
         mut self,
-        requested_reasoning: crate::ReasoningLevel,
+        requested_reasoning: crate::domain::capability::ReasoningLevel,
     ) -> Result<Self, crate::LlmError> {
-        self.default_scope = crate::InvocationScope::new(
+        self.default_scope = crate::InvocationScopeData::new(
             self.default_scope.model(),
             self.default_scope.max_tokens(),
             requested_reasoning,
@@ -481,7 +554,7 @@ impl LlmClient {
         Ok(self)
     }
 
-    pub fn default_scope(&self) -> &crate::InvocationScope {
+    pub fn default_scope(&self) -> &crate::InvocationScopeData {
         &self.default_scope
     }
 
@@ -495,9 +568,9 @@ impl LlmClient {
         &self,
         model: impl Into<String>,
         max_tokens: Option<u32>,
-        requested_reasoning: crate::ReasoningLevel,
-    ) -> Result<crate::InvocationScope, crate::LlmError> {
-        crate::InvocationScope::new(
+        requested_reasoning: crate::domain::capability::ReasoningLevel,
+    ) -> Result<crate::InvocationScopeData, crate::LlmError> {
+        crate::InvocationScopeData::new(
             model,
             max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),
             requested_reasoning,
@@ -511,7 +584,7 @@ impl LlmClient {
     pub fn provider_name(&self) -> &str {
         self.provider.provider_name()
     }
-    pub fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+    pub fn max_reasoning_level(&self) -> crate::domain::capability::ReasoningLevel {
         self.provider.max_reasoning_level()
     }
 }

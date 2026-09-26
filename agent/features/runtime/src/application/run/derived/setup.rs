@@ -41,7 +41,7 @@ pub struct DerivedRun {
     /// Max tokens for this sub-run.
     pub max_tokens: u32,
     /// Requested reasoning level.
-    pub reasoning_level: provider::ReasoningLevel,
+    pub reasoning_level: share::reasoning::ReasoningLevel,
     /// Session ID for the isolated context.
     pub session_id: String,
     /// Stable Skill 去重作用域，绑定当前 Sub-agent instance，不使用 run_id。

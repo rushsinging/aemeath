@@ -1,4 +1,4 @@
-use provider::ProviderStopReason;
+use provider::ProviderStopReasonData;
 
 use super::reflection::should_run_turn_reflection;
 
@@ -16,21 +16,21 @@ fn turn_reflection_requires_enabled_interval_finish_boundary() {
         &config,
         2,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
     assert!(!should_run_turn_reflection(
         &config,
         1,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
     assert!(!should_run_turn_reflection(
         &config,
         2,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         true,
     ));
 
@@ -40,7 +40,7 @@ fn turn_reflection_requires_enabled_interval_finish_boundary() {
         &memory_disabled,
         2,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
 
@@ -50,7 +50,7 @@ fn turn_reflection_requires_enabled_interval_finish_boundary() {
         &reflection_disabled,
         2,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
 
@@ -59,7 +59,7 @@ fn turn_reflection_requires_enabled_interval_finish_boundary() {
         &zero_interval,
         2,
         false,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
 }
@@ -72,14 +72,14 @@ fn turn_reflection_skips_unfinished_tool_round_but_accepts_completed_end_turn() 
         &config,
         2,
         true,
-        &ProviderStopReason::ToolUse,
+        &ProviderStopReasonData::ToolUse,
         false,
     ));
     assert!(should_run_turn_reflection(
         &config,
         2,
         true,
-        &ProviderStopReason::EndTurn,
+        &ProviderStopReasonData::EndTurn,
         false,
     ));
 }

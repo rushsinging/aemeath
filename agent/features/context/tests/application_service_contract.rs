@@ -18,11 +18,11 @@ use context::{
     PromptMaterialization, SessionRepository, SessionSnapshot,
 };
 use memory::api::{MemoryPort, NoOpMemory};
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message};
+use share::reasoning::ReasoningLevel;
 
 const CHECKPOINT: &str = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue";
 

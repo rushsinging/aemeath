@@ -107,7 +107,7 @@ impl SkillBootstrapAssembly {
 }
 
 pub struct PromptAssembly {
-    pub system_blocks: Vec<crate::ports::RequestSystemBlock>,
+    pub system_blocks: Vec<crate::ports::RequestSystemBlockData>,
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
@@ -116,14 +116,14 @@ pub struct PromptAssembly {
 
 impl PromptAssembly {
     pub fn new(
-        system_blocks: Vec<crate::ports::RequestSystemBlock>,
+        system_blocks: Vec<crate::ports::RequestSystemBlockData>,
         initial_git_context: String,
         user_context: String,
         model_id: impl Into<String>,
     ) -> Self {
         let system_prompt_text = system_blocks
             .iter()
-            .map(crate::ports::RequestSystemBlock::text)
+            .map(crate::ports::RequestSystemBlockData::text)
             .collect::<Vec<_>>()
             .join("\n\n");
         Self {

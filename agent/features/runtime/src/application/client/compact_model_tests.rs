@@ -3,10 +3,10 @@
 use super::*;
 use crate::ports::provider_port::fake::FakeProvider;
 use crate::ports::ProviderBuildSpec;
-use provider::ModelId;
-use provider::ReasoningLevel;
+use provider::ModelIdData;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
+use share::reasoning::ReasoningLevel;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct FakeConfigReader {
@@ -148,7 +148,7 @@ fn session_state(
         resolved,
         Arc::new(ProviderBinding {
             provider: Arc::new(FakeProvider::new()),
-            model: ModelId {
+            model: ModelIdData {
                 provider: "local".into(),
                 model: model_id,
             },

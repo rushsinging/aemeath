@@ -1035,7 +1035,7 @@ pub struct AgentClientBootstrap {
     pub context_size: usize,
     pub thinking: bool,
     /// 启动时生效的 reasoning 深度（#1616 TUI 状态栏初始展示）。
-    pub reasoning_level: provider::ReasoningLevel,
+    pub reasoning_level: share::reasoning::ReasoningLevel,
     pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
     pub skill_snapshot: sdk::SkillsUpdatedEvent,
@@ -1391,7 +1391,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let allow_all = runtime_client.client.allow_all();
     let context_size = runtime_client.client.context_size();
     let requested_level = runtime_client.client.requested_reasoning();
-    let thinking = requested_level != provider::ReasoningLevel::Off;
+    let thinking = requested_level != share::reasoning::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
@@ -1518,16 +1518,16 @@ mod tests {
     impl runtime::ProviderPort for ReportedUsageProvider {
         fn capabilities(
             &self,
-            model: &provider::ModelId,
-        ) -> Result<provider::ModelCapability, ProviderError> {
-            Ok(provider::ModelCapability {
+            model: &provider::ModelIdData,
+        ) -> Result<provider::ModelCapabilityData, ProviderError> {
+            Ok(provider::ModelCapabilityData {
                 model: model.clone(),
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: provider::ReasoningCapability::new(
-                    [provider::ReasoningLevel::Off],
-                    provider::ReasoningMappingKind::None,
+                reasoning: provider::ReasoningCapabilityData::new(
+                    [share::reasoning::ReasoningLevel::Off],
+                    provider::ReasoningMappingKindData::None,
                 )?,
                 context_limit: Some(128_000),
                 output_limit: Some(8_192),
@@ -1536,15 +1536,15 @@ mod tests {
 
         async fn invoke(
             &self,
-            _request: provider::InvocationRequest,
+            _request: provider::InvocationRequestData,
             _cancellation: &dyn provider::CancellationSignal,
-        ) -> Result<provider::InvocationStream, ProviderError> {
+        ) -> Result<provider::InvocationStreamData, ProviderError> {
             let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
             let completion = match invocation_index {
-                0 => provider::ProviderCompletion {
-                    output: vec![provider::ProviderContentBlock::ToolCall(
-                        provider::ProviderToolCall {
-                            id: provider::ProviderToolCallId("call-sub-agent".to_string()),
+                0 => provider::ProviderCompletionData {
+                    output: vec![provider::ProviderContentBlockData::ToolCall(
+                        provider::ProviderToolCallData {
+                            id: provider::ProviderToolCallIdData("call-sub-agent".to_string()),
                             name: "Agent".to_string(),
                             arguments: serde_json::json!({
                                 "description": "record child usage",
@@ -1553,41 +1553,41 @@ mod tests {
                             }),
                         },
                     )],
-                    stop_reason: provider::ProviderStopReason::ToolUse,
-                    usage: Some(provider::RawUsageSnapshot {
+                    stop_reason: provider::ProviderStopReasonData::ToolUse,
+                    usage: Some(provider::RawUsageSnapshotData {
                         input_tokens: Some(13),
                         output_tokens: Some(8),
                         cache_write_tokens: Some(0),
                         cache_read_tokens: None,
                         reasoning_tokens: None,
                     }),
-                    effective_reasoning: provider::ReasoningLevel::Off,
+                    effective_reasoning: share::reasoning::ReasoningLevel::Off,
                 },
-                1 => provider::ProviderCompletion {
-                    output: vec![provider::ProviderContentBlock::Text(
+                1 => provider::ProviderCompletionData {
+                    output: vec![provider::ProviderContentBlockData::Text(
                         "sub-agent complete".to_string(),
                     )],
-                    stop_reason: provider::ProviderStopReason::EndTurn,
-                    usage: Some(provider::RawUsageSnapshot {
+                    stop_reason: provider::ProviderStopReasonData::EndTurn,
+                    usage: Some(provider::RawUsageSnapshotData {
                         input_tokens: Some(21),
                         output_tokens: Some(5),
                         cache_write_tokens: None,
                         cache_read_tokens: Some(3),
                         reasoning_tokens: None,
                     }),
-                    effective_reasoning: provider::ReasoningLevel::Off,
+                    effective_reasoning: share::reasoning::ReasoningLevel::Off,
                 },
-                _ => provider::ProviderCompletion {
-                    output: vec![provider::ProviderContentBlock::Text(
+                _ => provider::ProviderCompletionData {
+                    output: vec![provider::ProviderContentBlockData::Text(
                         "main-agent complete".to_string(),
                     )],
-                    stop_reason: provider::ProviderStopReason::EndTurn,
+                    stop_reason: provider::ProviderStopReasonData::EndTurn,
                     usage: None,
-                    effective_reasoning: provider::ReasoningLevel::Off,
+                    effective_reasoning: share::reasoning::ReasoningLevel::Off,
                 },
             };
             Ok(Box::pin(futures_util::stream::iter(vec![
-                provider::InvocationEvent::Completed(completion),
+                provider::InvocationEventData::Completed(completion),
             ])))
         }
     }

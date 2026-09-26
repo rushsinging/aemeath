@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
-use crate::domain::invoke::{InvocationScope, SystemBlock};
+use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use crate::ports::LlmProvider;
 
 mod conversion;
@@ -32,7 +32,7 @@ pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
 
 impl OllamaProvider {
     /// `max_tokens` / `reasoning` 不再作为可变运行时状态保留：每次调用的实际
-    /// max_tokens / 推理档位由调用方传入的 `InvocationScope` 决定（不可变、
+    /// max_tokens / 推理档位由调用方传入的 `InvocationScopeData` 决定（不可变、
     /// 一次调用一份快照）。这两个构造参数仅为保持调用方签名兼容而保留，
     /// 当前未参与任何 immutable default 的派生，故有意不使用。
     #[allow(dead_code)]
@@ -130,22 +130,6 @@ impl OllamaProvider {
     }
 }
 
-fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
-    let kind = match error {
-        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
-        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            crate::ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
-    };
-    crate::ProviderError::fatal(kind, error.to_string())
-}
-
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
     failure.into_provider_error()
 }
@@ -154,18 +138,18 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for OllamaProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScope,
-        system: &[SystemBlock],
+        scope: &InvocationScopeData,
+        system: &[SystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
         let request_body = self
             .build_request_body(scope, system, messages, tool_schemas, true)
-            .map_err(provider_error_from_llm)?;
+            .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?;
         let url = format!("{}/api/chat", self.base_url);
         let request_bytes = serde_json::to_string(&request_body)
             .map(|value| value.len())
@@ -186,7 +170,10 @@ impl LlmProvider for OllamaProvider {
         let response = HttpAttemptExecutor::execute(
             self.http
                 .post(&url)
-                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .headers(
+                    self.build_headers()
+                        .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?,
+                )
                 .json(&request_body),
             &context,
             cancel,
@@ -213,8 +200,8 @@ impl LlmProvider for OllamaProvider {
         "ollama"
     }
 
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::Medium
+    fn max_reasoning_level(&self) -> crate::domain::capability::ReasoningLevel {
+        crate::domain::capability::ReasoningLevel::Medium
     }
 }
 
@@ -281,7 +268,7 @@ mod tests {
         let leaked = Box::leak(response.into_boxed_str());
         let (base_url, requests) = spawn_counting_server(leaked).await;
         let client =
-            crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptions {
+            crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
                 driver: crate::ProviderDriverKind::Ollama.as_str().to_string(),
                 source_key: "ollama".to_string(),
                 api_style: None,
@@ -295,11 +282,11 @@ mod tests {
                 user_agent: Some("aemeath-test/1.0".to_string()),
             })
             .expect("valid ollama config");
-        let scope = InvocationScope::new(
+        let scope = InvocationScopeData::new(
             "test-model",
             8192,
-            crate::ReasoningLevel::Off,
-            crate::ReasoningLevel::Off,
+            crate::domain::capability::ReasoningLevel::Off,
+            crate::domain::capability::ReasoningLevel::Off,
         )
         .unwrap();
 
@@ -320,13 +307,13 @@ mod tests {
         assert!(matches!(
             &events[..],
             [
-                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(first)),
-                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(second)),
-                crate::InvocationEvent::Completed(_)
+                crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
+                crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
+                crate::InvocationEventData::Completed(_)
             ] if first == "ol" && second == "lama"
         ));
         assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-        let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+        let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
             panic!("expected completed event");
         };
         let usage = completion.usage.as_ref().expect("ollama usage reported");

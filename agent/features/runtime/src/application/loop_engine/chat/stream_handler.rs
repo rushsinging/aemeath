@@ -2,23 +2,23 @@ use crate::application::loop_engine::chat::events::{
     ChatEventSink, RuntimeRunContext, RuntimeStreamEvent,
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
-use crate::ports::RawUsageSnapshot;
-use provider::{InvocationDelta, InvocationEvent, ProviderStopReason};
+use crate::ports::RawUsageSnapshotData;
+use provider::{InvocationDeltaData, InvocationEventData, ProviderStopReasonData};
 use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};
 
 /// Runtime-facing aggregated invocation result.
 ///
-/// Built by [`InvocationEventReducer`] from a terminal `InvocationEvent::Completed`.
+/// Built by [`InvocationEventReducer`] from a terminal `InvocationEventData::Completed`.
 /// Replaces the legacy provider response type which coupled to provider-internal `Usage`.
 #[derive(Debug)]
 pub struct InvocationResponse {
     /// Assistant message assembled from the completion output.
     pub assistant_message: Message,
     /// Token usage snapshot from the provider (optional fields, `None` = unreported).
-    pub usage: RawUsageSnapshot,
+    pub usage: RawUsageSnapshotData,
     /// Stop reason reported by the provider.
-    pub stop_reason: ProviderStopReason,
+    pub stop_reason: ProviderStopReasonData,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,11 +38,11 @@ pub struct InvocationEventReducer<S: ChatEventSink> {
     saw_visible_delta: bool,
 }
 
-fn has_actionable_output(output: &[provider::ProviderContentBlock]) -> bool {
+fn has_actionable_output(output: &[provider::ProviderContentBlockData]) -> bool {
     output.iter().any(|block| match block {
-        provider::ProviderContentBlock::Text(text) => !text.trim().is_empty(),
-        provider::ProviderContentBlock::ToolCall(_) => true,
-        provider::ProviderContentBlock::Thinking { .. } => false,
+        provider::ProviderContentBlockData::Text(text) => !text.trim().is_empty(),
+        provider::ProviderContentBlockData::ToolCall(_) => true,
+        provider::ProviderContentBlockData::Thinking { .. } => false,
     })
 }
 
@@ -85,20 +85,20 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
 
     pub fn apply(
         &mut self,
-        event: InvocationEvent,
+        event: InvocationEventData,
     ) -> Result<Option<InvocationResponse>, provider::ProviderError> {
         match event {
-            InvocationEvent::Delta(delta) => {
+            InvocationEventData::Delta(delta) => {
                 match delta {
-                    InvocationDelta::Text(text) => {
+                    InvocationDeltaData::Text(text) => {
                         self.saw_visible_delta = true;
                         self.handler.on_text(&text)
                     }
-                    InvocationDelta::Thinking { thinking, .. } => {
+                    InvocationDeltaData::Thinking { thinking, .. } => {
                         self.saw_visible_delta = true;
                         self.handler.on_thinking(&thinking)
                     }
-                    InvocationDelta::ToolCallStarted {
+                    InvocationDeltaData::ToolCallStarted {
                         index,
                         provider_id,
                         name,
@@ -110,7 +110,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             index,
                         )
                     }
-                    InvocationDelta::ToolArgumentsDelta {
+                    InvocationDeltaData::ToolArgumentsDelta {
                         index,
                         provider_id,
                         partial_json,
@@ -123,15 +123,15 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             &partial_json,
                         )
                     }
-                    InvocationDelta::ToolCallCompleted { index, call } => {
+                    InvocationDeltaData::ToolCallCompleted { index, call } => {
                         self.saw_visible_delta = true;
                         self.handler.on_tool_call_completed(index, &call);
                     }
-                    InvocationDelta::UsageSnapshot(_) => {}
+                    InvocationDeltaData::UsageSnapshot(_) => {}
                 }
                 Ok(None)
             }
-            InvocationEvent::Completed(completion) => {
+            InvocationEventData::Completed(completion) => {
                 self.handler.complete_active_streaming_block();
                 if !has_actionable_output(&completion.output) {
                     return Err(empty_completion_error());
@@ -139,13 +139,13 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                 if !self.saw_visible_delta {
                     for block in &completion.output {
                         match block {
-                            provider::ProviderContentBlock::Text(text) => {
+                            provider::ProviderContentBlockData::Text(text) => {
                                 self.handler.on_text(text)
                             }
-                            provider::ProviderContentBlock::Thinking { thinking, .. } => {
+                            provider::ProviderContentBlockData::Thinking { thinking, .. } => {
                                 self.handler.on_thinking(thinking)
                             }
-                            provider::ProviderContentBlock::ToolCall(call) => self
+                            provider::ProviderContentBlockData::ToolCall(call) => self
                                 .handler
                                 .on_tool_use_start(&call.name, Some(&call.id.0), 0),
                         }
@@ -156,19 +156,23 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                     .output
                     .into_iter()
                     .map(|block| match block {
-                        provider::ProviderContentBlock::Text(text) => ContentBlock::Text { text },
-                        provider::ProviderContentBlock::Thinking {
+                        provider::ProviderContentBlockData::Text(text) => {
+                            ContentBlock::Text { text }
+                        }
+                        provider::ProviderContentBlockData::Thinking {
                             thinking,
                             signature,
                         } => ContentBlock::Thinking {
                             thinking,
                             signature,
                         },
-                        provider::ProviderContentBlock::ToolCall(call) => ContentBlock::ToolUse {
-                            id: call.id.0,
-                            name: call.name,
-                            input: call.arguments,
-                        },
+                        provider::ProviderContentBlockData::ToolCall(call) => {
+                            ContentBlock::ToolUse {
+                                id: call.id.0,
+                                name: call.name,
+                                input: call.arguments,
+                            }
+                        }
                     })
                     .collect();
                 let usage = completion.usage.unwrap_or_default();
@@ -182,7 +186,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                     stop_reason: completion.stop_reason,
                 }))
             }
-            InvocationEvent::Failed(error) => {
+            InvocationEventData::Failed(error) => {
                 self.handler.complete_active_streaming_block();
                 Err(error)
             }
@@ -369,7 +373,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     }
 
     /// #1494：provider 已给出完整验证过的 tool call → 立即旁路执行（边流边执行）。
-    fn on_tool_call_completed(&mut self, index: usize, call: &provider::ProviderToolCall) {
+    fn on_tool_call_completed(&mut self, index: usize, call: &provider::ProviderToolCallData) {
         let Some(executor) = &self.streaming_tool else {
             return;
         };
@@ -389,9 +393,10 @@ mod invocation_reducer_tests {
     use super::*;
     use crate::application::loop_engine::chat::events::EventFuture;
     use provider::{
-        InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError,
-        ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
+        InvocationDeltaData, InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
+        ProviderError, ProviderStopReasonData, RawUsageSnapshotData,
     };
+    use share::reasoning::ReasoningLevel;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -413,15 +418,15 @@ mod invocation_reducer_tests {
         let events = sink.0.clone();
         let mut reducer = InvocationEventReducer::new(sink);
         assert!(reducer
-            .apply(InvocationEvent::Delta(InvocationDelta::Text(
+            .apply(InvocationEventData::Delta(InvocationDeltaData::Text(
                 "hi".to_string()
             )))
             .unwrap()
             .is_none());
-        let completion = ProviderCompletion {
-            output: vec![ProviderContentBlock::Text("hi".to_string())],
-            stop_reason: ProviderStopReason::EndTurn,
-            usage: Some(RawUsageSnapshot {
+        let completion = ProviderCompletionData {
+            output: vec![ProviderContentBlockData::Text("hi".to_string())],
+            stop_reason: ProviderStopReasonData::EndTurn,
+            usage: Some(RawUsageSnapshotData {
                 input_tokens: Some(2),
                 output_tokens: Some(1),
                 ..Default::default()
@@ -429,7 +434,7 @@ mod invocation_reducer_tests {
             effective_reasoning: ReasoningLevel::Off,
         };
         let response = reducer
-            .apply(InvocationEvent::Completed(completion))
+            .apply(InvocationEventData::Completed(completion))
             .unwrap()
             .expect("completion produces response");
         assert_eq!(response.assistant_message.text_content(), "hi");
@@ -445,7 +450,7 @@ mod invocation_reducer_tests {
         let sink = RecordingSink::default();
         let mut reducer = InvocationEventReducer::new(sink);
         let error = reducer
-            .apply(InvocationEvent::Failed(ProviderError::cancelled()))
+            .apply(InvocationEventData::Failed(ProviderError::cancelled()))
             .expect_err("failed terminal remains failure");
         assert!(error.is_cancelled());
     }

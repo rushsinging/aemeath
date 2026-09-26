@@ -88,11 +88,11 @@ fn responses_request_body_keeps_typed_image_input() {
         None,
         60,
     );
-    let scope = InvocationScope::new(
+    let scope = InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .expect("valid scope");
     let messages = vec![Message::user_with_image(
@@ -173,14 +173,14 @@ fn responses_instructions_omit_anthropic_cache_control() {
         None,
         60,
     );
-    let scope = InvocationScope::new(
+    let scope = InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .expect("valid scope");
-    let system = vec![SystemBlock::cached("stable instructions".to_string())];
+    let system = vec![SystemBlockData::cached("stable instructions".to_string())];
 
     let body = provider.build_responses_request_body(&scope, &system, &[], &[], false);
     assert_eq!(body["instructions"], "stable instructions");
@@ -210,11 +210,11 @@ fn test_build_responses_request_body_injects_tools_from_flat_schema() {
         None,
         60,
     );
-    let scope = InvocationScope::new(
+    let scope = InvocationScopeData::new(
         "test-model",
         8192,
-        crate::ports::ReasoningLevel::Off,
-        crate::ports::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
+        crate::domain::capability::ReasoningLevel::Off,
     )
     .expect("valid scope");
     let body = provider.build_responses_request_body(&scope, &[], &[], &flat_schemas, false);

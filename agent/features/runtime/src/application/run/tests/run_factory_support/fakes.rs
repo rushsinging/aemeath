@@ -66,14 +66,14 @@ pub(crate) struct FakeProviderPort;
 impl ProviderPort for FakeProviderPort {
     fn capabilities(
         &self,
-        model: &crate::ports::ModelId,
-    ) -> Result<crate::ports::ModelCapability, ProviderError> {
-        Ok(crate::ports::ModelCapability {
+        model: &crate::ports::ModelIdData,
+    ) -> Result<crate::ports::ModelCapabilityData, ProviderError> {
+        Ok(crate::ports::ModelCapabilityData {
             model: model.clone(),
             supports_tools: true,
             supports_parallel_tool_calls: false,
             supports_streaming: true,
-            reasoning: crate::ports::ReasoningCapability::none(),
+            reasoning: crate::ports::ReasoningCapabilityData::none(),
             context_limit: None,
             output_limit: None,
         })
@@ -81,9 +81,9 @@ impl ProviderPort for FakeProviderPort {
 
     async fn invoke(
         &self,
-        _request: crate::ports::InvocationRequest,
+        _request: crate::ports::InvocationRequestData,
         _cancellation: &dyn provider::CancellationSignal,
-    ) -> Result<crate::ports::InvocationStream, ProviderError> {
+    ) -> Result<crate::ports::InvocationStreamData, ProviderError> {
         Err(ProviderError::cancelled())
     }
 }
@@ -91,12 +91,12 @@ impl ProviderPort for FakeProviderPort {
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBinding> {
     Arc::new(ProviderBinding {
         provider: Arc::new(FakeProviderPort),
-        model: crate::ports::ModelId {
+        model: crate::ports::ModelIdData {
             provider: "test-provider".into(),
             model: "test-model".into(),
         },
         max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Medium,
+        requested_reasoning: share::reasoning::ReasoningLevel::Medium,
         context_window: Some(128_000),
     })
 }

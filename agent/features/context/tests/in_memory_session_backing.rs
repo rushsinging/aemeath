@@ -122,9 +122,9 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
     use context::ContextApplicationService;
     use context::{ContextPort, ContextPromptSource, PromptMaterialization};
     use context::{ContextRequest, Language, SystemPromptSpec};
-    use provider::ReasoningLevel;
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
+    use share::reasoning::ReasoningLevel;
     use std::sync::Arc;
 
     struct Prompt;

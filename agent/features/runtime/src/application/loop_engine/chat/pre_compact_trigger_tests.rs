@@ -59,7 +59,7 @@ fn frozen_request() -> ContextRequest {
         invocation_reminders: vec![],
         system_prompt: SystemPromptSpec::new("system"),
         model_id: "fake/model".to_string(),
-        effective_reasoning: provider::ReasoningLevel::Off,
+        effective_reasoning: share::reasoning::ReasoningLevel::Off,
         language: ContextLanguage::new("en"),
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
@@ -289,21 +289,21 @@ pub(super) struct StaticReflectionProvider;
 impl crate::ports::ProviderPort for StaticReflectionProvider {
     fn capabilities(
         &self,
-        model: &provider::ModelId,
+        model: &provider::ModelIdData,
     ) -> Result<
-        crate::ports::provider_port::ModelCapability,
+        crate::ports::provider_port::ModelCapabilityData,
         crate::ports::provider_port::ProviderError,
     > {
         use crate::ports::provider_port::{
-            ModelCapability, ProviderError, ProviderErrorKind, ReasoningCapability,
+            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
         };
         if model.provider == "pre-compact-test" {
-            Ok(ModelCapability {
+            Ok(ModelCapabilityData {
                 model: model.clone(),
                 supports_tools: false,
                 supports_parallel_tool_calls: false,
                 supports_streaming: true,
-                reasoning: ReasoningCapability::none(),
+                reasoning: ReasoningCapabilityData::none(),
                 context_limit: Some(128_000),
                 output_limit: Some(8_192),
             })
@@ -317,10 +317,10 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
 
     async fn invoke(
         &self,
-        _request: crate::ports::provider_port::InvocationRequest,
+        _request: crate::ports::provider_port::InvocationRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStream,
+        crate::ports::provider_port::InvocationStreamData,
         crate::ports::provider_port::ProviderError,
     > {
         Ok(
@@ -336,7 +336,7 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
 /// Build a `ProviderBinding` whose provider returns a parseable reflection
 /// response so `submit_complete` can drain the adapter to a terminal state.
 fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBinding> {
-    let model = provider::ModelId {
+    let model = provider::ModelIdData {
         provider: "pre-compact-test".to_string(),
         model: "pre-compact-test-model".to_string(),
     };
@@ -344,7 +344,7 @@ fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBinding> {
         provider: Arc::new(StaticReflectionProvider),
         model,
         max_tokens: 8_192,
-        requested_reasoning: provider::ReasoningLevel::Off,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(128_000),
     })
 }

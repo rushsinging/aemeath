@@ -2,9 +2,10 @@ use super::events::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use super::stream_handler::InvocationEventReducer;
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
-    InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
-    ProviderStopReason, ProviderToolCall, ProviderToolCallId, ReasoningLevel,
+    InvocationDeltaData, InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
+    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
 };
+use share::reasoning::ReasoningLevel;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -20,10 +21,10 @@ impl ChatEventSink for RecordingSink {
     }
 }
 
-fn completion(output: Vec<ProviderContentBlock>) -> InvocationEvent {
-    InvocationEvent::Completed(ProviderCompletion {
+fn completion(output: Vec<ProviderContentBlockData>) -> InvocationEventData {
+    InvocationEventData::Completed(ProviderCompletionData {
         output,
-        stop_reason: ProviderStopReason::EndTurn,
+        stop_reason: ProviderStopReasonData::EndTurn,
         usage: None,
         effective_reasoning: ReasoningLevel::Off,
     })
@@ -43,18 +44,22 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         InvocationEventReducer::with_tool_identity(sink.clone(), registry, second_context);
 
     first
-        .apply(InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
-            index: 0,
-            provider_id: Some(ProviderToolCallId("provider-a".into())),
-            name: "Read".into(),
-        }))
+        .apply(InvocationEventData::Delta(
+            InvocationDeltaData::ToolCallStarted {
+                index: 0,
+                provider_id: Some(ProviderToolCallIdData("provider-a".into())),
+                name: "Read".into(),
+            },
+        ))
         .unwrap();
     second
-        .apply(InvocationEvent::Delta(InvocationDelta::ToolCallStarted {
-            index: 0,
-            provider_id: Some(ProviderToolCallId("provider-b".into())),
-            name: "Read".into(),
-        }))
+        .apply(InvocationEventData::Delta(
+            InvocationDeltaData::ToolCallStarted {
+                index: 0,
+                provider_id: Some(ProviderToolCallIdData("provider-b".into())),
+                name: "Read".into(),
+            },
+        ))
         .unwrap();
 
     let ids: Vec<_> = sink
@@ -77,15 +82,15 @@ fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
         ("empty output", Vec::new()),
         (
             "empty text",
-            vec![ProviderContentBlock::Text(String::new())],
+            vec![ProviderContentBlockData::Text(String::new())],
         ),
         (
             "whitespace text",
-            vec![ProviderContentBlock::Text("   \n".into())],
+            vec![ProviderContentBlockData::Text("   \n".into())],
         ),
         (
             "thinking only",
-            vec![ProviderContentBlock::Thinking {
+            vec![ProviderContentBlockData::Thinking {
                 thinking: "internal reasoning".into(),
                 signature: None,
             }],
@@ -108,9 +113,9 @@ fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
 #[test]
 fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
     let cases = [
-        vec![ProviderContentBlock::Text("answer".into())],
-        vec![ProviderContentBlock::ToolCall(ProviderToolCall {
-            id: ProviderToolCallId("tool-1".into()),
+        vec![ProviderContentBlockData::Text("answer".into())],
+        vec![ProviderContentBlockData::ToolCall(ProviderToolCallData {
+            id: ProviderToolCallIdData("tool-1".into()),
             name: "Read".into(),
             arguments: serde_json::json!({}),
         })],
@@ -131,18 +136,18 @@ fn reducer_projects_block_transitions_without_callback_contract() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink.clone());
     reducer
-        .apply(InvocationEvent::Delta(InvocationDelta::Thinking {
+        .apply(InvocationEventData::Delta(InvocationDeltaData::Thinking {
             thinking: "thought".into(),
             signature: None,
         }))
         .unwrap();
     reducer
-        .apply(InvocationEvent::Delta(InvocationDelta::Text(
+        .apply(InvocationEventData::Delta(InvocationDeltaData::Text(
             "answer".into(),
         )))
         .unwrap();
     reducer
-        .apply(completion(vec![ProviderContentBlock::Text(
+        .apply(completion(vec![ProviderContentBlockData::Text(
             "answer".into(),
         )]))
         .unwrap();
@@ -164,7 +169,7 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink.clone());
     reducer
-        .apply(InvocationEvent::Delta(InvocationDelta::Text(
+        .apply(InvocationEventData::Delta(InvocationDeltaData::Text(
             "partial".into(),
         )))
         .unwrap();
@@ -174,7 +179,7 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
         "provider stream ended without terminal event",
     );
     let returned = reducer
-        .apply(InvocationEvent::Failed(error.clone()))
+        .apply(InvocationEventData::Failed(error.clone()))
         .expect_err("failure event should terminate the invocation");
     assert_eq!(returned.kind, ProviderErrorKind::StreamTruncated);
 

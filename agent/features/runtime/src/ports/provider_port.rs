@@ -5,11 +5,11 @@
 //! - `docs/design/02-modules/provider/02-ports-stream-and-client-scope.md`
 //!
 //! #901 冻结契约：
-//! - PL 类型（ModelId、ModelCapability、ProviderError、ProviderCompletion 等）
+//! - PL 类型（ModelIdData、ModelCapabilityData、ProviderError、ProviderCompletionData 等）
 //!   由 Provider crate 的 `published_language` 模块定义。
-//! - Runtime 定义 `ProviderPort` trait、`InvocationStream` 和 `InvocationEvent`，
+//! - Runtime 定义 `ProviderPort` trait、`InvocationStreamData` 和 `InvocationEventData`，
 //!   引用 Provider PL 类型，**NEVER** 引用 vendor wire DTO。
-//! - `invoke` 返回 pull-based 有序流，终结语义由 `InvocationEvent` 表达。
+//! - `invoke` 返回 pull-based 有序流，终结语义由 `InvocationEventData` 表达。
 
 use std::pin::Pin;
 
@@ -18,23 +18,23 @@ use futures::Stream;
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
-// 新 PL StopReason 通过别名 ProviderStopReason 导出，此处还原为 StopReason。
+// 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
-    CancellationSignal, InvocationEvent, InvocationOptions, InvocationRequest, ModelCapability,
-    ModelId, ModelToolSchema, ProviderError, ProviderStopReason as StopReason, RawUsageSnapshot,
-    RequestSystemBlock,
+    CancellationSignal, InvocationEventData, InvocationOptionsData, InvocationRequestData,
+    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderError,
+    ProviderStopReasonData as StopReason, RawUsageSnapshotData, RequestSystemBlockData,
 };
 
 #[cfg(test)]
 pub use provider::{
-    InvocationDelta, ProviderCompletion, ProviderContentBlock, ProviderErrorKind,
-    ReasoningCapability, ReasoningMappingKind,
+    InvocationDeltaData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
+    ReasoningCapabilityData, ReasoningMappingKindData,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
-pub use provider::ReasoningLevel;
+pub use share::reasoning::ReasoningLevel;
 
-// ─── InvocationStream ────────────────────────────────────
+// ─── InvocationStreamData ────────────────────────────────────
 
 /// 一次 LLM 调用的有序 pull-based 流。
 ///
@@ -42,7 +42,7 @@ pub use provider::ReasoningLevel;
 /// tool_call 提取和领域事件投影。
 ///
 /// consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
-pub type InvocationStream = Pin<Box<dyn Stream<Item = InvocationEvent> + Send>>;
+pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
 
 // ─── Port trait ───
 
@@ -56,16 +56,16 @@ pub type InvocationStream = Pin<Box<dyn Stream<Item = InvocationEvent> + Send>>;
 #[async_trait]
 pub trait ProviderPort: Send + Sync {
     /// 查询模型能力。
-    fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError>;
+    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError>;
 
     /// 发起一次 LLM 调用，返回单次 attempt 的有序流。
     ///
     /// 取消通过 `CancellationToken` 传播；取消后返回 `ProviderError::cancelled()`。
     async fn invoke(
         &self,
-        request: InvocationRequest,
+        request: InvocationRequestData,
         cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStream, ProviderError>;
+    ) -> Result<InvocationStreamData, ProviderError>;
 }
 
 // ─── Fake / Contract harness ───────────────────────────
@@ -83,41 +83,41 @@ pub(crate) mod fake {
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
     pub struct FakeProvider {
-        capabilities: ModelCapability,
+        capabilities: ModelCapabilityData,
     }
 
     impl FakeProvider {
         /// 构造一个默认 fake provider（supports_tools=true, streaming=true）。
         pub fn new() -> Self {
             Self {
-                capabilities: ModelCapability {
-                    model: ModelId {
+                capabilities: ModelCapabilityData {
+                    model: ModelIdData {
                         provider: "fake".to_string(),
                         model: "test-model".to_string(),
                     },
                     supports_tools: true,
                     supports_parallel_tool_calls: true,
                     supports_streaming: true,
-                    reasoning: ReasoningCapability::none(),
+                    reasoning: ReasoningCapabilityData::none(),
                     context_limit: Some(128_000),
                     output_limit: Some(8_192),
                 },
             }
         }
 
-        /// 生成一个产出 `events` 后终结的 InvocationStream。
-        pub fn stream_from(events: Vec<InvocationEvent>) -> InvocationStream {
+        /// 生成一个产出 `events` 后终结的 InvocationStreamData。
+        pub fn stream_from(events: Vec<InvocationEventData>) -> InvocationStreamData {
             Box::pin(stream::iter(events))
         }
 
         /// 生成一个文本 delta + Completed 终结的正常流。
-        pub fn happy_path_stream(text: &str) -> InvocationStream {
+        pub fn happy_path_stream(text: &str) -> InvocationStreamData {
             let events = vec![
-                InvocationEvent::Delta(InvocationDelta::Text(text.to_string())),
-                InvocationEvent::Completed(ProviderCompletion {
-                    output: vec![ProviderContentBlock::Text(text.to_string())],
+                InvocationEventData::Delta(InvocationDeltaData::Text(text.to_string())),
+                InvocationEventData::Completed(ProviderCompletionData {
+                    output: vec![ProviderContentBlockData::Text(text.to_string())],
                     stop_reason: StopReason::EndTurn,
-                    usage: Some(RawUsageSnapshot {
+                    usage: Some(RawUsageSnapshotData {
                         input_tokens: Some(10),
                         output_tokens: Some(5),
                         ..Default::default()
@@ -129,8 +129,8 @@ pub(crate) mod fake {
         }
 
         /// 生成一个直接失败的流。
-        pub fn error_stream(error: ProviderError) -> InvocationStream {
-            Self::stream_from(vec![InvocationEvent::Failed(error)])
+        pub fn error_stream(error: ProviderError) -> InvocationStreamData {
+            Self::stream_from(vec![InvocationEventData::Failed(error)])
         }
     }
 
@@ -142,7 +142,7 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl ProviderPort for FakeProvider {
-        fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError> {
+        fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
             if model.provider == "fake" {
                 Ok(self.capabilities.clone())
             } else {
@@ -155,9 +155,9 @@ pub(crate) mod fake {
 
         async fn invoke(
             &self,
-            _request: InvocationRequest,
+            _request: InvocationRequestData,
             cancellation: &dyn CancellationSignal,
-        ) -> Result<InvocationStream, ProviderError> {
+        ) -> Result<InvocationStreamData, ProviderError> {
             if cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
             }
@@ -187,7 +187,7 @@ pub(crate) mod fake {
     #[test]
     fn fake_provider_capabilities_returns_for_matching_model() {
         let provider = FakeProvider::new();
-        let model = ModelId {
+        let model = ModelIdData {
             provider: "fake".to_string(),
             model: "test-model".to_string(),
         };
@@ -200,7 +200,7 @@ pub(crate) mod fake {
     #[test]
     fn fake_provider_capabilities_rejects_unknown_model() {
         let provider = FakeProvider::new();
-        let model = ModelId {
+        let model = ModelIdData {
             provider: "unknown".to_string(),
             model: "x".to_string(),
         };
@@ -218,12 +218,12 @@ pub(crate) mod fake {
         let first = stream.next().await.unwrap();
         assert!(matches!(
             first,
-            InvocationEvent::Delta(InvocationDelta::Text(ref t)) if t == "hi"
+            InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hi"
         ));
 
         let second = stream.next().await.unwrap();
         match second {
-            InvocationEvent::Completed(c) => {
+            InvocationEventData::Completed(c) => {
                 assert_eq!(c.stop_reason, StopReason::EndTurn);
                 assert_eq!(c.usage.unwrap().input_tokens, Some(10));
             }
@@ -241,7 +241,7 @@ pub(crate) mod fake {
         use futures::StreamExt;
 
         let first = stream.next().await.unwrap();
-        assert!(matches!(first, InvocationEvent::Failed(_)));
+        assert!(matches!(first, InvocationEventData::Failed(_)));
 
         // 终结后 next() 返回 None
         assert!(stream.next().await.is_none());
@@ -253,13 +253,13 @@ pub(crate) mod fake {
         let cancel = CancellationToken::new();
         cancel.cancel();
 
-        let request = InvocationRequest::new(
-            ModelId {
+        let request = InvocationRequestData::new(
+            ModelIdData {
                 provider: "fake".to_string(),
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
 
         let result = provider.invoke(request, &cancel).await;
@@ -273,13 +273,13 @@ pub(crate) mod fake {
     async fn invoke_returns_stream_with_correct_terminal_semantics() {
         let provider = FakeProvider::new();
         let cancel = CancellationToken::new();
-        let request = InvocationRequest::new(
-            ModelId {
+        let request = InvocationRequestData::new(
+            ModelIdData {
                 provider: "fake".to_string(),
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
 
         let mut stream = provider.invoke(request, &cancel).await.unwrap();
@@ -293,8 +293,8 @@ pub(crate) mod fake {
 
         // 恰好 2 个事件：1 个 Delta + 1 个 Completed
         assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], InvocationEvent::Delta(_)));
-        assert!(matches!(events[1], InvocationEvent::Completed(_)));
+        assert!(matches!(events[0], InvocationEventData::Delta(_)));
+        assert!(matches!(events[1], InvocationEventData::Completed(_)));
     }
 
     #[tokio::test]
@@ -311,13 +311,13 @@ pub(crate) mod fake {
         }
 
         let provider = FakeProvider::new();
-        let request = InvocationRequest::new(
-            ModelId {
+        let request = InvocationRequestData::new(
+            ModelIdData {
                 provider: "fake".to_string(),
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptions::new(8192, ReasoningLevel::Off),
+            InvocationOptionsData::new(8192, ReasoningLevel::Off),
         );
 
         let result = provider.invoke(request, &AlwaysCancelled).await;
@@ -326,8 +326,8 @@ pub(crate) mod fake {
 
     #[test]
     fn invocation_event_is_the_provider_published_language_type() {
-        fn accepts_provider_event(_: provider::InvocationEvent) {}
-        accepts_provider_event(InvocationEvent::Failed(ProviderError::cancelled()));
+        fn accepts_provider_event(_: provider::InvocationEventData) {}
+        accepts_provider_event(InvocationEventData::Failed(ProviderError::cancelled()));
     }
 
     #[test]

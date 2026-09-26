@@ -307,9 +307,10 @@ impl tools::TypedTool for SpyTool {
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
-        ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningLevel,
+        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
+        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
     };
+    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -359,8 +360,8 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     // ── Provider: first call → tool call, second call → end_turn ──
     let second_call = Arc::new(AtomicBool::new(false));
     let second_call2 = second_call.clone();
-    let tool_call = ProviderToolCall {
-        id: ProviderToolCallId("toolu_test_001".to_string()),
+    let tool_call = ProviderToolCallData {
+        id: ProviderToolCallIdData("toolu_test_001".to_string()),
         name: "spy".to_string(),
         arguments: serde_json::json!({}),
     };
@@ -380,29 +381,33 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                     has_tool_result,
                     "second request must contain tool result backfill"
                 );
-                futures::stream::iter(vec![InvocationEvent::Completed(ProviderCompletion {
-                    output: vec![ProviderContentBlock::Text("all done".into())],
-                    stop_reason: ProviderStopReason::EndTurn,
-                    usage: Some(RawUsageSnapshot {
-                        input_tokens: Some(10),
-                        output_tokens: Some(3),
-                        ..RawUsageSnapshot::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
-                })])
+                futures::stream::iter(vec![InvocationEventData::Completed(
+                    ProviderCompletionData {
+                        output: vec![ProviderContentBlockData::Text("all done".into())],
+                        stop_reason: ProviderStopReasonData::EndTurn,
+                        usage: Some(RawUsageSnapshotData {
+                            input_tokens: Some(10),
+                            output_tokens: Some(3),
+                            ..RawUsageSnapshotData::default()
+                        }),
+                        effective_reasoning: ReasoningLevel::Off,
+                    },
+                )])
             } else {
-                futures::stream::iter(vec![InvocationEvent::Completed(ProviderCompletion {
-                    output: vec![ProviderContentBlock::ToolCall(tool_call.clone())],
-                    stop_reason: ProviderStopReason::ToolUse,
-                    usage: Some(RawUsageSnapshot {
-                        input_tokens: Some(5),
-                        output_tokens: Some(8),
-                        ..RawUsageSnapshot::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
-                })])
+                futures::stream::iter(vec![InvocationEventData::Completed(
+                    ProviderCompletionData {
+                        output: vec![ProviderContentBlockData::ToolCall(tool_call.clone())],
+                        stop_reason: ProviderStopReasonData::ToolUse,
+                        usage: Some(RawUsageSnapshotData {
+                            input_tokens: Some(5),
+                            output_tokens: Some(8),
+                            ..RawUsageSnapshotData::default()
+                        }),
+                        effective_reasoning: ReasoningLevel::Off,
+                    },
+                )])
             };
-            Box::pin(async move { Ok(Box::pin(stream) as InvocationStream) })
+            Box::pin(async move { Ok(Box::pin(stream) as InvocationStreamData) })
         },
     ));
 
@@ -540,9 +545,10 @@ impl tools::TypedTool for BlockingCancelTool {
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderStopReason,
-        ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningLevel,
+        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
+        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
     };
+    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -575,8 +581,8 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         }));
 
     // Provider: returns a tool call for blocking_cancel.
-    let tool_call = ProviderToolCall {
-        id: ProviderToolCallId("toolu_block_001".to_string()),
+    let tool_call = ProviderToolCallData {
+        id: ProviderToolCallIdData("toolu_block_001".to_string()),
         name: "blocking_cancel".to_string(),
         arguments: serde_json::json!({}),
     };
@@ -586,18 +592,18 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
             let tc = tool_call.clone();
             Box::pin(async move {
                 Ok(
-                    Box::pin(futures::stream::iter(vec![InvocationEvent::Completed(
-                        ProviderCompletion {
-                            output: vec![ProviderContentBlock::ToolCall(tc)],
-                            stop_reason: ProviderStopReason::ToolUse,
-                            usage: Some(RawUsageSnapshot {
+                    Box::pin(futures::stream::iter(vec![InvocationEventData::Completed(
+                        ProviderCompletionData {
+                            output: vec![ProviderContentBlockData::ToolCall(tc)],
+                            stop_reason: ProviderStopReasonData::ToolUse,
+                            usage: Some(RawUsageSnapshotData {
                                 input_tokens: Some(5),
                                 output_tokens: Some(8),
-                                ..RawUsageSnapshot::default()
+                                ..RawUsageSnapshotData::default()
                             }),
                             effective_reasoning: ReasoningLevel::Off,
                         },
-                    )])) as crate::ports::InvocationStream,
+                    )])) as crate::ports::InvocationStreamData,
                 )
             })
         },

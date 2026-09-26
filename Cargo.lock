@@ -3329,6 +3329,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "futures",
+ "futures-util",
  "hook",
  "inventory",
  "log",

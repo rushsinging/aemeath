@@ -4,25 +4,26 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream;
 use provider::{
-    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
-    ProviderError, ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
+    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
+    ProviderContentBlockData, ProviderError, ProviderStopReasonData, RawUsageSnapshotData,
 };
+use share::reasoning::ReasoningLevel;
 
 pub(crate) fn text_completion_stream(
     text: impl Into<String>,
     input_tokens: u32,
     output_tokens: u32,
-) -> InvocationStream {
+) -> InvocationStreamData {
     let text = text.into();
     Box::pin(stream::iter([
-        InvocationEvent::Delta(InvocationDelta::Text(text.clone())),
-        InvocationEvent::Completed(ProviderCompletion {
-            output: vec![ProviderContentBlock::Text(text)],
-            stop_reason: ProviderStopReason::EndTurn,
-            usage: Some(RawUsageSnapshot {
+        InvocationEventData::Delta(InvocationDeltaData::Text(text.clone())),
+        InvocationEventData::Completed(ProviderCompletionData {
+            output: vec![ProviderContentBlockData::Text(text)],
+            stop_reason: ProviderStopReasonData::EndTurn,
+            usage: Some(RawUsageSnapshotData {
                 input_tokens: Some(input_tokens),
                 output_tokens: Some(output_tokens),
-                ..RawUsageSnapshot::default()
+                ..RawUsageSnapshotData::default()
             }),
             effective_reasoning: ReasoningLevel::Off,
         }),
@@ -31,12 +32,12 @@ pub(crate) fn text_completion_stream(
 
 #[derive(Clone)]
 pub(crate) struct ScriptedInvocationProvider {
-    attempts: Arc<Mutex<VecDeque<Vec<InvocationEvent>>>>,
+    attempts: Arc<Mutex<VecDeque<Vec<InvocationEventData>>>>,
     calls: Arc<Mutex<usize>>,
 }
 
 impl ScriptedInvocationProvider {
-    pub(crate) fn new(attempts: Vec<Vec<InvocationEvent>>) -> Self {
+    pub(crate) fn new(attempts: Vec<Vec<InvocationEventData>>) -> Self {
         Self {
             attempts: Arc::new(Mutex::new(VecDeque::from(attempts))),
             calls: Arc::new(Mutex::new(0)),
@@ -49,15 +50,15 @@ impl ScriptedInvocationProvider {
 }
 
 #[async_trait]
-impl provider::test_harness::LlmProvider for ScriptedInvocationProvider {
+impl provider::composition::LlmProvider for ScriptedInvocationProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::test_harness::InvocationScope,
-        _system: &[provider::test_harness::SystemBlock],
+        _scope: &provider::composition::InvocationScopeData,
+        _system: &[provider::composition::SystemBlockData],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         *self.calls.lock().unwrap() += 1;
         let events = self
             .attempts
@@ -77,20 +78,20 @@ impl provider::test_harness::LlmProvider for ScriptedInvocationProvider {
     }
 }
 
-pub(crate) fn empty_completion() -> InvocationEvent {
-    InvocationEvent::Completed(ProviderCompletion {
+pub(crate) fn empty_completion() -> InvocationEventData {
+    InvocationEventData::Completed(ProviderCompletionData {
         output: Vec::new(),
-        stop_reason: ProviderStopReason::EndTurn,
-        usage: Some(RawUsageSnapshot::default()),
+        stop_reason: ProviderStopReasonData::EndTurn,
+        usage: Some(RawUsageSnapshotData::default()),
         effective_reasoning: ReasoningLevel::Off,
     })
 }
 
-pub(crate) fn successful_completion(text: &str) -> InvocationEvent {
-    InvocationEvent::Completed(ProviderCompletion {
-        output: vec![ProviderContentBlock::Text(text.to_string())],
-        stop_reason: ProviderStopReason::EndTurn,
-        usage: Some(RawUsageSnapshot::default()),
+pub(crate) fn successful_completion(text: &str) -> InvocationEventData {
+    InvocationEventData::Completed(ProviderCompletionData {
+        output: vec![ProviderContentBlockData::Text(text.to_string())],
+        stop_reason: ProviderStopReasonData::EndTurn,
+        usage: Some(RawUsageSnapshotData::default()),
         effective_reasoning: ReasoningLevel::Off,
     })
 }
@@ -146,18 +147,18 @@ pub(crate) async fn advance_until_retry_condition(
 /// dispatch. Tests use this to keep `Sequence`/`recording`/`error`/`cancel` behavior
 /// without writing bespoke provider port impls.
 ///
-/// Uses `for<'a>` HRTB so closures can capture the borrowed `&InvocationRequest`
+/// Uses `for<'a>` HRTB so closures can capture the borrowed `&InvocationRequestData`
 /// / `&dyn CancellationSignal` into their returned `Future + 'a`.
 pub(crate) type TestInvocationFn = Arc<
     dyn for<'a> Fn(
             usize,
-            &'a crate::ports::provider_port::InvocationRequest,
+            &'a crate::ports::provider_port::InvocationRequestData,
             &'a dyn crate::ports::provider_port::CancellationSignal,
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
                         Output = Result<
-                            crate::ports::provider_port::InvocationStream,
+                            crate::ports::provider_port::InvocationStreamData,
                             crate::ports::provider_port::ProviderError,
                         >,
                     > + Send
@@ -171,7 +172,7 @@ pub(crate) type TestInvocationFn = Arc<
 pub(crate) struct TestProviderPort {
     pub responses: Arc<Mutex<VecDeque<String>>>,
     pub error: Option<crate::ports::provider_port::ProviderError>,
-    pub model: provider::ModelId,
+    pub model: provider::ModelIdData,
     pub blocking: bool,
     pub seen: Option<Arc<Mutex<Vec<::logging::LogContext>>>>,
     pub calls: Arc<Mutex<usize>>,
@@ -180,7 +181,7 @@ pub(crate) struct TestProviderPort {
 }
 
 impl TestProviderPort {
-    pub fn new(responses: Vec<&str>, model: provider::ModelId) -> Self {
+    pub fn new(responses: Vec<&str>, model: provider::ModelIdData) -> Self {
         Self {
             responses: Arc::new(Mutex::new(
                 responses.into_iter().map(str::to_string).collect(),
@@ -205,21 +206,21 @@ impl TestProviderPort {
 impl crate::ports::ProviderPort for TestProviderPort {
     fn capabilities(
         &self,
-        model: &provider::ModelId,
+        model: &provider::ModelIdData,
     ) -> Result<
-        crate::ports::provider_port::ModelCapability,
+        crate::ports::provider_port::ModelCapabilityData,
         crate::ports::provider_port::ProviderError,
     > {
         use crate::ports::provider_port::{
-            ModelCapability, ProviderError, ProviderErrorKind, ReasoningCapability,
+            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
         };
         if model == &self.model {
-            Ok(ModelCapability {
+            Ok(ModelCapabilityData {
                 model: model.clone(),
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: ReasoningCapability::none(),
+                reasoning: ReasoningCapabilityData::none(),
                 context_limit: Some(128_000),
                 output_limit: Some(8192),
             })
@@ -233,10 +234,10 @@ impl crate::ports::ProviderPort for TestProviderPort {
 
     async fn invoke(
         &self,
-        request: crate::ports::provider_port::InvocationRequest,
+        request: crate::ports::provider_port::InvocationRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStream,
+        crate::ports::provider_port::InvocationStreamData,
         crate::ports::provider_port::ProviderError,
     > {
         use crate::ports::provider_port::ProviderError;
@@ -296,9 +297,9 @@ pub(crate) fn test_binding_from_port(port: TestProviderPort) -> Arc<crate::ports
     })
 }
 
-/// Default `ModelId` used by `test_binding*` helpers.
-pub(crate) fn test_model_id() -> provider::ModelId {
-    provider::ModelId {
+/// Default `ModelIdData` used by `test_binding*` helpers.
+pub(crate) fn test_model_id() -> provider::ModelIdData {
+    provider::ModelIdData {
         provider: "test".to_string(),
         model: "test-model".to_string(),
     }
@@ -339,20 +340,20 @@ pub(crate) fn constant_factory(
 // ─── LlmProvider → ProviderPort adapter (#907 loop test migration) ────────
 
 /// Adapter that implements [`crate::ports::ProviderPort`] by delegating to an
-/// existing `provider::test_harness::LlmProvider` scripted fake.
+/// existing `provider::composition::LlmProvider` scripted fake.
 ///
 /// Used only by `runtime` lib tests as a minimal bridge so the legacy scripted
 /// fakes (e.g. `SequenceProvider`, `RecordingProvider`, `CountingProvider`,
 /// `ErrorProvider`) can be wrapped in a `ProviderBinding` without rewriting
 /// every test to the new `ProviderPort` trait.
 struct LlmProviderPortAdapter {
-    provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>,
-    model: provider::ModelId,
+    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
+    model: provider::ModelIdData,
 }
 
 impl LlmProviderPortAdapter {
-    fn new(provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>) -> Self {
-        let model = provider::ModelId {
+    fn new(provider: std::sync::Arc<dyn provider::composition::LlmProvider>) -> Self {
+        let model = provider::ModelIdData {
             provider: provider.provider_name().to_string(),
             model: provider.model_name().to_string(),
         };
@@ -364,21 +365,21 @@ impl LlmProviderPortAdapter {
 impl crate::ports::ProviderPort for LlmProviderPortAdapter {
     fn capabilities(
         &self,
-        model: &provider::ModelId,
+        model: &provider::ModelIdData,
     ) -> Result<
-        crate::ports::provider_port::ModelCapability,
+        crate::ports::provider_port::ModelCapabilityData,
         crate::ports::provider_port::ProviderError,
     > {
         use crate::ports::provider_port::{
-            ModelCapability, ProviderError, ProviderErrorKind, ReasoningCapability,
+            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
         };
         if model == &self.model {
-            Ok(ModelCapability {
+            Ok(ModelCapabilityData {
                 model: model.clone(),
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: ReasoningCapability::none(),
+                reasoning: ReasoningCapabilityData::none(),
                 context_limit: Some(128_000),
                 output_limit: Some(8_192),
             })
@@ -392,17 +393,17 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
 
     async fn invoke(
         &self,
-        request: crate::ports::provider_port::InvocationRequest,
+        request: crate::ports::provider_port::InvocationRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStream,
+        crate::ports::provider_port::InvocationStreamData,
         crate::ports::provider_port::ProviderError,
     > {
-        // Convert InvocationRequest into the legacy LlmProvider argument list.
-        let system_blocks: Vec<provider::test_harness::SystemBlock> = request
+        // Convert InvocationRequestData into the legacy LlmProvider argument list.
+        let system_blocks: Vec<provider::composition::SystemBlockData> = request
             .system
             .iter()
-            .map(|block| provider::test_harness::SystemBlock::dynamic(block.text().to_string()))
+            .map(|block| provider::composition::SystemBlockData::dynamic(block.text().to_string()))
             .collect();
         let tool_schemas: Vec<serde_json::Value> = request
             .tools
@@ -413,11 +414,11 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         // `CancellationSignal` arg from ProviderPort::invoke is treated as
         // advisory (real cancellation originates from `request.cancellation`).
         let _ = cancellation;
-        let scope = provider::test_harness::InvocationScope::new(
+        let scope = provider::composition::InvocationScopeData::new(
             self.model.model.clone(),
             request.options.max_output_tokens.max(1),
-            provider::ReasoningLevel::Off,
-            provider::ReasoningLevel::Off,
+            share::reasoning::ReasoningLevel::Off,
+            share::reasoning::ReasoningLevel::Off,
         )
         .map_err(|error| {
             crate::ports::provider_port::ProviderError::fatal(
@@ -437,16 +438,16 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
     }
 }
 
-/// Wrap an existing `provider::test_harness::LlmProvider` scripted fake into a
+/// Wrap an existing `provider::composition::LlmProvider` scripted fake into a
 /// `ProviderBinding` so session-driver and agent tests can reuse their scripted
 /// providers without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
-    provider: std::sync::Arc<dyn provider::test_harness::LlmProvider>,
+    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
 ) -> std::sync::Arc<crate::ports::ProviderBinding> {
-    let model = provider::ModelId {
+    let model = provider::ModelIdData {
         provider: provider.provider_name().to_string(),
         model: provider.model_name().to_string(),
     };

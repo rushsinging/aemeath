@@ -11,10 +11,10 @@ use context::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     SessionRepository, SessionSnapshot,
 };
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
+use share::reasoning::ReasoningLevel;
 
 struct Session;
 #[async_trait]

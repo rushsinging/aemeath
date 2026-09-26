@@ -6,7 +6,7 @@
 use crate::application::loop_engine::chat::logged_input_messages;
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::tool::agent::ToolCall;
-use provider::RequestSystemBlock;
+use provider::RequestSystemBlockData;
 use sdk::ids::ToolCallId;
 use share::message::Message;
 #[cfg(test)]
@@ -19,7 +19,7 @@ use std::collections::HashMap;
 pub(crate) fn log_llm_input(
     messages_for_api: &[Message],
     persisted_message_count: usize,
-    system_blocks: &[RequestSystemBlock],
+    system_blocks: &[RequestSystemBlockData],
     tool_schemas: &[serde_json::Value],
     role: &str,
 ) {

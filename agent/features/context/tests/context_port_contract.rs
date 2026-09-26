@@ -9,11 +9,11 @@ use context::context_port::{
     RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec, TokenBudget,
     ToolOutcomeKind, Urgency,
 };
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 
 struct FakeContextPort;
 

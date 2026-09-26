@@ -197,7 +197,9 @@ fn test_fixture_uses_the_production_run_factory_chain() {
 fn session_run_factory_preserves_committed_capability_bindings() {
     let interaction: Arc<dyn crate::application::interaction::port::InteractionPort> =
         Arc::new(InteractionBridge::new());
-    let reasoning = Arc::new(std::sync::Mutex::new(provider::ReasoningLevel::High));
+    let reasoning = Arc::new(std::sync::Mutex::new(
+        share::reasoning::ReasoningLevel::High,
+    ));
     let event_sink =
         crate::application::run::run_factory_support::doubles::RecordingEventSink::default();
     let fixture = SessionRunFixture::builder()

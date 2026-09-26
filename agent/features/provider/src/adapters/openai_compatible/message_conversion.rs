@@ -1,12 +1,12 @@
 //! 消息格式转换：将 Anthropic 风格的消息转换为 OpenAI 格式
 
 use super::{message_helpers::enforce_openai_tool_pairs, OpenAICompatibleProvider};
-use crate::domain::invoke::SystemBlock;
+use crate::domain::invoke::SystemBlockData;
 use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
     /// 将 Anthropic 风格的 system 块转换为 OpenAI 风格的 system 消息
-    pub(crate) fn convert_system_to_message(system: &[SystemBlock]) -> serde_json::Value {
+    pub(crate) fn convert_system_to_message(system: &[SystemBlockData]) -> serde_json::Value {
         let system_text: String = system
             .iter()
             .map(|block| block.text.as_str())
@@ -25,7 +25,7 @@ impl OpenAICompatibleProvider {
     /// emitted on assistant messages that lack thinking blocks—needed for
     /// DeepSeek compatibility when thinking mode is active.
     pub(crate) fn convert_messages(
-        system: &[SystemBlock],
+        system: &[SystemBlockData],
         messages: &[Message],
         reasoning_enabled: bool,
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {

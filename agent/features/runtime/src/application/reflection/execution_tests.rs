@@ -1,8 +1,8 @@
 use super::*;
 use crate::application::model::test_support::text_completion_stream;
 use crate::ports::provider_port::{
-    InvocationRequest, InvocationStream, ModelCapability, ModelId, ProviderError,
-    ProviderErrorKind, ReasoningCapability,
+    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData, ProviderError,
+    ProviderErrorKind, ReasoningCapabilityData,
 };
 use async_trait::async_trait;
 use memory::api::{
@@ -16,19 +16,19 @@ struct StaticProvider {
 
 #[async_trait]
 impl ProviderPort for StaticProvider {
-    fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError> {
+    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
         if model.provider != "reflection-test-provider" {
             return Err(ProviderError::fatal(
                 ProviderErrorKind::ModelUnavailable,
                 format!("unknown model: {model}"),
             ));
         }
-        Ok(ModelCapability {
+        Ok(ModelCapabilityData {
             model: model.clone(),
             supports_tools: false,
             supports_parallel_tool_calls: false,
             supports_streaming: true,
-            reasoning: ReasoningCapability::none(),
+            reasoning: ReasoningCapabilityData::none(),
             context_limit: Some(8_192),
             output_limit: Some(4_096),
         })
@@ -36,9 +36,9 @@ impl ProviderPort for StaticProvider {
 
     async fn invoke(
         &self,
-        _request: InvocationRequest,
+        _request: InvocationRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<InvocationStream, ProviderError> {
+    ) -> Result<InvocationStreamData, ProviderError> {
         Ok(text_completion_stream(self.response.clone(), 11, 22))
     }
 }
@@ -81,8 +81,8 @@ impl ReflectionHistoryStore for RecordingHistory {
     }
 }
 
-fn model() -> ModelId {
-    ModelId {
+fn model() -> ModelIdData {
+    ModelIdData {
         provider: "reflection-test-provider".to_string(),
         model: "reflection-test-model".to_string(),
     }
@@ -112,7 +112,7 @@ async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memo
             provider: &provider,
             model: &model,
             max_tokens: 4_096,
-            requested_reasoning: provider::ReasoningLevel::Off,
+            requested_reasoning: share::reasoning::ReasoningLevel::Off,
             system_prompt_text: "system",
         },
         &NoOpMemory,
@@ -145,7 +145,7 @@ async fn malformed_provider_text_returns_safe_runtime_error_and_memory_records_p
             provider: &provider,
             model: &model,
             max_tokens: 4_096,
-            requested_reasoning: provider::ReasoningLevel::Off,
+            requested_reasoning: share::reasoning::ReasoningLevel::Off,
             system_prompt_text: "system",
         },
         &NoOpMemory,

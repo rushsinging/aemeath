@@ -26,11 +26,11 @@ use memory::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
 use project::wire_production_workspace;
-use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::{ConfigRevision, ConfigSnapshot};
 use share::config::Config;
 use share::message::{ContentBlock, Message};
+use share::reasoning::ReasoningLevel;
 use share::session_types::PersistedWorkspaceContext;
 use task::{
     BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPersist, TaskPriorityData,

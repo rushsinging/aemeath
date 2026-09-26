@@ -216,11 +216,11 @@ mod tests {
         MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, ReflectionApplyResult,
         ReflectionOutput, WriteResult,
     };
-    use provider::ReasoningLevel;
     use sdk::RunId;
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
     use share::message::Message;
+    use share::reasoning::ReasoningLevel;
 
     use super::*;
     use crate::domain::{ContextRequestId, Language, SystemPromptSpec};

@@ -9,9 +9,10 @@ use context::compact::CompactGenerator;
 use context::{CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput};
 use futures::StreamExt;
 use provider::{
-    InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, ReasoningLevel,
+    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
 };
 use share::message::Message;
+use share::reasoning::ReasoningLevel;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -58,10 +59,10 @@ impl CompactGenerator for ProviderCompactGenerator {
         let target = self.resolver.resolve().map_err(compact_model_failure)?;
         let binding = target.binding();
         let max_output_tokens = self.max_output_tokens.min(binding.max_tokens.max(1));
-        let mut invocation = InvocationRequest::new(
+        let mut invocation = InvocationRequestData::new(
             binding.model.clone(),
             request,
-            InvocationOptions::new(max_output_tokens, ReasoningLevel::Off),
+            InvocationOptionsData::new(max_output_tokens, ReasoningLevel::Off),
         );
         // 摘要生成不携带上下文窗口消息；压缩提示词本身就是全部输入。
         invocation.cancellation = cancel.clone();
@@ -78,12 +79,12 @@ impl CompactGenerator for ProviderCompactGenerator {
         let mut stream = stream;
         while let Some(event) = stream.next().await {
             match event {
-                InvocationEvent::Delta(InvocationDelta::Text(part)) => {
+                InvocationEventData::Delta(InvocationDeltaData::Text(part)) => {
                     text_delta_count += 1;
                     text.push_str(&part);
                 }
-                InvocationEvent::Delta(_) => non_text_delta_count += 1,
-                InvocationEvent::Completed(completion) => {
+                InvocationEventData::Delta(_) => non_text_delta_count += 1,
+                InvocationEventData::Completed(completion) => {
                     return Ok(CompactGenerationOutput::completed(
                         text,
                         Some(completion_reason(&completion.stop_reason)),
@@ -91,7 +92,7 @@ impl CompactGenerator for ProviderCompactGenerator {
                         non_text_delta_count,
                     ));
                 }
-                InvocationEvent::Failed(error) => {
+                InvocationEventData::Failed(error) => {
                     return Err(compact_generation_failure(error));
                 }
             }
@@ -126,14 +127,14 @@ impl CompactGenerator for ProviderCompactGenerator {
     }
 }
 
-fn completion_reason(reason: &provider::ProviderStopReason) -> String {
+fn completion_reason(reason: &provider::ProviderStopReasonData) -> String {
     match reason {
-        provider::ProviderStopReason::EndTurn => "end_turn".to_string(),
-        provider::ProviderStopReason::ToolUse => "tool_use".to_string(),
-        provider::ProviderStopReason::MaxOutputTokens => "max_output_tokens".to_string(),
-        provider::ProviderStopReason::ContentFiltered => "content_filtered".to_string(),
-        provider::ProviderStopReason::StopSequence => "stop_sequence".to_string(),
-        provider::ProviderStopReason::Other(reason) => format!("other:{reason}"),
+        provider::ProviderStopReasonData::EndTurn => "end_turn".to_string(),
+        provider::ProviderStopReasonData::ToolUse => "tool_use".to_string(),
+        provider::ProviderStopReasonData::MaxOutputTokens => "max_output_tokens".to_string(),
+        provider::ProviderStopReasonData::ContentFiltered => "content_filtered".to_string(),
+        provider::ProviderStopReasonData::StopSequence => "stop_sequence".to_string(),
+        provider::ProviderStopReasonData::Other(reason) => format!("other:{reason}"),
     }
 }
 
@@ -169,7 +170,7 @@ mod tests {
     use crate::application::client::SessionModelSlot;
     use crate::ports::provider_port::fake::FakeProvider;
     use crate::ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
-    use provider::ModelId;
+    use provider::ModelIdData;
     use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
     use share::config::Config;
 
@@ -286,7 +287,7 @@ mod tests {
             resolved,
             Arc::new(ProviderBinding {
                 provider: Arc::new(FakeProvider::new()),
-                model: ModelId {
+                model: ModelIdData {
                     provider: "fake".into(),
                     model: "test-model".into(),
                 },

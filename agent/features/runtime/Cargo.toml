@@ -7,8 +7,8 @@ edition.workspace = true
 share = { path = "../../shared" }
 utils = { path = "../../../packages/global/utils" }
 config = { path = "../config" }
-provider = { path = "../provider", features = ["test-harness"] }
-tools = { path = "../tools", features = ["test-harness"] }
+provider = { path = "../provider" }
+tools = { path = "../tools" }
 project = { path = "../project" }
 memory = { path = "../memory" }
 policy = { path = "../policy" }
@@ -41,4 +41,6 @@ logging = { path = "../../../packages/global/logging" }
 tempfile = "3"
 
 [dev-dependencies]
+tools = { path = "../tools", features = ["test-harness"] }
+futures-util = { workspace = true }
 context = { path = "../context", features = ["dev"] }

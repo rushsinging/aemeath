@@ -2,11 +2,11 @@
 
 pub(crate) const LOG_TARGET: &str = "aemeath:composition";
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub mod app;
 pub mod audit;
 pub mod delivery_logging;
 pub mod memory;
+/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub mod provider;
 pub mod runtime;
 pub mod tools;

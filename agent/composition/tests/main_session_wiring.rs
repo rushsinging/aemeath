@@ -418,12 +418,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         api_style: None,
         api_key: "test-api-key".to_string(),
         base_url: Some("http://127.0.0.1:1/v1".to_string()),
-        model: provider::ModelId {
+        model: provider::ModelIdData {
             provider: "local".to_string(),
             model: "test-model".to_string(),
         },
         max_tokens: 8192,
-        requested_reasoning: provider::ReasoningLevel::Off,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(8192),
         timeout: std::time::Duration::from_secs(30),
         user_agent: "aemeath-test".to_string(),

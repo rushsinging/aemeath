@@ -1,5 +1,5 @@
 use super::{UsageRecordContext, UsageRecordFactory};
-use crate::ports::{ModelId, RawUsageSnapshot};
+use crate::ports::{ModelIdData, RawUsageSnapshotData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 fn context() -> UsageRecordContext {
@@ -8,7 +8,7 @@ fn context() -> UsageRecordContext {
         run_id: RunId::new("01900000-0000-7000-8000-000000000002"),
         run_step_id: RunStepId::new("01900000-0000-7000-8000-000000000003"),
         model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000004"),
-        model: ModelId {
+        model: ModelIdData {
             provider: "provider-a".to_string(),
             model: "model-b".to_string(),
         },
@@ -19,7 +19,7 @@ fn context() -> UsageRecordContext {
 fn factory_maps_reported_usage_and_preserves_correlation() {
     let context = context();
     let expected_context = context.clone();
-    let usage = RawUsageSnapshot {
+    let usage = RawUsageSnapshotData {
         input_tokens: Some(u32::MAX),
         output_tokens: Some(23),
         cache_write_tokens: Some(7),
@@ -53,15 +53,15 @@ fn factory_distinguishes_unreported_usage_from_reported_zero() {
     let factory = UsageRecordFactory::new(|| 42);
 
     assert!(factory
-        .build_from_raw_usage(context(), RawUsageSnapshot::default())
+        .build_from_raw_usage(context(), RawUsageSnapshotData::default())
         .is_none());
 
     let record = factory
         .build_from_raw_usage(
             context(),
-            RawUsageSnapshot {
+            RawUsageSnapshotData {
                 cache_read_tokens: Some(0),
-                ..RawUsageSnapshot::default()
+                ..RawUsageSnapshotData::default()
             },
         )
         .expect("reported zero must produce a record");

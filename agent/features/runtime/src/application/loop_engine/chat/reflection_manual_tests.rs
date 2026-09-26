@@ -27,12 +27,12 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 fn fake_binding() -> Arc<crate::ports::ProviderBinding> {
     Arc::new(crate::ports::ProviderBinding {
         provider: Arc::new(crate::application::loop_engine::chat::pre_compact_trigger_tests::StaticReflectionProvider),
-        model: provider::ModelId {
+        model: provider::ModelIdData {
             provider: "manual-test".to_string(),
             model: "manual-test-model".to_string(),
         },
         max_tokens: 8_192,
-        requested_reasoning: provider::ReasoningLevel::Off,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(128_000),
     })
 }
