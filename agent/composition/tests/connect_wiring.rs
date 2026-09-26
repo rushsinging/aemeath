@@ -313,9 +313,8 @@ async fn connect_bootstrap_requires_only_global_connect_infrastructure() {
 #[tokio::test]
 async fn connect_facade_maps_identity_revision_origin_and_redacted_view() {
     let temp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
-        config::FilesystemGlobalConfigConnectStore::new(temp.path().to_path_buf()),
-    );
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(temp.path());
     store.create_complete_default().await.unwrap();
     let commit = GlobalConnectCommitAdapter::new(store.clone());
     let service = Arc::new(
@@ -356,12 +355,12 @@ async fn connect_facade_maps_identity_revision_origin_and_redacted_view() {
 #[tokio::test]
 async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest() {
     let temp = tempfile::tempdir().unwrap();
-    let store = Arc::new(config::FilesystemGlobalConfigConnectStore::new(
-        temp.path().to_path_buf(),
-    ));
-    store.create_complete_default().unwrap();
-    let started = store.load_global_document().unwrap().unwrap();
-    std::fs::write(store.config_path(), r#"{"language":"external"}"#).unwrap();
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(temp.path());
+    store.create_complete_default().await.unwrap();
+    let started = store.load_global_document().await.unwrap().unwrap();
+    let config_path = temp.path().join("aemeath.json");
+    std::fs::write(&config_path, r#"{"language":"external"}"#).unwrap();
     let mut draft = config::connect::ConnectDraft::empty();
     let entry = config::catalog::find_by_source("Anthropic").unwrap();
     draft.source = Some(entry.source.clone());
@@ -393,7 +392,7 @@ async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest(
         config::connect::ConnectCommitError::PersistConflict { .. }
     ));
     assert_eq!(
-        std::fs::read_to_string(store.config_path()).unwrap(),
+        std::fs::read_to_string(&config_path).unwrap(),
         r#"{"language":"external"}"#
     );
 }
@@ -401,9 +400,8 @@ async fn commit_adapter_uses_session_start_revision_instead_of_reloading_latest(
 #[tokio::test]
 async fn config_origin_remains_distinct_through_composition_acl() {
     let temp = tempfile::tempdir().unwrap();
-    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
-        config::FilesystemGlobalConfigConnectStore::new(temp.path().to_path_buf()),
-    );
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(temp.path());
     store.create_complete_default().await.unwrap();
     let service = Arc::new(
         ConnectAppService::builder()

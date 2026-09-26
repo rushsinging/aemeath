@@ -15,7 +15,7 @@
 Config 是**通用域 BC**——为所有其他 BC 提供配置真相：
 
 - ConfigSnapshot 是 Published Language；每个 Run 捕获一个不可变 snapshot，watch 只投影已提交的新值
-- ConfigReader 只作为 Config-owned committed-state view 交给 bootstrap / MainSession façade；Run 只用 admission 时捕获的 ConfigSnapshot，非 Run query / subscribe / update 经 async gate-aware ConfigQuery / ConfigWriter
+- ConfigReader 只作为 Config-owned committed-state view 交给 bootstrap / MainSession façade；Run 只用 admission 时捕获的 ConfigSnapshot，非 Run query / subscribe / update 经 async gate-aware ConfigReader / ConfigWriter（读轨合一后 `ConfigQuery` 已消亡）
 - ConfigAppService 独占 active project config；Context Management 经 `ProjectConfigParticipant` 协调切换但不复制第二份 current state
 - #933 定义 AgentClient delivery seam，#871 独占 SessionSwitchGate / coordinator 与 façade 实现；TUI / CLI 只见 AgentClient 命令和 SDK 投影
 - 不包含其他 BC 的业务逻辑；但拥有 Provider Catalog、Connect 向导、首次配置初始化、配置校验与持久化等配置业务规则
@@ -53,7 +53,14 @@ src/
     └── system_info.rs           #   SystemInformationPort 的平台 adapter
 ```
 
-`application/` 只编排 Config-owned 用例，不吸收 Provider HTTP 或 TUI 状态；`ports/` 只表达 Connect 所需的 Provider Probe、global durable store 与系统信息窄语义，分别由 Composition 接入 Provider adapter、由 Config filesystem/platform adapters 实现。`adapters/` 只承载外部来源 I/O、wire DTO 与 ACL，**NEVER** 持有 active state 或 merge policy；`ConfigReader`、`ConfigQuery`、`ConfigWriter` 与 `ProjectConfigParticipant` 是 effective-config 生命周期的窄视图，不据此建立对应横向 port 文件。
+`application/` 只编排 Config-owned 用例，不吸收 Provider HTTP 或 TUI 状态；`ports/` 只表达 Connect 所需的 Provider Probe、global durable store 与系统信息窄语义，分别由 Composition 接入 Provider adapter、由 Config filesystem/platform adapters 实现。`adapters/` 只承载外部来源 I/O、wire DTO 与 ACL，**NEVER** 持有 active state 或 merge policy；`ConfigReader`、`ConfigWriter` 与 `ProjectConfigParticipant` 是 effective-config 生命周期的窄视图，不据此建立对应横向 port 文件。
+
+## Published Language 边界登记
+
+- **子发布语言模块（模块即边界，跨界按模块 = 1 计数，不逐符号上 crate 根）**：`catalog`（Provider 目录协议）、`connect`（Connect 状态机与命令协议）、`form`（连接表单投影）、`ports`（端口契约）。消费方经 `config::<模块>::…` 整模块引入；
+- `user_agent` 已私有化——UA 四级解析为 crate 内实现，不发布；
+- `runtime_resolution` **不**登记为子发布语言：仅两个 free fn（`resolve_provider_runtime`、`resolve_provider_runtime_for_selection`）跨界，模块整体不对外承诺；
+- crate 根 façade 只收 DDD 五类（命令 / 事件 / 值对象 / 端口 / 工厂），实现体经 `wire_*` 工厂封装；根导出白名单由 `facade.config.root-exports` 守卫。收录判据见 [Published Language 重构原则](../../03-engineering/05-published-language.md) 的「DDD 判据」章节。
 
 ## 相关文档
 

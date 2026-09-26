@@ -10,7 +10,7 @@ use config::{ConfigReader, ConfigRefreshOutcomeData};
 
 /// Turn 边界配置与 Prompt source 变更检测结果。
 pub(crate) struct TurnBoundaryConfigOutcome {
-    pub refresh: ConfigRefreshOutcomeData,
+    pub refresh: Result<ConfigRefreshOutcomeData, share::error::DomainError>,
     pub guidance_sources_changed: bool,
 }
 
@@ -32,8 +32,8 @@ where
 {
     let refresh = config_reader.refresh_if_sources_changed().await;
     match &refresh {
-        ConfigRefreshOutcomeData::Unchanged => {}
-        ConfigRefreshOutcomeData::Reloaded { scopes, .. } => {
+        Ok(ConfigRefreshOutcomeData::Unchanged) => {}
+        Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. }) => {
             let mut changed_keys = vec!["config:reloaded".to_string()];
             changed_keys.extend(
                 scopes
@@ -60,9 +60,11 @@ where
                     .await;
             }
         }
-        ConfigRefreshOutcomeData::Rejected { error } => {
+        // 原 `Rejected` 分支等价行为：仅发一条降级 SystemMessage 通知，
+        // 继续使用已提交配置（绝不 `?` 早退、不改变 turn 流程）。
+        Err(error) => {
             sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
-                "[config] 配置重载失败，继续使用已提交配置：{error:?}"
+                "[config] 配置重载失败，继续使用已提交配置：{error}"
             )))
             .await;
         }

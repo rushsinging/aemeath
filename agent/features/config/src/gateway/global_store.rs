@@ -32,17 +32,12 @@ pub struct GlobalConfigDocument {
 
 #[derive(Debug, Clone)]
 pub struct BootstrapConfigReceipt {
-    pub path: PathBuf,
-    pub digest: GlobalConfigRevision,
-}
-
-#[derive(Debug, Clone)]
-pub struct GlobalConfigCommitReceipt {
-    pub revision: GlobalConfigRevision,
+    pub(crate) path: PathBuf,
+    pub(crate) digest: GlobalConfigRevision,
 }
 
 #[derive(Debug, Error)]
-pub enum GlobalConfigStoreError {
+pub(crate) enum GlobalConfigStoreError {
     #[error("全局配置已存在")]
     AlreadyExists,
     #[error("全局配置已被其他进程修改")]
@@ -61,31 +56,61 @@ pub enum GlobalConfigStoreError {
 pub trait GlobalConfigConnectStore: Send + Sync {
     async fn load_global_document(
         &self,
-    ) -> Result<Option<GlobalConfigDocument>, GlobalConfigStoreError>;
+    ) -> Result<Option<GlobalConfigDocument>, share::error::DomainError>;
     async fn create_complete_default(
         &self,
-    ) -> Result<BootstrapConfigReceipt, GlobalConfigStoreError>;
+    ) -> Result<BootstrapConfigReceipt, share::error::DomainError>;
     async fn compare_and_swap(
         &self,
         expected: GlobalConfigRevision,
         draft: ConnectDraft,
-    ) -> Result<GlobalConfigCommitReceipt, GlobalConfigStoreError>;
+    ) -> Result<GlobalConfigRevision, share::error::DomainError>;
     async fn rollback_bootstrap(
         &self,
         receipt: BootstrapConfigReceipt,
-    ) -> Result<(), GlobalConfigStoreError>;
+    ) -> Result<(), share::error::DomainError>;
 }
 
-pub struct FilesystemGlobalConfigConnectStore {
+impl From<GlobalConfigStoreError> for share::error::DomainError {
+    fn from(error: GlobalConfigStoreError) -> Self {
+        let folded = match &error {
+            GlobalConfigStoreError::Io(message) => {
+                share::error::DomainError::storage("config", message.clone())
+            }
+            GlobalConfigStoreError::Conflict { .. }
+            | GlobalConfigStoreError::AlreadyExists
+            | GlobalConfigStoreError::InvalidDocument(_)
+            | GlobalConfigStoreError::InvalidDraft(_)
+            | GlobalConfigStoreError::RollbackRefused => {
+                share::error::DomainError::invalid("config", error.to_string())
+            }
+        };
+        // 内部变体挂入 source 链：跨界只暴露分类 + 文案，crate 内与
+        // `is_persist_conflict` 经 `source_downcast_ref` 保留可识别性。
+        folded.with_source(std::sync::Arc::new(error))
+    }
+}
+
+/// CAS 冲突（`Conflict` 变体）的行为判定：错误折叠为 `DomainError` 后，
+/// 消费方（composition 的 commit 适配器）无须 match 内部变体即可分流，
+/// 冲突语义由 config crate 独占解释。
+pub fn is_persist_conflict(error: &share::error::DomainError) -> bool {
+    error
+        .source_downcast_ref::<GlobalConfigStoreError>()
+        .map(|inner| matches!(inner, GlobalConfigStoreError::Conflict { .. }))
+        .unwrap_or(false)
+}
+
+pub(crate) struct FilesystemGlobalConfigConnectStore {
     agents_dir: PathBuf,
 }
 
 impl FilesystemGlobalConfigConnectStore {
-    pub fn new(agents_dir: PathBuf) -> Self {
+    pub(crate) fn new(agents_dir: PathBuf) -> Self {
         Self { agents_dir }
     }
 
-    pub fn config_path(&self) -> PathBuf {
+    pub(crate) fn config_path(&self) -> PathBuf {
         self.agents_dir.join("aemeath.json")
     }
 
@@ -115,13 +140,13 @@ impl FilesystemGlobalConfigConnectStore {
         }
     }
 
-    pub fn load_global_document(
+    pub(crate) fn load_global_document(
         &self,
     ) -> Result<Option<GlobalConfigDocument>, GlobalConfigStoreError> {
         self.with_lock(|| self.load_unlocked())
     }
 
-    pub fn create_complete_default(
+    pub(crate) fn create_complete_default(
         &self,
     ) -> Result<BootstrapConfigReceipt, GlobalConfigStoreError> {
         self.with_lock(|| {
@@ -149,11 +174,11 @@ impl FilesystemGlobalConfigConnectStore {
         })
     }
 
-    pub fn commit_draft(
+    pub(crate) fn commit_draft(
         &self,
         expected: GlobalConfigRevision,
         draft: &ConnectDraft,
-    ) -> Result<GlobalConfigCommitReceipt, GlobalConfigStoreError> {
+    ) -> Result<GlobalConfigRevision, GlobalConfigStoreError> {
         self.with_lock(|| {
             let loaded = self.load_unlocked()?.ok_or_else(|| {
                 GlobalConfigStoreError::InvalidDocument("全局配置不存在".to_string())
@@ -165,13 +190,11 @@ impl FilesystemGlobalConfigConnectStore {
             let bytes = serde_json::to_vec_pretty(&candidate)
                 .map_err(|error| GlobalConfigStoreError::InvalidDocument(error.to_string()))?;
             atomic_replace(&self.config_path(), &bytes)?;
-            Ok(GlobalConfigCommitReceipt {
-                revision: digest(&bytes),
-            })
+            Ok(digest(&bytes))
         })
     }
 
-    pub fn rollback_bootstrap(
+    pub(crate) fn rollback_bootstrap(
         &self,
         receipt: &BootstrapConfigReceipt,
     ) -> Result<(), GlobalConfigStoreError> {
@@ -214,29 +237,29 @@ impl FilesystemGlobalConfigConnectStore {
 impl GlobalConfigConnectStore for FilesystemGlobalConfigConnectStore {
     async fn load_global_document(
         &self,
-    ) -> Result<Option<GlobalConfigDocument>, GlobalConfigStoreError> {
-        FilesystemGlobalConfigConnectStore::load_global_document(self)
+    ) -> Result<Option<GlobalConfigDocument>, share::error::DomainError> {
+        FilesystemGlobalConfigConnectStore::load_global_document(self).map_err(Into::into)
     }
 
     async fn create_complete_default(
         &self,
-    ) -> Result<BootstrapConfigReceipt, GlobalConfigStoreError> {
-        FilesystemGlobalConfigConnectStore::create_complete_default(self)
+    ) -> Result<BootstrapConfigReceipt, share::error::DomainError> {
+        FilesystemGlobalConfigConnectStore::create_complete_default(self).map_err(Into::into)
     }
 
     async fn compare_and_swap(
         &self,
         expected: GlobalConfigRevision,
         draft: ConnectDraft,
-    ) -> Result<GlobalConfigCommitReceipt, GlobalConfigStoreError> {
-        self.commit_draft(expected, &draft)
+    ) -> Result<GlobalConfigRevision, share::error::DomainError> {
+        self.commit_draft(expected, &draft).map_err(Into::into)
     }
 
     async fn rollback_bootstrap(
         &self,
         receipt: BootstrapConfigReceipt,
-    ) -> Result<(), GlobalConfigStoreError> {
-        FilesystemGlobalConfigConnectStore::rollback_bootstrap(self, &receipt)
+    ) -> Result<(), share::error::DomainError> {
+        FilesystemGlobalConfigConnectStore::rollback_bootstrap(self, &receipt).map_err(Into::into)
     }
 }
 

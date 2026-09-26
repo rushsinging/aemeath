@@ -2,9 +2,9 @@ use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
 use config::{
-    ConfigChangeData, ConfigPersistOutcomeData, ConfigReader, ConfigSubscriptionData,
-    ConfigUpdateData, ConfigWriter, PreparedConfigUpdateData, PreparedProjectConfigData,
-    ProjectConfigLocationData, ProjectConfigParticipant,
+    ConfigChangeData, ConfigReader, ConfigSubscriptionData, ConfigUpdateData, ConfigWriter,
+    PreparedConfigUpdateData, PreparedProjectConfigData, ProjectConfigLocationData,
+    ProjectConfigParticipant,
 };
 use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceWriter};
@@ -736,7 +736,10 @@ impl ConfigReader for GateAwareConfigReader {
         self.config_reader.subscribe_committed()
     }
 
-    async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
+    async fn refresh_if_sources_changed(
+        &self,
+    ) -> Result<config::ConfigRefreshOutcomeData, share::error::DomainError> {
+        // Err 原样透传：刷新失败的降级语义由最外层消费方（runtime turn 边界）判定。
         self.config_reader.refresh_if_sources_changed().await
     }
 
@@ -775,11 +778,11 @@ impl ConfigReader for GateAwareConfigReader {
 /// 4. **Spawn critical section** — the exclusive permit + prepared update +
 ///    candidate Memory are moved into a `tokio::spawn` owned task that calls
 ///    `persist_update`:
-///    - **NotCommitted** — old Memory and Config are kept untouched; the task
-///      returns `Err(Persist(…))`.
-///    - **Committed** — candidate Memory is installed into the committed holder,
+///    - **Err** — old Memory and Config are kept untouched; the task
+///      returns `Err(storage("config", "配置持久化失败：…"))`.
+///    - **Ok** — candidate Memory is installed into the committed holder,
 ///      then `commit_update` fires the config watch **last**. A
-///      [`ConfigCommitWarningData`] is logged but **not** converted to an error.
+///      config commit warning is logged but **not** converted to an error.
 ///
 /// The `update()` future awaits the spawned JoinHandle. Once execution reaches
 /// the durable handoff (`tokio::spawn`), cancelling or dropping the outer future
@@ -837,31 +840,29 @@ impl ConfigWriter for GateAwareConfigWriter {
             // Hold the exclusive permit for the entire critical section.
             let _permit = permit;
 
-            let outcome = config_participant.persist_update(prepared).await;
-            match outcome {
-                ConfigPersistOutcomeData::NotCommitted(err) => {
-                    // Old Memory and Config are kept untouched.
-                    Err(share::error::DomainError::storage(
-                        "config",
-                        format!("配置持久化失败：{err}"),
-                    ))
-                }
-                ConfigPersistOutcomeData::Committed(ready) => {
-                    // Warnings are informational — do NOT convert to error.
-                    if let Some(warning) = ready.warning() {
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "config commit warning: {:?}",
-                            warning
-                        );
-                    }
-                    // Install new Memory before committing config.
-                    *committed_memory.write().unwrap() = candidate_memory;
-                    // commit_update fires the watch last.
-                    let change_set = config_participant.commit_update(*ready);
-                    Ok(change_set)
-                }
+            // Old Memory and Config are kept untouched on persistence failure
+            // (Category + 「配置持久化失败：」前缀与原 NotCommitted 分支等价；
+            //  detail 来自 DomainError Display，不再出现双重前缀)。
+            let ready = config_participant
+                .persist_update(prepared)
+                .await
+                .map_err(|err| {
+                    share::error::DomainError::storage("config", format!("配置持久化失败：{err}"))
+                })?;
+
+            // Warnings are informational — do NOT convert to error.
+            if let Some(warning) = ready.warning() {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "config commit warning: {:?}",
+                    warning
+                );
             }
+            // Install new Memory before committing config.
+            *committed_memory.write().unwrap() = candidate_memory;
+            // commit_update fires the watch last.
+            let change_set = config_participant.commit_update(*ready);
+            Ok(change_set)
             // _permit dropped here → exclusive lock released.
         });
 

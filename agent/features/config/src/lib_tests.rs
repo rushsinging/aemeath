@@ -102,7 +102,7 @@ async fn wire_entry_logs_debug_enter_then_success_on_ok() {
     let result = wire_project_config_with_cli(
         project.path(),
         test_native_store(project.path()),
-        crate::CliConfigInputData::default(),
+        crate::adapters::CliConfigInputData::default(),
     )
     .await;
 
@@ -137,7 +137,7 @@ async fn wire_entry_logs_debug_enter_then_warn_failure_on_err_and_returns_origin
     let result = wire_project_config_with_cli(
         std::path::Path::new("/nonexistent/config/does/not/exist"),
         test_native_store(missing_store_root.path()),
-        crate::CliConfigInputData::default(),
+        crate::adapters::CliConfigInputData::default(),
     )
     .await;
 
