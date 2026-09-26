@@ -6,7 +6,7 @@ use crate::application::loop_engine::chat::{ChatEventSinkHandle, EventFuture};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Mutex;
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority, TaskStatus};
+use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPriorityData, TaskStatusData};
 use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
 struct ConcurrencyFlagTool {
@@ -170,36 +170,36 @@ struct RecordingTaskHook {
 }
 
 #[async_trait]
-impl HookPort for RecordingTaskHook {
+impl HookDispatcher for RecordingTaskHook {
     async fn dispatch(
         &self,
-        invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+        invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
         let kind = match invocation {
-            HookInvocation::TaskCreated(_) => Some("created"),
-            HookInvocation::TaskCompleted(_) => Some("completed"),
+            HookInvocationData::TaskCreated { .. } => Some("created"),
+            HookInvocationData::TaskCompleted { .. } => Some("completed"),
             _ => None,
         };
         if let Some(kind) = kind {
             self.invocations.lock().unwrap().push(kind);
         }
-        hook::HookOutcome::proceed()
+        hook::HookOutcomeData::proceed()
     }
 }
 
 fn created_task_outcome(text: &str) -> tools::ToolOutcome {
     let store = task::TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let result = store
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "subject".to_owned(),
                 String::new(),
                 None,
-                TaskPriority::Normal,
+                TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -212,22 +212,22 @@ fn created_task_outcome(text: &str) -> tools::ToolOutcome {
 fn completed_task_outcome(text: &str) -> tools::ToolOutcome {
     let store = task::TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let created = store
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "subject".to_owned(),
                 String::new(),
                 None,
-                TaskPriority::Normal,
+                TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
         )
         .unwrap();
     let result = store
-        .transition(created.value.id(), TaskStatus::Completed, 3)
+        .transition(created.value.id(), TaskStatusData::Completed, 3)
         .unwrap();
     tools::ToolOutcome::new(text, Value::Null, Vec::new())
         .with_task_change(tools::CommittedTaskChange::from_command_result(&result))
@@ -246,7 +246,7 @@ impl ChatEventSink for NoopTaskEventSink {
 
 async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
     let hook = Arc::new(RecordingTaskHook::default());
-    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let hook_port: Arc<dyn HookDispatcher> = hook.clone();
     let store = Arc::new(task::TaskStore::new());
     let revision = outcome
         .task_change
@@ -267,16 +267,16 @@ async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
     let execution = crate::application::tool::agent::ToolExecution::new(&tool_call, outcome);
     if let Some(revision) = revision {
         store
-            .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+            .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
             .unwrap();
         if revision >= 2 {
             store
                 .create_task(
-                    TaskCreateSpec::try_new(
+                    TaskCreateSpecData::try_new(
                         "subject".to_owned(),
                         String::new(),
                         None,
-                        TaskPriority::Normal,
+                        TaskPriorityData::Normal,
                     )
                     .unwrap(),
                     2,
@@ -285,7 +285,9 @@ async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
         }
         if revision >= 3 {
             let task_id = store.list()[0].id();
-            store.transition(task_id, TaskStatus::Completed, 3).unwrap();
+            store
+                .transition(task_id, TaskStatusData::Completed, 3)
+                .unwrap();
         }
     }
     dispatcher

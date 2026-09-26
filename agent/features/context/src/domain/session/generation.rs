@@ -9,7 +9,7 @@ use super::{
     SessionHistory, SessionMetadata, SkillLoadRecord, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
-use task::TaskSnapshot;
+use task::TaskSnapshotData;
 
 pub const CURRENT_SESSION_GENERATION_SCHEMA_VERSION: u32 = 1;
 const MANIFEST_MEMBER_NAME: &str = "manifest.json";
@@ -501,7 +501,7 @@ pub struct SessionStateMember {
     #[serde(default)]
     chats: Vec<ChatSegment>,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshot>,
+    tasks: SnapshotState<TaskSnapshotData>,
     workspace: SnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     compact: Option<ActiveCompactMarker>,

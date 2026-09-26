@@ -17,7 +17,7 @@ pub(super) fn model_invocation(step: &ModelStep) -> ModelInvocation {
     ModelInvocation::new(response)
 }
 
-/// #1248 Task 5: Resolve tool suspensions through the interaction coordinator.
+/// #1248 TaskData 5: Resolve tool suspensions through the interaction coordinator.
 /// Creates `UserQuestions` intents, registers them via coordinator, publishes
 /// to UI, stores the receiver on the port, and leaves the Run in AwaitingUser.
 /// The actual reply/cancel is handled on the next drain cycle via
@@ -30,7 +30,7 @@ pub(super) async fn handle_suspensions(
 ) -> Result<(), LoopEngineError> {
     use crate::application::interaction::coordinator::InteractionCoordinator;
 
-    // #1248 Task 5: Start ONLY the first suspension. Queue the rest on the port
+    // #1248 TaskData 5: Start ONLY the first suspension. Queue the rest on the port
     // so they are handled one-at-a-time via finish_interaction_work.
     let mut iter = suspended.into_iter();
     let first = match iter.next() {
@@ -155,7 +155,7 @@ pub(super) async fn handle_suspensions(
     Ok(())
 }
 
-/// #1248 Task 5: Resolve tool approvals through the interaction coordinator.
+/// #1248 TaskData 5: Resolve tool approvals through the interaction coordinator.
 /// Creates `ToolApproval` intents — only starts the FIRST, queues remaining.
 pub(super) async fn handle_tool_approvals(
     run: &mut Run,
@@ -661,7 +661,7 @@ pub(super) async fn handle_interaction_outcome(
     Ok(())
 }
 
-/// #1248 Task 5: Handle a HardPause stuck decision via the interaction coordinator.
+/// #1248 TaskData 5: Handle a HardPause stuck decision via the interaction coordinator.
 /// Instead of failing the run, creates a HardPause interaction request that the
 /// user can continue from. On resume, the run transitions back to ExecutingTools.
 pub(super) async fn handle_hard_pause(
@@ -737,7 +737,7 @@ pub(super) async fn handle_hard_pause(
     Ok(())
 }
 
-/// #1248 Task 5: Handle plan approval via the interaction coordinator.
+/// #1248 TaskData 5: Handle plan approval via the interaction coordinator.
 /// When the model produces a Complete response in plan mode, the user must review
 /// the plan before the run proceeds. On approve, the run continues; on reject,
 /// the run is cancelled.

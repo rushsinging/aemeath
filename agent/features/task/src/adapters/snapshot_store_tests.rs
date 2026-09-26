@@ -1,22 +1,22 @@
 //! Green tests for #888 crate-private `TaskStore` snapshot capture/install.
 //!
-//! Capture and candidate installation remain Task-BC internals: no `TaskPersist`
+//! Capture and candidate installation remain TaskData-BC internals: no `TaskPersist`
 //! port or public restore capability is introduced here. #890 may publish and
 //! wire the persistence boundary separately.
 
 use super::TaskStore;
 use crate::domain::{
-    BatchCreateSpec, BatchId, TaskCreateSpec, TaskId, TaskPriority, TaskRevision, TaskSnapshot,
-    TaskSnapshotValidationError, TaskStatus,
+    BatchCreateSpecData, BatchIdData, TaskCreateSpecData, TaskIdData, TaskPriorityData,
+    TaskRevisionData, TaskSnapshotData, TaskStatusData,
 };
 use crate::{TaskAccess, TaskPersist};
 
-fn batch_spec(name: &str) -> BatchCreateSpec {
-    BatchCreateSpec::try_new(name.into()).unwrap()
+fn batch_spec(name: &str) -> BatchCreateSpecData {
+    BatchCreateSpecData::try_new(name.into()).unwrap()
 }
 
-fn task_spec(name: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(name.into(), String::new(), None, TaskPriority::Normal).unwrap()
+fn task_spec(name: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(name.into(), String::new(), None, TaskPriorityData::Normal).unwrap()
 }
 
 /// One `TaskWireV2` entry rendered as raw JSON. Mirrors the wire shape
@@ -90,14 +90,14 @@ fn restored_completed_at_orders_status_progress_like_live_state() {
         Some("1"),
         &[batch_json("1", "active", 1)],
     );
-    let snapshot = TaskSnapshot::decode(&bytes).expect("legacy V2 fixture must decode");
+    let snapshot = TaskSnapshotData::decode(&bytes).expect("legacy V2 fixture must decode");
     let prepared = (&store as &dyn TaskPersist)
         .prepare_restore(&snapshot)
         .expect("legacy completed_at fixture must restore");
     (&store as &dyn TaskPersist).commit_restore(prepared);
 
     let progress = (&store as &dyn TaskAccess)
-        .transition_with_progress(TaskId::new(3), TaskStatus::InProgress, 40)
+        .transition_with_progress(TaskIdData::new(3), TaskStatusData::InProgress, 40)
         .expect("restored task status must update")
         .value;
 
@@ -107,9 +107,12 @@ fn restored_completed_at_orders_status_progress_like_live_state() {
             .iter()
             .map(|item| (item.id, item.completed_at))
             .collect::<Vec<_>>(),
-        vec![(TaskId::new(2), Some(30)), (TaskId::new(1), Some(20))]
+        vec![
+            (TaskIdData::new(2), Some(30)),
+            (TaskIdData::new(1), Some(20))
+        ]
     );
-    assert_eq!(progress.in_progress[0].id, TaskId::new(3));
+    assert_eq!(progress.in_progress[0].id, TaskIdData::new(3));
 }
 
 #[test]
@@ -147,7 +150,7 @@ fn task_persist_prepare_failure_and_captured_empty_are_atomic() {
     access.create_task(task_spec("旧任务"), 2).unwrap();
     let before = (&store as &dyn TaskPersist).collect_snapshot();
 
-    let invalid = TaskSnapshot::decode(&v2_bytes(
+    let invalid = TaskSnapshotData::decode(&v2_bytes(
         "1",
         &[
             task_json("1", "1", "pending", 1, 1, None, None, &[], &[]),
@@ -161,11 +164,11 @@ fn task_persist_prepare_failure_and_captured_empty_are_atomic() {
     .unwrap();
     assert!(matches!(
         (&store as &dyn TaskPersist).prepare_restore(&invalid),
-        Err(TaskSnapshotValidationError::DuplicateTaskId { .. })
+        Err(ref error) if error.message().contains("duplicate task ID")
     ));
     assert_eq!((&store as &dyn TaskPersist).collect_snapshot(), before);
 
-    let empty = TaskSnapshot::empty();
+    let empty = TaskSnapshotData::empty();
     let prepared = (&store as &dyn TaskPersist)
         .prepare_restore(&empty)
         .expect("captured empty 应合法");
@@ -184,9 +187,15 @@ fn capture_snapshot_preserves_mutated_live_state_and_round_trips_through_encode_
     let a = store.create_task(task_spec("A"), 1).unwrap().value;
     let b = store.create_task(task_spec("B"), 2).unwrap().value;
     store.add_dependency(a.id(), b.id(), 3).unwrap();
-    store.set_priority(a.id(), TaskPriority::High, 4).unwrap();
-    store.transition(b.id(), TaskStatus::InProgress, 5).unwrap();
-    store.transition(b.id(), TaskStatus::Completed, 6).unwrap();
+    store
+        .set_priority(a.id(), TaskPriorityData::High, 4)
+        .unwrap();
+    store
+        .transition(b.id(), TaskStatusData::InProgress, 5)
+        .unwrap();
+    store
+        .transition(b.id(), TaskStatusData::Completed, 6)
+        .unwrap();
     store.add_tag(a.id(), "urgent".into(), 7).unwrap();
     store.record_batch_turn(batch.id(), 3, true).unwrap();
 
@@ -215,7 +224,7 @@ fn capture_snapshot_preserves_mutated_live_state_and_round_trips_through_encode_
         serde_json::from_slice(&bytes).expect("encoded snapshot must be JSON");
     assert_eq!(wire["schema_version"], 2);
 
-    let decoded = TaskSnapshot::decode(&bytes).expect("captured snapshot must decode");
+    let decoded = TaskSnapshotData::decode(&bytes).expect("captured snapshot must decode");
     let prepared = decoded
         .prepare()
         .expect("a snapshot captured from live aggregate state must be installable");
@@ -249,7 +258,7 @@ fn capture_snapshot_filters_deleted_tasks_while_live_backing_still_holds_the_tom
     );
 
     let bytes = captured.encode().expect("filtered snapshot must encode");
-    let prepared = TaskSnapshot::decode(&bytes)
+    let prepared = TaskSnapshotData::decode(&bytes)
         .expect("filtered snapshot must decode")
         .prepare()
         .expect("a snapshot without any Deleted task must always validate");
@@ -264,12 +273,12 @@ fn install_snapshot_replaces_old_state_revision_counters_and_current_batch_whole
     store.create_batch(batch_spec("旧批次"), 0).unwrap();
     store.create_task(task_spec("旧任务"), 1).unwrap();
     let stale = store.state_snapshot();
-    assert_eq!(stale.revision(), TaskRevision::new(2));
+    assert_eq!(stale.revision(), TaskRevisionData::new(2));
 
     let batch = batch_json("9", "active", 100);
     let task = task_json("9", "9", "pending", 100, 100, None, None, &[], &[]);
     let bytes = v2_bytes("9", &[task], "10", "10", Some("9"), &[batch]);
-    let prepared = TaskSnapshot::decode(&bytes)
+    let prepared = TaskSnapshotData::decode(&bytes)
         .expect("fixture must decode")
         .prepare()
         .expect("fixture must validate");
@@ -280,13 +289,16 @@ fn install_snapshot_replaces_old_state_revision_counters_and_current_batch_whole
 
     assert_eq!(store.state_snapshot(), expected);
     assert_ne!(store.state_snapshot(), stale);
-    assert_eq!(store.revision(), TaskRevision::new(9));
+    assert_eq!(store.revision(), TaskRevisionData::new(9));
     assert_eq!(store.list().len(), 1);
-    assert_eq!(store.list().first().unwrap().id(), TaskId::new(9));
+    assert_eq!(store.list().first().unwrap().id(), TaskIdData::new(9));
     assert_eq!(store.list_batches().len(), 1);
-    assert_eq!(store.list_batches().first().unwrap().id(), BatchId::new(9));
-    assert_eq!(store.current_batch(), Some(BatchId::new(9)));
-    assert!(store.get(TaskId::new(1)).is_none());
+    assert_eq!(
+        store.list_batches().first().unwrap().id(),
+        BatchIdData::new(9)
+    );
+    assert_eq!(store.current_batch(), Some(BatchIdData::new(9)));
+    assert!(store.get(TaskIdData::new(1)).is_none());
 }
 
 // ---- 4) invalid validate 不可安装且旧 state 完全不变 ----
@@ -301,20 +313,20 @@ fn invalid_snapshot_never_produces_an_installable_candidate_and_leaves_old_state
 
     // Duplicate task ID: decode() alone only enforces wire-format ID shape,
     // so this still decodes; only validate() enforces aggregate-level
-    // uniqueness. There is no way to obtain a `PreparedTaskRestore` from it,
+    // uniqueness. There is no way to obtain a `PreparedTaskRestoreData` from it,
     // so `install_snapshot` can never be reached for a rejected snapshot.
     let batch = batch_json("1", "active", 100);
     let dup_a = task_json("1", "1", "pending", 100, 100, None, None, &[], &[]);
     let dup_b = task_json("1", "1", "pending", 100, 100, None, None, &[], &[]);
     let bytes = v2_bytes("1", &[dup_a, dup_b], "2", "2", Some("1"), &[batch]);
 
-    let error = TaskSnapshot::decode(&bytes)
+    let error = TaskSnapshotData::decode(&bytes)
         .expect("duplicate IDs are still well-formed wire data")
         .prepare()
         .expect_err("duplicate task IDs must be rejected by validate()");
     assert!(matches!(
         error,
-        TaskSnapshotValidationError::DuplicateTaskId { id } if id == TaskId::new(1)
+        _ if error.message().contains("duplicate task ID: 1")
     ));
 
     assert_eq!(store.state_snapshot(), baseline_state);
@@ -331,27 +343,27 @@ fn install_snapshot_restores_reverse_blocks_consistently_with_a_later_capture_ro
     let task_b = task_json("2", "1", "pending", 100, 100, None, None, &[], &[]);
     let bytes = v2_bytes("2", &[task_a, task_b], "3", "2", Some("1"), &[batch]);
 
-    let prepared = TaskSnapshot::decode(&bytes)
+    let prepared = TaskSnapshotData::decode(&bytes)
         .expect("fixture must decode")
         .prepare()
         .expect("fixture must validate");
     let expected_blocks = prepared
         .candidate()
         .tasks()
-        .get(&TaskId::new(2))
+        .get(&TaskIdData::new(2))
         .expect("task 2 must exist in the candidate")
         .blocks()
         .to_vec();
-    assert_eq!(expected_blocks, vec![TaskId::new(1)]);
+    assert_eq!(expected_blocks, vec![TaskIdData::new(1)]);
 
     let store = TaskStore::new();
     store.install_snapshot(prepared);
 
     assert_eq!(
-        store.get(TaskId::new(2)).unwrap().blocks(),
-        [TaskId::new(1)]
+        store.get(TaskIdData::new(2)).unwrap().blocks(),
+        [TaskIdData::new(1)]
     );
-    assert!(store.is_blocked(TaskId::new(1)).unwrap());
+    assert!(store.is_blocked(TaskIdData::new(1)).unwrap());
 
     // A subsequent capture/encode/decode/validate cycle over the freshly
     // installed live state must reconstruct the exact same reverse index; no
@@ -360,7 +372,7 @@ fn install_snapshot_restores_reverse_blocks_consistently_with_a_later_capture_ro
     let bytes = recaptured
         .encode()
         .expect("recaptured snapshot must encode");
-    let reprepared = TaskSnapshot::decode(&bytes)
+    let reprepared = TaskSnapshotData::decode(&bytes)
         .expect("recaptured snapshot must decode")
         .prepare()
         .expect("a snapshot captured right after install must always validate");
@@ -368,9 +380,9 @@ fn install_snapshot_restores_reverse_blocks_consistently_with_a_later_capture_ro
         reprepared
             .candidate()
             .tasks()
-            .get(&TaskId::new(2))
+            .get(&TaskIdData::new(2))
             .expect("task 2 must exist after the round trip")
             .blocks(),
-        [TaskId::new(1)]
+        [TaskIdData::new(1)]
     );
 }

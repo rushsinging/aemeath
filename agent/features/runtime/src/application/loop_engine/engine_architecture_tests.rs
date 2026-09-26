@@ -225,7 +225,7 @@ fn p6_9_4_source_directories_expose_only_source_observer_topology_and_mapping() 
             "async fn execute_tools_impl(",
             "prepare_tool_round(",
             "execute_tool_round(",
-            "HookInvocation::Stop",
+            "HookInvocationData::Stop",
             "ContextRequest {",
             "async fn finalize_sub_agent(",
             "impl crate::application::loop_engine::ModelInvocationPort",

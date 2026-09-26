@@ -12,7 +12,7 @@ enum CapabilityPolicy {
     Restricted,
 }
 
-// ── #1248 Task 1: capability-semantic enums ──
+// ── #1248 TaskData 1: capability-semantic enums ──
 
 /// Interaction binding mode — who mediates user interaction for this run.
 ///
@@ -53,7 +53,7 @@ impl InteractionBindingMode {
 pub enum HookBindingMode {
     /// All hooks active (Main run).
     Full,
-    /// No Hook capability. Runtime binds a no-op HookPort for this mode.
+    /// No Hook capability. Runtime binds a no-op HookDispatcher for this mode.
     BoundaryOnly,
 }
 
@@ -211,7 +211,7 @@ struct CapabilityCeiling {
     memory: MemoryMode,
     tools: ToolScope,
     timeout: Duration,
-    // #1248 Task 1: new capability-semantic dimensions
+    // #1248 TaskData 1: new capability-semantic dimensions
     interaction_kind: InteractionBindingMode,
     hooks: HookBindingMode,
     reasoning: ReasoningBindingMode,
@@ -248,7 +248,7 @@ pub struct RunSpec {
     pub tools: ToolScope,
     /// Run 目的：会话对话或只执行手动上下文压缩。
     pub intent: RunIntent,
-    /// #1248 Task 1: capability-semantic dimensions (private — use accessors).
+    /// #1248 TaskData 1: capability-semantic dimensions (private — use accessors).
     /// Private to prevent direct mutation that would bypass the capability
     /// ceiling check.
     interaction_kind: InteractionBindingMode,
@@ -411,7 +411,7 @@ impl RunSpec {
         Ok(self)
     }
 
-    // ── #1248 Task 1: capability-semantic builders ──
+    // ── #1248 TaskData 1: capability-semantic builders ──
 
     pub fn with_interaction_kind(
         mut self,
@@ -445,7 +445,7 @@ impl RunSpec {
         Ok(self)
     }
 
-    // ── #1248 Task 1: read-only capability accessors ──
+    // ── #1248 TaskData 1: read-only capability accessors ──
     //
     // Fields are private to prevent mutation that bypasses the ceiling check.
     // Use the `with_*` builders for mutation; use these accessors for

@@ -34,7 +34,7 @@ pub struct OutputViewState {
 
 impl Default for OutputViewState {
     /// `auto_scroll` 默认 `true`，对齐 widget `OutputArea::new()` 的启动贴尾语义
-    /// （view_state 现为滚动真相，S2 Task 3）：避免启动内容超过可见高度时
+    /// （view_state 现为滚动真相，S2 TaskData 3）：避免启动内容超过可见高度时
     /// 首帧出现非贴尾闪烁。其余字段保持类型默认值。
     fn default() -> Self {
         Self {

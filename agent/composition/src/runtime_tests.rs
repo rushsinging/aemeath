@@ -1,4 +1,4 @@
-//! Composition→Runtime contract tests (#1385 Task 8).
+//! Composition→Runtime contract tests (#1385 TaskData 8).
 //!
 //! Tests in this file live inside the `composition::runtime` module, giving
 //! direct access to `wire_runtime_tool_assembly` and `RuntimeToolAssembly`.

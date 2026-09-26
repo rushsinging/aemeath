@@ -419,12 +419,10 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
         drop(input_tx);
     });
 
-    let mut shell = test_shell_with_hooks(Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+    let mut shell = test_shell_with_hooks(hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
         events,
         ..HooksConfig::default()
-    }, ..share::config::Config::default() })).unwrap(),
-    ));
+    }, ..share::config::Config::default() })).unwrap());
     shell.workspace = workspace;
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
@@ -555,8 +553,7 @@ async fn stop_hook_uses_workspace_restored_during_the_same_run() {
         drop(input_tx);
     });
 
-    let mut shell = test_shell_with_hooks(Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+    let mut shell = test_shell_with_hooks(hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config {
                 hooks: HooksConfig {
                     events,
@@ -565,8 +562,7 @@ async fn stop_hook_uses_workspace_restored_during_the_same_run() {
                 ..share::config::Config::default()
             },
         ))
-        .unwrap(),
-    ));
+        .unwrap());
     shell.workspace = workspace.clone();
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
@@ -687,7 +683,7 @@ async fn test_run_session_command_driver_drains_input_after_stop_hook_before_don
 
 /// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
 /// 用于验证 `continue:false` 被识别为阻断（#372 缺陷 1）。
-fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookPort> {
+fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn HookDispatcher> {
     let flag_path_str = flag_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -706,14 +702,14 @@ fn continue_false_then_allow_hook_port(flag_path: &std::path::Path) -> Arc<dyn H
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
         events,
         ..HooksConfig::default()
-    }, ..share::config::Config::default() })).unwrap())
+    }, ..share::config::Config::default() })).unwrap()
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
-fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn HookPort> {
+fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn HookDispatcher> {
     let counter_path_str = counter_path.to_string_lossy().to_string();
     let mut events = HashMap::new();
     events.insert(
@@ -733,14 +729,14 @@ fn block_n_times_hook_port(counter_path: &std::path::Path, n: usize) -> Arc<dyn 
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
         events,
         ..HooksConfig::default()
-    }, ..share::config::Config::default() })).unwrap())
+    }, ..share::config::Config::default() })).unwrap()
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
-fn always_blocking_hook_port() -> Arc<dyn HookPort> {
+fn always_blocking_hook_port() -> Arc<dyn HookDispatcher> {
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -750,10 +746,10 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
         events,
         ..HooksConfig::default()
-    }, ..share::config::Config::default() })).unwrap())
+    }, ..share::config::Config::default() })).unwrap()
 }
 
 #[tokio::test]

@@ -29,7 +29,7 @@ pub(crate) enum ModuleOwner {
     Context,
     Config,
     Memory,
-    Task,
+    TaskData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,7 +52,7 @@ pub(crate) enum DiagnosticSinkId {
     Context,
     Config,
     Memory,
-    Task,
+    TaskData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +112,7 @@ const TARGETS: &[TargetSpec] = &[
     target!("aemeath:agent:prompt", Prompt, Prompt, "agent-prompt.log"),
     target!("aemeath:agent:config", Config, Config, "agent-config.log"),
     target!("aemeath:agent:memory", Memory, Memory, "agent-memory.log"),
-    target!("aemeath:agent:task", Task, Task, "agent-task.log"),
+    target!("aemeath:agent:task", TaskData, TaskData, "agent-task.log"),
     target!("aemeath:agent:hook", Hook, Hook, "agent-hook.log"),
     target!(
         "aemeath:agent:storage",

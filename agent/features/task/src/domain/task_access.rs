@@ -1,122 +1,131 @@
 use crate::domain::{
-    Batch, BatchCreateSpec, BatchId, Task, TaskBatchSnapshot, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority, TaskProgressSnapshot,
-    TaskRevision, TaskStatus, TaskStoreStats,
+    BatchCreateSpecData, BatchData, BatchIdData, TaskBatchSnapshotData, TaskCommandResultData,
+    TaskCreateSpecData, TaskData, TaskIdData, TaskLifecycleSnapshotData, TaskPriorityData,
+    TaskProgressSnapshotData, TaskRevisionData, TaskStatusData, TaskStoreStatsData,
 };
 
-/// Narrow, Task-owned capability for typed Task commands and queries.
+/// Narrow, TaskData-owned capability for typed TaskData commands and queries.
 ///
 /// This port deliberately exposes neither the backing store nor generic mutation
 /// hooks. All methods are synchronous because the in-memory transaction contains
 /// no I/O; implementations must release any state guard before returning.
 pub trait TaskAccess: Send + Sync {
-    fn revision(&self) -> TaskRevision;
+    fn revision(&self) -> TaskRevisionData;
 
     /// Atomically clears the complete aggregate. A non-empty clear emits one
     /// `TaskStoreCleared` event and advances revision once; an empty clear is a
     /// no-op with no event/revision.
-    fn clear(&self) -> Result<TaskCommandResult<()>, TaskCommandError>;
+    fn clear(&self) -> Result<TaskCommandResultData<()>, share::error::DomainError>;
 
     fn create_batch(
         &self,
-        spec: BatchCreateSpec,
+        spec: BatchCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    fn pause_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    fn resume_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    fn archive_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError>;
+    fn pause_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError>;
+    fn resume_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError>;
+    fn archive_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError>;
     fn record_batch_turn(
         &self,
-        id: BatchId,
+        id: BatchIdData,
         turn: u64,
         active: bool,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError>;
 
     fn create_task(
         &self,
-        spec: TaskCreateSpec,
+        spec: TaskCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn transition_with_progress(
         &self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskProgressSnapshotData>, share::error::DomainError>;
     fn transition(
         &self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn set_subject(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         subject: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn set_description(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         description: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn set_priority(
         &self,
-        id: TaskId,
-        priority: TaskPriority,
+        id: TaskIdData,
+        priority: TaskPriorityData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn add_dependency(
         &self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn replace_dependencies(
         &self,
-        task_id: TaskId,
-        blocked_by_ids: Vec<TaskId>,
+        task_id: TaskIdData,
+        blocked_by_ids: Vec<TaskIdData>,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn remove_dependency(
         &self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn add_tag(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         tag: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn remove_tag(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         tag: &str,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
     fn delete_with_progress(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskProgressSnapshotData>, share::error::DomainError>;
     fn delete(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError>;
 
-    fn get(&self, id: TaskId) -> Option<Task>;
-    fn current_task_by_seq(&self, seq: u64) -> Option<Task>;
-    fn list(&self) -> Vec<Task>;
-    fn list_batches(&self) -> Vec<Batch>;
-    fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot>;
-    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot>;
-    fn current_batch(&self) -> Option<BatchId>;
-    fn stats(&self) -> TaskStoreStats;
-    fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;
-    fn is_blocked(&self, id: TaskId) -> Result<bool, TaskCommandError>;
-    fn would_create_cycle(&self, task_id: TaskId, blocked_by_id: TaskId) -> bool;
+    fn get(&self, id: TaskIdData) -> Option<TaskData>;
+    fn current_task_by_seq(&self, seq: u64) -> Option<TaskData>;
+    fn list(&self) -> Vec<TaskData>;
+    fn list_batches(&self) -> Vec<BatchData>;
+    fn batch_snapshot(&self, id: BatchIdData) -> Option<TaskBatchSnapshotData>;
+    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshotData>;
+    fn current_batch(&self) -> Option<BatchIdData>;
+    fn stats(&self) -> TaskStoreStatsData;
+    fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshotData;
+    fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError>;
+    fn would_create_cycle(&self, task_id: TaskIdData, blocked_by_id: TaskIdData) -> bool;
 }

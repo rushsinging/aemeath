@@ -15,8 +15,9 @@ impl TypedTool for AgentTool {
         "Agent"
     }
 
+    /// 单一真相：英文文案即 i18n 入口，NEVER 在此维护第二份口径文本。
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously. `agent` is required and must name a configured entry in `config.agents.names`; the named instance binds the model and output budget, and its referenced role (builtin: planner, coder, explorer, tester, reviewer) narrows the toolset via the role policy when one is configured. Multiple Agent calls in the SAME response run concurrently."
+        share::i18n::tools::core::agent("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -91,7 +92,7 @@ CRITICAL — Context budget:
 - Use Glob to discover files, then read only the most relevant ones.
 - NEVER read more than 3 files per tool call round.
 - This Run has a wall-clock timeout: {timeout_secs} seconds (0 means unlimited). StuckGuard independently detects repeated text, tool loops, and blocked completion.
-- You cannot use Task*, AskUserQuestion, or Agent tools. Task tracking and user clarification belong to the parent agent.
+- You cannot use TaskData*, AskUserQuestion, or Agent tools. TaskData tracking and user clarification belong to the parent agent.
 - If the task is ambiguous or needs user input, return a concise `blocked:` explanation instead of asking the user.
 
 Instructions:- Complete the task described in the user message

@@ -1,4 +1,4 @@
-//! HookPort — Hook BC 出站端口。
+//! HookDispatcher — Hook BC 出站端口。
 //!
 //! 对应设计：`docs/design/02-modules/hook/README.md` §2。
 //! 一个类型化端口——Main 使用 Full；Sub Run 使用 `BoundaryOnly`，过滤由
@@ -12,36 +12,36 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
-use crate::domain::{HookInvocation, HookOutcome, HookPoint};
+use crate::domain::{HookInvocationData, HookOutcomeData, HookPointData};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookSubscriptionExecutionTerminal {
+pub enum HookExecutionTerminalData {
     Succeeded,
     Failed,
     Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookSubscriptionExecutionEvent {
+pub enum HookExecutionEventData {
     Started {
-        point: HookPoint,
+        point: HookPointData,
         script: String,
         attempt: u8,
     },
     AttemptChanged {
-        point: HookPoint,
+        point: HookPointData,
         script: String,
         attempt: u8,
     },
     Finished {
-        point: HookPoint,
+        point: HookPointData,
         script: String,
-        terminal: HookSubscriptionExecutionTerminal,
+        terminal: HookExecutionTerminalData,
     },
 }
 
-pub trait HookSubscriptionExecutionObserver: Send + Sync {
-    fn observe(&self, event: HookSubscriptionExecutionEvent);
+pub trait HookExecutionObserver: Send + Sync {
+    fn observe(&self, event: HookExecutionEventData);
 }
 
 /// Hook 一次 dispatch 的工作区上下文。
@@ -51,13 +51,13 @@ pub trait HookSubscriptionExecutionObserver: Send + Sync {
 /// `AEMEATH_SESSION_ID` 注入 hook 子进程，供外部集成（如终端会话恢复工具）
 /// 捕获当前会话。生命周期 observer 只报告 typed subscription 事实。
 #[derive(Clone)]
-pub struct HookDispatchContext {
+pub struct HookDispatchContextData {
     cwd: PathBuf,
     session_id: Option<String>,
-    subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
+    subscription_execution_observer: Option<std::sync::Arc<dyn HookExecutionObserver>>,
 }
 
-impl HookDispatchContext {
+impl HookDispatchContextData {
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),
@@ -73,7 +73,7 @@ impl HookDispatchContext {
 
     pub fn with_subscription_execution_observer(
         mut self,
-        observer: std::sync::Arc<dyn HookSubscriptionExecutionObserver>,
+        observer: std::sync::Arc<dyn HookExecutionObserver>,
     ) -> Self {
         self.subscription_execution_observer = Some(observer);
         self
@@ -81,7 +81,7 @@ impl HookDispatchContext {
 
     pub fn subscription_execution_observer(
         &self,
-    ) -> Option<&std::sync::Arc<dyn HookSubscriptionExecutionObserver>> {
+    ) -> Option<&std::sync::Arc<dyn HookExecutionObserver>> {
         self.subscription_execution_observer.as_ref()
     }
 
@@ -96,13 +96,13 @@ impl HookDispatchContext {
 
 /// Hook domain 所需的最小协作取消能力。
 #[async_trait]
-pub trait CancellationSignal: Send + Sync {
+pub trait HookCancellationSignal: Send + Sync {
     fn is_cancelled(&self) -> bool;
     async fn cancelled(&self);
 }
 
 #[async_trait]
-impl CancellationSignal for tokio_util::sync::CancellationToken {
+impl HookCancellationSignal for tokio_util::sync::CancellationToken {
     fn is_cancelled(&self) -> bool {
         tokio_util::sync::CancellationToken::is_cancelled(self)
     }
@@ -118,15 +118,15 @@ impl CancellationSignal for tokio_util::sync::CancellationToken {
 /// - 任意非零 exit 是主动 Block，不因 exit code 重试；
 /// - 仅 spawn/wait/IO/timeout/非法 JSON 等 ExecutionFailed 重试。
 #[async_trait]
-pub trait HookPort: Send + Sync {
+pub trait HookDispatcher: Send + Sync {
     /// 分发 hook 调用。
     ///
     /// `cancellation` 用于终止 Hook 子进程及重试等待。
     async fn dispatch(
         &self,
-        invocation: HookInvocation,
-        cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome;
+        invocation: HookInvocationData,
+        cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData;
 
     /// 使用当前工作区上下文分发 Hook。
     ///
@@ -134,10 +134,10 @@ pub trait HookPort: Send + Sync {
     /// 以避免 worktree 切换后复用陈旧 cwd。
     async fn dispatch_at(
         &self,
-        invocation: HookInvocation,
-        _context: HookDispatchContext,
-        cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+        invocation: HookInvocationData,
+        _context: HookDispatchContextData,
+        cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData {
         self.dispatch(invocation, cancellation).await
     }
 }

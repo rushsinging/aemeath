@@ -1,7 +1,7 @@
 use super::run_post_tool_batch;
 use crate::application::activity::ActivityCoordinator;
 use async_trait::async_trait;
-use hook::{HookDispatchContext, HookInvocation, HookPort};
+use hook::{HookDispatchContextData, HookDispatcher, HookInvocationData};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -11,26 +11,26 @@ struct RecordingPostBatchHook {
 }
 
 #[async_trait]
-impl HookPort for RecordingPostBatchHook {
+impl HookDispatcher for RecordingPostBatchHook {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
+        _invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
+        hook::HookOutcomeData::proceed()
     }
 
     async fn dispatch_at(
         &self,
-        _invocation: HookInvocation,
-        context: HookDispatchContext,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+        _invocation: HookInvocationData,
+        context: HookDispatchContextData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
         self.dispatched_cwds
             .lock()
             .unwrap()
             .push(context.cwd().to_path_buf());
-        hook::HookOutcome::proceed()
+        hook::HookOutcomeData::proceed()
     }
 }
 
@@ -80,7 +80,7 @@ async fn post_tool_batch_reads_workspace_root_when_dispatch_begins() {
         .enter(Some(linked_root), None, None)
         .expect("进入 linked worktree");
     let hook = Arc::new(RecordingPostBatchHook::default());
-    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let hook_port: Arc<dyn HookDispatcher> = hook.clone();
     workspace
         .control()
         .exit()

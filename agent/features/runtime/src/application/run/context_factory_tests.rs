@@ -27,37 +27,37 @@ fn main_spec() -> RunSpec {
 }
 
 async fn dispatch_stop_hook(context: &crate::application::run::context::RuntimeContext) -> bool {
-    use hook::{HookDirective, HookInvocation, StopInput};
+    use hook::{HookDirectiveData, HookInvocationData};
     use tokio_util::sync::CancellationToken;
 
     let outcome = context
         .hooks()
         .dispatch_at(
-            HookInvocation::Stop(StopInput { run_steps: 1 }),
-            hook::HookDispatchContext::new(std::path::PathBuf::from("/tmp/sub-stop-workspace")),
+            HookInvocationData::Stop { run_steps: 1 },
+            hook::HookDispatchContextData::new(std::path::PathBuf::from("/tmp/sub-stop-workspace")),
             &CancellationToken::new(),
         )
         .await;
-    matches!(outcome.directive, HookDirective::Block { .. })
+    matches!(outcome.directive, HookDirectiveData::Block { .. })
 }
 
 async fn dispatch_sub_run_stop_hook(
     context: &crate::application::run::context::RuntimeContext,
 ) -> bool {
-    use hook::{HookInvocation, SubRunStopInput};
+    use hook::HookInvocationData;
     use tokio_util::sync::CancellationToken;
 
     let outcome = context
         .hooks()
         .dispatch(
-            HookInvocation::SubRunStop(SubRunStopInput {
+            HookInvocationData::SubRunStop {
                 prompt: "prompt".to_string(),
                 system: "system".to_string(),
                 model_spec: None,
                 result: "result".to_string(),
                 run_steps: 1,
                 is_error: false,
-            }),
+            },
             &CancellationToken::new(),
         )
         .await;

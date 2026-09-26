@@ -4,7 +4,7 @@ use super::*;
 use crate::application::client::accessors::SessionRuntime;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::Policy;
-use hook::{HookInvocation, HookOutcome, HookPort};
+use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -213,13 +213,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
 
 struct FakeHook;
 #[async_trait::async_trait]
-impl HookPort for FakeHook {
+impl HookDispatcher for FakeHook {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
+        _invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> HookOutcomeData {
+        HookOutcomeData::proceed()
     }
 }
 /// Build a minimal `SessionRuntime` with fake ports for assembler tests.
@@ -261,7 +261,7 @@ async fn make_test_shell(
     let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
     let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
     let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-    let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
+    let hook_runner: Arc<dyn HookDispatcher> = Arc::new(FakeHook);
 
     struct NoopRunner;
     #[async_trait::async_trait]
@@ -281,7 +281,7 @@ async fn make_test_shell(
     let session_management = wiring.session_management();
     let cwd = root.clone();
 
-    // #1248 Task 3: Build RuntimeContextFactory for test SessionRuntime.
+    // #1248 TaskData 3: Build RuntimeContextFactory for test SessionRuntime.
     let runtime_context_factory = Arc::new(
         crate::application::run::context_factory::RuntimeContextFactory::new(
             tool_catalog.clone(),
@@ -364,7 +364,7 @@ async fn make_test_shell(
     )
 }
 
-// ── Task 4 L1: Shell classification tests ──
+// ── TaskData 4 L1: Shell classification tests ──
 
 /// After bootstrap, SessionRuntime holds session-level state: wiring, workspace,
 /// session identity, prompt bootstrap, model switch. It does NOT hold a per-Run
@@ -572,12 +572,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
-    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ))
-        .expect("test hook dispatcher"),
-    );
+    let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .expect("test hook dispatcher");
     let initial_binding = crate::ports::ProviderFactory::build(
         &crate::ports::provider_port::fake::FakeProviderFactory,
         crate::ports::ProviderBuildSpec {
@@ -694,7 +692,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         client.inner.shell.workspace.read().current_path_base(),
         root.canonicalize().expect("canonicalize root")
     );
-} // ── Task 4 GREEN: single-source verification tests ──
+} // ── TaskData 4 GREEN: single-source verification tests ──
 
 /// The SDK startup snapshot reads the current model state without exposing
 /// Runtime services or adapter-owned launch containers.
@@ -723,7 +721,7 @@ async fn startup_snapshot_reads_current_model_state() {
     assert_eq!(launch.model_display, expected_display);
 }
 
-/// #1385 Task 7: accessors return values from `shell`, the single source.
+/// #1385 TaskData 7: accessors return values from `shell`, the single source.
 #[tokio::test(flavor = "current_thread")]
 async fn accessors_read_from_shell_single_source() {
     let shell =
@@ -768,7 +766,7 @@ async fn accessors_read_from_shell_single_source() {
     assert_eq!(client.shell().verbose, shell.verbose);
 }
 
-/// #1385 Task 7: `shell.interaction_bridge` is the single source.
+/// #1385 TaskData 7: `shell.interaction_bridge` is the single source.
 /// `reply_interaction` and `cancel_interaction` both use it.
 #[tokio::test(flavor = "current_thread")]
 async fn interaction_bridge_is_single_source_on_shell() {

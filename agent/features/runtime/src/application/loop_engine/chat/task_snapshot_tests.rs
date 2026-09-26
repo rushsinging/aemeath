@@ -1,12 +1,12 @@
 use super::*;
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority, TaskStatus};
+use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPriorityData, TaskStatusData};
 
-fn task_spec(subject: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(
+fn task_spec(subject: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(
         subject.to_owned(),
         String::new(),
         None,
-        TaskPriority::Normal,
+        TaskPriorityData::Normal,
     )
     .unwrap()
 }
@@ -14,7 +14,7 @@ fn task_spec(subject: &str) -> TaskCreateSpec {
 fn access_with_active_batch() -> task::TaskStore {
     let store = task::TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".into()).unwrap(), 1)
         .unwrap();
     store
 }
@@ -60,10 +60,10 @@ fn task_status_lines_orders_statuses_and_formats_dependencies() {
     let in_progress = access.create_task(task_spec("working"), 3).unwrap().value;
     let pending = access.create_task(task_spec("blocked"), 4).unwrap().value;
     access
-        .transition(completed.id(), TaskStatus::Completed, 5)
+        .transition(completed.id(), TaskStatusData::Completed, 5)
         .unwrap();
     access
-        .transition(in_progress.id(), TaskStatus::InProgress, 6)
+        .transition(in_progress.id(), TaskStatusData::InProgress, 6)
         .unwrap();
     access
         .add_dependency(pending.id(), completed.id(), 7)
@@ -79,8 +79,8 @@ fn task_status_lines_orders_statuses_and_formats_dependencies() {
 
 #[test]
 fn blocked_by_omits_dependencies_outside_current_batch() {
-    let known = TaskId::new(1);
-    let unknown = TaskId::new(u64::MAX);
+    let known = TaskIdData::new(1);
+    let unknown = TaskIdData::new(u64::MAX);
     let display_map = [(known, 1_u64)].into_iter().collect();
 
     let rendered = format_blocked_by(&[known, unknown], &display_map);
@@ -99,7 +99,7 @@ fn task_status_lines_limits_visible_tasks_and_reports_hidden_count() {
             .unwrap()
             .value;
         access
-            .transition(task.id(), TaskStatus::Completed, index + 10)
+            .transition(task.id(), TaskStatusData::Completed, index + 10)
             .unwrap();
     }
     access.create_task(task_spec("pending"), 20).unwrap();
@@ -129,7 +129,7 @@ fn task_reminder_intent_preserves_count_and_active_list() {
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
     let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
     access
-        .transition(completed.id(), TaskStatus::Completed, 4)
+        .transition(completed.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
@@ -168,7 +168,7 @@ fn task_reminder_intent_none_without_active_batch() {
     assert!(build_task_reminder_intent(access, 7).is_none());
 }
 
-/// typed compact snapshot 与 companion 使用同一份 Task 状态。
+/// typed compact snapshot 与 companion 使用同一份 TaskData 状态。
 #[test]
 fn compact_task_snapshot_renders_with_full_identifiers() {
     let store = access_with_active_batch();
@@ -176,7 +176,7 @@ fn compact_task_snapshot_renders_with_full_identifiers() {
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
     let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
     access
-        .transition(completed.id(), TaskStatus::Completed, 4)
+        .transition(completed.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let snapshot = build_compact_task_snapshot(access).expect("typed snapshot built");
@@ -188,7 +188,7 @@ fn compact_task_snapshot_renders_with_full_identifiers() {
     // 不含 TUI 标签包装
     assert!(!text.contains("<system-reminder>"));
     // 携带 batch 标题
-    assert!(text.contains("Batch #"));
+    assert!(text.contains("BatchData #"));
     assert!(text.contains("Tasks: 1/2"));
     // 携带完整标识：task id + seq
     assert!(text.contains("task:"));

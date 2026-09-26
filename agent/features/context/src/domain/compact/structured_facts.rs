@@ -21,7 +21,7 @@ pub enum CompactFactSource {
 #[serde(rename_all = "snake_case")]
 pub enum ConstraintScope {
     Session,
-    Task,
+    TaskData,
     Phase,
     ToolCall,
     Unknown,
@@ -100,7 +100,7 @@ pub enum CompactFactEntity {
     CiRun,
     Branch,
     Worktree,
-    Task,
+    TaskData,
     TestSuite,
     Deployment,
     Other,
@@ -125,7 +125,7 @@ pub enum CompactFactDimension {
 pub enum CompactFactLifecycle {
     Persistent,
     Dynamic,
-    Task,
+    TaskData,
     Phase,
     Ephemeral,
 }
@@ -498,7 +498,7 @@ impl CompactTaskSnapshot {
             .filter(|item| item.status == CompactTaskStatus::Completed)
             .count();
         let mut lines = vec![format!(
-            "Batch #{} — Tasks: {completed}/{}",
+            "BatchData #{} — Tasks: {completed}/{}",
             self.batch_id,
             self.items.len()
         )];

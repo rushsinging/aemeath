@@ -19,15 +19,18 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
 
     let task_access = task::TaskStore::new();
     task_access
-        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("request".into()).unwrap(),
+            1,
+        )
         .unwrap();
     task_access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "authoritative".into(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -109,15 +112,18 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
 
     let task_access = task::TaskStore::new();
     task_access
-        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("request".into()).unwrap(),
+            1,
+        )
         .unwrap();
     task_access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "authoritative".into(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -154,15 +160,18 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
 
     let task_access = task::TaskStore::new();
     task_access
-        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("request".into()).unwrap(),
+            1,
+        )
         .unwrap();
     task_access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "authoritative".into(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,

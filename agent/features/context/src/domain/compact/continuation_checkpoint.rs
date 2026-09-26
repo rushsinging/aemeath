@@ -668,7 +668,7 @@ pub(crate) fn is_compact_protocol_text(text: &str) -> bool {
 }
 
 pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
-    const TASK_HEADING: &str = "\n\n## Current Task State\n";
+    const TASK_HEADING: &str = "\n\n## Current TaskData State\n";
     source
         .rsplit_once(TASK_HEADING)
         .map_or((source, None), |(checkpoint, task_state)| {

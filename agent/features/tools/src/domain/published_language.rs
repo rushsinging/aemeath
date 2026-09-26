@@ -131,9 +131,9 @@ pub enum ToolCapability {
     Interact,
     /// 派发子 agent。
     Dispatch,
-    /// 读取 Task 列表或 Task 详情。
+    /// 读取 TaskData 列表或 TaskData 详情。
     TaskRead,
-    /// 修改 Task 列表。
+    /// 修改 TaskData 列表。
     TaskWrite,
     /// 控制 workspace（worktree 进入 / 退出）。
     WorkspaceControl,

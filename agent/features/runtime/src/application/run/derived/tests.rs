@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
-/// #1248 Task 3: shared test factory for CliAgentRunner in tests.
+/// #1248 TaskData 3: shared test factory for CliAgentRunner in tests.
 fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeContextFactory> {
     let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
     let services = crate::application::run::context::RuntimeServices {
@@ -58,13 +58,13 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
         hooks: {
             struct FakeHook;
             #[async_trait]
-            impl hook::HookPort for FakeHook {
+            impl hook::HookDispatcher for FakeHook {
                 async fn dispatch(
                     &self,
-                    _invocation: hook::HookInvocation,
-                    _cancellation: &dyn hook::CancellationSignal,
-                ) -> hook::HookOutcome {
-                    hook::HookOutcome::proceed()
+                    _invocation: hook::HookInvocationData,
+                    _cancellation: &dyn hook::HookCancellationSignal,
+                ) -> hook::HookOutcomeData {
+                    hook::HookOutcomeData::proceed()
                 }
             }
             Arc::new(FakeHook)
@@ -634,13 +634,27 @@ impl tools::CancellationSignal for ManualCancellation {
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+        Arc::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl hook::HookCancellationSignal for ManualCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
     async fn cancelled(&self) {
         while !self.is_cancelled() {
             self.notify.notified().await;
         }
-    }
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
-        Arc::new(self.clone())
     }
 }
 
@@ -773,7 +787,9 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
     assert!(matches!(
         result,
         tools::AgentRunTerminal::Failed { ref error }
-            if error.contains("disabled")
+            if error.contains("已禁用")
+                && error.contains("`coder`")
+                && error.contains("可用 agent 名单")
     ));
 }
 
@@ -930,11 +946,17 @@ async fn unknown_sub_agent_name_fails_before_provider_invocation() {
         })
         .await;
 
-    assert_eq!(
-        result,
-        tools::AgentRunTerminal::Failed {
-            error: "sub-agent instance `missing-role` not found in config".to_string(),
-        }
+    let error_message = match result {
+        tools::AgentRunTerminal::Failed { error } => error,
+        other => panic!("unknown agent must fail before provider invocation, got {other:?}"),
+    };
+    assert!(
+        error_message.contains("`missing-role`") && error_message.contains("不存在"),
+        "错误必须指明缺失的 agent：{error_message}"
+    );
+    assert!(
+        error_message.contains("可用 agent 名单"),
+        "错误必须返回可用 agent 名单（issue #1736 R2）：{error_message}"
     );
 }
 
@@ -1644,7 +1666,7 @@ fn test_runner(
     test_runner_with_provider(Arc::new(ErrorProvider { error }))
 }
 
-/// #1385 Task 7: Create a `ParentRunContextSource` pre-loaded with a valid
+/// #1385 TaskData 7: Create a `ParentRunContextSource` pre-loaded with a valid
 /// parent frame so `run_agent` tests exercise the real production derivation
 /// path instead of the old `.ok()` fallback.
 /// The returned guard MUST be held for the duration of the test to keep
@@ -1765,7 +1787,7 @@ impl LlmProvider for ErrorProvider {
     }
 }
 
-// ── #1385 Task 6: Sub Context Derivation RED Tests ──
+// ── #1385 TaskData 6: Sub Context Derivation RED Tests ──
 
 #[path = "tests/runtime_context_derivation.rs"]
 mod sub_context_derivation_tests;

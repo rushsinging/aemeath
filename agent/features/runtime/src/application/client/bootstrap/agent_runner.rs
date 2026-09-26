@@ -154,16 +154,16 @@ mod tests {
                     }
                     Arc::new(FakeRefl)
                 };
-                let hooks: Arc<dyn hook::HookPort> = {
+                let hooks: Arc<dyn hook::HookDispatcher> = {
                     struct FakeHook;
                     #[async_trait::async_trait]
-                    impl hook::HookPort for FakeHook {
+                    impl hook::HookDispatcher for FakeHook {
                         async fn dispatch(
                             &self,
-                            _invocation: hook::HookInvocation,
-                            _cancellation: &dyn hook::CancellationSignal,
-                        ) -> hook::HookOutcome {
-                            hook::HookOutcome::proceed()
+                            _invocation: hook::HookInvocationData,
+                            _cancellation: &dyn hook::HookCancellationSignal,
+                        ) -> hook::HookOutcomeData {
+                            hook::HookOutcomeData::proceed()
                         }
                     }
                     Arc::new(FakeHook)

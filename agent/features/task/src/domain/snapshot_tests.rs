@@ -1,6 +1,6 @@
 use super::{
-    Batch, BatchCreateSpec, BatchId, Task, TaskCreateSpec, TaskId, TaskPriority, TaskRevision,
-    TaskSnapshot, TaskStoreState,
+    BatchCreateSpecData, BatchData, BatchIdData, TaskCreateSpecData, TaskData, TaskIdData,
+    TaskPriorityData, TaskRevisionData, TaskSnapshotData, TaskStoreState,
 };
 use crate::adapters::TaskSnapshotCodecError;
 
@@ -14,11 +14,11 @@ const EMPTY_V2: &[u8] = br#"{
   "batches": []
 }"#;
 
-fn decode(bytes: &[u8]) -> TaskSnapshot {
-    TaskSnapshot::decode(bytes).expect("fixture must decode")
+fn decode(bytes: &[u8]) -> TaskSnapshotData {
+    TaskSnapshotData::decode(bytes).expect("fixture must decode")
 }
 
-fn encoded_text(snapshot: &TaskSnapshot) -> String {
+fn encoded_text(snapshot: &TaskSnapshotData) -> String {
     String::from_utf8(snapshot.encode().expect("snapshot must encode"))
         .expect("snapshot JSON must be UTF-8")
 }
@@ -44,12 +44,20 @@ fn snapshot_decode_normalizes_unordered_wire_entities() {
     let snapshot = decode(unordered);
 
     assert_eq!(
-        snapshot.tasks().iter().map(Task::id).collect::<Vec<_>>(),
-        vec![TaskId::new(1), TaskId::new(2)]
+        snapshot
+            .tasks()
+            .iter()
+            .map(TaskData::id)
+            .collect::<Vec<_>>(),
+        vec![TaskIdData::new(1), TaskIdData::new(2)]
     );
     assert_eq!(
-        snapshot.batches().iter().map(Batch::id).collect::<Vec<_>>(),
-        vec![BatchId::new(1), BatchId::new(2)]
+        snapshot
+            .batches()
+            .iter()
+            .map(BatchData::id)
+            .collect::<Vec<_>>(),
+        vec![BatchIdData::new(1), BatchIdData::new(2)]
     );
 }
 
@@ -71,7 +79,7 @@ fn snapshot_v2_normalizes_pending_task_with_stale_started_at() {
 
     let snapshot = decode(legacy_pending);
     let task = snapshot.tasks().first().expect("task must decode");
-    assert_eq!(task.status(), super::TaskStatus::Pending);
+    assert_eq!(task.status(), super::TaskStatusData::Pending);
     assert_eq!(task.started_at(), None);
     assert_eq!(task.completed_at(), None);
     snapshot
@@ -83,38 +91,56 @@ fn snapshot_v2_normalizes_pending_task_with_stale_started_at() {
 fn snapshot_from_live_state_orders_tasks_and_batches_by_typed_id() {
     let mut state = TaskStoreState::empty();
     state
-        .create_batch(BatchCreateSpec::try_new("first".into()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("first".into()).unwrap(), 1)
         .unwrap();
     let first = state
         .create_task(
-            TaskCreateSpec::try_new("first".into(), String::new(), None, TaskPriority::Normal)
-                .unwrap(),
+            TaskCreateSpecData::try_new(
+                "first".into(),
+                String::new(),
+                None,
+                TaskPriorityData::Normal,
+            )
+            .unwrap(),
             2,
         )
         .unwrap()
         .value;
-    state.pause_batch(BatchId::new(1)).unwrap();
+    state.pause_batch(BatchIdData::new(1)).unwrap();
     state
-        .create_batch(BatchCreateSpec::try_new("second".into()).unwrap(), 3)
+        .create_batch(BatchCreateSpecData::try_new("second".into()).unwrap(), 3)
         .unwrap();
     let second = state
         .create_task(
-            TaskCreateSpec::try_new("second".into(), String::new(), None, TaskPriority::Normal)
-                .unwrap(),
+            TaskCreateSpecData::try_new(
+                "second".into(),
+                String::new(),
+                None,
+                TaskPriorityData::Normal,
+            )
+            .unwrap(),
             4,
         )
         .unwrap()
         .value;
 
-    let snapshot = TaskSnapshot::from_state(&state);
+    let snapshot = TaskSnapshotData::from_state(&state);
 
     assert_eq!(
-        snapshot.tasks().iter().map(Task::id).collect::<Vec<_>>(),
+        snapshot
+            .tasks()
+            .iter()
+            .map(TaskData::id)
+            .collect::<Vec<_>>(),
         vec![first.id(), second.id()]
     );
     assert_eq!(
-        snapshot.batches().iter().map(Batch::id).collect::<Vec<_>>(),
-        vec![BatchId::new(1), BatchId::new(2)]
+        snapshot
+            .batches()
+            .iter()
+            .map(BatchData::id)
+            .collect::<Vec<_>>(),
+        vec![BatchIdData::new(1), BatchIdData::new(2)]
     );
 }
 
@@ -122,17 +148,17 @@ fn snapshot_from_live_state_orders_tasks_and_batches_by_typed_id() {
 fn snapshot_empty_v2_decodes_to_canonical_empty_snapshot() {
     let snapshot = decode(EMPTY_V2);
 
-    assert_eq!(snapshot.revision(), TaskRevision::new(0));
+    assert_eq!(snapshot.revision(), TaskRevisionData::new(0));
     assert!(snapshot.tasks().is_empty());
     assert!(snapshot.batches().is_empty());
-    assert_eq!(snapshot.next_task_id(), TaskId::new(1));
-    assert_eq!(snapshot.next_batch_id(), BatchId::new(1));
+    assert_eq!(snapshot.next_task_id(), TaskIdData::new(1));
+    assert_eq!(snapshot.next_batch_id(), BatchIdData::new(1));
     assert_eq!(snapshot.current_batch(), None);
 }
 
 #[test]
 fn snapshot_empty_encodes_as_v2_with_string_ids_and_round_trips() {
-    let snapshot = TaskSnapshot::empty();
+    let snapshot = TaskSnapshotData::empty();
     let bytes = snapshot.encode().expect("empty snapshot must encode");
     let json = std::str::from_utf8(&bytes).unwrap();
 
@@ -167,9 +193,9 @@ fn snapshot_v1_upgrades_zero_current_batch_and_derives_missing_next_batch_id() {
 
     let snapshot = decode(legacy);
 
-    assert_eq!(snapshot.revision(), TaskRevision::new(0));
-    assert_eq!(snapshot.next_task_id(), TaskId::new(4));
-    assert_eq!(snapshot.next_batch_id(), BatchId::new(8));
+    assert_eq!(snapshot.revision(), TaskRevisionData::new(0));
+    assert_eq!(snapshot.next_task_id(), TaskIdData::new(4));
+    assert_eq!(snapshot.next_batch_id(), BatchIdData::new(8));
     assert_eq!(snapshot.current_batch(), None);
     assert_eq!(snapshot.batches().len(), 1);
 
@@ -232,7 +258,7 @@ fn snapshot_future_version_is_rejected_without_falling_back_to_v1() {
     let bytes = br#"{"schema_version":3,"revision":"0","tasks":[],"next_task_id":"1","next_batch_id":"1","current_batch":null,"batches":[]}"#;
 
     assert!(matches!(
-        TaskSnapshot::decode(bytes),
+        TaskSnapshotData::decode(bytes),
         Err(TaskSnapshotCodecError::UnsupportedFutureVersion { version: 3 })
     ));
 }
@@ -240,7 +266,7 @@ fn snapshot_future_version_is_rejected_without_falling_back_to_v1() {
 #[test]
 fn snapshot_malformed_json_returns_typed_codec_error() {
     assert!(matches!(
-        TaskSnapshot::decode(br#"{"schema_version":2,"tasks":["#),
+        TaskSnapshotData::decode(br#"{"schema_version":2,"tasks":["#),
         Err(TaskSnapshotCodecError::InvalidJson(_))
     ));
 }
@@ -269,7 +295,7 @@ fn snapshot_v2_rejects_numeric_mixed_and_zero_id_representations() {
     for (case, bytes) in cases {
         assert!(
             matches!(
-                TaskSnapshot::decode(bytes),
+                TaskSnapshotData::decode(bytes),
                 Err(TaskSnapshotCodecError::InvalidIdRepresentation { .. })
             ),
             "V2 must reject {case}"
@@ -290,7 +316,7 @@ fn legacy_v1_body_with_schema_version(schema_version_json: &str) -> Vec<u8> {
 
 fn assert_invalid_schema_version(schema_version_json: &str) {
     assert!(matches!(
-        TaskSnapshot::decode(&legacy_v1_body_with_schema_version(schema_version_json)),
+        TaskSnapshotData::decode(&legacy_v1_body_with_schema_version(schema_version_json)),
         Err(TaskSnapshotCodecError::InvalidSchemaVersionRepresentation { .. })
     ));
 }

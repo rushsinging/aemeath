@@ -7,12 +7,12 @@
 //! - 能力违规 → typed `Protocol` failure；
 //! - exit 1/2/127 → `Block`（阻塞 point）/ `Protocol{BlockOnNonBlocking}`（非阻塞 point）。
 //!
-//! `classify_directive` 返回 `Result<HookDirective, ClassifyError>`。
+//! `classify_directive` 返回 `Result<HookDirectiveData, ClassifyError>`。
 
 #![cfg(test)]
 
-use crate::domain::invocation::HookPoint;
-use crate::domain::outcome::{ClassifyError, HookDirective, HookReason, ProtocolViolation};
+use crate::domain::invocation::HookPointData;
+use crate::domain::outcome::{ClassifyError, HookDirectiveData, HookReasonData, ProtocolViolation};
 use crate::domain::protocol::{
     classify_directive, classify_output, default_true, truncate, OUTPUT_MAX_BYTES,
 };
@@ -27,7 +27,7 @@ fn test_classify_exit0_empty_stdout() {
     for point in all_points() {
         let d = classify_directive(point, Some(0), "", "");
         assert!(
-            matches!(d, Ok(HookDirective::Continue)),
+            matches!(d, Ok(HookDirectiveData::Continue)),
             "{point:?}: exit 0 + 空 stdout 应返回 Ok(Continue)，实际 = {d:?}"
         );
     }
@@ -36,28 +36,33 @@ fn test_classify_exit0_empty_stdout() {
 /// exit 0 + 空白输出 → Continue。
 #[test]
 fn test_classify_exit0_whitespace_stdout() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "   \n  ", "");
-    assert!(matches!(d, Ok(HookDirective::Continue)));
+    let d = classify_directive(HookPointData::PreToolUse, Some(0), "   \n  ", "");
+    assert!(matches!(d, Ok(HookDirectiveData::Continue)));
 }
 
 /// exit 0 + 合法 JSON（无特殊字段） → Continue。
 #[test]
 fn test_classify_exit0_plain_json() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "{}", "");
-    assert!(matches!(d, Ok(HookDirective::Continue)));
+    let d = classify_directive(HookPointData::PreToolUse, Some(0), "{}", "");
+    assert!(matches!(d, Ok(HookDirectiveData::Continue)));
 }
 
 /// exit 0 + `{"continue":true}` → Continue。
 #[test]
 fn test_classify_exit0_json_continue_true() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), r#"{"continue": true}"#, "");
-    assert!(matches!(d, Ok(HookDirective::Continue)));
+    let d = classify_directive(
+        HookPointData::PreToolUse,
+        Some(0),
+        r#"{"continue": true}"#,
+        "",
+    );
+    assert!(matches!(d, Ok(HookDirectiveData::Continue)));
 }
 
 /// #924：exit 0 + 非法 JSON → typed `InvalidJson`。
 #[test]
 fn test_classify_exit0_invalid_json_is_typed_invalid_json() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "{not json", "");
+    let d = classify_directive(HookPointData::PreToolUse, Some(0), "{not json", "");
     assert!(
         matches!(d, Err(ClassifyError::InvalidJson { .. })),
         "非法 JSON 应分类为 typed InvalidJson，实际 = {d:?}"
@@ -84,7 +89,7 @@ fn test_classify_none_exit_code_is_missing_exit_code() {
 #[test]
 fn test_classify_none_exit_code_with_stdout_still_missing() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         None,
         r#"{"additionalContext":"x"}"#,
         "",
@@ -98,7 +103,7 @@ fn test_classify_none_exit_code_with_stdout_still_missing() {
 /// #924：非法 JSON 的 `raw` 携带触发解析失败的原始 stdout。
 #[test]
 fn test_classify_exit0_invalid_json_carries_raw() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(0), "{not json", "");
+    let d = classify_directive(HookPointData::PreToolUse, Some(0), "{not json", "");
     match d {
         Err(ClassifyError::InvalidJson { raw, error }) => {
             assert!(!raw.is_empty(), "raw 应携带原始 stdout");
@@ -112,7 +117,7 @@ fn test_classify_exit0_invalid_json_carries_raw() {
 #[test]
 fn test_classify_exit0_json_decision_block_on_blocking_point() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"decision":"block","reason":"forbidden"}"#,
         "",
@@ -120,8 +125,8 @@ fn test_classify_exit0_json_decision_block_on_blocking_point() {
     .expect("阻塞 point 的 JSON block 应为 Ok");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::JsonBlock { ref reason }
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonBlock { ref reason }
         } if reason == "forbidden"
     ));
 }
@@ -130,7 +135,7 @@ fn test_classify_exit0_json_decision_block_on_blocking_point() {
 #[test]
 fn test_classify_exit0_json_decision_block_no_reason() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"decision":"block"}"#,
         "",
@@ -138,8 +143,8 @@ fn test_classify_exit0_json_decision_block_no_reason() {
     .expect("应为 Ok(Block)");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::JsonBlock { ref reason }
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonBlock { ref reason }
         } if reason.is_empty()
     ));
 }
@@ -148,20 +153,20 @@ fn test_classify_exit0_json_decision_block_no_reason() {
 #[test]
 fn classify_output_stop_plain_success_log_continues() {
     let directive = classify_directive(
-        HookPoint::Stop,
+        HookPointData::Stop,
         Some(0),
         "Finished build\nAll fast architecture guards passed.\n",
         "",
     )
     .expect("普通成功日志应视为 Continue");
 
-    assert!(matches!(directive, HookDirective::Continue));
+    assert!(matches!(directive, HookDirectiveData::Continue));
 }
 
 /// 以 `{` 开头的 stdout 表示声明 JSON 协议；损坏 JSON 仍必须报错。
 #[test]
 fn classify_output_stop_invalid_json_candidate_fails() {
-    let error = classify_directive(HookPoint::Stop, Some(0), "{not-json", "")
+    let error = classify_directive(HookPointData::Stop, Some(0), "{not-json", "")
         .expect_err("JSON 候选格式损坏不能静默放行");
 
     assert!(matches!(error, ClassifyError::InvalidJson { .. }));
@@ -171,7 +176,7 @@ fn classify_output_stop_invalid_json_candidate_fails() {
 #[test]
 fn test_classify_exit0_json_continue_false_on_blocking_point() {
     let d = classify_directive(
-        HookPoint::Stop,
+        HookPointData::Stop,
         Some(0),
         r#"{"continue":false,"stopReason":"needs more work"}"#,
         "",
@@ -179,8 +184,8 @@ fn test_classify_exit0_json_continue_false_on_blocking_point() {
     .expect("Stop 的 continue:false 应为 Ok(Block)");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::JsonContinueFalse { ref stop_reason }
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonContinueFalse { ref stop_reason }
         } if stop_reason.as_deref() == Some("needs more work")
     ));
 }
@@ -188,12 +193,12 @@ fn test_classify_exit0_json_continue_false_on_blocking_point() {
 /// exit 0 + `{"continue":false}` 无 stopReason → Block{stop_reason:None}。
 #[test]
 fn test_classify_exit0_json_continue_false_no_stop_reason() {
-    let d = classify_directive(HookPoint::Stop, Some(0), r#"{"continue":false}"#, "")
+    let d = classify_directive(HookPointData::Stop, Some(0), r#"{"continue":false}"#, "")
         .expect("应为 Ok(Block)");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::JsonContinueFalse { stop_reason: None }
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonContinueFalse { stop_reason: None }
         }
     ));
 }
@@ -202,11 +207,11 @@ fn test_classify_exit0_json_continue_false_no_stop_reason() {
 #[test]
 fn test_classify_exit_codes_1_2_127_are_block() {
     for code in [1, 2, 127] {
-        let d = classify_directive(HookPoint::PreToolUse, Some(code), "", "boom");
+        let d = classify_directive(HookPointData::PreToolUse, Some(code), "", "boom");
         match d {
-            Ok(HookDirective::Block {
+            Ok(HookDirectiveData::Block {
                 reason:
-                    HookReason::ExitCode {
+                    HookReasonData::ExitCode {
                         code: c,
                         ref stderr,
                     },
@@ -222,12 +227,12 @@ fn test_classify_exit_codes_1_2_127_are_block() {
 /// 非零 exit → Block（阻塞 point），携带 exit code 与 stderr。
 #[test]
 fn test_classify_nonzero_exit_on_blocking_point() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(1), "", "error occurred")
+    let d = classify_directive(HookPointData::PreToolUse, Some(1), "", "error occurred")
         .expect("阻塞 point 的非零 exit 应为 Ok(Block)");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 1, ref stderr }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 1, ref stderr }
         } if stderr == "error occurred"
     ));
 }
@@ -235,11 +240,11 @@ fn test_classify_nonzero_exit_on_blocking_point() {
 /// 非零 exit + 空 stderr → Block{stderr:""}。
 #[test]
 fn test_classify_nonzero_exit_empty_stderr() {
-    let d = classify_directive(HookPoint::PreToolUse, Some(2), "", "").expect("应为 Ok(Block)");
+    let d = classify_directive(HookPointData::PreToolUse, Some(2), "", "").expect("应为 Ok(Block)");
     assert!(matches!(
         d,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 2, stderr: ref s }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 2, stderr: ref s }
         } if s.is_empty()
     ));
 }
@@ -248,7 +253,7 @@ fn test_classify_nonzero_exit_empty_stderr() {
 #[test]
 fn test_classify_exit0_additional_context() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"additionalContext":"extra info"}"#,
         "",
@@ -256,7 +261,7 @@ fn test_classify_exit0_additional_context() {
     .expect("应为 Ok(ContinueWithContext)");
     assert!(matches!(
         d,
-        HookDirective::ContinueWithContext { ref context }
+        HookDirectiveData::ContinueWithContext { ref context }
         if context == "extra info"
     ));
 }
@@ -265,7 +270,7 @@ fn test_classify_exit0_additional_context() {
 #[test]
 fn test_classify_exit0_updated_input() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"hookSpecificOutput":{"updatedInput":{"command":"ls -la"}}}"#,
         "",
@@ -273,7 +278,7 @@ fn test_classify_exit0_updated_input() {
     .expect("应为 Ok(ContinueWithUpdatedInput)");
     assert!(matches!(
         d,
-        HookDirective::ContinueWithUpdatedInput { ref input }
+        HookDirectiveData::ContinueWithUpdatedInput { ref input }
         if input["command"] == "ls -la"
     ));
 }
@@ -282,7 +287,7 @@ fn test_classify_exit0_updated_input() {
 #[test]
 fn test_classify_exit0_context_and_input() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"additionalContext":"ctx","hookSpecificOutput":{"updatedInput":{"x":1}}}"#,
         "",
@@ -290,7 +295,7 @@ fn test_classify_exit0_context_and_input() {
     .expect("应为 Ok(ContinueWithContextAndInput)");
     assert!(matches!(
         d,
-        HookDirective::ContinueWithContextAndInput { ref context, ref input }
+        HookDirectiveData::ContinueWithContextAndInput { ref context, ref input }
         if context == "ctx" && input["x"] == 1
     ));
 }
@@ -299,13 +304,13 @@ fn test_classify_exit0_context_and_input() {
 #[test]
 fn test_classify_block_priority_over_context() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"decision":"block","reason":"denied","additionalContext":"ctx"}"#,
         "",
     )
     .expect("decision:block 应为 Ok");
-    assert!(matches!(d, HookDirective::Block { .. }));
+    assert!(matches!(d, HookDirectiveData::Block { .. }));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -385,7 +390,7 @@ fn test_json_continue_false_on_non_blocking_point_is_protocol_error() {
 #[test]
 fn test_context_on_no_context_point_is_protocol_error() {
     let d = classify_directive(
-        HookPoint::Stop,
+        HookPointData::Stop,
         Some(0),
         r#"{"additionalContext":"extra"}"#,
         "",
@@ -406,7 +411,7 @@ fn test_context_on_no_context_point_is_protocol_error() {
 #[test]
 fn test_updated_input_on_no_modify_point_is_protocol_error() {
     let d = classify_directive(
-        HookPoint::Stop,
+        HookPointData::Stop,
         Some(0),
         r#"{"hookSpecificOutput":{"updatedInput":{"x":1}}}"#,
         "",
@@ -427,13 +432,13 @@ fn test_updated_input_on_no_modify_point_is_protocol_error() {
 #[test]
 fn test_context_on_pre_compact_returns_context() {
     let d = classify_directive(
-        HookPoint::PreCompact,
+        HookPointData::PreCompact,
         Some(0),
         r#"{"additionalContext":"ctx"}"#,
         "",
     )
     .expect("PreCompact 支持 context，应为 Ok(ContinueWithContext)");
-    assert!(matches!(d, HookDirective::ContinueWithContext { .. }));
+    assert!(matches!(d, HookDirectiveData::ContinueWithContext { .. }));
 }
 
 /// #924：PreCompact 收到 updatedInput（can_modify_input=false）
@@ -441,7 +446,7 @@ fn test_context_on_pre_compact_returns_context() {
 #[test]
 fn test_updated_input_on_pre_compact_is_protocol_error() {
     let d = classify_directive(
-        HookPoint::PreCompact,
+        HookPointData::PreCompact,
         Some(0),
         r#"{"hookSpecificOutput":{"updatedInput":{"x":1}}}"#,
         "",
@@ -465,13 +470,13 @@ fn test_updated_input_on_pre_compact_is_protocol_error() {
 #[test]
 fn test_metadata_blocking_points() {
     let blocking_points = [
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PreCompact,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
-        HookPoint::Stop,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PreCompact,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
+        HookPointData::Stop,
     ];
     for point in blocking_points {
         let meta = point.metadata();
@@ -483,25 +488,25 @@ fn test_metadata_blocking_points() {
 #[test]
 fn test_metadata_non_blocking_points() {
     let non_blocking = [
-        HookPoint::PostToolUse,
-        HookPoint::PostToolUseFailure,
-        HookPoint::PostCompact,
-        HookPoint::PostToolBatch,
-        HookPoint::ElicitationResult,
-        HookPoint::SessionStart,
-        HookPoint::SessionEnd,
-        HookPoint::SubRunStart,
-        HookPoint::SubRunStop,
-        HookPoint::TaskCreated,
-        HookPoint::TaskCompleted,
-        HookPoint::Notification,
-        HookPoint::InstructionsLoaded,
-        HookPoint::StopFailure,
-        HookPoint::PermissionDenied,
-        HookPoint::ConfigChange,
-        HookPoint::CwdChanged,
-        HookPoint::FileChanged,
-        HookPoint::TeammateIdle,
+        HookPointData::PostToolUse,
+        HookPointData::PostToolUseFailure,
+        HookPointData::PostCompact,
+        HookPointData::PostToolBatch,
+        HookPointData::ElicitationResult,
+        HookPointData::SessionStart,
+        HookPointData::SessionEnd,
+        HookPointData::SubRunStart,
+        HookPointData::SubRunStop,
+        HookPointData::TaskCreated,
+        HookPointData::TaskCompleted,
+        HookPointData::Notification,
+        HookPointData::InstructionsLoaded,
+        HookPointData::StopFailure,
+        HookPointData::PermissionDenied,
+        HookPointData::ConfigChange,
+        HookPointData::CwdChanged,
+        HookPointData::FileChanged,
+        HookPointData::TeammateIdle,
     ];
     for point in non_blocking {
         let meta = point.metadata();
@@ -513,11 +518,11 @@ fn test_metadata_non_blocking_points() {
 #[test]
 fn test_metadata_modify_input_points() {
     let can_modify = [
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
     ];
     for point in can_modify {
         let meta = point.metadata();
@@ -528,19 +533,19 @@ fn test_metadata_modify_input_points() {
 /// Stop 的 can_modify_input=false。
 #[test]
 fn test_metadata_stop_no_modify_input() {
-    assert!(!HookPoint::Stop.metadata().can_modify_input);
+    assert!(!HookPointData::Stop.metadata().can_modify_input);
 }
 
 /// failure_policy_configurable=true 只有前置闸门（不含 Stop）。
 #[test]
 fn test_metadata_failure_policy_configurable() {
     let configurable = [
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PreCompact,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PreCompact,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
     ];
     for point in configurable {
         assert!(
@@ -549,19 +554,19 @@ fn test_metadata_failure_policy_configurable() {
         );
     }
     // Stop 不可配置
-    assert!(!HookPoint::Stop.metadata().failure_policy_configurable);
+    assert!(!HookPointData::Stop.metadata().failure_policy_configurable);
 }
 
 /// 观察类 point 全部 false（can_block / can_add_context）。
 #[test]
 fn test_metadata_observation_points_all_false() {
     let observation = [
-        HookPoint::StopFailure,
-        HookPoint::PermissionDenied,
-        HookPoint::ConfigChange,
-        HookPoint::CwdChanged,
-        HookPoint::FileChanged,
-        HookPoint::TeammateIdle,
+        HookPointData::StopFailure,
+        HookPointData::PermissionDenied,
+        HookPointData::ConfigChange,
+        HookPointData::CwdChanged,
+        HookPointData::FileChanged,
+        HookPointData::TeammateIdle,
     ];
     for point in observation {
         let meta = point.metadata();
@@ -599,199 +604,199 @@ fn test_default_true() {
 }
 
 // ════════════════════════════════════════════════════════════
-// HookInvocation::point() 测试
+// HookInvocationData::point() 测试
 // ════════════════════════════════════════════════════════════
 
-/// HookInvocation::point() 对每个变体返回正确的 HookPoint。
+/// HookInvocationData::point() 对每个变体返回正确的 HookPointData。
 #[test]
 fn test_invocation_point_roundtrip() {
     use crate::domain::invocation::*;
 
-    let cases: Vec<(HookInvocation, HookPoint)> = vec![
+    let cases: Vec<(HookInvocationData, HookPointData)> = vec![
         (
-            HookInvocation::PreToolUse(PreToolUseInput {
+            HookInvocationData::PreToolUse {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
-            }),
-            HookPoint::PreToolUse,
+            },
+            HookPointData::PreToolUse,
         ),
         (
-            HookInvocation::UserPromptSubmit(UserPromptInput {
+            HookInvocationData::UserPromptSubmit {
                 prompt: "hi".into(),
-            }),
-            HookPoint::UserPromptSubmit,
+            },
+            HookPointData::UserPromptSubmit,
         ),
         (
-            HookInvocation::PreCompact(PreCompactInput {
+            HookInvocationData::PreCompact {
                 run_steps: 1,
                 messages_count: 10,
-            }),
-            HookPoint::PreCompact,
+            },
+            HookPointData::PreCompact,
         ),
         (
-            HookInvocation::PermissionRequest(PermissionInput {
+            HookInvocationData::PermissionRequest {
                 tool_name: "Bash".into(),
                 permission_rule: "ask".into(),
-            }),
-            HookPoint::PermissionRequest,
+            },
+            HookPointData::PermissionRequest,
         ),
         (
-            HookInvocation::Elicitation(ElicitationInput {
+            HookInvocationData::Elicitation {
                 server_name: "srv".into(),
                 elicitation_text: "text".into(),
-            }),
-            HookPoint::Elicitation,
+            },
+            HookPointData::Elicitation,
         ),
         (
-            HookInvocation::UserPromptExpansion(UserPromptExpansionInput {
+            HookInvocationData::UserPromptExpansion {
                 original_input: "a".into(),
                 expanded_input: "b".into(),
-            }),
-            HookPoint::UserPromptExpansion,
+            },
+            HookPointData::UserPromptExpansion,
         ),
         (
-            HookInvocation::Stop(StopInput { run_steps: 1 }),
-            HookPoint::Stop,
+            HookInvocationData::Stop { run_steps: 1 },
+            HookPointData::Stop,
         ),
         (
-            HookInvocation::PostToolUse(PostToolUseInput {
+            HookInvocationData::PostToolUse {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
                 tool_output: "done".into(),
                 is_error: false,
-            }),
-            HookPoint::PostToolUse,
+            },
+            HookPointData::PostToolUse,
         ),
         (
-            HookInvocation::PostToolUseFailure(PostToolUseFailureInput {
+            HookInvocationData::PostToolUseFailure {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
                 error: "boom".into(),
-            }),
-            HookPoint::PostToolUseFailure,
+            },
+            HookPointData::PostToolUseFailure,
         ),
         (
-            HookInvocation::PostCompact(PostCompactInput {
+            HookInvocationData::PostCompact {
                 run_steps: 1,
                 messages_before: 10,
                 messages_after: 5,
-            }),
-            HookPoint::PostCompact,
+            },
+            HookPointData::PostCompact,
         ),
         (
-            HookInvocation::PostToolBatch(PostToolBatchInput {
+            HookInvocationData::PostToolBatch {
                 tool_count: 3,
                 summary: "ok".into(),
-            }),
-            HookPoint::PostToolBatch,
+            },
+            HookPointData::PostToolBatch,
         ),
         (
-            HookInvocation::ElicitationResult(ElicitationResultInput {
+            HookInvocationData::ElicitationResult {
                 server_name: "srv".into(),
                 user_response: "resp".into(),
-            }),
-            HookPoint::ElicitationResult,
+            },
+            HookPointData::ElicitationResult,
         ),
         (
-            HookInvocation::SessionStart(SessionInput {
+            HookInvocationData::SessionStart {
                 session_id: "sess-start".into(),
-            }),
-            HookPoint::SessionStart,
+            },
+            HookPointData::SessionStart,
         ),
         (
-            HookInvocation::SessionEnd(SessionInput {
+            HookInvocationData::SessionEnd {
                 session_id: "sess-end".into(),
-            }),
-            HookPoint::SessionEnd,
+            },
+            HookPointData::SessionEnd,
         ),
         (
-            HookInvocation::SubRunStart(SubRunInput {
+            HookInvocationData::SubRunStart {
                 prompt: "p".into(),
                 system: "s".into(),
                 model_spec: None,
-            }),
-            HookPoint::SubRunStart,
+            },
+            HookPointData::SubRunStart,
         ),
         (
-            HookInvocation::SubRunStop(SubRunStopInput {
+            HookInvocationData::SubRunStop {
                 prompt: "p".into(),
                 system: "s".into(),
                 model_spec: None,
                 result: "r".into(),
                 run_steps: 1,
                 is_error: false,
-            }),
-            HookPoint::SubRunStop,
+            },
+            HookPointData::SubRunStop,
         ),
         (
-            HookInvocation::TaskCreated(TaskInput {
+            HookInvocationData::TaskCreated {
                 tool_input: serde_json::json!({}),
                 tool_output: "ok".into(),
-            }),
-            HookPoint::TaskCreated,
+            },
+            HookPointData::TaskCreated,
         ),
         (
-            HookInvocation::TaskCompleted(TaskInput {
+            HookInvocationData::TaskCompleted {
                 tool_input: serde_json::json!({}),
                 tool_output: "ok".into(),
-            }),
-            HookPoint::TaskCompleted,
+            },
+            HookPointData::TaskCompleted,
         ),
         (
-            HookInvocation::Notification(NotificationInput {
+            HookInvocationData::Notification {
                 notification_text: "n".into(),
                 notification_type: "t".into(),
-            }),
-            HookPoint::Notification,
+            },
+            HookPointData::Notification,
         ),
         (
-            HookInvocation::InstructionsLoaded(InstructionsInput {
+            HookInvocationData::InstructionsLoaded {
                 file_path: "f".into(),
                 instruction_type: "claude_md".into(),
-            }),
-            HookPoint::InstructionsLoaded,
+            },
+            HookPointData::InstructionsLoaded,
         ),
         (
-            HookInvocation::StopFailure(StopFailureInput {
+            HookInvocationData::StopFailure {
                 run_steps: 1,
                 error: "e".into(),
-            }),
-            HookPoint::StopFailure,
+            },
+            HookPointData::StopFailure,
         ),
         (
-            HookInvocation::PermissionDenied(PermissionInput {
+            HookInvocationData::PermissionDenied {
                 tool_name: "Bash".into(),
                 permission_rule: "deny".into(),
-            }),
-            HookPoint::PermissionDenied,
+            },
+            HookPointData::PermissionDenied,
         ),
         (
-            HookInvocation::ConfigChange(ConfigChangeInput {
+            HookInvocationData::ConfigChange {
                 config_file: "f".into(),
                 changed_field: None,
-            }),
-            HookPoint::ConfigChange,
+            },
+            HookPointData::ConfigChange,
         ),
         (
-            HookInvocation::CwdChanged(CwdChangedInput {
+            HookInvocationData::CwdChanged {
                 old_cwd: "/a".into(),
                 new_cwd: "/b".into(),
-            }),
-            HookPoint::CwdChanged,
+            },
+            HookPointData::CwdChanged,
         ),
         (
-            HookInvocation::FileChanged(FileChangedInput {
+            HookInvocationData::FileChanged {
                 file_path: "f".into(),
                 change_type: "write".into(),
-            }),
-            HookPoint::FileChanged,
+            },
+            HookPointData::FileChanged,
         ),
         (
-            HookInvocation::TeammateIdle(TeammateIdleInput {
+            HookInvocationData::TeammateIdle {
                 teammate_name: "t".into(),
                 idle_reason: None,
-            }),
-            HookPoint::TeammateIdle,
+            },
+            HookPointData::TeammateIdle,
         ),
     ];
 
@@ -799,7 +804,7 @@ fn test_invocation_point_roundtrip() {
         assert_eq!(
             inv.point(),
             expected_point,
-            "HookInvocation 变体的 point() 不匹配"
+            "HookInvocationData 变体的 point() 不匹配"
         );
     }
 }
@@ -812,8 +817,8 @@ fn test_invocation_point_roundtrip() {
 #[test]
 fn test_classify_output_empty_stdout_no_system_message() {
     let (directive, system_message) =
-        classify_output(HookPoint::PreToolUse, Some(0), "", "").expect("应为 Ok");
-    assert!(matches!(directive, HookDirective::Continue));
+        classify_output(HookPointData::PreToolUse, Some(0), "", "").expect("应为 Ok");
+    assert!(matches!(directive, HookDirectiveData::Continue));
     assert!(
         system_message.is_none(),
         "空 stdout 不应有 system_message，实际 = {system_message:?}"
@@ -825,14 +830,14 @@ fn test_classify_output_empty_stdout_no_system_message() {
 #[test]
 fn test_classify_output_preserves_system_message_alone() {
     let (directive, system_message) = classify_output(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"systemMessage":"watch out!"}"#,
         "",
     )
     .expect("应为 Ok");
     assert!(
-        matches!(directive, HookDirective::Continue),
+        matches!(directive, HookDirectiveData::Continue),
         "仅 systemMessage 不应改变 directive，实际 = {directive:?}"
     );
     assert_eq!(
@@ -847,7 +852,7 @@ fn test_classify_output_preserves_system_message_alone() {
 #[test]
 fn test_classify_output_preserves_both_context_and_system_message() {
     let (directive, system_message) = classify_output(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"additionalContext":"ctx","systemMessage":"warn"}"#,
         "",
@@ -855,7 +860,7 @@ fn test_classify_output_preserves_both_context_and_system_message() {
     .expect("应为 Ok");
     assert!(matches!(
         directive,
-        HookDirective::ContinueWithContext { ref context } if context == "ctx"
+        HookDirectiveData::ContinueWithContext { ref context } if context == "ctx"
     ));
     assert_eq!(
         system_message.as_deref(),
@@ -868,13 +873,13 @@ fn test_classify_output_preserves_both_context_and_system_message() {
 #[test]
 fn test_classify_output_preserves_system_message_on_json_block() {
     let (directive, system_message) = classify_output(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"decision":"block","reason":"denied","systemMessage":"notify"}"#,
         "",
     )
     .expect("应为 Ok");
-    assert!(matches!(directive, HookDirective::Block { .. }));
+    assert!(matches!(directive, HookDirectiveData::Block { .. }));
     assert_eq!(
         system_message.as_deref(),
         Some("notify"),
@@ -886,8 +891,8 @@ fn test_classify_output_preserves_system_message_on_json_block() {
 #[test]
 fn test_classify_output_nonzero_exit_has_no_system_message() {
     let (directive, system_message) =
-        classify_output(HookPoint::PreToolUse, Some(1), "", "boom").expect("应为 Ok");
-    assert!(matches!(directive, HookDirective::Block { .. }));
+        classify_output(HookPointData::PreToolUse, Some(1), "", "boom").expect("应为 Ok");
+    assert!(matches!(directive, HookDirectiveData::Block { .. }));
     assert!(
         system_message.is_none(),
         "非零 exit 未解析 JSON，system_message 应为 None"
@@ -898,14 +903,14 @@ fn test_classify_output_nonzero_exit_has_no_system_message() {
 #[test]
 fn test_classify_directive_signature_unchanged() {
     let d = classify_directive(
-        HookPoint::PreToolUse,
+        HookPointData::PreToolUse,
         Some(0),
         r#"{"systemMessage":"dropped"}"#,
         "",
     )
     .expect("应为 Ok(Continue)");
     assert!(
-        matches!(d, HookDirective::Continue),
+        matches!(d, HookDirectiveData::Continue),
         "classify_directive 不受 systemMessage 影响，实际 = {d:?}"
     );
 }
@@ -914,35 +919,35 @@ fn test_classify_directive_signature_unchanged() {
 // 辅助
 // ════════════════════════════════════════════════════════════
 
-/// 返回全部 26 个 HookPoint（用于参数化测试）。
-fn all_points() -> Vec<HookPoint> {
+/// 返回全部 26 个 HookPointData（用于参数化测试）。
+fn all_points() -> Vec<HookPointData> {
     vec![
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PreCompact,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
-        HookPoint::Stop,
-        HookPoint::PostToolUse,
-        HookPoint::PostToolUseFailure,
-        HookPoint::PostCompact,
-        HookPoint::PostToolBatch,
-        HookPoint::ElicitationResult,
-        HookPoint::SessionStart,
-        HookPoint::SessionEnd,
-        HookPoint::SubRunStart,
-        HookPoint::SubRunStop,
-        HookPoint::TaskCreated,
-        HookPoint::TaskCompleted,
-        HookPoint::Notification,
-        HookPoint::InstructionsLoaded,
-        HookPoint::StopFailure,
-        HookPoint::PermissionDenied,
-        HookPoint::ConfigChange,
-        HookPoint::CwdChanged,
-        HookPoint::FileChanged,
-        HookPoint::TeammateIdle,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PreCompact,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
+        HookPointData::Stop,
+        HookPointData::PostToolUse,
+        HookPointData::PostToolUseFailure,
+        HookPointData::PostCompact,
+        HookPointData::PostToolBatch,
+        HookPointData::ElicitationResult,
+        HookPointData::SessionStart,
+        HookPointData::SessionEnd,
+        HookPointData::SubRunStart,
+        HookPointData::SubRunStop,
+        HookPointData::TaskCreated,
+        HookPointData::TaskCompleted,
+        HookPointData::Notification,
+        HookPointData::InstructionsLoaded,
+        HookPointData::StopFailure,
+        HookPointData::PermissionDenied,
+        HookPointData::ConfigChange,
+        HookPointData::CwdChanged,
+        HookPointData::FileChanged,
+        HookPointData::TeammateIdle,
     ]
 }
 
@@ -956,18 +961,18 @@ fn all_points() -> Vec<HookPoint> {
 fn session_lifecycle_payload_serializes_session_id() {
     use crate::domain::invocation::*;
 
-    let start = serde_json::to_value(HookInvocation::SessionStart(SessionInput {
+    let start = serde_json::to_value(HookInvocationData::SessionStart {
         session_id: "sess-serialize-1".into(),
-    }))
+    })
     .expect("SessionStart 序列化必须成功");
     assert_eq!(
         start,
         serde_json::json!({"SessionStart": {"session_id": "sess-serialize-1"}})
     );
 
-    let end = serde_json::to_value(HookInvocation::SessionEnd(SessionInput {
+    let end = serde_json::to_value(HookInvocationData::SessionEnd {
         session_id: "sess-serialize-2".into(),
-    }))
+    })
     .expect("SessionEnd 序列化必须成功");
     assert_eq!(
         end,

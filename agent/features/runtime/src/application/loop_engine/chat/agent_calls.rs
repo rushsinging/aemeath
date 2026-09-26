@@ -10,7 +10,7 @@ use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PreToolUseInput};
+use hook::{HookDispatcher, HookInvocationData};
 use policy::Policy;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -28,7 +28,7 @@ pub(crate) async fn execute_agent_calls<S>(
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
     workspace_persist: &Arc<dyn project::WorkspaceWriter>,
     sink: &S,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     workspace_read: &Arc<dyn project::WorkspaceReader>,
@@ -107,7 +107,7 @@ async fn execute_one_agent<S>(
     context: &RuntimeRunContext,
     call: ToolCall,
     sink: S,
-    hook_port: Arc<dyn HookPort>,
+    hook_port: Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     agent: &crate::application::tool::agent::Agent,
     agent_tool_context: &mut ToolExecutionContext,
@@ -139,10 +139,10 @@ where
         &hook_port,
         activities,
         step_id,
-        HookInvocation::PreToolUse(PreToolUseInput {
+        HookInvocationData::PreToolUse {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
-        }),
+        },
         &workspace_root,
         agent.session_id.as_ref(),
         cancel,
@@ -627,17 +627,17 @@ mod tests {
         fn try_send_event(&self, _event: RuntimeStreamEvent) {}
     }
 
-    /// A test HookPort that always returns Continue.
+    /// A test HookDispatcher that always returns Continue.
     struct NoOpHookPort;
 
     #[async_trait]
-    impl HookPort for NoOpHookPort {
+    impl HookDispatcher for NoOpHookPort {
         async fn dispatch(
             &self,
-            _invocation: HookInvocation,
-            _cancellation: &dyn hook::CancellationSignal,
-        ) -> hook::HookOutcome {
-            hook::HookOutcome::proceed()
+            _invocation: HookInvocationData,
+            _cancellation: &dyn hook::HookCancellationSignal,
+        ) -> hook::HookOutcomeData {
+            hook::HookOutcomeData::proceed()
         }
     }
 
@@ -757,7 +757,7 @@ mod tests {
     ) -> tokio::task::JoinHandle<Vec<ToolExecution>> {
         tokio::spawn(async move {
             let sink = NoopSink;
-            let hook_port: Arc<dyn HookPort> = Arc::new(NoOpHookPort);
+            let hook_port: Arc<dyn HookDispatcher> = Arc::new(NoOpHookPort);
             let activities = crate::application::activity::ActivityCoordinator::new(
                 sdk::RunId::new_v7(),
                 Arc::new(crate::application::activity::SystemActivityClock),

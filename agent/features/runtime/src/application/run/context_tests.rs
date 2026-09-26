@@ -114,9 +114,9 @@ fn runtime_context_config_accessor_returns_snapshot() {
     let _allow_all = cfg.allow_all();
 }
 
-// ── Task 5: Behavioral assertion — RuntimeContext ports are functional, not just Arc identity ──
+// ── TaskData 5: Behavioral assertion — RuntimeContext ports are functional, not just Arc identity ──
 
-/// #1385 Task 5: RuntimeContext must hold live ports that execute real behavior,
+/// #1385 TaskData 5: RuntimeContext must hold live ports that execute real behavior,
 /// not just pass Arc pointer-equality checks.
 ///
 /// This test proves that `tool_catalog()`, `policy()`, `hooks()`, and
@@ -146,7 +146,7 @@ fn runtime_context_ports_are_functional_not_just_identity() {
 
     // Hooks: prove the Arc is functional via trait dispatch.
     let _hooks = ctx.hooks();
-    // Task: prove accessor is wired.
+    // TaskData: prove accessor is wired.
     let _task = ctx.task();
 
     // Interaction bridge: non-panicking smoke check.
@@ -400,7 +400,7 @@ fn run_cancellation_scope_child_does_not_cancel_parent() {
     assert!(!parent.token().is_cancelled());
 }
 
-// ── #1385 Task 11: I/O seam tests ──
+// ── #1385 TaskData 11: I/O seam tests ──
 
 // ── RunUsageTracker tests ──
 
@@ -666,7 +666,7 @@ fn runtime_context_has_all_required_accessors_with_io_seams() {
     let _input = context.input();
 }
 
-// ── #1385 Task 12: RuntimeContext I/O seam production-facing tests ──
+// ── #1385 TaskData 12: RuntimeContext I/O seam production-facing tests ──
 
 /// Proves that `RunInputBufferHandle::with_lock` gives access to
 /// the SAME inner buffer across clones — satisfying the requirement

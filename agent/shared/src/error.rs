@@ -131,4 +131,11 @@ impl DomainError {
     pub fn source_error(&self) -> Option<&(dyn std::error::Error + Send + Sync)> {
         self.source.as_deref()
     }
+
+    /// source 链按具体内部错误类型下钻（crate 内测试断言细变体字段用）。
+    pub fn source_downcast_ref<T: std::error::Error + 'static>(&self) -> Option<&T> {
+        self.source
+            .as_deref()
+            .and_then(|error| error.downcast_ref::<T>())
+    }
 }

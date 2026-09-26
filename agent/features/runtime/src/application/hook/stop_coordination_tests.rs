@@ -1,9 +1,9 @@
 //! Tests for stop hook coordination.
 //!
-//! #1248 Task 6: Verify typed decision variants, Proceed/Block/ExecutionFailed,
+//! #1248 TaskData 6: Verify typed decision variants, Proceed/Block/ExecutionFailed,
 //! and that string-based variant discrimination is impossible.
 //!
-//! Uses real hook dispatchers (via `hook::build_dispatcher`) to avoid
+//! Uses real hook dispatchers (via `hook::wire_hook_dispatcher`) to avoid
 //! cross-feature direct construction of internal hook types.
 
 use super::*;
@@ -18,26 +18,26 @@ struct RecordingWorkspaceHook {
 }
 
 #[async_trait]
-impl HookPort for RecordingWorkspaceHook {
+impl HookDispatcher for RecordingWorkspaceHook {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
+        _invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
+        hook::HookOutcomeData::proceed()
     }
 
     async fn dispatch_at(
         &self,
-        _invocation: HookInvocation,
-        context: HookDispatchContext,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+        _invocation: HookInvocationData,
+        context: HookDispatchContextData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
         self.dispatched_cwds
             .lock()
             .unwrap()
             .push(context.cwd().to_path_buf());
-        hook::HookOutcome::proceed()
+        hook::HookOutcomeData::proceed()
     }
 }
 
@@ -53,7 +53,7 @@ impl StopHookObserver for StopContextObserver {
 }
 
 /// Helper: build a dispatcher that always returns Continue.
-fn continue_hook_port() -> Arc<dyn HookPort> {
+fn continue_hook_port() -> Arc<dyn HookDispatcher> {
     let mut events = std::collections::HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -63,22 +63,20 @@ fn continue_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config {
-                hooks: HooksConfig {
-                    events,
-                    ..HooksConfig::default()
-                },
-                ..share::config::Config::default()
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+        share::config::Config {
+            hooks: HooksConfig {
+                events,
+                ..HooksConfig::default()
             },
-        ))
-        .unwrap(),
-    )
+            ..share::config::Config::default()
+        },
+    ))
+    .unwrap()
 }
 
 /// Helper: build a dispatcher that always blocks (exit code 2).
-fn always_blocking_hook_port() -> Arc<dyn HookPort> {
+fn always_blocking_hook_port() -> Arc<dyn HookDispatcher> {
     let mut events = std::collections::HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -88,18 +86,16 @@ fn always_blocking_hook_port() -> Arc<dyn HookPort> {
             timeout: 5,
         }],
     );
-    Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config {
-                hooks: HooksConfig {
-                    events,
-                    ..HooksConfig::default()
-                },
-                ..share::config::Config::default()
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+        share::config::Config {
+            hooks: HooksConfig {
+                events,
+                ..HooksConfig::default()
             },
-        ))
-        .unwrap(),
-    )
+            ..share::config::Config::default()
+        },
+    ))
+    .unwrap()
 }
 
 #[tokio::test]
@@ -148,7 +144,7 @@ async fn stop_hook_reads_workspace_root_when_dispatch_begins() {
         .enter(Some(linked_root), None, None)
         .expect("进入 linked worktree");
     let hook = Arc::new(RecordingWorkspaceHook::default());
-    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let hook_port: Arc<dyn HookDispatcher> = hook.clone();
     let mut observer = StopContextObserver {
         context: StopHookExecutionContext::new(
             hook_port,

@@ -1,10 +1,13 @@
 //! 核心工具文案（agent/memory/skill/plan_mode/ask_user/brief/sleep/tool_search 的 description）。
 
 /// Agent description。
+///
+/// Agent 工具描述的**唯一真相源**：`AgentTool::description()` / `description_for()`
+/// 与注入 LLM 的 tool schema 均由此分派，NEVER 再维护第二份口径文本。
 pub fn agent(lang: &str) -> &'static str {
     match lang {
-        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每次调用都是全新的独立会话，不继承主会话、其他子代理或历史调用的上下文，因此 prompt 必须自包含并列全完成任务所需的信息。必须通过 `role` 选择 `config.agents.roles` 中已配置的角色；子代理的模型、上下文窗口和输出预算来自该角色对应的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
-        _ => "Launch a new agent to handle a focused, scoped task autonomously. Every call starts a fresh, independent session and inherits no context from the parent conversation, other sub-agents, or previous calls, so the prompt must be self-contained with all information needed to complete the task. `role` is required and must name a configured entry in `config.agents.roles`; the sub-agent model, context window, and output budget come from that role's `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
+        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每次调用都是全新的独立会话，不继承主会话、其他子代理或历史调用的上下文，因此 prompt 必须自包含并列全完成任务所需的信息。`agent` 为必填字段，必须与系统提示「Available Agent Roles」名单或 `config.agents.names` 中的实例名完全一致；子代理的模型、上下文窗口和输出预算来自该实例绑定的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
+        _ => "Launch a new agent to handle a focused, scoped task autonomously. Every call starts a fresh, independent session and inherits no context from the parent conversation, other sub-agents, or previous calls, so the prompt must be self-contained with all information needed to complete the task. `agent` is required and must exactly match an instance name in the system prompt's Available Agent Roles roster or in `config.agents.names`; the sub-agent model, context window, and output budget come from that instance's bound `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
     }
 }
 
@@ -101,6 +104,31 @@ mod tests {
         assert!(en.contains("fresh, independent session"));
         assert!(en.contains("inherits no context"));
         assert!(en.contains("prompt must be self-contained"));
+    }
+
+    /// 描述口径必须与 `AgentInput::data_schema()` 的 required 字段（`agent`）一致：
+    /// 出现即误导 LLM 漏传 `agent`（issue #1736 R1 复现）。
+    #[test]
+    fn agent_description_declares_agent_field_not_deprecated_role() {
+        for lang in ["zh", "en"] {
+            let description = agent(lang);
+            assert!(
+                !description.contains("config.agents.roles"),
+                "{lang} 描述不得出现废弃口径 config.agents.roles：{description}"
+            );
+            assert!(
+                !description.contains("`role`"),
+                "{lang} 描述不得出现废弃口径 `role` 字段：{description}"
+            );
+            assert!(
+                description.contains("`agent`"),
+                "{lang} 描述必须声明 `agent` 字段口径：{description}"
+            );
+            assert!(
+                description.contains("config.agents.names"),
+                "{lang} 描述必须指向 config.agents.names：{description}"
+            );
+        }
     }
 
     #[test]

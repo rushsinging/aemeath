@@ -332,6 +332,19 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "审计追加存储的文件系统适配工厂（原 append_store_for 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
       "tracking_issue": 1705
+    },
+    {
+      "id": "construction.hook.wire-hook-dispatcher",
+      "symbol": "wire_hook_dispatcher",
+      "owner_crate": "hook",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src",
+        "agent/features/runtime/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "生产 hook 派发器工厂（原 build_dispatcher 更名 + 返回 Arc<dyn HookDispatcher> 实现体私有化）；runtime/context 装配点调用",
+      "tracking_issue": 1708
     }
   ],
   "entries": [
@@ -1723,26 +1736,24 @@
         "value": "agent/features/hook/src"
       },
       "allowed_symbols": [
-        "*",
-        "CancellationSignal",
-        "Dispatcher",
-        "HookClass",
-        "HookDirective",
-        "HookDispatchContext",
-        "HookDisplayMessage",
-        "HookDisplayMessageKind",
-        "HookExecution",
-        "HookExecutionStatus",
-        "HookInvocation",
-        "HookMatcher",
-        "HookOutcome",
-        "HookPoint",
-        "HookPort",
-        "HookReason",
-        "HookSubscriptionExecutionEvent",
-        "HookSubscriptionExecutionObserver",
-        "HookSubscriptionExecutionTerminal",
-        "build_dispatcher"
+        "HookCancellationSignal",
+        "HookClassData",
+        "HookDirectiveData",
+        "HookDispatchContextData",
+        "HookDispatcher",
+        "HookDisplayMessageData",
+        "HookDisplayMessageKindData",
+        "HookExecutionData",
+        "HookExecutionEventData",
+        "HookExecutionObserver",
+        "HookExecutionStatusData",
+        "HookExecutionTerminalData",
+        "HookInvocationData",
+        "HookMatcherData",
+        "HookOutcomeData",
+        "HookPointData",
+        "HookReasonData",
+        "wire_hook_dispatcher"
       ],
       "reason": "F-2：hook crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "full"
@@ -2020,28 +2031,32 @@
         "value": "agent/features/task/src"
       },
       "allowed_symbols": [
-        "Batch",
-        "BatchCreateSpec",
-        "BatchId",
-        "BatchStatus",
-        "PreparedTaskRestore",
-        "Task",
+        "BatchCreateSpecData",
+        "BatchData",
+        "BatchIdData",
+        "BatchStatusData",
+        "InterruptedBatchInfoData",
+        "PreparedTaskRestoreData",
+        "StaleBatchInfoData",
         "TaskAccess",
-        "TaskCommandError",
-        "TaskCommandResult",
-        "TaskCreateSpec",
-        "TaskEvent",
-        "TaskId",
+        "TaskBatchSnapshotData",
+        "TaskCommandResultData",
+        "TaskCreateSpecData",
+        "TaskData",
+        "TaskEventData",
+        "TaskIdData",
+        "TaskLifecycleSnapshotData",
         "TaskPersist",
-        "TaskPriority",
-        "TaskProgressItem",
-        "TaskProgressSnapshot",
-        "TaskRevision",
-        "TaskSnapshot",
-        "TaskSnapshotValidationError",
-        "TaskStatus",
+        "TaskPriorityData",
+        "TaskPriorityStatsData",
+        "TaskProgressItemData",
+        "TaskProgressSnapshotData",
+        "TaskRevisionData",
+        "TaskSnapshotData",
+        "TaskStatusData",
         "TaskStore",
-        "TaskView",
+        "TaskStoreStatsData",
+        "TaskViewData",
         "TaskWiring",
         "wire_task"
       ],
@@ -2261,7 +2276,9 @@
         "storage": [
           "share"
         ],
-        "task": [],
+        "task": [
+          "share"
+        ],
         "hook": [
           "share",
           "utils"

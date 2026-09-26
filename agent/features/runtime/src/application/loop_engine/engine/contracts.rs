@@ -180,7 +180,7 @@ pub enum ToolGuardDecision {
     SoftBlock { reason: String },
 }
 
-/// #1248 Task 5: A tool call that was suspended for user interaction.
+/// #1248 TaskData 5: A tool call that was suspended for user interaction.
 /// Carries the suspension details needed to form a `UserQuestions` intent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuspendedToolCall {
@@ -201,7 +201,7 @@ pub enum ToolStep {
     ContinueWithFuseBypass(Vec<sdk::ToolCallId>),
     #[cfg(test)]
     AwaitUser,
-    /// #1248 Task 5: Tool execution produced one or more suspensions
+    /// #1248 TaskData 5: Tool execution produced one or more suspensions
     /// that should be resolved through the interaction coordinator.
     InteractionSuspended {
         suspended: Vec<SuspendedToolCall>,
@@ -211,7 +211,7 @@ pub enum ToolStep {
         completed_results: Vec<(sdk::ToolCallId, ToolCallStatus)>,
         fuse_bypassed: Vec<sdk::ToolCallId>,
     },
-    /// #1248 Task 5: Some tool calls require approval before execution.
+    /// #1248 TaskData 5: Some tool calls require approval before execution.
     /// The engine creates ToolApproval intents for each.
     AwaitingToolApproval {
         calls_needing_approval: Vec<ApprovalRequiredCall>,
@@ -221,7 +221,7 @@ pub enum ToolStep {
     },
 }
 
-/// #1248 Task 5: A tool call that needs approval before execution.
+/// #1248 TaskData 5: A tool call that needs approval before execution.
 /// Carries the full ToolCall and AuthorizationContext so the approval
 /// flow can execute directly without re-evaluating policy.
 #[derive(Debug, Clone, PartialEq)]

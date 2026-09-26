@@ -253,12 +253,10 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::wire_active_run_registry());
-    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ))
-        .unwrap(),
-    );
+    let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .unwrap();
 
     let wiring_clone = wiring.clone();
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(

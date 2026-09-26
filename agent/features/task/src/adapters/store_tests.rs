@@ -3,16 +3,16 @@ use std::thread;
 
 use super::{TaskAccess, TaskStore};
 use crate::domain::{
-    BatchCreateSpec, TaskCommandError, TaskCreateSpec, TaskEvent, TaskId, TaskPriority,
-    TaskRevision, TaskStatus, TaskStoreState,
+    BatchCreateSpecData, TaskCommandError, TaskCreateSpecData, TaskEventData, TaskIdData,
+    TaskPriorityData, TaskRevisionData, TaskStatusData, TaskStoreState,
 };
 
-fn batch_spec(name: &str) -> BatchCreateSpec {
-    BatchCreateSpec::try_new(name.into()).unwrap()
+fn batch_spec(name: &str) -> BatchCreateSpecData {
+    BatchCreateSpecData::try_new(name.into()).unwrap()
 }
 
-fn task_spec(name: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(name.into(), String::new(), None, TaskPriority::Normal).unwrap()
+fn task_spec(name: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(name.into(), String::new(), None, TaskPriorityData::Normal).unwrap()
 }
 
 // ---- 结构性质：同一同步锁槽 ----
@@ -26,7 +26,7 @@ fn store_is_send_and_sync_for_shared_use_without_holding_guard_across_await() {
 #[test]
 fn new_store_starts_at_empty_revision_zero() {
     let store = TaskStore::new();
-    assert_eq!(store.revision(), TaskRevision::new(0));
+    assert_eq!(store.revision(), TaskRevisionData::new(0));
     assert!(store.list().is_empty());
     assert!(store.list_batches().is_empty());
 }
@@ -34,7 +34,7 @@ fn new_store_starts_at_empty_revision_zero() {
 #[test]
 fn default_store_matches_new() {
     let store = TaskStore::default();
-    assert_eq!(store.revision(), TaskRevision::new(0));
+    assert_eq!(store.revision(), TaskRevisionData::new(0));
 }
 
 #[test]
@@ -59,15 +59,15 @@ fn real_mutation_advances_revision_exactly_once_and_commits_with_value_and_event
     let store = TaskStore::new();
 
     let batch = store.create_batch(batch_spec("批次"), 1).unwrap();
-    assert_eq!(batch.revision(), Some(TaskRevision::new(1)));
-    assert_eq!(store.revision(), TaskRevision::new(1));
+    assert_eq!(batch.revision(), Some(TaskRevisionData::new(1)));
+    assert_eq!(store.revision(), TaskRevisionData::new(1));
 
     let created = store.create_task(task_spec("任务"), 2).unwrap();
-    assert_eq!(created.revision(), Some(TaskRevision::new(2)));
-    assert_eq!(store.revision(), TaskRevision::new(2));
+    assert_eq!(created.revision(), Some(TaskRevisionData::new(2)));
+    assert_eq!(store.revision(), TaskRevisionData::new(2));
     assert_eq!(
         created.events,
-        vec![TaskEvent::TaskCreated {
+        vec![TaskEventData::TaskCreated {
             task_id: created.value.id()
         }]
     );
@@ -82,7 +82,7 @@ fn failure_command_leaves_revision_and_state_untouched() {
 
     let err = store.create_task(task_spec("任务"), 1).unwrap_err();
 
-    assert_eq!(err, TaskCommandError::NoActiveBatch);
+    assert_eq!(err, TaskCommandError::NoActiveBatch.into());
     assert_eq!(store.revision(), before_revision);
     assert!(store.list().is_empty());
 }
@@ -129,26 +129,27 @@ fn idempotent_no_op_mutation_does_not_advance_revision() {
 
 #[test]
 fn revision_overflow_fails_atomically_without_partial_mutation() {
-    let store =
-        TaskStore::from_state(TaskStoreState::empty().with_revision(TaskRevision::new(u64::MAX)));
+    let store = TaskStore::from_state(
+        TaskStoreState::empty().with_revision(TaskRevisionData::new(u64::MAX)),
+    );
     let before = store.state_snapshot();
 
     let err = store.create_batch(batch_spec("批次"), 1).unwrap_err();
 
-    assert_eq!(err, TaskCommandError::RevisionExhausted);
+    assert_eq!(err, TaskCommandError::RevisionExhausted.into());
     assert_eq!(store.state_snapshot(), before);
 }
 
 #[test]
 fn task_id_overflow_fails_atomically_without_partial_mutation() {
     let store =
-        TaskStore::from_state(TaskStoreState::empty().with_next_task_id(TaskId::new(u64::MAX)));
+        TaskStore::from_state(TaskStoreState::empty().with_next_task_id(TaskIdData::new(u64::MAX)));
     store.create_batch(batch_spec("批次"), 1).unwrap();
     let before = store.state_snapshot();
 
     let err = store.create_task(task_spec("任务"), 2).unwrap_err();
 
-    assert_eq!(err, TaskCommandError::TaskIdExhausted);
+    assert_eq!(err, TaskCommandError::TaskIdExhausted.into());
     assert_eq!(store.state_snapshot(), before);
 }
 
@@ -160,27 +161,27 @@ fn dependency_and_tag_commands_delegate_and_commit_revision_in_order() {
     store.create_batch(batch_spec("批次"), 0).unwrap();
     let a = store.create_task(task_spec("A"), 1).unwrap().value;
     let b = store.create_task(task_spec("B"), 2).unwrap().value;
-    assert_eq!(store.revision(), TaskRevision::new(3));
+    assert_eq!(store.revision(), TaskRevisionData::new(3));
 
     assert!(!store.would_create_cycle(a.id(), b.id()));
 
     let dep = store.add_dependency(a.id(), b.id(), 3).unwrap();
-    assert_eq!(dep.revision(), Some(TaskRevision::new(4)));
+    assert_eq!(dep.revision(), Some(TaskRevisionData::new(4)));
     assert!(store.is_blocked(a.id()).unwrap());
 
     let tagged = store.add_tag(a.id(), "urgent".into(), 4).unwrap();
-    assert_eq!(tagged.revision(), Some(TaskRevision::new(5)));
+    assert_eq!(tagged.revision(), Some(TaskRevisionData::new(5)));
     assert!(tagged.value.tags().contains(&"urgent".to_string()));
 
     let untagged = store.remove_tag(a.id(), "urgent", 5).unwrap();
-    assert_eq!(untagged.revision(), Some(TaskRevision::new(6)));
+    assert_eq!(untagged.revision(), Some(TaskRevisionData::new(6)));
     assert!(untagged.value.tags().is_empty());
 
     let undep = store.remove_dependency(a.id(), b.id(), 6).unwrap();
-    assert_eq!(undep.revision(), Some(TaskRevision::new(7)));
+    assert_eq!(undep.revision(), Some(TaskRevisionData::new(7)));
     assert!(!store.is_blocked(a.id()).unwrap());
 
-    assert_eq!(store.revision(), TaskRevision::new(7));
+    assert_eq!(store.revision(), TaskRevisionData::new(7));
 }
 
 #[test]
@@ -188,34 +189,40 @@ fn lifecycle_transition_and_batch_commands_delegate_and_commit_revision_in_order
     let store = TaskStore::new();
     let batch = store.create_batch(batch_spec("批次"), 0).unwrap().value;
     let a = store.create_task(task_spec("A"), 1).unwrap().value;
-    assert_eq!(store.revision(), TaskRevision::new(2));
+    assert_eq!(store.revision(), TaskRevisionData::new(2));
 
-    let started = store.transition(a.id(), TaskStatus::InProgress, 2).unwrap();
-    assert_eq!(started.revision(), Some(TaskRevision::new(3)));
+    let started = store
+        .transition(a.id(), TaskStatusData::InProgress, 2)
+        .unwrap();
+    assert_eq!(started.revision(), Some(TaskRevisionData::new(3)));
 
-    let completed = store.transition(a.id(), TaskStatus::Completed, 3).unwrap();
-    assert_eq!(completed.revision(), Some(TaskRevision::new(4)));
+    let completed = store
+        .transition(a.id(), TaskStatusData::Completed, 3)
+        .unwrap();
+    assert_eq!(completed.revision(), Some(TaskRevisionData::new(4)));
 
-    let priority = store.set_priority(a.id(), TaskPriority::High, 4).unwrap();
-    assert_eq!(priority.revision(), Some(TaskRevision::new(5)));
+    let priority = store
+        .set_priority(a.id(), TaskPriorityData::High, 4)
+        .unwrap();
+    assert_eq!(priority.revision(), Some(TaskRevisionData::new(5)));
 
     let turned = store.record_batch_turn(batch.id(), 1, true).unwrap();
-    assert_eq!(turned.revision(), Some(TaskRevision::new(6)));
+    assert_eq!(turned.revision(), Some(TaskRevisionData::new(6)));
 
     let deleted = store.delete(a.id(), 5).unwrap();
-    assert_eq!(deleted.revision(), Some(TaskRevision::new(7)));
+    assert_eq!(deleted.revision(), Some(TaskRevisionData::new(7)));
     assert_eq!(store.stats().deleted, 1);
 
     let paused = store.pause_batch(batch.id()).unwrap();
-    assert_eq!(paused.revision(), Some(TaskRevision::new(8)));
+    assert_eq!(paused.revision(), Some(TaskRevisionData::new(8)));
 
     let resumed = store.resume_batch(batch.id()).unwrap();
-    assert_eq!(resumed.revision(), Some(TaskRevision::new(9)));
+    assert_eq!(resumed.revision(), Some(TaskRevisionData::new(9)));
 
     let archived = store.archive_batch(batch.id()).unwrap();
-    assert_eq!(archived.revision(), Some(TaskRevision::new(10)));
+    assert_eq!(archived.revision(), Some(TaskRevisionData::new(10)));
 
-    assert_eq!(store.revision(), TaskRevision::new(10));
+    assert_eq!(store.revision(), TaskRevisionData::new(10));
 }
 
 // ---- 并发下同一锁槽保证 revision 唯一且不丢更新 ----
@@ -244,5 +251,5 @@ fn concurrent_task_creation_produces_unique_sequential_revisions() {
 
     assert_eq!(revisions, (2..=9).collect::<Vec<_>>());
     assert_eq!(store.list().len(), 8);
-    assert_eq!(store.revision(), TaskRevision::new(9));
+    assert_eq!(store.revision(), TaskRevisionData::new(9));
 }

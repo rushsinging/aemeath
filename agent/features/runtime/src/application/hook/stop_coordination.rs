@@ -1,7 +1,7 @@
 //! Stop Hook coordination —— 共享 Loop 触发的 typed decision。
 //!
 //! Stop Hook outcome 已从 adapter 的专用阻断投影迁入共享 Loop 与 Run 状态机。
-//! Coordinator 只消费 HookPort / Hook PL，返回
+//! Coordinator 只消费 HookDispatcher / Hook PL，返回
 //! Runtime-owned typed decision；保留 block detail/messages，禁止用 reason 字符串
 //! 区分主动 Block 与 ExecutionFailed。Hook 内部三次 retry 仍归 Hook BC。
 //!
@@ -21,8 +21,8 @@ use crate::application::loop_engine::LoopEngineError;
 use crate::application::run::execution_state::RunExecutionState;
 use async_trait::async_trait;
 use hook::{
-    HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionObserver,
-    StopInput,
+    HookDispatchContextData, HookDispatcher, HookExecutionObserver, HookInvocationData,
+    HookPointData,
 };
 use share::message::{HookNotice, HookNoticeKind, Message};
 use std::path::PathBuf;
@@ -73,16 +73,16 @@ pub use crate::application::hook::outcome_mapper::RuntimeHookBlockDetail;
 /// Run-scoped dependencies required to execute one Stop Hook.
 #[derive(Clone)]
 pub struct StopHookExecutionContext {
-    hook_port: Arc<dyn HookPort>,
+    hook_port: Arc<dyn HookDispatcher>,
     workspace_read: Arc<dyn project::WorkspaceReader>,
     session_id: String,
     language: String,
-    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
+    subscription_execution_observer: Option<Arc<dyn HookExecutionObserver>>,
 }
 
 impl StopHookExecutionContext {
     pub fn new(
-        hook_port: Arc<dyn HookPort>,
+        hook_port: Arc<dyn HookDispatcher>,
         workspace_read: Arc<dyn project::WorkspaceReader>,
         session_id: String,
         language: String,
@@ -98,7 +98,7 @@ impl StopHookExecutionContext {
 
     pub fn with_subscription_execution_observer(
         mut self,
-        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+        observer: Arc<dyn HookExecutionObserver>,
     ) -> Self {
         self.subscription_execution_observer = Some(observer);
         self
@@ -172,7 +172,7 @@ pub struct StopHookContext {
     pub workspace_root: PathBuf,
     pub session_id: String,
     pub language: String,
-    pub subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
+    pub subscription_execution_observer: Option<Arc<dyn HookExecutionObserver>>,
 }
 
 #[derive(Debug, Clone)]
@@ -181,47 +181,47 @@ pub struct StopHookOutcome {
     pub feedback_message: Option<Message>,
 }
 
-pub(crate) fn hook_point_view(point: HookPoint) -> sdk::HookPointView {
+pub(crate) fn hook_point_view(point: HookPointData) -> sdk::HookPointView {
     match point {
-        HookPoint::PreToolUse => sdk::HookPointView::PreToolUse,
-        HookPoint::UserPromptSubmit => sdk::HookPointView::UserPromptSubmit,
-        HookPoint::PreCompact => sdk::HookPointView::PreCompact,
-        HookPoint::PermissionRequest => sdk::HookPointView::PermissionRequest,
-        HookPoint::Elicitation => sdk::HookPointView::Elicitation,
-        HookPoint::UserPromptExpansion => sdk::HookPointView::UserPromptExpansion,
-        HookPoint::Stop => sdk::HookPointView::Stop,
-        HookPoint::PostToolUse => sdk::HookPointView::PostToolUse,
-        HookPoint::PostToolUseFailure => sdk::HookPointView::PostToolUseFailure,
-        HookPoint::PostCompact => sdk::HookPointView::PostCompact,
-        HookPoint::PostToolBatch => sdk::HookPointView::PostToolBatch,
-        HookPoint::ElicitationResult => sdk::HookPointView::ElicitationResult,
-        HookPoint::SessionStart => sdk::HookPointView::SessionStart,
-        HookPoint::SessionEnd => sdk::HookPointView::SessionEnd,
-        HookPoint::SubRunStart => sdk::HookPointView::SubRunStart,
-        HookPoint::SubRunStop => sdk::HookPointView::SubRunStop,
-        HookPoint::TaskCreated => sdk::HookPointView::TaskCreated,
-        HookPoint::TaskCompleted => sdk::HookPointView::TaskCompleted,
-        HookPoint::Notification => sdk::HookPointView::Notification,
-        HookPoint::InstructionsLoaded => sdk::HookPointView::InstructionsLoaded,
-        HookPoint::StopFailure => sdk::HookPointView::StopFailure,
-        HookPoint::PermissionDenied => sdk::HookPointView::PermissionDenied,
-        HookPoint::ConfigChange => sdk::HookPointView::ConfigChange,
-        HookPoint::CwdChanged => sdk::HookPointView::CwdChanged,
-        HookPoint::FileChanged => sdk::HookPointView::FileChanged,
-        HookPoint::TeammateIdle => sdk::HookPointView::TeammateIdle,
+        HookPointData::PreToolUse => sdk::HookPointView::PreToolUse,
+        HookPointData::UserPromptSubmit => sdk::HookPointView::UserPromptSubmit,
+        HookPointData::PreCompact => sdk::HookPointView::PreCompact,
+        HookPointData::PermissionRequest => sdk::HookPointView::PermissionRequest,
+        HookPointData::Elicitation => sdk::HookPointView::Elicitation,
+        HookPointData::UserPromptExpansion => sdk::HookPointView::UserPromptExpansion,
+        HookPointData::Stop => sdk::HookPointView::Stop,
+        HookPointData::PostToolUse => sdk::HookPointView::PostToolUse,
+        HookPointData::PostToolUseFailure => sdk::HookPointView::PostToolUseFailure,
+        HookPointData::PostCompact => sdk::HookPointView::PostCompact,
+        HookPointData::PostToolBatch => sdk::HookPointView::PostToolBatch,
+        HookPointData::ElicitationResult => sdk::HookPointView::ElicitationResult,
+        HookPointData::SessionStart => sdk::HookPointView::SessionStart,
+        HookPointData::SessionEnd => sdk::HookPointView::SessionEnd,
+        HookPointData::SubRunStart => sdk::HookPointView::SubRunStart,
+        HookPointData::SubRunStop => sdk::HookPointView::SubRunStop,
+        HookPointData::TaskCreated => sdk::HookPointView::TaskCreated,
+        HookPointData::TaskCompleted => sdk::HookPointView::TaskCompleted,
+        HookPointData::Notification => sdk::HookPointView::Notification,
+        HookPointData::InstructionsLoaded => sdk::HookPointView::InstructionsLoaded,
+        HookPointData::StopFailure => sdk::HookPointView::StopFailure,
+        HookPointData::PermissionDenied => sdk::HookPointView::PermissionDenied,
+        HookPointData::ConfigChange => sdk::HookPointView::ConfigChange,
+        HookPointData::CwdChanged => sdk::HookPointView::CwdChanged,
+        HookPointData::FileChanged => sdk::HookPointView::FileChanged,
+        HookPointData::TeammateIdle => sdk::HookPointView::TeammateIdle,
     }
 }
 
 pub async fn orchestrate_stop_hook(
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     context: StopHookContext,
     cancellation: &CancellationToken,
 ) -> StopHookOutcome {
-    let invocation = HookInvocation::Stop(StopInput {
+    let invocation = HookInvocationData::Stop {
         run_steps: context.run_steps,
-    });
+    };
     let mut hook_dispatch_context =
-        HookDispatchContext::new(&context.workspace_root).with_session_id(&context.session_id);
+        HookDispatchContextData::new(&context.workspace_root).with_session_id(&context.session_id);
     if let Some(observer) = context.subscription_execution_observer {
         hook_dispatch_context =
             hook_dispatch_context.with_subscription_execution_observer(observer);
@@ -233,7 +233,7 @@ pub async fn orchestrate_stop_hook(
         || hook_outcome
             .executions
             .iter()
-            .any(|execution| matches!(execution.status, hook::HookExecutionStatus::Cancelled))
+            .any(|execution| matches!(execution.status, hook::HookExecutionStatusData::Cancelled))
     {
         return StopHookOutcome {
             decision: StopHookDecision::Cancelled,

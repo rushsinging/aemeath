@@ -7,7 +7,7 @@ use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookInvocation, HookPort, PreToolUseInput};
+use hook::{HookDispatcher, HookInvocationData};
 use policy::Policy;
 use std::sync::Arc;
 use tools::ToolOutcome;
@@ -19,7 +19,7 @@ pub(super) async fn execute_non_agent<S>(
     context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     non_agent_calls: &[PreparedToolCall],
     language: &str,
@@ -87,7 +87,7 @@ async fn execute_multiple_non_agent<S>(
     context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     other_calls: &[&PreparedToolCall],
     language: &str,
@@ -221,7 +221,7 @@ async fn execute_one_non_agent<S>(
     context: &RuntimeRunContext,
     agent: &Agent,
     sink: &S,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     prepared: &PreparedToolCall,
     language: &str,
@@ -260,10 +260,10 @@ where
         hook_port,
         activities,
         step_id,
-        HookInvocation::PreToolUse(PreToolUseInput {
+        HookInvocationData::PreToolUse {
             tool_name: owned_call.name.clone(),
             tool_input: owned_call.input.clone(),
-        }),
+        },
         &workspace_root,
         agent.session_id.as_ref(),
         cancel,

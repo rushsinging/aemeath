@@ -1,4 +1,4 @@
-//! Task state ACL：从 `TaskAccess` 构造结构化 SDK 状态，并为 LLM reminder
+//! TaskData state ACL：从 `TaskAccess` 构造结构化 SDK 状态，并为 LLM reminder
 //! 保留独立的文本渲染出口。
 //!
 //! 放在 business 层而非 core/client 层（COLA 分层：business 不可依赖 core，
@@ -11,9 +11,9 @@ use sdk::{
     TaskStateView,
 };
 use share::config::TaskListConfig;
-use task::{BatchStatus, Task, TaskAccess, TaskId, TaskPriority, TaskStatus};
+use task::{BatchStatusData, TaskAccess, TaskData, TaskIdData, TaskPriorityData, TaskStatusData};
 
-/// 从 `TaskAccess` 构造带 Session/revision 的完整结构化 Task state。
+/// 从 `TaskAccess` 构造带 Session/revision 的完整结构化 TaskData state。
 pub(crate) fn build_task_state_view(
     access: &dyn TaskAccess,
     session_id: impl Into<String>,
@@ -30,23 +30,23 @@ pub(crate) fn build_task_state_view(
     let total = tasks.len();
     let completed = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Completed)
+        .filter(|task| task.status() == TaskStatusData::Completed)
         .count();
     let in_progress = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::InProgress)
+        .filter(|task| task.status() == TaskStatusData::InProgress)
         .count();
-    let mut completed_tasks: Vec<&Task> = tasks
+    let mut completed_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Completed)
+        .filter(|task| task.status() == TaskStatusData::Completed)
         .collect();
-    let mut in_progress_tasks: Vec<&Task> = tasks
+    let mut in_progress_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::InProgress)
+        .filter(|task| task.status() == TaskStatusData::InProgress)
         .collect();
-    let mut pending_tasks: Vec<&Task> = tasks
+    let mut pending_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Pending)
+        .filter(|task| task.status() == TaskStatusData::Pending)
         .collect();
     completed_tasks.sort_by_key(|task| task.updated_at());
     in_progress_tasks.sort_by_key(|task| task.updated_at());
@@ -58,7 +58,7 @@ pub(crate) fn build_task_state_view(
         select_task_window(completed_tasks, in_progress_tasks, pending_tasks, max_items)
     };
     let hidden_count = tasks.len().saturating_sub(visible_tasks.len());
-    let sequence_by_id: HashMap<TaskId, u64> =
+    let sequence_by_id: HashMap<TaskIdData, u64> =
         tasks.iter().map(|task| (task.id(), task.seq())).collect();
     let items = visible_tasks
         .into_iter()
@@ -67,16 +67,16 @@ pub(crate) fn build_task_state_view(
             sequence: task.seq(),
             subject: task.subject().to_owned(),
             status: match task.status() {
-                TaskStatus::Pending => TaskItemStatusView::Pending,
-                TaskStatus::InProgress => TaskItemStatusView::InProgress,
-                TaskStatus::Completed => TaskItemStatusView::Completed,
-                TaskStatus::Deleted => unreachable!("batch snapshot excludes deleted tasks"),
+                TaskStatusData::Pending => TaskItemStatusView::Pending,
+                TaskStatusData::InProgress => TaskItemStatusView::InProgress,
+                TaskStatusData::Completed => TaskItemStatusView::Completed,
+                TaskStatusData::Deleted => unreachable!("batch snapshot excludes deleted tasks"),
             },
             priority: match task.priority() {
-                TaskPriority::Low => TaskPriorityView::Low,
-                TaskPriority::Normal => TaskPriorityView::Normal,
-                TaskPriority::High => TaskPriorityView::High,
-                TaskPriority::Urgent => TaskPriorityView::Urgent,
+                TaskPriorityData::Low => TaskPriorityView::Low,
+                TaskPriorityData::Normal => TaskPriorityView::Normal,
+                TaskPriorityData::High => TaskPriorityView::High,
+                TaskPriorityData::Urgent => TaskPriorityView::Urgent,
             },
             blocked_by_sequences: task
                 .blocked_by()
@@ -93,9 +93,9 @@ pub(crate) fn build_task_state_view(
             id: batch.id().get(),
             summary: batch.summary().map(str::to_owned),
             status: match batch.status() {
-                BatchStatus::Active => TaskBatchStatusView::Active,
-                BatchStatus::Paused => TaskBatchStatusView::Paused,
-                BatchStatus::Archived => TaskBatchStatusView::Archived,
+                BatchStatusData::Active => TaskBatchStatusView::Active,
+                BatchStatusData::Paused => TaskBatchStatusView::Paused,
+                BatchStatusData::Archived => TaskBatchStatusView::Archived,
             },
         }),
         total,
@@ -106,10 +106,10 @@ pub(crate) fn build_task_state_view(
     }
 }
 
-/// 当前 batch 的 live（非 Deleted）Task 列表；无 batch 或无任务时返回 `None`。
-fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
+/// 当前 batch 的 live（非 Deleted）TaskData 列表；无 batch 或无任务时返回 `None`。
+fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<TaskData>> {
     let current_batch = access.current_batch()?;
-    let active: Vec<Task> = access
+    let active: Vec<TaskData> = access
         .list()
         .into_iter()
         .filter(|task| task.batch() == current_batch)
@@ -121,7 +121,7 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<Task>> {
     }
 }
 
-/// 将当前 Task 状态冻结为 Context-owned invocation reminder intent。
+/// 将当前 TaskData 状态冻结为 Context-owned invocation reminder intent。
 pub(crate) fn build_task_reminder_intent(
     access: &dyn TaskAccess,
     max_items: usize,
@@ -133,19 +133,19 @@ pub(crate) fn build_task_reminder_intent(
     let total = tasks.len();
     let completed = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Completed)
+        .filter(|task| task.status() == TaskStatusData::Completed)
         .count();
-    let mut completed_tasks: Vec<&Task> = tasks
+    let mut completed_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Completed)
+        .filter(|task| task.status() == TaskStatusData::Completed)
         .collect();
-    let mut in_progress_tasks: Vec<&Task> = tasks
+    let mut in_progress_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::InProgress)
+        .filter(|task| task.status() == TaskStatusData::InProgress)
         .collect();
-    let mut pending_tasks: Vec<&Task> = tasks
+    let mut pending_tasks: Vec<&TaskData> = tasks
         .iter()
-        .filter(|task| task.status() == TaskStatus::Pending)
+        .filter(|task| task.status() == TaskStatusData::Pending)
         .collect();
     completed_tasks.sort_by_key(|task| task.updated_at());
     in_progress_tasks.sort_by_key(|task| task.updated_at());
@@ -155,7 +155,7 @@ pub(crate) fn build_task_reminder_intent(
     } else {
         select_task_window(completed_tasks, in_progress_tasks, pending_tasks, max_items)
     };
-    let sequence_by_id: HashMap<TaskId, u64> =
+    let sequence_by_id: HashMap<TaskIdData, u64> =
         tasks.iter().map(|task| (task.id(), task.seq())).collect();
     let items = visible
         .into_iter()
@@ -163,10 +163,10 @@ pub(crate) fn build_task_reminder_intent(
             sequence: task.seq(),
             subject: task.subject().to_owned(),
             status: match task.status() {
-                TaskStatus::Completed => context::TaskProgressStatus::Completed,
-                TaskStatus::InProgress => context::TaskProgressStatus::InProgress,
-                TaskStatus::Pending => context::TaskProgressStatus::Pending,
-                TaskStatus::Deleted => unreachable!("current batch excludes deleted tasks"),
+                TaskStatusData::Completed => context::TaskProgressStatus::Completed,
+                TaskStatusData::InProgress => context::TaskProgressStatus::InProgress,
+                TaskStatusData::Pending => context::TaskProgressStatus::Pending,
+                TaskStatusData::Deleted => unreachable!("current batch excludes deleted tasks"),
             },
             blocked_by_sequences: task
                 .blocked_by()
@@ -193,7 +193,7 @@ pub(crate) fn build_task_reminder_intent(
     Some(reminder)
 }
 
-/// 将当前 Task aggregate 冻结为 Context-owned typed compact snapshot。
+/// 将当前 TaskData aggregate 冻结为 Context-owned typed compact snapshot。
 pub(crate) fn build_compact_task_snapshot(
     access: &dyn TaskAccess,
 ) -> Option<context::compact::CompactTaskSnapshot> {
@@ -205,9 +205,9 @@ pub(crate) fn build_compact_task_snapshot(
         return None;
     }
     let status = match batch.status() {
-        BatchStatus::Active => context::compact::CompactTaskBatchStatus::Active,
-        BatchStatus::Paused => context::compact::CompactTaskBatchStatus::Paused,
-        BatchStatus::Archived => context::compact::CompactTaskBatchStatus::Archived,
+        BatchStatusData::Active => context::compact::CompactTaskBatchStatus::Active,
+        BatchStatusData::Paused => context::compact::CompactTaskBatchStatus::Paused,
+        BatchStatusData::Archived => context::compact::CompactTaskBatchStatus::Archived,
     };
     let sequence_by_id = batch_snapshot
         .tasks()
@@ -217,16 +217,16 @@ pub(crate) fn build_compact_task_snapshot(
     let items = batch_snapshot
         .tasks()
         .iter()
-        .filter(|task| task.status() != TaskStatus::Deleted)
+        .filter(|task| task.status() != TaskStatusData::Deleted)
         .map(|task| {
             context::compact::CompactTaskItem::new(
                 task.seq(),
                 task.subject(),
                 match task.status() {
-                    TaskStatus::Pending => context::compact::CompactTaskStatus::Pending,
-                    TaskStatus::InProgress => context::compact::CompactTaskStatus::InProgress,
-                    TaskStatus::Completed => context::compact::CompactTaskStatus::Completed,
-                    TaskStatus::Deleted => unreachable!("deleted tasks were filtered"),
+                    TaskStatusData::Pending => context::compact::CompactTaskStatus::Pending,
+                    TaskStatusData::InProgress => context::compact::CompactTaskStatus::InProgress,
+                    TaskStatusData::Completed => context::compact::CompactTaskStatus::Completed,
+                    TaskStatusData::Deleted => unreachable!("deleted tasks were filtered"),
                 },
                 task.blocked_by()
                     .iter()
@@ -248,7 +248,7 @@ pub(crate) fn build_compact_task_snapshot(
 }
 
 #[cfg(test)]
-fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
+fn task_status_lines(tasks: &[TaskData], max_lines: usize) -> Vec<String> {
     if tasks.is_empty() || max_lines == 0 {
         return Vec::new();
     }
@@ -256,19 +256,19 @@ fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
     let total = tasks.len();
     let completed_count = tasks
         .iter()
-        .filter(|t| t.status() == TaskStatus::Completed)
+        .filter(|t| t.status() == TaskStatusData::Completed)
         .count();
     let mut lines = vec![format!("━━ Tasks: {}/{} ━━", completed_count, total)];
 
-    let mut completed: Vec<&Task> = Vec::new();
-    let mut in_progress: Vec<&Task> = Vec::new();
-    let mut pending: Vec<&Task> = Vec::new();
+    let mut completed: Vec<&TaskData> = Vec::new();
+    let mut in_progress: Vec<&TaskData> = Vec::new();
+    let mut pending: Vec<&TaskData> = Vec::new();
     for task in tasks {
         match task.status() {
-            TaskStatus::Completed => completed.push(task),
-            TaskStatus::InProgress => in_progress.push(task),
-            TaskStatus::Pending => pending.push(task),
-            TaskStatus::Deleted => {}
+            TaskStatusData::Completed => completed.push(task),
+            TaskStatusData::InProgress => in_progress.push(task),
+            TaskStatusData::Pending => pending.push(task),
+            TaskStatusData::Deleted => {}
         }
     }
     completed.sort_by_key(|t| t.updated_at());
@@ -296,10 +296,10 @@ fn task_status_lines(tasks: &[Task], max_lines: usize) -> Vec<String> {
 }
 
 fn ordered_tasks<'a>(
-    completed: Vec<&'a Task>,
-    in_progress: Vec<&'a Task>,
-    pending: Vec<&'a Task>,
-) -> Vec<&'a Task> {
+    completed: Vec<&'a TaskData>,
+    in_progress: Vec<&'a TaskData>,
+    pending: Vec<&'a TaskData>,
+) -> Vec<&'a TaskData> {
     completed
         .into_iter()
         .chain(in_progress)
@@ -308,11 +308,11 @@ fn ordered_tasks<'a>(
 }
 
 fn select_task_window<'a>(
-    completed: Vec<&'a Task>,
-    in_progress: Vec<&'a Task>,
-    pending: Vec<&'a Task>,
+    completed: Vec<&'a TaskData>,
+    in_progress: Vec<&'a TaskData>,
+    pending: Vec<&'a TaskData>,
     max_lines: usize,
-) -> Vec<&'a Task> {
+) -> Vec<&'a TaskData> {
     let mut visible = Vec::with_capacity(max_lines);
     if max_lines == 0 {
         return visible;
@@ -336,19 +336,19 @@ fn select_task_window<'a>(
 }
 
 #[cfg(test)]
-fn format_task_status_line(task: &Task, display_map: &HashMap<TaskId, u64>) -> String {
+fn format_task_status_line(task: &TaskData, display_map: &HashMap<TaskIdData, u64>) -> String {
     let icon = match task.status() {
-        TaskStatus::Completed => "✓",
-        TaskStatus::InProgress => "■",
-        TaskStatus::Pending => "□",
-        TaskStatus::Deleted => "?",
+        TaskStatusData::Completed => "✓",
+        TaskStatusData::InProgress => "■",
+        TaskStatusData::Pending => "□",
+        TaskStatusData::Deleted => "?",
     };
     let blocked_by = format_blocked_by(task.blocked_by(), display_map);
     format!("{} #{} {}{}", icon, task.seq(), task.subject(), blocked_by)
 }
 
 #[cfg(test)]
-fn format_blocked_by(blocked_by: &[TaskId], display_map: &HashMap<TaskId, u64>) -> String {
+fn format_blocked_by(blocked_by: &[TaskIdData], display_map: &HashMap<TaskIdData, u64>) -> String {
     let deps = blocked_by
         .iter()
         .filter_map(|id| display_map.get(id))
