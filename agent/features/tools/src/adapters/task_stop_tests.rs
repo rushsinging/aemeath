@@ -8,15 +8,18 @@ fn test_ctx() -> ToolExecutionContext {
 fn seeded_access() -> Arc<dyn task::TaskAccess> {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     access
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
         .unwrap();
     access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "任务".into(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -38,8 +41,8 @@ async fn task_stop_marks_pending_task_deleted() {
 
     assert!(!result.is_error, "{}", result.text);
     assert_eq!(
-        access.get(task::TaskId::new(1)).unwrap().status(),
-        task::TaskStatus::Deleted
+        access.get(task::TaskIdData::new(1)).unwrap().status(),
+        task::TaskStatusData::Deleted
     );
 }
 

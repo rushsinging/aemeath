@@ -8,7 +8,7 @@ use crate::application::tool::tool_result_materializer::{
 };
 use crate::ports::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
 use std::sync::{Arc, Mutex};
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority};
+use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPriorityData};
 
 #[derive(Clone, Default)]
 struct TaskStateRecordingSink {
@@ -53,11 +53,11 @@ fn materializer() -> Arc<ToolResultMaterializer> {
 fn create_task(access: &dyn TaskAccess, subject: &str, now_ms: u64) {
     access
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 subject.to_owned(),
                 String::new(),
                 None,
-                TaskPriority::Normal,
+                TaskPriorityData::Normal,
             )
             .unwrap(),
             now_ms,
@@ -68,11 +68,11 @@ fn create_task(access: &dyn TaskAccess, subject: &str, now_ms: u64) {
 fn task_execution_with_committed_change(store: &task::TaskStore) -> ToolExecution {
     let command_result = store
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "second".to_owned(),
                 String::new(),
                 None,
-                TaskPriority::Normal,
+                TaskPriorityData::Normal,
             )
             .unwrap(),
             3,
@@ -137,7 +137,7 @@ async fn task_mutation_round_publishes_one_final_complete_authoritative_state() 
     let sink = TaskStateRecordingSink::default();
     let store = Arc::new(task::TaskStore::new());
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     create_task(store.as_ref(), "first", 2);
     let observer = observer_with_task_store(sink.clone(), store.clone());

@@ -161,7 +161,7 @@ mod tests {
         assert!(app.chat.is_processing, "首条提交后应进入 processing 态");
     }
 
-    /// Step 1（A1 Task 6）：非忙与忙时提交走同一路径——都把 `UserMessage`
+    /// Step 1（A1 TaskData 6）：非忙与忙时提交走同一路径——都把 `UserMessage`
     /// 发往 input_event_tx 通道（用真实 sender 捕获断言）。
     #[test]
     fn test_submit_routes_user_message_to_input_channel() {
@@ -255,7 +255,7 @@ mod tests {
         assert!(has_queued, "首条复制文本应以折叠占位符入排队显示");
     }
 
-    /// Step 1（A3 Task 1）：submit 后文本统一走事件通道，effects 含 SendChatInputEvent::UserMessage。
+    /// Step 1（A3 TaskData 1）：submit 后文本统一走事件通道，effects 含 SendChatInputEvent::UserMessage。
     #[test]
     fn submit_routes_via_event_channel() {
         let mut app = test_app();
@@ -273,13 +273,13 @@ mod tests {
         );
     }
 
-    /// Step 1（A3 Task 1）：submit 后，占位块携带的 input_id 与事件 id 相同。
+    /// Step 1（A3 TaskData 1）：submit 后，占位块携带的 input_id 与事件 id 相同。
     ///
     /// 同一次提交生成一个 InputId，分别写入：
     /// 1. `ChatInputEvent::UserMessage { id }` 事件；
     /// 2. `ConversationBlock::QueuedUserMessage { input_id }` 占位块。
     ///
-    /// 两者必须相等——这是 Task 2 按 id 清占位的前提。
+    /// 两者必须相等——这是 TaskData 2 按 id 清占位的前提。
     #[test]
     fn submit_placeholder_carries_input_id() {
         let mut app = test_app();

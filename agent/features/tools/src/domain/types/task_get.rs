@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `task_get` tool.
 ///
-/// Uses the Task-owned stable output view so Tool wire compatibility does not
+/// Uses the TaskData-owned stable output view so Tool wire compatibility does not
 /// depend on a duplicate Shared Kernel DTO.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskGetResult {
-    pub task: task::TaskView,
+    pub task: task::TaskViewData,
 }
 
 #[cfg(test)]

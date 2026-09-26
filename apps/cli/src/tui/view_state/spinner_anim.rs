@@ -6,7 +6,7 @@
 use rand::prelude::IndexedRandom;
 
 /// 装饰性动词池。verb 选定移入 view_state 后，此处为该池的唯一真相来源
-/// （Task 4.1 已删除原 `render/output_area/spinner.rs::SPINNER_VERBS`）。
+/// （TaskData 4.1 已删除原 `render/output_area/spinner.rs::SPINNER_VERBS`）。
 const SPINNER_VERBS: &[&str] = &[
     "Thinking",
     "Pondering",

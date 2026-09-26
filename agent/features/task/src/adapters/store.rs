@@ -1,16 +1,16 @@
 use std::sync::{Mutex, MutexGuard};
 
 use crate::domain::{
-    Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskBatchSnapshot,
-    TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot,
-    TaskPriority, TaskProgressSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError,
-    TaskStatus, TaskStoreState, TaskStoreStats,
+    BatchCreateSpecData, BatchData, BatchIdData, PreparedTaskRestoreData, TaskBatchSnapshotData,
+    TaskCommandResultData, TaskCreateSpecData, TaskData, TaskIdData, TaskLifecycleSnapshotData,
+    TaskPriorityData, TaskProgressSnapshotData, TaskRevisionData, TaskSnapshotData, TaskStatusData,
+    TaskStoreState, TaskStoreStatsData,
 };
 use crate::{TaskAccess, TaskPersist};
 
-/// Task BC 的内存事务 backing。
+/// TaskData BC 的内存事务 backing。
 ///
-/// 全部可变字段收进一个 [`TaskStoreState`]（其自身即携带权威 [`TaskRevision`]），
+/// 全部可变字段收进一个 [`TaskStoreState`]（其自身即携带权威 [`TaskRevisionData`]），
 /// 由一把同步 `Mutex` 统一守护；**NEVER** 为 tasks / batches / counters 分别建锁，
 /// 避免锁槽拆分导致 state 与 revision 之间出现不一致的中间态。
 ///
@@ -55,14 +55,14 @@ impl TaskStore {
     /// Captures one coherent persistence image while holding the aggregate's
     /// single lock. Deleted tombstones and runtime-only reverse indexes are not
     /// persisted. Crate-private plumbing behind the [`TaskPersist`] port.
-    pub(crate) fn capture_snapshot(&self) -> TaskSnapshot {
+    pub(crate) fn capture_snapshot(&self) -> TaskSnapshotData {
         self.lock().capture_snapshot()
     }
 
     /// Installs an already validated candidate with one lock acquisition and
     /// one infallible whole-state assignment. Crate-private plumbing behind the
     /// [`TaskPersist`] port.
-    pub(crate) fn install_snapshot(&self, prepared: PreparedTaskRestore) {
+    pub(crate) fn install_snapshot(&self, prepared: PreparedTaskRestoreData) {
         *self.lock() = prepared.into_candidate();
     }
 
@@ -75,221 +75,230 @@ impl TaskStore {
 }
 
 impl TaskAccess for TaskStore {
-    fn revision(&self) -> TaskRevision {
+    fn revision(&self) -> TaskRevisionData {
         self.lock().revision()
     }
 
-    fn clear(&self) -> Result<TaskCommandResult<()>, TaskCommandError> {
+    fn clear(&self) -> Result<TaskCommandResultData<()>, share::error::DomainError> {
         self.lock().clear()
     }
 
     fn create_batch(
         &self,
-        spec: BatchCreateSpec,
+        spec: BatchCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().create_batch(spec, timestamp)
     }
 
-    fn pause_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    fn pause_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().pause_batch(id)
     }
 
-    fn resume_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    fn resume_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().resume_batch(id)
     }
 
-    fn archive_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    fn archive_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().archive_batch(id)
     }
 
     fn record_batch_turn(
         &self,
-        id: BatchId,
+        id: BatchIdData,
         turn: u64,
         active: bool,
-    ) -> Result<TaskCommandResult<Batch>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().record_batch_turn(id, turn, active)
     }
 
     fn create_task(
         &self,
-        spec: TaskCreateSpec,
+        spec: TaskCreateSpecData,
         timestamp: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().create_task(spec, timestamp)
     }
 
     fn transition_with_progress(
         &self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskProgressSnapshotData>, share::error::DomainError> {
         self.lock().transition_with_progress(id, to, updated_at)
     }
 
     fn transition(
         &self,
-        id: TaskId,
-        to: TaskStatus,
+        id: TaskIdData,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().transition(id, to, updated_at)
     }
 
     fn set_subject(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         subject: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().set_subject(id, subject, updated_at)
     }
 
     fn set_description(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         description: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().set_description(id, description, updated_at)
     }
 
     fn set_priority(
         &self,
-        id: TaskId,
-        priority: TaskPriority,
+        id: TaskIdData,
+        priority: TaskPriorityData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().set_priority(id, priority, updated_at)
     }
 
     fn add_dependency(
         &self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock()
             .add_dependency(task_id, blocked_by_id, updated_at)
     }
 
     fn replace_dependencies(
         &self,
-        task_id: TaskId,
-        blocked_by_ids: Vec<TaskId>,
+        task_id: TaskIdData,
+        blocked_by_ids: Vec<TaskIdData>,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock()
             .replace_dependencies(task_id, blocked_by_ids, updated_at)
     }
 
     fn remove_dependency(
         &self,
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock()
             .remove_dependency(task_id, blocked_by_id, updated_at)
     }
 
     fn add_tag(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         tag: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().add_tag(id, tag, updated_at)
     }
 
     fn remove_tag(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         tag: &str,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().remove_tag(id, tag, updated_at)
     }
 
     fn delete_with_progress(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskProgressSnapshotData>, share::error::DomainError> {
         self.lock().delete_with_progress(id, updated_at)
     }
 
     fn delete(
         &self,
-        id: TaskId,
+        id: TaskIdData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock().delete(id, updated_at)
     }
 
-    fn get(&self, id: TaskId) -> Option<Task> {
+    fn get(&self, id: TaskIdData) -> Option<TaskData> {
         self.lock().get(id)
     }
 
-    fn current_task_by_seq(&self, seq: u64) -> Option<Task> {
+    fn current_task_by_seq(&self, seq: u64) -> Option<TaskData> {
         self.lock().current_task_by_seq(seq)
     }
 
-    fn list(&self) -> Vec<Task> {
+    fn list(&self) -> Vec<TaskData> {
         self.lock().list()
     }
 
-    fn list_batches(&self) -> Vec<Batch> {
+    fn list_batches(&self) -> Vec<BatchData> {
         self.lock().list_batches()
     }
 
-    fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot> {
+    fn batch_snapshot(&self, id: BatchIdData) -> Option<TaskBatchSnapshotData> {
         self.lock().batch_snapshot(id)
     }
 
-    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot> {
+    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshotData> {
         self.lock().list_batch_snapshots()
     }
 
-    fn current_batch(&self) -> Option<BatchId> {
+    fn current_batch(&self) -> Option<BatchIdData> {
         self.lock().current_batch()
     }
 
-    fn stats(&self) -> TaskStoreStats {
+    fn stats(&self) -> TaskStoreStatsData {
         self.lock().stats()
     }
 
-    fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot {
+    fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshotData {
         self.lock().lifecycle_snapshot(stale_after_silence_turns)
     }
 
-    fn is_blocked(&self, id: TaskId) -> Result<bool, TaskCommandError> {
+    fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
         self.lock().is_blocked(id)
     }
 
-    fn would_create_cycle(&self, task_id: TaskId, blocked_by_id: TaskId) -> bool {
+    fn would_create_cycle(&self, task_id: TaskIdData, blocked_by_id: TaskIdData) -> bool {
         self.lock().would_create_cycle(task_id, blocked_by_id)
     }
 }
 
 impl TaskPersist for TaskStore {
-    fn collect_snapshot(&self) -> TaskSnapshot {
+    fn collect_snapshot(&self) -> TaskSnapshotData {
         self.capture_snapshot()
     }
 
     fn prepare_restore(
         &self,
-        snapshot: &TaskSnapshot,
-    ) -> Result<PreparedTaskRestore, TaskSnapshotValidationError> {
+        snapshot: &TaskSnapshotData,
+    ) -> Result<PreparedTaskRestoreData, share::error::DomainError> {
         // Clone before validating: the candidate is built from the caller's
         // snapshot alone and never reads or mutates the live backing, so a
         // rejected restore leaves both the argument and this store untouched.
         snapshot.clone().prepare()
     }
 
-    fn commit_restore(&self, token: PreparedTaskRestore) {
+    fn commit_restore(&self, token: PreparedTaskRestoreData) {
         self.install_snapshot(token);
     }
 }

@@ -27,9 +27,9 @@ macro_rules! numeric_id {
     };
 }
 
-numeric_id!(TaskId);
-numeric_id!(BatchId);
-numeric_id!(TaskRevision);
+numeric_id!(TaskIdData);
+numeric_id!(BatchIdData);
+numeric_id!(TaskRevisionData);
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("任务 ID 必须是非零十进制整数：{value}")]
@@ -37,8 +37,8 @@ pub struct TaskIdParseError {
     value: String,
 }
 
-impl TaskId {
-    /// Parses a Task Tool wire identifier. Aggregate internals may still
+impl TaskIdData {
+    /// Parses a TaskData Tool wire identifier. Aggregate internals may still
     /// construct zero IDs solely to validate malformed persisted snapshots.
     pub fn parse_tool_input(value: &str) -> Result<Self, TaskIdParseError> {
         let id = value.parse::<u64>().map_err(|_| TaskIdParseError {
@@ -55,7 +55,7 @@ impl TaskId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum TaskStatusData {
     Pending,
     InProgress,
     Completed,
@@ -64,7 +64,7 @@ pub enum TaskStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BatchStatus {
+pub enum BatchStatusData {
     Active,
     Paused,
     Archived,
@@ -72,7 +72,7 @@ pub enum BatchStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskPriority {
+pub enum TaskPriorityData {
     #[default]
     Normal,
     Low,
@@ -80,28 +80,28 @@ pub enum TaskPriority {
     Urgent,
 }
 
-impl Ord for TaskPriority {
+impl Ord for TaskPriorityData {
     fn cmp(&self, other: &Self) -> Ordering {
-        fn rank(priority: TaskPriority) -> u8 {
+        fn rank(priority: TaskPriorityData) -> u8 {
             match priority {
-                TaskPriority::Low => 0,
-                TaskPriority::Normal => 1,
-                TaskPriority::High => 2,
-                TaskPriority::Urgent => 3,
+                TaskPriorityData::Low => 0,
+                TaskPriorityData::Normal => 1,
+                TaskPriorityData::High => 2,
+                TaskPriorityData::Urgent => 3,
             }
         }
         rank(*self).cmp(&rank(*other))
     }
 }
 
-impl PartialOrd for TaskPriority {
+impl PartialOrd for TaskPriorityData {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum TaskCommandError {
+pub(crate) enum TaskCommandError {
     #[error("任务标题不能为空")]
     InvalidTaskSubject,
     #[error("批次摘要不能为空")]
@@ -113,85 +113,97 @@ pub enum TaskCommandError {
     #[error("修订号已耗尽")]
     RevisionExhausted,
     #[error("非法任务状态迁移：{from:?} -> {to:?}")]
-    IllegalTransition { from: TaskStatus, to: TaskStatus },
+    IllegalTransition {
+        from: TaskStatusData,
+        to: TaskStatusData,
+    },
     #[error("删除只能通过聚合删除命令执行")]
     DeletedOnlyViaDelete,
     #[error("批次 {id} 不允许从 {from:?} 迁移到 {to:?}")]
     IllegalBatchTransition {
-        id: BatchId,
-        from: BatchStatus,
-        to: BatchStatus,
+        id: BatchIdData,
+        from: BatchStatusData,
+        to: BatchStatusData,
     },
     #[error("任务不存在：{id}")]
-    TaskNotFound { id: TaskId },
+    TaskNotFound { id: TaskIdData },
     #[error("批次不存在：{id}")]
-    BatchNotFound { id: BatchId },
+    BatchNotFound { id: BatchIdData },
     #[error("当前没有 active 批次")]
     NoActiveBatch,
     #[error("依赖边会形成环：{task_id} -> {blocked_by_id}")]
     DependencyCycle {
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
     },
     #[error("禁止跨批次依赖：{task_id} -> {blocked_by_id}")]
     CrossBatchDependency {
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
     },
     #[error("任务 {task_id} 的依赖列表包含重复任务：{blocked_by_id}")]
     DuplicateDependency {
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
     },
     #[error("任务 {id} 被前置任务阻塞：{blocked_by:?}")]
-    TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
+    TaskBlocked {
+        id: TaskIdData,
+        blocked_by: Vec<TaskIdData>,
+    },
     #[error("批次 {active} 已经 active，不能恢复批次 {requested}")]
-    ActiveBatchConflict { active: BatchId, requested: BatchId },
+    ActiveBatchConflict {
+        active: BatchIdData,
+        requested: BatchIdData,
+    },
     #[error("批次 {id} 当前状态为 {status:?}，只有 active 批次才能记录轮次")]
-    BatchNotActive { id: BatchId, status: BatchStatus },
+    BatchNotActive {
+        id: BatchIdData,
+        status: BatchStatusData,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskEvent {
+pub enum TaskEventData {
     TaskCreated {
-        task_id: TaskId,
+        task_id: TaskIdData,
     },
     TaskStatusChanged {
-        task_id: TaskId,
-        from: TaskStatus,
-        to: TaskStatus,
+        task_id: TaskIdData,
+        from: TaskStatusData,
+        to: TaskStatusData,
     },
     TaskDependencyAdded {
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
     },
     TaskDependencyRemoved {
-        task_id: TaskId,
-        blocked_by_id: TaskId,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
     },
     TaskPriorityChanged {
-        task_id: TaskId,
-        from: TaskPriority,
-        to: TaskPriority,
+        task_id: TaskIdData,
+        from: TaskPriorityData,
+        to: TaskPriorityData,
     },
     TaskSubjectChanged {
-        task_id: TaskId,
+        task_id: TaskIdData,
     },
     TaskDescriptionChanged {
-        task_id: TaskId,
+        task_id: TaskIdData,
     },
     TaskTagAdded {
-        task_id: TaskId,
+        task_id: TaskIdData,
         tag: String,
     },
     TaskTagRemoved {
-        task_id: TaskId,
+        task_id: TaskIdData,
         tag: String,
     },
     TaskDeleted {
-        task_id: TaskId,
+        task_id: TaskIdData,
     },
-    /// The complete Task aggregate was reset atomically.
+    /// The complete TaskData aggregate was reset atomically.
     ///
     /// A non-empty reset emits exactly one event and advances the aggregate
     /// revision exactly once. Resetting an already-empty aggregate is an
@@ -203,18 +215,18 @@ pub enum TaskEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskCommandResult<T> {
+pub struct TaskCommandResultData<T> {
     pub value: T,
-    pub events: Vec<TaskEvent>,
-    revision: Option<TaskRevision>,
+    pub events: Vec<TaskEventData>,
+    revision: Option<TaskRevisionData>,
 }
 
-impl<T> TaskCommandResult<T> {
-    pub fn revision(&self) -> Option<TaskRevision> {
+impl<T> TaskCommandResultData<T> {
+    pub fn revision(&self) -> Option<TaskRevisionData> {
         self.revision
     }
 
-    pub(crate) fn uncommitted(value: T, events: Vec<TaskEvent>) -> Self {
+    pub(crate) fn uncommitted(value: T, events: Vec<TaskEventData>) -> Self {
         Self {
             value,
             events,
@@ -222,27 +234,27 @@ impl<T> TaskCommandResult<T> {
         }
     }
 
-    pub(crate) fn commit(&mut self, revision: TaskRevision) {
+    pub(crate) fn commit(&mut self, revision: TaskRevisionData) {
         self.revision = Some(revision);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskCreateSpec {
+pub struct TaskCreateSpecData {
     subject: String,
     description: String,
     active_form: Option<String>,
-    priority: TaskPriority,
+    priority: TaskPriorityData,
 }
-impl TaskCreateSpec {
+impl TaskCreateSpecData {
     pub fn try_new(
         subject: String,
         description: String,
         active_form: Option<String>,
-        priority: TaskPriority,
-    ) -> Result<Self, TaskCommandError> {
+        priority: TaskPriorityData,
+    ) -> Result<Self, share::error::DomainError> {
         if subject.trim().is_empty() {
-            return Err(TaskCommandError::InvalidTaskSubject);
+            return Err(TaskCommandError::InvalidTaskSubject.into());
         }
         Ok(Self {
             subject,
@@ -260,19 +272,19 @@ impl TaskCreateSpec {
     pub fn active_form(&self) -> Option<&str> {
         self.active_form.as_deref()
     }
-    pub fn priority(&self) -> TaskPriority {
+    pub fn priority(&self) -> TaskPriorityData {
         self.priority
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BatchCreateSpec {
+pub struct BatchCreateSpecData {
     summary: String,
 }
-impl BatchCreateSpec {
-    pub fn try_new(summary: String) -> Result<Self, TaskCommandError> {
+impl BatchCreateSpecData {
+    pub fn try_new(summary: String) -> Result<Self, share::error::DomainError> {
         if summary.trim().is_empty() {
-            return Err(TaskCommandError::InvalidBatchSummary);
+            return Err(TaskCommandError::InvalidBatchSummary.into());
         }
         Ok(Self { summary })
     }
@@ -282,50 +294,50 @@ impl BatchCreateSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Task {
-    id: TaskId,
-    batch: BatchId,
+pub struct TaskData {
+    id: TaskIdData,
+    batch: BatchIdData,
     seq: u64,
     subject: String,
     description: String,
     active_form: Option<String>,
     session_id: Option<String>,
     tags: Vec<String>,
-    blocked_by: Vec<TaskId>,
-    blocks: Vec<TaskId>,
-    status: TaskStatus,
-    priority: TaskPriority,
+    blocked_by: Vec<TaskIdData>,
+    blocks: Vec<TaskIdData>,
+    status: TaskStatusData,
+    priority: TaskPriorityData,
     created_at: u64,
     updated_at: u64,
     started_at: Option<u64>,
     completed_at: Option<u64>,
 }
 pub(crate) struct TaskSnapshotFields {
-    pub(crate) id: TaskId,
-    pub(crate) batch: BatchId,
+    pub(crate) id: TaskIdData,
+    pub(crate) batch: BatchIdData,
     pub(crate) seq: u64,
     pub(crate) subject: String,
     pub(crate) description: String,
     pub(crate) active_form: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) tags: Vec<String>,
-    pub(crate) blocked_by: Vec<TaskId>,
-    pub(crate) status: TaskStatus,
-    pub(crate) priority: TaskPriority,
+    pub(crate) blocked_by: Vec<TaskIdData>,
+    pub(crate) status: TaskStatusData,
+    pub(crate) priority: TaskPriorityData,
     pub(crate) created_at: u64,
     pub(crate) updated_at: u64,
     pub(crate) started_at: Option<u64>,
     pub(crate) completed_at: Option<u64>,
 }
 
-impl Task {
+impl TaskData {
     pub(crate) fn create(
-        id: TaskId,
-        batch: BatchId,
+        id: TaskIdData,
+        batch: BatchIdData,
         seq: u64,
-        spec: TaskCreateSpec,
+        spec: TaskCreateSpecData,
         timestamp: u64,
-    ) -> TaskCommandResult<Self> {
+    ) -> TaskCommandResultData<Self> {
         let task = Self {
             id,
             batch,
@@ -337,20 +349,20 @@ impl Task {
             tags: Vec::new(),
             blocked_by: Vec::new(),
             blocks: Vec::new(),
-            status: TaskStatus::Pending,
+            status: TaskStatusData::Pending,
             priority: spec.priority,
             created_at: timestamp,
             updated_at: timestamp,
             started_at: None,
             completed_at: None,
         };
-        TaskCommandResult::uncommitted(task, vec![TaskEvent::TaskCreated { task_id: id }])
+        TaskCommandResultData::uncommitted(task, vec![TaskEventData::TaskCreated { task_id: id }])
     }
     #[cfg(test)]
     pub(crate) fn with_status(
-        id: TaskId,
-        batch: BatchId,
-        status: TaskStatus,
+        id: TaskIdData,
+        batch: BatchIdData,
+        status: TaskStatusData,
         timestamp: u64,
     ) -> Self {
         Self {
@@ -365,11 +377,11 @@ impl Task {
             blocked_by: Vec::new(),
             blocks: Vec::new(),
             status,
-            priority: TaskPriority::Normal,
+            priority: TaskPriorityData::Normal,
             created_at: timestamp,
             updated_at: timestamp,
-            started_at: (status != TaskStatus::Pending).then_some(timestamp),
-            completed_at: (status == TaskStatus::Completed).then_some(timestamp),
+            started_at: (status != TaskStatusData::Pending).then_some(timestamp),
+            completed_at: (status == TaskStatusData::Completed).then_some(timestamp),
         }
     }
     pub(crate) fn from_snapshot(fields: TaskSnapshotFields) -> Self {
@@ -392,10 +404,10 @@ impl Task {
             completed_at: fields.completed_at,
         }
     }
-    pub fn id(&self) -> TaskId {
+    pub fn id(&self) -> TaskIdData {
         self.id
     }
-    pub fn batch(&self) -> BatchId {
+    pub fn batch(&self) -> BatchIdData {
         self.batch
     }
     pub fn seq(&self) -> u64 {
@@ -411,18 +423,18 @@ impl Task {
         &mut self,
         subject: String,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Self>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<Self>, share::error::DomainError> {
         if subject.trim().is_empty() {
-            return Err(TaskCommandError::InvalidTaskSubject);
+            return Err(TaskCommandError::InvalidTaskSubject.into());
         }
         if self.subject == subject {
-            return Ok(TaskCommandResult::uncommitted(self.clone(), Vec::new()));
+            return Ok(TaskCommandResultData::uncommitted(self.clone(), Vec::new()));
         }
         self.subject = subject;
         self.updated_at = updated_at;
-        Ok(TaskCommandResult::uncommitted(
+        Ok(TaskCommandResultData::uncommitted(
             self.clone(),
-            vec![TaskEvent::TaskSubjectChanged { task_id: self.id }],
+            vec![TaskEventData::TaskSubjectChanged { task_id: self.id }],
         ))
     }
     pub fn description(&self) -> &str {
@@ -432,15 +444,15 @@ impl Task {
         &mut self,
         description: String,
         updated_at: u64,
-    ) -> TaskCommandResult<Self> {
+    ) -> TaskCommandResultData<Self> {
         if self.description == description {
-            return TaskCommandResult::uncommitted(self.clone(), Vec::new());
+            return TaskCommandResultData::uncommitted(self.clone(), Vec::new());
         }
         self.description = description;
         self.updated_at = updated_at;
-        TaskCommandResult::uncommitted(
+        TaskCommandResultData::uncommitted(
             self.clone(),
-            vec![TaskEvent::TaskDescriptionChanged { task_id: self.id }],
+            vec![TaskEventData::TaskDescriptionChanged { task_id: self.id }],
         )
     }
     pub fn active_form(&self) -> Option<&str> {
@@ -452,34 +464,34 @@ impl Task {
     pub fn tags(&self) -> &[String] {
         &self.tags
     }
-    pub fn blocked_by(&self) -> &[TaskId] {
+    pub fn blocked_by(&self) -> &[TaskIdData] {
         &self.blocked_by
     }
-    pub fn blocks(&self) -> &[TaskId] {
+    pub fn blocks(&self) -> &[TaskIdData] {
         &self.blocks
     }
     /// Restores the derived reverse dependency index without changing the
     /// persisted task timestamps. Snapshot validation calls this only after all
     /// `blocked_by` edges have been accepted.
-    pub(crate) fn restore_blocks(&mut self, mut blocks: Vec<TaskId>) {
+    pub(crate) fn restore_blocks(&mut self, mut blocks: Vec<TaskIdData>) {
         blocks.sort_unstable();
         self.blocks = blocks;
     }
-    pub(crate) fn add_blocked_by(&mut self, id: TaskId, updated_at: u64) {
+    pub(crate) fn add_blocked_by(&mut self, id: TaskIdData, updated_at: u64) {
         if !self.blocked_by.contains(&id) {
             self.blocked_by.push(id);
             self.blocked_by.sort_unstable();
             self.updated_at = updated_at;
         }
     }
-    pub(crate) fn add_blocks(&mut self, id: TaskId, updated_at: u64) {
+    pub(crate) fn add_blocks(&mut self, id: TaskIdData, updated_at: u64) {
         if !self.blocks.contains(&id) {
             self.blocks.push(id);
             self.blocks.sort_unstable();
             self.updated_at = updated_at;
         }
     }
-    pub(crate) fn remove_blocked_by(&mut self, id: TaskId, updated_at: u64) -> bool {
+    pub(crate) fn remove_blocked_by(&mut self, id: TaskIdData, updated_at: u64) -> bool {
         let old_len = self.blocked_by.len();
         self.blocked_by.retain(|existing| *existing != id);
         if self.blocked_by.len() != old_len {
@@ -489,7 +501,7 @@ impl Task {
             false
         }
     }
-    pub(crate) fn remove_blocks(&mut self, id: TaskId, updated_at: u64) -> bool {
+    pub(crate) fn remove_blocks(&mut self, id: TaskIdData, updated_at: u64) -> bool {
         let old_len = self.blocks.len();
         self.blocks.retain(|existing| *existing != id);
         if self.blocks.len() != old_len {
@@ -500,16 +512,16 @@ impl Task {
         }
     }
     pub(crate) fn mark_deleted(&mut self, updated_at: u64) {
-        self.status = TaskStatus::Deleted;
+        self.status = TaskStatusData::Deleted;
         self.updated_at = updated_at;
     }
-    pub fn status(&self) -> TaskStatus {
+    pub fn status(&self) -> TaskStatusData {
         self.status
     }
-    pub fn priority(&self) -> TaskPriority {
+    pub fn priority(&self) -> TaskPriorityData {
         self.priority
     }
-    pub(crate) fn set_priority(&mut self, priority: TaskPriority, updated_at: u64) {
+    pub(crate) fn set_priority(&mut self, priority: TaskPriorityData, updated_at: u64) {
         if self.priority == priority {
             return;
         }
@@ -543,22 +555,22 @@ impl Task {
     }
     pub(crate) fn reopen_from_completed(
         &mut self,
-        to: TaskStatus,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Self>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<Self>, share::error::DomainError> {
         let from = self.status;
-        if from != TaskStatus::Completed
-            || !matches!(to, TaskStatus::Pending | TaskStatus::InProgress)
+        if from != TaskStatusData::Completed
+            || !matches!(to, TaskStatusData::Pending | TaskStatusData::InProgress)
         {
-            return Err(TaskCommandError::IllegalTransition { from, to });
+            return Err(TaskCommandError::IllegalTransition { from, to }.into());
         }
         self.status = to;
         self.updated_at = updated_at;
         self.completed_at = None;
-        self.started_at = (to == TaskStatus::InProgress).then_some(updated_at);
-        Ok(TaskCommandResult::uncommitted(
+        self.started_at = (to == TaskStatusData::InProgress).then_some(updated_at);
+        Ok(TaskCommandResultData::uncommitted(
             self.clone(),
-            vec![TaskEvent::TaskStatusChanged {
+            vec![TaskEventData::TaskStatusChanged {
                 task_id: self.id,
                 from,
                 to,
@@ -568,41 +580,41 @@ impl Task {
 
     pub(crate) fn transition_to(
         &mut self,
-        to: TaskStatus,
+        to: TaskStatusData,
         updated_at: u64,
-    ) -> Result<TaskCommandResult<Self>, TaskCommandError> {
+    ) -> Result<TaskCommandResultData<Self>, share::error::DomainError> {
         let from = self.status;
-        if to == TaskStatus::Deleted {
-            return Err(TaskCommandError::DeletedOnlyViaDelete);
+        if to == TaskStatusData::Deleted {
+            return Err(TaskCommandError::DeletedOnlyViaDelete.into());
         }
         if !matches!(
             (from, to),
             (
-                TaskStatus::Pending,
-                TaskStatus::InProgress | TaskStatus::Completed
+                TaskStatusData::Pending,
+                TaskStatusData::InProgress | TaskStatusData::Completed
             ) | (
-                TaskStatus::InProgress,
-                TaskStatus::Pending | TaskStatus::Completed
+                TaskStatusData::InProgress,
+                TaskStatusData::Pending | TaskStatusData::Completed
             )
         ) {
-            return Err(TaskCommandError::IllegalTransition { from, to });
+            return Err(TaskCommandError::IllegalTransition { from, to }.into());
         }
         self.status = to;
         self.updated_at = updated_at;
-        if to == TaskStatus::Pending {
+        if to == TaskStatusData::Pending {
             self.started_at = None;
             self.completed_at = None;
-        } else if matches!(to, TaskStatus::InProgress | TaskStatus::Completed)
+        } else if matches!(to, TaskStatusData::InProgress | TaskStatusData::Completed)
             && self.started_at.is_none()
         {
             self.started_at = Some(updated_at);
         }
-        if to == TaskStatus::Completed {
+        if to == TaskStatusData::Completed {
             self.completed_at = Some(updated_at);
         }
-        Ok(TaskCommandResult::uncommitted(
+        Ok(TaskCommandResultData::uncommitted(
             self.clone(),
-            vec![TaskEvent::TaskStatusChanged {
+            vec![TaskEventData::TaskStatusChanged {
                 task_id: self.id,
                 from,
                 to,
@@ -612,23 +624,23 @@ impl Task {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskView {
-    id: String,
+pub struct TaskViewData {
+    id: TaskIdData,
     subject: String,
     description: String,
-    status: TaskStatus,
+    status: TaskStatusData,
     blocked_by: Vec<String>,
-    priority: TaskPriority,
+    priority: TaskPriorityData,
     created_at: u64,
     updated_at: u64,
     session_id: Option<String>,
-    batch: BatchId,
+    batch: BatchIdData,
 }
 
-impl TaskView {
-    pub fn from_task(task: &Task, blocked_by: Vec<String>) -> Self {
+impl TaskViewData {
+    pub fn from_task(task: &TaskData, blocked_by: Vec<String>) -> Self {
         Self {
-            id: task.seq().to_string(),
+            id: task.id(),
             subject: task.subject.clone(),
             description: task.description.clone(),
             status: task.status,
@@ -642,8 +654,8 @@ impl TaskView {
     }
 }
 
-impl From<&Task> for TaskView {
-    fn from(task: &Task) -> Self {
+impl From<&TaskData> for TaskViewData {
+    fn from(task: &TaskData) -> Self {
         Self::from_task(
             task,
             task.blocked_by().iter().map(ToString::to_string).collect(),
@@ -652,27 +664,31 @@ impl From<&Task> for TaskView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Batch {
-    id: BatchId,
+pub struct BatchData {
+    id: BatchIdData,
     summary: Option<String>,
-    status: BatchStatus,
+    status: BatchStatusData,
     created_at: u64,
     last_active_turn: u64,
     silence_turns: u64,
 }
-impl Batch {
-    pub(crate) fn create(id: BatchId, spec: BatchCreateSpec, created_at: u64) -> Self {
+impl BatchData {
+    pub(crate) fn create(id: BatchIdData, spec: BatchCreateSpecData, created_at: u64) -> Self {
         Self {
             id,
             summary: Some(spec.summary),
-            status: BatchStatus::Active,
+            status: BatchStatusData::Active,
             created_at,
             last_active_turn: 0,
             silence_turns: 0,
         }
     }
     #[cfg(test)]
-    pub(crate) fn with_status(id: BatchId, status: BatchStatus, silence_turns: u64) -> Self {
+    pub(crate) fn with_status(
+        id: BatchIdData,
+        status: BatchStatusData,
+        silence_turns: u64,
+    ) -> Self {
         Self {
             id,
             summary: Some("批次".into()),
@@ -683,9 +699,9 @@ impl Batch {
         }
     }
     pub(crate) fn from_snapshot(
-        id: BatchId,
+        id: BatchIdData,
         summary: Option<String>,
-        status: BatchStatus,
+        status: BatchStatusData,
         created_at: u64,
         last_active_turn: u64,
         silence_turns: u64,
@@ -699,13 +715,13 @@ impl Batch {
             silence_turns,
         }
     }
-    pub fn id(&self) -> BatchId {
+    pub fn id(&self) -> BatchIdData {
         self.id
     }
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
     }
-    pub fn status(&self) -> BatchStatus {
+    pub fn status(&self) -> BatchStatusData {
         self.status
     }
     pub fn created_at(&self) -> u64 {
@@ -728,12 +744,13 @@ impl Batch {
         &mut self,
         turn: u64,
         active: bool,
-    ) -> Result<bool, TaskCommandError> {
-        if self.status != BatchStatus::Active {
+    ) -> Result<bool, share::error::DomainError> {
+        if self.status != BatchStatusData::Active {
             return Err(TaskCommandError::BatchNotActive {
                 id: self.id,
                 status: self.status,
-            });
+            }
+            .into());
         }
         if active {
             if self.last_active_turn == turn && self.silence_turns == 0 {
@@ -749,35 +766,40 @@ impl Batch {
         }
         Ok(true)
     }
-    pub(crate) fn reopen(&mut self) -> Result<(), TaskCommandError> {
-        if self.status != BatchStatus::Archived {
+    pub(crate) fn reopen(&mut self) -> Result<(), share::error::DomainError> {
+        if self.status != BatchStatusData::Archived {
             return Err(TaskCommandError::IllegalBatchTransition {
                 id: self.id,
                 from: self.status,
-                to: BatchStatus::Active,
-            });
+                to: BatchStatusData::Active,
+            }
+            .into());
         }
-        self.status = BatchStatus::Active;
+        self.status = BatchStatusData::Active;
         Ok(())
     }
 
-    pub(crate) fn transition_to(&mut self, to: BatchStatus) -> Result<(), TaskCommandError> {
+    pub(crate) fn transition_to(
+        &mut self,
+        to: BatchStatusData,
+    ) -> Result<(), share::error::DomainError> {
         let from = self.status;
         if !matches!(
             (from, to),
             (
-                BatchStatus::Active,
-                BatchStatus::Paused | BatchStatus::Archived
+                BatchStatusData::Active,
+                BatchStatusData::Paused | BatchStatusData::Archived
             ) | (
-                BatchStatus::Paused,
-                BatchStatus::Active | BatchStatus::Archived
-            ) | (BatchStatus::Archived, BatchStatus::Archived)
+                BatchStatusData::Paused,
+                BatchStatusData::Active | BatchStatusData::Archived
+            ) | (BatchStatusData::Archived, BatchStatusData::Archived)
         ) {
             return Err(TaskCommandError::IllegalBatchTransition {
                 id: self.id,
                 from,
                 to,
-            });
+            }
+            .into());
         }
         self.status = to;
         Ok(())
@@ -787,3 +809,13 @@ impl Batch {
 #[cfg(test)]
 #[path = "model_tests.rs"]
 mod tests;
+
+// ─── DomainError 折叠层（跨界唯一错误）────────────────────────────────
+
+impl From<TaskCommandError> for share::error::DomainError {
+    fn from(inner: TaskCommandError) -> Self {
+        // 命令错误全部为校验/状态非法（无 IO 类别）。
+        let message = inner.to_string();
+        share::error::DomainError::invalid("task", message).with_source(std::sync::Arc::new(inner))
+    }
+}

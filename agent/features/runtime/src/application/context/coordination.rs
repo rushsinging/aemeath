@@ -37,7 +37,7 @@ use share::message::Message;
 /// materialized ContextWindow. A typed skip is a non-fatal no-op: Context did
 /// not mutate its backing, so Runtime keeps both values and proceeds with the
 /// current model invocation.
-/// #1385 Task 12: `last_total_tokens` replaced with `RunUsageTracker` for
+/// #1385 TaskData 12: `last_total_tokens` replaced with `RunUsageTracker` for
 /// RuntimeContext I/O seam.
 pub(crate) fn apply_automatic_compact_outcome<T>(
     outcome: &CompactOutcome,

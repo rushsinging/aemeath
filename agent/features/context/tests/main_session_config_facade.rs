@@ -21,7 +21,7 @@ use memory::{
 };
 use project::wire_production_workspace;
 use share::session_types::PersistedWorkspaceContext;
-use task::{TaskSnapshot, TaskStore};
+use task::{TaskSnapshotData, TaskStore};
 
 // ─── Temp dir helpers (copied from main_session_wiring.rs) ───────────
 
@@ -281,7 +281,7 @@ async fn build_with_store_harness() -> FacadeHarness {
 
 fn session_with_workspace(
     ws: &PersistedWorkspaceContext,
-    tasks: SnapshotState<TaskSnapshot>,
+    tasks: SnapshotState<TaskSnapshotData>,
 ) -> CanonicalSession {
     CanonicalSession {
         id: "resume-target".to_string(),

@@ -3901,6 +3901,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "share",
  "thiserror 2.0.18",
 ]
 

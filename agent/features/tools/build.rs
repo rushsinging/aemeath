@@ -29,8 +29,10 @@ fn rust_type_to_json_schema(
             let name = segments.last().unwrap().as_str();
 
             match name {
-                "String" | "PathBuf" | "OsString" | "TaskId" => r#"{"type": "string"}"#.to_string(),
-                "BatchId" => r#"{"type": "integer"}"#.to_string(),
+                "String" | "PathBuf" | "OsString" | "TaskIdData" => {
+                    r#"{"type": "string"}"#.to_string()
+                }
+                "BatchIdData" => r#"{"type": "integer"}"#.to_string(),
                 "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
                 | "i128" | "isize" => r#"{"type": "integer"}"#.to_string(),
                 "f32" | "f64" => r#"{"type": "number"}"#.to_string(),
@@ -315,10 +317,10 @@ fn main() {
         all_files.push((path.clone(), syn_file));
     }
 
-    // Task-owned Tool output views participate in schema generation without
+    // TaskData-owned Tool output views participate in schema generation without
     // duplicating their definitions in Tools or Shared Kernel. Only the stable
-    // TaskView and its wire enums may enter the Tools schema graph; aggregate
-    // and command types stay private to Task.
+    // TaskViewData and its wire enums may enter the Tools schema graph; aggregate
+    // and command types stay private to TaskData.
     let task_types_path = Path::new("../task/src/domain/model.rs");
     println!("cargo:rerun-if-changed={}", task_types_path.display());
     let content = fs::read_to_string(task_types_path).unwrap();
@@ -326,13 +328,13 @@ fn main() {
         .unwrap_or_else(|e| panic!("build.rs: syn 解析 {} 失败: {e}", task_types_path.display()));
     for item in &syn_file.items {
         match item {
-            syn::Item::Struct(item_struct) if item_struct.ident == "TaskView" => {
+            syn::Item::Struct(item_struct) if item_struct.ident == "TaskViewData" => {
                 known_structs.insert(item_struct.ident.to_string(), item_struct.clone());
             }
             syn::Item::Enum(item_enum)
                 if matches!(
                     item_enum.ident.to_string().as_str(),
-                    "TaskStatus" | "TaskPriority"
+                    "TaskStatusData" | "TaskPriorityData"
                 ) =>
             {
                 let variants = item_enum

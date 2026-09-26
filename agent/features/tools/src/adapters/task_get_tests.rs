@@ -8,15 +8,18 @@ fn test_ctx() -> ToolExecutionContext {
 fn seeded_access() -> Arc<dyn task::TaskAccess> {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     access
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
         .unwrap();
     access
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "任务".into(),
                 "描述".into(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -37,13 +40,13 @@ async fn task_get_returns_task_owned_view_for_live_task() {
 
     assert!(!result.is_error, "{}", result.text);
     let value = serde_json::to_value(result.data.unwrap()).expect("serialize task result");
-    assert_eq!(value["task"]["id"], "1");
+    assert_eq!(value["task"]["id"], 1);
 }
 
 #[tokio::test]
 async fn task_get_hides_deleted_task() {
     let access = seeded_access();
-    access.delete(task::TaskId::new(1), 3).unwrap();
+    access.delete(task::TaskIdData::new(1), 3).unwrap();
     let tool = TaskGetTool { access };
 
     let result = tool
@@ -51,7 +54,7 @@ async fn task_get_hides_deleted_task() {
         .await;
 
     assert!(result.is_error);
-    assert!(result.text.contains("Task not found"));
+    assert!(result.text.contains("TaskData not found"));
 }
 
 #[tokio::test]

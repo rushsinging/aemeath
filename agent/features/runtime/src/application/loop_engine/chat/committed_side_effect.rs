@@ -97,7 +97,7 @@ impl CommittedSideEffectHandler for TaskCommittedSideEffectHandler {
         if state.revision != change.revision().get() {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "忽略 revision 不一致的 Task committed observation: committed={} observed={}",
+                "忽略 revision 不一致的 TaskData committed observation: committed={} observed={}",
                 change.revision().get(),
                 state.revision,
             );

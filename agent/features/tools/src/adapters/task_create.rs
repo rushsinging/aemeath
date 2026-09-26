@@ -3,36 +3,36 @@ use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedT
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskCreateSpec, TaskPriority};
+use task::{TaskAccess, TaskCreateSpecData, TaskPriorityData};
 
 pub struct TaskCreateTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
-fn parse_priority(value: Option<&str>) -> TaskPriority {
+fn parse_priority(value: Option<&str>) -> TaskPriorityData {
     match value.map(str::to_ascii_lowercase).as_deref() {
-        Some("low") => TaskPriority::Low,
-        Some("high") => TaskPriority::High,
-        Some("urgent" | "critical") => TaskPriority::Urgent,
-        _ => TaskPriority::Normal,
+        Some("low") => TaskPriorityData::Low,
+        Some("high") => TaskPriorityData::High,
+        Some("urgent" | "critical") => TaskPriorityData::Urgent,
+        _ => TaskPriorityData::Normal,
     }
 }
 
-fn status_label(status: task::TaskStatus) -> &'static str {
+fn status_label(status: task::TaskStatusData) -> &'static str {
     match status {
-        task::TaskStatus::Pending => "pending",
-        task::TaskStatus::InProgress => "in_progress",
-        task::TaskStatus::Completed => "completed",
-        task::TaskStatus::Deleted => "deleted",
+        task::TaskStatusData::Pending => "pending",
+        task::TaskStatusData::InProgress => "in_progress",
+        task::TaskStatusData::Completed => "completed",
+        task::TaskStatusData::Deleted => "deleted",
     }
 }
 
-fn priority_label(priority: TaskPriority) -> &'static str {
+fn priority_label(priority: TaskPriorityData) -> &'static str {
     match priority {
-        TaskPriority::Low => "low",
-        TaskPriority::Normal => "normal",
-        TaskPriority::High => "high",
-        TaskPriority::Urgent => "urgent",
+        TaskPriorityData::Low => "low",
+        TaskPriorityData::Normal => "normal",
+        TaskPriorityData::High => "high",
+        TaskPriorityData::Urgent => "urgent",
     }
 }
 
@@ -75,11 +75,12 @@ impl TypedTool for TaskCreateTool {
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
         let priority = parse_priority(args.priority.as_deref());
-        let spec = match TaskCreateSpec::try_new(args.subject, args.description, None, priority) {
+        let spec = match TaskCreateSpecData::try_new(args.subject, args.description, None, priority)
+        {
             Ok(spec) => spec,
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
-        // Task BC deliberately returns NoActiveBatch; the tool must not create one implicitly.
+        // TaskData BC deliberately returns NoActiveBatch; the tool must not create one implicitly.
         let command_result = match self
             .access
             .create_task(spec, chrono::Utc::now().timestamp_millis() as u64)
@@ -91,7 +92,7 @@ impl TypedTool for TaskCreateTool {
         let created = command_result.value;
         let display_id = created.seq().to_string();
         TypedToolResult::success(
-            format!("Task #{} created: {}", display_id, created.subject()),
+            format!("TaskData #{} created: {}", display_id, created.subject()),
             TaskCreateResult {
                 task_id: display_id.clone(),
                 display_id,

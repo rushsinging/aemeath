@@ -33,8 +33,8 @@ use share::config::Config;
 use share::message::{ContentBlock, Message};
 use share::session_types::PersistedWorkspaceContext;
 use task::{
-    BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority, TaskSnapshot,
-    TaskSnapshotValidationError, TaskStore,
+    BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPersist, TaskPriorityData,
+    TaskSnapshotData, TaskStore,
 };
 
 // ─── RAII temp directory ─────────────────────────────────────────────
@@ -253,7 +253,7 @@ fn build_harness() -> Harness {
 /// Builds a `CanonicalSession` whose workspace matches the harness's live workspace.
 fn session_with_workspace(
     ws: &PersistedWorkspaceContext,
-    tasks: SnapshotState<TaskSnapshot>,
+    tasks: SnapshotState<TaskSnapshotData>,
 ) -> CanonicalSession {
     CanonicalSession {
         id: SessionId::new("resume-target").as_ref().to_string(),
@@ -357,14 +357,14 @@ fn finalized_tool_step(
 
 /// Seeds `count` tasks into the task store (all in a single batch).
 fn seed_tasks(access: &dyn TaskAccess, count: usize) {
-    let batch = BatchCreateSpec::try_new("seed-batch".to_owned()).unwrap();
+    let batch = BatchCreateSpecData::try_new("seed-batch".to_owned()).unwrap();
     access.create_batch(batch, 0).unwrap();
     for i in 0..count {
-        let spec = TaskCreateSpec::try_new(
+        let spec = TaskCreateSpecData::try_new(
             format!("task-{i}"),
             String::new(),
             None,
-            TaskPriority::Normal,
+            TaskPriorityData::Normal,
         )
         .unwrap();
         access.create_task(spec, (i + 1) as u64).unwrap();
@@ -387,7 +387,7 @@ async fn successful_resume_commits_all_and_updates_committed_state() {
 
     // Build a resume session with the current workspace.
     let ws = h.workspace_persist.snapshot();
-    let session = session_with_workspace(&ws, SnapshotState::Captured(TaskSnapshot::empty()));
+    let session = session_with_workspace(&ws, SnapshotState::Captured(TaskSnapshotData::empty()));
 
     h.wiring
         .resume_prepared(session)
@@ -435,8 +435,10 @@ async fn resumed_main_run_builds_the_same_structured_l2_l3_window() {
     let _guard = git_lock().await;
     let h = build_harness();
     let workspace = h.workspace_persist.snapshot();
-    let mut session =
-        session_with_workspace(&workspace, SnapshotState::Captured(TaskSnapshot::empty()));
+    let mut session = session_with_workspace(
+        &workspace,
+        SnapshotState::Captured(TaskSnapshotData::empty()),
+    );
     session.run_slices = vec![
         CommittedRunSlice::new(
             RunId::new("old-read").as_ref(),
@@ -723,7 +725,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     assert_eq!(rebound.session().structured_messages().len(), 1);
 }
 
-/// Cross-project resume is rejected before Config, Memory, Task or workspace
+/// Cross-project resume is rejected before Config, Memory, TaskData or workspace
 /// state can switch. The current project's committed resources remain intact.
 #[tokio::test]
 async fn cross_project_resume_is_rejected() {
@@ -741,7 +743,7 @@ async fn cross_project_resume_is_rejected() {
         .unwrap()
         .persist()
         .snapshot();
-    let session = session_with_workspace(&ws2, SnapshotState::Captured(TaskSnapshot::empty()));
+    let session = session_with_workspace(&ws2, SnapshotState::Captured(TaskSnapshotData::empty()));
 
     // Resume must reject before any participant is prepared or committed.
     assert!(matches!(
@@ -807,7 +809,7 @@ async fn task_captured_snapshot_restores_tasks_into_task_access() {
 async fn pending_task_with_legacy_started_at_restores_after_snapshot_normalization() {
     let _guard = git_lock().await;
     let h = build_harness();
-    let snapshot = TaskSnapshot::decode(
+    let snapshot = TaskSnapshotData::decode(
         br#"{"schema_version":2,"revision":"1","tasks":[{"id":"35","batch":"8","subject":"resumable","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":[],"status":"pending","priority":"high","created_at":100,"updated_at":300,"started_at":200,"completed_at":null}],"next_task_id":"36","next_batch_id":"9","current_batch":"8","batches":[{"id":"8","summary":"active","status":"active","created_at":100,"last_active_turn":0,"silence_turns":0}]}"#,
     )
     .expect("legacy pending task snapshot must decode");
@@ -825,10 +827,10 @@ async fn pending_task_with_legacy_started_at_restores_after_snapshot_normalizati
         .into_iter()
         .next()
         .expect("task restored");
-    assert_eq!(task.status(), task::TaskStatus::Pending);
+    assert_eq!(task.status(), task::TaskStatusData::Pending);
 }
 
-/// A rejected Task snapshot must leave every already-live participant unchanged.
+/// A rejected TaskData snapshot must leave every already-live participant unchanged.
 #[tokio::test]
 async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchanged() {
     let _guard = git_lock().await;
@@ -837,7 +839,7 @@ async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchange
     let pre_session_id = h.wiring.committed_session().id.clone();
     let pre_memory = h.wiring.committed_memory();
     let before_tasks = h.task_store.collect_snapshot();
-    let invalid = TaskSnapshot::decode(
+    let invalid = TaskSnapshotData::decode(
         br#"{"schema_version":2,"revision":"1","tasks":[{"id":"1","batch":"1","subject":"t","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":["1"],"status":"pending","priority":"normal","created_at":1,"updated_at":1,"started_at":null,"completed_at":null}],"next_task_id":"2","next_batch_id":"2","current_batch":"1","batches":[{"id":"1","summary":"b","status":"active","created_at":1,"last_active_turn":0,"silence_turns":0}]}"#,
     )
     .expect("fixture must decode");
@@ -848,9 +850,8 @@ async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchange
 
     assert!(matches!(
         result,
-        Err(MainSessionError::TaskRestore(
-            TaskSnapshotValidationError::SelfDependency { .. }
-        ))
+        Err(MainSessionError::TaskRestore(ref error))
+            if error.message().contains("depends on itself")
     ));
     assert_eq!(h.wiring.committed_session().id, pre_session_id);
     assert!(Arc::ptr_eq(&h.wiring.committed_memory(), &pre_memory));
@@ -858,7 +859,7 @@ async fn invalid_task_snapshot_keeps_committed_session_memory_and_tasks_unchange
 }
 
 /// Resuming with `tasks: Missing` clears stale live tasks via
-/// `TaskSnapshot::empty()`.
+/// `TaskSnapshotData::empty()`.
 #[tokio::test]
 async fn task_missing_clears_stale_live_tasks() {
     let _guard = git_lock().await;
@@ -923,7 +924,7 @@ async fn missing_persisted_workspace_falls_back_to_live_workspace_and_rewrites_s
 
     let session = session_with_workspace(
         &stale_workspace,
-        SnapshotState::Captured(TaskSnapshot::empty()),
+        SnapshotState::Captured(TaskSnapshotData::empty()),
     );
 
     h.wiring
@@ -958,7 +959,7 @@ async fn missing_cross_project_workspace_remains_rejected() {
     stale_workspace.path_base = missing_root.display().to_string();
     let session = session_with_workspace(
         &stale_workspace,
-        SnapshotState::Captured(TaskSnapshot::empty()),
+        SnapshotState::Captured(TaskSnapshotData::empty()),
     );
 
     let result = h.wiring.resume_prepared(session).await;

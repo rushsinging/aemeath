@@ -264,7 +264,7 @@ impl AgentRunner for CliAgentRunner {
         let model_display = derived.model_display.clone();
         let model_name = derived.model_name.clone();
         let max_tokens = derived.max_tokens;
-        // #1248 Task 7: reasoning level from RuntimeContext's ReasoningPort,
+        // #1248 TaskData 7: reasoning level from RuntimeContext's ReasoningPort,
         // not a duplicate static field. DerivedRun.reasoning_level is
         // still available for diagnostics but no longer used at construction.
         let _reasoning_level = derived.reasoning_level;

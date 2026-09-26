@@ -11,7 +11,7 @@ pub enum StuckDecision {
 
 /// Guard against stuck loops (repeated text, tool call loops, timeout).
 ///
-/// #1248 Task 6: Stop hook block counting has been moved to `Run` domain.
+/// #1248 TaskData 6: Stop hook block counting has been moved to `Run` domain.
 /// `record_stop_hook_block` and `stop_hook_block_limit`/`stop_hook_block_count`
 /// are removed — the shared Loop now uses `Run::record_stop_hook_block()`.
 pub struct StuckGuard {

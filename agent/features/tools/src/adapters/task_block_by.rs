@@ -4,20 +4,24 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
-use task::{TaskAccess, TaskId};
+use task::{TaskAccess, TaskIdData};
 
 pub struct TaskBlockByTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
-fn current_task_id(access: &dyn TaskAccess, value: &str, field: &str) -> Result<TaskId, String> {
-    let seq = TaskId::parse_tool_input(value)
-        .map(TaskId::get)
+fn current_task_id(
+    access: &dyn TaskAccess,
+    value: &str,
+    field: &str,
+) -> Result<TaskIdData, String> {
+    let seq = TaskIdData::parse_tool_input(value)
+        .map(TaskIdData::get)
         .map_err(|_| format!("{field} must contain non-zero decimal task ID sequences: {value}"))?;
     access
         .current_task_by_seq(seq)
         .map(|task| task.id())
-        .ok_or_else(|| format!("Task not found in current task list: {value}"))
+        .ok_or_else(|| format!("TaskData not found in current task list: {value}"))
 }
 
 #[async_trait]
@@ -104,7 +108,7 @@ impl TypedTool for TaskBlockByTool {
         let task_id = updated.seq().to_string();
         TypedToolResult::success(
             format!(
-                "Task #{} blocking dependencies replaced: {}",
+                "TaskData #{} blocking dependencies replaced: {}",
                 task_id,
                 if blocked_by_ids.is_empty() {
                     "none".to_string()
