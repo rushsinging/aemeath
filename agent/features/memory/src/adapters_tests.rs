@@ -1,10 +1,6 @@
 use super::{map_storage_error, AtomicDatasetMemoryStore, ProjectMemoryOpener};
-use crate::{
-    LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource, LegacyMemorySourceError,
-    MemoryCategory, MemoryCommitVisibility, MemoryDataset, MemoryDatasetStore, MemoryEntry,
-    MemoryError, MemoryId, MemoryLayer, MemoryOpenerError, MemoryPolicy, MemoryPort, MemorySource,
-    MemoryStorageErrorKind, ProjectMemoryKey,
-};
+use crate::adapters::MemoryPolicy;
+use crate::{domain::*, ports::*};
 use async_trait::async_trait;
 use std::{str::FromStr, sync::Arc};
 use storage as storage_api;

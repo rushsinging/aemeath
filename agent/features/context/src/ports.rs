@@ -23,7 +23,7 @@ pub trait MainContextFactory: Send + Sync {
         session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
         workspace_persist: Arc<dyn project::WorkspaceWriter>,
-        memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
+        memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort>;
 }

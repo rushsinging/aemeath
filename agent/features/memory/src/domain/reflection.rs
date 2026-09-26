@@ -1,5 +1,5 @@
 use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryLayer};
-use crate::ReflectionApplyResult;
+use crate::ports::ReflectionApplyResult;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -308,37 +308,6 @@ JSON format:
 {recent_summary}"#
         }
     }
-
-    fn labels(
-        lang: &str,
-    ) -> (
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-    ) {
-        if lang == "zh" {
-            (
-                "Reflection",
-                "偏差：暂无明显偏差",
-                "偏差：\n- ",
-                "记忆建议：暂无建议",
-                "记忆建议：\n",
-                "过期记忆：",
-            )
-        } else {
-            (
-                "Reflection",
-                "Deviations: no significant deviations",
-                "Deviations:\n- ",
-                "Memory suggestions: none",
-                "Memory suggestions:\n",
-                "Outdated memories: ",
-            )
-        }
-    }
 }
 
 impl ReflectionEngine {
@@ -380,6 +349,39 @@ impl ReflectionEngine {
         Ok(output)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn labels(
+        lang: &str,
+    ) -> (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+    ) {
+        if lang == "zh" {
+            (
+                "Reflection",
+                "偏差：暂无明显偏差",
+                "偏差：\n- ",
+                "记忆建议：暂无建议",
+                "记忆建议：\n",
+                "过期记忆：",
+            )
+        } else {
+            (
+                "Reflection",
+                "Deviations: no significant deviations",
+                "Deviations:\n- ",
+                "Memory suggestions: none",
+                "Memory suggestions:\n",
+                "Outdated memories: ",
+            )
+        }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String {
         let (
             title,
@@ -475,7 +477,7 @@ impl ReflectionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryId, MemorySource};
+    use crate::domain::{MemoryId, MemorySource};
 
     fn engine() -> ReflectionEngine {
         ReflectionEngine

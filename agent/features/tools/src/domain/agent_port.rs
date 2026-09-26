@@ -10,7 +10,7 @@ pub struct AgentRunRequest<'a> {
     pub identity: &'a ExecutionScope,
     pub cancellation: Arc<dyn CancellationSignal>,
     pub progress: Option<Arc<dyn ProgressSink>>,
-    pub memory: Arc<dyn memory::MemoryPort>,
+    pub memory: Arc<dyn memory::api::MemoryPort>,
     pub catalog: Option<Arc<dyn crate::domain::CatalogQuery>>,
     pub read_set: Arc<dyn ReadSet>,
     pub plan_mode: Arc<dyn PlanModeState>,

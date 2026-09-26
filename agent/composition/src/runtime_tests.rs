@@ -16,11 +16,11 @@ use std::sync::Arc;
 // ─── Test doubles: minimal, no unnecessary abstraction ────────────────
 
 struct TestMemoryPortSource {
-    memory: Arc<dyn memory::MemoryPort>,
+    memory: Arc<dyn memory::api::MemoryPort>,
 }
 
 impl tools::MemoryPortSource for TestMemoryPortSource {
-    fn current(&self) -> Arc<dyn memory::MemoryPort> {
+    fn current(&self) -> Arc<dyn memory::api::MemoryPort> {
         self.memory.clone()
     }
 }

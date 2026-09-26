@@ -186,10 +186,10 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
+    let legacy_factory = Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+    let memory_opener = Box::new(memory::api::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
     ));
@@ -214,22 +214,22 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     // verify it can be retrieved. An InMemoryTestOpener would lose the
     // entry on clone; the filesystem-backed opener persists it.
     let memory = wiring.committed_memory();
-    let entry = memory::MemoryEntry::new(
-        memory::MemoryId::now_v7(),
+    let entry = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
         1,
-        memory::MemoryLayer::Project,
-        memory::MemoryCategory::Decision,
+        memory::api::MemoryLayer::Project,
+        memory::api::MemoryCategory::Decision,
         "test memory from composition wiring",
-        memory::MemorySource::User,
+        memory::api::MemorySource::User,
     )
     .expect("create memory entry");
     let write_result = memory.write(entry.clone()).await.expect("write entry");
     assert!(
-        matches!(write_result, memory::WriteResult::Added { .. }),
+        matches!(write_result, memory::api::WriteResult::Added { .. }),
         "write should add the entry, got {write_result:?}"
     );
 
-    let entries = memory.list(Some(memory::MemoryLayer::Project));
+    let entries = memory.list(Some(memory::api::MemoryLayer::Project));
     assert!(
         entries
             .iter()
@@ -254,9 +254,9 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let task_wiring = task::wire_task();
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+    let memory_opener = Box::new(memory::api::DatasetMemoryOpener::new(
         dataset_adapter,
-        Arc::new(memory::FileLegacyMemorySourceFactory::new(
+        Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
             agents_dir.join("memory"),
         )),
     ));
@@ -360,16 +360,16 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
+    let legacy_factory = Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));
     let project_key =
         memory::api::ProjectMemoryKey::derive(root.to_str().expect("project root is UTF-8"), None)
             .expect("derive key");
     let reflection_history: Arc<dyn memory::api::ReflectionHistoryStore> = Arc::new(
-        memory::AtomicDatasetReflectionHistoryStore::new(dataset_adapter.clone(), project_key),
+        memory::api::AtomicDatasetReflectionHistoryStore::new(dataset_adapter.clone(), project_key),
     );
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+    let memory_opener = Box::new(memory::api::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
     ));
@@ -549,10 +549,10 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
 
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
+    let legacy_factory = Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+    let memory_opener = Box::new(memory::api::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
     ));

@@ -38,7 +38,7 @@ pub(crate) fn test_tool_execution_context(
                 std::collections::HashSet::new(),
             )))),
             Arc::new(tools::FixedPlanMode(None)),
-            Arc::new(memory::NoOpMemory),
+            Arc::new(memory::api::NoOpMemory),
             Arc::new(tools::FixedGuidance {
                 language: "en".into(),
             }),

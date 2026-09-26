@@ -147,7 +147,7 @@ pub enum MemoryOpenError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryCategory, MemoryId, MemorySource};
+    use crate::domain::*;
 
     fn entry(id: MemoryId, layer: MemoryLayer, content: &str) -> MemoryEntry {
         MemoryEntry::new(

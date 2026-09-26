@@ -56,7 +56,7 @@ fn manual_outcome_text_never_reports_error_semantics() {
 async fn manual_submission_freezes_visible_messages_into_shared_slot() {
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     let binding = fake_binding();
-    let memory: Arc<dyn memory::MemoryPort> = Arc::new(memory::NoOpMemory);
+    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let history = super::pre_compact_trigger_tests::noop_reflection_history();
 
     let outcome = submit_manual_reflection(

@@ -4,7 +4,7 @@
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
 use context::SessionManagementPort;
-use memory::{
+use memory::api::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySearchQuery,
     MemorySource, MemoryStats, WriteResult,
 };
@@ -323,7 +323,7 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use memory::{InMemoryMemory, MemoryPolicy};
+    use memory::api::{InMemoryMemory, MemoryPolicy};
 
     /// Creates a fresh `InMemoryMemory` port for each test (no filesystem IO).
     fn test_port() -> InMemoryMemory {

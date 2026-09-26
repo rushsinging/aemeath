@@ -13,7 +13,7 @@ struct WiringMemoryPortSource {
 }
 
 impl tools::MemoryPortSource for WiringMemoryPortSource {
-    fn current(&self) -> Arc<dyn memory::MemoryPort> {
+    fn current(&self) -> Arc<dyn memory::api::MemoryPort> {
         self.wiring.committed_memory()
     }
 }
@@ -204,10 +204,10 @@ pub(crate) async fn from_args_with_gateways(
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
         config_participant: config.participant(),
-        memory_opener: Box::new(memory::DatasetMemoryOpener::new(
+        memory_opener: Box::new(memory::api::DatasetMemoryOpener::new(
             storage::file_system_dataset(agents_dir_buf)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
-            Arc::new(memory::FileLegacyMemorySourceFactory::new(
+            Arc::new(memory::api::FileLegacyMemorySourceFactory::new(
                 agents_dir.join("memory"),
             )),
         )),

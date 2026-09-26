@@ -207,9 +207,9 @@ mod tests {
     fn test_memory_source() -> Arc<dyn MemoryPortSource> {
         struct TestSource;
         impl MemoryPortSource for TestSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            fn current(&self) -> Arc<dyn memory::api::MemoryPort> {
                 Arc::new(
-                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                    memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default())
                         .expect("valid default policy"),
                 )
             }

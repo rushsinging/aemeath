@@ -1,4 +1,4 @@
-use memory::*;
+use memory::api::*;
 
 #[tokio::test]
 async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {

@@ -22,7 +22,7 @@ use context::{
     CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeRecord, SnapshotState,
 };
-use memory::{
+use memory::api::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
 use project::wire_production_workspace;

@@ -1,4 +1,4 @@
-use memory::{
+use memory::api::{
     AtomicDatasetReflectionHistoryStore, MemoryError, MemoryStorageErrorKind, ProjectMemoryKey,
     ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore, ReflectionRecord,
     ReflectionTrigger,
@@ -39,7 +39,7 @@ fn record(id: &str, timestamp: u64) -> ReflectionRecord {
 async fn reflection_history_upsert_replaces_stable_id_without_duplication() {
     let root = unique_root("upsert");
     let history = store(&root);
-    let running = memory::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
+    let running = memory::api::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
     history.append(&running).await.unwrap();
     let terminal = record("stable", 40);
     history.upsert(&terminal).await.unwrap();

@@ -191,7 +191,7 @@ impl memory::api::ReflectionHistoryQuery for FakeReflectionHistory {
     async fn list(
         &self,
         _limit: usize,
-    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError> {
+    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
         Ok(vec![])
     }
 }
@@ -200,13 +200,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
     async fn append(
         &self,
         _record: &memory::api::ReflectionRecord,
-    ) -> Result<(), memory::MemoryError> {
+    ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }
     async fn upsert(
         &self,
         _record: &memory::api::ReflectionRecord,
-    ) -> Result<(), memory::MemoryError> {
+    ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }
 }
@@ -255,7 +255,7 @@ async fn make_test_shell(
     let snapshot = wiring.committed_config();
     let binding = crate::application::model::test_support::test_binding(Vec::new());
     let policy: Arc<dyn Policy> = policy::allow_all();
-    let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
+    let _memory: Arc<dyn MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
     let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
     let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();

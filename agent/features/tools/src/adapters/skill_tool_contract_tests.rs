@@ -57,8 +57,8 @@ impl SkillLoadStatePort for FreshSkillState {
 fn memory_source() -> Arc<dyn MemoryPortSource> {
     struct Source;
     impl MemoryPortSource for Source {
-        fn current(&self) -> Arc<dyn memory::MemoryPort> {
-            Arc::new(memory::NoOpMemory)
+        fn current(&self) -> Arc<dyn memory::api::MemoryPort> {
+            Arc::new(memory::api::NoOpMemory)
         }
     }
     Arc::new(Source)
@@ -127,7 +127,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
                 WorkspaceReadAccess::new(workspace.read()),
                 Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
                 Arc::new(FixedPlanMode(None)),
-                Arc::new(memory::NoOpMemory),
+                Arc::new(memory::api::NoOpMemory),
                 Arc::new(FixedGuidance {
                     language: "en".into(),
                 }),
@@ -203,7 +203,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
                 WorkspaceReadAccess::new(workspace.read()),
                 Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
                 Arc::new(FixedPlanMode(None)),
-                Arc::new(memory::NoOpMemory),
+                Arc::new(memory::api::NoOpMemory),
                 Arc::new(FixedGuidance {
                     language: "zh".into(),
                 }),
@@ -264,7 +264,7 @@ async fn deleted_skill_returns_failure_without_panicking() {
             WorkspaceReadAccess::new(workspace.read()),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
             Arc::new(FixedPlanMode(None)),
-            Arc::new(memory::NoOpMemory),
+            Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
             }),
