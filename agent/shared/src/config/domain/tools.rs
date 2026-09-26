@@ -320,6 +320,18 @@ impl AgentsConfig {
         merged
     }
 
+    /// 已启用实例名（排序），用于错误提示与 roster 的可用名单单一口径。
+    pub fn enabled_instance_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .names
+            .iter()
+            .filter(|(_, instance)| instance.enabled)
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
     /// Resolve a named agent instance for a sub run: instance lookup, enabled
     /// check, role-reference validation, and empty-model fallback to
     /// `default_model`. Single source of truth consumed by runtime dispatch.
@@ -391,6 +403,26 @@ mod tests {
         assert!(AgentInstanceConfig::default().enabled);
         assert_eq!(config.role, "");
         assert_eq!(config.model, "");
+    }
+
+    #[test]
+    fn enabled_instance_names_lists_only_enabled_instances_sorted() {
+        let mut agents = AgentsConfig::default();
+        for (name, enabled) in [("zeta", true), ("alpha", true), ("mid", false)] {
+            agents.names.insert(
+                name.to_string(),
+                AgentInstanceConfig {
+                    enabled,
+                    ..Default::default()
+                },
+            );
+        }
+
+        assert_eq!(
+            agents.enabled_instance_names(),
+            vec!["alpha".to_string(), "zeta".to_string()],
+            "可用名单只含 enabled 实例且排序稳定"
+        );
     }
 
     #[test]

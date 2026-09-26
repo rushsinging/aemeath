@@ -20,7 +20,7 @@ fn test_output_assembler_renders_task_list_create_tool_call() {
         "tool-tlc",
         "TaskListCreate",
         r#"{"subject":"修复 bug","summary":"修复 bug 84"}"#,
-        "Task list #0 created",
+        "TaskData list #0 created",
     );
 
     let vm = assemble_output_view(&conversation, None);
@@ -61,7 +61,7 @@ fn test_output_assembler_renders_task_create_tool_call() {
         "tool-tc",
         "TaskCreate",
         r#"{"subject":"分析代码","description":"查看代码结构"}"#,
-        "Task #0 created",
+        "TaskData #0 created",
     );
 
     let vm = assemble_output_view(&conversation, None);
@@ -94,7 +94,7 @@ fn test_output_assembler_renders_task_update_tool_call() {
         "tool-tu",
         "TaskUpdate",
         r#"{"taskId":"1","key":"status","value":"completed"}"#,
-        "Task #1 updated",
+        "TaskData #1 updated",
     );
 
     let vm = assemble_output_view(&conversation, None);

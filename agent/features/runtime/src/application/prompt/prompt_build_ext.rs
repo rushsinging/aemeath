@@ -1,7 +1,7 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::application::prompt::instructions_hook::PromptInstructionsHook;
-use hook::HookPort;
+use hook::HookDispatcher;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub async fn build_static_prompt(
     model: &str,
     reasoning: bool,
     config_file: Option<&ConfigSnapshot>,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     prompt_parts: crate::application::prompt::build::SystemPromptParts,
 ) -> String {
     let guidance_config = config_file
@@ -70,7 +70,24 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
             } else {
                 format!(" (model: {})", instance.model)
             };
-            format!("- `{}` [{}]{}{}", name, instance.role, desc, model_info)
+            // R3：标注绑定模型在 config.models 中的可用性，让 LLM 可预判。
+            // 回退口径与 AgentsConfig::resolve_agent 一致：空 instance.model → default_model。
+            let effective_model = if instance.model.trim().is_empty() {
+                agents.default_model.as_str()
+            } else {
+                instance.model.as_str()
+            };
+            let availability = if effective_model.trim().is_empty() {
+                " [no model configured]".to_string()
+            } else if snap.models().find_model(effective_model).is_none() {
+                format!(" [model unavailable: {effective_model}]")
+            } else {
+                String::new()
+            };
+            format!(
+                "- `{}` [{}]{}{}{}",
+                name, instance.role, desc, model_info, availability
+            )
         })
         .collect();
     if role_lines.is_empty() {
@@ -103,12 +120,10 @@ mod tests {
 
     #[tokio::test]
     async fn build_static_prompt_does_not_embed_execution_discipline() {
-        let hook_port: Arc<dyn HookPort> = Arc::new(
-            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-                share::config::Config::default(),
-            ))
-            .unwrap(),
-        );
+        let hook_port: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+            &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+        )
+        .unwrap();
         let prompt = build_static_prompt(
             std::path::Path::new("/tmp/project"),
             "fake/model",
@@ -265,6 +280,60 @@ mod tests {
 
         assert!(!prompt.contains("`coder-fast`"));
         assert!(prompt.contains("`reviewer-glm`"));
+    }
+
+    /// R3（issue #1736）：roster 必须标注绑定模型在 config.models 中的可用性，
+    /// 否则 LLM 无法预判哪些 agent 可用，只能靠派发报错盲试。
+    #[test]
+    fn test_append_agent_roles_marks_unavailable_bound_model() {
+        let mut names = HashMap::new();
+        names.insert(
+            "explorer-mimo".to_string(),
+            AgentInstanceConfig {
+                role: "explorer".to_string(),
+                model: "Mimo/mimo-v2.6-flash".to_string(),
+                description: "Retrieves code".to_string(),
+                ..Default::default()
+            },
+        );
+        names.insert(
+            "coder-known".to_string(),
+            AgentInstanceConfig {
+                role: "coder".to_string(),
+                model: "test-provider/test-model".to_string(),
+                description: "Writes code".to_string(),
+                ..Default::default()
+            },
+        );
+        let mut config = Config::default();
+        config.agents.names = names;
+        config.language = "en".to_string();
+        config.models.providers.insert(
+            "test-provider".to_string(),
+            share::config::models::ProviderModelsConfig {
+                driver: "openai".to_string(),
+                models: vec![share::config::models::ModelEntryConfig {
+                    id: "test-model".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        let snap = share::config::domain::snapshot::ConfigSnapshot::new(config);
+        let mut prompt = String::new();
+
+        append_agent_roles(&mut prompt, Some(&snap), "en");
+
+        assert!(
+            prompt.contains("`explorer-mimo`")
+                && prompt.contains("[model unavailable: Mimo/mimo-v2.6-flash]"),
+            "未注册模型必须标注不可用：{prompt}"
+        );
+        assert!(
+            prompt.contains("`coder-known`")
+                && !prompt.contains("[model unavailable: test-provider/test-model]"),
+            "已注册模型不得标注不可用：{prompt}"
+        );
     }
 
     /// ConfigSnapshot.language="zh" 且 lang 参数传 "zh" 时，

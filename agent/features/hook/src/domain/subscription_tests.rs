@@ -5,7 +5,7 @@
 #![cfg(test)]
 
 use super::*;
-use crate::domain::invocation::HookPoint;
+use crate::domain::invocation::HookPointData;
 
 // ════════════════════════════════════════════════════════════
 // 配置合法性校验（设计 §4）
@@ -26,7 +26,7 @@ fn validate_accepts_no_failure_policy_on_any_point() {
 fn validate_accepts_continue_policy_on_non_stop_points() {
     for point in all_points() {
         // Stop 固定 Block 语义，禁止任何 failure_policy（由下一用例覆盖）。
-        if point == HookPoint::Stop {
+        if point == HookPointData::Stop {
             continue;
         }
         let sub =
@@ -41,12 +41,12 @@ fn validate_accepts_continue_policy_on_non_stop_points() {
 #[test]
 fn validate_accepts_block_policy_on_configurable_points() {
     for point in [
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PreCompact,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PreCompact,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
     ] {
         let sub = HookSubscription::new(point, "cmd").with_failure_policy(HookFailurePolicy::Block);
         assert!(
@@ -59,12 +59,12 @@ fn validate_accepts_block_policy_on_configurable_points() {
 #[test]
 fn validate_rejects_failure_policy_on_stop() {
     for policy in [HookFailurePolicy::Continue, HookFailurePolicy::Block] {
-        let sub = HookSubscription::new(HookPoint::Stop, "cmd").with_failure_policy(policy);
+        let sub = HookSubscription::new(HookPointData::Stop, "cmd").with_failure_policy(policy);
         assert!(
             matches!(
                 sub.validate(),
                 Err(SubscriptionError::FailurePolicyOnStop {
-                    point: HookPoint::Stop
+                    point: HookPointData::Stop
                 })
             ),
             "Stop 固定 Block 语义，禁止任何 failure_policy（测试 {policy:?}）"
@@ -76,12 +76,12 @@ fn validate_rejects_failure_policy_on_stop() {
 fn validate_rejects_block_policy_on_non_configurable_points() {
     // Stop 由上一用例覆盖（FailurePolicyOnStop）；这里覆盖非前置闸门。
     for point in [
-        HookPoint::PostToolUse,
-        HookPoint::SessionStart,
-        HookPoint::Notification,
-        HookPoint::StopFailure,
-        HookPoint::PermissionDenied,
-        HookPoint::TeammateIdle,
+        HookPointData::PostToolUse,
+        HookPointData::SessionStart,
+        HookPointData::Notification,
+        HookPointData::StopFailure,
+        HookPointData::PermissionDenied,
+        HookPointData::TeammateIdle,
     ] {
         let sub = HookSubscription::new(point, "cmd").with_failure_policy(HookFailurePolicy::Block);
         assert!(
@@ -94,34 +94,34 @@ fn validate_rejects_block_policy_on_non_configurable_points() {
     }
 }
 
-/// 返回全部 26 个 HookPoint（用于参数化校验）。
-fn all_points() -> Vec<HookPoint> {
+/// 返回全部 26 个 HookPointData（用于参数化校验）。
+fn all_points() -> Vec<HookPointData> {
     vec![
-        HookPoint::PreToolUse,
-        HookPoint::UserPromptSubmit,
-        HookPoint::PreCompact,
-        HookPoint::PermissionRequest,
-        HookPoint::Elicitation,
-        HookPoint::UserPromptExpansion,
-        HookPoint::Stop,
-        HookPoint::PostToolUse,
-        HookPoint::PostToolUseFailure,
-        HookPoint::PostCompact,
-        HookPoint::PostToolBatch,
-        HookPoint::ElicitationResult,
-        HookPoint::SessionStart,
-        HookPoint::SessionEnd,
-        HookPoint::SubRunStart,
-        HookPoint::SubRunStop,
-        HookPoint::TaskCreated,
-        HookPoint::TaskCompleted,
-        HookPoint::Notification,
-        HookPoint::InstructionsLoaded,
-        HookPoint::StopFailure,
-        HookPoint::PermissionDenied,
-        HookPoint::ConfigChange,
-        HookPoint::CwdChanged,
-        HookPoint::FileChanged,
-        HookPoint::TeammateIdle,
+        HookPointData::PreToolUse,
+        HookPointData::UserPromptSubmit,
+        HookPointData::PreCompact,
+        HookPointData::PermissionRequest,
+        HookPointData::Elicitation,
+        HookPointData::UserPromptExpansion,
+        HookPointData::Stop,
+        HookPointData::PostToolUse,
+        HookPointData::PostToolUseFailure,
+        HookPointData::PostCompact,
+        HookPointData::PostToolBatch,
+        HookPointData::ElicitationResult,
+        HookPointData::SessionStart,
+        HookPointData::SessionEnd,
+        HookPointData::SubRunStart,
+        HookPointData::SubRunStop,
+        HookPointData::TaskCreated,
+        HookPointData::TaskCompleted,
+        HookPointData::Notification,
+        HookPointData::InstructionsLoaded,
+        HookPointData::StopFailure,
+        HookPointData::PermissionDenied,
+        HookPointData::ConfigChange,
+        HookPointData::CwdChanged,
+        HookPointData::FileChanged,
+        HookPointData::TeammateIdle,
     ]
 }

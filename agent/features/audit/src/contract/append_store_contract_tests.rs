@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::adapters::file_usage_append_store;
+use crate::adapters::append::file_usage_append_store;
 use crate::ports::{AppendLogError, AppendLogNamespace, UsageAppendStorePort};
 use sdk::SessionId;
 use storage::SafeStorageRoot;

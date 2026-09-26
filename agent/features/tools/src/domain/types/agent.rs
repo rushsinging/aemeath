@@ -18,7 +18,7 @@ pub struct AgentInput {
     pub prompt: String,
     /// A short (3-5 word) description of the task
     pub description: String,
-    /// Required named agent. The value must exactly match a key in `config.agents.names`.
+    /// Required named agent. Must exactly match an instance name in the system prompt's Available Agent Roles roster (machine key: `config.agents.names`).
     pub agent: String,
     /// Wall-clock timeout in seconds. Defaults to 1800 seconds and is capped at 10800 seconds. Use 0 for no timeout.
     pub timeout: Option<u64>,
@@ -29,13 +29,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn minimal_input_requires_role() {
+    fn minimal_input_requires_agent_field() {
         let json = serde_json::json!({"prompt": "p", "description": "d"});
         assert!(serde_json::from_value::<AgentInput>(json).is_err());
     }
 
     #[test]
-    fn full_input_with_role_and_timeout() {
+    fn full_input_with_agent_and_timeout() {
         let json =
             serde_json::json!({"prompt": "p", "description": "d", "agent": "coder", "timeout": 50});
         let input: AgentInput = serde_json::from_value(json).unwrap();

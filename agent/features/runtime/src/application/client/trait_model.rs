@@ -2,7 +2,7 @@ use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::ports::{ProviderBuildSpec, ProviderFactory};
-use config::{resolve_provider_runtime, ConfigQuery};
+use config::{resolve_provider_runtime, ConfigReader};
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -10,11 +10,11 @@ type Result<T> = std::result::Result<T, SdkError>;
 /// + `ModelSwitchResult`（#567 / #907）。
 ///
 /// 在 loop_runner idle 分支收到 `SwitchModel` 事件时调用。
-/// 从 `ConfigQuery` 加载配置（gate-aware），经 `resolve_model_selection` 解析
+/// 从 `ConfigReader` 加载配置（gate-aware），经 `resolve_model_selection` 解析
 /// `Provider/Model`，再构建 `ProviderBuildSpec` 交由 factory 构建 binding。
 pub(crate) async fn build_provider_binding_for_switch(
     selection: &str,
-    query: &dyn ConfigQuery,
+    query: &dyn ConfigReader,
     factory: &dyn ProviderFactory,
 ) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
     let snapshot = query
@@ -132,7 +132,7 @@ fn non_empty_string(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use config::{ConfigQuery, ConfigQueryError};
+    use config::ConfigReader;
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
     use share::config::Config;
@@ -145,16 +145,34 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ConfigQuery for CountingQuery {
-        async fn snapshot(&self) -> std::result::Result<ConfigSnapshot, ConfigQueryError> {
+    impl ConfigReader for CountingQuery {
+        fn committed_snapshot(&self) -> ConfigSnapshot {
+            self.snapshot.clone()
+        }
+
+        fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<ConfigSnapshot> {
+            let (sender, receiver) = tokio::sync::watch::channel(self.snapshot.clone());
+            let _ = sender; // fake：不广播
+            receiver
+        }
+
+        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
+            config::ConfigRefreshOutcomeData::Unchanged
+        }
+
+        async fn snapshot(&self) -> std::result::Result<ConfigSnapshot, share::error::DomainError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
             Ok(self.snapshot.clone())
         }
 
         async fn subscribe(
             &self,
-        ) -> std::result::Result<config::ConfigSubscription, ConfigQueryError> {
-            Err(ConfigQueryError::Unavailable)
+        ) -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError>
+        {
+            Err(share::error::DomainError::unavailable(
+                "config",
+                "配置读取暂不可用",
+            ))
         }
     }
 

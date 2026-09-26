@@ -55,7 +55,7 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
         storage::file_system_blob(root.path()).expect("blob adapter");
     let expected = session_with_step("legacy", 4, "legacy history");
     let legacy_management = context::AtomicBlobSessionManagement::new(blob.clone());
-    let project = share::session_types::ProjectIdentity {
+    let project = share::session_types::ProjectIdentityData {
         initial_cwd: "/legacy".to_string(),
         git_common_dir: None,
     };
@@ -333,7 +333,7 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
         ),
     ]
     .into();
-    let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue\n\n## Current Task State\n■ current task";
+    let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue\n\n## Current TaskData State\n■ current task";
     session.compact = Some(context::ActiveCompactMarker {
         summary: checkpoint.to_string(),
         start_at: Some(context::RunStepCursor {

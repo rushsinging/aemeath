@@ -1,12 +1,15 @@
 use super::task_change::{CommittedTaskChange, TaskChangeFact};
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority, TaskStatus, TaskStore};
+use task::{
+    BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPriorityData, TaskStatusData,
+    TaskStore,
+};
 
-fn task_spec(subject: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(
+fn task_spec(subject: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(
         subject.to_owned(),
         "description".to_owned(),
         None,
-        TaskPriority::Normal,
+        TaskPriorityData::Normal,
     )
     .expect("task fixture must be valid")
 }
@@ -15,7 +18,7 @@ fn task_spec(subject: &str) -> TaskCreateSpec {
 fn committed_create_exposes_revision_and_created_fact() {
     let store = TaskStore::new();
     let batch = store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let created = store.create_task(task_spec("first"), 2).unwrap();
 
@@ -34,14 +37,14 @@ fn committed_create_exposes_revision_and_created_fact() {
 fn committed_completion_exposes_completed_fact_only_on_real_transition() {
     let store = TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let created = store.create_task(task_spec("first"), 2).unwrap().value;
     store
-        .transition(created.id(), TaskStatus::InProgress, 3)
+        .transition(created.id(), TaskStatusData::InProgress, 3)
         .unwrap();
     let completed = store
-        .transition(created.id(), TaskStatus::Completed, 4)
+        .transition(created.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let change = CommittedTaskChange::from_command_result(&completed).expect("completion commits");
@@ -57,7 +60,7 @@ fn committed_completion_exposes_completed_fact_only_on_real_transition() {
 fn no_op_command_has_no_committed_task_change() {
     let store = TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let created = store.create_task(task_spec("first"), 2).unwrap().value;
     let no_op = store
@@ -72,11 +75,11 @@ fn no_op_command_has_no_committed_task_change() {
 fn non_hook_mutation_keeps_commit_revision_without_hook_fact() {
     let store = TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let created = store.create_task(task_spec("first"), 2).unwrap().value;
     let changed = store
-        .set_priority(created.id(), TaskPriority::High, 3)
+        .set_priority(created.id(), TaskPriorityData::High, 3)
         .unwrap();
 
     let change = CommittedTaskChange::from_command_result(&changed).expect("priority commits");

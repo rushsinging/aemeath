@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::TaskStore;
 use crate::{TaskAccess, TaskPersist};
 
-/// Composition root for the Task BC.
+/// Composition root for the TaskData BC.
 ///
 /// `TaskWiring` owns the single [`TaskStore`] backing behind an [`Arc`] and
 /// hands out only capability-typed, composition-only views of it. The backing
@@ -18,7 +18,7 @@ pub struct TaskWiring {
     store: Arc<TaskStore>,
 }
 
-/// Wires a fresh, empty Task BC and returns its composition root.
+/// Wires a fresh, empty TaskData BC and returns its composition root.
 pub fn wire_task() -> TaskWiring {
     log::info!(target: crate::LOG_TARGET, "wire_task: enter");
     let wiring = TaskWiring {
@@ -44,15 +44,16 @@ impl TaskWiring {
 mod tests {
     use super::*;
     use crate::domain::{
-        BatchCreateSpec, TaskCreateSpec, TaskPriority, TaskSnapshot, TaskSnapshotValidationError,
+        BatchCreateSpecData, TaskCreateSpecData, TaskPriorityData, TaskSnapshotData,
     };
 
-    fn batch_spec(name: &str) -> BatchCreateSpec {
-        BatchCreateSpec::try_new(name.into()).unwrap()
+    fn batch_spec(name: &str) -> BatchCreateSpecData {
+        BatchCreateSpecData::try_new(name.into()).unwrap()
     }
 
-    fn task_spec(name: &str) -> TaskCreateSpec {
-        TaskCreateSpec::try_new(name.into(), String::new(), None, TaskPriority::Normal).unwrap()
+    fn task_spec(name: &str) -> TaskCreateSpecData {
+        TaskCreateSpecData::try_new(name.into(), String::new(), None, TaskPriorityData::Normal)
+            .unwrap()
     }
 
     #[test]
@@ -74,7 +75,7 @@ mod tests {
         // A restore committed through the persist view is observable through the
         // access view, confirming the shared backing in the other direction.
         let empty = persist
-            .prepare_restore(&TaskSnapshot::empty())
+            .prepare_restore(&TaskSnapshotData::empty())
             .expect("empty snapshot restores");
         persist.commit_restore(empty);
         assert!(access.list().is_empty());
@@ -124,15 +125,15 @@ mod tests {
         // clones before validating, so both the argument snapshot and the live
         // backing survive the rejection unchanged.
         let bytes = br#"{"schema_version":2,"revision":"1","tasks":[{"id":"1","batch":"1","subject":"t","description":"","active_form":null,"session_id":null,"tags":[],"blocked_by":["1"],"status":"pending","priority":"normal","created_at":1,"updated_at":1,"started_at":null,"completed_at":null}],"next_task_id":"2","next_batch_id":"2","current_batch":"1","batches":[{"id":"1","summary":"b","status":"active","created_at":1,"last_active_turn":0,"silence_turns":0}]}"#;
-        let invalid = TaskSnapshot::decode(bytes).expect("well-formed wire data");
+        let invalid = TaskSnapshotData::decode(bytes).expect("well-formed wire data");
 
         assert!(matches!(
             persist.prepare_restore(&invalid),
-            Err(TaskSnapshotValidationError::SelfDependency { .. })
+            Err(ref error) if error.message().contains("depends on itself")
         ));
         // The argument snapshot is untouched (still decodable/equal) and live
         // state is byte-for-byte unchanged.
-        assert_eq!(invalid, TaskSnapshot::decode(bytes).unwrap());
+        assert_eq!(invalid, TaskSnapshotData::decode(bytes).unwrap());
         assert_eq!(persist.collect_snapshot(), before);
     }
 

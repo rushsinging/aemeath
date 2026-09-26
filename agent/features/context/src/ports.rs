@@ -22,7 +22,7 @@ pub trait MainContextFactory: Send + Sync {
         &self,
         session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort>;
@@ -103,7 +103,7 @@ pub struct PromptMaterialization {
 }
 
 /// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
-/// 与 live Project `WorkspaceRead` 快照构造 `tools::SkillQuery`。
+/// 与 live Project `WorkspaceReader` 快照构造 `tools::SkillQuery`。
 pub trait SkillQueryFactory: Send + Sync {
     fn query(&self, request: &ContextRequest) -> tools::SkillQuery;
 }

@@ -1088,7 +1088,7 @@ impl AgentClient for PreChatAgentClient {
 
     async fn update_config(
         &self,
-        update: sdk::ConfigUpdate,
+        update: sdk::ConfigUpdateData,
     ) -> Result<sdk::ConfigUpdateResult, SdkError> {
         self.runtime.update_config(update).await
     }
@@ -1104,37 +1104,26 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 
 pub struct FeatureGateways {
     pub provider: Arc<dyn ProviderFactory>,
-    pub policy: Arc<dyn policy::PolicyPort>,
+    pub policy: Arc<dyn policy::Policy>,
 }
 
 impl FeatureGateways {
-    pub fn new(provider: Arc<dyn ProviderFactory>, policy: Arc<dyn policy::PolicyPort>) -> Self {
+    pub fn new(provider: Arc<dyn ProviderFactory>, policy: Arc<dyn policy::Policy>) -> Self {
         Self { provider, policy }
     }
 
-    pub fn wire_default(policy: Arc<dyn policy::PolicyPort>) -> Self {
+    pub fn wire_default(policy: Arc<dyn policy::Policy>) -> Self {
         Self::new(crate::provider::provider_factory(), policy)
     }
 }
 
-struct ConfigPolicyModeSource {
-    reader: Arc<dyn config::ConfigReader>,
+fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::Policy> {
+    let reader = config.reader();
+    policy::configured(move || reader.committed_snapshot().permission_mode().into())
 }
 
-impl policy::PolicyModeSource for ConfigPolicyModeSource {
-    fn current_mode(&self) -> policy::PolicyMode {
-        self.reader.committed_snapshot().permission_mode().into()
-    }
-}
-
-fn configured_policy(config: &config::ConfigWiring) -> Arc<dyn policy::PolicyPort> {
-    Arc::new(policy::ConfiguredPolicy::new(ConfigPolicyModeSource {
-        reader: config.reader(),
-    }))
-}
-
-fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
-    config::CliConfigInput {
+fn cli_config_input(args: &AgentArgs) -> config::CliConfigInputData {
+    config::CliConfigInputData {
         api_key: args.api_key.clone(),
         base_url: args.base_url.clone(),
         model: args.model.clone(),
@@ -1151,7 +1140,7 @@ fn cli_config_input(args: &AgentArgs) -> config::CliConfigInput {
 fn wire_config_override_store(agents_dir: &Path) -> Result<config::NativeConfigStore, SdkError> {
     let blob = storage::file_system_blob(agents_dir.join("config-overrides"))
         .map_err(|error| SdkError::Init(format!("配置 override 存储初始化失败：{error}")))?;
-    Ok(config::native_override_store(blob))
+    Ok(config::wire_config_override_store(blob))
 }
 
 fn logging_settings_from_snapshot(
@@ -1258,7 +1247,7 @@ fn init_logging(
 fn wire_workspace_with_config(
     cwd: &std::path::Path,
     config: &config::ConfigWiring,
-) -> Result<project::WorkspaceViews, SdkError> {
+) -> Result<project::Workspace, SdkError> {
     project::wire_production_workspace(
         cwd.to_path_buf(),
         config
@@ -1268,7 +1257,6 @@ fn wire_workspace_with_config(
             .map(Path::to_path_buf),
     )
     .map_err(|error| SdkError::Init(error.to_string()))
-    .map(project::WorkspaceWiring::into_views)
 }
 
 pub async fn build_agent_client(args: AgentArgs) -> Result<AgentClientHandle, SdkError> {
@@ -1848,7 +1836,7 @@ mod tests {
             .expect("write MCP config");
 
         let provider = Arc::new(CountingProviderFactory::default());
-        let gateways = FeatureGateways::new(provider.clone(), Arc::new(policy::AllowAllPolicy));
+        let gateways = FeatureGateways::new(provider.clone(), policy::allow_all());
         let args = AgentArgs {
             cwd: Some(root),
             api_key: Some("test-api-key".to_string()),

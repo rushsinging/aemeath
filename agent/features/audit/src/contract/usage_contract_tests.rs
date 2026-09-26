@@ -1,11 +1,11 @@
 use crate::domain::{
-    Pagination, TimeRange, UsageCursor, UsageDropReason, UsageEmitOutcome, UsageEnvelopeV1,
-    UsageQuery, UsageRecord, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageCursor, UsageDropReasonData, UsageEmitOutcomeData, UsageEnvelopeV1, UsagePaginationData,
+    UsageQueryData, UsageRecordData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
-fn fixed_record() -> UsageRecord {
-    UsageRecord {
+fn fixed_record() -> UsageRecordData {
+    UsageRecordData {
         recorded_at_unix_ms: 1_720_000_000_000,
         session_id: SessionId::new("session-927"),
         run_id: RunId::new("run-927"),
@@ -77,29 +77,29 @@ fn usage_envelope_v1_round_trip_preserves_record_and_ignores_unknown_fields() {
 #[test]
 fn usage_emit_outcome_preserves_structured_drop_reason() {
     assert_eq!(
-        UsageEmitOutcome::Dropped(UsageDropReason::QueueFull),
-        UsageEmitOutcome::Dropped(UsageDropReason::QueueFull)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::QueueFull),
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::QueueFull)
     );
     assert_ne!(
-        UsageEmitOutcome::Dropped(UsageDropReason::QueueFull),
-        UsageEmitOutcome::Dropped(UsageDropReason::WorkerUnavailable)
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::QueueFull),
+        UsageEmitOutcomeData::Dropped(UsageDropReasonData::WorkerUnavailable)
     );
 }
 
 #[test]
 fn usage_query_contract_carries_all_correlation_filters() {
-    let query = UsageQuery {
+    let query = UsageQueryData {
         session_id: Some(SessionId::new("session-927")),
         run_id: Some(RunId::new("run-927")),
         run_step_id: Some(RunStepId::new("step-927")),
         model_invocation_id: Some(ModelInvocationId::new("invocation-927")),
         provider: Some("anthropic".to_string()),
         model: Some("claude-sonnet".to_string()),
-        recorded_range: Some(TimeRange {
+        recorded_range: Some(UsageTimeRangeData {
             from_inclusive_unix_ms: Some(10),
             to_exclusive_unix_ms: Some(20),
         }),
-        pagination: Pagination {
+        pagination: UsagePaginationData {
             cursor: Some(UsageCursor::new("opaque-cursor")),
             limit: std::num::NonZeroUsize::new(50).expect("non-zero"),
         },

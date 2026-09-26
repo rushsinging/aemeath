@@ -5,8 +5,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use hook::{
-    HookDirective, HookDispatchContext, HookExecutionStatus, HookInvocation, HookPort, HookReason,
-    PreToolUseInput,
+    HookDirectiveData, HookDispatchContextData, HookExecutionStatusData, HookInvocationData,
+    HookReasonData,
 };
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -17,7 +17,7 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
 }
 
-fn dispatcher_for(command: String, timeout: u64) -> hook::Dispatcher {
+fn dispatcher_for(command: String, timeout: u64) -> std::sync::Arc<dyn hook::HookDispatcher> {
     let config = Config {
         hooks: HooksConfig {
             events: HashMap::from([(
@@ -33,21 +33,21 @@ fn dispatcher_for(command: String, timeout: u64) -> hook::Dispatcher {
         ..Config::default()
     };
 
-    hook::build_dispatcher(&ConfigSnapshot::new(config)).expect("公开配置入口应构造 Dispatcher")
+    hook::wire_hook_dispatcher(&ConfigSnapshot::new(config)).expect("公开配置入口应构造 Dispatcher")
 }
 
-fn invocation() -> HookInvocation {
-    HookInvocation::PreToolUse(PreToolUseInput {
+fn invocation() -> HookInvocationData {
+    HookInvocationData::PreToolUse {
         tool_name: "Bash".to_string(),
         tool_input: serde_json::json!({"command": "printf contract"}),
-    })
+    }
 }
 
-async fn dispatch(dispatcher: &hook::Dispatcher, cwd: &Path) -> hook::HookOutcome {
+async fn dispatch(dispatcher: &dyn hook::HookDispatcher, cwd: &Path) -> hook::HookOutcomeData {
     dispatcher
         .dispatch_at(
             invocation(),
-            HookDispatchContext::new(cwd),
+            HookDispatchContextData::new(cwd),
             &CancellationToken::new(),
         )
         .await
@@ -61,12 +61,12 @@ async fn public_port_treats_nonzero_exit_as_single_business_block() {
         "printf 'attempt\\n' >> {}; exit 127",
         shell_quote(&attempts)
     );
-    let outcome = dispatch(&dispatcher_for(command, 2), temp.path()).await;
+    let outcome = dispatch(&*dispatcher_for(command, 2), temp.path()).await;
 
     assert!(matches!(
         outcome.directive,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 127, .. }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 127, .. }
         }
     ));
     assert_eq!(outcome.executions.len(), 1);
@@ -84,13 +84,13 @@ async fn public_port_retries_protocol_failure_three_times_then_continues() {
         "printf 'attempt\\n' >> {}; printf '{{'",
         shell_quote(&attempts)
     );
-    let outcome = dispatch(&dispatcher_for(command, 2), temp.path()).await;
+    let outcome = dispatch(&*dispatcher_for(command, 2), temp.path()).await;
 
-    assert_eq!(outcome.directive, HookDirective::Continue);
+    assert_eq!(outcome.directive, HookDirectiveData::Continue);
     assert_eq!(outcome.executions.len(), 3);
     assert!(outcome.executions.iter().all(|execution| matches!(
         execution.status,
-        HookExecutionStatus::ExecutionFailed { .. }
+        HookExecutionStatusData::ExecutionFailed { .. }
     )));
     assert_eq!(
         std::fs::read_to_string(attempts).expect("读取执行次数"),
@@ -103,7 +103,7 @@ async fn public_port_injects_approved_invocation_environment() {
     let temp = tempfile::tempdir().expect("创建临时目录");
     let command = "printf '%s' \"${AEMEATH_PROJECT_DIR-missing}\"".to_string();
 
-    let outcome = dispatch(&dispatcher_for(command, 2), temp.path()).await;
+    let outcome = dispatch(&*dispatcher_for(command, 2), temp.path()).await;
 
     assert_eq!(outcome.executions.len(), 1);
     assert_eq!(
@@ -121,14 +121,14 @@ async fn public_port_reaps_background_process_group_after_shell_exit() {
         shell_quote(&marker)
     );
     let started = Instant::now();
-    let outcome = dispatch(&dispatcher_for(command, 10), temp.path()).await;
+    let outcome = dispatch(&*dispatcher_for(command, 10), temp.path()).await;
     let elapsed = started.elapsed();
     let child_pid = std::fs::read_to_string(marker)
         .expect("读取后台进程 PID")
         .parse::<libc::pid_t>()
         .expect("解析后台进程 PID");
 
-    assert_eq!(outcome.directive, HookDirective::Continue);
+    assert_eq!(outcome.directive, HookDirectiveData::Continue);
     assert!(
         elapsed < Duration::from_secs(3),
         "后台进程不得让公开 dispatch 等待到 timeout，实际耗时 {elapsed:?}"

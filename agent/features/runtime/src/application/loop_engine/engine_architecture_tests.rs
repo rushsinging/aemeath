@@ -225,7 +225,7 @@ fn p6_9_4_source_directories_expose_only_source_observer_topology_and_mapping() 
             "async fn execute_tools_impl(",
             "prepare_tool_round(",
             "execute_tool_round(",
-            "HookInvocation::Stop",
+            "HookInvocationData::Stop",
             "ContextRequest {",
             "async fn finalize_sub_agent(",
             "impl crate::application::loop_engine::ModelInvocationPort",
@@ -542,6 +542,7 @@ struct ScriptedObservations {
 }
 
 struct ScriptedState {
+    cancel_during_manual_compaction: bool,
     model_steps: VecDeque<ModelStep>,
     model_errors: VecDeque<LoopEngineError>,
     tool_steps: VecDeque<ToolStep>,
@@ -567,6 +568,7 @@ struct ScriptedState {
 impl Default for ScriptedState {
     fn default() -> Self {
         Self {
+            cancel_during_manual_compaction: false,
             model_steps: VecDeque::new(),
             model_errors: VecDeque::new(),
             tool_steps: VecDeque::new(),
@@ -636,6 +638,7 @@ struct InteractionMailboxFake {
 
 struct ScriptedPorts {
     input: InputFake,
+    manual_compaction: ManualCompactionFake,
     events: EventSinkFake,
     control: RunControlFake,
     lifecycle: RunLifecycleFake,
@@ -677,6 +680,24 @@ impl ScenarioLoopHarness {
         Arc::clone(&self.scenario.model_started)
     }
 
+    pub(crate) fn manual_compaction_cancelling() -> Self {
+        Self {
+            scenario: ScriptedScenario {
+                cancel_during_manual_compaction: true,
+                drain_outcomes: manual_compaction_drain_outcomes(),
+                ..Default::default()
+            },
+        }
+    }
+
+    pub(crate) fn manual_compaction_calls(&self) -> usize {
+        self.scenario
+            .calls()
+            .iter()
+            .filter(|call| **call == "manual_compact")
+            .count()
+    }
+
     pub(crate) fn use_active_run_control(
         &mut self,
         active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
@@ -711,6 +732,7 @@ impl ScenarioLoopHarness {
 }
 
 struct ScriptedScenario {
+    cancel_during_manual_compaction: bool,
     model_steps: VecDeque<ModelStep>,
     model_errors: VecDeque<LoopEngineError>,
     tool_steps: VecDeque<ToolStep>,
@@ -756,6 +778,7 @@ impl Default for ScriptedScenario {
             epoch: DrainEpoch(1),
         });
         Self {
+            cancel_during_manual_compaction: false,
             model_steps: VecDeque::new(),
             model_errors: VecDeque::new(),
             tool_steps: VecDeque::new(),
@@ -804,6 +827,7 @@ impl ScriptedScenario {
                 model_cancellation_cleanup_completed: self.model_cancellation_cleanup_completed,
                 block_await_user_input_forever: self.block_await_user_input_forever,
                 block_compact_until_cancelled: self.block_compact_until_cancelled,
+                cancel_during_manual_compaction: self.cancel_during_manual_compaction,
                 fail_accept_input: self.fail_accept_input,
                 needs_compaction: self.needs_compaction,
                 fail_emit_once: self.fail_emit_once,
@@ -835,6 +859,9 @@ impl ScriptedScenario {
                 compaction: CompactionFake {
                     state: Arc::clone(&state),
                     controls: Arc::clone(&controls),
+                },
+                manual_compaction: ManualCompactionFake {
+                    state: Arc::clone(&state),
                 },
                 model: ModelInvocationFake {
                     state: Arc::clone(&state),
@@ -904,7 +931,7 @@ impl ScriptedScenario {
 
 impl ScriptedPorts {
     fn run_loop(&mut self) -> RunLoop<'_> {
-        RunLoop::new(
+        let mut run_loop = RunLoop::new(
             &mut self.input,
             &mut self.events,
             &self.control,
@@ -917,7 +944,9 @@ impl ScriptedPorts {
             &mut self.tools,
             &mut self.stuck,
             &self.plan_approval,
-        )
+        );
+        run_loop.bind_manual_compaction(&mut self.manual_compaction);
+        run_loop
     }
 }
 
@@ -1092,6 +1121,32 @@ impl StepPersistencePort for StepPersistenceFake {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct ManualCompactionFake {
+    state: Arc<std::sync::Mutex<ScriptedState>>,
+}
+
+#[async_trait::async_trait]
+impl crate::application::loop_engine::ManualCompactionPort for ManualCompactionFake {
+    async fn manual_compact(
+        &mut self,
+        _run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+        _progress: std::sync::Arc<dyn CompactProgressView>,
+    ) -> Result<crate::application::loop_engine::ManualCompactionOutcome, LoopEngineError> {
+        let cancel_now = {
+            let mut state = self.state.lock().unwrap();
+            state.observations.calls.push("manual_compact");
+            state.cancel_during_manual_compaction
+        };
+        if cancel_now {
+            cancel.cancel();
+            return Err(LoopEngineError::Cancelled);
+        }
+        Ok(crate::application::loop_engine::ManualCompactionOutcome::Committed)
     }
 }
 
@@ -1425,4 +1480,37 @@ fn call(name: &str, input: serde_json::Value) -> ToolCall {
         index: 0,
         input,
     }
+}
+
+fn manual_compaction_drain_outcomes() -> VecDeque<DrainOutcome> {
+    VecDeque::from([
+        DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(0),
+        },
+        DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(1),
+        },
+    ])
+}
+
+#[tokio::test]
+async fn manual_compaction_run_terminates_when_cancelled() {
+    let mut harness = ScenarioLoopHarness::manual_compaction_cancelling();
+    let mut run = Run::new(crate::domain::agent_run::RunSpec::manual_compaction(), None);
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), 0);
+    let cancel = CancellationToken::new();
+    let mut loop_context = harness.run_loop();
+    let directive = run_loop(&mut run, &mut execution, &cancel, &mut loop_context)
+        .await
+        .expect("手动压缩 Run 的 loop 应正常返回");
+
+    assert!(matches!(directive, LoopDirective::Terminal));
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert_eq!(harness.manual_compaction_calls(), 1, "手动压缩只应发起一次");
+    assert_eq!(
+        harness.completed_terminal_event_count(),
+        0,
+        "被取消的手动压缩 Run 不得产生 Completed 终态事件"
+    );
 }

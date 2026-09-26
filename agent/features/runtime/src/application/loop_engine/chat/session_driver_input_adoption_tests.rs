@@ -804,7 +804,11 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
     let (input_tx, input_events) = ChannelInputEvents::new();
     input_tx.send(sdk::ChatInputEvent::Compact).unwrap();
 
+    let provider = Arc::new(ScriptedInvocationProvider::new(Vec::new()));
     let shell = test_shell();
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
     shell.set_test_session_id("test-idle-compact-command");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
@@ -847,11 +851,16 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
             .any(|event| event.as_str() == "CommandResultText"),
         "跳过 compact 不得伪报成功"
     );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "手动压缩 Run 不得调用模型（脚本 provider 未提供任何 attempt）"
+    );
 }
 
 // ─── #1492 task reminder injection ─────────────────────────────────────
 
-/// #1492：run 首步注入 Task 进度 reminder（invocation-only，只给 LLM）：
+/// #1492：run 首步注入 TaskData 进度 reminder（invocation-only，只给 LLM）：
 ///  - 首请求 messages 含 `<system-reminder>`（计数 + 任务列表）
 ///  - 同 run 第二次请求（tool 往返后）不再注入
 ///  - TUI 同步快照（TurnStarted / SessionMessageStateChanged）不含注入内容
@@ -884,17 +893,17 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
     let task_store = Arc::new(task::TaskStore::new());
     task_store
         .create_batch(
-            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            task::BatchCreateSpecData::try_new("batch".to_string()).unwrap(),
             1,
         )
         .unwrap();
     let task = task_store
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "修复 compact 收敛".to_string(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -902,7 +911,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
         .unwrap()
         .value;
     task_store
-        .transition(task.id(), task::TaskStatus::InProgress, 3)
+        .transition(task.id(), task::TaskStatusData::InProgress, 3)
         .unwrap();
 
     input_tx
@@ -988,7 +997,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
     );
 }
 
-/// #1492：/clear（ChatInputEvent::Reset）在 idle 时清理权威 Task 状态。
+/// #1492：/clear（ChatInputEvent::Reset）在 idle 时清理权威 TaskData 状态。
 #[tokio::test]
 async fn clear_resets_authoritative_task_state() {
     let provider = Arc::new(TextOnlyProvider::new(Arc::new(tokio::sync::Notify::new())));
@@ -1000,17 +1009,17 @@ async fn clear_resets_authoritative_task_state() {
     let task_store = Arc::new(task::TaskStore::new());
     task_store
         .create_batch(
-            task::BatchCreateSpec::try_new("batch".to_string()).unwrap(),
+            task::BatchCreateSpecData::try_new("batch".to_string()).unwrap(),
             1,
         )
         .unwrap();
     task_store
         .create_task(
-            task::TaskCreateSpec::try_new(
+            task::TaskCreateSpecData::try_new(
                 "遗留任务".to_string(),
                 String::new(),
                 None,
-                task::TaskPriority::Normal,
+                task::TaskPriorityData::Normal,
             )
             .unwrap(),
             2,

@@ -15,7 +15,8 @@ Idle → DrainingInput ⇄ AwaitingInput
               │ Ready / InternalContinuation
               ▼
       PreparingContext ⇄ Compacting
-              │
+              │              │
+              │              └─ 手动压缩 Run：命令置 Compacting，回收完成后回 DrainingInput（reason=ManualCompactionSettled）──▶ Completed
               ▼
         InvokingModel → ApplyingResponse
                               ├─ end turn ────────────────┐
@@ -38,6 +39,8 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 
 正常 finalized Step 与 `CancelRunStep` 收口后均进入 `DrainingInput`：有输入（`Ready`/`InternalContinuation`）继续下一 Step；队列保持 Open 且暂无输入时进入 `AwaitingInput`；admission 已 seal 且为空时由 `EmptyAndSealed` 正常 `Completed`。`TerminateRun` 才终止整个 Run，并在退出前完成同等质量的 Step 收口和 Session flush。Run 级 cancellation 兼容路径不存在，也不得从 root cancellation token 推断第二个 Run 终态。
 
+`RunSpec::manual_compaction()` 表达只执行一次上下文压缩的 Run（目的为 `RunIntent::ManualCompaction`）：runtime 受理 `/compact` 后由命令入口 `Run::begin_manual_compaction()` 直接把 Run 置为 `Compacting`（仅该意图与 `DrainingInput` 起点可用，迁移仍经状态矩阵），压缩完成由状态机自行判定收口目标（存在活动 Step → `PreparingContext`；无活动 Step → `DrainingInput`，reason=`ManualCompactionSettled`），再由主循环里 drain 的 `EmptyAndSealed` 收口 `Completed`。该目的禁止 `ContextPrepared` 迁移，因此 **NEVER** 进入 `InvokingModel`；`Completed` 只能由 `DrainingInput + EmptyAndSealed` 产生这一不变量对所有 Run 一致。
+
 `DrainEpoch` 是 Run-owned 单调递增计数器，在同一 `run_loop` 生命周期内持续推进。每次成功 drain 后递增；`AwaitingInput` park 不重置 epoch。Engine 和 InputQueue 双向校验 epoch，不匹配返回 typed error。
 
 ### 状态转换矩阵
@@ -51,7 +54,9 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | AwaitingInput | `await_input` → `Ready(UserMessage)` | DrainingInput → PreparingContext |
 | DrainingInput | `drain` → `EmptyAndSealed`（admission 已 seal 且队列为空） | Completed(`InputDrained` 或 `StepCancelledAndInputDrained`) |
 | PreparingContext | needs_compaction | Compacting |
-| Compacting | 回收完成 | PreparingContext |
+| Compacting | 回收完成且存在活动 Step（自动压缩） | PreparingContext |
+| DrainingInput | 手动压缩命令 `begin_manual_compaction`（仅 `RunIntent::ManualCompaction`） | Compacting |
+| Compacting | 回收完成且无活动 Step（手动压缩 Run），reason=`ManualCompactionSettled` | DrainingInput |
 | PreparingContext | 上下文就绪 | InvokingModel |
 | InvokingModel | LLM 响应 | ApplyingResponse |
 | InvokingModel | Retryable 错误(超时/5xx/429) | InvokingModel（退避重试 ≤10 次，见 §5）|
@@ -572,3 +577,7 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 | 2026-07-21 | #1278 将 Context durable schema 收口为 `FinalizedStepRecord`，并更正 Stop Hook Block：当前 assistant / Tool outcome 先持久化，feedback 仅进入下一 Step；#1247 继续承接生产控制命令与 deterministic receipt 的完整接线 | #1278 / #1247 |
 | 2026-07-20 | 纠正 Stop Hook 的历史语义：Block 只阻断 Run 终止，已完成 assistant / Tool Step 必须先持久化；feedback 与同次 drain 的用户追问组成下一 Step，控制请求优先于 continuation | #743 |
 | 2026-07-22 | #1272 落地 per-turn drain/admission：`DrainOutcome` 全量（`Ready`/`InternalContinuation(StopHookFeedback,ToolResults)`/`EmptyAndSealed`/`NoInput`），`DrainEpoch` 双向校验，统一 InputQueue 接受 live session、parent-dispatched task 与 scheduler UserMessage；AwaitingInput 同一 Run park，普通输入与 interaction reply mailbox 分离 | [#1272](https://github.com/rushsinging/aemeath/issues/1272) |
+| 2026-09-26 | 手动 `/compact` 复用 Run 状态机：新增 `RunIntent::ManualCompaction` 与 `PreparingContext --CompactionOnlySettled--> DrainingInput`；手动压缩 Run 不进入 `InvokingModel`，由第二次 drain 的 `EmptyAndSealed` 收口 | — |
+| 2026-09-26 | 手动压缩改为命令驱动置状态：新增 `Run::begin_manual_compaction()` 与迁移 `(DrainingInput, BeginCompaction)`；`CompactionOnlySettled` 源状态由 `PreparingContext` 改为 `Compacting`，压缩前置到主循环之前，删除以 `InternalContinuation` 兑现意图的绕行 | — |
+| 2026-09-26 | 压缩完成只保留 `CompactionCompleted` 一条迁移：收口目标由状态机按“是否存在活动 Step”判定，手动压缩 Run 的收口以 reason `ManualCompactionSettled` 区分，删除 `CompactionOnlySettled` 迁移与 reason | — |
+| 2026-09-26 | 命令式状态设置收敛为唯一入口 `Run::set_status_by_command` + `(from, to)` 枚举白名单 gate（拒绝时 `IllegalCommandTransition` 且不改状态）；源码守卫锁定状态写入只允许出现在 `transition` 矩阵与该 gate 两处 | — |

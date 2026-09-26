@@ -5,7 +5,7 @@
 //! 1. **Real Memory opener uses project/config** — the production wiring
 //!    constructs `DatasetMemoryOpener` with `storage::file_system_dataset` +
 //!    `FileLegacyMemorySourceFactory`, eager-opens memory from the workspace
-//!    `ProjectIdentity` + committed `MemoryConfig`, and the resulting
+//!    `ProjectIdentityData` + committed `MemoryConfig`, and the resulting
 //!    `MemoryPort` is filesystem-backed (writes persist).
 //! 2. **Runtime gets the same wiring** — the session id returned by
 //!    `AgentClientImpl::session_id()` matches the wiring's
@@ -65,8 +65,8 @@ fn make_agents_dir(temp: &tempfile::TempDir) -> std::path::PathBuf {
     agents_dir
 }
 
-fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
-    config::CliConfigInput {
+fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInputData {
+    config::CliConfigInputData {
         api_key: args.api_key.clone(),
         base_url: args.base_url.clone(),
         model: args.model.clone(),
@@ -87,8 +87,8 @@ fn cli_config_input(args: &ChatBootstrapArgs) -> config::CliConfigInput {
 async fn wire_config_with_agents_dir(
     project_dir: &Path,
     agents_dir: &Path,
-    cli: config::CliConfigInput,
-) -> Result<config::ConfigWiring, config::ConfigError> {
+    cli: config::CliConfigInputData,
+) -> Result<config::ConfigWiring, share::error::DomainError> {
     config::wire_project_config_with_agents_dir(
         project_dir,
         agents_dir,
@@ -99,7 +99,7 @@ async fn wire_config_with_agents_dir(
 }
 
 fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
-    config::native_override_store(
+    config::wire_config_override_store(
         storage::file_system_blob(agents_dir.join("config-overrides"))
             .expect("create config override blob"),
     )
@@ -167,9 +167,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(
         &root,
         &agents_dir,
@@ -248,12 +246,11 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
-    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
-        .await
-        .expect("wire config");
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
+    let config =
+        wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInputData::default())
+            .await
+            .expect("wire config");
     let task_wiring = task::wire_task();
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
@@ -342,9 +339,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let config = wire_config_with_agents_dir(
         &root,
         &agents_dir,
@@ -411,12 +406,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::wire_active_run_registry());
-    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ))
-        .expect("test hook dispatcher"),
-    );
+    let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .expect("test hook dispatcher");
 
     let provider_factory = composition::provider::provider_factory();
     let provider_spec = runtime::ProviderBuildSpec {
@@ -470,7 +463,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let runtime_context_factory = Arc::new(runtime::RuntimeContextFactory::new(
         tools.catalog_port(),
         tools.execution(),
-        Arc::new(policy::AllowAllPolicy),
+        policy::allow_all(),
         reflection_history,
         task_access,
         hook_runner,
@@ -546,12 +539,11 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let agents_dir = make_agents_dir(&temp);
     std::fs::create_dir_all(&root).expect("create project root");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
-    let config = wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInput::default())
-        .await
-        .expect("wire config");
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
+    let config =
+        wire_config_with_agents_dir(&root, &agents_dir, config::CliConfigInputData::default())
+            .await
+            .expect("wire config");
 
     let task_wiring = task::wire_task();
 
@@ -684,10 +676,13 @@ async fn config_storage_worktrees_dir_drives_workspace_default_derivation() {
         assert!(status.success(), "unexpected exit for git {args:?}");
     }
 
-    let config =
-        wire_config_with_agents_dir(&repo_root, &agents_dir, config::CliConfigInput::default())
-            .await
-            .expect("config wiring");
+    let config = wire_config_with_agents_dir(
+        &repo_root,
+        &agents_dir,
+        config::CliConfigInputData::default(),
+    )
+    .await
+    .expect("config wiring");
     assert_eq!(
         config
             .reader()
@@ -706,8 +701,7 @@ async fn config_storage_worktrees_dir_drives_workspace_default_derivation() {
             .worktrees_dir()
             .map(std::path::Path::to_path_buf),
     )
-    .expect("workspace wiring")
-    .into_views();
+    .expect("workspace wiring");
 
     workspace
         .control()

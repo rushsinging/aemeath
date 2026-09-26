@@ -207,6 +207,33 @@ where
     }
 }
 
+/// 手动压缩阶段结果。
+pub(super) enum ManualCompactionPhaseOutcome {
+    Ready(ManualCompactionOutcome),
+    Cancelled,
+    TimedOut,
+}
+
+pub(super) async fn run_manual_compaction_phase<P>(
+    run: &Run,
+    cancel: &CancellationToken,
+    manual_compaction: &mut P,
+    progress: std::sync::Arc<dyn CompactProgressView>,
+) -> Result<ManualCompactionPhaseOutcome, LoopEngineError>
+where
+    P: ManualCompactionPort + ?Sized,
+{
+    let compaction = manual_compaction.manual_compact(run.id(), cancel, progress);
+    match await_interruptible(run, cancel, compaction).await {
+        Interrupt::Completed(Ok(outcome)) => Ok(ManualCompactionPhaseOutcome::Ready(outcome)),
+        Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
+            Ok(ManualCompactionPhaseOutcome::Cancelled)
+        }
+        Interrupt::Completed(Err(error)) => Err(error),
+        Interrupt::TimedOut => Ok(ManualCompactionPhaseOutcome::TimedOut),
+    }
+}
+
 pub(super) enum ModelInvocationOutcome {
     Invoked(ModelStep, StepTokenUsage),
     NeedsCompaction(String),

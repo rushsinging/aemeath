@@ -302,7 +302,7 @@ impl MainContextFactory for ProductionMainContextFactory {
         &self,
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
@@ -392,7 +392,7 @@ impl Drop for AutoCompactAttemptPermit {
 pub struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
-    workspace_persist: Arc<dyn project::WorkspacePersist>,
+    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     writer: Arc<dyn CanonicalSessionWriter>,
     accepted_input_writer: Arc<dyn AcceptedInputWriter>,
     tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
@@ -407,7 +407,7 @@ impl CanonicalSessionRepository {
     pub fn new(
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspacePersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         writer: Arc<dyn CanonicalSessionWriter>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {
@@ -532,7 +532,7 @@ impl CanonicalSessionRepository {
         }
     }
 
-    /// 将 typed Task snapshot 确定性渲染为非权威 companion，并将完整 summary
+    /// 将 typed TaskData snapshot 确定性渲染为非权威 companion，并将完整 summary
     /// 收敛到同一 Context-owned summary budget。
     fn append_task_snapshot_companion(
         summary: &str,
@@ -551,7 +551,7 @@ impl CanonicalSessionRepository {
         loop {
             let companion = snapshot.render_companion_with_limit(item_limit);
             let companion_tokens = crate::domain::token_budget::estimate_tokens(&format!(
-                "\n\n## Current Task State\n{companion}"
+                "\n\n## Current TaskData State\n{companion}"
             ));
             if companion_tokens < budget {
                 if let Ok(bounded_checkpoint) = checkpoint
@@ -559,7 +559,7 @@ impl CanonicalSessionRepository {
                     .degrade_to_budget(budget - companion_tokens)
                 {
                     return Ok(format!(
-                        "{}\n\n## Current Task State\n{companion}",
+                        "{}\n\n## Current TaskData State\n{companion}",
                         bounded_checkpoint.render()
                     ));
                 }

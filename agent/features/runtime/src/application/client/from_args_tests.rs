@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::*;
 use crate::application::client::accessors::SessionRuntime;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::PolicyPort;
-use hook::{HookInvocation, HookOutcome, HookPort};
+use crate::ports::Policy;
+use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -213,13 +213,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
 
 struct FakeHook;
 #[async_trait::async_trait]
-impl HookPort for FakeHook {
+impl HookDispatcher for FakeHook {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
+        _invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> HookOutcomeData {
+        HookOutcomeData::proceed()
     }
 }
 /// Build a minimal `SessionRuntime` with fake ports for assembler tests.
@@ -231,13 +231,11 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
-        config::native_override_store(
+        config::wire_config_override_store(
             storage::file_system_blob(temp.path()).expect("create config blob"),
         ),
     )
@@ -256,14 +254,14 @@ async fn make_test_shell(
     .await;
     let snapshot = wiring.committed_config();
     let binding = crate::application::model::test_support::test_binding(Vec::new());
-    let policy: Arc<dyn PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn Policy> = policy::allow_all();
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
     let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
     let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
     let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
     let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-    let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
+    let hook_runner: Arc<dyn HookDispatcher> = Arc::new(FakeHook);
 
     struct NoopRunner;
     #[async_trait::async_trait]
@@ -283,7 +281,7 @@ async fn make_test_shell(
     let session_management = wiring.session_management();
     let cwd = root.clone();
 
-    // #1248 Task 3: Build RuntimeContextFactory for test SessionRuntime.
+    // #1248 TaskData 3: Build RuntimeContextFactory for test SessionRuntime.
     let runtime_context_factory = Arc::new(
         crate::application::run::context_factory::RuntimeContextFactory::new(
             tool_catalog.clone(),
@@ -366,7 +364,7 @@ async fn make_test_shell(
     )
 }
 
-// ── Task 4 L1: Shell classification tests ──
+// ── TaskData 4 L1: Shell classification tests ──
 
 /// After bootstrap, SessionRuntime holds session-level state: wiring, workspace,
 /// session identity, prompt bootstrap, model switch. It does NOT hold a per-Run
@@ -533,9 +531,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let original = workspace.clone();
     workspace
         .control()
@@ -552,7 +548,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     };
     let config = config::wire_project_config(
         &root,
-        config::native_override_store(
+        config::wire_config_override_store(
             storage::file_system_blob(&agents_dir).expect("create config blob"),
         ),
     )
@@ -570,18 +566,16 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         ))),
     )
     .await;
-    let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn policy::Policy> = policy::allow_all();
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
-    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ))
-        .expect("test hook dispatcher"),
-    );
+    let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .expect("test hook dispatcher");
     let initial_binding = crate::ports::ProviderFactory::build(
         &crate::ports::provider_port::fake::FakeProviderFactory,
         crate::ports::ProviderBuildSpec {
@@ -698,7 +692,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         client.inner.shell.workspace.read().current_path_base(),
         root.canonicalize().expect("canonicalize root")
     );
-} // ── Task 4 GREEN: single-source verification tests ──
+} // ── TaskData 4 GREEN: single-source verification tests ──
 
 /// The SDK startup snapshot reads the current model state without exposing
 /// Runtime services or adapter-owned launch containers.
@@ -727,7 +721,7 @@ async fn startup_snapshot_reads_current_model_state() {
     assert_eq!(launch.model_display, expected_display);
 }
 
-/// #1385 Task 7: accessors return values from `shell`, the single source.
+/// #1385 TaskData 7: accessors return values from `shell`, the single source.
 #[tokio::test(flavor = "current_thread")]
 async fn accessors_read_from_shell_single_source() {
     let shell =
@@ -772,7 +766,7 @@ async fn accessors_read_from_shell_single_source() {
     assert_eq!(client.shell().verbose, shell.verbose);
 }
 
-/// #1385 Task 7: `shell.interaction_bridge` is the single source.
+/// #1385 TaskData 7: `shell.interaction_bridge` is the single source.
 /// `reply_interaction` and `cancel_interaction` both use it.
 #[tokio::test(flavor = "current_thread")]
 async fn interaction_bridge_is_single_source_on_shell() {
@@ -794,7 +788,7 @@ async fn interaction_bridge_is_single_source_on_shell() {
 }
 
 /// Startup resume must run before the committed snapshot is read, while
-/// Context rejects any session whose ProjectIdentity differs from the
+/// Context rejects any session whose ProjectIdentityData differs from the
 /// live workspace; a failed resume therefore cannot change Config/Memory.
 #[test]
 fn startup_resume_precedes_current_project_config_read() {

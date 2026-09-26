@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 
-use crate::ports::CancellationSignal;
+use crate::ports::HookCancellationSignal;
 
 pub(crate) const DEFAULT_OUTPUT_LIMIT: usize = 8 * 1024;
 #[cfg(any(not(unix), test))]
@@ -83,7 +83,7 @@ impl ProcessDriver {
     pub(crate) async fn execute(
         &self,
         request: ProcessRequest,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
         let mut command = Command::new("sh");
         command
@@ -229,7 +229,7 @@ impl ProcessDriver {
     pub(crate) async fn execute(
         &self,
         _request: ProcessRequest,
-        _cancellation: &dyn CancellationSignal,
+        _cancellation: &dyn HookCancellationSignal,
     ) -> Result<ProcessOutput, ProcessFailure> {
         Err(ProcessFailure::new(
             ProcessFailureKind::Unsupported,

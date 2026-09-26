@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use hook::{
-    CancellationSignal, HookClass, HookDispatchContext, HookInvocation, HookOutcome, HookPort,
+    HookCancellationSignal, HookClassData, HookDispatchContextData, HookDispatcher,
+    HookInvocationData, HookOutcomeData,
 };
 
 #[derive(Clone)]
@@ -9,45 +10,45 @@ use hook::{
 /// Hook-owned metadata 是过滤的唯一真相：Boundary point（含 Stop）转发到本 Run 的
 /// frozen Dispatcher，Tool/Notification point 无副作用返回 Proceed。
 pub struct BoundaryHookPort {
-    inner: std::sync::Arc<dyn HookPort>,
+    inner: std::sync::Arc<dyn HookDispatcher>,
 }
 
 impl BoundaryHookPort {
-    pub fn new(inner: std::sync::Arc<dyn HookPort>) -> Self {
+    pub fn new(inner: std::sync::Arc<dyn HookDispatcher>) -> Self {
         Self { inner }
     }
 
-    fn allows(point: hook::HookPoint) -> bool {
-        point.metadata().class == HookClass::Boundary
+    fn allows(point: hook::HookPointData) -> bool {
+        point.metadata().class == HookClassData::Boundary
     }
 }
 
 #[async_trait]
-impl HookPort for BoundaryHookPort {
+impl HookDispatcher for BoundaryHookPort {
     async fn dispatch(
         &self,
-        invocation: HookInvocation,
-        cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+        invocation: HookInvocationData,
+        cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData {
         if Self::allows(invocation.point()) {
             self.inner.dispatch(invocation, cancellation).await
         } else {
-            HookOutcome::proceed()
+            HookOutcomeData::proceed()
         }
     }
 
     async fn dispatch_at(
         &self,
-        invocation: HookInvocation,
-        context: HookDispatchContext,
-        cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+        invocation: HookInvocationData,
+        context: HookDispatchContextData,
+        cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData {
         if Self::allows(invocation.point()) {
             self.inner
                 .dispatch_at(invocation, context, cancellation)
                 .await
         } else {
-            HookOutcome::proceed()
+            HookOutcomeData::proceed()
         }
     }
 }

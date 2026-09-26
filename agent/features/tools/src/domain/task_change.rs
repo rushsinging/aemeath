@@ -1,32 +1,32 @@
-use task::{TaskCommandResult, TaskEvent, TaskRevision, TaskStatus};
+use task::{TaskCommandResultData, TaskEventData, TaskRevisionData, TaskStatusData};
 
-/// Runtime-only fact that a Task command committed state.
+/// Runtime-only fact that a TaskData command committed state.
 ///
-/// This type intentionally carries no Task aggregate, display text, or wire data.
+/// This type intentionally carries no TaskData aggregate, display text, or wire data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedTaskChange {
-    revision: TaskRevision,
+    revision: TaskRevisionData,
     facts: Vec<TaskChangeFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskChangeFact {
-    Created { task_id: task::TaskId },
-    Completed { task_id: task::TaskId },
+    Created { task_id: task::TaskIdData },
+    Completed { task_id: task::TaskIdData },
 }
 
 impl CommittedTaskChange {
-    pub fn from_command_result<T>(result: &TaskCommandResult<T>) -> Option<Self> {
+    pub fn from_command_result<T>(result: &TaskCommandResultData<T>) -> Option<Self> {
         let revision = result.revision()?;
         let facts = result
             .events
             .iter()
             .filter_map(|event| match event {
-                TaskEvent::TaskCreated { task_id } => {
+                TaskEventData::TaskCreated { task_id } => {
                     Some(TaskChangeFact::Created { task_id: *task_id })
                 }
-                TaskEvent::TaskStatusChanged { task_id, to, .. }
-                    if *to == TaskStatus::Completed =>
+                TaskEventData::TaskStatusChanged { task_id, to, .. }
+                    if *to == TaskStatusData::Completed =>
                 {
                     Some(TaskChangeFact::Completed { task_id: *task_id })
                 }
@@ -36,7 +36,7 @@ impl CommittedTaskChange {
         Some(Self { revision, facts })
     }
 
-    pub fn revision(&self) -> TaskRevision {
+    pub fn revision(&self) -> TaskRevisionData {
         self.revision
     }
 

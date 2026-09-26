@@ -581,7 +581,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // #1248 Task 6: RetryExhausted 由 Run 状态机产生，消息在 fail_run 中。
+    // #1248 TaskData 6: RetryExhausted 由 Run 状态机产生，消息在 fail_run 中。
     assert!(
         events
             .iter()
@@ -653,7 +653,7 @@ impl LlmProvider for CancellableThenNormalProvider {
 
 #[tokio::test]
 async fn test_cancel_aborts_turn_then_returns_to_idle() {
-    // #390 A1 Task 3：回合进行中 cancel → 发出 Cancelled、回滚本回合消息、
+    // #390 A1 TaskData 3：回合进行中 cancel → 发出 Cancelled、回滚本回合消息、
     // **回到空闲**（不退 loop）；随后投递新 UserMessage → 新回合正常完成；
     // 最后 drop 发送端关闭通道 → loop shutdown 退出。
     //
@@ -965,7 +965,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     );
 }
 
-/// Task 4：loop 顶部无待答回合时必须先 idle-wait，收到 UserMessage 后才调 LLM。
+/// TaskData 4：loop 顶部无待答回合时必须先 idle-wait，收到 UserMessage 后才调 LLM。
 ///
 /// 用一个计数 provider 追踪 LLM 调用次数。在投递任何输入前，先给 loop 充分调度
 /// 机会（yield 若干轮），断言此时 LLM 调用数为 0（loop 正处于 loop-top idle-wait）。

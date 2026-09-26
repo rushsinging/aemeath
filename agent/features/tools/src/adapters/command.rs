@@ -162,7 +162,7 @@ fn snapshot_target(target: CommandTarget) -> Option<SnapshotQueryTarget> {
         CommandTarget::Runtime => SnapshotQueryTarget::Runtime,
         CommandTarget::ContextManagement => SnapshotQueryTarget::ContextManagement,
         CommandTarget::Memory => SnapshotQueryTarget::Memory,
-        CommandTarget::Task => SnapshotQueryTarget::Task,
+        CommandTarget::TaskData => SnapshotQueryTarget::TaskData,
         CommandTarget::Project => SnapshotQueryTarget::Project,
         CommandTarget::Provider => SnapshotQueryTarget::Provider,
         CommandTarget::Config => SnapshotQueryTarget::Config,
@@ -177,7 +177,7 @@ fn control_target(target: CommandTarget) -> Option<ApplicationControlTarget> {
         CommandTarget::Runtime => ApplicationControlTarget::Runtime,
         CommandTarget::ContextManagement => ApplicationControlTarget::ContextManagement,
         CommandTarget::Memory => ApplicationControlTarget::Memory,
-        CommandTarget::Task => ApplicationControlTarget::Task,
+        CommandTarget::TaskData => ApplicationControlTarget::TaskData,
         CommandTarget::Project => ApplicationControlTarget::Project,
         CommandTarget::Config => ApplicationControlTarget::Config,
         CommandTarget::ApplicationVersionControl => {

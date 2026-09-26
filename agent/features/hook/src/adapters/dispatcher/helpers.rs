@@ -3,11 +3,12 @@
 //! 从 `dispatcher.rs` 拆出：这些纯函数不依赖 `&self`，按职责分组在此，
 //! 保持 `dispatcher.rs` 只含编排逻辑（struct + dispatch 主循环 + 重试循环）。
 
-use crate::domain::invocation::{HookInvocation, HookPoint};
+use crate::domain::invocation::{HookInvocationData, HookPointData};
 use crate::domain::outcome::{
-    ClassifyError, HookDirective, HookExecution, HookExecutionStatus, HookReason, ProtocolViolation,
+    ClassifyError, HookDirectiveData, HookExecutionData, HookExecutionStatusData, HookReasonData,
+    ProtocolViolation,
 };
-use crate::domain::subscription::{HookFailurePolicy, HookMatcher};
+use crate::domain::subscription::{HookFailurePolicy, HookMatcherData};
 
 use super::executor::ExecutionFault;
 
@@ -19,34 +20,34 @@ pub(super) const CONTEXT_SEPARATOR: &str = "\n";
 /// - `All` 匹配任意 invocation；
 /// - `ToolName(name)` 仅在带工具名的 point（PreToolUse / PostToolUse /
 ///   PostToolUseFailure / PermissionRequest / PermissionDenied）上且工具名相等时命中。
-pub(super) fn matcher_hits(matcher: &HookMatcher, invocation: &HookInvocation) -> bool {
+pub(super) fn matcher_hits(matcher: &HookMatcherData, invocation: &HookInvocationData) -> bool {
     match matcher {
-        HookMatcher::All => true,
-        HookMatcher::ToolName(expected) => tool_name_of(invocation)
+        HookMatcherData::All => true,
+        HookMatcherData::ToolName(expected) => tool_name_of(invocation)
             .map(|actual| actual == expected)
             .unwrap_or(false),
     }
 }
 
-/// HookMatcher 的稳定非秘密来源值（用于展示消息的 `source` 字段）。
+/// HookMatcherData 的稳定非秘密来源值（用于展示消息的 `source` 字段）。
 ///
 /// - `All` → `"*"`；
 /// - `ToolName(name)` → `name`（工具名是用户配置的稳定非秘密值）。
-pub(super) fn matcher_source(matcher: &HookMatcher) -> String {
+pub(super) fn matcher_source(matcher: &HookMatcherData) -> String {
     match matcher {
-        HookMatcher::All => "*".to_string(),
-        HookMatcher::ToolName(name) => name.clone(),
+        HookMatcherData::All => "*".to_string(),
+        HookMatcherData::ToolName(name) => name.clone(),
     }
 }
 
 /// 提取 invocation 携带的工具名（仅工具相关 point 有）。
-fn tool_name_of(invocation: &HookInvocation) -> Option<&str> {
+fn tool_name_of(invocation: &HookInvocationData) -> Option<&str> {
     match invocation {
-        HookInvocation::PreToolUse(i) => Some(&i.tool_name),
-        HookInvocation::PostToolUse(i) => Some(&i.tool_name),
-        HookInvocation::PostToolUseFailure(i) => Some(&i.tool_name),
-        HookInvocation::PermissionRequest(i) => Some(&i.tool_name),
-        HookInvocation::PermissionDenied(i) => Some(&i.tool_name),
+        HookInvocationData::PreToolUse { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PostToolUse { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PostToolUseFailure { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PermissionRequest { tool_name, .. } => Some(tool_name),
+        HookInvocationData::PermissionDenied { tool_name, .. } => Some(tool_name),
         _ => None,
     }
 }
@@ -78,62 +79,62 @@ pub(super) fn classify_error_summary(err: &ClassifyError) -> String {
 /// 能力矩阵违规的中文描述。
 fn violation_message(violation: ProtocolViolation) -> &'static str {
     match violation {
-        ProtocolViolation::BlockOnNonBlocking => "非阻塞 HookPoint 收到 Block",
+        ProtocolViolation::BlockOnNonBlocking => "非阻塞 HookPointData 收到 Block",
         ProtocolViolation::UpdatedInputOnNonModifiable => {
-            "不可修改输入的 HookPoint 收到 UpdatedInput"
+            "不可修改输入的 HookPointData 收到 UpdatedInput"
         }
         ProtocolViolation::ContextOnNonContextual => {
-            "不可追加上下文的 HookPoint 收到 AdditionalContext"
+            "不可追加上下文的 HookPointData 收到 AdditionalContext"
         }
     }
 }
 
 /// 取最后一次 ExecutionFailed 的 error 摘要（用于合成 Block reason）。
-pub(super) fn last_error_of(executions: &[HookExecution]) -> Option<String> {
+pub(super) fn last_error_of(executions: &[HookExecutionData]) -> Option<String> {
     executions.iter().rev().find_map(|e| match &e.status {
-        HookExecutionStatus::ExecutionFailed { error } => Some(error.clone()),
+        HookExecutionStatusData::ExecutionFailed { error } => Some(error.clone()),
         _ => None,
     })
 }
 
 /// 合成重试耗尽后的最终 directive（纯函数，无需 async）。
 pub(super) fn synthesize_exhausted_directive(
-    point: HookPoint,
+    point: HookPointData,
     failure_policy: Option<HookFailurePolicy>,
-    all_executions: &[HookExecution],
-) -> HookDirective {
+    all_executions: &[HookExecutionData],
+) -> HookDirectiveData {
     let error = last_error_of(all_executions).unwrap_or_default();
     match point {
         // Stop 固定 Block(StopHookExecutionFailed) —— 设计 §6，用户不可覆盖。
-        HookPoint::Stop => HookDirective::Block {
-            reason: HookReason::StopHookExecutionFailed { error },
+        HookPointData::Stop => HookDirectiveData::Block {
+            reason: HookReasonData::StopHookExecutionFailed { error },
         },
         // 普通 Hook：配置 Block → Block(PolicyBlock)；未配置 → 默认 Continue。
         _ => match failure_policy {
-            Some(HookFailurePolicy::Block) => HookDirective::Block {
-                reason: HookReason::PolicyBlock { error },
+            Some(HookFailurePolicy::Block) => HookDirectiveData::Block {
+                reason: HookReasonData::PolicyBlock { error },
             },
-            _ => HookDirective::Continue,
+            _ => HookDirectiveData::Continue,
         },
     }
 }
 
 /// 合成 Cancelled 后的最终 directive（纯函数，无需 async）。
 pub(super) fn synthesize_cancelled_directive(
-    point: HookPoint,
+    point: HookPointData,
     failure_policy: Option<HookFailurePolicy>,
-) -> HookDirective {
+) -> HookDirectiveData {
     let error = ExecutionFault::Cancelled.message().to_string();
     match point {
         // Stop 取消按 Stop 固定语义合成 Block(StopHookExecutionFailed)。
-        HookPoint::Stop => HookDirective::Block {
-            reason: HookReason::StopHookExecutionFailed { error },
+        HookPointData::Stop => HookDirectiveData::Block {
+            reason: HookReasonData::StopHookExecutionFailed { error },
         },
         _ => match failure_policy {
-            Some(HookFailurePolicy::Block) => HookDirective::Block {
-                reason: HookReason::PolicyBlock { error },
+            Some(HookFailurePolicy::Block) => HookDirectiveData::Block {
+                reason: HookReasonData::PolicyBlock { error },
             },
-            _ => HookDirective::Continue,
+            _ => HookDirectiveData::Continue,
         },
     }
 }

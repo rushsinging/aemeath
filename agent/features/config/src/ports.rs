@@ -17,9 +17,9 @@
 //! 服务调用。Probe 输入为已校验的 driver / endpoint / credential / 模型 /
 //! `max_tokens` / 最终 UA / timeout，不接收 TUI 类型、不暴露内部状态。
 use crate::domain::{
-    ConfigChangeSet, ConfigError, ConfigPersistOutcome, ConfigQueryError, ConfigRefreshOutcome,
-    ConfigSubscription, ConfigUpdate, ConfigUpdateError, PreparedConfigUpdate,
-    PreparedProjectConfig, ProjectConfigLocation, ReadyConfigCommit,
+    ConfigChangeData, ConfigPersistOutcomeData, ConfigRefreshOutcomeData, ConfigSubscriptionData,
+    ConfigUpdateData, PreparedConfigUpdateData, PreparedProjectConfigData,
+    ProjectConfigLocationData, ReadyConfigCommitData,
 };
 use async_trait::async_trait;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -29,34 +29,35 @@ use tokio::sync::watch;
 pub trait ConfigReader: Send + Sync {
     fn committed_snapshot(&self) -> ConfigSnapshot;
     fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
-    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcome;
-}
-
-#[async_trait]
-pub trait ConfigQuery: Send + Sync {
-    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError>;
-    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError>;
+    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcomeData;
+    /// 异步快照（gate-aware 视图实现经内部 gate 校验后委托）。
+    async fn snapshot(&self) -> Result<ConfigSnapshot, share::error::DomainError>;
+    /// 订阅（gate-aware 同上）。
+    async fn subscribe(&self) -> Result<ConfigSubscriptionData, share::error::DomainError>;
 }
 
 #[async_trait]
 pub trait ConfigWriter: Send + Sync {
-    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError>;
+    async fn update(
+        &self,
+        command: ConfigUpdateData,
+    ) -> Result<ConfigChangeData, share::error::DomainError>;
 }
 
 #[async_trait]
 pub trait ProjectConfigParticipant: Send + Sync {
     async fn prepare_for_project(
         &self,
-        location: &ProjectConfigLocation,
-    ) -> Result<PreparedProjectConfig, ConfigError>;
+        location: &ProjectConfigLocationData,
+    ) -> Result<PreparedProjectConfigData, share::error::DomainError>;
     fn snapshot(&self) -> ConfigSnapshot;
-    async fn commit_project(&self, prepared: PreparedProjectConfig);
+    async fn commit_project(&self, prepared: PreparedProjectConfigData);
     async fn prepare_update(
         &self,
-        command: ConfigUpdate,
-    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
-    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome;
-    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet;
+        command: ConfigUpdateData,
+    ) -> Result<PreparedConfigUpdateData, share::error::DomainError>;
+    async fn persist_update(&self, prepared: PreparedConfigUpdateData) -> ConfigPersistOutcomeData;
+    fn commit_update(&self, ready: ReadyConfigCommitData) -> ConfigChangeData;
 }
 
 // ---------------------------------------------------------------------------

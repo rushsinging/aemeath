@@ -11,8 +11,8 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::domain::agent_run::{
-    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunStatus, RunTransition,
-    RunTransitionError, RuntimeLifecycleEvent, StopHookBlockResult, ToolCallStatus,
+    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunIntent, RunStatus,
+    RunTransition, RunTransitionError, RuntimeLifecycleEvent, StopHookBlockResult, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};
@@ -20,6 +20,7 @@ use super::{StuckDecision, StuckGuard};
 mod contracts;
 mod control_driver;
 mod interaction_driver;
+mod manual_compaction;
 mod phases;
 mod step_driver;
 
@@ -27,6 +28,7 @@ pub use contracts::*;
 pub(crate) use control_driver::fail_run;
 use control_driver::*;
 use interaction_driver::*;
+use manual_compaction::*;
 use phases::*;
 use step_driver::*;
 
@@ -76,6 +78,18 @@ async fn run_loop_body(
     if run.status() == RunStatus::Created {
         run.start_draining()?;
         emit_events(run, execution, port).await?;
+    }
+
+    // 手动压缩 Run：runtime 已受理 `/compact`，压缩前置到主循环之前——命令直接把
+    // Run 置为 `Compacting`，压缩完成后回到 `DrainingInput`，收口仍由主循环里 drain 的
+    // `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
+    if run.spec().intent() == RunIntent::ManualCompaction
+        && matches!(
+            execute_manual_compaction(run, execution, cancel, port).await?,
+            ManualCompactionDirective::Terminal
+        )
+    {
+        return Ok(LoopDirective::Terminal);
     }
 
     log::debug!(

@@ -795,7 +795,7 @@
       ],
       "type": "string"
     },
-    "ConfigChangeCause": {
+    "ConfigChangeCauseData": {
       "enum": [
         "client_update",
         "project_commit",
@@ -806,11 +806,11 @@
     "ConfigChangedEvent": {
       "properties": {
         "cause": {
-          "$ref": "#/$defs/ConfigChangeCause"
+          "$ref": "#/$defs/ConfigChangeCauseData"
         },
         "changed_fields": {
           "items": {
-            "$ref": "#/$defs/ConfigField"
+            "$ref": "#/$defs/ConfigFieldData"
           },
           "type": "array"
         },
@@ -826,7 +826,7 @@
       "title": "ConfigChangedEvent",
       "type": "object"
     },
-    "ConfigField": {
+    "ConfigFieldData": {
       "enum": [
         "model",
         "permission_mode",
@@ -878,7 +878,7 @@
       "title": "ConfigReloadedEvent",
       "type": "object"
     },
-    "ConfigUpdate": {
+    "ConfigUpdateData": {
       "oneOf": [
         {
           "properties": {
@@ -913,13 +913,13 @@
           "type": "object"
         }
       ],
-      "title": "ConfigUpdate"
+      "title": "ConfigUpdateData"
     },
     "ConfigUpdateResult": {
       "properties": {
         "changed_fields": {
           "items": {
-            "$ref": "#/$defs/ConfigField"
+            "$ref": "#/$defs/ConfigFieldData"
           },
           "type": "array"
         },

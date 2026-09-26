@@ -53,7 +53,7 @@ impl TypedTool for TaskListCompleteTool {
                 let task_change = CommittedTaskChange::from_command_result(&command_result);
                 let batch_id = command_result.value.id().to_string();
                 TypedToolResult::success(
-                    format!("Task list #{} completed", batch_id),
+                    format!("TaskData list #{} completed", batch_id),
                     TaskListCompleteResult { batch_id },
                 )
                 .with_task_change(task_change)
@@ -74,10 +74,10 @@ mod tests {
         .build()
     }
 
-    fn create_batch(access: &dyn task::TaskAccess) -> task::Batch {
+    fn create_batch(access: &dyn task::TaskAccess) -> task::BatchData {
         access
             .create_batch(
-                task::BatchCreateSpec::try_new("当前请求".to_string()).unwrap(),
+                task::BatchCreateSpecData::try_new("当前请求".to_string()).unwrap(),
                 1,
             )
             .unwrap()
@@ -99,7 +99,7 @@ mod tests {
         assert_eq!(result.data.unwrap().batch_id, batch.id().to_string());
         assert_eq!(
             task::TaskAccess::list_batches(access.as_ref())[0].status(),
-            task::BatchStatus::Archived
+            task::BatchStatusData::Archived
         );
     }
 
@@ -121,11 +121,11 @@ mod tests {
         let batch = create_batch(access.as_ref());
         let created = access
             .create_task(
-                task::TaskCreateSpec::try_new(
+                task::TaskCreateSpecData::try_new(
                     "任务".to_string(),
                     "描述".to_string(),
                     None,
-                    task::TaskPriority::Normal,
+                    task::TaskPriorityData::Normal,
                 )
                 .unwrap(),
                 2,

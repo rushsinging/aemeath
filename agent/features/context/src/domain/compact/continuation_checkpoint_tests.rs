@@ -512,7 +512,7 @@ fn legacy_summary_becomes_conservative_checkpoint() {
 
 #[test]
 fn task_state_companion_is_split_from_checkpoint() {
-    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current TaskData State\n■ #1 running");
     let (checkpoint, task_state) = split_checkpoint_and_task_state(&source);
 
     assert_eq!(checkpoint, COMPLETE_CHECKPOINT);
@@ -521,7 +521,7 @@ fn task_state_companion_is_split_from_checkpoint() {
 
 #[test]
 fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
-    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current TaskData State\n■ #1 running");
 
     let decoded = CanonicalCompactSummary::decode(&source).expect("canonical summary must decode");
 
@@ -532,7 +532,7 @@ fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
 #[test]
 fn canonical_summary_rejects_unknown_authoritative_section_before_task_companion() {
     let source = format!(
-        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current Task State\n■ #1 running"
+        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current TaskData State\n■ #1 running"
     );
 
     let error = CanonicalCompactSummary::decode(&source)

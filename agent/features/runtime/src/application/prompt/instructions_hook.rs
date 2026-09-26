@@ -1,9 +1,9 @@
-use hook::HookDispatchContext;
+use hook::HookDispatchContextData;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct PromptInstructionsHook {
-    pub hooks: Arc<dyn hook::HookPort>,
+    pub hooks: Arc<dyn hook::HookDispatcher>,
     pub workspace_root: PathBuf,
 }
 
@@ -13,11 +13,11 @@ impl context::guidance::InstructionsLoadedHook for PromptInstructionsHook {
         let _ = self
             .hooks
             .dispatch_at(
-                hook::HookInvocation::InstructionsLoaded(hook::InstructionsInput {
+                hook::HookInvocationData::InstructionsLoaded {
                     file_path: file_path.to_string(),
                     instruction_type: instruction_type.to_string(),
-                }),
-                HookDispatchContext::new(&self.workspace_root),
+                },
+                HookDispatchContextData::new(&self.workspace_root),
                 &tokio_util::sync::CancellationToken::new(),
             )
             .await;

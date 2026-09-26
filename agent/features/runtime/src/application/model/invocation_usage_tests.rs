@@ -2,18 +2,18 @@ use super::record_successful_usage;
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::model::usage::UsageRecordContext;
 use crate::ports::{ModelId, RawUsageSnapshot, UsageSink};
-use audit::{UsageDropReason, UsageEmitOutcome, UsageRecord};
+use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use share::message::Message;
 use std::sync::Mutex;
 
 struct RecordingSink {
-    outcome: UsageEmitOutcome,
-    records: Mutex<Vec<UsageRecord>>,
+    outcome: UsageEmitOutcomeData,
+    records: Mutex<Vec<UsageRecordData>>,
 }
 
 impl RecordingSink {
-    fn new(outcome: UsageEmitOutcome) -> Self {
+    fn new(outcome: UsageEmitOutcomeData) -> Self {
         Self {
             outcome,
             records: Mutex::new(Vec::new()),
@@ -22,7 +22,7 @@ impl RecordingSink {
 }
 
 impl UsageSink for RecordingSink {
-    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome {
+    fn try_record(&self, record: UsageRecordData) -> UsageEmitOutcomeData {
         self.records.lock().expect("record lock").push(record);
         self.outcome
     }
@@ -51,7 +51,9 @@ fn response(usage: RawUsageSnapshot) -> InvocationResponse {
 
 #[test]
 fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
-    let sink = RecordingSink::new(UsageEmitOutcome::Dropped(UsageDropReason::QueueFull));
+    let sink = RecordingSink::new(UsageEmitOutcomeData::Dropped(
+        UsageDropReasonData::QueueFull,
+    ));
 
     let expected_context = context();
     record_successful_usage(
@@ -88,8 +90,8 @@ fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
 
 #[test]
 fn successful_unreported_usage_does_not_call_sink() {
-    let sink = RecordingSink::new(UsageEmitOutcome::Dropped(
-        UsageDropReason::WorkerUnavailable,
+    let sink = RecordingSink::new(UsageEmitOutcomeData::Dropped(
+        UsageDropReasonData::WorkerUnavailable,
     ));
 
     record_successful_usage(

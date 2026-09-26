@@ -1,14 +1,24 @@
+//! Project：workspace/worktree 的探测、装配与生命周期。
+//!
+//! # Published Language（四类语法 + DomainError）
+//!
+//! | 类 | 实体 | 说明 |
+//! |---|---|---|
+//! | 工厂 | `wire_production_workspace` | 返回 `Workspace`（域句柄） |
+//! | Role | `Workspace`（三窄面 accessor + 隔离派生；原 Wiring/Views 合并）、`WorkspaceReader`/`WorkspaceControl`/`WorkspaceWriter`（窄 trait） | |
+//! | Data | `WorkspaceData`（快照：id 内嵌 + 路径 + kind；原 Frame/Id/Kind 三导出合并——Id/Kind 物理在 share::session_types，本 crate 不再转发） | |
+//! | Error | `share::error::DomainError`（三错误统一折叠；细变体 crate 内） | 错误统一随 #1711 并入 |
+//!
+//! `ProjectIdentityData`/`WorkspaceId`/`WorktreeKind` 定义于 `share::session_types`，
+//! 消费方直连 share（本 crate 零转发）。
+
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
 mod adapters;
 mod domain;
 
-pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
-pub use domain::state::PreparedWorkspaceRestore;
-pub use domain::types::{
-    WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
-    WorkspaceRestoreError,
-};
-pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
+pub use adapters::wiring::{wire_production_workspace, Workspace};
+pub use domain::state::WorkspaceRestoreData;
+pub use domain::types::{WorkspaceControl, WorkspaceData, WorkspaceReader, WorkspaceWriter};
 
 #[cfg(test)]
 mod tests {
@@ -150,13 +160,13 @@ mod tests {
 
     // ---- #894: production wiring 对 Git / NonGit 初始化并返回 Result / 结构化错误 ----
 
-    /// #894: production wiring 必须返回 `Result`；成功路径经 `WorkspaceRead`
+    /// #894: production wiring 必须返回 `Result`；成功路径经 `WorkspaceReader`
     /// 暴露完整 `project_identity` 与稳定 `workspace_id`。在临时 git repo 中验证。
     #[test]
     fn production_wiring_returns_result_and_exposes_identity() {
         let tmp = TempDir::new("identity");
         tmp.init_git();
-        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+        let wiring: Workspace = wire_production_workspace(tmp.path().to_path_buf(), None)
             .expect("git repo 应初始化成功");
         let read = wiring.read();
         assert!(
@@ -205,10 +215,10 @@ mod tests {
         let missing = PathBuf::from("/definitely/not/here/aemeath-894-xyz");
         let result = wire_production_workspace(missing, None);
         assert!(
-            matches!(
-                result,
-                Err(domain::types::WorkspaceInitError::PathNotFound { .. })
-            ),
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.message().starts_with("路径不存在")),
             "缺失路径应返回结构化 PathNotFound 错误"
         );
     }
@@ -221,10 +231,10 @@ mod tests {
         std::fs::write(&file_path, "content").unwrap();
         let result = wire_production_workspace(file_path, None);
         assert!(
-            matches!(
-                result,
-                Err(domain::types::WorkspaceInitError::NotDirectory { .. })
-            ),
+            result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.message().starts_with("路径不是目录")),
             "文件路径应返回结构化 NotDirectory 错误"
         );
     }
@@ -234,7 +244,7 @@ mod tests {
     #[test]
     fn production_wiring_initializes_non_git_directory() {
         let tmp = TempDir::new("nongit");
-        let wiring: WorkspaceWiring = wire_production_workspace(tmp.path().to_path_buf(), None)
+        let wiring: Workspace = wire_production_workspace(tmp.path().to_path_buf(), None)
             .expect("普通目录应初始化成功");
         let read = wiring.read();
         assert!(
@@ -353,8 +363,8 @@ mod tests {
             "应记录 failure exit：{joined}"
         );
         assert!(
-            logs.iter().any(|(_, m)| m.contains("PathNotFound")),
-            "failure 日志应包含安全的错误类别：{joined}"
+            logs.iter().any(|(_, m)| m.contains("category=invalid")),
+            "failure 日志应包含安全的错误类别（无路径）：{joined}"
         );
 
         let path_str = missing.display().to_string();

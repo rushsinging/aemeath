@@ -15,6 +15,7 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, GateKind, PendingCommand, PendingInputBuffer, RuntimeRunContext,
     RuntimeStreamEvent,
 };
+use crate::domain::agent_run::RunSpec;
 
 /// Drives one Main session across idle commands and sequential Runs.
 /// The session itself only idles, accepts one real user input, creates one fresh `Run`,
@@ -43,7 +44,7 @@ where
                 session_queries,
             } = input;
 
-            // #1385 Task 12: Construct real ChatEventSinkHandle from session sink.
+            // #1385 TaskData 12: Construct real ChatEventSinkHandle from session sink.
             // The handle is Clone and can be used in place of S everywhere.
             let sink_handle =
                 crate::application::loop_engine::chat::ChatEventSinkHandle::new(sink.clone());
@@ -86,6 +87,8 @@ where
             let session_usage = crate::application::run::context::RunUsageTracker::new();
             let mut step_count = 0;
             let mut pending_input = PendingInputBuffer::default();
+            // idle `/compact` 已受理，等待下一次循环启动手动压缩 Run。
+            let mut manual_compaction_requested = false;
                 let tool_identity =
                     crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
@@ -114,190 +117,11 @@ where
                     PendingCommand::Compact => {
                         log::debug!(
                             target: crate::LOG_TARGET,
-                            "[compact] idle command accepted; starting manual compaction"
+                            "[compact] idle command accepted; 启动手动压缩 Run"
                         );
-                        let bound = match wiring.bind_main_run().await {
-                        Ok(bound) => bound,
-                        Err(error) => {
-                            sink.send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("无法绑定当前 Session：{error}"),
-                                is_error: true,
-                            }).await;
-                            continue;
-                        }
-                    };
-                    let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
-                    let task_snapshot = crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
-                        task_access.as_ref(),
-                    );
-                    let request = crate::ports::ManualCompactRequest {
-                        session_id: crate::ports::SessionId::new(bound.session().id.clone()),
-                        run_id: sdk::RunId::new(uuid::Uuid::now_v7().to_string()),
-                        system_prompt: crate::ports::SystemPromptSpec::new(system_prompt_text.clone()),
-                        context_size,
-                        progress: None,
-                        task_snapshot,
-                    };
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "[compact] manual request prepared session_id={} context_size={}",
-                        request.session_id,
-                        request.context_size
-                    );
-                    let activity_coordinator = std::sync::Arc::new(
-                        crate::application::activity::ActivityCoordinator::production(
-                            request.run_id.clone(),
-                            Arc::new(sink_handle.clone()),
-                        ),
-                    );
-                    let compact_activity_id = match activity_coordinator
-                        .start_manual_compaction(sdk::CompactStageView::Preparing)
-                    {
-                        Ok(activity_id) => Some(activity_id),
-                        Err(error) => {
-                            log::warn!(
-                                target: crate::LOG_TARGET,
-                                "[compact] 无法发布手动 Compact Activity，继续执行压缩: {error}"
-                            );
-                            None
-                        }
-                    };
-                    // #1500：进度由 Context compact 管线经 progress 回调驱动，
-                    // 转发到手动 Compact Activity（chunk 计数实时更新）。
-                    let request = crate::ports::ManualCompactRequest {
-                        progress: compact_activity_id.as_ref().map(|activity_id| {
-                            let coordinator = activity_coordinator.clone();
-                            let activity_id = activity_id.clone();
-                            let progress: std::sync::Arc<
-                                dyn context::compact::CompactProgressFn,
-                            > = std::sync::Arc::new(
-                                move |stage: context::compact::CompactStage,
-                                      work: context::compact::CompactWork| {
-                                    let view_stage = match stage {
-                                        context::compact::CompactStage::Preparing => {
-                                            sdk::CompactStageView::Preparing
-                                        }
-                                        context::compact::CompactStage::Generating => {
-                                            sdk::CompactStageView::Generating
-                                        }
-                                        context::compact::CompactStage::Mapping => {
-                                            sdk::CompactStageView::Mapping
-                                        }
-                                        context::compact::CompactStage::Reducing => {
-                                            sdk::CompactStageView::Reducing
-                                        }
-                                        context::compact::CompactStage::Refreshing => {
-                                            sdk::CompactStageView::Refreshing
-                                        }
-                                        context::compact::CompactStage::Finalizing => {
-                                            sdk::CompactStageView::Finalizing
-                                        }
-                                    };
-                                    let view_work = match work {
-                                        context::compact::CompactWork::Indeterminate => {
-                                            sdk::CompactWorkView::Indeterminate
-                                        }
-                                        context::compact::CompactWork::Determinate {
-                                            completed,
-                                            total,
-                                        } => {
-                                            let (Ok(completed), Ok(total)) = (
-                                                u32::try_from(completed),
-                                                u32::try_from(total),
-                                            ) else {
-                                                return;
-                                            };
-                                            sdk::CompactWorkView::Determinate { completed, total }
-                                        }
-                                    };
-                                    let _ = coordinator.update_compaction(
-                                        activity_id.clone(),
-                                        view_stage,
-                                        view_work,
-                                    );
-                                },
-                            );
-                            progress
-                        }),
-                        ..request
-                    };
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "[compact] manual request prepared session_id={} context_size={} progress={}",
-                        request.session_id,
-                        request.context_size,
-                        request.progress.is_some(),
-                    );
-                    match coordinator.manual_compact(&request).await {
-                        Ok(crate::ports::CompactOutcome::Committed(result)) => {
-                            log::debug!(
-                                target: crate::LOG_TARGET,
-                                "[compact] manual compaction committed recent_messages={}",
-                                result.recent_messages.len()
-                            );
-                            if let Some(activity_id) = compact_activity_id.as_ref() {
-                                if let Err(error) = activity_coordinator.update_compaction(
-                                    activity_id.clone(),
-                                    sdk::CompactStageView::Finalizing,
-                                    sdk::CompactWorkView::Indeterminate,
-                                ) {
-                                    log::warn!(
-                                        target: crate::LOG_TARGET,
-                                        "[compact] 无法更新手动 Compact Activity，继续发布结果: {error}"
-                                    );
-                                }
-                                if let Err(error) = activity_coordinator.finish(
-                                    activity_id.clone(),
-                                    crate::application::activity::ActivityTerminal::Succeeded,
-                                ) {
-                                    log::warn!(
-                                        target: crate::LOG_TARGET,
-                                        "[compact] 无法结束手动 Compact Activity，继续发布结果: {error}"
-                                    );
-                                }
-                            }
-                            messages = result.recent_messages.clone();
-                            sink.send_event(RuntimeStreamEvent::CompactOperationCompleted {
-                                messages: result.recent_messages,
-                                notice: "✓ 上下文压缩完成".to_string(),
-                            }).await;
-                        }
-                        Ok(crate::ports::CompactOutcome::Skipped(_)) => {
-                            if let Some(activity_id) = compact_activity_id {
-                                if let Err(error) = activity_coordinator.finish(
-                                    activity_id,
-                                    crate::application::activity::ActivityTerminal::Succeeded,
-                                ) {
-                                    log::warn!(
-                                        target: crate::LOG_TARGET,
-                                        "[compact] 无法结束跳过的手动 Compact Activity: {error}"
-                                    );
-                                }
-                            }
-                            sink.send_event(RuntimeStreamEvent::SystemMessage(
-                                "Not enough messages to compact.".to_string(),
-                            )).await;
-                        }
-                        Err(error) => {
-                            if let Some(activity_id) = compact_activity_id {
-                                if let Err(activity_error) = activity_coordinator.finish(
-                                    activity_id,
-                                    crate::application::activity::ActivityTerminal::Failed,
-                                ) {
-                                    log::warn!(
-                                        target: crate::LOG_TARGET,
-                                        "[compact] 无法结束失败的手动 Compact Activity: {activity_error}"
-                                    );
-                                }
-                            }
-                            sink.send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Session compact 失败：{error}"),
-                                is_error: true,
-                            }).await;
-                        }
+                        manual_compaction_requested = true;
+                        continue;
                     }
-                    continue;
-                }
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
                         Ok((new_binding, result)) => {
@@ -603,7 +427,9 @@ where
                 // Busy user messages are no longer deferred to the session. They
                           // accumulate in the Run-scoped buffer and are consumed within the
                           // same Run (#1272).
-                          let idle_result = if !pending_input.is_empty() {
+                          let idle_result = if manual_compaction_requested {
+    IdleResult::ManualCompactionRequested
+} else if !pending_input.is_empty() {
                               // Busy control events are serviced at idle before the next queued user Run. They are
                               // never appended to model context.
                               let next_segment = ChatId::new_v7().to_string();
@@ -636,7 +462,10 @@ where
                               .await
                           };
 
-                let (segment_id, accepted_inputs) = match idle_result {                    IdleResult::Shutdown => break 'session,
+                let manual_compaction_run =
+                    matches!(idle_result, IdleResult::ManualCompactionRequested);
+                let (segment_id, accepted_inputs) = match idle_result {
+                    IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
                         let bound = match wiring.bind_main_run().await {
                             Ok(bound) => bound,
@@ -668,6 +497,10 @@ where
                         continue;
                     }
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
+                    IdleResult::ManualCompactionRequested => {
+                        manual_compaction_requested = false;
+                        (ChatId::new_v7().to_string(), Vec::new())
+                    }
                     IdleResult::Resumed {
                         segment_id: next_segment,
                         accepted_inputs,
@@ -716,6 +549,11 @@ where
                     &reasoning,
                     &sink_handle,
                     &session_usage,
+                    if manual_compaction_run {
+                        RunSpec::manual_compaction()
+                    } else {
+                        RunSpec::main()
+                    },
                 ) {
                     Ok(preparation) => preparation,
                     Err(error) => {
@@ -814,7 +652,7 @@ where
                 let main_active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort> =
                     active_run.clone();
 
-                // #1385 Task 7: Install parent frame via RAII guard so sub-agent
+                // #1385 TaskData 7: Install parent frame via RAII guard so sub-agent
                 // derivation can read the true parent spec + context.
                 // The guard clears its own generation on drop — no manual clear.
                 let _parent_frame_guard = shell.parent_context_source.install(Arc::new(
@@ -1004,6 +842,12 @@ where
                 let mut stuck = crate::application::loop_engine::run_ports::NoopStuckObserver;
                 let plan_approval =
                     crate::application::loop_engine::run_ports::FixedPlanApproval::new(false);
+                let mut manual_compaction = main_run_port::ChatManualCompaction {
+                    runtime_context: runtime_context.clone(),
+                    session_id: session_id.clone(),
+                    system_prompt: cacheable_system_prompt.clone(),
+                    context_size,
+                };
                 let mut loop_context = crate::application::loop_engine::RunLoop::new(
                     &mut launch_input,
                     &mut events,
@@ -1018,6 +862,9 @@ where
                     &mut stuck,
                     &plan_approval,
                 );
+                if manual_compaction_run {
+                    loop_context.bind_manual_compaction(&mut manual_compaction);
+                }
                 let launch_result = logging::within(
                     logging::LogContextPatch {
                         run_step: logging::FieldPatch::Set(step_count),
@@ -1034,7 +881,7 @@ where
                 heartbeat_cancel.cancel();
                 let _ = heartbeat_task.await;
 
-                  // #1385 Task 7: Guard is dropped when the block ends,
+                  // #1385 TaskData 7: Guard is dropped when the block ends,
                   // clearing only the generation we installed.
 
                 match launch_result {

@@ -2,18 +2,19 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::adapters::{file_usage_append_store, usage_query_service};
-use crate::application::{start_usage_worker, UsageWorkerConfig};
+use crate::adapters::append::file_usage_append_store;
+use crate::adapters::query::UsageQueryService;
+use crate::client::{wire_audit_client, wire_audit_store};
 use crate::domain::{
-    Pagination, TimeRange, UsageCursor, UsageEnvelopeV1, UsageQuery, UsageQueryError,
-    UsageQueryWarning, UsageRecord, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageCursor, UsageEnvelopeV1, UsagePaginationData, UsageQueryData, UsageQueryError,
+    UsageQueryWarning, UsageRecordData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 use crate::ports::UsageQueryPort;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use storage::SafeStorageRoot;
 
-fn record(session: &str, id: &str, timestamp: u64) -> UsageRecord {
-    UsageRecord {
+fn record(session: &str, id: &str, timestamp: u64) -> UsageRecordData {
+    UsageRecordData {
         recorded_at_unix_ms: timestamp,
         session_id: SessionId::new(session),
         run_id: RunId::new(format!("run-{id}")),
@@ -34,8 +35,8 @@ fn record(session: &str, id: &str, timestamp: u64) -> UsageRecord {
     }
 }
 
-fn query(limit: usize) -> UsageQuery {
-    UsageQuery {
+fn query(limit: usize) -> UsageQueryData {
+    UsageQueryData {
         session_id: None,
         run_id: None,
         run_step_id: None,
@@ -43,7 +44,7 @@ fn query(limit: usize) -> UsageQuery {
         provider: None,
         model: None,
         recorded_range: None,
-        pagination: Pagination {
+        pagination: UsagePaginationData {
             cursor: None,
             limit: NonZeroUsize::new(limit).unwrap(),
         },
@@ -59,7 +60,7 @@ async fn service(
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
     ));
-    let query = usage_query_service(store.clone());
+    let query = UsageQueryService::from_store(store.clone());
     (store, query)
 }
 
@@ -72,7 +73,7 @@ async fn append_envelope(store: &crate::adapters::FileUsageAppendStore, envelope
     store.flush(&stream).await.unwrap();
 }
 
-async fn append(store: &crate::adapters::FileUsageAppendStore, record: UsageRecord) {
+async fn append(store: &crate::adapters::FileUsageAppendStore, record: UsageRecordData) {
     append_envelope(store, UsageEnvelopeV1::new(record)).await;
 }
 
@@ -104,76 +105,62 @@ async fn query_skips_unknown_schema_with_exact_warning_and_keeps_neighbors() {
 }
 
 #[tokio::test]
-async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
+async fn accepted_usage_drains_to_file_then_queries() {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
     ));
-    let service = usage_query_service(store.clone());
+    let service = UsageQueryService::from_store(store.clone());
     let expected = record("session-l4", "match", 15);
-    let (sender, worker) =
-        start_usage_worker(store, UsageWorkerConfig::new(4, Duration::from_secs(1)));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let sender = client.clone();
 
     assert_eq!(
         sender.try_record(expected.clone()),
-        crate::domain::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcomeData::Accepted
     );
-    worker.shutdown().await;
+    client.shutdown().await;
 
     let mut request = query(10);
     request.session_id = Some(expected.session_id.clone());
     request.provider = Some(expected.provider.clone());
     request.model = Some(expected.model.clone());
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(15),
         to_exclusive_unix_ms: Some(16),
     });
     let page = service.query(request.clone()).await.unwrap();
     assert_eq!(page.records, vec![expected]);
     assert!(page.warnings.is_empty());
-
-    let summary = service.summarize(request).await.unwrap();
-    assert_eq!(summary.record_count, 1);
-    assert_eq!(summary.input_tokens, 10);
-    assert_eq!(summary.output_tokens, 20);
-    assert_eq!(summary.cache_write_tokens, 3);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 5);
 }
 
 #[tokio::test]
-async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
+async fn global_query_reads_records_from_multiple_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
     ));
-    let service = usage_query_service(store.clone());
+    let service = UsageQueryService::from_store(store.clone());
     let first = record("session-global-a", "match", 15);
     let second = record("session-global-b", "match", 16);
-    let (sender, worker) =
-        start_usage_worker(store, UsageWorkerConfig::new(4, Duration::from_secs(1)));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let sender = client.clone();
 
     assert_eq!(
         sender.try_record(first.clone()),
-        crate::domain::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcomeData::Accepted
     );
     assert_eq!(
         sender.try_record(second.clone()),
-        crate::domain::UsageEmitOutcome::Accepted
+        crate::domain::UsageEmitOutcomeData::Accepted
     );
-    worker.shutdown().await;
+    client.shutdown().await;
 
     let page = service.query(query(10)).await.unwrap();
     assert_eq!(page.records.len(), 2);
     assert!(page.records.contains(&first));
     assert!(page.records.contains(&second));
-    let summary = service.summarize(query(10)).await.unwrap();
-    assert_eq!(summary.record_count, 2);
-    assert_eq!(summary.input_tokens, 20);
-    assert_eq!(summary.output_tokens, 40);
-    assert_eq!(summary.cache_write_tokens, 6);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 10);
+    // summarize 随死方法退役（生产零消费）。
 }
 
 #[tokio::test]
@@ -190,7 +177,7 @@ async fn query_filters_by_all_correlation_fields() {
     request.model_invocation_id = Some(matching.model_invocation_id.clone());
     request.provider = Some(matching.provider.clone());
     request.model = Some(matching.model.clone());
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(10),
         to_exclusive_unix_ms: Some(20),
     });
@@ -273,19 +260,9 @@ async fn query_skips_corrupt_and_truncated_lines_then_summarizes_tokens() {
         UsageQueryWarning::CorruptLine { line_number: 3, .. }
     ));
 
-    let summary = service.summarize(query(10)).await.unwrap();
-    assert_eq!(summary.record_count, 1);
     let mut cursor_query = query(10);
     cursor_query.pagination.cursor = Some(UsageCursor::new("v1:bad:bad:0"));
-    assert_eq!(
-        service.summarize(cursor_query).await,
-        Err(UsageQueryError::InvalidCursor)
-    );
-    assert_eq!(summary.input_tokens, 10);
-    assert_eq!(summary.output_tokens, 20);
-    assert_eq!(summary.cache_write_tokens, 3);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 5);
+    // summarize 随死方法退役；InvalidCursor 行为由 query 路径同型断言覆盖。
 }
 
 #[tokio::test]
@@ -307,7 +284,7 @@ async fn query_rejects_invalid_range_and_returns_empty_for_missing_partition() {
     let (store, service) = service(&temp).await;
     append(&store, record("session-a", "a", 20)).await;
     let mut request = query(10);
-    request.recorded_range = Some(TimeRange {
+    request.recorded_range = Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(20),
         to_exclusive_unix_ms: Some(20),
     });

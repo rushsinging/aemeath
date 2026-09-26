@@ -3,7 +3,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskId, TaskView};
+use task::{TaskAccess, TaskIdData, TaskViewData};
 
 pub struct TaskGetTool {
     pub access: Arc<dyn TaskAccess>,
@@ -13,13 +13,13 @@ pub struct TaskGetTool {
 #[path = "task_get_tests.rs"]
 mod tests;
 
-fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::Task, String> {
-    let seq = TaskId::parse_tool_input(value)
-        .map(TaskId::get)
-        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
+fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::TaskData, String> {
+    let seq = TaskIdData::parse_tool_input(value)
+        .map(TaskIdData::get)
+        .map_err(|_| format!("TaskData ID must be a non-zero decimal number: {value}"))?;
     access
         .current_task_by_seq(seq)
-        .ok_or_else(|| format!("Task not found: {value}"))
+        .ok_or_else(|| format!("TaskData not found: {value}"))
 }
 
 #[async_trait]
@@ -68,9 +68,9 @@ impl TypedTool for TaskGetTool {
             .filter_map(|id| self.access.get(*id).map(|task| task.seq().to_string()))
             .collect();
         TypedToolResult::success(
-            format!("Task #{}: {}", task.seq(), task.subject()),
+            format!("TaskData #{}: {}", task.seq(), task.subject()),
             TaskGetResult {
-                task: TaskView::from_task(&task, blocked_by),
+                task: TaskViewData::from_task(&task, blocked_by),
             },
         )
     }

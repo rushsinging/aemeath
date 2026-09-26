@@ -2,7 +2,7 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEvent, HooksConfig};
 
 use crate::adapters::dispatcher::Dispatcher;
-use crate::domain::{HookMatcher, HookPoint, HookSubscription, SubscriptionError};
+use crate::domain::{HookMatcherData, HookPointData, HookSubscription};
 
 /// 将 Claude Code 兼容的扁平 HooksConfig 转为 Hook BC 所有的订阅语言。
 ///
@@ -19,9 +19,9 @@ pub fn subscriptions_from_config(config: &HooksConfig) -> Vec<HookSubscription> 
             let point = hook_point_from_event(*event);
             entries.iter().enumerate().map(move |(order, entry)| {
                 let matcher = if entry.matcher.is_empty() {
-                    HookMatcher::All
+                    HookMatcherData::All
                 } else {
-                    HookMatcher::ToolName(entry.matcher.clone())
+                    HookMatcherData::ToolName(entry.matcher.clone())
                 };
                 let mut subscription = HookSubscription::new(point, entry.command.clone())
                     .with_matcher(matcher)
@@ -34,7 +34,9 @@ pub fn subscriptions_from_config(config: &HooksConfig) -> Vec<HookSubscription> 
 }
 
 /// 构造 Hook BC 唯一的生产 Dispatcher。
-pub fn build_dispatcher(config: &ConfigSnapshot) -> Result<Dispatcher, Vec<SubscriptionError>> {
+pub fn wire_hook_dispatcher(
+    config: &ConfigSnapshot,
+) -> Result<std::sync::Arc<dyn crate::ports::HookDispatcher>, share::error::DomainError> {
     let subscriptions = subscriptions_from_config(config.hooks());
     let policy = config.hook_execution_policy();
     log::debug!(
@@ -50,36 +52,52 @@ pub fn build_dispatcher(config: &ConfigSnapshot) -> Result<Dispatcher, Vec<Subsc
         policy,
         config.hooks().env_passthrough.clone(),
     )
+    .map(|dispatcher| {
+        std::sync::Arc::new(dispatcher) as std::sync::Arc<dyn crate::ports::HookDispatcher>
+    })
+    .map_err(|errors| {
+        share::error::DomainError::invalid(
+            "hook",
+            format!(
+                "hook 订阅配置非法：{}",
+                errors
+                    .into_iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
+        )
+    })
 }
 
-fn hook_point_from_event(event: HookEvent) -> HookPoint {
+fn hook_point_from_event(event: HookEvent) -> HookPointData {
     match event {
-        HookEvent::PreToolUse => HookPoint::PreToolUse,
-        HookEvent::PostToolUse => HookPoint::PostToolUse,
-        HookEvent::PostToolUseFailure => HookPoint::PostToolUseFailure,
-        HookEvent::UserPromptSubmit => HookPoint::UserPromptSubmit,
-        HookEvent::Stop => HookPoint::Stop,
-        HookEvent::StopFailure => HookPoint::StopFailure,
-        HookEvent::SessionStart => HookPoint::SessionStart,
-        HookEvent::SessionEnd => HookPoint::SessionEnd,
-        HookEvent::PreCompact => HookPoint::PreCompact,
-        HookEvent::PostCompact => HookPoint::PostCompact,
-        HookEvent::PostToolBatch => HookPoint::PostToolBatch,
-        HookEvent::SubagentStart => HookPoint::SubRunStart,
-        HookEvent::SubagentStop => HookPoint::SubRunStop,
-        HookEvent::TaskCreated => HookPoint::TaskCreated,
-        HookEvent::TaskCompleted => HookPoint::TaskCompleted,
-        HookEvent::PermissionRequest => HookPoint::PermissionRequest,
-        HookEvent::PermissionDenied => HookPoint::PermissionDenied,
-        HookEvent::Notification => HookPoint::Notification,
-        HookEvent::InstructionsLoaded => HookPoint::InstructionsLoaded,
-        HookEvent::ConfigChange => HookPoint::ConfigChange,
-        HookEvent::Elicitation => HookPoint::Elicitation,
-        HookEvent::ElicitationResult => HookPoint::ElicitationResult,
-        HookEvent::UserPromptExpansion => HookPoint::UserPromptExpansion,
-        HookEvent::CwdChanged => HookPoint::CwdChanged,
-        HookEvent::FileChanged => HookPoint::FileChanged,
-        HookEvent::TeammateIdle => HookPoint::TeammateIdle,
+        HookEvent::PreToolUse => HookPointData::PreToolUse,
+        HookEvent::PostToolUse => HookPointData::PostToolUse,
+        HookEvent::PostToolUseFailure => HookPointData::PostToolUseFailure,
+        HookEvent::UserPromptSubmit => HookPointData::UserPromptSubmit,
+        HookEvent::Stop => HookPointData::Stop,
+        HookEvent::StopFailure => HookPointData::StopFailure,
+        HookEvent::SessionStart => HookPointData::SessionStart,
+        HookEvent::SessionEnd => HookPointData::SessionEnd,
+        HookEvent::PreCompact => HookPointData::PreCompact,
+        HookEvent::PostCompact => HookPointData::PostCompact,
+        HookEvent::PostToolBatch => HookPointData::PostToolBatch,
+        HookEvent::SubagentStart => HookPointData::SubRunStart,
+        HookEvent::SubagentStop => HookPointData::SubRunStop,
+        HookEvent::TaskCreated => HookPointData::TaskCreated,
+        HookEvent::TaskCompleted => HookPointData::TaskCompleted,
+        HookEvent::PermissionRequest => HookPointData::PermissionRequest,
+        HookEvent::PermissionDenied => HookPointData::PermissionDenied,
+        HookEvent::Notification => HookPointData::Notification,
+        HookEvent::InstructionsLoaded => HookPointData::InstructionsLoaded,
+        HookEvent::ConfigChange => HookPointData::ConfigChange,
+        HookEvent::Elicitation => HookPointData::Elicitation,
+        HookEvent::ElicitationResult => HookPointData::ElicitationResult,
+        HookEvent::UserPromptExpansion => HookPointData::UserPromptExpansion,
+        HookEvent::CwdChanged => HookPointData::CwdChanged,
+        HookEvent::FileChanged => HookPointData::FileChanged,
+        HookEvent::TeammateIdle => HookPointData::TeammateIdle,
     }
 }
 

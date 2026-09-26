@@ -5,34 +5,35 @@
 use std::sync::{Arc, Mutex};
 
 use hook::{
-    CancellationSignal, HookDirective, HookDispatchContext, HookInvocation, HookOutcome, HookPort,
+    HookCancellationSignal, HookDirectiveData, HookDispatchContextData, HookDispatcher,
+    HookInvocationData, HookOutcomeData,
 };
 
 use super::emit_session_start;
 
 #[derive(Clone, Default)]
 struct RecordingHookPort {
-    invocations: Arc<Mutex<Vec<HookInvocation>>>,
+    invocations: Arc<Mutex<Vec<HookInvocationData>>>,
     context_session_ids: Arc<Mutex<Vec<Option<String>>>>,
     context_cwds: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait::async_trait]
-impl HookPort for RecordingHookPort {
+impl HookDispatcher for RecordingHookPort {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+        _invocation: HookInvocationData,
+        _cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData {
         unreachable!("SessionStart emit 必须经 dispatch_at 携带 workspace 上下文");
     }
 
     async fn dispatch_at(
         &self,
-        invocation: HookInvocation,
-        context: HookDispatchContext,
-        _cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+        invocation: HookInvocationData,
+        context: HookDispatchContextData,
+        _cancellation: &dyn HookCancellationSignal,
+    ) -> HookOutcomeData {
         self.invocations.lock().unwrap().push(invocation);
         self.context_session_ids
             .lock()
@@ -42,9 +43,9 @@ impl HookPort for RecordingHookPort {
             .lock()
             .unwrap()
             .push(context.cwd().display().to_string());
-        HookOutcome {
+        HookOutcomeData {
             executions: Vec::new(),
-            directive: HookDirective::Continue,
+            directive: HookDirectiveData::Continue,
             messages: Vec::new(),
             block_detail: None,
         }
@@ -56,7 +57,7 @@ impl HookPort for RecordingHookPort {
 async fn emit_session_start_dispatches_once_with_session_identity() {
     let port = RecordingHookPort::default();
     emit_session_start(
-        &(Arc::new(port.clone()) as Arc<dyn HookPort>),
+        &(Arc::new(port.clone()) as Arc<dyn HookDispatcher>),
         std::path::Path::new("/tmp/aemeath-emit-workspace"),
         "sess-emit-1",
     )
@@ -65,8 +66,8 @@ async fn emit_session_start_dispatches_once_with_session_identity() {
     let invocations = port.invocations.lock().unwrap();
     assert_eq!(invocations.len(), 1);
     match &invocations[0] {
-        HookInvocation::SessionStart(input) => {
-            assert_eq!(input.session_id, "sess-emit-1");
+        HookInvocationData::SessionStart { session_id, .. } => {
+            assert_eq!(session_id, "sess-emit-1");
         }
         other => panic!("必须是 SessionStart，实际 {other:?}"),
     }
@@ -86,25 +87,25 @@ async fn emit_session_start_never_blocks_caller_on_hook_failure() {
     struct FailingHookPort;
 
     #[async_trait::async_trait]
-    impl HookPort for FailingHookPort {
+    impl HookDispatcher for FailingHookPort {
         async fn dispatch(
             &self,
-            _invocation: HookInvocation,
-            _cancellation: &dyn CancellationSignal,
-        ) -> HookOutcome {
+            _invocation: HookInvocationData,
+            _cancellation: &dyn HookCancellationSignal,
+        ) -> HookOutcomeData {
             unreachable!();
         }
 
         async fn dispatch_at(
             &self,
-            _invocation: HookInvocation,
-            _context: HookDispatchContext,
-            _cancellation: &dyn CancellationSignal,
-        ) -> HookOutcome {
-            HookOutcome {
+            _invocation: HookInvocationData,
+            _context: HookDispatchContextData,
+            _cancellation: &dyn HookCancellationSignal,
+        ) -> HookOutcomeData {
+            HookOutcomeData {
                 executions: Vec::new(),
-                directive: HookDirective::Block {
-                    reason: hook::HookReason::JsonBlock {
+                directive: HookDirectiveData::Block {
+                    reason: hook::HookReasonData::JsonBlock {
                         reason: "hook says no".to_string(),
                     },
                 },
@@ -116,7 +117,7 @@ async fn emit_session_start_never_blocks_caller_on_hook_failure() {
 
     // 仅断言正常返回：SessionStart 的 Block 语义对生命周期点无效，调用方继续。
     emit_session_start(
-        &(Arc::new(FailingHookPort) as Arc<dyn HookPort>),
+        &(Arc::new(FailingHookPort) as Arc<dyn HookDispatcher>),
         std::path::Path::new("/tmp/aemeath-emit-workspace"),
         "sess-emit-2",
     )

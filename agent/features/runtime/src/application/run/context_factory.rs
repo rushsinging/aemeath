@@ -22,8 +22,8 @@ use crate::application::run::creation::{
 };
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{HookBindingMode, InteractionBindingMode, RunSpec};
-use crate::ports::PolicyPort;
-use hook::HookPort;
+use crate::ports::Policy;
+use hook::HookDispatcher;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
 use tools::{
@@ -86,7 +86,7 @@ struct InteractionSelection {
 }
 
 struct HookSelection {
-    port: Arc<dyn HookPort>,
+    port: Arc<dyn HookDispatcher>,
 }
 
 struct ReasoningSelection {
@@ -147,10 +147,10 @@ impl RuntimeContextFactory {
     pub fn new(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        policy: Arc<dyn PolicyPort>,
+        policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
+        hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self::from_services(
@@ -167,10 +167,10 @@ impl RuntimeContextFactory {
     fn from_services(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
-        policy: Arc<dyn PolicyPort>,
+        policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
+        hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self {
@@ -401,6 +401,7 @@ impl RuntimeContextFactory {
         if agent.model.trim().is_empty() {
             return Err(RunCreationError::SubAgentNoModel {
                 agent: request.spec().name.clone(),
+                available: request.session().config().agents().enabled_instance_names(),
             });
         }
         let (source_key, source, model) = request
@@ -409,6 +410,7 @@ impl RuntimeContextFactory {
             .models()
             .find_model(&agent.model)
             .ok_or_else(|| RunCreationError::SubUnknownModel {
+                agent: agent.instance_name.clone(),
                 model: agent.model.clone(),
             })?;
         let max_tokens = agent
@@ -558,13 +560,11 @@ impl RuntimeContextFactory {
         config: &crate::application::run::config::RunConfigSnapshot,
         parent: Option<&RuntimeContext>,
     ) -> Result<HookSelection, RunCreationError> {
-        let run_hooks: Arc<dyn HookPort> = if cfg!(test) && self.use_injected_hooks {
+        let run_hooks: Arc<dyn HookDispatcher> = if cfg!(test) && self.use_injected_hooks {
             self.services.hooks.clone()
         } else {
-            Arc::new(
-                hook::build_dispatcher(config.config())
-                    .map_err(|_| RunCreationError::ContextAssembly)?,
-            )
+            hook::wire_hook_dispatcher(config.config())
+                .map_err(|_| RunCreationError::ContextAssembly)?
         };
         let port = match spec.hook_binding() {
             HookBindingMode::Full => run_hooks,
@@ -657,6 +657,7 @@ impl RuntimeContextFactory {
         request: &RunCreationRequest,
     ) -> Result<share::config::ResolvedAgent, RunCreationError> {
         let agent_name = request.spec().name.clone();
+        let available = request.session().config().agents().enabled_instance_names();
         match request
             .session()
             .config()
@@ -667,9 +668,13 @@ impl RuntimeContextFactory {
             Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
                 Err(RunCreationError::SubAgentDisabled {
                     agent: instance_name,
+                    available,
                 })
             }
-            None => Err(RunCreationError::SubAgentNotFound { agent: agent_name }),
+            None => Err(RunCreationError::SubAgentNotFound {
+                agent: agent_name,
+                available,
+            }),
         }
     }
 }

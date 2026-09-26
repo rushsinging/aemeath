@@ -4,10 +4,10 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
 use crate::ports::{
-    ContextPort, PolicyDecision, PolicyPort, PolicyRequest, ProviderBinding, ProviderBuildSpec,
+    ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBinding, ProviderBuildSpec,
     ProviderError, ProviderFactory, ProviderPort,
 };
-use hook::{HookInvocation, HookOutcome, HookPort};
+use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::{
     SkillCatalogPort, SkillDescriptor, SkillQuery, ToolCatalogError, ToolCatalogPort,
     ToolCatalogSnapshot, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
@@ -146,9 +146,13 @@ impl ToolExecutionPort for FakeToolExecution {
 
 pub(crate) struct FakePolicyPort;
 
-impl PolicyPort for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+impl Policy for FakePolicyPort {
+    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 
@@ -184,13 +188,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
 pub(crate) struct FakeHookPort;
 
 #[async_trait::async_trait]
-impl HookPort for FakeHookPort {
+impl HookDispatcher for FakeHookPort {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
+        _invocation: HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> HookOutcomeData {
+        HookOutcomeData::proceed()
     }
 }
 

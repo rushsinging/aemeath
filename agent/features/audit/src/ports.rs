@@ -7,11 +7,10 @@ pub use usage_append_store::{
 
 use async_trait::async_trait;
 
-use crate::domain::{UsagePage, UsageQuery, UsageQueryError, UsageSummary};
+use crate::domain::{UsagePageData, UsageQueryData, UsageQueryError};
 
 #[async_trait]
 #[cfg_attr(not(test), allow(dead_code))]
 pub trait UsageQueryPort: Send + Sync {
-    async fn query(&self, query: UsageQuery) -> Result<UsagePage, UsageQueryError>;
-    async fn summarize(&self, query: UsageQuery) -> Result<UsageSummary, UsageQueryError>;
+    async fn query(&self, query: UsageQueryData) -> Result<UsagePageData, UsageQueryError>;
 }

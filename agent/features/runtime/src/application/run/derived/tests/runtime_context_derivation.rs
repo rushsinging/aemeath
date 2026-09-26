@@ -4,7 +4,7 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{PolicyDecision, PolicyPort, PolicyRequest};
+use crate::ports::{Policy, PolicyDecisionData, PolicyRequestData};
 use std::sync::Arc;
 use std::time::Duration;
 use tools::{ToolCatalogPort, ToolProfileName};
@@ -37,9 +37,13 @@ impl tools::ToolExecutionPort for FakeToolExec {
 }
 
 pub(super) struct FakePolicyPort;
-impl PolicyPort for FakePolicyPort {
-    fn evaluate(&self, _request: &PolicyRequest) -> PolicyDecision {
-        PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+impl Policy for FakePolicyPort {
+    fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 
@@ -71,13 +75,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflHist {
 
 pub(super) struct FakeHookPort;
 #[async_trait::async_trait]
-impl hook::HookPort for FakeHookPort {
+impl hook::HookDispatcher for FakeHookPort {
     async fn dispatch(
         &self,
-        _invocation: hook::HookInvocation,
-        _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
+        _invocation: hook::HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
+        hook::HookOutcomeData::proceed()
     }
 }
 // ── Helper: build a parent RuntimeContext through RunFactory ──
@@ -299,8 +303,7 @@ pub(super) fn make_parent_context() -> RuntimeContext {
 
 pub(super) fn make_parent_workspace() -> RuntimeWorkspaceAccess {
     let views = project::wire_production_workspace(std::env::temp_dir(), None)
-        .expect("wire test workspace")
-        .into_views();
+        .expect("wire test workspace");
     RuntimeWorkspaceAccess::new(views)
 }
 

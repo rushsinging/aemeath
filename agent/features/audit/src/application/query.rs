@@ -1,6 +1,6 @@
 use crate::domain::{
-    TimeRange, UsageEnvelopeV1, UsageQuery, UsageQueryError, UsageQueryWarning, UsageRecord,
-    UsageSummary, CURRENT_USAGE_SCHEMA_VERSION,
+    UsageEnvelopeV1, UsageQueryData, UsageQueryError, UsageQueryWarning, UsageRecordData,
+    UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
 
 pub(crate) const MAX_USAGE_QUERY_LIMIT: usize = 1_000;
@@ -12,8 +12,8 @@ pub(crate) struct CursorPosition {
     pub query_fingerprint: String,
 }
 
-pub(crate) fn validate_query(query: &UsageQuery) -> Result<usize, UsageQueryError> {
-    if let Some(TimeRange {
+pub(crate) fn validate_query(query: &UsageQueryData) -> Result<usize, UsageQueryError> {
+    if let Some(UsageTimeRangeData {
         from_inclusive_unix_ms: Some(from),
         to_exclusive_unix_ms: Some(to),
     }) = query.recorded_range
@@ -49,7 +49,7 @@ pub(crate) fn decode_cursor(value: &str) -> Result<CursorPosition, UsageQueryErr
     })
 }
 
-pub(crate) fn query_fingerprint(query: &UsageQuery) -> String {
+pub(crate) fn query_fingerprint(query: &UsageQueryData) -> String {
     format!(
         "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
         query.session_id,
@@ -76,7 +76,7 @@ pub(crate) fn decode_record(
     terminated: bool,
     stream: &str,
     line_number: u64,
-) -> Result<UsageRecord, UsageQueryWarning> {
+) -> Result<UsageRecordData, UsageQueryWarning> {
     if !terminated {
         return Err(corrupt(stream, line_number));
     }
@@ -88,7 +88,7 @@ pub(crate) fn decode_record(
     Ok(envelope.record)
 }
 
-pub(crate) fn matches(query: &UsageQuery, record: &UsageRecord) -> bool {
+pub(crate) fn matches(query: &UsageQueryData, record: &UsageRecordData) -> bool {
     query
         .session_id
         .as_ref()
@@ -121,16 +121,6 @@ pub(crate) fn matches(query: &UsageQuery, record: &UsageRecord) -> bool {
                     .to_exclusive_unix_ms
                     .is_none_or(|to| record.recorded_at_unix_ms < to)
         })
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn add_summary(summary: &mut UsageSummary, record: &UsageRecord) {
-    summary.record_count += 1;
-    summary.input_tokens += record.input_tokens;
-    summary.output_tokens += record.output_tokens;
-    summary.cache_write_tokens += record.cache_write_tokens.unwrap_or(0);
-    summary.cache_read_tokens += record.cache_read_tokens.unwrap_or(0);
-    summary.reasoning_tokens += record.reasoning_tokens.unwrap_or(0);
 }
 
 fn corrupt(stream: &str, line_number: u64) -> UsageQueryWarning {

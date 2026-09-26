@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use super::intent::RunIntent;
+
 /// Capability policy applied when a spec is created without a parent ceiling.
 ///
 /// This policy expresses the effective capability contract directly; it is not
@@ -10,7 +12,7 @@ enum CapabilityPolicy {
     Restricted,
 }
 
-// ── #1248 Task 1: capability-semantic enums ──
+// ── #1248 TaskData 1: capability-semantic enums ──
 
 /// Interaction binding mode — who mediates user interaction for this run.
 ///
@@ -51,7 +53,7 @@ impl InteractionBindingMode {
 pub enum HookBindingMode {
     /// All hooks active (Main run).
     Full,
-    /// No Hook capability. Runtime binds a no-op HookPort for this mode.
+    /// No Hook capability. Runtime binds a no-op HookDispatcher for this mode.
     BoundaryOnly,
 }
 
@@ -209,7 +211,7 @@ struct CapabilityCeiling {
     memory: MemoryMode,
     tools: ToolScope,
     timeout: Duration,
-    // #1248 Task 1: new capability-semantic dimensions
+    // #1248 TaskData 1: new capability-semantic dimensions
     interaction_kind: InteractionBindingMode,
     hooks: HookBindingMode,
     reasoning: ReasoningBindingMode,
@@ -244,7 +246,9 @@ pub struct RunSpec {
     pub workspace: ResourceMode,
     pub memory: MemoryMode,
     pub tools: ToolScope,
-    /// #1248 Task 1: capability-semantic dimensions (private — use accessors).
+    /// Run 目的：会话对话或只执行手动上下文压缩。
+    pub intent: RunIntent,
+    /// #1248 TaskData 1: capability-semantic dimensions (private — use accessors).
     /// Private to prevent direct mutation that would bypass the capability
     /// ceiling check.
     interaction_kind: InteractionBindingMode,
@@ -273,6 +277,7 @@ impl RunSpec {
             workspace: ResourceMode::Shared,
             memory: MemoryMode::Enabled,
             tools: ToolScope::Full,
+            intent: RunIntent::Conversation,
             interaction_kind: InteractionBindingMode::Client,
             hooks: HookBindingMode::Full,
             reasoning: ReasoningBindingMode::Adaptive,
@@ -283,6 +288,15 @@ impl RunSpec {
 
     pub fn sub(name: impl Into<String>, timeout: Duration) -> Self {
         Self::restricted(name, timeout)
+    }
+
+    /// 手动上下文压缩 Run：只执行一次压缩，压缩完成后回到输入排空阶段收口，
+    /// **NEVER** 进入模型调用。装配与主会话 Run 一致，仅目的不同。
+    pub fn manual_compaction() -> Self {
+        Self {
+            intent: RunIntent::ManualCompaction,
+            ..Self::full("main", Duration::ZERO)
+        }
     }
 
     fn restricted(name: impl Into<String>, timeout: Duration) -> Self {
@@ -296,6 +310,7 @@ impl RunSpec {
             workspace: ResourceMode::Isolated,
             memory: MemoryMode::Disabled,
             tools: ToolScope::Restricted,
+            intent: RunIntent::Conversation,
             interaction_kind: InteractionBindingMode::ParentMediated,
             hooks: HookBindingMode::BoundaryOnly,
             reasoning: ReasoningBindingMode::Inherit,
@@ -396,7 +411,7 @@ impl RunSpec {
         Ok(self)
     }
 
-    // ── #1248 Task 1: capability-semantic builders ──
+    // ── #1248 TaskData 1: capability-semantic builders ──
 
     pub fn with_interaction_kind(
         mut self,
@@ -430,13 +445,18 @@ impl RunSpec {
         Ok(self)
     }
 
-    // ── #1248 Task 1: read-only capability accessors ──
+    // ── #1248 TaskData 1: read-only capability accessors ──
     //
     // Fields are private to prevent mutation that bypasses the ceiling check.
     // Use the `with_*` builders for mutation; use these accessors for
     // read-only inspection.
 
     /// Read-only access to the interaction binding mode.
+    /// 本 Run 的目的。
+    pub fn intent(&self) -> RunIntent {
+        self.intent
+    }
+
     pub fn interaction_binding(&self) -> InteractionBindingMode {
         self.interaction_kind
     }

@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub struct SkillCatalogRefresh {
     catalog: Arc<dyn tools::SkillCatalogPort>,
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
     /// 启动快照：extra_dirs 与 available_tools；project_root 字段被忽略，
     /// 每次刷新以 workspace 当前根覆盖。
     query_template: tools::SkillQuery,
@@ -27,7 +27,7 @@ impl SkillCatalogRefresh {
     /// `initial` 为启动 bootstrap 快照，其 revision 作为比较基线。
     pub fn new(
         catalog: Arc<dyn tools::SkillCatalogPort>,
-        workspace: project::WorkspaceViews,
+        workspace: project::Workspace,
         query_template: tools::SkillQuery,
         initial: &tools::SkillCatalogSnapshot,
     ) -> Self {

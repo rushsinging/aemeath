@@ -1,21 +1,22 @@
 use super::{TaskListInput, TaskListMetadata, TaskListResult, TaskListStats};
 use crate::domain::types::ToolSchema;
-use task::{BatchCreateSpec, TaskCreateSpec, TaskPriority, TaskView};
+use task::{BatchCreateSpecData, TaskCreateSpecData, TaskPriorityData, TaskViewData};
 
-fn task_view(subject: &str, description: &str, priority: TaskPriority) -> TaskView {
+fn task_view(subject: &str, description: &str, priority: TaskPriorityData) -> TaskViewData {
     let wiring = task::wire_task();
     let access = wiring.access();
     access
-        .create_batch(BatchCreateSpec::try_new("批次".into()).unwrap(), 10)
+        .create_batch(BatchCreateSpecData::try_new("批次".into()).unwrap(), 10)
         .unwrap();
     let task = access
         .create_task(
-            TaskCreateSpec::try_new(subject.into(), description.into(), None, priority).unwrap(),
+            TaskCreateSpecData::try_new(subject.into(), description.into(), None, priority)
+                .unwrap(),
             11,
         )
         .unwrap()
         .value;
-    TaskView::from(&task)
+    TaskViewData::from(&task)
 }
 
 #[test]
@@ -48,7 +49,11 @@ fn task_list_result_serializes_each_task_with_the_stable_task_view_wire() {
             in_progress: 0,
             completed: 0,
         },
-        tasks: vec![task_view("核验列表", "保持既有 wire", TaskPriority::Urgent)],
+        tasks: vec![task_view(
+            "核验列表",
+            "保持既有 wire",
+            TaskPriorityData::Urgent,
+        )],
     })
     .expect("serialize task list result");
 
@@ -70,7 +75,7 @@ fn task_list_result_serializes_each_task_with_the_stable_task_view_wire() {
                 "completed": 0
             },
             "tasks": [{
-                "id": "1",
+                "id": 1,
                 "subject": "核验列表",
                 "description": "保持既有 wire",
                 "status": "pending",

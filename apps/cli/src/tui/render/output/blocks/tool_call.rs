@@ -421,7 +421,7 @@ mod tests {
         let block = render_tool_call("t1", &view, &RenderCtx::for_width(80));
 
         assert!(
-            block.lines[0].plain.contains("Task"),
+            block.lines[0].plain.contains("TaskData"),
             "fallback header 应包含 display name: {}",
             block.lines[0].plain
         );

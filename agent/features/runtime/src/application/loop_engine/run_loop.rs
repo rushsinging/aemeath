@@ -4,9 +4,9 @@ use crate::application::activity::{ActivityCoordinator, ActivityError, ActivityT
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort,
-    InternalContinuationKind, LoopEngineError, ModelInvocationPort, PendingInteractionWork,
-    PlanApprovalPort, RunControlPort, RunLifecyclePort, StepPersistencePort, StuckDecision,
-    StuckHandlingPort, ToolOrchestrationPort,
+    InternalContinuationKind, LoopEngineError, ManualCompactionPort, ModelInvocationPort,
+    PendingInteractionWork, PlanApprovalPort, RunControlPort, RunLifecyclePort,
+    StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
@@ -60,6 +60,7 @@ pub struct RunLoop<'a> {
     interaction: &'a mut dyn InteractionMailboxPort,
     persistence: &'a mut dyn StepPersistencePort,
     compaction: &'a mut dyn CompactionPort,
+    manual_compaction: Option<&'a mut dyn ManualCompactionPort>,
     model: &'a mut dyn ModelInvocationPort,
     stop_hook: &'a mut dyn StopHookObserver,
     tools: &'a mut dyn ToolOrchestrationPort,
@@ -93,6 +94,7 @@ impl<'a> RunLoop<'a> {
             interaction,
             persistence,
             compaction,
+            manual_compaction: None,
             model,
             stop_hook,
             tools,
@@ -240,6 +242,14 @@ impl<'a> RunLoop<'a> {
         )
     }
 
+    /// 启动“无 Run Step”的手动压缩 activity（手动压缩 Run 没有 RunStep）。
+    pub(super) fn start_manual_compaction_activity(
+        &self,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?
+            .start_manual_compaction(sdk::CompactStageView::Preparing)
+    }
+
     /// #1500：构造 compact 进度视图回调——把 Context 压缩管线进度
     /// （Preparing/Summarizing chunk 计数/Finalizing）转发到 Activity 观测。
     /// 闭包只捕获 `Arc<ActivityCoordinator>` 与 activity_id，不借用自身。
@@ -288,6 +298,15 @@ impl<'a> RunLoop<'a> {
 
     pub(super) fn compaction_mut(&mut self) -> &mut dyn CompactionPort {
         self.compaction
+    }
+
+    /// 绑动手动压缩端口；只有手动压缩 Run 的装配方需要绑动。
+    pub(crate) fn bind_manual_compaction(&mut self, port: &'a mut dyn ManualCompactionPort) {
+        self.manual_compaction = Some(port);
+    }
+
+    pub(super) fn manual_compaction_mut(&mut self) -> Option<&mut (dyn ManualCompactionPort + 'a)> {
+        self.manual_compaction.as_deref_mut()
     }
 
     pub(super) fn model_mut(&mut self) -> &mut dyn ModelInvocationPort {

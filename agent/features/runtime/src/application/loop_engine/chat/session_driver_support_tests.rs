@@ -156,7 +156,7 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 fn test_wiring() -> Arc<context::MainSessionWiring> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let persist = workspace.persist();
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
@@ -201,7 +201,7 @@ use crate::application::model::test_support::{
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use hook::HookPort;
+use hook::HookDispatcher;
 use provider::test_harness::{InvocationScope, LlmProvider, SystemBlock};
 use provider::ReasoningLevel;
 use provider::{
@@ -263,14 +263,17 @@ impl ::tools::AgentRunner for NoopAgentRunner {
 }
 
 /// #1385: Hook port that delegates to a real dispatcher with empty config.
-fn noop_hook_port() -> Arc<dyn hook::HookPort> {
-    Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config { hooks: HooksConfig {
-            events: HashMap::new(),
-            ..HooksConfig::default()
-        }, ..share::config::Config::default() }))
-        .expect("empty hook dispatcher"),
-    )
+fn noop_hook_port() -> Arc<dyn hook::HookDispatcher> {
+    hook::wire_hook_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
+        share::config::Config {
+            hooks: HooksConfig {
+                events: HashMap::new(),
+                ..HooksConfig::default()
+            },
+            ..share::config::Config::default()
+        },
+    ))
+    .expect("empty hook dispatcher")
 }
 
 /// #1385: Construct a [`SessionRuntime`] for tests.
@@ -279,13 +282,13 @@ fn test_shell() -> crate::application::client::SessionRuntime {
 }
 
 fn test_shell_with_hooks(
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
 ) -> crate::application::client::SessionRuntime {
     test_shell_with_task_store(hooks, Arc::new(task::TaskStore::new()))
 }
 
 fn test_shell_with_catalog(
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     factory: ::tools::composition::TestCatalogExecution,
 ) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
@@ -293,7 +296,7 @@ fn test_shell_with_catalog(
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();
     let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
@@ -379,7 +382,7 @@ fn test_shell_with_catalog(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
                 factory.execution(),
-                Arc::new(policy::AllowAllPolicy),
+                policy::allow_all(),
                 test_reflection_history_store(),
                 Arc::new(task::TaskStore::new()),
                 hooks,
@@ -388,9 +391,9 @@ fn test_shell_with_catalog(
     }
 }
 
-/// #1492：预置 Task 状态的行为测试用——允许注入外部 `TaskStore`。
+/// #1492：预置 TaskData 状态的行为测试用——允许注入外部 `TaskStore`。
 fn test_shell_with_task_store(
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     task_store: Arc<task::TaskStore>,
 ) -> crate::application::client::SessionRuntime {
     let wiring = test_wiring();
@@ -398,7 +401,7 @@ fn test_shell_with_task_store(
     let cwd = std::env::current_dir().unwrap();
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
-        .into_views();
+        ;
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
     let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();
@@ -485,7 +488,7 @@ fn test_shell_with_task_store(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
                 factory.execution(),
-                Arc::new(policy::AllowAllPolicy),
+                policy::allow_all(),
                 test_reflection_history_store(),
                 task_store,
                 hooks,

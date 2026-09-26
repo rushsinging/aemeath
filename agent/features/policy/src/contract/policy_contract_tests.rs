@@ -1,13 +1,15 @@
-use policy::{
-    AllowAllPolicy, ApprovalSubject, AuthorizationContext, ConfiguredPolicy, PolicyDecision,
-    PolicyMode, PolicyModeSource, PolicyPort, PolicyReason, PolicyRequest, StandardPolicy,
+use crate::adapters::StandardPolicy;
+use crate::domain::{
+    ApprovalSubjectData, Policy, PolicyDecisionData, PolicyModeData, PolicyReasonData,
+    PolicyRequestData,
 };
+use crate::{allow_all, configured};
 use sdk::ids::{RunId, RunStepId};
 use share::config::PermissionModeConfig;
 use tools::{ToolCapabilities, ToolCapability, ToolName};
 
-fn request(tool: &str, capability: ToolCapability) -> PolicyRequest {
-    PolicyRequest::new(
+fn request(tool: &str, capability: ToolCapability) -> PolicyRequestData {
+    PolicyRequestData::new(
         RunId::new_v7(),
         RunStepId::new_v7(),
         ToolName::new(tool),
@@ -20,24 +22,24 @@ fn request(tool: &str, capability: ToolCapability) -> PolicyRequest {
 #[test]
 fn permission_mode_maps_to_single_policy_mode() {
     assert_eq!(
-        PolicyMode::from(PermissionModeConfig::Ask),
-        PolicyMode::Standard
+        PolicyModeData::from(PermissionModeConfig::Ask),
+        PolicyModeData::Standard
     );
     assert_eq!(
-        PolicyMode::from(PermissionModeConfig::AutoRead),
-        PolicyMode::Standard
+        PolicyModeData::from(PermissionModeConfig::AutoRead),
+        PolicyModeData::Standard
     );
     assert_eq!(
-        PolicyMode::from(PermissionModeConfig::AllowAll),
-        PolicyMode::AllowAll
+        PolicyModeData::from(PermissionModeConfig::AllowAll),
+        PolicyModeData::AllowAll
     );
 }
 
 #[test]
 fn allow_all_authorization_disables_every_authorization_guard() {
     assert_eq!(
-        AuthorizationContext::ALLOW_ALL,
-        AuthorizationContext {
+        tools::AuthorizationContext::ALLOW_ALL,
+        tools::AuthorizationContext {
             allow_outside_workspace: true,
             require_read_before_write: false,
             enforce_bash_safety: false,
@@ -49,8 +51,8 @@ fn allow_all_authorization_disables_every_authorization_guard() {
 #[test]
 fn standard_authorization_preserves_existing_guards() {
     assert_eq!(
-        AuthorizationContext::STANDARD,
-        AuthorizationContext {
+        tools::AuthorizationContext::STANDARD,
+        tools::AuthorizationContext {
             allow_outside_workspace: false,
             require_read_before_write: true,
             enforce_bash_safety: true,
@@ -61,57 +63,52 @@ fn standard_authorization_preserves_existing_guards() {
 
 #[test]
 fn standard_policy_returns_allow_with_standard_authorization() {
-    let policy: &dyn PolicyPort = &StandardPolicy;
+    let policy: &dyn Policy = &StandardPolicy;
     assert_eq!(
         policy.evaluate(&request("Read", ToolCapability::Read)),
-        PolicyDecision::Allow(AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
     );
-}
-
-#[derive(Clone)]
-struct MutableModeSource(std::sync::Arc<std::sync::RwLock<PermissionModeConfig>>);
-
-impl PolicyModeSource for MutableModeSource {
-    fn current_mode(&self) -> PolicyMode {
-        (*self.0.read().expect("mode source lock")).into()
-    }
 }
 
 #[test]
 fn configured_policy_reads_current_mode_for_every_evaluation() {
     let mode = std::sync::Arc::new(std::sync::RwLock::new(PermissionModeConfig::Ask));
-    let policy = ConfiguredPolicy::new(MutableModeSource(mode.clone()));
+    let mode_for_closure = std::sync::Arc::clone(&mode);
+    let policy = configured(move || (*mode_for_closure.read().expect("mode lock")).into());
     let request = request("Read", ToolCapability::Read);
 
     assert_eq!(
         policy.evaluate(&request),
-        PolicyDecision::Allow(AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
     );
 
     *mode.write().expect("mode source lock") = PermissionModeConfig::AllowAll;
 
     assert_eq!(
         policy.evaluate(&request),
-        PolicyDecision::Allow(AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
     );
 }
 
 #[test]
 fn policy_decision_future_variants_keep_typed_reason_and_subject() {
-    let deny = PolicyDecision::Deny {
-        reason: PolicyReason::RestrictedTool,
+    let deny = PolicyDecisionData::Deny {
+        reason: PolicyReasonData::RestrictedTool,
     };
-    let approval = PolicyDecision::RequireApproval {
-        reason: PolicyReason::RestrictedWorkspace,
-        subject: ApprovalSubject::UserInteraction,
+    let approval = PolicyDecisionData::RequireApproval {
+        reason: PolicyReasonData::RestrictedWorkspace,
+        subject: ApprovalSubjectData::UserInteraction,
     };
-    assert!(matches!(deny, PolicyDecision::Deny { .. }));
-    assert!(matches!(approval, PolicyDecision::RequireApproval { .. }));
+    assert!(matches!(deny, PolicyDecisionData::Deny { .. }));
+    assert!(matches!(
+        approval,
+        PolicyDecisionData::RequireApproval { .. }
+    ));
 }
 
 #[test]
 fn allow_all_policy_contract_allows_every_valid_request() {
-    let policy: &dyn PolicyPort = &AllowAllPolicy;
+    let policy = allow_all();
     for request in [
         request("Read", ToolCapability::Read),
         request("Edit", ToolCapability::Write),
@@ -119,14 +116,14 @@ fn allow_all_policy_contract_allows_every_valid_request() {
     ] {
         assert_eq!(
             policy.evaluate(&request),
-            PolicyDecision::Allow(AuthorizationContext::ALLOW_ALL)
+            PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
         );
     }
 }
 
 #[test]
 fn policy_request_rejects_empty_workspace_root() {
-    let result = PolicyRequest::new(
+    let result = PolicyRequestData::new(
         RunId::new_v7(),
         RunStepId::new_v7(),
         ToolName::new("Read"),

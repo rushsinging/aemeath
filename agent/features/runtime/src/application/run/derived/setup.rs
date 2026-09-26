@@ -27,7 +27,7 @@ pub struct SubRunRequest {
 /// derived launcher. Run ownership stays in `instance`; remaining fields are
 /// derived-only metadata and never duplicate Run execution state.
 ///
-/// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::WorkspaceViews`]);
+/// #1385: holds full [`RuntimeWorkspaceAccess`] (not just [`project::Workspace`]);
 /// all scope/read_access/persist/skill query/hook workspace root come from the
 /// workspace capability retained by `DerivedRun.instance`.
 pub struct DerivedRun {
@@ -122,6 +122,7 @@ pub fn derive_sub_run(
 
     // 2. RuntimeContextFactory binds the derived workspace and live capabilities.
     let config_snapshot = parent_context.config().clone();
+    let available = config_snapshot.config().agents().enabled_instance_names();
     let resolved = match config_snapshot
         .config()
         .agents()
@@ -131,11 +132,13 @@ pub fn derive_sub_run(
         Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
             return Err(RuntimeContextAssemblyError::SubAgentDisabled {
                 agent: instance_name,
+                available,
             })
         }
         None => {
             return Err(RuntimeContextAssemblyError::SubAgentNotFound {
                 agent: request.agent_name.clone(),
+                available,
             })
         }
     };
@@ -261,7 +264,7 @@ impl AgentRunner for CliAgentRunner {
         let model_display = derived.model_display.clone();
         let model_name = derived.model_name.clone();
         let max_tokens = derived.max_tokens;
-        // #1248 Task 7: reasoning level from RuntimeContext's ReasoningPort,
+        // #1248 TaskData 7: reasoning level from RuntimeContext's ReasoningPort,
         // not a duplicate static field. DerivedRun.reasoning_level is
         // still available for diagnostics but no longer used at construction.
         let _reasoning_level = derived.reasoning_level;
@@ -327,11 +330,11 @@ impl AgentRunner for CliAgentRunner {
                     "{}:sub-run-start",
                     derived.instance.run().id().as_ref()
                 )),
-                hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                hook::HookInvocationData::SubRunStart {
                     prompt: prompt.to_string(),
                     system: system.clone(),
                     model_spec: Some(model_display.clone()),
-                }),
+                },
                 &workspace_root,
                 derived.instance.context().main_session_id(),
                 &tokio_util::sync::CancellationToken::new(),

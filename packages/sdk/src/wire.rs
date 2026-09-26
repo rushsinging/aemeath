@@ -9,8 +9,8 @@ use serde_json::{json, Map, Value};
 use crate::{
     ActivityChangeKind, ActivityId, ActivitySnapshotView, ActivityView, CancelCurrentRunOutcome,
     CancelRunStepOutcome, ChatEventContext, ChatMessage, ConfigChangedEvent, ConfigReloadedEvent,
-    ConfigUpdate, ConfigUpdateResult, ConfigView, ConnectCommand, ConnectErrorView, ConnectOutcome,
-    ConnectView, ControlDeadline, ElementSpacingView, InteractionCancelReason,
+    ConfigUpdateData, ConfigUpdateResult, ConfigView, ConnectCommand, ConnectErrorView,
+    ConnectOutcome, ConnectView, ControlDeadline, ElementSpacingView, InteractionCancelReason,
     InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
     MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary, ProjectContext,
     ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
@@ -41,7 +41,7 @@ pub fn components_document() -> Value {
     register::<MarkdownSpacingModeView>(&mut definitions);
     register::<ElementSpacingView>(&mut definitions);
     register::<MarkdownSpacingOverridesView>(&mut definitions);
-    register::<ConfigUpdate>(&mut definitions);
+    register::<ConfigUpdateData>(&mut definitions);
     register::<ConfigUpdateResult>(&mut definitions);
     register::<ConfigChangedEvent>(&mut definitions);
     register::<ConfigReloadedEvent>(&mut definitions);

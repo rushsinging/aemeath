@@ -13,7 +13,7 @@ use crate::application::loop_engine::{
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use async_trait::async_trait;
-use policy::{PolicyDecision, PolicyPort, PolicyRequest};
+use policy::{Policy, PolicyDecisionData, PolicyRequestData};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio_util::sync::CancellationToken;
@@ -24,7 +24,7 @@ pub(crate) struct ToolRoundContext<'a> {
     pub agent: crate::application::tool::agent::Agent,
     pub turn_context: crate::application::loop_engine::chat::RuntimeRunContext,
     pub language: &'a str,
-    pub workspace_read: std::sync::Arc<dyn project::WorkspaceRead>,
+    pub workspace_read: std::sync::Arc<dyn project::WorkspaceReader>,
     pub session_id: &'a str,
     pub materializer:
         &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
@@ -437,14 +437,14 @@ pub(crate) struct PreparedToolRound {
     pub guard_blocked: Vec<ToolExecution>,
     pub denied: Vec<DeniedToolCall>,
     pub fuse_bypassed: Vec<sdk::ToolCallId>,
-    /// #1248 Task 5: Calls that Policy marked RequireApproval. The engine
+    /// #1248 TaskData 5: Calls that Policy marked RequireApproval. The engine
     /// reads this to create [`ToolApproval`] interaction intents instead of
     /// denying them inline.  On approve, only this specific call is executed
     /// with its original authorization; on deny, a typed denied result.
     pub require_approval: Vec<RequireApprovalCall>,
 }
 
-/// #1248 Task 5: A tool call that needs approval before execution.
+/// #1248 TaskData 5: A tool call that needs approval before execution.
 #[derive(Clone)]
 pub(crate) struct RequireApprovalCall {
     pub call: ToolCall,
@@ -461,7 +461,7 @@ pub(crate) struct RequireApprovalCall {
 pub(crate) fn prepare_tool_round(
     calls: &[(ToolCall, ToolGuardDecision)],
     catalog: &ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &Path,
@@ -475,7 +475,7 @@ pub(crate) fn prepare_tool_round(
             });
             continue;
         };
-        let request = match PolicyRequest::new(
+        let request = match PolicyRequestData::new(
             run_id.clone(),
             step_id.clone(),
             ToolName::new(&call.name),
@@ -492,7 +492,7 @@ pub(crate) fn prepare_tool_round(
             }
         };
         match policy.evaluate(&request) {
-            PolicyDecision::Allow(authorization) => {
+            PolicyDecisionData::Allow(authorization) => {
                 if let ToolGuardDecision::SoftBlock { reason } = decision {
                     if authorization.enforce_tool_fuse {
                         prepared
@@ -507,12 +507,12 @@ pub(crate) fn prepare_tool_round(
                     authorization,
                 });
             }
-            PolicyDecision::Deny { reason } => prepared.denied.push(DeniedToolCall {
+            PolicyDecisionData::Deny { reason } => prepared.denied.push(DeniedToolCall {
                 call: call.clone(),
                 reason: format!("{reason:?}"),
             }),
-            PolicyDecision::RequireApproval { reason, subject } => {
-                // #1248 Task 5: Surface RequireApproval for the engine
+            PolicyDecisionData::RequireApproval { reason, subject } => {
+                // #1248 TaskData 5: Surface RequireApproval for the engine
                 // to create ToolApproval interaction intents. No longer
                 // deny inline.
                 prepared.require_approval.push(RequireApprovalCall {
@@ -728,7 +728,7 @@ impl std::fmt::Debug for HookDirectiveOutcome {
 /// 1. Look up the frozen catalog descriptor by tool name.
 /// 2. Validate the updated input against the descriptor's `input_schema` via
 ///    [`tools::validate_tool_input`].
-/// 3. Rebuild a [`PolicyRequest`] using the descriptor's `required_capabilities`.
+/// 3. Rebuild a [`PolicyRequestData`] using the descriptor's `required_capabilities`.
 /// 4. Re-evaluate policy.
 ///
 /// Non-mutating directives (`Continue`, `Context`) short-circuit to
@@ -741,7 +741,7 @@ pub fn apply_hook_directive_to_tool_call(
     call: &ToolCall,
     directive: RuntimeHookDirective,
     catalog: &ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &Path,
@@ -789,7 +789,7 @@ fn revalidate_updated_input(
     input: &serde_json::Value,
     context: Option<String>,
     catalog: &ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &Path,
@@ -810,8 +810,8 @@ fn revalidate_updated_input(
         };
     }
 
-    // 3. Rebuild PolicyRequest with the descriptor's required capabilities.
-    let request = match PolicyRequest::new(
+    // 3. Rebuild PolicyRequestData with the descriptor's required capabilities.
+    let request = match PolicyRequestData::new(
         run_id.clone(),
         step_id.clone(),
         ToolName::new(&call.name),
@@ -833,16 +833,16 @@ fn revalidate_updated_input(
         ..call.clone()
     };
     match policy.evaluate(&request) {
-        PolicyDecision::Allow(authorization) => HookDirectiveOutcome::Ready {
+        PolicyDecisionData::Allow(authorization) => HookDirectiveOutcome::Ready {
             call: updated_call,
             context,
             authorization,
         },
-        PolicyDecision::Deny { reason } => HookDirectiveOutcome::Denied {
+        PolicyDecisionData::Deny { reason } => HookDirectiveOutcome::Denied {
             call: call.clone(),
             reason: format!("{reason:?}"),
         },
-        PolicyDecision::RequireApproval { reason, subject } => {
+        PolicyDecisionData::RequireApproval { reason, subject } => {
             HookDirectiveOutcome::ApprovalRequired {
                 call: updated_call,
                 reason: format!("approval required: {subject:?}: {reason:?}"),

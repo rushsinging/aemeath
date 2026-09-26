@@ -27,7 +27,7 @@ pub fn build_agent_runner(
     tool_result_materializer: Arc<
         crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     >,
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     parent_context_source: ParentRunContextSource,
     runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
@@ -110,8 +110,7 @@ mod tests {
     #[test]
     fn build_agent_runner_constructs_without_panic() {
         let workspace = project::wire_production_workspace(std::env::temp_dir(), None)
-            .expect("wire test workspace")
-            .into_views();
+            .expect("wire test workspace");
 
         let skill_wiring = tools::composition::wire_skills();
         let skill_catalog = skill_wiring.catalog();
@@ -155,16 +154,16 @@ mod tests {
                     }
                     Arc::new(FakeRefl)
                 };
-                let hooks: Arc<dyn hook::HookPort> = {
+                let hooks: Arc<dyn hook::HookDispatcher> = {
                     struct FakeHook;
                     #[async_trait::async_trait]
-                    impl hook::HookPort for FakeHook {
+                    impl hook::HookDispatcher for FakeHook {
                         async fn dispatch(
                             &self,
-                            _invocation: hook::HookInvocation,
-                            _cancellation: &dyn hook::CancellationSignal,
-                        ) -> hook::HookOutcome {
-                            hook::HookOutcome::proceed()
+                            _invocation: hook::HookInvocationData,
+                            _cancellation: &dyn hook::HookCancellationSignal,
+                        ) -> hook::HookOutcomeData {
+                            hook::HookOutcomeData::proceed()
                         }
                     }
                     Arc::new(FakeHook)
@@ -172,7 +171,7 @@ mod tests {
                 crate::application::run::context_factory::RuntimeContextFactory::new(
                     tool_ports.catalog_port(),
                     tool_ports.execution(),
-                    Arc::new(policy::AllowAllPolicy),
+                    policy::allow_all(),
                     refl,
                     crate::application::run::test_task_access(),
                     hooks,

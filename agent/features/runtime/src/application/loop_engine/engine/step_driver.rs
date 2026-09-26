@@ -278,13 +278,13 @@ pub(super) async fn execute_step_with_scope(
         ModelStep::Complete { text } => {
             // Text-only completion is handled by the static reasoning level.
 
-            // #1248 Task 5: Plan approval before proceeding when in plan mode.
+            // #1248 TaskData 5: Plan approval before proceeding when in plan mode.
             if port.needs_plan_approval() && !text.trim().is_empty() {
                 handle_plan_approval(run, execution, port, &step_id, &text).await?;
                 return Ok(());
             }
 
-            // #1248 Task 6: Evaluate Stop hook BEFORE text stall check.
+            // #1248 TaskData 6: Evaluate Stop hook BEFORE text stall check.
             // A blocking stop hook with repeated output should continue
             // (feedback may change the model's behavior); text stall
             // detection runs only when the stop hook allows proceeding.
@@ -668,14 +668,14 @@ pub(super) async fn execute_step_with_scope(
                     return Ok(());
                 }
                 ToolStep::InteractionSuspended { suspended, .. } => {
-                    // #1248 Task 5: Resolve suspensions through coordinator
+                    // #1248 TaskData 5: Resolve suspensions through coordinator
                     handle_suspensions(run, execution, port, suspended).await?;
                 }
                 ToolStep::AwaitingToolApproval {
                     calls_needing_approval,
                     ..
                 } => {
-                    // #1248 Task 5: Resolve tool approvals through coordinator
+                    // #1248 TaskData 5: Resolve tool approvals through coordinator
                     handle_tool_approvals(run, execution, port, calls_needing_approval).await?;
                 }
             }

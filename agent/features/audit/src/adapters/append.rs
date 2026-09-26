@@ -35,6 +35,7 @@ impl FileUsageAppendStore {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn stream_for_session(&self, session_id: &SessionId) -> AppendLogStream {
         AppendLogStream::for_session(session_id)
     }

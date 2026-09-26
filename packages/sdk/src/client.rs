@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::{
     CancelCurrentRunOutcome, CancelRunStepOutcome, ChatRequest, ChatStream, ConfigFormInvokeAction,
     ConfigFormOrigin, ConfigFormRevision, ConfigFormSessionId, ConfigFormSubmitPage,
-    ConfigFormView, ConfigFormWorkflowId, ConfigUpdate, ConfigUpdateResult, ConfigView,
+    ConfigFormView, ConfigFormWorkflowId, ConfigUpdateData, ConfigUpdateResult, ConfigView,
     ConnectCommand, ConnectOrigin, ConnectRevision, ConnectSessionId, ConnectView, ControlDeadline,
     RunId, RunStepId, RunTerminationReason, TerminateRunOutcome,
 };
@@ -115,7 +115,7 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 提交类型化配置更新；返回完整已提交投影。
     async fn update_config(
         &self,
-        _update: ConfigUpdate,
+        _update: ConfigUpdateData,
     ) -> Result<ConfigUpdateResult, super::SdkError> {
         Err(super::SdkError::Internal(
             "config update is unavailable for this client".to_string(),

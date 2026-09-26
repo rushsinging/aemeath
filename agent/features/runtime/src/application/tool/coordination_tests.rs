@@ -2,7 +2,9 @@ use super::*;
 use crate::application::hook::outcome_mapper::{RuntimeHookDirective, RuntimeHookReason};
 use crate::application::loop_engine::ToolGuardDecision;
 use crate::application::tool::agent::ToolCall;
-use policy::{ApprovalSubject, PolicyDecision, PolicyPort, PolicyReason, PolicyRequest};
+use policy::{
+    ApprovalSubjectData, Policy, PolicyDecisionData, PolicyReasonData, PolicyRequestData,
+};
 use sdk::ids::ToolCallId;
 use std::sync::Mutex;
 use tools::composition::TestCatalogExecutionFactory;
@@ -39,7 +41,7 @@ fn p6_4_production_uses_explicit_tool_round_boundaries() {
 
 struct RecordingPolicy {
     names: Mutex<Vec<String>>,
-    decision: Option<PolicyDecision>,
+    decision: Option<PolicyDecisionData>,
 }
 
 impl RecordingPolicy {
@@ -50,7 +52,7 @@ impl RecordingPolicy {
         }
     }
 
-    fn returning(decision: PolicyDecision) -> Self {
+    fn returning(decision: PolicyDecisionData) -> Self {
         Self {
             names: Mutex::new(Vec::new()),
             decision: Some(decision),
@@ -58,21 +60,25 @@ impl RecordingPolicy {
     }
 }
 
-impl PolicyPort for RecordingPolicy {
-    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision {
+impl Policy for RecordingPolicy {
+    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
         self.names
             .lock()
             .unwrap()
             .push(request.tool_name().as_str().to_string());
         self.decision.clone().unwrap_or_else(|| {
             if request.tool_name().as_str() == "Denied" {
-                PolicyDecision::Deny {
-                    reason: PolicyReason::RestrictedTool,
+                PolicyDecisionData::Deny {
+                    reason: PolicyReasonData::RestrictedTool,
                 }
             } else {
-                PolicyDecision::Allow(tools::AuthorizationContext::STANDARD)
+                PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
             }
         })
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 
@@ -160,13 +166,17 @@ struct AllowAllRecordingPolicy {
     names: Mutex<Vec<String>>,
 }
 
-impl PolicyPort for AllowAllRecordingPolicy {
-    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision {
+impl Policy for AllowAllRecordingPolicy {
+    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
         self.names
             .lock()
             .unwrap()
             .push(request.tool_name().as_str().to_string());
-        PolicyDecision::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 
@@ -212,9 +222,9 @@ fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() 
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy = RecordingPolicy::returning(PolicyDecision::RequireApproval {
-        reason: PolicyReason::RestrictedWorkspace,
-        subject: ApprovalSubject::UserInteraction,
+    let policy = RecordingPolicy::returning(PolicyDecisionData::RequireApproval {
+        reason: PolicyReasonData::RestrictedWorkspace,
+        subject: ApprovalSubjectData::UserInteraction,
     });
 
     let prepared = prepare_tool_round(
@@ -226,7 +236,7 @@ fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() 
         &std::env::current_dir().unwrap(),
     );
 
-    // #1248 Task 5: RequireApproval now surfaces in require_approval, not denied
+    // #1248 TaskData 5: RequireApproval now surfaces in require_approval, not denied
     assert!(prepared.executable.is_empty());
     assert!(prepared.denied.is_empty());
     assert_eq!(prepared.require_approval.len(), 1);
@@ -241,8 +251,9 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy =
-        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
+    let policy = RecordingPolicy::returning(PolicyDecisionData::Allow(
+        tools::AuthorizationContext::STANDARD,
+    ));
 
     let prepared = prepare_tool_round(
         &[(call("Unknown", 0), ToolGuardDecision::Allow)],
@@ -272,8 +283,9 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
         tokio_util::sync::CancellationToken::new(),
     );
     let catalog = factory.build(ctx).catalog();
-    let policy =
-        RecordingPolicy::returning(PolicyDecision::Allow(tools::AuthorizationContext::STANDARD));
+    let policy = RecordingPolicy::returning(PolicyDecisionData::Allow(
+        tools::AuthorizationContext::STANDARD,
+    ));
 
     let prepared = prepare_tool_round(
         &[(call("Read", 0), ToolGuardDecision::Allow)],
@@ -414,19 +426,23 @@ impl HookTestPolicy {
     }
 }
 
-impl PolicyPort for HookTestPolicy {
-    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision {
+impl Policy for HookTestPolicy {
+    fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
         *self.eval_count.lock().unwrap() += 1;
         match request.tool_name().as_str() {
-            "Denied" => PolicyDecision::Deny {
-                reason: PolicyReason::RestrictedTool,
+            "Denied" => PolicyDecisionData::Deny {
+                reason: PolicyReasonData::RestrictedTool,
             },
-            "ApprovalRequired" => PolicyDecision::RequireApproval {
-                reason: PolicyReason::RestrictedTool,
-                subject: ApprovalSubject::UserInteraction,
+            "ApprovalRequired" => PolicyDecisionData::RequireApproval {
+                reason: PolicyReasonData::RestrictedTool,
+                subject: ApprovalSubjectData::UserInteraction,
             },
-            _ => PolicyDecision::Allow(self.authorization),
+            _ => PolicyDecisionData::Allow(self.authorization),
         }
+    }
+
+    fn current_mode(&self) -> policy::PolicyModeData {
+        policy::PolicyModeData::Standard
     }
 }
 

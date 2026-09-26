@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
 
-use hook::{HookDispatchContext, HookInvocation, HookPort};
+use hook::{HookDispatchContextData, HookDispatcher, HookInvocationData};
 use share::config::paths;
 use share::config::PermissionModeConfig;
 use share::i18n::prompt::system::static_system_prompt;
@@ -143,7 +143,7 @@ fn build_commit_guidance(
 
 pub async fn build_system_prompt_parts(
     context: &PromptContext,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     lang: &str,
 ) -> SystemPromptParts {
     let cwd = &context.cwd;
@@ -186,7 +186,7 @@ struct UserGuidanceFile {
 
 async fn read_preferred_user_guidance_layers(
     candidate_paths: &[PathBuf],
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     workspace_root: &Path,
 ) -> Vec<UserGuidanceFile> {
     let mut files = Vec::new();
@@ -196,11 +196,11 @@ async fn read_preferred_user_guidance_layers(
                 Ok(content) => {
                     hook_port
                         .dispatch_at(
-                            HookInvocation::InstructionsLoaded(hook::InstructionsInput {
+                            HookInvocationData::InstructionsLoaded {
                                 file_path: path.to_string_lossy().to_string(),
                                 instruction_type: "agents_md".to_string(),
-                            }),
-                            HookDispatchContext::new(workspace_root),
+                            },
+                            HookDispatchContextData::new(workspace_root),
                             &tokio_util::sync::CancellationToken::new(),
                         )
                         .await;
@@ -245,7 +245,7 @@ fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
 async fn load_agents_md_from_paths(
     global_paths: &[PathBuf],
     project_paths: &[PathBuf],
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     workspace_root: &Path,
 ) -> String {
     let mut files =
@@ -280,7 +280,7 @@ fn scan_user_guidance(user_guidance: String) -> String {
 
 pub async fn load_agents_md(
     cwd: &Path,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     workspace_root: &Path,
 ) -> String {
     let global_paths = [

@@ -5,7 +5,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{BatchId, TaskAccess, TaskStatus, TaskView};
+use task::{BatchIdData, TaskAccess, TaskStatusData, TaskViewData};
 
 pub struct TaskListTool {
     pub access: Arc<dyn TaskAccess>,
@@ -15,18 +15,18 @@ pub struct TaskListTool {
 #[path = "task_list_tests.rs"]
 mod tests;
 
-fn status_name(status: TaskStatus) -> &'static str {
+fn status_name(status: TaskStatusData) -> &'static str {
     match status {
-        TaskStatus::Pending => "pending",
-        TaskStatus::InProgress => "in_progress",
-        TaskStatus::Completed => "completed",
-        TaskStatus::Deleted => "deleted",
+        TaskStatusData::Pending => "pending",
+        TaskStatusData::InProgress => "in_progress",
+        TaskStatusData::Completed => "completed",
+        TaskStatusData::Deleted => "deleted",
     }
 }
 
 fn format_task_line(
-    task: &task::Task,
-    seq_by_id: &std::collections::HashMap<task::TaskId, String>,
+    task: &task::TaskData,
+    seq_by_id: &std::collections::HashMap<task::TaskIdData, String>,
 ) -> String {
     let blocked_by = task
         .blocked_by()
@@ -85,15 +85,15 @@ impl TypedTool for TaskListTool {
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
         let status = args.status.as_deref().and_then(|value| match value {
-            "pending" => Some(TaskStatus::Pending),
-            "in_progress" => Some(TaskStatus::InProgress),
-            "completed" => Some(TaskStatus::Completed),
-            "deleted" => Some(TaskStatus::Deleted),
+            "pending" => Some(TaskStatusData::Pending),
+            "in_progress" => Some(TaskStatusData::InProgress),
+            "completed" => Some(TaskStatusData::Completed),
+            "deleted" => Some(TaskStatusData::Deleted),
             _ => None,
         });
         let target_batch = match args.task_list_id.as_deref() {
             Some(value) => match value.parse::<u64>() {
-                Ok(id) if id > 0 => BatchId::new(id),
+                Ok(id) if id > 0 => BatchIdData::new(id),
                 _ => return TypedToolResult::error(format!("invalid task list id: {value}")),
             },
             None => match self.access.current_batch() {
@@ -131,7 +131,7 @@ impl TypedTool for TaskListTool {
         let stats = snapshot.stats();
         let batch = snapshot.batch();
         let mut message = format!(
-            "Task list #{}: {}\n{} tasks ({} pending, {} in_progress, {} completed)",
+            "TaskData list #{}: {}\n{} tasks ({} pending, {} in_progress, {} completed)",
             batch.id(),
             batch.summary().unwrap_or_default(),
             stats.total,
@@ -163,7 +163,7 @@ impl TypedTool for TaskListTool {
                 tasks: tasks
                     .iter()
                     .map(|task| {
-                        TaskView::from_task(
+                        TaskViewData::from_task(
                             task,
                             task.blocked_by()
                                 .iter()

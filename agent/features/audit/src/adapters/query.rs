@@ -3,23 +3,26 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::query::{
-    add_summary, decode_cursor, decode_record, encode_cursor, matches, query_fingerprint,
-    validate_query, CursorPosition,
+    decode_cursor, decode_record, encode_cursor, matches, query_fingerprint, validate_query,
+    CursorPosition,
 };
-use crate::domain::{UsageCursor, UsagePage, UsageQuery, UsageQueryError, UsageSummary};
+use crate::domain::{UsageCursor, UsagePageData, UsageQueryData, UsageQueryError};
 use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageQueryPort};
 
-pub fn usage_query_service(store: Arc<dyn UsageAppendStorePort>) -> UsageQueryService {
-    UsageQueryService { store }
-}
-
+#[derive(Clone)]
 pub struct UsageQueryService {
     store: Arc<dyn UsageAppendStorePort>,
 }
 
+impl UsageQueryService {
+    pub(crate) fn from_store(store: Arc<dyn UsageAppendStorePort>) -> Self {
+        Self { store }
+    }
+}
+
 #[async_trait]
 impl UsageQueryPort for UsageQueryService {
-    async fn query(&self, query: UsageQuery) -> Result<UsagePage, UsageQueryError> {
+    async fn query(&self, query: UsageQueryData) -> Result<UsagePageData, UsageQueryError> {
         let limit = validate_query(&query)?;
         let cursor = query
             .pagination
@@ -53,7 +56,7 @@ impl UsageQueryPort for UsageQueryService {
                 ) {
                     Ok(record) if matches(&query, &record) => {
                         if records.len() == limit {
-                            return Ok(UsagePage {
+                            return Ok(UsagePageData {
                                 records,
                                 next_cursor: Some(UsageCursor::new(encode_cursor(
                                     &CursorPosition {
@@ -73,52 +76,30 @@ impl UsageQueryPort for UsageQueryService {
             }
         }
 
-        Ok(UsagePage {
+        Ok(UsagePageData {
             records,
             next_cursor: None,
             warnings,
         })
     }
-
-    async fn summarize(&self, query: UsageQuery) -> Result<UsageSummary, UsageQueryError> {
-        validate_query(&query)?;
-        if query.pagination.cursor.is_some() {
-            return Err(UsageQueryError::InvalidCursor);
-        }
-        let streams = self.streams(&query, None).await?;
-        let mut summary = UsageSummary::default();
-
-        for stream in streams {
-            let reader = self.store.read(&stream).await.map_err(storage_error)?;
-            for (offset, line) in reader.lines().iter().enumerate() {
-                let line_number = u64::try_from(offset + 1).unwrap_or(u64::MAX);
-                if let Ok(record) = decode_record(
-                    line.bytes(),
-                    line.is_terminated(),
-                    stream.as_str(),
-                    line_number,
-                ) {
-                    if matches(&query, &record) {
-                        add_summary(&mut summary, &record);
-                    }
-                }
-            }
-        }
-
-        Ok(summary)
-    }
 }
 
 impl UsageQueryService {
-    /// PL 固有读出入口（消费者无需导入 Port trait；边界错误为粗分类 AuditError）。
-    pub async fn query_page(&self, query: UsageQuery) -> Result<UsagePage, crate::AuditError> {
+    /// PL 固有读出入口（消费者无需导入 Port trait；边界错误为 share::error::DomainError）。
+    pub async fn query_page(
+        &self,
+        query: UsageQueryData,
+    ) -> Result<UsagePageData, share::error::DomainError> {
         let port = self as &dyn crate::ports::UsageQueryPort;
-        port.query(query).await.map_err(crate::AuditError::from)
+        port.query(query)
+            .await
+            .map_err(crate::AuditError::from)
+            .map_err(Into::into)
     }
 
     async fn streams(
         &self,
-        query: &UsageQuery,
+        query: &UsageQueryData,
         cursor: Option<&CursorPosition>,
     ) -> Result<Vec<AppendLogStream>, UsageQueryError> {
         let streams = if let Some(session_id) = &query.session_id {

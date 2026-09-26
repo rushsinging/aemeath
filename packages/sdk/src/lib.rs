@@ -81,8 +81,8 @@ pub use config_form::{
     ConfigFormWorkflowId,
 };
 pub use config_view::{
-    ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
-    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ElementSpacingView,
+    ConfigApplicationScopeView, ConfigChangeCauseData, ConfigChangedEvent, ConfigFieldData,
+    ConfigReloadedEvent, ConfigUpdateData, ConfigUpdateResult, ConfigView, ElementSpacingView,
     MarkdownSpacingModeView, MarkdownSpacingOverridesView, PermissionModeView,
 };
 pub use connect::{

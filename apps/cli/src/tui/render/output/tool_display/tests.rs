@@ -160,9 +160,9 @@ fn test_format_tool_call_unknown_tool_uses_fallback() {
 #[test]
 fn test_format_tool_call_invalid_json_uses_fallback() {
     let (header, _details) = format_tool_call("TaskListCreate", "not json", None, None);
-    // 不应 panic，应 fallback。display name 为 "New Task List"。
+    // 不应 panic，应 fallback。display name 为 "New TaskData List"。
     let text = line_to_string(&header);
-    assert!(text.contains("New Task List"));
+    assert!(text.contains("New TaskData List"));
 }
 
 #[test]
@@ -282,8 +282,8 @@ fn test_format_tool_call_task_create_empty_subject_no_question_mark() {
     let (header, _details) = format_tool_call("TaskCreate", "{}", None, None);
     let text = line_to_string(&header);
     assert_eq!(
-        text, "Task",
-        "空 subject 时应只显示 display name 'Task': {text}"
+        text, "TaskData",
+        "空 subject 时应只显示 display name 'TaskData': {text}"
     );
     assert!(!text.contains('?'));
 }
@@ -307,8 +307,8 @@ fn test_format_tool_call_task_update_empty_id_no_question_mark() {
     let (header, _details) = format_tool_call("TaskUpdate", "{}", None, None);
     let text = line_to_string(&header);
     assert_eq!(
-        text, "Task",
-        "空 taskId 时应只显示 display name 'Task': {text}"
+        text, "TaskData",
+        "空 taskId 时应只显示 display name 'TaskData': {text}"
     );
     assert!(!text.contains('?'));
 }
@@ -330,12 +330,12 @@ fn task_block_by_formats_replacement_and_clear() {
         None,
         None,
     );
-    assert_eq!(line_to_string(&header), "Task #7 — blocked by #4, #5");
+    assert_eq!(line_to_string(&header), "TaskData #7 — blocked by #4, #5");
     assert!(details.is_empty());
 
     let (header, _) =
         format_tool_call("TaskBlockBy", r#"{"id":"7","block_by_ids":[]}"#, None, None);
-    assert_eq!(line_to_string(&header), "Task #7 — clear blockers");
+    assert_eq!(line_to_string(&header), "TaskData #7 — clear blockers");
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn test_format_tool_call_task_update_no_subject_anywhere_omits_title() {
     );
     let text = line_to_string(&header);
     assert!(text.contains("→ completed"), "应包含 status: {text}");
-    // 无标题时仍是合法格式 `Task 4 — → completed`，不 crash
+    // 无标题时仍是合法格式 `TaskData 4 — → completed`，不 crash
     assert!(!text.contains("— ,"), "不应出现空 parts 分隔符: {text}");
 }
 
@@ -455,8 +455,8 @@ fn test_format_tool_call_task_get_empty_id_no_question_mark() {
     let (header, _details) = format_tool_call("TaskGet", "{}", None, None);
     let text = line_to_string(&header);
     assert_eq!(
-        text, "Task",
-        "空 taskId 时应只显示 display name 'Task': {text}"
+        text, "TaskData",
+        "空 taskId 时应只显示 display name 'TaskData': {text}"
     );
     assert!(!text.contains('?'));
 }
@@ -466,8 +466,8 @@ fn test_format_tool_call_task_stop_empty_id_no_question_mark() {
     let (header, _details) = format_tool_call("TaskStop", "{}", None, None);
     let text = line_to_string(&header);
     assert_eq!(
-        text, "Stop Task",
-        "空 taskId 时应只显示 display name 'Stop Task': {text}"
+        text, "Stop TaskData",
+        "空 taskId 时应只显示 display name 'Stop TaskData': {text}"
     );
     assert!(!text.contains('?'));
 }
@@ -477,8 +477,8 @@ fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
     let (header, _details) = format_tool_call("TaskListCreate", "{}", None, None);
     let text = line_to_string(&header);
     assert_eq!(
-        text, "New Task List",
-        "空 subject 时应只显示 display name 'New Task List': {text}"
+        text, "New TaskData List",
+        "空 subject 时应只显示 display name 'New TaskData List': {text}"
     );
     assert!(!text.contains('?'));
 }
@@ -892,7 +892,10 @@ fn test_task_update_snake_case_task_id_shows_id() {
         text.contains("42"),
         "TaskUpdate header 应包含 task_id '42'，实际: {text}"
     );
-    assert_ne!(text, "● Task", "header 不应退化为裸 display name: {text}");
+    assert_ne!(
+        text, "● TaskData",
+        "header 不应退化为裸 display name: {text}"
+    );
 }
 
 #[test]

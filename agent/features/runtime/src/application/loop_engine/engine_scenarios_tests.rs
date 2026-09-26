@@ -27,7 +27,7 @@ fn stuck_guard_detects_tool_loops_and_escalates() {
     ));
 }
 
-// #1248 Task 6: Stop hook block counting moved to Run domain.
+// #1248 TaskData 6: Stop hook block counting moved to Run domain.
 // The following test is removed because record_stop_hook_block no longer
 // exists on StuckGuard. Equivalent coverage is in domain/agent_run/tests.rs
 // and application/stop_hook_coordination_tests.rs.

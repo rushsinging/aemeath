@@ -15,7 +15,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::domain::subscription::HookCommand;
-use crate::ports::CancellationSignal;
+use crate::ports::HookCancellationSignal;
 
 #[cfg(any(not(unix), test))]
 use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
@@ -40,7 +40,7 @@ pub(crate) struct RawExecution {
 
 /// 单次执行的协议级故障（ExecutionFailed 可重试路径）。
 ///
-/// 与业务 Block（`HookReason`）严格区分：业务 Block 永不重试，
+/// 与业务 Block（`HookReasonData`）严格区分：业务 Block 永不重试，
 /// 本枚举中的可恢复执行故障按 Dispatcher 注入的 execution policy 重试。
 /// `Unsupported` 是永久性平台能力缺失，`Cancelled` 是调用方终止；二者均立即结束，
 /// 不进入重试循环，但仍保留一次 typed execution 明细。
@@ -93,7 +93,7 @@ pub(crate) trait Executor: Send + Sync {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> Result<RawExecution, ExecutionFault>;
 }
 
@@ -132,7 +132,7 @@ impl Executor for ProcessDriverExecutor {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
         let stdin_bytes = serde_json::to_vec(stdin).unwrap_or_default();
         let request = ProcessRequest {
@@ -150,7 +150,7 @@ impl Executor for ProcessDriverExecutor {
         };
         match self.driver.execute(request, cancellation).await {
             Ok(output) => {
-                // HookExecution PL 当前不发布截断字段；ProcessDriver 仍负责 drain 与截断，
+                // HookExecutionData PL 当前不发布截断字段；ProcessDriver 仍负责 drain 与截断，
                 // Dispatcher 只消费正文。
                 let _output_was_truncated = output.stdout_truncated || output.stderr_truncated;
                 Ok(RawExecution {

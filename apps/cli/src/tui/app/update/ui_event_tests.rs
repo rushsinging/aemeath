@@ -205,7 +205,7 @@ fn test_post_tool_sync_no_display() {
     );
 }
 
-/// Task 3: UserMessagesAdopted 按 id 清占位 + 顺序回显
+/// TaskData 3: UserMessagesAdopted 按 id 清占位 + 顺序回显
 ///
 /// 场景：入队两条占位（A="hi"，B="yo"）；
 /// handler 收到 UserMessagesAdopted([{id:A,"hi"},{id:B,"yo"}])

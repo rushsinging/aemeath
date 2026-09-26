@@ -19,7 +19,7 @@ impl context::MainContextFactory for FixedMainContextFactory {
         &self,
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
         _task_persist: Arc<dyn task::TaskPersist>,
-        _workspace_persist: Arc<dyn project::WorkspacePersist>,
+        _workspace_persist: Arc<dyn project::WorkspaceWriter>,
         _memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
         _mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
@@ -44,8 +44,8 @@ pub(crate) struct SessionRunFixture {
     event_sink: RecordingEventSink,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    policy: Arc<dyn crate::ports::PolicyPort>,
-    hooks: Arc<dyn hook::HookPort>,
+    policy: Arc<dyn crate::ports::Policy>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
 }
 impl SessionRunFixture {
@@ -103,11 +103,11 @@ impl SessionRunFixture {
         &self.tool_execution
     }
 
-    pub(crate) fn policy(&self) -> &Arc<dyn crate::ports::PolicyPort> {
+    pub(crate) fn policy(&self) -> &Arc<dyn crate::ports::Policy> {
         &self.policy
     }
 
-    pub(crate) fn hooks(&self) -> &Arc<dyn hook::HookPort> {
+    pub(crate) fn hooks(&self) -> &Arc<dyn hook::HookDispatcher> {
         &self.hooks
     }
 
@@ -135,10 +135,10 @@ pub(crate) struct SessionRunFixtureBuilder {
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: RecordingEventSink,
     event_sink_handle: Option<crate::application::loop_engine::chat::ChatEventSinkHandle>,
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
-    policy: Arc<dyn crate::ports::PolicyPort>,
+    policy: Arc<dyn crate::ports::Policy>,
     context_factory: Option<Arc<RuntimeContextFactory>>,
     config: share::config::domain::snapshot::ConfigSnapshot,
     session_id: String,
@@ -229,7 +229,7 @@ impl SessionRunFixtureBuilder {
         self
     }
 
-    pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::PolicyPort>) -> Self {
+    pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::Policy>) -> Self {
         self.policy = policy;
         self
     }
@@ -273,8 +273,7 @@ impl SessionRunFixtureBuilder {
         );
         let session_snapshot = session_state.snapshot_for_run();
         let workspace = project::wire_production_workspace(self.workspace_root.clone(), None)
-            .expect("wire fixture workspace")
-            .into_views();
+            .expect("wire fixture workspace");
         let workspace_access =
             crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone());
         let task_store = Arc::new(task::TaskStore::new());

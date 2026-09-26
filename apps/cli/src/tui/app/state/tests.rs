@@ -156,7 +156,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_submit_then_user_messages_added_echoes_user_message() {
-        // A3 Task 4：MessagesSync 退出 display，用户回显改由 UserMessagesAdopted 驱动。
+        // A3 TaskData 4：MessagesSync 退出 display，用户回显改由 UserMessagesAdopted 驱动。
         // 模拟流程：Enter 提交 → runtime 回传 UserMessagesAdopted → TUI 回显 `> search bug 76`；
         // MessagesSync 仅负责镜像 chat.messages，不再产生 UserMessage 回显块。
         let mut app = App::new(
@@ -270,7 +270,7 @@ mod tests {
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
         let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
-        // A3 Task 4：用户回显改由 UserMessagesAdopted 归宿事件驱动（MessagesSync 已退出 display）。
+        // A3 TaskData 4：用户回显改由 UserMessagesAdopted 归宿事件驱动（MessagesSync 已退出 display）。
         // 先建占位，再触发 UserMessagesAdopted，使 `> search bug 76` 回显。
         let input_id = "state-input-a".to_string();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");

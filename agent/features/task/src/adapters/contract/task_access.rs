@@ -1,18 +1,19 @@
 use crate::{
-    Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskAccess, TaskCommandError,
-    TaskCreateSpec, TaskEvent, TaskPriority, TaskRevision, TaskStatus,
+    domain::TaskCommandError, BatchCreateSpecData, BatchData, BatchIdData, BatchStatusData,
+    TaskAccess, TaskCreateSpecData, TaskData, TaskEventData, TaskPriorityData, TaskRevisionData,
+    TaskStatusData,
 };
 
-fn batch_spec(subject: &str) -> BatchCreateSpec {
-    BatchCreateSpec::try_new(subject.to_owned()).expect("valid batch spec")
+fn batch_spec(subject: &str) -> BatchCreateSpecData {
+    BatchCreateSpecData::try_new(subject.to_owned()).expect("valid batch spec")
 }
 
-fn task_spec(subject: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(
+fn task_spec(subject: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(
         subject.to_owned(),
         String::new(),
         None,
-        TaskPriority::Normal,
+        TaskPriorityData::Normal,
     )
     .expect("valid task spec")
 }
@@ -22,14 +23,14 @@ fn task_spec(subject: &str) -> TaskCreateSpec {
 /// deterministic list projections. Comparing this triple before/after a
 /// rejected or idempotent command is a `dyn TaskAccess`-safe substitute for
 /// inspecting a concrete backing snapshot.
-fn observable(access: &dyn TaskAccess) -> (TaskRevision, Vec<Task>, Vec<Batch>) {
+fn observable(access: &dyn TaskAccess) -> (TaskRevisionData, Vec<TaskData>, Vec<BatchData>) {
     (access.revision(), access.list(), access.list_batches())
 }
 
 /// Pre-overflow fixtures for the three independent exhaustion scenarios.
 ///
-/// Each scenario needs its own starting shape (an already-seeded Batch ID
-/// counter, an already-seeded Task ID counter with no Batch yet, or an
+/// Each scenario needs its own starting shape (an already-seeded BatchData ID
+/// counter, an already-seeded TaskData ID counter with no BatchData yet, or an
 /// already-maxed revision) so the contract stays agnostic to *how* a
 /// concrete `TaskAccess` implementation constructs that starting state.
 pub(super) struct TaskAccessOverflowFixtures<'a> {
@@ -44,14 +45,14 @@ pub(super) fn assert_task_access_contract(
     overflow: TaskAccessOverflowFixtures<'_>,
 ) {
     // Empty backing is revision zero.
-    assert_eq!(access.revision(), TaskRevision::new(0));
+    assert_eq!(access.revision(), TaskRevisionData::new(0));
 
     // A failed command is atomic and does not advance revision.
     assert_eq!(
         access.create_task(task_spec("orphan"), 1),
-        Err(TaskCommandError::NoActiveBatch)
+        Err(TaskCommandError::NoActiveBatch.into())
     );
-    assert_eq!(access.revision(), TaskRevision::new(0));
+    assert_eq!(access.revision(), TaskRevisionData::new(0));
     assert!(access.list().is_empty());
 
     // Each real write advances exactly once, and the returned revision belongs
@@ -59,22 +60,22 @@ pub(super) fn assert_task_access_contract(
     let batch = access
         .create_batch(batch_spec("batch"), 2)
         .expect("batch creation succeeds");
-    assert_eq!(batch.revision(), Some(TaskRevision::new(1)));
-    assert_eq!(access.revision(), TaskRevision::new(1));
+    assert_eq!(batch.revision(), Some(TaskRevisionData::new(1)));
+    assert_eq!(access.revision(), TaskRevisionData::new(1));
     assert_eq!(access.list_batches(), vec![batch.value.clone()]);
 
     let second = access
         .create_task(task_spec("second"), 3)
         .expect("task creation succeeds");
-    assert_eq!(second.revision(), Some(TaskRevision::new(2)));
-    assert_eq!(access.revision(), TaskRevision::new(2));
+    assert_eq!(second.revision(), Some(TaskRevisionData::new(2)));
+    assert_eq!(access.revision(), TaskRevisionData::new(2));
     assert_eq!(access.get(second.value.id()), Some(second.value.clone()));
 
     let first = access
         .create_task(task_spec("first"), 4)
         .expect("task creation succeeds");
-    assert_eq!(first.revision(), Some(TaskRevision::new(3)));
-    assert_eq!(access.revision(), TaskRevision::new(3));
+    assert_eq!(first.revision(), Some(TaskRevisionData::new(3)));
+    assert_eq!(access.revision(), TaskRevisionData::new(3));
 
     // Queries are deterministic and cannot advance revision. In particular,
     // list order is typed-ID order rather than HashMap iteration order.
@@ -107,10 +108,10 @@ pub(super) fn assert_task_access_contract(
     let replacement = access
         .create_batch(batch_spec("replacement"), 5)
         .expect("new task list replaces active batch");
-    assert_eq!(replacement.value.status(), BatchStatus::Active);
+    assert_eq!(replacement.value.status(), BatchStatusData::Active);
     assert_eq!(
         access.revision(),
-        TaskRevision::new(revision_before_replacement.get() + 1)
+        TaskRevisionData::new(revision_before_replacement.get() + 1)
     );
     assert_eq!(
         access.get(first.value.id()).unwrap().batch(),
@@ -124,7 +125,7 @@ pub(super) fn assert_task_access_contract(
             .find(|candidate| candidate.id() == batch.value.id())
             .unwrap()
             .status(),
-        BatchStatus::Archived
+        BatchStatusData::Archived
     );
 
     // ---- Multi-entity dependency add/remove and delete: revision, events,
@@ -153,7 +154,7 @@ pub(super) fn assert_task_access_contract(
         .expect("edge admitted");
     assert_eq!(
         added_ab.revision(),
-        Some(TaskRevision::new(revision_before_edges.get() + 1))
+        Some(TaskRevisionData::new(revision_before_edges.get() + 1))
     );
     assert_eq!(access.get(alpha.id()).unwrap().blocked_by(), &[beta.id()]);
     assert_eq!(access.get(beta.id()).unwrap().blocks(), &[alpha.id()]);
@@ -163,14 +164,14 @@ pub(super) fn assert_task_access_contract(
         .expect("edge admitted");
     assert_eq!(
         added_bg.revision(),
-        Some(TaskRevision::new(revision_before_edges.get() + 2))
+        Some(TaskRevisionData::new(revision_before_edges.get() + 2))
     );
     let added_dg = access
         .add_dependency(delta.id(), gamma.id(), 12)
         .expect("edge admitted");
     assert_eq!(
         added_dg.revision(),
-        Some(TaskRevision::new(revision_before_edges.get() + 3))
+        Some(TaskRevisionData::new(revision_before_edges.get() + 3))
     );
 
     let replaced = access
@@ -179,7 +180,7 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(replaced.value.blocked_by(), &[beta.id()]);
     assert_eq!(
         replaced.revision(),
-        Some(TaskRevision::new(revision_before_edges.get() + 4))
+        Some(TaskRevisionData::new(revision_before_edges.get() + 4))
     );
     access
         .replace_dependencies(delta.id(), vec![gamma.id()], 14)
@@ -206,7 +207,8 @@ pub(super) fn assert_task_access_contract(
         Err(TaskCommandError::DependencyCycle {
             task_id: alpha.id(),
             blocked_by_id: alpha.id(),
-        })
+        }
+        .into())
     );
     assert_eq!(observable(access), observable_before_self_cycle);
 
@@ -219,7 +221,8 @@ pub(super) fn assert_task_access_contract(
         Err(TaskCommandError::DependencyCycle {
             task_id: gamma.id(),
             blocked_by_id: alpha.id(),
-        })
+        }
+        .into())
     );
     assert_eq!(observable(access), observable_before_indirect_cycle);
 
@@ -230,13 +233,13 @@ pub(super) fn assert_task_access_contract(
     let deleted = access.delete(beta.id(), 16).expect("delete succeeds");
     assert_eq!(
         deleted.revision(),
-        Some(TaskRevision::new(revision_before_delete.get() + 1))
+        Some(TaskRevisionData::new(revision_before_delete.get() + 1))
     );
     assert_eq!(
         deleted.events,
-        vec![TaskEvent::TaskDeleted { task_id: beta.id() }]
+        vec![TaskEventData::TaskDeleted { task_id: beta.id() }]
     );
-    assert_eq!(deleted.value.status(), TaskStatus::Deleted);
+    assert_eq!(deleted.value.status(), TaskStatusData::Deleted);
     assert!(deleted.value.blocked_by().is_empty());
     assert!(deleted.value.blocks().is_empty());
     assert!(access.get(alpha.id()).unwrap().blocked_by().is_empty());
@@ -248,51 +251,52 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(access.get(delta.id()).unwrap().blocked_by(), &[gamma.id()]);
     assert!(!access.list().contains(&deleted.value));
 
-    // ---- Task status transition: legal path plus an atomic illegal
+    // ---- TaskData status transition: legal path plus an atomic illegal
     // transition failure that must not disturb any read model ----
     let revision_before_transition = access.revision();
     let started = access
-        .transition(gamma.id(), TaskStatus::InProgress, 17)
+        .transition(gamma.id(), TaskStatusData::InProgress, 17)
         .expect("legal transition");
     assert_eq!(
         started.revision(),
-        Some(TaskRevision::new(revision_before_transition.get() + 1))
+        Some(TaskRevisionData::new(revision_before_transition.get() + 1))
     );
     let completed = access
-        .transition(gamma.id(), TaskStatus::Completed, 18)
+        .transition(gamma.id(), TaskStatusData::Completed, 18)
         .expect("legal transition");
     assert_eq!(
         completed.revision(),
-        Some(TaskRevision::new(revision_before_transition.get() + 2))
+        Some(TaskRevisionData::new(revision_before_transition.get() + 2))
     );
-    assert_eq!(completed.value.status(), TaskStatus::Completed);
+    assert_eq!(completed.value.status(), TaskStatusData::Completed);
     // Once its sole dependency completes, `delta` is no longer blocked.
     assert!(!access.is_blocked(delta.id()).expect("known task"));
 
     let observable_before_illegal_transition = observable(access);
     assert_eq!(
-        access.transition(gamma.id(), TaskStatus::InProgress, 19),
+        access.transition(gamma.id(), TaskStatusData::InProgress, 19),
         Err(TaskCommandError::IllegalTransition {
-            from: TaskStatus::Completed,
-            to: TaskStatus::InProgress,
-        })
+            from: TaskStatusData::Completed,
+            to: TaskStatusData::InProgress,
+        }
+        .into())
     );
     assert_eq!(observable(access), observable_before_illegal_transition);
     assert_eq!(
-        access.transition(gamma.id(), TaskStatus::Deleted, 20),
-        Err(TaskCommandError::DeletedOnlyViaDelete)
+        access.transition(gamma.id(), TaskStatusData::Deleted, 20),
+        Err(TaskCommandError::DeletedOnlyViaDelete.into())
     );
     assert_eq!(observable(access), observable_before_illegal_transition);
 
     // ---- Tag commands: add/remove with an idempotent no-op both ways, and
-    // rejection on an already-deleted Task ----
+    // rejection on an already-deleted TaskData ----
     let revision_before_tag = access.revision();
     let tagged = access
         .add_tag(alpha.id(), "urgent".to_owned(), 21)
         .expect("tag add succeeds");
     assert_eq!(
         tagged.revision(),
-        Some(TaskRevision::new(revision_before_tag.get() + 1))
+        Some(TaskRevisionData::new(revision_before_tag.get() + 1))
     );
     assert_eq!(tagged.value.tags(), ["urgent".to_owned()]);
 
@@ -307,7 +311,7 @@ pub(super) fn assert_task_access_contract(
         .expect("tag remove succeeds");
     assert_eq!(
         untagged.revision(),
-        Some(TaskRevision::new(revision_before_tag.get() + 2))
+        Some(TaskRevisionData::new(revision_before_tag.get() + 2))
     );
     assert!(untagged.value.tags().is_empty());
 
@@ -320,7 +324,7 @@ pub(super) fn assert_task_access_contract(
     let observable_before_deleted_tag = observable(access);
     assert_eq!(
         access.add_tag(beta.id(), "late".to_owned(), 25),
-        Err(TaskCommandError::TaskNotFound { id: beta.id() })
+        Err(TaskCommandError::TaskNotFound { id: beta.id() }.into())
     );
     assert_eq!(observable(access), observable_before_deleted_tag);
 
@@ -334,13 +338,13 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(renamed.value.subject(), "renamed alpha");
     assert_eq!(
         renamed.events,
-        vec![TaskEvent::TaskSubjectChanged {
+        vec![TaskEventData::TaskSubjectChanged {
             task_id: alpha.id(),
         }]
     );
     assert_eq!(
         renamed.revision(),
-        Some(TaskRevision::new(revision_before_subject.get() + 1))
+        Some(TaskRevisionData::new(revision_before_subject.get() + 1))
     );
 
     let duplicate_subject = access
@@ -352,7 +356,7 @@ pub(super) fn assert_task_access_contract(
     let before_invalid_subject = observable(access);
     assert_eq!(
         access.set_subject(alpha.id(), "  ".to_owned(), 28),
-        Err(TaskCommandError::InvalidTaskSubject)
+        Err(TaskCommandError::InvalidTaskSubject.into())
     );
     assert_eq!(observable(access), before_invalid_subject);
 
@@ -363,13 +367,13 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(described.value.description(), "new description");
     assert_eq!(
         described.events,
-        vec![TaskEvent::TaskDescriptionChanged {
+        vec![TaskEventData::TaskDescriptionChanged {
             task_id: alpha.id(),
         }]
     );
     assert_eq!(
         described.revision(),
-        Some(TaskRevision::new(revision_before_description.get() + 1))
+        Some(TaskRevisionData::new(revision_before_description.get() + 1))
     );
 
     // ---- record_batch_turn: Active admission plus idempotent no-op ----
@@ -380,7 +384,7 @@ pub(super) fn assert_task_access_contract(
         .expect("active batch admits turn");
     assert_eq!(
         turned.revision(),
-        Some(TaskRevision::new(revision_before_turn.get() + 1))
+        Some(TaskRevisionData::new(revision_before_turn.get() + 1))
     );
     assert_eq!(turned.value.last_active_turn(), 1);
     assert_eq!(turned.value.silence_turns(), 0);
@@ -398,19 +402,19 @@ pub(super) fn assert_task_access_contract(
         .expect("silence turn recorded");
     assert_eq!(
         silent_turn.revision(),
-        Some(TaskRevision::new(revision_after_first_turn.get() + 1))
+        Some(TaskRevisionData::new(revision_after_first_turn.get() + 1))
     );
     assert_eq!(silent_turn.value.silence_turns(), 1);
 
-    // ---- Batch lifecycle: pause -> resume -> archive, where a duplicate
+    // ---- BatchData lifecycle: pause -> resume -> archive, where a duplicate
     // archive is the sole idempotent no-op terminal transition ----
     let revision_before_pause = access.revision();
     let paused = access.pause_batch(active_batch_id).expect("pause succeeds");
     assert_eq!(
         paused.revision(),
-        Some(TaskRevision::new(revision_before_pause.get() + 1))
+        Some(TaskRevisionData::new(revision_before_pause.get() + 1))
     );
-    assert_eq!(paused.value.status(), BatchStatus::Paused);
+    assert_eq!(paused.value.status(), BatchStatusData::Paused);
 
     // A Paused batch can no longer record turns; the rejection is atomic.
     let observable_before_paused_turn = observable(access);
@@ -418,8 +422,9 @@ pub(super) fn assert_task_access_contract(
         access.record_batch_turn(active_batch_id, 3, true),
         Err(TaskCommandError::BatchNotActive {
             id: active_batch_id,
-            status: BatchStatus::Paused,
-        })
+            status: BatchStatusData::Paused,
+        }
+        .into())
     );
     assert_eq!(observable(access), observable_before_paused_turn);
 
@@ -429,9 +434,9 @@ pub(super) fn assert_task_access_contract(
         .expect("resume succeeds");
     assert_eq!(
         resumed.revision(),
-        Some(TaskRevision::new(revision_before_resume.get() + 1))
+        Some(TaskRevisionData::new(revision_before_resume.get() + 1))
     );
-    assert_eq!(resumed.value.status(), BatchStatus::Active);
+    assert_eq!(resumed.value.status(), BatchStatusData::Active);
 
     let revision_before_archive = access.revision();
     let archived = access
@@ -439,9 +444,9 @@ pub(super) fn assert_task_access_contract(
         .expect("archive succeeds");
     assert_eq!(
         archived.revision(),
-        Some(TaskRevision::new(revision_before_archive.get() + 1))
+        Some(TaskRevisionData::new(revision_before_archive.get() + 1))
     );
-    assert_eq!(archived.value.status(), BatchStatus::Archived);
+    assert_eq!(archived.value.status(), BatchStatusData::Archived);
 
     // Archiving an already-archived batch is a true no-op: it keeps
     // succeeding and never reserves another revision, unlike every other
@@ -452,7 +457,7 @@ pub(super) fn assert_task_access_contract(
         .expect("duplicate archive succeeds");
     assert_eq!(duplicate_archive.revision(), None);
     assert!(duplicate_archive.events.is_empty());
-    assert_eq!(duplicate_archive.value.status(), BatchStatus::Archived);
+    assert_eq!(duplicate_archive.value.status(), BatchStatusData::Archived);
     assert_eq!(access.revision(), revision_after_archive);
 
     // An Archived batch can never record turns, pause, or resume again.
@@ -461,24 +466,27 @@ pub(super) fn assert_task_access_contract(
         access.record_batch_turn(batch.value.id(), 4, true),
         Err(TaskCommandError::BatchNotActive {
             id: batch.value.id(),
-            status: BatchStatus::Archived,
-        })
+            status: BatchStatusData::Archived,
+        }
+        .into())
     );
     assert_eq!(
         access.pause_batch(batch.value.id()),
         Err(TaskCommandError::IllegalBatchTransition {
             id: batch.value.id(),
-            from: BatchStatus::Archived,
-            to: BatchStatus::Paused,
-        })
+            from: BatchStatusData::Archived,
+            to: BatchStatusData::Paused,
+        }
+        .into())
     );
     assert_eq!(
         access.resume_batch(batch.value.id()),
         Err(TaskCommandError::IllegalBatchTransition {
             id: batch.value.id(),
-            from: BatchStatus::Archived,
-            to: BatchStatus::Active,
-        })
+            from: BatchStatusData::Archived,
+            to: BatchStatusData::Active,
+        }
+        .into())
     );
     assert_eq!(observable(access), observable_before_archived_ops);
 
@@ -491,11 +499,11 @@ pub(super) fn assert_task_access_contract(
     let cleared = access.clear().expect("aggregate clear succeeds");
     assert_eq!(
         cleared.revision(),
-        Some(TaskRevision::new(revision_before_clear.get() + 1))
+        Some(TaskRevisionData::new(revision_before_clear.get() + 1))
     );
     assert_eq!(
         cleared.events,
-        vec![TaskEvent::TaskStoreCleared {
+        vec![TaskEventData::TaskStoreCleared {
             task_count,
             batch_count,
         }]
@@ -515,27 +523,30 @@ pub(super) fn assert_task_access_contract(
         overflow
             .revision_exhausted
             .create_batch(batch_spec("overflow-revision"), 1),
-        Err(TaskCommandError::RevisionExhausted)
+        Err(TaskCommandError::RevisionExhausted.into())
     );
     assert_eq!(
         overflow.revision_exhausted.revision(),
-        TaskRevision::new(u64::MAX)
+        TaskRevisionData::new(u64::MAX)
     );
     assert!(overflow.revision_exhausted.list().is_empty());
     assert!(overflow.revision_exhausted.list_batches().is_empty());
 
-    // ---- Batch ID overflow fails before any revision is reserved or any
+    // ---- BatchData ID overflow fails before any revision is reserved or any
     // batch becomes current ----
     assert_eq!(
         overflow
             .batch_id_exhausted
             .create_batch(batch_spec("overflow-batch-id"), 1),
-        Err(TaskCommandError::BatchIdExhausted)
+        Err(TaskCommandError::BatchIdExhausted.into())
     );
-    assert_eq!(overflow.batch_id_exhausted.revision(), TaskRevision::new(0));
+    assert_eq!(
+        overflow.batch_id_exhausted.revision(),
+        TaskRevisionData::new(0)
+    );
     assert!(overflow.batch_id_exhausted.list_batches().is_empty());
 
-    // ---- Task ID overflow fails atomically even though its owning Batch
+    // ---- TaskData ID overflow fails atomically even though its owning BatchData
     // was created successfully moments earlier ----
     let seeded_batch = overflow
         .task_id_exhausted
@@ -546,7 +557,7 @@ pub(super) fn assert_task_access_contract(
         overflow
             .task_id_exhausted
             .create_task(task_spec("overflow-task-id"), 2),
-        Err(TaskCommandError::TaskIdExhausted)
+        Err(TaskCommandError::TaskIdExhausted.into())
     );
     assert_eq!(
         overflow.task_id_exhausted.revision(),
@@ -562,15 +573,17 @@ pub(super) fn assert_task_access_contract(
 #[test]
 fn task_store_satisfies_task_access_contract() {
     use crate::domain::TaskStoreState;
-    use crate::{TaskId, TaskStore};
+    use crate::{TaskIdData, TaskStore};
 
     let access = TaskStore::new();
-    let revision_exhausted =
-        TaskStore::from_state(TaskStoreState::empty().with_revision(TaskRevision::new(u64::MAX)));
-    let batch_id_exhausted =
-        TaskStore::from_state(TaskStoreState::empty().with_next_batch_id(BatchId::new(u64::MAX)));
+    let revision_exhausted = TaskStore::from_state(
+        TaskStoreState::empty().with_revision(TaskRevisionData::new(u64::MAX)),
+    );
+    let batch_id_exhausted = TaskStore::from_state(
+        TaskStoreState::empty().with_next_batch_id(BatchIdData::new(u64::MAX)),
+    );
     let task_id_exhausted =
-        TaskStore::from_state(TaskStoreState::empty().with_next_task_id(TaskId::new(u64::MAX)));
+        TaskStore::from_state(TaskStoreState::empty().with_next_task_id(TaskIdData::new(u64::MAX)));
 
     assert_task_access_contract(
         &access,

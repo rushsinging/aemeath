@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::domain::agent_run::ToolCall;
 
 use super::event::{RunId, RunTimingSnapshot, RuntimeLifecycleEvent};
+use super::intent::RunIntent;
 use super::spec::RunSpec;
 use super::state::{
     DrainDecision, InteractionContinuation, PendingInteraction, RunStatus, RunStep,
@@ -167,7 +168,7 @@ impl Run {
             request_id: request_id.clone(),
             continuation,
         });
-        self.apply_state_transition(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser);
+        self.set_status_by_command(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser)?;
         self.events.push(RuntimeLifecycleEvent::AwaitingUser {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -191,10 +192,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.apply_state_transition(
+        self.set_status_by_command(
             pending.continuation.resume_status(),
             RunTransitionReason::UserResumed,
-        );
+        )?;
         self.events.push(RuntimeLifecycleEvent::Resumed {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -218,10 +219,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.apply_state_transition(
+        self.set_status_by_command(
             pending.continuation.resume_status(),
             RunTransitionReason::UserResumed,
-        );
+        )?;
         Ok(pending.continuation)
     }
 
@@ -275,6 +276,38 @@ impl Run {
                 return Err(RunTransitionError::StepIncomplete);
             }
         }
+        // 目的决定迁移合法性：只有 compaction-only Run 能收口压缩，且它 NEVER 进入模型调用。
+        if transition == RunTransition::BeginCompaction
+            && self.status == RunStatus::DrainingInput
+            && self.spec.intent() != RunIntent::ManualCompaction
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 仅手动压缩 Run 可从排空阶段直接进入压缩",
+                self.id,
+                self.spec.intent(),
+                transition,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition,
+            });
+        }
+        if transition == RunTransition::ContextPrepared
+            && self.spec.intent() == RunIntent::ManualCompaction
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩 Run 不得进入模型调用",
+                self.id,
+                self.spec.intent(),
+                transition,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition,
+            });
+        }
         let next = match (self.status, transition) {
             (RunStatus::Created, RunTransition::StartDraining) => RunStatus::DrainingInput,
             (RunStatus::DrainingInput, RunTransition::DrainInputs)
@@ -284,8 +317,15 @@ impl Run {
             (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed) => RunStatus::Completed,
             (RunStatus::PreparingContext, RunTransition::BeginCompaction) => RunStatus::Compacting,
             (RunStatus::Compacting, RunTransition::CompactionCompleted) => {
-                RunStatus::PreparingContext
+                // 自动压缩回到 PreparingContext 继续当前 Step；没有活动 Step 的
+                // 手动压缩 Run 回到排空阶段，由 drain 收口。
+                if self.steps.iter().any(|step| step.is_active()) {
+                    RunStatus::PreparingContext
+                } else {
+                    RunStatus::DrainingInput
+                }
             }
+            (RunStatus::DrainingInput, RunTransition::BeginCompaction) => RunStatus::Compacting,
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel
             }
@@ -323,7 +363,13 @@ impl Run {
             }
         };
 
-        self.apply_state_transition(next, RunTransitionReason::from(transition));
+        let reason = match (next, transition) {
+            (RunStatus::DrainingInput, RunTransition::CompactionCompleted) => {
+                RunTransitionReason::ManualCompactionSettled
+            }
+            _ => RunTransitionReason::from(transition),
+        };
+        self.apply_state_transition(next, reason);
         Ok(next)
     }
 
@@ -332,6 +378,26 @@ impl Run {
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_else(|| "-".to_string())
+    }
+
+    /// 命令式状态设置的唯一入口：所有不经迁移矩阵的写入都必须经此 gate，
+    /// 由 [`command_status_allowed`] 的枚举白名单决定是否放行。
+    fn set_status_by_command(
+        &mut self,
+        to: RunStatus,
+        reason: RunTransitionReason,
+    ) -> Result<(), RunTransitionError> {
+        let from = self.status;
+        if !command_status_allowed(from, to) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "command status change rejected: run_id={} from={from:?} to={to:?}",
+                self.id,
+            );
+            return Err(RunTransitionError::IllegalCommandTransition { from, to });
+        }
+        self.apply_state_transition(to, reason);
+        Ok(())
     }
 
     fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
@@ -530,6 +596,30 @@ impl Run {
         Ok(())
     }
 
+    /// 命令驱动：手动压缩 Run 直接进入 `Compacting`。
+    ///
+    /// 只接受 `ManualCompaction` 意图与 `DrainingInput` 起点，其余组合返回
+    /// `IllegalTransition`。迁移仍经状态矩阵（`(DrainingInput, BeginCompaction)`），
+    /// 因此事件发布与 activity 观察与其它迁移完全一致。
+    pub fn begin_manual_compaction(&mut self) -> Result<(), RunTransitionError> {
+        if self.spec.intent() != RunIntent::ManualCompaction
+            || self.status != RunStatus::DrainingInput
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "manual compaction command rejected: run_id={} intent={:?} status={:?} 仅手动压缩 Run 可从排空阶段进入压缩",
+                self.id,
+                self.spec.intent(),
+                self.status,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition: RunTransition::BeginCompaction,
+            });
+        }
+        self.transition(RunTransition::BeginCompaction).map(|_| ())
+    }
+
     /// #1272: Set the completion result text that will be used by
     /// `apply_drain_decision(EmptyAndSealed, …)` when sealing the
     /// run as Completed.  Callers that know they are going to seal
@@ -638,10 +728,17 @@ impl Run {
         }
         self.pending_interaction = None;
         step.status = RunStepStatus::Cancelling;
-        self.apply_state_transition(
+        if let Err(error) = self.set_status_by_command(
             RunStatus::CancellingStep,
             RunTransitionReason::StepCancellationRequested,
-        );
+        ) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run step cancellation rejected: run_id={} error={error}",
+                self.id,
+            );
+            return RunStepCancellationRequest::RunTerminal;
+        }
         self.events
             .push(RuntimeLifecycleEvent::StepCancellationRequested {
                 run_id: self.id.clone(),
@@ -660,10 +757,10 @@ impl Run {
             return Err(RunTransitionError::StepNotActive);
         }
         step.status = RunStepStatus::Finalizing;
-        self.apply_state_transition(
+        self.set_status_by_command(
             RunStatus::FinalizingStep,
             RunTransitionReason::StepFinalizationStarted,
-        );
+        )?;
         self.events
             .push(RuntimeLifecycleEvent::StepFinalizationStarted {
                 run_id: self.id.clone(),
@@ -745,10 +842,17 @@ impl Run {
         }
         self.termination = Some((run_reason, deadline));
         self.pending_interaction = None;
-        self.apply_state_transition(
+        if let Err(error) = self.set_status_by_command(
             RunStatus::Terminating,
             RunTransitionReason::TerminationRequested,
-        );
+        ) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run termination request rejected: run_id={} error={error}",
+                self.id,
+            );
+            return RunTerminationRequest::AlreadyTerminal;
+        }
         self.events
             .push(RuntimeLifecycleEvent::TerminationRequested {
                 run_id: self.id.clone(),
@@ -800,7 +904,7 @@ impl Run {
             );
             return Err(RunTransitionError::RunNotActive(self.status));
         }
-        self.apply_state_transition(RunStatus::Failed, RunTransitionReason::Failed);
+        self.set_status_by_command(RunStatus::Failed, RunTransitionReason::Failed)?;
         self.close_active_steps(RunStepStatus::Failed);
         self.events.push(RuntimeLifecycleEvent::Failed {
             run_id: self.id.clone(),
@@ -809,4 +913,37 @@ impl Run {
         });
         Ok(())
     }
+}
+
+/// 命令式状态设置的枚举白名单：只有列出的 `(from, to)` 组合允许写入状态。
+///
+/// 常规 Step 主流程迁移由 `RunTransition` 矩阵执行，不在此表范围内。
+fn command_status_allowed(from: RunStatus, to: RunStatus) -> bool {
+    if from.is_terminal() {
+        return false;
+    }
+    match to {
+        // 外部控制：终止与失败可从任意非终态发起。
+        RunStatus::Terminating | RunStatus::Failed => true,
+        // Step 取消的可取消性由 `request_step_cancellation` 自行校验。
+        RunStatus::CancellingStep => true,
+        // Step 收口只能从取消态进入。
+        RunStatus::FinalizingStep => from == RunStatus::CancellingStep,
+        // 交互暂停：只允许从工具/模型工作阶段进入。
+        RunStatus::AwaitingUser => matches!(
+            from,
+            RunStatus::InvokingModel
+                | RunStatus::ApplyingResponse
+                | RunStatus::AwaitingToolApproval
+                | RunStatus::ExecutingTools
+        ),
+        // 交互恢复：只能从 AwaitingUser 回到 continuation 保存的工作阶段。
+        RunStatus::ExecutingTools | RunStatus::PreparingContext => from == RunStatus::AwaitingUser,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn command_gate_allows(from: RunStatus, to: RunStatus) -> bool {
+    command_status_allowed(from, to)
 }

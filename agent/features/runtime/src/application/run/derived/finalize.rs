@@ -1,4 +1,4 @@
-use hook::{HookInvocation, HookPort, SubRunStopInput};
+use hook::{HookDispatcher, HookInvocationData};
 use std::sync::Arc;
 use tools::{AgentProgressKind, AgentProgressSourceContext};
 
@@ -8,7 +8,7 @@ pub use crate::application::loop_engine::run_finalization::{
 };
 
 pub(crate) struct SubRunFinalizationObserver<'a> {
-    pub hook_port: Arc<dyn HookPort>,
+    pub hook_port: Arc<dyn HookDispatcher>,
     pub activities: &'a crate::application::activity::ActivityCoordinator,
     pub run_step_id: sdk::RunStepId,
     pub workspace_root: &'a std::path::Path,
@@ -62,14 +62,14 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
             &self.hook_port,
             self.activities,
             &self.run_step_id,
-            HookInvocation::SubRunStop(SubRunStopInput {
+            HookInvocationData::SubRunStop {
                 prompt: self.prompt.to_string(),
                 system: self.system.to_string(),
                 model_spec: self.model_spec.map(str::to_string),
                 result: terminal.output(),
                 run_steps: outcome.run_steps,
                 is_error,
-            }),
+            },
             self.workspace_root,
             self.main_session_id,
             &tokio_util::sync::CancellationToken::new(),

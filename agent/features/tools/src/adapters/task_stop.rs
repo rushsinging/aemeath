@@ -3,7 +3,7 @@ use crate::domain::{CommittedTaskChange, ToolExecutionContext, TypedTool, TypedT
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{TaskAccess, TaskId, TaskStatus};
+use task::{TaskAccess, TaskIdData, TaskStatusData};
 
 pub struct TaskStopTool {
     pub access: Arc<dyn TaskAccess>,
@@ -13,13 +13,13 @@ pub struct TaskStopTool {
 #[path = "task_stop_tests.rs"]
 mod tests;
 
-fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::Task, String> {
-    let seq = TaskId::parse_tool_input(value)
-        .map(TaskId::get)
-        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
+fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::TaskData, String> {
+    let seq = TaskIdData::parse_tool_input(value)
+        .map(TaskIdData::get)
+        .map_err(|_| format!("TaskData ID must be a non-zero decimal number: {value}"))?;
     access
         .current_task_by_seq(seq)
-        .ok_or_else(|| format!("Task not found: {value}"))
+        .ok_or_else(|| format!("TaskData not found: {value}"))
 }
 
 #[async_trait]
@@ -64,14 +64,17 @@ impl TypedTool for TaskStopTool {
         };
         let id = task.id();
         match task.status() {
-            TaskStatus::Completed => {
+            TaskStatusData::Completed => {
                 return TypedToolResult::error(format!(
-                    "Task #{} is already completed and cannot be stopped",
+                    "TaskData #{} is already completed and cannot be stopped",
                     task.seq()
                 ))
             }
-            TaskStatus::Deleted => {
-                return TypedToolResult::error(format!("Task #{} is already deleted", task.seq()))
+            TaskStatusData::Deleted => {
+                return TypedToolResult::error(format!(
+                    "TaskData #{} is already deleted",
+                    task.seq()
+                ))
             }
             _ => {}
         }
@@ -84,7 +87,7 @@ impl TypedTool for TaskStopTool {
         };
         let task_change = CommittedTaskChange::from_command_result(&command_result);
         TypedToolResult::success(
-            format!("Task #{} stopped and marked as deleted", task.seq()),
+            format!("TaskData #{} stopped and marked as deleted", task.seq()),
             TaskStopResult {
                 task_id: task.seq().to_string(),
             },
