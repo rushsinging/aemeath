@@ -81,6 +81,7 @@ fn screen(view: &sdk::ConfigFormView, width: u16, height: u16) -> String {
         height,
         ConfigFormInteraction {
             multi_selection: std::collections::HashMap::new(),
+            focusing_actions: false,
             focused_field: 0,
             selected_option: 0,
             focused_action: 0,
@@ -97,6 +98,7 @@ fn selected_provider_is_visibly_marked_after_navigation() {
         20,
         ConfigFormInteraction {
             multi_selection: std::collections::HashMap::new(),
+            focusing_actions: false,
             focused_field: 0,
             selected_option: 1,
             focused_action: 0,
@@ -124,6 +126,7 @@ fn selected_action_is_visibly_marked() {
         20,
         ConfigFormInteraction {
             multi_selection: std::collections::HashMap::new(),
+            focusing_actions: false,
             focused_field: 0,
             selected_option: 0,
             focused_action: 1,
@@ -153,6 +156,7 @@ fn focused_text_input_sets_visible_terminal_cursor() {
                 0,
                 ConfigFormInteraction {
                     multi_selection: std::collections::HashMap::new(),
+                    focusing_actions: false,
                     focused_field: 0,
                     selected_option: 0,
                     focused_action: 0,
@@ -178,6 +182,7 @@ fn text_input_page_publishes_editing_shortcuts() {
         20,
         ConfigFormInteraction {
             multi_selection: std::collections::HashMap::new(),
+            focusing_actions: false,
             focused_field: 0,
             selected_option: 0,
             focused_action: 0,
@@ -217,6 +222,7 @@ fn replacing_page_clears_previous_frame_content() {
                 0,
                 ConfigFormInteraction {
                     multi_selection: std::collections::HashMap::new(),
+                    focusing_actions: false,
                     focused_field: 0,
                     selected_option: 0,
                     focused_action: 0,
@@ -237,6 +243,7 @@ fn replacing_page_clears_previous_frame_content() {
                 0,
                 ConfigFormInteraction {
                     multi_selection: std::collections::HashMap::new(),
+                    focusing_actions: false,
                     focused_field: 0,
                     selected_option: 0,
                     focused_action: 0,

@@ -163,7 +163,7 @@ fn review_page_displays_every_chosen_configuration() {
             "Provider",
             "Base URL",
             "API Key",
-            "模型",
+            "模型（默认）",
             "User-Agent",
             "全局默认模型"
         ]

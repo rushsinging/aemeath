@@ -105,9 +105,18 @@ fn connect_wizard_full_flow_shows_probe_result() {
     // 4. UA：Anthropic 有 catalog 官方 UA 预填，直接回车
     wait_screen("claude-cli", "UA 页", 10_000);
     submit("");
-    // 5. 模型页：空格勾选首项推荐模型后回车提交（全局默认已并入
-    //    模型编辑页，无独立 6/8 页）
+    // 5. 模型页：→ 进入 action 区（添加/编辑模型可达），先验证编辑页
+    //    入口再勾选提交（全局默认已并入编辑页，无独立 6/8 页）
     wait_screen("claude-fable", "模型页", 10_000);
+    key("right");
+    pause();
+    wait_screen("[添加模型]", "action 区高亮", 5_000);
+    submit("");
+    wait_screen("Model ID", "进入模型编辑页", 10_000);
+    // Esc 返回模型页，勾选首项提交
+    key("escape");
+    pause();
+    wait_screen("claude-fable", "返回模型页", 10_000);
     key("space");
     pause();
     submit("");

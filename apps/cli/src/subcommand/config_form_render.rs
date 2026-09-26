@@ -12,6 +12,8 @@ pub(crate) struct ConfigFormInteraction {
     pub(crate) focused_field: usize,
     pub(crate) selected_option: usize,
     pub(crate) focused_action: usize,
+    /// 焦点是否在 action 区（决定 action 高亮 [x] 形态）。
+    pub(crate) focusing_actions: bool,
     pub(crate) input_cursor_column: Option<usize>,
     /// MultiSelect 字段的勾选集合（字段索引 → 勾选 option 索引集合）。
     pub(crate) multi_selection: std::collections::HashMap<usize, std::collections::HashSet<usize>>,
@@ -259,7 +261,8 @@ fn render_footer(
         if action_index > 0 {
             action_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_DIM)));
         }
-        let selected = interaction.focused_action == action_index;
+        let action_is_focus = interaction.focusing_actions || view.page.fields.is_empty();
+        let selected = action_is_focus && interaction.focused_action == action_index;
         let label = if selected {
             format!("[{}]", action.label)
         } else {

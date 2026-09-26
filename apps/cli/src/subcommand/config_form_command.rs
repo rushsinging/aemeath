@@ -26,6 +26,8 @@ pub(crate) struct ConfigFormModel {
     field_inputs: Vec<String>,
     input_cursor: usize,
     selected_option: usize,
+    /// 焦点是否在底部 action 区（Tab / ←→ 切换）；Enter 触发聚焦 action。
+    focusing_actions: bool,
     /// MultiSelect 字段的勾选集合（字段索引 → 勾选的 option 索引集合）。
     multi_selection: std::collections::HashMap<usize, std::collections::HashSet<usize>>,
     focused_action: usize,
@@ -49,6 +51,7 @@ impl ConfigFormModel {
             field_inputs,
             input_cursor,
             selected_option: 0,
+            focusing_actions: false,
             multi_selection,
             focused_action,
             scroll: 0,
@@ -65,6 +68,7 @@ impl ConfigFormModel {
         self.focused_field = 0;
         self.selected_option = self.initial_selected_option();
         self.multi_selection = multi_selection_from_view(&self.view);
+        self.focusing_actions = false;
         self.focused_action = initial_focused_action(&self.view);
         self.scroll = 0;
         self.field_inputs = initial_field_inputs(&self.view);
@@ -99,6 +103,7 @@ impl ConfigFormModel {
             focused_field: self.focused_field,
             selected_option: self.selected_option,
             focused_action: self.focused_action,
+            focusing_actions: self.focusing_actions,
             input_cursor_column: self.input_cursor_column(),
             multi_selection: self.multi_selection.clone(),
         }
@@ -251,6 +256,38 @@ impl ConfigFormModel {
         if self.view.busy.is_some() || self.view.terminal.is_some() {
             return None;
         }
+        // 焦点在 action 区：回车直接触发聚焦 action（如"添加模型"）。
+        if self.focusing_actions {
+            let action = self.view.page.actions.get(self.focused_action)?.clone();
+            let option_suffix = self
+                .current_field()
+                .filter(|field| {
+                    matches!(
+                        field.field_type,
+                        sdk::ConfigFormFieldType::SingleSelect
+                            | sdk::ConfigFormFieldType::MultiSelect
+                    )
+                })
+                .and_then(|field| {
+                    field
+                        .options
+                        .get(self.selected_option)
+                        .map(|option| format!(":{}", option.id.as_str()))
+                })
+                .unwrap_or_default();
+            self.focusing_actions = false;
+            return Some(ConfigFormEffect::InvokeAction {
+                command: sdk::ConfigFormInvokeAction {
+                    session_id: self.view.session_id.clone(),
+                    expected_revision: self.view.revision,
+                    action_id: sdk::ConfigFormActionId(format!(
+                        "{}{}",
+                        action.id.as_str(),
+                        option_suffix
+                    )),
+                },
+            });
+        }
         // 无可提交字段（fields 为空，或全部为 Summary / Status 只读字段，
         // 如 ConfirmOverwrite 摘要页）时，回车触发聚焦 action（覆盖 / 返回），
         // 而不是提交空字段集导致"页面不接受字段提交"。
@@ -393,26 +430,63 @@ impl ConfigFormModel {
     }
 
     fn focus_next_region(&mut self) {
-        if self.view.page.fields.len() > 1 {
-            self.focus_next_field();
-        } else if self.view.page.fields.is_empty() && self.view.page.actions.len() > 1 {
+        // Tab：字段区 ↔ action 区轮转；action 区内切下一个 action。
+        if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+            }
+            return;
+        }
+        if self.focusing_actions {
             self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+        } else if self.view.page.fields.len() > 1 {
+            self.focus_next_field();
+        } else if !self.view.page.actions.is_empty() {
+            self.focusing_actions = true;
         }
     }
 
     fn focus_previous_region(&mut self) {
-        if self.view.page.fields.len() > 1 {
+        if self.view.page.fields.is_empty() {
+            if !self.view.page.actions.is_empty() {
+                self.focused_action = self
+                    .focused_action
+                    .checked_sub(1)
+                    .unwrap_or(self.view.page.actions.len() - 1);
+            }
+            return;
+        }
+        if self.focusing_actions {
+            self.focusing_actions = false;
+        } else if self.view.page.fields.len() > 1 {
             self.focus_previous_field();
-        } else if self.view.page.fields.is_empty() && self.view.page.actions.len() > 1 {
-            self.focused_action = self
-                .focused_action
-                .checked_sub(1)
-                .unwrap_or(self.view.page.actions.len() - 1);
+        }
+    }
+
+    /// ←→：action 区内切换；字段区非文本字段按 → 进入 action 区、← 回字段。
+    fn focus_action_region(&mut self, forward: bool) {
+        if self.view.page.actions.is_empty() {
+            return;
+        }
+        // 无字段页 action 即唯一焦点，直接切换。
+        if self.view.page.fields.is_empty() || self.focusing_actions {
+            if forward {
+                self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+            } else {
+                self.focused_action = self
+                    .focused_action
+                    .checked_sub(1)
+                    .unwrap_or(self.view.page.actions.len() - 1);
+            }
+        } else if !self.accepts_text_input() && forward {
+            self.focusing_actions = true;
         }
     }
 
     fn navigate_down(&mut self) {
-        if matches!(
+        if self.focusing_actions && !self.view.page.actions.is_empty() {
+            self.focused_action = (self.focused_action + 1) % self.view.page.actions.len();
+        } else if matches!(
             self.focused_field_type(),
             Some(sdk::ConfigFormFieldType::SingleSelect | sdk::ConfigFormFieldType::MultiSelect)
         ) {
@@ -425,7 +499,12 @@ impl ConfigFormModel {
     }
 
     fn navigate_up(&mut self) {
-        if matches!(
+        if self.focusing_actions && !self.view.page.actions.is_empty() {
+            self.focused_action = self
+                .focused_action
+                .checked_sub(1)
+                .unwrap_or(self.view.page.actions.len() - 1);
+        } else if matches!(
             self.focused_field_type(),
             Some(sdk::ConfigFormFieldType::SingleSelect | sdk::ConfigFormFieldType::MultiSelect)
         ) {
@@ -440,6 +519,8 @@ impl ConfigFormModel {
     fn navigate_left(&mut self) {
         if self.accepts_text_input() {
             self.input_cursor = self.input_cursor.saturating_sub(1);
+        } else if self.focusing_actions {
+            self.focus_action_region(false);
         } else if self.focused_field_type() == Some(sdk::ConfigFormFieldType::Boolean)
             || self.view.page.fields.is_empty()
         {
@@ -450,9 +531,13 @@ impl ConfigFormModel {
     fn navigate_right(&mut self) {
         if self.accepts_text_input() {
             self.input_cursor = (self.input_cursor + 1).min(self.input.chars().count());
-        } else if self.focused_field_type() == Some(sdk::ConfigFormFieldType::Boolean)
-            || self.view.page.fields.is_empty()
+        } else if self.focusing_actions
+            || (!self.view.page.actions.is_empty()
+                && self.focused_field_type() != Some(sdk::ConfigFormFieldType::Boolean))
         {
+            // →：进入 / 在 action 区内后移（Boolean 字段保留原切换语义）。
+            self.focus_action_region(true);
+        } else if self.view.page.fields.is_empty() {
             self.select_next();
         }
     }

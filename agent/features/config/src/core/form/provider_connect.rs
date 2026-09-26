@@ -320,15 +320,24 @@ fn page_for_connect(
             )
         }
         ConnectStage::ChooseProbe => ("choose_probe", "测试连接", Vec::new()),
-        ConnectStage::Probing => (
-            "probe_status",
-            "连接测试",
-            vec![status_field(
+        ConnectStage::Probing => {
+            let mut field = status_field(
                 "probe_status",
                 "状态",
                 probe_status_text(connect.probe_status.as_ref()),
-            )?],
-        ),
+            )?;
+            // 结果出来后明确确认语义；测试中提示等待。
+            field.description = match connect.probe_status.as_ref() {
+                Some(ProbeStatusView::Success { .. }) => {
+                    Some("回车确认继续；← 返回编辑".to_string())
+                }
+                Some(ProbeStatusView::Failed { .. }) => {
+                    Some("回车确认继续；← 返回编辑".to_string())
+                }
+                _ => Some("正在测试连接，请稍候…".to_string()),
+            };
+            ("probe_status", "连接测试", vec![field])
+        }
         ConnectStage::Review => ("review", "检查并保存", review_fields(connect)?),
         ConnectStage::Saving => (
             "saving",
@@ -886,33 +895,41 @@ fn review_fields(connect: &ConnectView) -> Result<Vec<ConfigFormField>, ConfigFo
             "未设置".to_string()
         },
     )?);
-    fields.push(summary_field(
-        "review_models",
-        "模型",
-        if connect.draft.models.is_empty() {
-            "未选择".to_string()
-        } else {
-            connect
+    // 模型列表分行显示：每模型一行（label 标注默认标记）。
+    if connect.draft.models.is_empty() {
+        fields.push(summary_field(
+            "review_models",
+            "模型",
+            "未选择".to_string(),
+        )?);
+    } else {
+        for model in &connect.draft.models {
+            let is_default = connect
                 .draft
-                .models
-                .iter()
-                .map(|model| {
-                    format!(
-                        "{}（Context {} · Max {}{}）",
-                        model.model_id,
-                        model.context_window.unwrap_or(0),
-                        model.max_tokens.unwrap_or(0),
-                        model
-                            .reasoning_effort
-                            .as_deref()
-                            .map(|effort| format!(" · {effort}"))
-                            .unwrap_or_default(),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("、")
-        },
-    )?);
+                .default_model_id
+                .as_deref()
+                .is_some_and(|target| target == model.model_id);
+            fields.push(summary_field(
+                &format!("review_model_{}", model.model_id),
+                if is_default {
+                    "模型（默认）"
+                } else {
+                    "模型"
+                },
+                format!(
+                    "{}（Context {} · Max {}{}）",
+                    model.model_id,
+                    model.context_window.unwrap_or(0),
+                    model.max_tokens.unwrap_or(0),
+                    model
+                        .reasoning_effort
+                        .as_deref()
+                        .map(|effort| format!(" · {effort}"))
+                        .unwrap_or_default(),
+                ),
+            )?);
+        }
+    }
     fields.push(summary_field(
         "review_user_agent",
         "User-Agent",
