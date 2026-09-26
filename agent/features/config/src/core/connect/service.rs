@@ -494,8 +494,10 @@ async fn run_async_operation(
 fn apply_async_outcome(session: &mut ConnectSession, outcome: AsyncOutcome) {
     match outcome {
         AsyncOutcome::ProbeSuccess { latency_ms } => {
+            // 成功同样停在结果页等待用户回车确认（ContinueAfterProbe）
+            // 才进入 Review，与失败路径一致。
             session.probe_status = Some(ProbeStatusView::Success { latency_ms });
-            session.stage = ConnectStage::Review;
+            session.stage = ConnectStage::Probing;
             session.last_error = None;
         }
         AsyncOutcome::ProbeFailed { kind, message } => {

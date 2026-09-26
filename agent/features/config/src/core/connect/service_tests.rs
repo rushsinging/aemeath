@@ -650,11 +650,14 @@ async fn probe_success_moves_directly_to_review() {
     let view = ready_to_probe(&service).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
     let result = wait_for_probe_result(&service, running.session_id).await;
-    assert_eq!(result.stage, ConnectStage::Review);
+    // 成功停在结果页等待用户确认，回车（ContinueAfterProbe）才进 Review。
+    assert_eq!(result.stage, ConnectStage::Probing);
     assert!(matches!(
         result.probe_status,
         Some(ProbeStatusView::Success { .. })
     ));
+    let review = advance(&service, result, ConnectCommand::ContinueAfterProbe).await;
+    assert_eq!(review.stage, ConnectStage::Review);
 }
 
 #[tokio::test]
