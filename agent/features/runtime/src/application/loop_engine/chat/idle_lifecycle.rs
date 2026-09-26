@@ -50,6 +50,8 @@ pub(crate) enum IdleResult {
     ResetRequested,
     Shutdown,
     CommandRequested(PendingCommand),
+    /// idle `/compact`：启动一次只执行压缩、不调用模型的 Run。
+    ManualCompactionRequested,
 }
 
 async fn await_idle_input<I: InputEventDrainPort>(
@@ -108,6 +110,9 @@ where
             IdleResult::ResetRequested => return IdleResult::ResetRequested,
             IdleResult::Shutdown => return IdleResult::Shutdown,
             IdleResult::CommandRequested(command) => return IdleResult::CommandRequested(command),
+            IdleResult::ManualCompactionRequested => {
+                return IdleResult::ManualCompactionRequested;
+            }
         }
     }
 }

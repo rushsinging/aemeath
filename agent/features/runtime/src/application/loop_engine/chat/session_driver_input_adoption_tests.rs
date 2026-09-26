@@ -804,7 +804,11 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
     let (input_tx, input_events) = ChannelInputEvents::new();
     input_tx.send(sdk::ChatInputEvent::Compact).unwrap();
 
+    let provider = Arc::new(ScriptedInvocationProvider::new(Vec::new()));
     let shell = test_shell();
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
     shell.set_test_session_id("test-idle-compact-command");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
@@ -846,6 +850,11 @@ async fn idle_compact_command_reaches_context_and_emits_result() {
             .iter()
             .any(|event| event.as_str() == "CommandResultText"),
         "跳过 compact 不得伪报成功"
+    );
+    assert_eq!(
+        provider.calls(),
+        0,
+        "手动压缩 Run 不得调用模型（脚本 provider 未提供任何 attempt）"
     );
 }
 

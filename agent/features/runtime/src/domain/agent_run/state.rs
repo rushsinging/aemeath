@@ -143,6 +143,7 @@ pub enum RunTransitionReason {
     DrainEmptyAndSealed,
     BeginCompaction,
     CompactionCompleted,
+    ManualCompactionSettled,
     ContextPrepared,
     RetryModel,
     ModelContextExceeded,
@@ -193,6 +194,8 @@ pub enum RunTransitionError {
         from: RunStatus,
         transition: RunTransition,
     },
+    #[error("非法命令状态设置：{from:?} → {to:?}")]
+    IllegalCommandTransition { from: RunStatus, to: RunStatus },
     #[error("Run 当前不是活动状态：{0:?}")]
     RunNotActive(RunStatus),
     #[error("未找到 Run Step")]

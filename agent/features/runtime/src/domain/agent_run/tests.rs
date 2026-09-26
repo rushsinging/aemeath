@@ -803,6 +803,7 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
             Some(RunStatus::DrainingInput)
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
+        (RunStatus::DrainingInput, RunTransition::BeginCompaction) => Some(RunStatus::Compacting),
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         _ => None,
     }
@@ -812,7 +813,7 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
 fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
     for from in ALL_RUN_STATUSES {
         for transition in ALL_RUN_TRANSITIONS {
-            let mut run = run_at_status(from);
+            let mut run = run_at_status_for_transition(from, transition);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
                 run.record_model_invocation(&step_id, ModelInvocation::new("response"))
@@ -832,6 +833,41 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
             }
         }
     }
+}
+
+/// 迁移合法性依赖 Run 形态：手动压缩入口只在 `ManualCompaction` 意图下合法；
+/// `CompactionCompleted` 的收口目标取决于是否存在活动 Step，因此矩阵测试需要为
+/// 这两类组合构造对应形态的 Run。
+fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) -> Run {
+    if transition == RunTransition::BeginCompaction && status == RunStatus::DrainingInput {
+        return manual_compaction_run_at_status(status);
+    }
+    if transition == RunTransition::CompactionCompleted && status == RunStatus::Compacting {
+        return automatic_compaction_run_at_compacting();
+    }
+    run_at_status(status)
+}
+
+fn manual_compaction_run_at_status(status: RunStatus) -> Run {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    match status {
+        RunStatus::DrainingInput => run,
+        RunStatus::Compacting => {
+            run.begin_manual_compaction().unwrap();
+            run
+        }
+        other => panic!("手动压缩 fixture 不支持状态: {other:?}"),
+    }
+}
+
+/// 自动压缩形态：上下文超限时 Step 仍活动，压缩完成后必须回到 `PreparingContext`。
+fn automatic_compaction_run_at_compacting() -> Run {
+    let mut run = run_at_status(RunStatus::InvokingModel);
+    run.begin_step().unwrap();
+    run.transition(RunTransition::ModelContextExceeded).unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+    run
 }
 
 #[test]
@@ -1981,4 +2017,151 @@ fn nested_derived_run_can_further_restrict_interaction() {
         sub2.with_interaction_kind(InteractionBindingMode::Client),
         Err(RunSpecError::CapabilityEscalation)
     );
+}
+
+// ── 手动压缩复用 Run 状态机 ────────────────────────────────────────────
+
+#[test]
+fn manual_compaction_spec_declares_compaction_only_intent() {
+    assert_eq!(RunSpec::main().intent(), RunIntent::Conversation);
+    assert_eq!(
+        RunSpec::manual_compaction().intent(),
+        RunIntent::ManualCompaction
+    );
+    assert_eq!(
+        RunSpec::manual_compaction()
+            .derive_sub("sub", Duration::from_secs(30))
+            .unwrap()
+            .intent(),
+        RunIntent::Conversation,
+        "派生 Run 不得继承 compaction-only 意图"
+    );
+}
+
+#[test]
+fn compaction_completed_without_active_step_settles_to_draining_input() {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+
+    run.begin_manual_compaction().unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+
+    run.transition(RunTransition::CompactionCompleted).unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RuntimeLifecycleEvent::Transitioned { reason, .. }
+                if *reason == RunTransitionReason::ManualCompactionSettled
+        )),
+        "无活动 Step 的压缩收口必须以 ManualCompactionSettled reason 记录"
+    );
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some(""))
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::Completed);
+}
+
+#[test]
+fn conversation_run_rejects_manual_compaction_command() {
+    let mut run = run_at_status(RunStatus::DrainingInput);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.begin_manual_compaction(),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::DrainingInput,
+            transition: RunTransition::BeginCompaction,
+        })
+    );
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的手动压缩命令不得发布迁移事件"
+    );
+}
+
+#[test]
+fn compaction_only_run_never_enters_model_invocation() {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+
+    assert_eq!(
+        run.transition(RunTransition::ContextPrepared),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::PreparingContext,
+            transition: RunTransition::ContextPrepared,
+        }),
+        "compaction-only Run 不得进入 InvokingModel"
+    );
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert!(
+        !run.events().iter().any(event_run_entered_invoking_model),
+        "被拒绝的上下文准备不得留下 InvokingModel 迁移事件"
+    );
+}
+
+// ── 命令式状态设置的唯一 gate ──────────────────────────────────────────
+
+#[test]
+fn command_status_gate_whitelist_is_explicit() {
+    let allowed = [
+        (RunStatus::DrainingInput, RunStatus::Terminating),
+        (RunStatus::PreparingContext, RunStatus::Terminating),
+        (RunStatus::InvokingModel, RunStatus::CancellingStep),
+        (RunStatus::ExecutingTools, RunStatus::AwaitingUser),
+        (RunStatus::AwaitingUser, RunStatus::ExecutingTools),
+        (RunStatus::AwaitingUser, RunStatus::PreparingContext),
+        (RunStatus::CancellingStep, RunStatus::FinalizingStep),
+        (RunStatus::ExecutingTools, RunStatus::Failed),
+    ];
+    for (from, to) in allowed {
+        assert!(
+            super::domain::command_gate_allows(from, to),
+            "白名单组合被拒绝: {from:?} → {to:?}"
+        );
+    }
+
+    let rejected = [
+        (RunStatus::Created, RunStatus::Compacting),
+        (RunStatus::Created, RunStatus::ExecutingTools),
+        (RunStatus::DrainingInput, RunStatus::InvokingModel),
+        (RunStatus::PreparingContext, RunStatus::FinalizingStep),
+        (RunStatus::AwaitingUser, RunStatus::AwaitingUser),
+        (RunStatus::Completed, RunStatus::Terminating),
+        (RunStatus::Failed, RunStatus::Terminating),
+    ];
+    for (from, to) in rejected {
+        assert!(
+            !super::domain::command_gate_allows(from, to),
+            "非白名单组合被放行: {from:?} → {to:?}"
+        );
+    }
+}
+
+#[test]
+fn command_status_writes_go_through_the_single_gate() {
+    let domain_source = include_str!("domain.rs");
+    assert_eq!(
+        domain_source
+            .matches("self.apply_state_transition(")
+            .count(),
+        2,
+        "状态写入只允许出现在 transition 矩阵与 set_status_by_command gate 两处"
+    );
+    assert!(
+        domain_source.contains("fn set_status_by_command("),
+        "domain 必须提供唯一的命令式状态写入入口"
+    );
+}
+
+fn event_run_entered_invoking_model(event: &RuntimeLifecycleEvent) -> bool {
+    matches!(
+        event,
+        RuntimeLifecycleEvent::Transitioned { to, .. } if *to == RunStatus::InvokingModel
+    )
 }
