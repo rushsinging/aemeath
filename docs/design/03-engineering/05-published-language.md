@@ -79,3 +79,33 @@ config 收敛为本批判例：根 PL 面按五类重组（命令 2 / 事件 4 /
 4. 白名单与 construction_symbols 同步；
 5. lib.rs PL 表格重写（DDD 五类分组 + 消费者 + 判定注释）；
 6. 三重验证：workspace 测试全过 / clippy 0 / guard 90 rules 0 violations。
+
+## 六、执行经验（七批沉淀：audit/policy/project/config/hook/task/provider）
+
+### 批量改名的坑
+1. 词边界替换防长尾：`\bSystemBlock\b` 不命中 `RequestSystemBlock`，但**无边界裸替换**会——按完整符号词从长到短替换，已完成项用占位符保护；
+2. 全仓替换前先核**单一定义**：同名不同型跨域符号（provider 与 context 各有 `SystemBlock`）会静默波及——按域 diff 审查、按批边界回滚；
+3. subprocess 中 grep 的 `\|` 转义失效导致**静默空跑**——两次独立 grep 合并，并打印处理文件数校验非零；
+4. 多行块括号三种尾形态（`});`/`})`/`)`）都要覆盖；`.into()` 必须在**错误值上**（`Err(X::V.into())`），Result 间无 From；
+5. **编译器行号驱动循环**优于全文正则猜：捕获 cargo check 的 stderr，按文件:行修→下一轮；处理数为 0 时停下看真实形态。
+
+### 错误折叠（DomainError）
+6. From 折叠必须 `.with_source(Arc::new(inner))`——否则细变体下钻断言全失败；
+7. pattern 位置禁函数调用——`Err(ref error) if error.message().contains(...)` 或 crate 内 `source_downcast_ref::<Inner>()`；
+8. message 断言先 `grep '#[error'` 取真实文案（有英文文案）；
+9. `#[from]` 同类型双变体冲突——后者去 `#[from]` 改手动 `map_err`；
+10. 错误 pub(crate) 后 crate 内 import 改 `crate::domain::X`；tests/ 目录走 message 断言。
+
+### 删除与收窄
+11. 零消费三重口径：跨 crate 零但内部活跃 → 降 `pub(crate)`；仅测试直连 → #1696 判定；签名载荷 → 随导出或 getter 透标量；
+12. 删符号连带删死测试，但先确认行为无活代码依赖。
+
+### 架构前置
+13. 加依赖前查 workspace-matrix（先改 registry 再动 Cargo.toml）；
+14. wire 更名/新增同步登记 `construction_symbols`（kind:"wire"）；
+15. 白名单用 dump 法（`tools/xtask/examples/dump.rs` → `guards_engine::index_file`）覆盖。
+
+### 批边界
+16. 结构性问题（信号/retry 类）→ 开 issue 挂 milestone + 贴完整现场，当批只做 PL 规范；
+17. PR 拆分：纯 PL 一个、行为重构一个；
+18. **每个 PR 合入前必须等用户确认**。
