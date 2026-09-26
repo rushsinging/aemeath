@@ -327,7 +327,7 @@ impl AgentRunner for CliAgentRunner {
                     "{}:sub-run-start",
                     derived.instance.run().id().as_ref()
                 )),
-                hook::HookInvocation::SubRunStart(hook::SubRunInput {
+                hook::HookInvocationData::SubRunStart(hook::SubRunInput {
                     prompt: prompt.to_string(),
                     system: system.clone(),
                     model_spec: Some(model_display.clone()),

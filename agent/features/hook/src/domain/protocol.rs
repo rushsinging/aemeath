@@ -4,13 +4,13 @@
 //! 将单次 hook 执行的原始结果（exit code + stdout JSON）分类为 directive，
 //! 并依据能力矩阵校验非阻塞 point 的 Block。
 //!
-//! #924 typed 分类：`classify_directive` 返回 `Result<HookDirective, ClassifyError>`。
+//! #924 typed 分类：`classify_directive` 返回 `Result<HookDirectiveData, ClassifyError>`。
 //! - exit 0 + 非法 JSON → `Err(InvalidJson)`；
 //! - 能力矩阵违规 → `Err(Protocol{...})`；
 //! - exit 1/2/127（任意非零）→ 阻塞 point `Ok(Block)`，非阻塞 point `Err(Protocol{BlockOnNonBlocking})`。
 
-use crate::domain::invocation::HookPoint;
-use crate::domain::outcome::{ClassifyError, HookDirective, HookReason, ProtocolViolation};
+use crate::domain::invocation::HookPointData;
+use crate::domain::outcome::{ClassifyError, HookDirectiveData, HookReasonData, ProtocolViolation};
 
 /// stdout/stderr 大小上限（字节）。超出部分截断。
 pub(crate) const OUTPUT_MAX_BYTES: usize = 8192;
@@ -78,11 +78,11 @@ pub(crate) fn truncate(text: &str) -> String {
 /// 分类失败（`Err`）对应 ExecutionFailed 路径，可重试；业务 Block 永不重试。
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn classify_directive(
-    point: HookPoint,
+    point: HookPointData,
     exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
-) -> Result<HookDirective, ClassifyError> {
+) -> Result<HookDirectiveData, ClassifyError> {
     // 公共签名保持兼容：丢弃 system_message，只返回 directive。
     classify_output(point, exit_code, stdout, stderr).map(|(directive, _system_message)| directive)
 }
@@ -92,15 +92,15 @@ pub fn classify_directive(
 /// 与 [`classify_directive`] 的唯一区别：返回 `(directive, system_message)`，其中
 /// `system_message` 取自 JSON `systemMessage` 字段，与 directive 无关、独立保留
 /// （`additionalContext` 仍折叠进 directive，由 dispatcher 再展开为逐条
-/// [`HookDisplayMessage`](crate::domain::outcome::HookDisplayMessage)）。
+/// [`HookDisplayMessageData`](crate::domain::outcome::HookDisplayMessageData)）。
 ///
 /// 分类失败（`Err`）时不携带 system_message（ExecutionFailed 路径不展示消息）。
 pub(crate) fn classify_output(
-    point: HookPoint,
+    point: HookPointData,
     exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
-) -> Result<(HookDirective, Option<String>), ClassifyError> {
+) -> Result<(HookDirectiveData, Option<String>), ClassifyError> {
     let meta = point.metadata();
 
     // ── exit_code=None：进程未正常退出，缺少退出码 → MissingExitCode ──
@@ -112,7 +112,7 @@ pub(crate) fn classify_output(
 
     // ── 非零 exit → Block（能力校验后）；未解析 JSON，无 system_message ──
     if code != 0 {
-        let block_reason = HookReason::ExitCode {
+        let block_reason = HookReasonData::ExitCode {
             code,
             stderr: truncate(stderr.trim()),
         };
@@ -122,12 +122,12 @@ pub(crate) fn classify_output(
     // ── exit 0 + 空 stdout → Continue ──
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return Ok((HookDirective::Continue, None));
+        return Ok((HookDirectiveData::Continue, None));
     }
 
     // ── exit 0 + 普通日志 → Continue；仅 `{` 前缀声明 JSON 协议输出 ──
     if !trimmed.starts_with('{') {
-        return Ok((HookDirective::Continue, None));
+        return Ok((HookDirectiveData::Continue, None));
     }
 
     // ── exit 0 + JSON 候选输出：非法 JSON → typed InvalidJson ──
@@ -147,7 +147,7 @@ pub(crate) fn classify_output(
     // ── JSON decision:block → Block ──
     if json.decision.as_deref() == Some("block") {
         let reason = json.reason.unwrap_or_default();
-        return enforce_block_permission(meta, HookReason::JsonBlock { reason })
+        return enforce_block_permission(meta, HookReasonData::JsonBlock { reason })
             .map(|d| (d, system_message));
     }
 
@@ -155,7 +155,7 @@ pub(crate) fn classify_output(
     if !json.r#continue {
         return enforce_block_permission(
             meta,
-            HookReason::JsonContinueFalse {
+            HookReasonData::JsonContinueFalse {
                 stop_reason: json.stop_reason,
             },
         )
@@ -184,13 +184,13 @@ pub(crate) fn classify_output(
     }
 
     let directive = match (context, updated_input) {
-        (Some(ctx), Some(inp)) => HookDirective::ContinueWithContextAndInput {
+        (Some(ctx), Some(inp)) => HookDirectiveData::ContinueWithContextAndInput {
             context: ctx,
             input: inp,
         },
-        (Some(ctx), None) => HookDirective::ContinueWithContext { context: ctx },
-        (None, Some(inp)) => HookDirective::ContinueWithUpdatedInput { input: inp },
-        (None, None) => HookDirective::Continue,
+        (Some(ctx), None) => HookDirectiveData::ContinueWithContext { context: ctx },
+        (None, Some(inp)) => HookDirectiveData::ContinueWithUpdatedInput { input: inp },
+        (None, None) => HookDirectiveData::Continue,
     };
     Ok((directive, system_message))
 }
@@ -201,10 +201,10 @@ pub(crate) fn classify_output(
 /// - `can_block=false` → `Err(Protocol{BlockOnNonBlocking})`（协议级故障，可重试）。
 fn enforce_block_permission(
     meta: crate::domain::metadata::HookPointMetadata,
-    reason: HookReason,
-) -> Result<HookDirective, ClassifyError> {
+    reason: HookReasonData,
+) -> Result<HookDirectiveData, ClassifyError> {
     if meta.can_block {
-        Ok(HookDirective::Block { reason })
+        Ok(HookDirectiveData::Block { reason })
     } else {
         Err(ClassifyError::Protocol {
             violation: ProtocolViolation::BlockOnNonBlocking,

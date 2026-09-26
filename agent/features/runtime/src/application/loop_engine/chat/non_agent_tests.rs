@@ -170,21 +170,21 @@ struct RecordingTaskHook {
 }
 
 #[async_trait]
-impl HookPort for RecordingTaskHook {
+impl HookDispatcher for RecordingTaskHook {
     async fn dispatch(
         &self,
-        invocation: HookInvocation,
+        invocation: HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+    ) -> hook::HookOutcomeData {
         let kind = match invocation {
-            HookInvocation::TaskCreated(_) => Some("created"),
-            HookInvocation::TaskCompleted(_) => Some("completed"),
+            HookInvocationData::TaskCreated(_) => Some("created"),
+            HookInvocationData::TaskCompleted(_) => Some("completed"),
             _ => None,
         };
         if let Some(kind) = kind {
             self.invocations.lock().unwrap().push(kind);
         }
-        hook::HookOutcome::proceed()
+        hook::HookOutcomeData::proceed()
     }
 }
 
@@ -246,7 +246,7 @@ impl ChatEventSink for NoopTaskEventSink {
 
 async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
     let hook = Arc::new(RecordingTaskHook::default());
-    let hook_port: Arc<dyn HookPort> = hook.clone();
+    let hook_port: Arc<dyn HookDispatcher> = hook.clone();
     let store = Arc::new(task::TaskStore::new());
     let revision = outcome
         .task_change

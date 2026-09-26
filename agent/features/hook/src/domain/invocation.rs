@@ -1,11 +1,11 @@
 //! Hook 触发点与 typed 调用请求。
 //!
 //! 对应设计：`docs/design/02-modules/hook/README.md` §2。
-//! 使用 enum 绑定 HookPoint 与 payload，禁止 `point + 无约束 JSON` 形成非法组合。
+//! 使用 enum 绑定 HookPointData 与 payload，禁止 `point + 无约束 JSON` 形成非法组合。
 
 use serde::{Deserialize, Serialize};
 
-// ─── HookPoint ────────────────────────────────────────────────
+// ─── HookPointData ────────────────────────────────────────────────
 
 /// Hook 触发点（26 个变体）。
 ///
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// adapter 可兼容 Claude Code 的 `SubagentStart/Stop` 名称。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum HookPoint {
+pub enum HookPointData {
     // ── 前置闸门 ──
     PreToolUse,
     UserPromptSubmit,
@@ -47,13 +47,13 @@ pub enum HookPoint {
     TeammateIdle,
 }
 
-// ─── HookInvocation ───────────────────────────────────────────
+// ─── HookInvocationData ───────────────────────────────────────────
 
 /// Hook 调用请求（typed dispatch）。
 ///
 /// 每个变体绑定 payload struct，消除 `point + 无约束 JSON` 的非法组合。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum HookInvocation {
+pub enum HookInvocationData {
     // ── 前置闸门 ──
     PreToolUse(PreToolUseInput),
     UserPromptSubmit(UserPromptInput),
@@ -87,36 +87,36 @@ pub enum HookInvocation {
     TeammateIdle(TeammateIdleInput),
 }
 
-impl HookInvocation {
+impl HookInvocationData {
     /// 返回该调用对应的触发点。
-    pub fn point(&self) -> HookPoint {
+    pub fn point(&self) -> HookPointData {
         match self {
-            Self::PreToolUse(_) => HookPoint::PreToolUse,
-            Self::UserPromptSubmit(_) => HookPoint::UserPromptSubmit,
-            Self::PreCompact(_) => HookPoint::PreCompact,
-            Self::PermissionRequest(_) => HookPoint::PermissionRequest,
-            Self::Elicitation(_) => HookPoint::Elicitation,
-            Self::UserPromptExpansion(_) => HookPoint::UserPromptExpansion,
-            Self::Stop(_) => HookPoint::Stop,
-            Self::PostToolUse(_) => HookPoint::PostToolUse,
-            Self::PostToolUseFailure(_) => HookPoint::PostToolUseFailure,
-            Self::PostCompact(_) => HookPoint::PostCompact,
-            Self::PostToolBatch(_) => HookPoint::PostToolBatch,
-            Self::ElicitationResult(_) => HookPoint::ElicitationResult,
-            Self::SessionStart(_) => HookPoint::SessionStart,
-            Self::SessionEnd(_) => HookPoint::SessionEnd,
-            Self::SubRunStart(_) => HookPoint::SubRunStart,
-            Self::SubRunStop(_) => HookPoint::SubRunStop,
-            Self::TaskCreated(_) => HookPoint::TaskCreated,
-            Self::TaskCompleted(_) => HookPoint::TaskCompleted,
-            Self::Notification(_) => HookPoint::Notification,
-            Self::InstructionsLoaded(_) => HookPoint::InstructionsLoaded,
-            Self::StopFailure(_) => HookPoint::StopFailure,
-            Self::PermissionDenied(_) => HookPoint::PermissionDenied,
-            Self::ConfigChange(_) => HookPoint::ConfigChange,
-            Self::CwdChanged(_) => HookPoint::CwdChanged,
-            Self::FileChanged(_) => HookPoint::FileChanged,
-            Self::TeammateIdle(_) => HookPoint::TeammateIdle,
+            Self::PreToolUse(_) => HookPointData::PreToolUse,
+            Self::UserPromptSubmit(_) => HookPointData::UserPromptSubmit,
+            Self::PreCompact(_) => HookPointData::PreCompact,
+            Self::PermissionRequest(_) => HookPointData::PermissionRequest,
+            Self::Elicitation(_) => HookPointData::Elicitation,
+            Self::UserPromptExpansion(_) => HookPointData::UserPromptExpansion,
+            Self::Stop(_) => HookPointData::Stop,
+            Self::PostToolUse(_) => HookPointData::PostToolUse,
+            Self::PostToolUseFailure(_) => HookPointData::PostToolUseFailure,
+            Self::PostCompact(_) => HookPointData::PostCompact,
+            Self::PostToolBatch(_) => HookPointData::PostToolBatch,
+            Self::ElicitationResult(_) => HookPointData::ElicitationResult,
+            Self::SessionStart(_) => HookPointData::SessionStart,
+            Self::SessionEnd(_) => HookPointData::SessionEnd,
+            Self::SubRunStart(_) => HookPointData::SubRunStart,
+            Self::SubRunStop(_) => HookPointData::SubRunStop,
+            Self::TaskCreated(_) => HookPointData::TaskCreated,
+            Self::TaskCompleted(_) => HookPointData::TaskCompleted,
+            Self::Notification(_) => HookPointData::Notification,
+            Self::InstructionsLoaded(_) => HookPointData::InstructionsLoaded,
+            Self::StopFailure(_) => HookPointData::StopFailure,
+            Self::PermissionDenied(_) => HookPointData::PermissionDenied,
+            Self::ConfigChange(_) => HookPointData::ConfigChange,
+            Self::CwdChanged(_) => HookPointData::CwdChanged,
+            Self::FileChanged(_) => HookPointData::FileChanged,
+            Self::TeammateIdle(_) => HookPointData::TeammateIdle,
         }
     }
 

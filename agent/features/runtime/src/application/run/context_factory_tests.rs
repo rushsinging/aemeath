@@ -27,30 +27,30 @@ fn main_spec() -> RunSpec {
 }
 
 async fn dispatch_stop_hook(context: &crate::application::run::context::RuntimeContext) -> bool {
-    use hook::{HookDirective, HookInvocation, StopInput};
+    use hook::{HookDirectiveData, HookInvocationData, StopInput};
     use tokio_util::sync::CancellationToken;
 
     let outcome = context
         .hooks()
         .dispatch_at(
-            HookInvocation::Stop(StopInput { run_steps: 1 }),
-            hook::HookDispatchContext::new(std::path::PathBuf::from("/tmp/sub-stop-workspace")),
+            HookInvocationData::Stop(StopInput { run_steps: 1 }),
+            hook::HookDispatchContextData::new(std::path::PathBuf::from("/tmp/sub-stop-workspace")),
             &CancellationToken::new(),
         )
         .await;
-    matches!(outcome.directive, HookDirective::Block { .. })
+    matches!(outcome.directive, HookDirectiveData::Block { .. })
 }
 
 async fn dispatch_sub_run_stop_hook(
     context: &crate::application::run::context::RuntimeContext,
 ) -> bool {
-    use hook::{HookInvocation, SubRunStopInput};
+    use hook::{HookInvocationData, SubRunStopInput};
     use tokio_util::sync::CancellationToken;
 
     let outcome = context
         .hooks()
         .dispatch(
-            HookInvocation::SubRunStop(SubRunStopInput {
+            HookInvocationData::SubRunStop(SubRunStopInput {
                 prompt: "prompt".to_string(),
                 system: "system".to_string(),
                 model_spec: None,

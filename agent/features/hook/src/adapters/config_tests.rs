@@ -7,14 +7,14 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::config::Config;
 
-use crate::adapters::config::{build_dispatcher, subscriptions_from_config};
-use crate::{HookMatcher, HookPoint};
+use crate::adapters::config::{subscriptions_from_config, wire_hook_dispatcher};
+use crate::{HookMatcherData, HookPointData};
 
 #[test]
 fn build_dispatcher_owns_process_environment_policy() {
-    let dispatcher = build_dispatcher(&ConfigSnapshot::new(Config::default()))
+    let dispatcher = wire_hook_dispatcher(&ConfigSnapshot::new(Config::default()))
         .expect("默认 Hook 配置应构造生产 Dispatcher");
-    let _hook_port: &dyn crate::ports::HookPort = &dispatcher;
+    let _hook_port: &dyn crate::ports::HookDispatcher = dispatcher.as_ref();
 }
 
 #[test]
@@ -51,18 +51,18 @@ fn subscriptions_from_config_preserves_event_entry_order_and_wire_fields() {
     let subscriptions = subscriptions_from_config(&config);
     let pre_tool = subscriptions
         .iter()
-        .filter(|subscription| subscription.point == HookPoint::PreToolUse)
+        .filter(|subscription| subscription.point == HookPointData::PreToolUse)
         .collect::<Vec<_>>();
 
     assert_eq!(pre_tool.len(), 2);
-    assert_eq!(pre_tool[0].matcher, HookMatcher::All);
+    assert_eq!(pre_tool[0].matcher, HookMatcherData::All);
     assert_eq!(pre_tool[0].command.command, "first");
     assert_eq!(pre_tool[0].timeout, Duration::from_secs(7));
     assert_eq!(pre_tool[0].order, 0);
     assert!(pre_tool[0].enabled);
     assert_eq!(
         pre_tool[1].matcher,
-        HookMatcher::ToolName("Bash".to_string())
+        HookMatcherData::ToolName("Bash".to_string())
     );
     assert_eq!(pre_tool[1].command.command, "second");
     assert_eq!(pre_tool[1].timeout, Duration::from_secs(9));
@@ -70,7 +70,7 @@ fn subscriptions_from_config_preserves_event_entry_order_and_wire_fields() {
     assert_eq!(
         subscriptions
             .iter()
-            .find(|subscription| subscription.point == HookPoint::Stop)
+            .find(|subscription| subscription.point == HookPointData::Stop)
             .expect("Stop subscription")
             .command
             .command,
@@ -95,5 +95,5 @@ fn subscriptions_from_config_maps_subagent_compatibility_points() {
     let subscriptions = subscriptions_from_config(&config);
 
     assert_eq!(subscriptions.len(), 1);
-    assert_eq!(subscriptions[0].point, HookPoint::SubRunStart);
+    assert_eq!(subscriptions[0].point, HookPointData::SubRunStart);
 }

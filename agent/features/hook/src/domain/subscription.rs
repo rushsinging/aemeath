@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use crate::domain::invocation::HookPoint;
+use crate::domain::invocation::HookPointData;
 
 // ─── HookSubscription ─────────────────────────────────────────
 
@@ -18,9 +18,9 @@ use crate::domain::invocation::HookPoint;
 #[derive(Debug, Clone)]
 pub struct HookSubscription {
     /// 触发点。
-    pub point: HookPoint,
+    pub point: HookPointData,
     /// 匹配器。
-    pub matcher: HookMatcher,
+    pub matcher: HookMatcherData,
     /// 执行命令。
     pub command: HookCommand,
     /// 单次执行超时。
@@ -35,10 +35,10 @@ pub struct HookSubscription {
 
 impl HookSubscription {
     /// 创建一个默认订阅（`All` matcher、order 0、无 failure_policy、60s 超时、enabled）。
-    pub fn new(point: HookPoint, command: impl Into<String>) -> Self {
+    pub fn new(point: HookPointData, command: impl Into<String>) -> Self {
         Self {
             point,
-            matcher: HookMatcher::All,
+            matcher: HookMatcherData::All,
             command: HookCommand::new(command),
             timeout: Duration::from_secs(60),
             failure_policy: None,
@@ -48,7 +48,7 @@ impl HookSubscription {
     }
 
     /// 设置匹配器。
-    pub fn with_matcher(mut self, matcher: HookMatcher) -> Self {
+    pub fn with_matcher(mut self, matcher: HookMatcherData) -> Self {
         self.matcher = matcher;
         self
     }
@@ -59,7 +59,8 @@ impl HookSubscription {
         self
     }
 
-    /// 设置失败策略。
+    /// 设置失败策略（测试构造用）。
+    #[cfg(test)]
     pub fn with_failure_policy(mut self, policy: HookFailurePolicy) -> Self {
         self.failure_policy = Some(policy);
         self
@@ -81,7 +82,7 @@ impl HookSubscription {
             return Ok(());
         };
         // Stop 固定 Block，禁止用户配置任何 failure_policy。
-        if self.point == HookPoint::Stop {
+        if self.point == HookPointData::Stop {
             return Err(SubscriptionError::FailurePolicyOnStop { point: self.point });
         }
         // Block 策略仅允许出现在 failure_policy_configurable=true 的 point。
@@ -97,20 +98,20 @@ impl HookSubscription {
 ///
 /// 对应设计 §4「非法组合在 Config 校验阶段拒绝，而非运行时静默忽略」。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SubscriptionError {
+pub(crate) enum SubscriptionError {
     /// Stop point 配置了 failure_policy（其语义固定为 Block，用户不可覆盖）。
     FailurePolicyOnStop {
         /// 违规的 point。
-        point: HookPoint,
+        point: HookPointData,
     },
     /// 在不支持配置 Block 策略的 point（非前置闸门）上声明了 `failure_policy=Block`。
     BlockPolicyOnNonConfigurablePoint {
         /// 违规的 point。
-        point: HookPoint,
+        point: HookPointData,
     },
 }
 
-// ─── HookMatcher ──────────────────────────────────────────────
+// ─── HookMatcherData ──────────────────────────────────────────────
 
 /// Hook 匹配器。
 ///
@@ -118,7 +119,7 @@ pub enum SubscriptionError {
 /// 本类型仅承载配置数据。空 / `All` 匹配所有；`ToolName` 精确匹配
 /// PreToolUse / PostToolUse / PermissionRequest 等带工具名的 point。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookMatcher {
+pub enum HookMatcherData {
     /// 匹配全部（默认）。
     All,
     /// 工具名精确匹配。
@@ -151,6 +152,7 @@ impl HookCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookFailurePolicy {
     /// 执行失败重试耗尽后继续。
+    #[allow(dead_code)] // 语义完备：未配置即默认 Continue，生产经隐式路径
     Continue,
     /// 执行失败重试耗尽后阻断。
     Block,
@@ -159,3 +161,19 @@ pub enum HookFailurePolicy {
 #[cfg(test)]
 #[path = "subscription_tests.rs"]
 mod tests;
+
+impl std::fmt::Display for SubscriptionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FailurePolicyOnStop { point } => {
+                write!(
+                    formatter,
+                    "Stop point（{point:?}）不允许配置 failure_policy"
+                )
+            }
+            Self::BlockPolicyOnNonConfigurablePoint { point } => {
+                write!(formatter, "point（{point:?}）不支持 Block 失败策略")
+            }
+        }
+    }
+}

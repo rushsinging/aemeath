@@ -13,14 +13,15 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::invocation::{
-    HookInvocation, HookPoint, PreToolUseInput, StopInput, UserPromptInput,
+    HookInvocationData, HookPointData, PreToolUseInput, StopInput, UserPromptInput,
 };
 use crate::domain::outcome::{
-    HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecutionStatus, HookReason,
+    HookDirectiveData, HookDisplayMessageData, HookDisplayMessageKindData, HookExecutionStatusData,
+    HookReasonData,
 };
-use crate::domain::subscription::{HookFailurePolicy, HookMatcher, HookSubscription};
+use crate::domain::subscription::{HookFailurePolicy, HookMatcherData, HookSubscription};
 use crate::ports::{
-    HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
+    HookDispatchContextData, HookDispatcher, HookSubscriptionExecutionEventData,
     HookSubscriptionExecutionObserver,
 };
 
@@ -30,28 +31,28 @@ use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
 // 测试辅助
 // ════════════════════════════════════════════════════════════
 
-fn pre_tool_use(tool_name: &str) -> HookInvocation {
-    HookInvocation::PreToolUse(PreToolUseInput {
+fn pre_tool_use(tool_name: &str) -> HookInvocationData {
+    HookInvocationData::PreToolUse(PreToolUseInput {
         tool_name: tool_name.to_string(),
         tool_input: serde_json::json!({}),
     })
 }
 
-fn stop(run_steps: usize) -> HookInvocation {
-    HookInvocation::Stop(StopInput { run_steps })
+fn stop(run_steps: usize) -> HookInvocationData {
+    HookInvocationData::Stop(StopInput { run_steps })
 }
 
-fn sub(point: HookPoint, command: &str) -> HookSubscription {
+fn sub(point: HookPointData, command: &str) -> HookSubscription {
     HookSubscription::new(point, command)
 }
 
 #[derive(Default)]
 struct RecordingSubscriptionObserver {
-    events: Mutex<Vec<HookSubscriptionExecutionEvent>>,
+    events: Mutex<Vec<HookSubscriptionExecutionEventData>>,
 }
 
 impl HookSubscriptionExecutionObserver for RecordingSubscriptionObserver {
-    fn observe(&self, event: HookSubscriptionExecutionEvent) {
+    fn observe(&self, event: HookSubscriptionExecutionEventData) {
         self.events.lock().expect("observer lock").push(event);
     }
 }
@@ -59,8 +60,8 @@ impl HookSubscriptionExecutionObserver for RecordingSubscriptionObserver {
 #[tokio::test]
 async fn consecutive_dispatches_use_only_current_workspace_and_payload_environment() {
     let subscriptions = vec![
-        sub(HookPoint::PreToolUse, "tool"),
-        sub(HookPoint::Stop, "stop"),
+        sub(HookPointData::PreToolUse, "tool"),
+        sub(HookPointData::Stop, "stop"),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
@@ -70,14 +71,14 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
     dispatcher
         .dispatch_at(
             pre_tool_use("Bash"),
-            HookDispatchContext::new(&first_workspace),
+            HookDispatchContextData::new(&first_workspace),
             &CancellationToken::new(),
         )
         .await;
     dispatcher
         .dispatch_at(
             stop(7),
-            HookDispatchContext::new(&second_workspace),
+            HookDispatchContextData::new(&second_workspace),
             &CancellationToken::new(),
         )
         .await;
@@ -110,8 +111,8 @@ async fn consecutive_dispatches_use_only_current_workspace_and_payload_environme
 #[tokio::test]
 async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
     let subscriptions = vec![
-        sub(HookPoint::Stop, "stop"),
-        sub(HookPoint::StopFailure, "observe"),
+        sub(HookPointData::Stop, "stop"),
+        sub(HookPointData::StopFailure, "observe"),
     ];
     // #1614：Timeout 单次终判不重试——Stop 一次超时耗尽即触发 StopFailure，
     // StopFailure 订阅消费第二步的 ok。
@@ -124,7 +125,7 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
     dispatcher
         .dispatch_at(
             stop(9),
-            HookDispatchContext::new("/tmp/aemeath-stop-workspace"),
+            HookDispatchContextData::new("/tmp/aemeath-stop-workspace"),
             &CancellationToken::new(),
         )
         .await;
@@ -145,8 +146,8 @@ async fn stop_failure_rebuilds_environment_without_stop_only_variables() {
 #[tokio::test]
 async fn dispatch_at_injects_session_id_environment_only_when_context_carries_it() {
     let subscriptions = vec![
-        sub(HookPoint::PreToolUse, "tool"),
-        sub(HookPoint::Stop, "stop"),
+        sub(HookPointData::PreToolUse, "tool"),
+        sub(HookPointData::Stop, "stop"),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
@@ -155,14 +156,14 @@ async fn dispatch_at_injects_session_id_environment_only_when_context_carries_it
     dispatcher
         .dispatch_at(
             pre_tool_use("Bash"),
-            HookDispatchContext::new(&workspace).with_session_id("sess-abc-123"),
+            HookDispatchContextData::new(&workspace).with_session_id("sess-abc-123"),
             &CancellationToken::new(),
         )
         .await;
     dispatcher
         .dispatch_at(
             stop(3),
-            HookDispatchContext::new(&workspace),
+            HookDispatchContextData::new(&workspace),
             &CancellationToken::new(),
         )
         .await;
@@ -177,8 +178,8 @@ async fn dispatch_at_injects_session_id_environment_only_when_context_carries_it
 #[tokio::test]
 async fn stop_failure_environment_inherits_session_id_from_context() {
     let subscriptions = vec![
-        sub(HookPoint::Stop, "stop"),
-        sub(HookPoint::StopFailure, "observe"),
+        sub(HookPointData::Stop, "stop"),
+        sub(HookPointData::StopFailure, "observe"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Timeout),
@@ -189,7 +190,8 @@ async fn stop_failure_environment_inherits_session_id_from_context() {
     dispatcher
         .dispatch_at(
             stop(5),
-            HookDispatchContext::new("/tmp/aemeath-stop-workspace").with_session_id("sess-def-456"),
+            HookDispatchContextData::new("/tmp/aemeath-stop-workspace")
+                .with_session_id("sess-def-456"),
             &CancellationToken::new(),
         )
         .await;
@@ -209,8 +211,10 @@ async fn stop_failure_environment_inherits_session_id_from_context() {
 #[tokio::test]
 async fn matcher_tool_name_only_executes_matching_subscription() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "bash-cmd").with_matcher(HookMatcher::ToolName("Bash".into())),
-        sub(HookPoint::PreToolUse, "edit-cmd").with_matcher(HookMatcher::ToolName("Edit".into())),
+        sub(HookPointData::PreToolUse, "bash-cmd")
+            .with_matcher(HookMatcherData::ToolName("Bash".into())),
+        sub(HookPointData::PreToolUse, "edit-cmd")
+            .with_matcher(HookMatcherData::ToolName("Edit".into())),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -235,7 +239,7 @@ async fn matcher_tool_name_only_executes_matching_subscription() {
 /// `All` matcher 匹配任意 invocation（含不同工具名）。
 #[tokio::test]
 async fn matcher_all_matches_any_invocation() {
-    let subs = vec![sub(HookPoint::PreToolUse, "all-cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "all-cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -251,8 +255,9 @@ async fn matcher_all_matches_any_invocation() {
 #[tokio::test]
 async fn matcher_tool_name_does_not_match_non_tool_point() {
     let subs = vec![
-        sub(HookPoint::Stop, "toolname-stop").with_matcher(HookMatcher::ToolName("Bash".into())),
-        sub(HookPoint::Stop, "all-stop"),
+        sub(HookPointData::Stop, "toolname-stop")
+            .with_matcher(HookMatcherData::ToolName("Bash".into())),
+        sub(HookPointData::Stop, "all-stop"),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -277,8 +282,8 @@ async fn matcher_tool_name_does_not_match_non_tool_point() {
 #[tokio::test]
 async fn order_same_uses_declaration_order() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a"),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a"),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -298,8 +303,8 @@ async fn order_same_uses_declaration_order() {
 #[tokio::test]
 async fn order_ascending_before_declaration() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a").with_order(10),
-        sub(HookPoint::PreToolUse, "b").with_order(0),
+        sub(HookPointData::PreToolUse, "a").with_order(10),
+        sub(HookPointData::PreToolUse, "b").with_order(0),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
@@ -323,8 +328,8 @@ async fn order_ascending_before_declaration() {
 #[tokio::test]
 async fn block_short_circuits_remaining_subscriptions() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "first"),
-        sub(HookPoint::PreToolUse, "second"),
+        sub(HookPointData::PreToolUse, "first"),
+        sub(HookPointData::PreToolUse, "second"),
     ];
     // first 返回非零 exit（主动 Block）；second 不应执行，故不为其入队步。
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(2, "denied")]);
@@ -342,8 +347,8 @@ async fn block_short_circuits_remaining_subscriptions() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::Block {
-                reason: HookReason::ExitCode { code: 2, .. }
+            HookDirectiveData::Block {
+                reason: HookReasonData::ExitCode { code: 2, .. }
             }
         ),
         "首个非零 exit 应短路为 Block{{ExitCode}}，实际 = {:?}",
@@ -359,8 +364,8 @@ async fn block_short_circuits_remaining_subscriptions() {
 #[tokio::test]
 async fn context_merged_in_execution_order() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a"),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a"),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_json(r#"{"additionalContext":"ctx-a"}"#),
@@ -374,7 +379,7 @@ async fn context_merged_in_execution_order() {
 
     assert_eq!(scripted.call_count(), 2);
     match outcome.directive {
-        HookDirective::ContinueWithContext { context } => {
+        HookDirectiveData::ContinueWithContext { context } => {
             assert_eq!(context, "ctx-a\nctx-b", "context 应按顺序以换行合并 a→b");
         }
         other => panic!("两次 ContinueWithContext 应合并为 ContinueWithContext，实际 = {other:?}"),
@@ -391,8 +396,8 @@ async fn context_merged_in_execution_order() {
 #[tokio::test]
 async fn updated_input_replaces_tool_input_at_payload_location() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a"),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a"),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_json(r#"{"hookSpecificOutput":{"updatedInput":{"rewritten":true}}}"#),
@@ -428,7 +433,7 @@ async fn updated_input_replaces_tool_input_at_payload_location() {
     );
     // 最终 directive 仍携带最后一次 UpdatedInput 的值（供调用方重新校验）。
     match outcome.directive {
-        HookDirective::ContinueWithUpdatedInput { input } => {
+        HookDirectiveData::ContinueWithUpdatedInput { input } => {
             assert_eq!(input, serde_json::json!({"rewritten": true}));
         }
         other => panic!("应为 ContinueWithUpdatedInput，实际 = {other:?}"),
@@ -440,8 +445,8 @@ async fn updated_input_replaces_tool_input_at_payload_location() {
 #[tokio::test]
 async fn updated_input_replaces_user_prompt_at_payload_location() {
     let subs = vec![
-        sub(HookPoint::UserPromptSubmit, "a"),
-        sub(HookPoint::UserPromptSubmit, "b"),
+        sub(HookPointData::UserPromptSubmit, "a"),
+        sub(HookPointData::UserPromptSubmit, "b"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_json(r#"{"hookSpecificOutput":{"updatedInput":"rewritten-prompt"}}"#),
@@ -451,7 +456,7 @@ async fn updated_input_replaces_user_prompt_at_payload_location() {
 
     dispatcher
         .dispatch(
-            HookInvocation::UserPromptSubmit(UserPromptInput {
+            HookInvocationData::UserPromptSubmit(UserPromptInput {
                 prompt: "original".to_string(),
             }),
             &CancellationToken::new(),
@@ -476,7 +481,7 @@ async fn updated_input_replaces_user_prompt_at_payload_location() {
 
 #[tokio::test]
 async fn configured_execution_attempt_limit_controls_failure_retries() {
-    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subscriptions = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Spawn),
         ScriptStep::fault(ExecutionFault::Spawn),
@@ -495,7 +500,7 @@ async fn configured_execution_attempt_limit_controls_failure_retries() {
 
 #[tokio::test]
 async fn unsupported_platform_failure_is_not_retried() {
-    let subscriptions = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subscriptions = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Unsupported),
         ScriptStep::fault(ExecutionFault::Unsupported),
@@ -510,14 +515,14 @@ async fn unsupported_platform_failure_is_not_retried() {
     assert_eq!(outcome.executions.len(), 1);
     assert!(matches!(
         outcome.executions[0].status,
-        HookExecutionStatus::ExecutionFailed { ref error }
+        HookExecutionStatusData::ExecutionFailed { ref error }
             if error == "当前平台不支持 Hook 命令执行"
     ));
 }
 
 /// 参数化：每种可恢复协议级故障连续发生时，最多执行默认策略的 3 次尝试。
 async fn assert_fault_retries_three_times(kind: ExecutionFault) {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(kind.clone()),
         ScriptStep::fault(kind.clone()),
@@ -538,7 +543,7 @@ async fn assert_fault_retries_three_times(kind: ExecutionFault) {
         outcome
             .executions
             .iter()
-            .all(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. })),
+            .all(|e| matches!(e.status, HookExecutionStatusData::ExecutionFailed { .. })),
         "{kind:?} 重试耗尽后所有 execution 应为 ExecutionFailed"
     );
 }
@@ -562,7 +567,7 @@ async fn retry_io_up_to_three() {
 /// 成倍放大（实测 Stop hook 600s×3≈30 分钟）。超时必须单次终判不重试。
 #[tokio::test]
 async fn timeout_does_not_retry() {
-    let subs = vec![sub(HookPoint::Stop, "stop-verify")];
+    let subs = vec![sub(HookPointData::Stop, "stop-verify")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Timeout),
         // 若错误重试，第二次调用会消费本步骤并把结果错计入执行轨迹。
@@ -583,7 +588,7 @@ async fn timeout_does_not_retry() {
         outcome
             .executions
             .iter()
-            .all(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. })),
+            .all(|e| matches!(e.status, HookExecutionStatusData::ExecutionFailed { .. })),
         "Timeout 终判后所有 execution 应为 ExecutionFailed"
     );
     assert_eq!(
@@ -596,7 +601,7 @@ async fn timeout_does_not_retry() {
 #[tokio::test]
 async fn retry_invalid_json_up_to_three() {
     // exit 0 + 非法 JSON → classify InvalidJson → ExecutionFailed 重试。
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_json("{not json"),
         ScriptStep::ok_json("{not json"),
@@ -613,7 +618,7 @@ async fn retry_invalid_json_up_to_three() {
         outcome
             .executions
             .iter()
-            .all(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. })),
+            .all(|e| matches!(e.status, HookExecutionStatusData::ExecutionFailed { .. })),
         "InvalidJson 重试耗尽后所有 execution 应为 ExecutionFailed"
     );
 }
@@ -625,7 +630,7 @@ async fn retry_invalid_json_up_to_three() {
 /// 两次 ExecutionFailed 后第三次成功 → 不再重试，directive 为成功结果。
 #[tokio::test]
 async fn third_attempt_succeeds_after_two_failures() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Io),
         ScriptStep::fault(ExecutionFault::Io),
@@ -639,20 +644,20 @@ async fn third_attempt_succeeds_after_two_failures() {
 
     assert_eq!(scripted.call_count(), 3, "第三次成功应恰好尝试 3 次");
     assert!(
-        matches!(outcome.directive, HookDirective::Continue),
+        matches!(outcome.directive, HookDirectiveData::Continue),
         "第三次成功（exit 0 + 空输出）应为 Continue，实际 = {:?}",
         outcome.directive
     );
 }
 
-/// 两次 ExecutionFailed 后第三次成功 → HookOutcome.executions 必须保留全部
+/// 两次 ExecutionFailed 后第三次成功 → HookOutcomeData.executions 必须保留全部
 /// 三条 attempt 明细（attempts 1/2/3），前两条 ExecutionFailed、第三条 Success。
 ///
 /// 回归测试：此前 `AttemptOutcome::Success` 仅携带最终成功的 execution，丢弃了
-/// prior executions（此前失败的 attempt），导致 HookOutcome.executions 丢失重试轨迹。
+/// prior executions（此前失败的 attempt），导致 HookOutcomeData.executions 丢失重试轨迹。
 #[tokio::test]
 async fn third_success_preserves_all_three_attempt_details() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Io),
         ScriptStep::fault(ExecutionFault::Io),
@@ -674,7 +679,7 @@ async fn third_success_preserves_all_three_attempt_details() {
     assert!(
         matches!(
             outcome.executions[0].status,
-            HookExecutionStatus::ExecutionFailed { .. }
+            HookExecutionStatusData::ExecutionFailed { .. }
         ),
         "第 1 条 attempt 应为 ExecutionFailed，实际 = {:?}",
         outcome.executions[0].status
@@ -683,7 +688,7 @@ async fn third_success_preserves_all_three_attempt_details() {
     assert!(
         matches!(
             outcome.executions[1].status,
-            HookExecutionStatus::ExecutionFailed { .. }
+            HookExecutionStatusData::ExecutionFailed { .. }
         ),
         "第 2 条 attempt 应为 ExecutionFailed，实际 = {:?}",
         outcome.executions[1].status
@@ -691,7 +696,10 @@ async fn third_success_preserves_all_three_attempt_details() {
     assert_eq!(outcome.executions[1].attempts, 2, "第 2 条 attempts 应为 2");
     // 第三条：Success，attempts 为 3。
     assert!(
-        matches!(outcome.executions[2].status, HookExecutionStatus::Success),
+        matches!(
+            outcome.executions[2].status,
+            HookExecutionStatusData::Success
+        ),
         "第 3 条 attempt 应为 Success，实际 = {:?}",
         outcome.executions[2].status
     );
@@ -704,7 +712,7 @@ async fn third_success_preserves_all_three_attempt_details() {
 
 #[tokio::test]
 async fn exit_code_1_blocks_once_without_retry() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(1, "nope")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -715,15 +723,15 @@ async fn exit_code_1_blocks_once_without_retry() {
     assert_eq!(scripted.call_count(), 1, "业务 Block（exit 1）不应重试");
     assert!(matches!(
         outcome.directive,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 1, .. }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 1, .. }
         }
     ));
 }
 
 #[tokio::test]
 async fn exit_code_2_blocks_once_without_retry() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(2, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -734,15 +742,15 @@ async fn exit_code_2_blocks_once_without_retry() {
     assert_eq!(scripted.call_count(), 1, "exit 2 是业务 Block，不重试");
     assert!(matches!(
         outcome.directive,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 2, .. }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 2, .. }
         }
     ));
 }
 
 #[tokio::test]
 async fn exit_code_127_blocks_once_without_retry() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(127, "command not found")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -753,8 +761,8 @@ async fn exit_code_127_blocks_once_without_retry() {
     assert_eq!(scripted.call_count(), 1, "exit 127 是业务 Block，不重试");
     assert!(matches!(
         outcome.directive,
-        HookDirective::Block {
-            reason: HookReason::ExitCode { code: 127, .. }
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode { code: 127, .. }
         }
     ));
 }
@@ -762,8 +770,8 @@ async fn exit_code_127_blocks_once_without_retry() {
 #[tokio::test]
 async fn stop_block_detail_keeps_blocking_subscription() {
     let subs = vec![
-        sub(HookPoint::Stop, "blocking-stop.sh").with_order(0),
-        sub(HookPoint::Stop, "passing-stop.sh").with_order(1),
+        sub(HookPointData::Stop, "blocking-stop.sh").with_order(0),
+        sub(HookPointData::Stop, "passing-stop.sh").with_order(1),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_exit(2, "").with_stderr("must finish work"),
@@ -789,7 +797,7 @@ async fn stop_block_detail_keeps_blocking_subscription() {
 /// 执行返回 Cancelled → 立即终止，不重试。
 #[tokio::test]
 async fn cancellation_is_not_retried() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::fault(ExecutionFault::Cancelled)]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -812,7 +820,7 @@ async fn cancellation_is_not_retried() {
 /// 普通 Hook（failure_policy=None）ExecutionFailed 重试耗尽 → 默认 Continue。
 #[tokio::test]
 async fn normal_hook_default_continue_on_exhausted_failures() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Io),
         ScriptStep::fault(ExecutionFault::Io),
@@ -826,7 +834,7 @@ async fn normal_hook_default_continue_on_exhausted_failures() {
 
     assert_eq!(scripted.call_count(), 3);
     assert!(
-        matches!(outcome.directive, HookDirective::Continue),
+        matches!(outcome.directive, HookDirectiveData::Continue),
         "未配置 failure_policy 的普通 Hook 重试耗尽应默认 Continue，实际 = {:?}",
         outcome.directive
     );
@@ -844,7 +852,7 @@ async fn normal_hook_default_continue_on_exhausted_failures() {
 #[tokio::test]
 async fn configured_block_policy_blocks_on_exhausted_failures() {
     let subs =
-        vec![sub(HookPoint::PreToolUse, "cmd").with_failure_policy(HookFailurePolicy::Block)];
+        vec![sub(HookPointData::PreToolUse, "cmd").with_failure_policy(HookFailurePolicy::Block)];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Io),
         ScriptStep::fault(ExecutionFault::Io),
@@ -858,7 +866,7 @@ async fn configured_block_policy_blocks_on_exhausted_failures() {
 
     assert_eq!(scripted.call_count(), 3);
     assert!(
-        matches!(outcome.directive, HookDirective::Block { .. }),
+        matches!(outcome.directive, HookDirectiveData::Block { .. }),
         "配置 failure_policy=Block 的 Hook 重试耗尽应 Block，实际 = {:?}",
         outcome.directive
     );
@@ -873,8 +881,8 @@ async fn configured_block_policy_blocks_on_exhausted_failures() {
 #[tokio::test]
 async fn stop_exhausted_synthesizes_block_and_one_stop_failure() {
     let subs = vec![
-        sub(HookPoint::Stop, "stop-cmd"),
-        sub(HookPoint::StopFailure, "stopfail-cmd"),
+        sub(HookPointData::Stop, "stop-cmd"),
+        sub(HookPointData::StopFailure, "stopfail-cmd"),
     ];
     // 3 次 Stop 失败 + 1 次 StopFailure 成功。
     let scripted = Scripted::from_steps([
@@ -903,8 +911,8 @@ async fn stop_exhausted_synthesizes_block_and_one_stop_failure() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::Block {
-                reason: HookReason::StopHookExecutionFailed { .. }
+            HookDirectiveData::Block {
+                reason: HookReasonData::StopHookExecutionFailed { .. }
             }
         ),
         "Stop 重试耗尽应合成 Block(StopHookExecutionFailed)，实际 = {:?}",
@@ -923,8 +931,8 @@ async fn stop_exhausted_synthesizes_block_and_one_stop_failure() {
 #[tokio::test]
 async fn stop_failure_does_not_recurse_on_own_failure() {
     let subs = vec![
-        sub(HookPoint::Stop, "stop-cmd"),
-        sub(HookPoint::StopFailure, "stopfail-cmd"),
+        sub(HookPointData::Stop, "stop-cmd"),
+        sub(HookPointData::StopFailure, "stopfail-cmd"),
     ];
     // Stop 3 次失败 + StopFailure 自身 3 次失败（不应再有第 4 次 StopFailure 会话）。
     let scripted = Scripted::from_steps([
@@ -955,8 +963,8 @@ async fn stop_failure_does_not_recurse_on_own_failure() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::Block {
-                reason: HookReason::StopHookExecutionFailed { .. }
+            HookDirectiveData::Block {
+                reason: HookReasonData::StopHookExecutionFailed { .. }
             }
         ),
         "StopFailure 失败不得改写 Stop 的 Block 语义，实际 = {:?}",
@@ -975,18 +983,18 @@ async fn stop_failure_does_not_recurse_on_own_failure() {
 #[tokio::test]
 async fn stop_failure_respects_enabled_matcher_and_order() {
     let disabled = {
-        let mut s = sub(HookPoint::StopFailure, "sf-disabled");
+        let mut s = sub(HookPointData::StopFailure, "sf-disabled");
         s.enabled = false;
         s
     };
     let subs = vec![
-        sub(HookPoint::Stop, "stop-cmd"),
+        sub(HookPointData::Stop, "stop-cmd"),
         // ToolName matcher：StopFailure 无工具名，永不命中。
-        sub(HookPoint::StopFailure, "sf-toolname")
-            .with_matcher(HookMatcher::ToolName("Bash".into())),
+        sub(HookPointData::StopFailure, "sf-toolname")
+            .with_matcher(HookMatcherData::ToolName("Bash".into())),
         // order 10 先声明、order 0 后声明：稳定排序后 order=0 先执行。
-        sub(HookPoint::StopFailure, "sf-late").with_order(10),
-        sub(HookPoint::StopFailure, "sf-early").with_order(0),
+        sub(HookPointData::StopFailure, "sf-late").with_order(10),
+        sub(HookPointData::StopFailure, "sf-early").with_order(0),
         disabled,
     ];
     // 3 次 Stop 失败 + 2 次 StopFailure 成功（按 order 0→10）。
@@ -1012,13 +1020,13 @@ async fn stop_failure_respects_enabled_matcher_and_order() {
     );
 }
 
-/// StopFailure subscription 的执行明细必须并入原 Stop HookOutcome.executions，
+/// StopFailure subscription 的执行明细必须并入原 Stop HookOutcomeData.executions，
 /// 而非被丢弃。
 #[tokio::test]
 async fn stop_failure_executions_merge_into_stop_outcome() {
     let subs = vec![
-        sub(HookPoint::Stop, "stop-cmd"),
-        sub(HookPoint::StopFailure, "sf-cmd"),
+        sub(HookPointData::Stop, "stop-cmd"),
+        sub(HookPointData::StopFailure, "sf-cmd"),
     ];
     // 3 次 Stop 失败（空 stdout）+ 1 次 StopFailure 成功，stdout 带 marker（合法 JSON → Continue）。
     let scripted = Scripted::from_steps([
@@ -1052,9 +1060,9 @@ async fn stop_failure_executions_merge_into_stop_outcome() {
 #[tokio::test]
 async fn stop_failure_continues_to_next_observer_after_one_exhausts() {
     let subs = vec![
-        sub(HookPoint::Stop, "stop-cmd"),
-        sub(HookPoint::StopFailure, "sf-a"),
-        sub(HookPoint::StopFailure, "sf-b"),
+        sub(HookPointData::Stop, "stop-cmd"),
+        sub(HookPointData::StopFailure, "sf-a"),
+        sub(HookPointData::StopFailure, "sf-b"),
     ];
     // 3 次 Stop 失败 + sf-a 3 次失败耗尽 + sf-b 成功。
     let scripted = Scripted::from_steps([
@@ -1087,7 +1095,7 @@ async fn stop_failure_continues_to_next_observer_after_one_exhausts() {
         outcome
             .executions
             .iter()
-            .any(|e| matches!(e.status, HookExecutionStatus::Success)),
+            .any(|e| matches!(e.status, HookExecutionStatusData::Success)),
         "sf-b 成功明细应并入 executions，实际 = {:?}",
         outcome.executions
     );
@@ -1095,8 +1103,8 @@ async fn stop_failure_continues_to_next_observer_after_one_exhausts() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::Block {
-                reason: HookReason::StopHookExecutionFailed { .. }
+            HookDirectiveData::Block {
+                reason: HookReasonData::StopHookExecutionFailed { .. }
             }
         ),
         "StopFailure 观察结果不得改写 Stop Block 语义，实际 = {:?}",
@@ -1112,7 +1120,7 @@ async fn stop_failure_continues_to_next_observer_after_one_exhausts() {
 /// 进入 ExecutionFailed 可重试路径，最多重试 3 次；**不得**按空 stdout 误判为 Continue。
 #[tokio::test]
 async fn missing_exit_code_retries_up_to_three() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([
         ScriptStep::no_exit_code(),
         ScriptStep::no_exit_code(),
@@ -1133,7 +1141,7 @@ async fn missing_exit_code_retries_up_to_three() {
         outcome
             .executions
             .iter()
-            .all(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. })),
+            .all(|e| matches!(e.status, HookExecutionStatusData::ExecutionFailed { .. })),
         "exit_code=None 重试耗尽后所有 execution 应为 ExecutionFailed"
     );
 }
@@ -1150,8 +1158,8 @@ async fn missing_exit_code_retries_up_to_three() {
 #[tokio::test]
 async fn default_policy_exhausted_continues_to_next_subscription() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a"),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a"),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     // a 三次失败耗尽；b 成功返回 ContinueWithContext。
     let scripted = Scripted::from_steps([
@@ -1176,7 +1184,7 @@ async fn default_policy_exhausted_continues_to_next_subscription() {
     let failed_count = outcome
         .executions
         .iter()
-        .filter(|e| matches!(e.status, HookExecutionStatus::ExecutionFailed { .. }))
+        .filter(|e| matches!(e.status, HookExecutionStatusData::ExecutionFailed { .. }))
         .count();
     assert_eq!(
         failed_count, 3,
@@ -1187,7 +1195,7 @@ async fn default_policy_exhausted_continues_to_next_subscription() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::ContinueWithContext { ref context } if context == "ctx-b"
+            HookDirectiveData::ContinueWithContext { ref context } if context == "ctx-b"
         ),
         "默认 policy 耗尽后应继续聚合后续成功 directive，实际 = {:?}",
         outcome.directive
@@ -1198,8 +1206,8 @@ async fn default_policy_exhausted_continues_to_next_subscription() {
 #[tokio::test]
 async fn continue_policy_exhausted_continues_to_next_subscription() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a").with_failure_policy(HookFailurePolicy::Continue),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a").with_failure_policy(HookFailurePolicy::Continue),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::fault(ExecutionFault::Io),
@@ -1220,7 +1228,7 @@ async fn continue_policy_exhausted_continues_to_next_subscription() {
         scripted.commands()
     );
     assert!(
-        matches!(outcome.directive, HookDirective::Continue),
+        matches!(outcome.directive, HookDirectiveData::Continue),
         "最终应聚合为 Continue，实际 = {:?}",
         outcome.directive
     );
@@ -1235,8 +1243,8 @@ async fn continue_policy_exhausted_continues_to_next_subscription() {
 #[tokio::test]
 async fn block_policy_exhausted_short_circuits_remaining_subscriptions() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a").with_failure_policy(HookFailurePolicy::Block),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a").with_failure_policy(HookFailurePolicy::Block),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     // a 三次失败耗尽 → Block 短路；b 不应执行，不为其入队步。
     let scripted = Scripted::from_steps([
@@ -1259,8 +1267,8 @@ async fn block_policy_exhausted_short_circuits_remaining_subscriptions() {
     assert!(
         matches!(
             outcome.directive,
-            HookDirective::Block {
-                reason: HookReason::PolicyBlock { .. }
+            HookDirectiveData::Block {
+                reason: HookReasonData::PolicyBlock { .. }
             }
         ),
         "Block policy 耗尽应合成 Block{{PolicyBlock}}，实际 = {:?}",
@@ -1276,7 +1284,7 @@ async fn block_policy_exhausted_short_circuits_remaining_subscriptions() {
 /// Cancelled 明细，而非压入 ExecutionFailed 文本或静默丢弃。
 #[tokio::test]
 async fn cancelled_records_typed_execution_status() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::fault(ExecutionFault::Cancelled)]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -1297,12 +1305,12 @@ async fn cancelled_records_typed_execution_status() {
     );
     assert!(matches!(
         outcome.executions[0].status,
-        HookExecutionStatus::Cancelled
+        HookExecutionStatusData::Cancelled
     ));
 }
 
 // ════════════════════════════════════════════════════════════
-// 15. BC 保留展示消息（HookOutcome.messages，#925）
+// 15. BC 保留展示消息（HookOutcomeData.messages，#925）
 // ════════════════════════════════════════════════════════════
 
 /// 单 subscription 同时返回 additionalContext 与 systemMessage →
@@ -1310,7 +1318,7 @@ async fn cancelled_records_typed_execution_status() {
 /// 各自携带正确的 point / source / attempt / execution_ordinal。
 #[tokio::test]
 async fn display_messages_preserves_both_kinds_from_one_subscription() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_json(
         r#"{"additionalContext":"ctx","systemMessage":"warn"}"#,
     )]);
@@ -1320,15 +1328,15 @@ async fn display_messages_preserves_both_kinds_from_one_subscription() {
         .dispatch(pre_tool_use("Bash"), &CancellationToken::new())
         .await;
 
-    let ctx_msgs: Vec<&HookDisplayMessage> = outcome
+    let ctx_msgs: Vec<&HookDisplayMessageData> = outcome
         .messages
         .iter()
-        .filter(|m| m.kind == HookDisplayMessageKind::AdditionalContext)
+        .filter(|m| m.kind == HookDisplayMessageKindData::AdditionalContext)
         .collect();
-    let sys_msgs: Vec<&HookDisplayMessage> = outcome
+    let sys_msgs: Vec<&HookDisplayMessageData> = outcome
         .messages
         .iter()
-        .filter(|m| m.kind == HookDisplayMessageKind::SystemMessage)
+        .filter(|m| m.kind == HookDisplayMessageKindData::SystemMessage)
         .collect();
 
     assert_eq!(
@@ -1347,7 +1355,7 @@ async fn display_messages_preserves_both_kinds_from_one_subscription() {
     assert_eq!(sys_msgs[0].text, "warn");
     // point / source / attempt / execution_ordinal（All matcher，第 1 次成功执行）。
     for m in &outcome.messages {
-        assert_eq!(m.point, HookPoint::PreToolUse);
+        assert_eq!(m.point, HookPointData::PreToolUse);
         assert_eq!(m.source, "*", "All matcher 的稳定来源应为 *");
         assert_eq!(m.attempt, 1, "首次成功 attempt 应为 1");
         assert_eq!(m.execution_ordinal, 1, "首条 execution 的序号应为 1");
@@ -1355,15 +1363,15 @@ async fn display_messages_preserves_both_kinds_from_one_subscription() {
     // directive 仍聚合 context（注入用），与逐条展示消息分离。
     assert!(matches!(
         outcome.directive,
-        HookDirective::ContinueWithContext { ref context } if context == "ctx"
+        HookDirectiveData::ContinueWithContext { ref context } if context == "ctx"
     ));
 }
 
 /// `ToolName` matcher 的来源应为工具名本身（稳定非秘密值）。
 #[tokio::test]
 async fn display_message_source_reflects_tool_name_matcher() {
-    let subs =
-        vec![sub(HookPoint::PreToolUse, "cmd").with_matcher(HookMatcher::ToolName("Bash".into()))];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")
+        .with_matcher(HookMatcherData::ToolName("Bash".into()))];
     let scripted = Scripted::from_steps([ScriptStep::ok_json(r#"{"systemMessage":"hi"}"#)]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -1378,7 +1386,7 @@ async fn display_message_source_reflects_tool_name_matcher() {
     );
     assert_eq!(
         outcome.messages[0].kind,
-        HookDisplayMessageKind::SystemMessage
+        HookDisplayMessageKindData::SystemMessage
     );
 }
 
@@ -1387,8 +1395,8 @@ async fn display_message_source_reflects_tool_name_matcher() {
 #[tokio::test]
 async fn display_messages_ordinal_and_attempt_across_subscriptions() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "a"),
-        sub(HookPoint::PreToolUse, "b"),
+        sub(HookPointData::PreToolUse, "a"),
+        sub(HookPointData::PreToolUse, "b"),
     ];
     let scripted = Scripted::from_steps([
         ScriptStep::ok_json(r#"{"additionalContext":"ctx-a"}"#),
@@ -1410,12 +1418,12 @@ async fn display_messages_ordinal_and_attempt_across_subscriptions() {
     // a 先执行：ordinal=1, attempt=1, AdditionalContext(ctx-a)。
     assert_eq!(m0.execution_ordinal, 1);
     assert_eq!(m0.attempt, 1);
-    assert_eq!(m0.kind, HookDisplayMessageKind::AdditionalContext);
+    assert_eq!(m0.kind, HookDisplayMessageKindData::AdditionalContext);
     assert_eq!(m0.text, "ctx-a");
     // b 后执行：ordinal=2, attempt=1, SystemMessage(warn-b)。
     assert_eq!(m1.execution_ordinal, 2);
     assert_eq!(m1.attempt, 1);
-    assert_eq!(m1.kind, HookDisplayMessageKind::SystemMessage);
+    assert_eq!(m1.kind, HookDisplayMessageKindData::SystemMessage);
     assert_eq!(m1.text, "warn-b");
 }
 
@@ -1424,8 +1432,8 @@ async fn display_messages_ordinal_and_attempt_across_subscriptions() {
 #[tokio::test]
 async fn display_message_attempt_and_ordinal_after_retries() {
     let subs = vec![
-        sub(HookPoint::PreToolUse, "flaky"),
-        sub(HookPoint::PreToolUse, "stable"),
+        sub(HookPointData::PreToolUse, "flaky"),
+        sub(HookPointData::PreToolUse, "stable"),
     ];
     // flaky：两次失败后第三次成功返回 systemMessage；stable：首次成功返回 additionalContext。
     let scripted = Scripted::from_steps([
@@ -1444,7 +1452,7 @@ async fn display_message_attempt_and_ordinal_after_retries() {
     assert_eq!(outcome.messages.len(), 2, "实际 = {:?}", outcome.messages);
     // flaky 第三次成功：该 execution 是聚合 executions 的第 3 条（ordinal=3），attempt=3。
     let flaky_msg = &outcome.messages[0];
-    assert_eq!(flaky_msg.kind, HookDisplayMessageKind::SystemMessage);
+    assert_eq!(flaky_msg.kind, HookDisplayMessageKindData::SystemMessage);
     assert_eq!(flaky_msg.text, "finally");
     assert_eq!(flaky_msg.attempt, 3, "flaky 第三次成功的 attempt 应为 3");
     assert_eq!(
@@ -1453,7 +1461,10 @@ async fn display_message_attempt_and_ordinal_after_retries() {
     );
     // stable 首次成功：聚合 executions 的第 4 条（ordinal=4），attempt=1。
     let stable_msg = &outcome.messages[1];
-    assert_eq!(stable_msg.kind, HookDisplayMessageKind::AdditionalContext);
+    assert_eq!(
+        stable_msg.kind,
+        HookDisplayMessageKindData::AdditionalContext
+    );
     assert_eq!(stable_msg.text, "ctx-stable");
     assert_eq!(stable_msg.attempt, 1);
     assert_eq!(stable_msg.execution_ordinal, 4);
@@ -1479,12 +1490,12 @@ fn script_file_name_reconstructs_adjacent_quoted_and_unquoted_command_segments()
 async fn subscription_execution_events_follow_order_and_expose_only_script_file_name() {
     let subs = vec![
         sub(
-            HookPoint::PreToolUse,
+            HookPointData::PreToolUse,
             "${AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh --secret value",
         )
         .with_order(20),
         sub(
-            HookPoint::PreToolUse,
+            HookPointData::PreToolUse,
             "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
         )
         .with_order(10),
@@ -1501,25 +1512,25 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
     assert_eq!(
         observer.events.lock().expect("observer events").as_slice(),
         [
-            HookSubscriptionExecutionEvent::Started {
-                point: HookPoint::PreToolUse,
+            HookSubscriptionExecutionEventData::Started {
+                point: HookPointData::PreToolUse,
                 script: "check-first.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEvent::Finished {
-                point: HookPoint::PreToolUse,
+            HookSubscriptionExecutionEventData::Finished {
+                point: HookPointData::PreToolUse,
                 script: "check-first.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
             },
-            HookSubscriptionExecutionEvent::Started {
-                point: HookPoint::PreToolUse,
+            HookSubscriptionExecutionEventData::Started {
+                point: HookPointData::PreToolUse,
                 script: "check-second.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEvent::Finished {
-                point: HookPoint::PreToolUse,
+            HookSubscriptionExecutionEventData::Finished {
+                point: HookPointData::PreToolUse,
                 script: "check-second.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
             },
         ]
     );
@@ -1532,11 +1543,11 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
 async fn commands_pass_through_verbatim_and_project_dir_reaches_env_only() {
     let subs = vec![
         sub(
-            HookPoint::PreToolUse,
+            HookPointData::PreToolUse,
             "\"${AEMEATH_PROJECT_DIR}/.agents/hooks/check-first.sh\" --fast",
         ),
         sub(
-            HookPoint::PreToolUse,
+            HookPointData::PreToolUse,
             "{AEMEATH_PROJECT_DIR}/.agents/hooks/check-second.sh",
         ),
     ];
@@ -1547,7 +1558,7 @@ async fn commands_pass_through_verbatim_and_project_dir_reaches_env_only() {
     dispatcher
         .dispatch_at(
             pre_tool_use("Bash"),
-            HookDispatchContext::new(&workspace),
+            HookDispatchContextData::new(&workspace),
             &CancellationToken::new(),
         )
         .await;
@@ -1583,9 +1594,11 @@ async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
         ScriptStep::ok_exit(0, ""),
     ]);
     let observer = Arc::new(RecordingSubscriptionObserver::default());
-    let dispatcher =
-        Dispatcher::with_scripted(vec![sub(HookPoint::Stop, "/hooks/check-stop.sh")], scripted)
-            .with_subscription_execution_observer(observer.clone());
+    let dispatcher = Dispatcher::with_scripted(
+        vec![sub(HookPointData::Stop, "/hooks/check-stop.sh")],
+        scripted,
+    )
+    .with_subscription_execution_observer(observer.clone());
 
     dispatcher
         .dispatch(stop(1), &CancellationToken::new())
@@ -1594,20 +1607,20 @@ async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
     assert_eq!(
         observer.events.lock().expect("observer events").as_slice(),
         [
-            HookSubscriptionExecutionEvent::Started {
-                point: HookPoint::Stop,
+            HookSubscriptionExecutionEventData::Started {
+                point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEvent::AttemptChanged {
-                point: HookPoint::Stop,
+            HookSubscriptionExecutionEventData::AttemptChanged {
+                point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
                 attempt: 2,
             },
-            HookSubscriptionExecutionEvent::Finished {
-                point: HookPoint::Stop,
+            HookSubscriptionExecutionEventData::Finished {
+                point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminal::Succeeded,
+                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
             },
         ]
     );
@@ -1616,7 +1629,7 @@ async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
 /// 没有 additionalContext / systemMessage 的成功执行不应产生展示消息。
 #[tokio::test]
 async fn display_messages_empty_when_no_context_or_system_message() {
-    let subs = vec![sub(HookPoint::PreToolUse, "cmd")];
+    let subs = vec![sub(HookPointData::PreToolUse, "cmd")];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subs, scripted.clone());
 
@@ -1637,8 +1650,8 @@ async fn display_messages_empty_when_no_context_or_system_message() {
 #[tokio::test]
 async fn dispatch_stdin_dual_writes_flat_event_name_and_session_id() {
     let subscriptions = vec![
-        sub(HookPoint::PreToolUse, "tool"),
-        sub(HookPoint::Stop, "stop"),
+        sub(HookPointData::PreToolUse, "tool"),
+        sub(HookPointData::Stop, "stop"),
     ];
     let scripted = Scripted::from_steps([ScriptStep::ok_exit(0, ""), ScriptStep::ok_exit(0, "")]);
     let dispatcher = Dispatcher::with_scripted(subscriptions, scripted.clone());
@@ -1647,14 +1660,14 @@ async fn dispatch_stdin_dual_writes_flat_event_name_and_session_id() {
     dispatcher
         .dispatch_at(
             pre_tool_use("Bash"),
-            HookDispatchContext::new(&workspace).with_session_id("sess-dual-1"),
+            HookDispatchContextData::new(&workspace).with_session_id("sess-dual-1"),
             &CancellationToken::new(),
         )
         .await;
     dispatcher
         .dispatch_at(
             stop(2),
-            HookDispatchContext::new(&workspace),
+            HookDispatchContextData::new(&workspace),
             &CancellationToken::new(),
         )
         .await;

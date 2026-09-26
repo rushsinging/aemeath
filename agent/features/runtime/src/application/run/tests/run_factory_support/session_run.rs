@@ -45,7 +45,7 @@ pub(crate) struct SessionRunFixture {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     policy: Arc<dyn crate::ports::Policy>,
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
 }
 impl SessionRunFixture {
@@ -107,7 +107,7 @@ impl SessionRunFixture {
         &self.policy
     }
 
-    pub(crate) fn hooks(&self) -> &Arc<dyn hook::HookPort> {
+    pub(crate) fn hooks(&self) -> &Arc<dyn hook::HookDispatcher> {
         &self.hooks
     }
 
@@ -135,7 +135,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: RecordingEventSink,
     event_sink_handle: Option<crate::application::loop_engine::chat::ChatEventSinkHandle>,
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::ToolExecutionPort>,
     policy: Arc<dyn crate::ports::Policy>,

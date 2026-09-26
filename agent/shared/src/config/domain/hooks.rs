@@ -1,7 +1,7 @@
 //! Hook 配置定义
 //!
 //! 参考 Claude Code hook 系统，定义 Aemeath 可解析的 Hook 配置 surface。
-//! HookEvent / HookInvocation 的稳定 PL 存在不等于生产触发已接线；实际 emit 与消费状态
+//! HookEvent / HookInvocationData 的稳定 PL 存在不等于生产触发已接线；实际 emit 与消费状态
 //! 以 `docs/design/02-modules/hook/README.md` 的 production reachability 矩阵为准。
 //!
 //! ## 事件类型（26 个）

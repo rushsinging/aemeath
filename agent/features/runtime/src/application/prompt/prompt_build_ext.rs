@@ -1,7 +1,7 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::application::prompt::instructions_hook::PromptInstructionsHook;
-use hook::HookPort;
+use hook::HookDispatcher;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ pub async fn build_static_prompt(
     model: &str,
     reasoning: bool,
     config_file: Option<&ConfigSnapshot>,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     prompt_parts: crate::application::prompt::build::SystemPromptParts,
 ) -> String {
     let guidance_config = config_file
@@ -103,12 +103,10 @@ mod tests {
 
     #[tokio::test]
     async fn build_static_prompt_does_not_embed_execution_discipline() {
-        let hook_port: Arc<dyn HookPort> = Arc::new(
-            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-                share::config::Config::default(),
-            ))
-            .unwrap(),
-        );
+        let hook_port: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+            &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+        )
+        .unwrap();
         let prompt = build_static_prompt(
             std::path::Path::new("/tmp/project"),
             "fake/model",

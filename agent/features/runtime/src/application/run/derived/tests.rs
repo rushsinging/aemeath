@@ -58,13 +58,13 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
         hooks: {
             struct FakeHook;
             #[async_trait]
-            impl hook::HookPort for FakeHook {
+            impl hook::HookDispatcher for FakeHook {
                 async fn dispatch(
                     &self,
-                    _invocation: hook::HookInvocation,
+                    _invocation: hook::HookInvocationData,
                     _cancellation: &dyn hook::CancellationSignal,
-                ) -> hook::HookOutcome {
-                    hook::HookOutcome::proceed()
+                ) -> hook::HookOutcomeData {
+                    hook::HookOutcomeData::proceed()
                 }
             }
             Arc::new(FakeHook)
