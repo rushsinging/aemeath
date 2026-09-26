@@ -1,5 +1,4 @@
 use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryLayer};
-use crate::ports::ReflectionApplyResult;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -138,6 +137,18 @@ pub struct ReflectionSafeSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ReflectionTokenUsage>,
     pub duration_ms: u64,
+}
+
+/// 申请结果值对象：Reflection 建议的应用完成度（原摆放于 ports，依赖方向回归 domain）。
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ReflectionApplyResult {
+    /// Number of requested operations (suggestions plus outdated-memory marks).
+    pub attempted: usize,
+    /// Number of operations durably completed. This can be smaller than
+    /// `attempted` when a cross-layer apply returns `MemoryError::PartialApply`.
+    pub completed: usize,
+    pub suggestions_added: usize,
+    pub outdated_marked: usize,
 }
 
 /// One completed Reflection result. Persistence is supplied by a separate adapter.

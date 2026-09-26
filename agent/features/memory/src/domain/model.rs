@@ -246,3 +246,40 @@ mod tests {
         assert_eq!(candidates[0].entry, normal);
     }
 }
+
+/// 记忆条目所在位置（原摆放于 ports，依赖方向回归 domain）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryLocation {
+    Active,
+    Archive,
+}
+
+/// 淘汰候选值对象（原摆放于 ports，依赖方向回归 domain）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvictionCandidate {
+    pub entry: MemoryEntry,
+    pub ttl_expired: bool,
+    pub eviction_score: i64,
+    pub eviction_reason: String,
+}
+
+/// 搜索命中值对象（原摆放于 ports，依赖方向回归 domain）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemorySearchHit {
+    pub entry: MemoryEntry,
+    pub location: MemoryLocation,
+    pub outdated: bool,
+    pub ttl_expired: bool,
+    pub relevance: Option<f64>,
+}
+
+/// 显式搜索查询值对象（原摆放于 ports，依赖方向回归 domain）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemorySearchQuery {
+    pub text: String,
+    pub limit: usize,
+    pub layer: Option<MemoryLayer>,
+    pub category: Option<MemoryCategory>,
+    pub include_archive: bool,
+    pub now: u64,
+}

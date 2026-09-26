@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use super::MemoryLocation;
 use super::{search_tie_break_score, MemoryEntry};
-use crate::ports::{MemoryLocation, MemorySearchHit, MemorySearchQuery};
+use super::{MemorySearchHit, MemorySearchQuery};
 
 const EXACT_MATCH_BOOST: f64 = 100.0;
 const CONTENT_WEIGHT: f64 = 3.0;

@@ -1,5 +1,5 @@
+use super::EvictionCandidate;
 use super::MemoryEntry;
-use crate::ports::EvictionCandidate;
 use std::collections::HashSet;
 
 pub fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
