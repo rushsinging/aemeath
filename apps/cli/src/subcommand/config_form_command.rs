@@ -192,6 +192,18 @@ impl ConfigFormModel {
                 self.toggle_multi_selection();
                 None
             }
+            // Ctrl+U：清空当前输入框（终端惯例，便于覆盖长预填值）。
+            KeyCode::Char('u')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                if self.accepts_text_input() {
+                    self.input.clear();
+                    self.input_cursor = 0;
+                }
+                None
+            }
             KeyCode::Char(character) => {
                 if self.accepts_text_input() {
                     insert_character(&mut self.input, self.input_cursor, character);

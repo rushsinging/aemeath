@@ -76,12 +76,44 @@ pub(crate) async fn run_chat(args: Args) {
             return;
         }
     }
-    let mut bootstrap = composition::app::build_agent_bootstrap(args.into())
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        });
+    let args_for_bootstrap = args.clone();
+    let mut bootstrap =
+        match composition::app::build_agent_bootstrap(args_for_bootstrap.into()).await {
+            Ok(bootstrap) => bootstrap,
+            // `aemeath connect` 的目的就是配置模型：装配失败（如未指定模型）
+            // 时先在 TUI 外跑一次全屏向导（stdin/stdout 仍是终端），保存后
+            // 重新装配进入主 TUI，而不是直接退出。
+            Err(error) if startup_connect && interactive => {
+                let fallback = composition::app::build_connect_bootstrap()
+                    .await
+                    .unwrap_or_else(|bootstrap_error| {
+                        eprintln!("Error: {bootstrap_error}");
+                        std::process::exit(1);
+                    });
+                match crate::subcommand::connect_command::run_connect_command_with_origin(
+                    fallback.forms,
+                    sdk::ConfigFormOrigin::ExplicitCommand,
+                )
+                .await
+                {
+                    Ok(sdk::ConfigFormTerminal::Completed { .. }) => {}
+                    _ => {
+                        eprintln!("Error: {error}");
+                        std::process::exit(1);
+                    }
+                }
+                composition::app::build_agent_bootstrap(args.into())
+                    .await
+                    .unwrap_or_else(|retry_error| {
+                        eprintln!("Error: {retry_error}");
+                        std::process::exit(1);
+                    })
+            }
+            Err(error) => {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        };
     let session_id = bootstrap.session_id.clone();
     let frontend_context = composition::delivery_logging::create_session_scope(
         composition::delivery_logging::capture(),

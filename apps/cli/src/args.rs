@@ -122,6 +122,7 @@ pub enum Commands {
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.
+#[derive(Clone)]
 pub struct Args {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
